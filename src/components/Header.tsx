@@ -66,6 +66,7 @@ export default function Header() {
           <Link
             to="/counter"
             className="nav-link"
+            activeOptions={{ exact: false }}
             activeProps={{ className: "nav-link is-active" }}
           >
             Counter

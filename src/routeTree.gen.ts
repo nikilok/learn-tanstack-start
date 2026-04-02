@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as CounterRouteImport } from './routes/counter'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CounterCountRouteImport } from './routes/counter_.$count'
 
 const CounterRoute = CounterRouteImport.update({
   id: '/counter',
@@ -28,35 +29,44 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CounterCountRoute = CounterCountRouteImport.update({
+  id: '/counter_/$count',
+  path: '/counter/$count',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
+  '/counter/$count': typeof CounterCountRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
+  '/counter/$count': typeof CounterCountRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
+  '/counter_/$count': typeof CounterCountRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/counter'
+  fullPaths: '/' | '/about' | '/counter' | '/counter/$count'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/counter'
-  id: '__root__' | '/' | '/about' | '/counter'
+  to: '/' | '/about' | '/counter' | '/counter/$count'
+  id: '__root__' | '/' | '/about' | '/counter' | '/counter_/$count'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   CounterRoute: typeof CounterRoute
+  CounterCountRoute: typeof CounterCountRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/counter_/$count': {
+      id: '/counter_/$count'
+      path: '/counter/$count'
+      fullPath: '/counter/$count'
+      preLoaderRoute: typeof CounterCountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   CounterRoute: CounterRoute,
+  CounterCountRoute: CounterCountRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

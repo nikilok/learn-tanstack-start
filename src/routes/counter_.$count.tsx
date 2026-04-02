@@ -1,6 +1,6 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 
-export const Route = createFileRoute("/counter_/$count")({
+export const Route = createFileRoute('/counter_/$count')({
   component: Counter,
 });
 
@@ -25,7 +25,7 @@ function Counter() {
             type="button"
             onClick={() =>
               navigate({
-                to: "/counter/$count",
+                to: '/counter/$count',
                 params: { count: String(numCount - 1) },
               })
             }
@@ -40,7 +40,7 @@ function Counter() {
             type="button"
             onClick={() =>
               navigate({
-                to: "/counter/$count",
+                to: '/counter/$count',
                 params: { count: String(numCount + 1) },
               })
             }

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+export {};
 
 const name = process.argv[2];
 if (!name) {
@@ -7,13 +7,13 @@ if (!name) {
 }
 
 const journalPath = './drizzle/meta/_journal.json';
-const journal = JSON.parse(readFileSync(journalPath, 'utf-8'));
+const journal = await Bun.file(journalPath).json();
 
 const nextIdx = journal.entries.length;
 const tag = `${String(nextIdx).padStart(4, '0')}_${name}`;
 const sqlPath = `./drizzle/${tag}.sql`;
 
-writeFileSync(sqlPath, '-- Write your SQL here\n');
+await Bun.write(sqlPath, '-- Write your SQL here\n');
 
 journal.entries.push({
   idx: nextIdx,
@@ -23,7 +23,7 @@ journal.entries.push({
   breakpoints: true,
 });
 
-writeFileSync(journalPath, JSON.stringify(journal, null, 2) + '\n');
+await Bun.write(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
 
 console.log(`Created: ${sqlPath}`);
 console.log(`Journal updated: entry ${nextIdx} → ${tag}`);

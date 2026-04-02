@@ -1,13 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
-import { db } from "../db";
-import { posts } from "../db/schema";
+import { createFileRoute } from '@tanstack/react-router';
+import { createServerFn } from '@tanstack/react-start';
+import { db } from '../db';
+import { posts } from '../db/schema';
 
 const getPosts = createServerFn().handler(async () => {
   return await db.select().from(posts).orderBy(posts.id);
 });
 
-export const Route = createFileRoute("/data")({
+export const Route = createFileRoute('/data')({
   loader: () => getPosts(),
   component: DataPage,
 });
@@ -35,7 +35,7 @@ function DataPage() {
                 {post.title}
               </h3>
               <p className="text-sm text-(--sea-ink-soft)">
-                by {post.author} · {post.published ? "Published" : "Draft"}
+                by {post.author} · {post.published ? 'Published' : 'Draft'}
               </p>
             </li>
           ))}

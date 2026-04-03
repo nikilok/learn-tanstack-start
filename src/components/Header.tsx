@@ -17,7 +17,7 @@ export default function Header() {
 
         <div className="ml-auto flex items-center gap-1.5 sm:ml-0 sm:gap-2">
           <a
-            href="https://x.com/tan_stack"
+            href="https://x.com/NikilKuruvilla"
             target="_blank"
             rel="noreferrer"
             className="hidden rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink) sm:block"
@@ -31,7 +31,7 @@ export default function Header() {
             </svg>
           </a>
           <a
-            href="https://github.com/TanStack"
+            href="https://github.com/nikilok"
             target="_blank"
             rel="noreferrer"
             className="hidden rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink) sm:block"

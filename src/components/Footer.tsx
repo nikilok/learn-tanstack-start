@@ -11,7 +11,7 @@ export default function Footer() {
       </div>
       <div className="mt-4 flex justify-center gap-3">
         <a
-          href="https://x.com/tan_stack"
+          href="https://x.com/NikilKuruvilla"
           target="_blank"
           rel="noreferrer"
           className="rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink)"
@@ -25,7 +25,7 @@ export default function Footer() {
           </svg>
         </a>
         <a
-          href="https://github.com/TanStack"
+          href="https://github.com/nikilok"
           target="_blank"
           rel="noreferrer"
           className="rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink)"

@@ -196,7 +196,7 @@ body::after {
   );
 }
 
-a {
+a:where(:not([class*="no-underline"])) {
   color: var(--link-blue);
   text-decoration: underline;
   text-underline-offset: 2px;

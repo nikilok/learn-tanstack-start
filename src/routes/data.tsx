@@ -29,19 +29,23 @@ function DataPage() {
           {postList.map((post) => (
             <li
               key={post.id}
-              className="rounded-xl border border-(--line) bg-(--chip-bg) p-4"
+              className="flex items-center justify-between rounded-xl border border-(--line) bg-(--chip-bg) p-4"
             >
-              <h3 className="text-lg font-semibold text-(--sea-ink)">
-                {post.title}
-              </h3>
-              <p className="text-sm text-(--sea-ink-soft)">
-                by {post.author} ·{' '}
+              <div>
+                <h3 className="text-lg font-semibold text-(--sea-ink)">
+                  {post.title}
+                </h3>
+                <p className="text-sm text-(--sea-ink-soft)">
+                  by {post.author}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-(--sea-ink-soft)">
                 {post.published && post.publishedAt
-                    ? `Published on ${new Date(post.publishedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}`
-                    : post.published
-                      ? 'Published'
-                      : 'Draft'}
-              </p>
+                  ? new Date(post.publishedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+                  : post.published
+                    ? 'Published'
+                    : 'Draft'}
+              </span>
             </li>
           ))}
         </ul>

@@ -35,7 +35,12 @@ function DataPage() {
                 {post.title}
               </h3>
               <p className="text-sm text-(--sea-ink-soft)">
-                by {post.author} · {post.published ? 'Published' : 'Draft'}
+                by {post.author} ·{' '}
+                {post.published && post.publishedAt
+                    ? `Published on ${new Date(post.publishedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}`
+                    : post.published
+                      ? 'Published'
+                      : 'Draft'}
               </p>
             </li>
           ))}

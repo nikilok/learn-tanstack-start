@@ -1,76 +1,135 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
 @theme {
-  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Geist", system-ui, -apple-system, Arial, sans-serif;
+  --font-mono:
+    "Geist Mono", ui-monospace, SFMono-Regular, "Roboto Mono", Menlo, monospace;
 }
 
 :root {
-  --sea-ink: #173a40;
-  --sea-ink-soft: #416166;
-  --lagoon: #4fb8b2;
-  --lagoon-deep: #328f97;
-  --palm: #2f6a4a;
-  --sand: #e7f0e8;
-  --foam: #f3faf5;
-  --surface: rgba(255, 255, 255, 0.74);
-  --surface-strong: rgba(255, 255, 255, 0.9);
-  --line: rgba(23, 58, 64, 0.14);
-  --inset-glint: rgba(255, 255, 255, 0.82);
-  --kicker: rgba(47, 106, 74, 0.9);
-  --bg-base: #e7f3ec;
-  --header-bg: rgba(251, 255, 248, 0.84);
-  --chip-bg: rgba(255, 255, 255, 0.8);
-  --chip-line: rgba(47, 106, 74, 0.18);
-  --link-bg-hover: rgba(255, 255, 255, 0.9);
-  --hero-a: rgba(79, 184, 178, 0.36);
-  --hero-b: rgba(47, 106, 74, 0.2);
+  --black: #171717;
+  --white: #ffffff;
+  --gray-50: #fafafa;
+  --gray-100: #ebebeb;
+  --gray-200: #d6d6d6;
+  --gray-400: #808080;
+  --gray-500: #666666;
+  --gray-600: #4d4d4d;
+  --link-blue: #0072f5;
+  --focus-blue: hsl(212, 100%, 48%);
+  --badge-bg: #ebf5ff;
+  --badge-text: #0068d6;
+
+  /* Mapped tokens for components */
+  --sea-ink: #171717;
+  --sea-ink-soft: #4d4d4d;
+  --kicker: #666666;
+  --surface: var(--white);
+  --surface-strong: var(--white);
+  --line: var(--gray-100);
+  --bg-base: var(--white);
+  --header-bg: rgba(255, 255, 255, 0.85);
+  --chip-bg: var(--white);
+  --chip-line: var(--gray-100);
+  --link-bg-hover: var(--gray-50);
+  --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
+  --shadow-card:
+    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 2px 2px,
+    #fafafa 0px 0px 0px 1px;
+  --shadow-card-full:
+    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.04) 0px 2px 2px, rgba(0, 0, 0, 0.04) 0px 8px 8px -8px,
+    #fafafa 0px 0px 0px 1px;
+  --glass-bg: rgba(255, 255, 255, 0.5);
+  --glow-a: rgba(0, 114, 245, 0.18);
+  --glow-b: rgba(121, 40, 202, 0.12);
+  --glow-c: rgba(0, 112, 243, 0.1);
+  --dot-color: rgba(0, 0, 0, 0.12);
+  --grid-line: rgba(0, 0, 0, 0.06);
+  --grid-opacity: 0.7;
 }
 
 :root[data-theme="dark"] {
-  --sea-ink: #d7ece8;
-  --sea-ink-soft: #afcdc8;
-  --lagoon: #60d7cf;
-  --lagoon-deep: #8de5db;
-  --palm: #6ec89a;
-  --sand: #0f1a1e;
-  --foam: #101d22;
-  --surface: rgba(16, 30, 34, 0.8);
-  --surface-strong: rgba(15, 27, 31, 0.92);
-  --line: rgba(141, 229, 219, 0.18);
-  --inset-glint: rgba(194, 247, 238, 0.14);
-  --kicker: #b8efe5;
-  --bg-base: #0a1418;
-  --header-bg: rgba(10, 20, 24, 0.8);
-  --chip-bg: rgba(13, 28, 32, 0.9);
-  --chip-line: rgba(141, 229, 219, 0.24);
-  --link-bg-hover: rgba(24, 44, 49, 0.8);
-  --hero-a: rgba(96, 215, 207, 0.18);
-  --hero-b: rgba(110, 200, 154, 0.12);
+  --black: #ededed;
+  --white: #0a0a0a;
+  --gray-50: #111111;
+  --gray-100: #2a2a2a;
+  --gray-200: #3a3a3a;
+  --gray-400: #666666;
+  --gray-500: #808080;
+  --gray-600: #a0a0a0;
+  --badge-bg: rgba(0, 114, 245, 0.15);
+  --badge-text: #3b9eff;
+
+  --sea-ink: #ededed;
+  --sea-ink-soft: #a0a0a0;
+  --kicker: #808080;
+  --surface: #0a0a0a;
+  --surface-strong: #0a0a0a;
+  --line: #2a2a2a;
+  --bg-base: #0a0a0a;
+  --header-bg: rgba(10, 10, 10, 0.88);
+  --chip-bg: #111111;
+  --chip-line: #2a2a2a;
+  --link-bg-hover: #1a1a1a;
+  --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
+  --shadow-card:
+    rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.2) 0px 2px 2px, rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
+  --shadow-card-full:
+    rgba(255, 255, 255, 0.12) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.3) 0px 2px 2px, rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
+    rgba(255, 255, 255, 0.04) 0px 0px 0px 1px;
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glow-a: rgba(0, 114, 245, 0.15);
+  --glow-b: rgba(121, 40, 202, 0.12);
+  --glow-c: rgba(0, 112, 243, 0.08);
+  --dot-color: rgba(255, 255, 255, 0.06);
+  --grid-line: rgba(255, 255, 255, 0.04);
+  --grid-opacity: 0.6;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --sea-ink: #d7ece8;
-    --sea-ink-soft: #afcdc8;
-    --lagoon: #60d7cf;
-    --lagoon-deep: #8de5db;
-    --palm: #6ec89a;
-    --sand: #0f1a1e;
-    --foam: #101d22;
-    --surface: rgba(16, 30, 34, 0.8);
-    --surface-strong: rgba(15, 27, 31, 0.92);
-    --line: rgba(141, 229, 219, 0.18);
-    --inset-glint: rgba(194, 247, 238, 0.14);
-    --kicker: #b8efe5;
-    --bg-base: #0a1418;
-    --header-bg: rgba(10, 20, 24, 0.8);
-    --chip-bg: rgba(13, 28, 32, 0.9);
-    --chip-line: rgba(141, 229, 219, 0.24);
-    --link-bg-hover: rgba(24, 44, 49, 0.8);
-    --hero-a: rgba(96, 215, 207, 0.18);
-    --hero-b: rgba(110, 200, 154, 0.12);
+    --black: #ededed;
+    --white: #0a0a0a;
+    --gray-50: #111111;
+    --gray-100: #2a2a2a;
+    --gray-200: #3a3a3a;
+    --gray-400: #666666;
+    --gray-500: #808080;
+    --gray-600: #a0a0a0;
+    --badge-bg: rgba(0, 114, 245, 0.15);
+    --badge-text: #3b9eff;
+
+    --sea-ink: #ededed;
+    --sea-ink-soft: #a0a0a0;
+    --kicker: #808080;
+    --surface: #0a0a0a;
+    --surface-strong: #0a0a0a;
+    --line: #2a2a2a;
+    --bg-base: #0a0a0a;
+    --header-bg: rgba(10, 10, 10, 0.88);
+    --chip-bg: #111111;
+    --chip-line: #2a2a2a;
+    --link-bg-hover: #1a1a1a;
+    --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
+    --shadow-card:
+      rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.2) 0px 2px 2px,
+      rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
+    --shadow-card-full:
+      rgba(255, 255, 255, 0.12) 0px 0px 0px 1px,
+      rgba(0, 0, 0, 0.3) 0px 2px 2px, rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
+      rgba(255, 255, 255, 0.04) 0px 0px 0px 1px;
+    --glow-a: rgba(0, 114, 245, 0.15);
+    --glow-b: rgba(121, 40, 202, 0.12);
+    --glow-c: rgba(0, 112, 243, 0.08);
+    --dot-color: rgba(255, 255, 255, 0.06);
+    --grid-line: rgba(255, 255, 255, 0.08);
+    --grid-opacity: 1;
   }
 }
 
@@ -88,21 +147,12 @@ body {
   margin: 0;
   color: var(--sea-ink);
   font-family: var(--font-sans);
+  font-feature-settings: "liga" 1;
   background-color: var(--bg-base);
-  background:
-    radial-gradient(1100px 620px at -8% -10%, var(--hero-a), transparent 58%),
-    radial-gradient(1050px 620px at 112% -12%, var(--hero-b), transparent 62%),
-    radial-gradient(
-      720px 380px at 50% 115%,
-      rgba(79, 184, 178, 0.1),
-      transparent 68%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--sand) 68%, white) 0%,
-      var(--foam) 44%,
-      var(--bg-base) 100%
-    );
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 80%, var(--glow-c), transparent);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -114,15 +164,18 @@ body::before {
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  opacity: 0.28;
-  background:
-    radial-gradient(
-      circle at 20% 15%,
-      rgba(255, 255, 255, 0.8),
-      transparent 34%
-    ),
-    radial-gradient(circle at 78% 26%, rgba(79, 184, 178, 0.2), transparent 42%),
-    radial-gradient(circle at 42% 82%, rgba(47, 106, 74, 0.14), transparent 36%);
+  opacity: 0.4;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, var(--dot-color), transparent),
+    radial-gradient(1px 1px at 40% 70%, var(--dot-color), transparent),
+    radial-gradient(1px 1px at 60% 20%, var(--dot-color), transparent),
+    radial-gradient(1px 1px at 80% 50%, var(--dot-color), transparent);
+  background-size: 200px 200px;
+  background-position:
+    0 0,
+    50px 100px,
+    100px 30px,
+    150px 80px;
 }
 
 body::after {
@@ -131,93 +184,92 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  opacity: 0.14;
+  opacity: var(--grid-opacity);
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: radial-gradient(circle at 50% 30%, black, transparent 78%);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(
+    ellipse 70% 50% at 50% 30%,
+    black,
+    transparent 70%
+  );
 }
 
 a {
-  color: var(--lagoon-deep);
-  text-decoration-color: rgba(50, 143, 151, 0.4);
-  text-decoration-thickness: 1px;
+  color: var(--link-blue);
+  text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 a:hover {
-  color: #246f76;
+  opacity: 0.85;
 }
 
 code {
-  font-size: 0.9em;
-  border: 1px solid var(--line);
-  background: color-mix(in oklab, var(--surface-strong) 82%, white 18%);
-  border-radius: 7px;
-  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--gray-50);
+  border-radius: 4px;
+  padding: 2px 6px;
+  box-shadow: var(--shadow-ring);
 }
 
 pre code {
-  border: 0;
   background: transparent;
   padding: 0;
   border-radius: 0;
+  box-shadow: none;
   font-size: inherit;
   color: inherit;
 }
 
 .page-wrap {
-  width: min(1080px, calc(100% - 2rem));
+  width: min(1200px, calc(100% - 2rem));
   margin-inline: auto;
 }
 
 .display-title {
-  font-family: "Fraunces", Georgia, serif;
+  font-family: var(--font-sans);
+  letter-spacing: -2.4px;
 }
 
 .island-shell {
-  border: 1px solid var(--line);
-  background: linear-gradient(165deg, var(--surface-strong), var(--surface));
-  box-shadow:
-    0 1px 0 var(--inset-glint) inset,
-    0 22px 44px rgba(30, 90, 72, 0.1),
-    0 6px 18px rgba(23, 58, 64, 0.08);
-  backdrop-filter: blur(4px);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s;
+}
+
+.island-shell:hover {
+  box-shadow: var(--shadow-card-full);
 }
 
 .feature-card {
-  background: linear-gradient(
-    165deg,
-    color-mix(in oklab, var(--surface-strong) 93%, white 7%),
-    var(--surface)
-  );
-  box-shadow:
-    0 1px 0 var(--inset-glint) inset,
-    0 18px 34px rgba(30, 90, 72, 0.1),
-    0 4px 14px rgba(23, 58, 64, 0.06);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s;
 }
 
 .feature-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--lagoon-deep) 35%, var(--line));
+  box-shadow: var(--shadow-card-full);
 }
 
 button,
 .island-shell,
 a {
   transition:
-    background-color 180ms ease,
-    color 180ms ease,
-    border-color 180ms ease,
-    transform 180ms ease;
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
 }
 
 .island-kicker {
-  letter-spacing: 0.16em;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
   text-transform: uppercase;
-  font-weight: 700;
-  font-size: 0.69rem;
+  font-weight: 500;
+  font-size: 0.75rem;
   color: var(--kicker);
 }
 
@@ -238,7 +290,7 @@ a {
   height: 2px;
   transform: scaleX(0);
   transform-origin: left;
-  background: linear-gradient(90deg, var(--lagoon), #7ed3bf);
+  background: var(--sea-ink);
   transition: transform 170ms ease;
 }
 
@@ -258,19 +310,55 @@ a {
   }
 }
 
+.site-header {
+  background: var(--header-bg);
+  box-shadow: var(--shadow-ring);
+}
+
 .site-footer {
   border-top: 1px solid var(--line);
-  background: color-mix(in oklab, var(--header-bg) 84%, transparent 16%);
+}
+
+.shadow-ring {
+  box-shadow: var(--shadow-ring);
+}
+
+.glass {
+  backdrop-filter: blur(2px);
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s;
+}
+
+.glass:hover {
+  box-shadow: var(--shadow-card-full);
+}
+
+.heading-tight {
+  letter-spacing: -2.4px;
+  line-height: 1;
+}
+
+.heading-snug {
+  letter-spacing: -1.8px;
+  line-height: 1.1;
+}
+
+.heading-card {
+  letter-spacing: -0.4px;
+}
+
+.brand-link {
+  letter-spacing: -0.28px;
 }
 
 .rise-in {
-  animation: rise-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rise-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

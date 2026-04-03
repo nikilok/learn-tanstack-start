@@ -16,32 +16,36 @@ function DataPage() {
   const postList = Route.useLoaderData();
 
   return (
-    <main className="page-wrap px-4 py-12">
-      <section className="island-shell rounded-2xl p-6 sm:p-8">
-        <p className="island-kicker mb-2">Data</p>
-        <h2 className="display-title mb-3 text-3xl font-bold text-(--sea-ink) sm:text-4xl">
+    <main className="page-wrap px-4 py-16">
+      <section className="mx-auto max-w-2xl">
+        <p className="island-kicker mb-3">Data</p>
+        <h2 className="heading-snug mb-3 text-3xl font-semibold text-(--sea-ink) sm:text-4xl">
           Vercel Postgres Demo
         </h2>
-        <p className="m-0 mb-6 max-w-3xl text-base leading-8 text-(--sea-ink-soft)">
+        <p className="mb-8 text-base leading-relaxed text-(--sea-ink-soft)">
           Posts loaded from Vercel Postgres via Drizzle ORM.
         </p>
         <ul className="space-y-3">
           {postList.map((post) => (
             <li
               key={post.id}
-              className="flex items-center justify-between rounded-xl border border-(--line) bg-(--chip-bg) p-4"
+              className="glass flex items-center justify-between rounded-lg p-4"
             >
               <div>
-                <h3 className="text-lg font-semibold text-(--sea-ink)">
+                <h3 className="heading-card text-base font-semibold text-(--sea-ink)">
                   {post.title}
                 </h3>
                 <p className="text-sm text-(--sea-ink-soft)">
                   by {post.author}
                 </p>
               </div>
-              <span className="shrink-0 text-xs text-(--sea-ink-soft)">
+              <span className="shrink-0 text-xs text-(--kicker)">
                 {post.published && post.publishedAt
-                  ? new Date(post.publishedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })
+                  ? new Date(post.publishedAt).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: 'long',
+                      year: 'numeric',
+                    })
                   : post.published
                     ? 'Published'
                     : 'Draft'}

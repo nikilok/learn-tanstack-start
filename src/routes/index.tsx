@@ -5,80 +5,87 @@ export const Route = createFileRoute('/')({ component: App });
 function App() {
   return (
     <main className="page-wrap px-4 pb-8 pt-14">
-      <section className="island-shell rise-in relative overflow-hidden rounded-[2rem] px-6 py-10 sm:px-10 sm:py-14">
-        <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(79,184,178,0.32),transparent_66%)]" />
-        <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(47,106,74,0.18),transparent_66%)]" />
-        <p className="island-kicker mb-3">TanStack Start Base Template</p>
-        <h1 className="display-title mb-5 max-w-3xl text-4xl leading-[1.02] font-bold tracking-tight text-(--sea-ink) sm:text-6xl">
-          Start simple, ship quickly.
+      <section className="rise-in py-24 text-center">
+        <h1 className="heading-tight mb-4 text-5xl font-semibold text-(--sea-ink) sm:text-6xl">
+          Learning
+          <br />
+          TanStack Start
         </h1>
-        <p className="mb-8 max-w-2xl text-base text-(--sea-ink-soft) sm:text-lg">
-          This base starter intentionally keeps things light: two routes, clean
-          structure, and the essentials you need to build from scratch.
+        <p className="mx-auto mb-8 max-w-xl text-xl leading-relaxed text-(--sea-ink-soft)">
+          A hands-on playground for exploring SSR, server functions, database
+          integration, and deployment — built from scratch, one concept at a
+          time.
         </p>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap justify-center gap-3">
           <a
-            href="/about"
-            className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-(--lagoon-deep) no-underline transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)]"
+            href="/counter"
+            className="inline-block rounded-md bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--surface) no-underline transition hover:opacity-85"
           >
-            About This Starter
+            Try the Counter
           </a>
           <a
-            href="https://tanstack.com/router"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full border border-[rgba(23,58,64,0.2)] bg-white/50 px-5 py-2.5 text-sm font-semibold text-(--sea-ink) no-underline transition hover:-translate-y-0.5 hover:border-[rgba(23,58,64,0.35)]"
+            href="/data"
+            className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"
           >
-            Router Guide
+            View Database Demo
           </a>
         </div>
       </section>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <hr className="border-t border-(--line)" />
+
+      <section className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {[
           [
-            'Type-Safe Routing',
-            'Routes and links stay in sync across every page.',
+            'URL State',
+            'Counter value lives in the URL — navigate, share, and bookmark state directly.',
           ],
           [
             'Server Functions',
-            'Call server code from your UI without creating API boilerplate.',
+            'Fetch data from Postgres via Drizzle ORM inside createServerFn.',
           ],
           [
-            'Streaming by Default',
-            'Ship progressively rendered responses for faster experiences.',
+            'SSR + Hydration',
+            'beforeLoad runs server-side on page load, client-side on SPA navigation.',
           ],
           [
-            'Tailwind Native',
-            'Design quickly with utility-first styling and reusable tokens.',
+            'Vercel + Neon',
+            'Deployed on Vercel with Nitro, backed by a serverless Neon Postgres database.',
           ],
         ].map(([title, desc], index) => (
           <article
             key={title}
-            className="island-shell feature-card rise-in rounded-2xl p-5"
+            className="glass rise-in rounded-lg p-6"
             style={{ animationDelay: `${index * 90 + 80}ms` }}
           >
-            <h2 className="mb-2 text-base font-semibold text-(--sea-ink)">
+            <h2 className="heading-card mb-2 text-lg font-semibold text-(--sea-ink)">
               {title}
             </h2>
-            <p className="m-0 text-sm text-(--sea-ink-soft)">{desc}</p>
+            <p className="m-0 text-sm leading-relaxed text-(--sea-ink-soft)">
+              {desc}
+            </p>
           </article>
         ))}
       </section>
 
-      <section className="island-shell mt-8 rounded-2xl p-6">
-        <p className="island-kicker mb-2">Quick Start</p>
+      <section className="glass mt-10 rounded-lg p-6">
+        <p className="island-kicker mb-3">What I've explored so far</p>
         <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-(--sea-ink-soft)">
           <li>
-            Edit <code>src/routes/index.tsx</code> to customize the home page.
+            File-based routing with dynamic params (<code>/counter/$count</code>
+            ) and the <code>_</code> suffix to opt out of layout nesting.
           </li>
           <li>
-            Update <code>src/components/Header.tsx</code> and{' '}
-            <code>src/components/Footer.tsx</code> for brand links.
+            <code>beforeLoad</code> behaviour: runs server-side on full page
+            load, client-side on SPA navigation.
           </li>
           <li>
-            Add routes in <code>src/routes</code> and tweak visual tokens in{' '}
-            <code>src/styles.css</code>.
+            Drizzle ORM with Neon Postgres — schema migrations, data seeding,
+            and a custom migration script.
+          </li>
+          <li>
+            Deploying to Vercel via the Nitro plugin, with environment variables
+            and serverless function logs.
           </li>
         </ul>
       </section>

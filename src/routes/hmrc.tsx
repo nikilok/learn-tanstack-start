@@ -4,7 +4,7 @@ import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { desc, sql } from 'drizzle-orm';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import RatingIcon from '../components/RatingIcon';
-import SearchInput from '../components/SearchInput';
+import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
 import Tooltip from '../components/Tooltip';
 import { db } from '../db';
@@ -74,11 +74,29 @@ function Hmrc() {
   const navigate = useNavigate();
   const [results, setResults] = useState<HmrcRow[]>([]);
   const [loading, setLoading] = useState(search.length >= 3);
+  const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [isStuck, setIsStuck] = useState(false);
+  const [pillClicked, setPillClicked] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef(search);
   searchRef.current = search;
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsStuck(!entry.isIntersecting);
+        if (entry.isIntersecting) setPillClicked(false);
+      },
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (search.length < 3) {
@@ -142,18 +160,24 @@ function Hmrc() {
     <main className="page-wrap px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">HMRC</p>
-        <div className="sticky top-24 z-40 -mx-4 mt-6 px-4 pb-4 backdrop-blur-xl">
-          <SearchInput
-            autoFocus
-            value={search}
-            onChange={(value) =>
-              navigate({
-                to: '/hmrc',
-                search: { search: value },
-                replace: true,
-              })
-            }
-            placeholder="Search organisations (min 3 characters)..."
+        <div ref={sentinelRef} className="mt-6" />
+        <div className="sticky top-24 z-40 -mx-4 px-4 pb-4">
+          <SearchBar
+            search={search}
+            isStuck={isStuck}
+            pillClicked={pillClicked}
+            onSearch={(value) => {
+              if (navTimerRef.current) clearTimeout(navTimerRef.current);
+              navTimerRef.current = setTimeout(() => {
+                navigate({
+                  to: '/hmrc',
+                  search: { search: value },
+                  replace: true,
+                });
+              }, 150);
+            }}
+            onPillClick={() => setPillClicked(true)}
+            onBlur={() => setPillClicked(false)}
           />
         </div>
 

@@ -1,21 +1,9 @@
-@keyframes glow-pulse {
-  0%,
-  100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
 .input {
   transition: box-shadow 0.3s;
 }
 
 .input:focus {
   box-shadow:
-    0 0 20px 8px var(--glow-a),
-    0 0 60px 20px var(--glow-b),
-    0 0 100px 40px var(--glow-c);
-  animation: glow-pulse 4s ease-in-out infinite;
+    0 0 15px 4px var(--glow-a),
+    0 0 30px 8px var(--glow-b);
 }

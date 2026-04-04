@@ -90,7 +90,7 @@ function Hmrc() {
 
   const virtualizer = useWindowVirtualizer({
     count: results.length,
-    estimateSize: () => 100,
+    estimateSize: () => 120,
     gap: 12,
     overscan: 10,
     scrollMargin: listRef.current?.offsetTop ?? 0,

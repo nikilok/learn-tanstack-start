@@ -63,7 +63,7 @@ export default memo(function SearchInput({
         }}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-transparent px-4 py-3 pr-10 text-lg text-(--sea-ink) backdrop-blur-xl placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base)/80 px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
       />
       <button
         ref={clearRef}

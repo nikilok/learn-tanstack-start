@@ -1,3 +1,5 @@
+import styles from './SearchInput.module.css';
+
 export default function SearchInput({
   value,
   onChange,
@@ -18,7 +20,7 @@ export default function SearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-lg border border-(--sea-ink-soft)/20 bg-transparent px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink) focus:outline-none focus:ring-1 focus:ring-(--sea-ink)"
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-transparent px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
       />
       {value && (
         <button

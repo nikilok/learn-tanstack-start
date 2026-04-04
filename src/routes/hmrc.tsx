@@ -124,7 +124,7 @@ function Hmrc() {
     count: results.length,
     estimateSize: () => 120,
     gap: 12,
-    overscan: 10,
+    overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
 
@@ -178,7 +178,9 @@ function Hmrc() {
                 const r = results[virtualRow.index];
                 return (
                   <div
-                    key={r.id}
+                    key={virtualRow.index}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualRow.index}
                     style={{
                       position: 'absolute',
                       top: 0,

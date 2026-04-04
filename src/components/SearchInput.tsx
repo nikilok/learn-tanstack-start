@@ -17,9 +17,17 @@ export default memo(function SearchInput({
   focus?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const clearRef = useRef<HTMLButtonElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const hasAutoFocused = useRef(false);
+
+  const syncClearButton = () => {
+    if (clearRef.current) {
+      clearRef.current.style.display =
+        inputRef.current?.value ? '' : 'none';
+    }
+  };
 
   // Only run on mount or when pill is clicked — not on every refocus
   useEffect(() => {
@@ -49,17 +57,22 @@ export default memo(function SearchInput({
         ref={inputRef}
         type="text"
         defaultValue={defaultValue}
-        onInput={() => onChangeRef.current(inputRef.current?.value ?? '')}
+        onInput={() => {
+          syncClearButton();
+          onChangeRef.current(inputRef.current?.value ?? '');
+        }}
         onBlur={onBlur}
         placeholder={placeholder}
         className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-transparent px-4 py-3 pr-10 text-lg text-(--sea-ink) backdrop-blur-xl placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
       />
-      {/* Clear button is always available via ref check */}
       <button
+        ref={clearRef}
         type="button"
+        style={{ display: defaultValue ? '' : 'none' }}
         onClick={() => {
           if (inputRef.current) inputRef.current.value = '';
           onChangeRef.current('');
+          syncClearButton();
         }}
         className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
       >

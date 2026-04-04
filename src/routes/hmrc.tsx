@@ -16,10 +16,11 @@ const searchHmrc = createServerFn()
   )
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
+    const escaped = query.replace(/[%_\\]/g, '\\$&');
     const rows = await db
       .select()
       .from(hmrcSkilledWorkers)
-      .where(ilike(hmrcSkilledWorkers.organisationName, `%${query}%`))
+      .where(ilike(hmrcSkilledWorkers.organisationName, `%${escaped}%`))
       .orderBy(asc(hmrcSkilledWorkers.organisationName))
       .limit(PAGE_SIZE + 1)
       .offset(offset);

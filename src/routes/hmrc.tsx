@@ -1,18 +1,19 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
-import { desc, sql } from "drizzle-orm";
-import { useCallback, useEffect, useRef, useState } from "react";
-import RatingIcon from "../components/RatingIcon";
-import SkeletonCards from "../components/SkeletonCards";
-import Tooltip from "../components/Tooltip";
-import { db } from "../db";
-import { hmrcSkilledWorkers } from "../db/schema";
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createServerFn } from '@tanstack/react-start';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { desc, sql } from 'drizzle-orm';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import RatingIcon from '../components/RatingIcon';
+import SearchInput from '../components/SearchInput';
+import SkeletonCards from '../components/SkeletonCards';
+import Tooltip from '../components/Tooltip';
+import { db } from '../db';
+import { hmrcSkilledWorkers } from '../db/schema';
 
 const PAGE_SIZE = 50;
 
 function titleCase(str: string | null) {
-  if (!str) return "";
+  if (!str) return '';
   return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -23,7 +24,7 @@ const searchHmrc = createServerFn()
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
-    const escaped = query.replace(/[%_\\]/g, "\\$&");
+    const escaped = query.replace(/[%_\\]/g, '\\$&');
     const rows = await db
       .select({
         id: hmrcSkilledWorkers.id,
@@ -59,11 +60,11 @@ const searchHmrc = createServerFn()
     return { rows: rows.slice(0, PAGE_SIZE), hasMore };
   });
 
-type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>["rows"][number];
+type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>['rows'][number];
 
-export const Route = createFileRoute("/hmrc")({
+export const Route = createFileRoute('/hmrc')({
   validateSearch: (search: Record<string, unknown>) => ({
-    search: (search.search as string) || "",
+    search: (search.search as string) || '',
   }),
   component: Hmrc,
 });
@@ -142,20 +143,17 @@ function Hmrc() {
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">HMRC</p>
         <div className="sticky top-24 z-40 -mx-4 mt-6 px-4 pb-4 backdrop-blur-xl">
-          <input
-            // biome-ignore lint/a11y/noAutofocus: search page needs immediate focus
+          <SearchInput
             autoFocus
-            type="text"
             value={search}
-            onChange={(e) =>
+            onChange={(value) =>
               navigate({
-                to: "/hmrc",
-                search: { search: e.target.value },
+                to: '/hmrc',
+                search: { search: value },
                 replace: true,
               })
             }
             placeholder="Search organisations (min 3 characters)..."
-            className="w-full rounded-lg border border-(--sea-ink-soft)/20 bg-transparent px-4 py-3 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink) focus:outline-none focus:ring-1 focus:ring-(--sea-ink)"
           />
         </div>
 
@@ -172,8 +170,8 @@ function Hmrc() {
             <div
               style={{
                 height: virtualizer.getTotalSize(),
-                width: "100%",
-                position: "relative",
+                width: '100%',
+                position: 'relative',
               }}
             >
               {virtualItems.map((virtualRow) => {
@@ -182,10 +180,10 @@ function Hmrc() {
                   <div
                     key={r.id}
                     style={{
-                      position: "absolute",
+                      position: 'absolute',
                       top: 0,
                       left: 0,
-                      width: "100%",
+                      width: '100%',
                       transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                     }}
                   >
@@ -201,13 +199,13 @@ function Hmrc() {
                             text={[r.townCity, r.county]
                               .filter(Boolean)
                               .map(titleCase)
-                              .join(", ")}
+                              .join(', ')}
                           >
                             <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
                               {[r.townCity, r.county]
                                 .filter(Boolean)
                                 .map(titleCase)
-                                .join(", ")}
+                                .join(', ')}
                             </p>
                           </Tooltip>
                           <Tooltip text={titleCase(r.route)}>

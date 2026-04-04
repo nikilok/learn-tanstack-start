@@ -64,6 +64,13 @@
       "when": 1775315545033,
       "tag": "0008_seed_hmrc_skilled_workers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775328497096,
+      "tag": "0009_enable_pg_trgm",
+      "breakpoints": true
     }
   ]
 }

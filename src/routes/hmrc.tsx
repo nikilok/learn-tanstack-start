@@ -1,18 +1,18 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { createServerFn } from '@tanstack/react-start';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { asc, ilike } from 'drizzle-orm';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import RatingIcon from '../components/RatingIcon';
-import SkeletonCards from '../components/SkeletonCards';
-import Tooltip from '../components/Tooltip';
-import { db } from '../db';
-import { hmrcSkilledWorkers } from '../db/schema';
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { desc, sql } from "drizzle-orm";
+import { useCallback, useEffect, useRef, useState } from "react";
+import RatingIcon from "../components/RatingIcon";
+import SkeletonCards from "../components/SkeletonCards";
+import Tooltip from "../components/Tooltip";
+import { db } from "../db";
+import { hmrcSkilledWorkers } from "../db/schema";
 
 const PAGE_SIZE = 50;
 
 function titleCase(str: string | null) {
-  if (!str) return '';
+  if (!str) return "";
   return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -22,12 +22,36 @@ const searchHmrc = createServerFn()
   )
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
-    const escaped = query.replace(/[%_\\]/g, '\\$&');
+    console.log(`[HMRC Search] query="${query}" offset=${offset}`);
+    const escaped = query.replace(/[%_\\]/g, "\\$&");
     const rows = await db
-      .select()
+      .select({
+        id: hmrcSkilledWorkers.id,
+        organisationName: hmrcSkilledWorkers.organisationName,
+        townCity: hmrcSkilledWorkers.townCity,
+        county: hmrcSkilledWorkers.county,
+        typeRating: hmrcSkilledWorkers.typeRating,
+        route: hmrcSkilledWorkers.route,
+        score: sql<number>`
+          CASE WHEN ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
+            THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+            ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+          END`,
+      })
       .from(hmrcSkilledWorkers)
-      .where(ilike(hmrcSkilledWorkers.organisationName, `%${escaped}%`))
-      .orderBy(asc(hmrcSkilledWorkers.organisationName))
+      .where(
+        sql`(
+          ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
+          OR word_similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.6
+        )`,
+      )
+      .orderBy(
+        desc(sql`
+          CASE WHEN ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
+            THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+            ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+          END`),
+      )
       .limit(PAGE_SIZE + 1)
       .offset(offset);
 
@@ -35,11 +59,11 @@ const searchHmrc = createServerFn()
     return { rows: rows.slice(0, PAGE_SIZE), hasMore };
   });
 
-type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>['rows'][number];
+type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>["rows"][number];
 
-export const Route = createFileRoute('/hmrc')({
+export const Route = createFileRoute("/hmrc")({
   validateSearch: (search: Record<string, unknown>) => ({
-    search: (search.search as string) || '',
+    search: (search.search as string) || "",
   }),
   component: Hmrc,
 });
@@ -125,7 +149,7 @@ function Hmrc() {
             value={search}
             onChange={(e) =>
               navigate({
-                to: '/hmrc',
+                to: "/hmrc",
                 search: { search: e.target.value },
                 replace: true,
               })
@@ -148,8 +172,8 @@ function Hmrc() {
             <div
               style={{
                 height: virtualizer.getTotalSize(),
-                width: '100%',
-                position: 'relative',
+                width: "100%",
+                position: "relative",
               }}
             >
               {virtualItems.map((virtualRow) => {
@@ -158,10 +182,10 @@ function Hmrc() {
                   <div
                     key={r.id}
                     style={{
-                      position: 'absolute',
+                      position: "absolute",
                       top: 0,
                       left: 0,
-                      width: '100%',
+                      width: "100%",
                       transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                     }}
                   >
@@ -177,13 +201,13 @@ function Hmrc() {
                             text={[r.townCity, r.county]
                               .filter(Boolean)
                               .map(titleCase)
-                              .join(', ')}
+                              .join(", ")}
                           >
                             <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
                               {[r.townCity, r.county]
                                 .filter(Boolean)
                                 .map(titleCase)
-                                .join(', ')}
+                                .join(", ")}
                             </p>
                           </Tooltip>
                           <Tooltip text={titleCase(r.route)}>

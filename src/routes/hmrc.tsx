@@ -3,12 +3,18 @@ import { createServerFn } from '@tanstack/react-start';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { asc, ilike } from 'drizzle-orm';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import RatingIcon from '../components/RatingIcon';
 import SkeletonCards from '../components/SkeletonCards';
 import Tooltip from '../components/Tooltip';
 import { db } from '../db';
 import { hmrcSkilledWorkers } from '../db/schema';
 
 const PAGE_SIZE = 50;
+
+function titleCase(str: string | null) {
+  if (!str) return '';
+  return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 const searchHmrc = createServerFn()
   .inputValidator(
@@ -159,31 +165,37 @@ function Hmrc() {
                       transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                     }}
                   >
-                    <div className="glass flex items-center justify-between gap-4 rounded-lg p-4">
-                      <div className="min-w-0">
-                        <Tooltip text={r.organisationName}>
-                          <h3 className="heading-card cursor-pointer truncate text-base font-semibold text-(--sea-ink)">
-                            {r.organisationName}
-                          </h3>
-                        </Tooltip>
-                        <Tooltip
-                          text={[r.townCity, r.county]
-                            .filter(Boolean)
-                            .join(', ')}
-                        >
-                          <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
-                            {[r.townCity, r.county].filter(Boolean).join(', ')}
-                          </p>
-                        </Tooltip>
-                        <Tooltip text={r.route}>
-                          <p className="mt-1 cursor-pointer truncate text-xs text-(--sea-ink-soft)">
-                            {r.route}
-                          </p>
-                        </Tooltip>
+                    <div className="glass rounded-lg p-4">
+                      <Tooltip text={titleCase(r.organisationName)}>
+                        <h3 className="heading-card cursor-pointer truncate text-base font-semibold text-(--sea-ink)">
+                          {titleCase(r.organisationName)}
+                        </h3>
+                      </Tooltip>
+                      <div className="mt-1 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <Tooltip
+                            text={[r.townCity, r.county]
+                              .filter(Boolean)
+                              .map(titleCase)
+                              .join(', ')}
+                          >
+                            <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
+                              {[r.townCity, r.county]
+                                .filter(Boolean)
+                                .map(titleCase)
+                                .join(', ')}
+                            </p>
+                          </Tooltip>
+                          <Tooltip text={titleCase(r.route)}>
+                            <p className="mt-1 cursor-pointer truncate text-xs text-(--sea-ink-soft)">
+                              {titleCase(r.route)}
+                            </p>
+                          </Tooltip>
+                        </div>
+                        <div className="shrink-0">
+                          <RatingIcon rating={r.typeRating} />
+                        </div>
                       </div>
-                      <span className="shrink-0 text-xs text-(--kicker)">
-                        {r.typeRating}
-                      </span>
                     </div>
                   </div>
                 );

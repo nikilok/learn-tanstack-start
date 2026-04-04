@@ -19,17 +19,29 @@ export default memo(function SearchInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const hasAutoFocused = useRef(false);
 
+  // Only run on mount or when pill is clicked — not on every refocus
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
-    if (focus || autoFocus) {
+    if (autoFocus && !hasAutoFocused.current) {
+      hasAutoFocused.current = true;
       el.focus({ preventScroll: true });
       requestAnimationFrame(() => {
         el.setSelectionRange(el.value.length, el.value.length);
       });
     }
-  }, [focus, autoFocus]);
+  }, [autoFocus]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || !focus) return;
+    el.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, [focus]);
 
   return (
     <div className="relative">

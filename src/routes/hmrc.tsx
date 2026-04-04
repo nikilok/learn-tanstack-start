@@ -164,9 +164,11 @@ function Hmrc() {
                             {r.organisationName}
                           </h3>
                         </Tooltip>
-                        <p className="text-sm text-(--sea-ink-soft)">
-                          {[r.townCity, r.county].filter(Boolean).join(", ")}
-                        </p>
+                        <Tooltip text={[r.townCity, r.county].filter(Boolean).join(", ")}>
+                          <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
+                            {[r.townCity, r.county].filter(Boolean).join(", ")}
+                          </p>
+                        </Tooltip>
                         <p className="mt-1 text-xs text-(--sea-ink-soft)">
                           {r.route}
                         </p>

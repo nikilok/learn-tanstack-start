@@ -29,6 +29,12 @@ function App() {
           >
             View Database Demo
           </a>
+          <a
+            href="/hmrc"
+            className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"
+          >
+            HMRC Search
+          </a>
         </div>
       </section>
 

@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as HmrcRouteImport } from './routes/hmrc'
 import { Route as DataRouteImport } from './routes/data'
 import { Route as CounterRouteImport } from './routes/counter'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CounterCountRouteImport } from './routes/counter_.$count'
 
+const HmrcRoute = HmrcRouteImport.update({
+  id: '/hmrc',
+  path: '/hmrc',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DataRoute = DataRouteImport.update({
   id: '/data',
   path: '/data',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
   '/data': typeof DataRoute
+  '/hmrc': typeof HmrcRoute
   '/counter/$count': typeof CounterCountRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
   '/data': typeof DataRoute
+  '/hmrc': typeof HmrcRoute
   '/counter/$count': typeof CounterCountRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,22 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/counter': typeof CounterRoute
   '/data': typeof DataRoute
+  '/hmrc': typeof HmrcRoute
   '/counter_/$count': typeof CounterCountRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/counter' | '/data' | '/counter/$count'
+  fullPaths: '/' | '/about' | '/counter' | '/data' | '/hmrc' | '/counter/$count'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/counter' | '/data' | '/counter/$count'
-  id: '__root__' | '/' | '/about' | '/counter' | '/data' | '/counter_/$count'
+  to: '/' | '/about' | '/counter' | '/data' | '/hmrc' | '/counter/$count'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/counter'
+    | '/data'
+    | '/hmrc'
+    | '/counter_/$count'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,11 +92,19 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   CounterRoute: typeof CounterRoute
   DataRoute: typeof DataRoute
+  HmrcRoute: typeof HmrcRoute
   CounterCountRoute: typeof CounterCountRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/hmrc': {
+      id: '/hmrc'
+      path: '/hmrc'
+      fullPath: '/hmrc'
+      preLoaderRoute: typeof HmrcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/data': {
       id: '/data'
       path: '/data'
@@ -124,6 +148,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   CounterRoute: CounterRoute,
   DataRoute: DataRoute,
+  HmrcRoute: HmrcRoute,
   CounterCountRoute: CounterCountRoute,
 }
 export const routeTree = rootRouteImport

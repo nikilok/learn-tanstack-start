@@ -50,6 +50,20 @@
       "when": 1775213159004,
       "tag": "0006_backfill_published_at",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1775315154255,
+      "tag": "0007_polite_the_call",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1775315545033,
+      "tag": "0008_seed_hmrc_skilled_workers",
+      "breakpoints": true
     }
   ]
 }

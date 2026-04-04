@@ -24,8 +24,10 @@ export default memo(function SearchInput({
     const el = inputRef.current;
     if (!el) return;
     if (focus || autoFocus) {
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
+      el.focus({ preventScroll: true });
+      requestAnimationFrame(() => {
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
     }
   }, [focus, autoFocus]);
 

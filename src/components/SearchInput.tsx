@@ -52,7 +52,7 @@ export default memo(function SearchInput({
   }, [focus]);
 
   return (
-    <div className="relative">
+    <div className="relative" style={{ transform: 'translateZ(0)' }}>
       <input
         ref={inputRef}
         type="text"
@@ -60,16 +60,6 @@ export default memo(function SearchInput({
         onInput={() => {
           syncClearButton();
           onChangeRef.current(inputRef.current?.value ?? '');
-        }}
-        onFocus={() => {
-          // Workaround: Mobile Safari miscalculates caret position in sticky containers.
-          // Toggling the value forces Safari to recalculate the caret location.
-          const el = inputRef.current;
-          if (el) {
-            const v = el.value;
-            el.value = '';
-            el.value = v;
-          }
         }}
         onBlur={onBlur}
         placeholder={placeholder}

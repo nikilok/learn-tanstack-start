@@ -1,12 +1,12 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useRef, useState } from "react";
-import SkeletonCards from "../components/SkeletonCards";
-import Tooltip from "../components/Tooltip";
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
-import { db } from "../db";
-import { hmrcSkilledWorkers } from "../db/schema";
-import { ilike, asc } from "drizzle-orm";
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createServerFn } from '@tanstack/react-start';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { asc, ilike } from 'drizzle-orm';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import SkeletonCards from '../components/SkeletonCards';
+import Tooltip from '../components/Tooltip';
+import { db } from '../db';
+import { hmrcSkilledWorkers } from '../db/schema';
 
 const PAGE_SIZE = 50;
 
@@ -28,11 +28,11 @@ const searchHmrc = createServerFn()
     return { rows: rows.slice(0, PAGE_SIZE), hasMore };
   });
 
-type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>["rows"][number];
+type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>['rows'][number];
 
-export const Route = createFileRoute("/hmrc")({
+export const Route = createFileRoute('/hmrc')({
   validateSearch: (search: Record<string, unknown>) => ({
-    search: (search.search as string) || "",
+    search: (search.search as string) || '',
   }),
   component: Hmrc,
 });
@@ -112,12 +112,13 @@ function Hmrc() {
         <p className="island-kicker mb-3">HMRC</p>
         <div className="sticky top-24 z-40 -mx-4 mt-6 px-4 pb-4 backdrop-blur-xl">
           <input
+            // biome-ignore lint/a11y/noAutofocus: search page needs immediate focus
             autoFocus
             type="text"
             value={search}
             onChange={(e) =>
               navigate({
-                to: "/hmrc",
+                to: '/hmrc',
                 search: { search: e.target.value },
                 replace: true,
               })
@@ -140,8 +141,8 @@ function Hmrc() {
             <div
               style={{
                 height: virtualizer.getTotalSize(),
-                width: "100%",
-                position: "relative",
+                width: '100%',
+                position: 'relative',
               }}
             >
               {virtualItems.map((virtualRow) => {
@@ -150,10 +151,10 @@ function Hmrc() {
                   <div
                     key={r.id}
                     style={{
-                      position: "absolute",
+                      position: 'absolute',
                       top: 0,
                       left: 0,
-                      width: "100%",
+                      width: '100%',
                       transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                     }}
                   >
@@ -164,14 +165,20 @@ function Hmrc() {
                             {r.organisationName}
                           </h3>
                         </Tooltip>
-                        <Tooltip text={[r.townCity, r.county].filter(Boolean).join(", ")}>
+                        <Tooltip
+                          text={[r.townCity, r.county]
+                            .filter(Boolean)
+                            .join(', ')}
+                        >
                           <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
-                            {[r.townCity, r.county].filter(Boolean).join(", ")}
+                            {[r.townCity, r.county].filter(Boolean).join(', ')}
                           </p>
                         </Tooltip>
-                        <p className="mt-1 text-xs text-(--sea-ink-soft)">
-                          {r.route}
-                        </p>
+                        <Tooltip text={r.route}>
+                          <p className="mt-1 cursor-pointer truncate text-xs text-(--sea-ink-soft)">
+                            {r.route}
+                          </p>
+                        </Tooltip>
                       </div>
                       <span className="shrink-0 text-xs text-(--kicker)">
                         {r.typeRating}

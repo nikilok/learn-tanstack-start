@@ -2,6 +2,7 @@ export default function SkeletonCards({ count = 6 }: { count?: number }) {
   return (
     <div className="mt-6 space-y-3">
       {Array.from({ length: count }).map((_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders never reorder
         <div key={i} className="glass animate-pulse rounded-lg p-4">
           <div className="flex items-center justify-between">
             <div className="space-y-2">

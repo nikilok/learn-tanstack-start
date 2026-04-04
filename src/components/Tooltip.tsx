@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export default function Tooltip({
   text,
@@ -9,7 +9,7 @@ export default function Tooltip({
   children: React.ReactNode;
 }) {
   const [visible, setVisible] = useState(false);
-  const triggerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
@@ -24,16 +24,21 @@ export default function Tooltip({
     const handleClick = (e: MouseEvent) => {
       if (!triggerRef.current?.contains(e.target as Node)) dismiss();
     };
-    document.addEventListener("click", handleClick);
-    window.addEventListener("scroll", dismiss, true);
+    document.addEventListener('click', handleClick);
+    window.addEventListener('scroll', dismiss, true);
     return () => {
-      document.removeEventListener("click", handleClick);
-      window.removeEventListener("scroll", dismiss, true);
+      document.removeEventListener('click', handleClick);
+      window.removeEventListener('scroll', dismiss, true);
     };
   }, [visible]);
 
   return (
-    <div ref={triggerRef} onClick={() => setVisible((v) => !v)}>
+    <button
+      ref={triggerRef}
+      type="button"
+      className="w-full text-left"
+      onClick={() => setVisible((v) => !v)}
+    >
       {children}
       {visible &&
         createPortal(
@@ -42,13 +47,13 @@ export default function Tooltip({
             style={{
               top: pos.top,
               left: pos.left,
-              backdropFilter: "blur(8px)",
+              backdropFilter: 'blur(8px)',
             }}
           >
             {text}
           </div>,
           document.body,
         )}
-    </div>
+    </button>
   );
 }

@@ -32,7 +32,9 @@ function clean(val: string | undefined): string {
 const BATCH_SIZE = 500;
 const lines: string[] = [];
 
-lines.push('-- HMRC Skilled Workers seed data (generated from 2026-03-31-Worker.csv)');
+lines.push(
+  '-- HMRC Skilled Workers seed data (generated from 2026-03-31-Worker.csv)',
+);
 lines.push('TRUNCATE TABLE "hmrc_skilled_workers" RESTART IDENTITY;');
 lines.push('--> statement-breakpoint');
 
@@ -45,15 +47,15 @@ for (let i = 0; i < records.length; i += BATCH_SIZE) {
   const values = batch.map((r) => {
     const org = `'${escapeSql(r['Organisation Name'].trim())}'`;
     const city = clean(r['Town/City']);
-    const county = clean(r['County']);
+    const county = clean(r.County);
     const type = `'${escapeSql(r['Type & Rating'].trim())}'`;
-    const route = `'${escapeSql(r['Route'].trim())}'`;
+    const route = `'${escapeSql(r.Route.trim())}'`;
     return `(${org}, ${city}, ${county}, ${type}, ${route})`;
   });
 
-  lines.push(values.join(',\n') + ';');
+  lines.push(`${values.join(',\n')};`);
   lines.push('--> statement-breakpoint');
 }
 
-await Bun.write(sqlPath, lines.join('\n') + '\n');
+await Bun.write(sqlPath, `${lines.join('\n')}\n`);
 console.log(`Written ${records.length} rows to ${sqlPath}`);

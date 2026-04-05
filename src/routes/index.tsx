@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import { parsePlatform } from '../hooks/usePlatform';
+import { useSearchShortcut } from '../hooks/useSearchShortcut';
 
 const getPlatform = createServerFn().handler(async () => {
   const ua = getRequestHeader('user-agent') ?? '';
@@ -30,6 +31,7 @@ function Home() {
   const [isStuck, setIsStuck] = useState(false);
   const [pillClicked, setPillClicked] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -45,6 +47,8 @@ function Home() {
     return () => observer.disconnect();
   }, []);
 
+  useSearchShortcut(inputRef, () => setPillClicked(true));
+
   return (
     <main className="page-wrap px-4 py-16">
       <section className="mx-auto max-w-2xl">
@@ -57,6 +61,7 @@ function Home() {
             search={search}
             isStuck={isStuck}
             pillClicked={pillClicked}
+            inputRef={inputRef}
             platform={platformInfo.platform}
             isMobile={platformInfo.isMobile}
             onSearch={(value) => {

@@ -15,15 +15,5 @@ export function parsePlatform(ua: string): {
 }
 
 export function getShortcutLabel(platform: Platform): string {
-  switch (platform) {
-    case 'mac':
-      return '⌘K';
-    case 'chromeos':
-    case 'linux':
-      return 'Ctrl+F';
-    case 'windows':
-      return 'Ctrl+K';
-    default:
-      return '';
-  }
+  return platform === 'mac' ? '⌘K' : 'Ctrl+K';
 }

@@ -1,27 +1,25 @@
+import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
-import { useSearchShortcut } from '../hooks/useSearchShortcut';
 import SearchIcon from './SearchIcon';
 import styles from './SearchInput.module.css';
 
 export default memo(function SearchInput({
+  inputRef,
   defaultValue,
   onChange,
   onBlur,
-  onShortcut,
   placeholder,
   autoFocus,
   focus,
 }: {
+  inputRef: RefObject<HTMLInputElement | null>;
   defaultValue: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
-  onShortcut?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
   focus?: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  useSearchShortcut(inputRef, onShortcut);
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
   const onChangeRef = useRef(onChange);
@@ -40,7 +38,7 @@ export default memo(function SearchInput({
     }
   };
 
-  // Only run on mount or when pill is clicked — not on every refocus
+  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -53,6 +51,7 @@ export default memo(function SearchInput({
     }
   }, [autoFocus]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el || !focus) return;

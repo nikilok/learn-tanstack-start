@@ -1,3 +1,4 @@
+import { type RefObject, useEffect, useRef } from 'react';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
@@ -6,6 +7,7 @@ export default function SearchBar({
   search,
   isStuck,
   pillClicked,
+  inputRef,
   platform,
   isMobile,
   onSearch,
@@ -15,6 +17,7 @@ export default function SearchBar({
   search: string;
   isStuck: boolean;
   pillClicked: boolean;
+  inputRef: RefObject<HTMLInputElement | null>;
   platform: Platform;
   isMobile: boolean;
   onSearch: (value: string) => void;
@@ -23,6 +26,14 @@ export default function SearchBar({
 }) {
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
+  const pillRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (showPill) {
+      // Focus the pill so the page retains focus and keyboard shortcuts work
+      pillRef.current?.focus({ preventScroll: true });
+    }
+  }, [showPill]);
 
   return (
     <div className="relative">
@@ -35,12 +46,12 @@ export default function SearchBar({
         }}
       >
         <SearchInput
+          inputRef={inputRef}
           autoFocus={!isStuck && search.length < 3}
           focus={pillClicked}
           defaultValue={search}
           onChange={onSearch}
           onBlur={isStuck ? onBlur : undefined}
-          onShortcut={showPill ? onPillClick : undefined}
           placeholder={
             shortcut ? `search company... (${shortcut})` : 'search company...'
           }
@@ -57,6 +68,7 @@ export default function SearchBar({
         }}
       >
         <button
+          ref={pillRef}
           type="button"
           onClick={onPillClick}
           className="inline-flex items-center gap-3 whitespace-nowrap rounded-full bg-(--sea-ink) px-4 py-3 text-lg text-(--surface) transition hover:opacity-85"

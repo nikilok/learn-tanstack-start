@@ -1,5 +1,38 @@
 import { type RefObject, useEffect, useRef } from 'react';
 
+// Global listener state — persists across React mount/unmount cycles
+const state: {
+  inputRef: RefObject<HTMLInputElement | null> | null;
+  onActivate: (() => void) | null;
+  registered: boolean;
+} = { inputRef: null, onActivate: null, registered: false };
+
+function handleKeyDown(e: KeyboardEvent) {
+  const el = state.inputRef?.current;
+  if (!el) return;
+  if (document.activeElement === el) return;
+
+  const isSlash = e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey;
+  const isCmdK = e.key === 'k' && (e.metaKey || e.ctrlKey);
+
+  if (isSlash || isCmdK) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    state.onActivate?.();
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+  }
+}
+
+function ensureListener() {
+  if (state.registered || typeof window === 'undefined') return;
+  window.addEventListener('keydown', handleKeyDown, true);
+  state.registered = true;
+}
+
 export function useSearchShortcut(
   inputRef: RefObject<HTMLInputElement | null>,
   onActivate?: () => void,
@@ -8,33 +41,12 @@ export function useSearchShortcut(
   onActivateRef.current = onActivate;
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const el = inputRef.current;
-      if (!el) return;
-
-      if (document.activeElement === el) return;
-
-      const isSlash = e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey;
-      const isCmdK = e.key === 'k' && (e.metaKey || e.ctrlKey);
-      const isCtrlF = e.key === 'f' && e.ctrlKey && !e.metaKey;
-
-      if (isSlash || isCmdK || isCtrlF) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (onActivateRef.current) {
-          onActivateRef.current();
-          // Delay focus until after React re-renders (pill → input transition)
-          requestAnimationFrame(() => {
-            el.focus();
-            el.setSelectionRange(el.value.length, el.value.length);
-          });
-        } else {
-          el.focus();
-          el.setSelectionRange(el.value.length, el.value.length);
-        }
-      }
+    state.inputRef = inputRef;
+    state.onActivate = () => onActivateRef.current?.();
+    ensureListener();
+    return () => {
+      state.inputRef = null;
+      state.onActivate = null;
     };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [inputRef]);
 }

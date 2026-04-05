@@ -33,7 +33,7 @@ export default function SearchBar({
           defaultValue={search}
           onChange={onSearch}
           onBlur={isStuck ? onBlur : undefined}
-          placeholder="Search organisations (min 3 characters)..."
+          placeholder="search company..."
         />
       </div>
 

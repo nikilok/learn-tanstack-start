@@ -35,7 +35,9 @@ function Hmrc() {
   return (
     <main className="page-wrap px-4 py-16">
       <section className="mx-auto max-w-2xl">
-        <p className="island-kicker mb-3">HMRC</p>
+        <p className="island-kicker mb-3">
+          HMRC list of sponsorship providing companies in the UK
+        </p>
         <div ref={sentinelRef} className="mt-6" />
         <div className="sticky top-24 z-40 -mx-4 px-4 pb-4">
           <SearchBar

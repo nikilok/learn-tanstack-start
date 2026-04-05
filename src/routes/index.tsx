@@ -18,10 +18,10 @@ function App() {
         </p>
         <div className="flex flex-wrap justify-center gap-3">
           <a
-            href="/counter"
+            href="/hmrc"
             className="inline-block rounded-md bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--surface) no-underline transition hover:opacity-85"
           >
-            Try the Counter
+            HMRC Search
           </a>
           <a
             href="/data"
@@ -30,10 +30,10 @@ function App() {
             View Database Demo
           </a>
           <a
-            href="/hmrc"
+            href="/counter"
             className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"
           >
-            HMRC Search
+            Try the Counter
           </a>
         </div>
       </section>

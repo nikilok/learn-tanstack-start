@@ -28,7 +28,7 @@ export default function SearchBar({
         }}
       >
         <SearchInput
-          autoFocus={!isStuck}
+          autoFocus={!isStuck && search.length < 3}
           focus={pillClicked}
           defaultValue={search}
           onChange={onSearch}

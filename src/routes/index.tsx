@@ -43,7 +43,7 @@ function Home() {
   useSearchShortcut(inputRef, () => setPillClicked(true));
 
   return (
-    <main className="page-wrap px-4 py-16">
+    <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">
           Search UK skilled worker visa sponsors

@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router';
+import BookSearchIcon from './BookSearchIcon';
 import ThemeToggle from './ThemeToggle';
 
 export default function Header() {
@@ -11,8 +12,8 @@ export default function Header() {
             search={{ search: '' }}
             className="shadow-ring inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold text-(--sea-ink) no-underline transition hover:bg-(--link-bg-hover)"
           >
-            <span className="inline-block h-2 w-2 rounded-full bg-[linear-gradient(135deg,#0070f3,#7928ca)]" />
-            TanStack Start
+            <BookSearchIcon className="h-5 w-5" />
+            Sponsor Search
           </Link>
         </h2>
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
 
@@ -73,9 +74,11 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="shadow-ring rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink) transition hover:bg-(--link-bg-hover)"
+      className="shadow-ring rounded-md p-2 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
     >
-      {mode === 'auto' ? 'Auto' : mode === 'dark' ? 'Dark' : 'Light'}
+      {mode === 'light' && <SunIcon />}
+      {mode === 'dark' && <MoonIcon />}
+      {mode === 'auto' && <MonitorIcon />}
     </button>
   );
 }

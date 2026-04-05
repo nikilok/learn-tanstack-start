@@ -32,6 +32,7 @@ function handleKeyDown(e: KeyboardEvent) {
     e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey;
   if (isPrintable) {
     state.onActivate?.();
+    el.value = '';
     el.focus();
   }
 }

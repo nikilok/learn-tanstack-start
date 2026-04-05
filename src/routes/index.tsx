@@ -1,16 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { createServerFn } from '@tanstack/react-start';
-import { getRequestHeader } from '@tanstack/start-server-core';
 import { useEffect, useRef, useState } from 'react';
+import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
-import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchShortcut } from '../hooks/useSearchShortcut';
-
-const getPlatform = createServerFn().handler(async () => {
-  const ua = getRequestHeader('user-agent') ?? '';
-  return parsePlatform(ua);
-});
 
 export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>) => ({

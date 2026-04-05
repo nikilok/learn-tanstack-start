@@ -24,6 +24,15 @@ function handleKeyDown(e: KeyboardEvent) {
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
     });
+    return;
+  }
+
+  // Auto-focus on any printable character (desktop only)
+  const isPrintable =
+    e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey;
+  if (isPrintable) {
+    state.onActivate?.();
+    el.focus();
   }
 }
 

@@ -15,6 +15,9 @@ const config = defineConfig({
     nitro(),
     viteReact(),
   ],
+  optimizeDeps: {
+    exclude: ['@tanstack/start-server-core'],
+  },
 });
 
 export default config;

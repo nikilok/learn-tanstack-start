@@ -1,57 +1,13 @@
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { type HmrcRow, searchHmrc } from '../api/hmrc';
+import { useEffect, useRef } from 'react';
+import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
 export default function HmrcResults({ search }: { search: string }) {
-  const [results, setResults] = useState<HmrcRow[]>([]);
-  const [loading, setLoading] = useState(search.length >= 3);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const { results, isLoading, hasMore, loadingMore, fetchMore } =
+    useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef(search);
-  searchRef.current = search;
-
-  useEffect(() => {
-    if (search.length < 3) {
-      setResults([]);
-      setHasMore(false);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const data = await searchHmrc({ data: { query: search, offset: 0 } });
-        if (searchRef.current === search) {
-          setResults(data.rows);
-          setHasMore(data.hasMore);
-        }
-      } finally {
-        if (searchRef.current === search) setLoading(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [search]);
-
-  const fetchMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
-    setLoadingMore(true);
-    try {
-      const data = await searchHmrc({
-        data: { query: searchRef.current, offset: results.length },
-      });
-      if (searchRef.current === search) {
-        setResults((prev) => [...prev, ...data.rows]);
-        setHasMore(data.hasMore);
-      }
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [loadingMore, hasMore, results.length, search]);
 
   const virtualizer = useWindowVirtualizer({
     count: results.length,
@@ -79,7 +35,7 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  if (loading) return <SkeletonCards />;
+  if (isLoading) return <SkeletonCards />;
 
   if (results.length === 0 && search.length >= 3) {
     return (

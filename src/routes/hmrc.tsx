@@ -52,7 +52,7 @@ function Hmrc() {
                   search: { search: value },
                   replace: true,
                 });
-              }, 150);
+              }, 300);
             }}
             onPillClick={() => setPillClicked(true)}
             onBlur={() => setPillClicked(false)}

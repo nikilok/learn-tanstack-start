@@ -61,6 +61,7 @@ export default memo(function SearchInput({
     <div className="relative" style={{ transform: 'translateZ(0)' }}>
       <input
         ref={inputRef}
+        {...(autoFocus ? { autoFocus: true } : {})}
         type="text"
         defaultValue={defaultValue}
         onInput={() => {

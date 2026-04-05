@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from 'react';
+import SearchIcon from './SearchIcon';
 import styles from './SearchInput.module.css';
 
 export default memo(function SearchInput({
@@ -102,18 +103,7 @@ export default memo(function SearchInput({
         onClick={() => inputRef.current?.focus()}
         className="absolute right-[8px] top-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
       >
-        <svg
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          aria-hidden="true"
-          className="h-3.5 w-3.5"
-        >
-          <path
-            fillRule="evenodd"
-            d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-            clipRule="evenodd"
-          />
-        </svg>
+        <SearchIcon className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">search</span>
       </button>
     </div>

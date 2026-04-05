@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from 'react';
+import { useSearchShortcut } from '../hooks/useSearchShortcut';
 import SearchIcon from './SearchIcon';
 import styles from './SearchInput.module.css';
 
@@ -6,6 +7,7 @@ export default memo(function SearchInput({
   defaultValue,
   onChange,
   onBlur,
+  onShortcut,
   placeholder,
   autoFocus,
   focus,
@@ -13,11 +15,13 @@ export default memo(function SearchInput({
   defaultValue: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
+  onShortcut?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
   focus?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  useSearchShortcut(inputRef, onShortcut);
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
   const onChangeRef = useRef(onChange);

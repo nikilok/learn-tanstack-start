@@ -1,100 +1,80 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createServerFn } from '@tanstack/react-start';
+import { getRequestHeader } from '@tanstack/start-server-core';
+import { useEffect, useRef, useState } from 'react';
+import HmrcResults from '../components/HmrcResults';
+import SearchBar from '../components/SearchBar';
+import { parsePlatform } from '../hooks/usePlatform';
 
-export const Route = createFileRoute('/')({ component: App });
+const getPlatform = createServerFn().handler(async () => {
+  const ua = getRequestHeader('user-agent') ?? '';
+  return parsePlatform(ua);
+});
 
-function App() {
+export const Route = createFileRoute('/')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    search: (search.search as string) || '',
+  }),
+  beforeLoad: async () => {
+    const platformInfo = await getPlatform();
+    return { platformInfo };
+  },
+  component: Home,
+});
+
+function Home() {
+  const { search } = Route.useSearch();
+  const { platformInfo } = Route.useRouteContext();
+  const navigate = useNavigate();
+  const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isStuck, setIsStuck] = useState(false);
+  const [pillClicked, setPillClicked] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsStuck(!entry.isIntersecting);
+        if (entry.isIntersecting) setPillClicked(false);
+      },
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <main className="page-wrap px-4 pb-8 pt-14">
-      <section className="rise-in py-24 text-center">
-        <h1 className="heading-tight mb-4 text-5xl font-semibold text-(--sea-ink) sm:text-6xl">
-          Learning
-          <br />
-          TanStack Start
-        </h1>
-        <p className="mx-auto mb-8 max-w-xl text-xl leading-relaxed text-(--sea-ink-soft)">
-          A hands-on playground for exploring SSR, server functions, database
-          integration, and deployment — built from scratch, one concept at a
-          time.
+    <main className="page-wrap px-4 py-16">
+      <section className="mx-auto max-w-2xl">
+        <p className="island-kicker mb-3">
+          HMRC list of sponsorship providing companies in the UK
         </p>
-        <div className="flex flex-wrap justify-center gap-3">
-          <Link
-            to="/hmrc"
-            search={{ search: '' }}
-            className="inline-block rounded-md bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--surface) no-underline transition hover:opacity-85"
-          >
-            HMRC Search
-          </Link>
-          <a
-            href="/data"
-            className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"
-          >
-            View Database Demo
-          </a>
-          <a
-            href="/counter"
-            className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"
-          >
-            Try the Counter
-          </a>
+        <div ref={sentinelRef} className="mt-6" />
+        <div className="sticky top-24 z-40 -mx-4 px-4 pb-4">
+          <SearchBar
+            search={search}
+            isStuck={isStuck}
+            pillClicked={pillClicked}
+            platform={platformInfo.platform}
+            isMobile={platformInfo.isMobile}
+            onSearch={(value) => {
+              if (navTimerRef.current) clearTimeout(navTimerRef.current);
+              navTimerRef.current = setTimeout(() => {
+                navigate({
+                  to: '/',
+                  search: { search: value },
+                  replace: true,
+                });
+              }, 300);
+            }}
+            onPillClick={() => setPillClicked(true)}
+            onBlur={() => setPillClicked(false)}
+          />
         </div>
-      </section>
 
-      <hr className="border-t border-(--line)" />
-
-      <section className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          [
-            'URL State',
-            'Counter value lives in the URL — navigate, share, and bookmark state directly.',
-          ],
-          [
-            'Server Functions',
-            'Fetch data from Postgres via Drizzle ORM inside createServerFn.',
-          ],
-          [
-            'SSR + Hydration',
-            'beforeLoad runs server-side on page load, client-side on SPA navigation.',
-          ],
-          [
-            'Vercel + Neon',
-            'Deployed on Vercel with Nitro, backed by a serverless Neon Postgres database.',
-          ],
-        ].map(([title, desc], index) => (
-          <article
-            key={title}
-            className="glass rise-in rounded-lg p-6"
-            style={{ animationDelay: `${index * 90 + 80}ms` }}
-          >
-            <h2 className="heading-card mb-2 text-lg font-semibold text-(--sea-ink)">
-              {title}
-            </h2>
-            <p className="m-0 text-sm leading-relaxed text-(--sea-ink-soft)">
-              {desc}
-            </p>
-          </article>
-        ))}
-      </section>
-
-      <section className="glass mt-10 rounded-lg p-6">
-        <p className="island-kicker mb-3">What I've explored so far</p>
-        <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-(--sea-ink-soft)">
-          <li>
-            File-based routing with dynamic params (<code>/counter/$count</code>
-            ) and the <code>_</code> suffix to opt out of layout nesting.
-          </li>
-          <li>
-            <code>beforeLoad</code> behaviour: runs server-side on full page
-            load, client-side on SPA navigation.
-          </li>
-          <li>
-            Drizzle ORM with Neon Postgres — schema migrations, data seeding,
-            and a custom migration script.
-          </li>
-          <li>
-            Deploying to Vercel via the Nitro plugin, with environment variables
-            and serverless function logs.
-          </li>
-        </ul>
+        <HmrcResults search={search} />
       </section>
     </main>
   );

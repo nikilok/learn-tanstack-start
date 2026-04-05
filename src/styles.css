@@ -18,9 +18,6 @@
   --gray-500: #666666;
   --gray-600: #4d4d4d;
   --link-blue: #0072f5;
-  --focus-blue: hsl(212, 100%, 48%);
-  --badge-bg: #ebf5ff;
-  --badge-text: #0068d6;
 
   /* Mapped tokens for components */
   --sea-ink: #171717;
@@ -31,8 +28,6 @@
   --line: var(--gray-100);
   --bg-base: var(--white);
   --header-bg: rgba(255, 255, 255, 0.85);
-  --chip-bg: var(--white);
-  --chip-line: var(--gray-100);
   --link-bg-hover: var(--gray-50);
   --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
   --shadow-card:
@@ -60,8 +55,6 @@
   --gray-400: #666666;
   --gray-500: #808080;
   --gray-600: #a0a0a0;
-  --badge-bg: rgba(0, 114, 245, 0.15);
-  --badge-text: #3b9eff;
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;
@@ -71,8 +64,6 @@
   --line: #2a2a2a;
   --bg-base: #0a0a0a;
   --header-bg: rgba(10, 10, 10, 0.88);
-  --chip-bg: #111111;
-  --chip-line: #2a2a2a;
   --link-bg-hover: #1a1a1a;
   --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
   --shadow-card:
@@ -206,56 +197,12 @@ a:hover {
   opacity: 0.85;
 }
 
-code {
-  font-family: var(--font-mono);
-  font-size: 0.875em;
-  background: var(--gray-50);
-  border-radius: 4px;
-  padding: 2px 6px;
-  box-shadow: var(--shadow-ring);
-}
-
-pre code {
-  background: transparent;
-  padding: 0;
-  border-radius: 0;
-  box-shadow: none;
-  font-size: inherit;
-  color: inherit;
-}
-
 .page-wrap {
   width: min(1200px, calc(100% - 2rem));
   margin-inline: auto;
 }
 
-.display-title {
-  font-family: var(--font-sans);
-  letter-spacing: -2.4px;
-}
-
-.island-shell {
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-  transition: box-shadow 0.2s;
-}
-
-.island-shell:hover {
-  box-shadow: var(--shadow-card-full);
-}
-
-.feature-card {
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-  transition: box-shadow 0.2s;
-}
-
-.feature-card:hover {
-  box-shadow: var(--shadow-card-full);
-}
-
 button,
-.island-shell,
 a {
   transition:
     background-color 150ms ease,
@@ -333,35 +280,6 @@ a {
   box-shadow: var(--shadow-card-full);
 }
 
-.heading-tight {
-  letter-spacing: -2.4px;
-  line-height: 1;
-}
-
-.heading-snug {
-  letter-spacing: -1.8px;
-  line-height: 1.1;
-}
-
 .heading-card {
   letter-spacing: -0.4px;
-}
-
-.brand-link {
-  letter-spacing: -0.28px;
-}
-
-.rise-in {
-  animation: rise-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }

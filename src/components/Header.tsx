@@ -8,6 +8,7 @@ export default function Header() {
         <h2 className="m-0 shrink-0">
           <Link
             to="/"
+            search={{ search: '' }}
             className="shadow-ring inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold text-(--sea-ink) no-underline transition hover:bg-(--link-bg-hover)"
           >
             <span className="inline-block h-2 w-2 rounded-full bg-[linear-gradient(135deg,#0070f3,#7928ca)]" />
@@ -51,40 +52,11 @@ export default function Header() {
         <div className="order-3 flex w-full flex-wrap items-center gap-x-5 gap-y-1 pb-1 text-sm font-medium sm:order-2 sm:w-auto sm:flex-nowrap sm:pb-0">
           <Link
             to="/"
-            className="nav-link"
-            activeProps={{ className: 'nav-link is-active' }}
-          >
-            Home
-          </Link>
-          <Link
-            to="/about"
-            className="nav-link"
-            activeProps={{ className: 'nav-link is-active' }}
-          >
-            About
-          </Link>
-          <Link
-            to="/counter"
-            className="nav-link"
-            activeOptions={{ exact: false }}
-            activeProps={{ className: 'nav-link is-active' }}
-          >
-            Counter
-          </Link>
-          <Link
-            to="/data"
-            className="nav-link"
-            activeProps={{ className: 'nav-link is-active' }}
-          >
-            Data
-          </Link>
-          <Link
-            to="/hmrc"
             search={{ search: '' }}
             className="nav-link"
             activeProps={{ className: 'nav-link is-active' }}
           >
-            HMRC
+            Home
           </Link>
         </div>
       </nav>

@@ -1,3 +1,4 @@
+import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
 
@@ -5,6 +6,8 @@ export default function SearchBar({
   search,
   isStuck,
   pillClicked,
+  platform,
+  isMobile,
   onSearch,
   onPillClick,
   onBlur,
@@ -12,11 +15,14 @@ export default function SearchBar({
   search: string;
   isStuck: boolean;
   pillClicked: boolean;
+  platform: Platform;
+  isMobile: boolean;
   onSearch: (value: string) => void;
   onPillClick: () => void;
   onBlur: () => void;
 }) {
   const showPill = isStuck && !pillClicked && !!search;
+  const shortcut = isMobile ? '' : getShortcutLabel(platform);
 
   return (
     <div className="relative">
@@ -34,7 +40,10 @@ export default function SearchBar({
           defaultValue={search}
           onChange={onSearch}
           onBlur={isStuck ? onBlur : undefined}
-          placeholder="search company..."
+          onShortcut={showPill ? onPillClick : undefined}
+          placeholder={
+            shortcut ? `search company... (${shortcut})` : 'search company...'
+          }
         />
       </div>
 

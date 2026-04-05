@@ -11,7 +11,8 @@ export function useSearchShortcut(
     const handleKeyDown = (e: KeyboardEvent) => {
       const el = inputRef.current;
       if (!el) return;
-      if (el === document.activeElement) return;
+
+      if (document.activeElement === el) return;
 
       const isSlash = e.key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey;
       const isCmdK = e.key === 'k' && (e.metaKey || e.ctrlKey);
@@ -19,12 +20,21 @@ export function useSearchShortcut(
 
       if (isSlash || isCmdK || isCtrlF) {
         e.preventDefault();
-        onActivateRef.current?.();
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
+        e.stopPropagation();
+        if (onActivateRef.current) {
+          onActivateRef.current();
+          // Delay focus until after React re-renders (pill → input transition)
+          requestAnimationFrame(() => {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          });
+        } else {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [inputRef]);
 }

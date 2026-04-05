@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { Link, createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/')({ component: App });
 
@@ -17,12 +17,13 @@ function App() {
           time.
         </p>
         <div className="flex flex-wrap justify-center gap-3">
-          <a
-            href="/hmrc"
+          <Link
+            to="/hmrc"
+            search={{ search: '' }}
             className="inline-block rounded-md bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--surface) no-underline transition hover:opacity-85"
           >
             HMRC Search
-          </a>
+          </Link>
           <a
             href="/data"
             className="shadow-ring inline-block rounded-md px-5 py-2.5 text-sm font-medium text-(--sea-ink) no-underline transition hover:opacity-85"

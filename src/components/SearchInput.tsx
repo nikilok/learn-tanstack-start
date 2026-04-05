@@ -114,7 +114,7 @@ export default memo(function SearchInput({
             clipRule="evenodd"
           />
         </svg>
-        search
+        <span className="hidden sm:inline">search</span>
       </button>
     </div>
   );

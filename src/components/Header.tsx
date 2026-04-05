@@ -80,6 +80,7 @@ export default function Header() {
           </Link>
           <Link
             to="/hmrc"
+            search={{ search: '' }}
             className="nav-link"
             activeProps={{ className: 'nav-link is-active' }}
           >

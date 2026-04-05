@@ -24,8 +24,7 @@ export default memo(function SearchInput({
 
   const syncClearButton = () => {
     if (clearRef.current) {
-      clearRef.current.style.display =
-        inputRef.current?.value ? '' : 'none';
+      clearRef.current.style.display = inputRef.current?.value ? '' : 'none';
     }
   };
 

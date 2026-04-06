@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { THEME_COLORS } from '../theme';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
@@ -30,6 +31,17 @@ function applyThemeMode(mode: ThemeMode) {
   }
 
   document.documentElement.style.colorScheme = resolved;
+
+  // Update mobile browser chrome to match the app background
+  let meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'theme-color');
+    document.head.appendChild(meta);
+  }
+  meta.content = resolved === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light;
 }
 
 export default function ThemeToggle() {

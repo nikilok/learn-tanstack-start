@@ -12,7 +12,8 @@ export const searchHmrc = createServerFn()
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
-    const escaped = query.replace(/[%_\\]/g, '\\$&');
+    const regexEscaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordBoundaryPattern = `\\m${regexEscaped}`;
     const rows = await db
       .select({
         id: hmrcSkilledWorkers.id,
@@ -22,22 +23,29 @@ export const searchHmrc = createServerFn()
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
         score: sql<number>`
-          CASE WHEN ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
-            THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+          CASE
+            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
+              THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
+              THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
             ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
           END`,
       })
       .from(hmrcSkilledWorkers)
       .where(
         sql`(
-          ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
+          ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
           OR word_similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.6
+          OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
         )`,
       )
       .orderBy(
         desc(sql`
-          CASE WHEN ${hmrcSkilledWorkers.organisationName} ILIKE ${`%${escaped}%`}
-            THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+          CASE
+            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
+              THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
+              THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
             ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
           END`),
       )

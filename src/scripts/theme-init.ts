@@ -24,9 +24,9 @@ export const THEME_INIT_SCRIPT = `(() => {
 
     root.style.colorScheme = resolved;
 
-    const meta = document.createElement('meta');
-    meta.setAttribute('name', 'theme-color');
-    meta.content = resolved === 'dark' ? '${THEME_COLORS.dark}' : '${THEME_COLORS.light}';
-    document.head.appendChild(meta);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.content = resolved === 'dark' ? '${THEME_COLORS.dark}' : '${THEME_COLORS.light}';
+    }
   } catch (_e) {}
 })();`;

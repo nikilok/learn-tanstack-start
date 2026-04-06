@@ -270,6 +270,15 @@ a {
   box-shadow: var(--shadow-ring);
 }
 
+.search-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0 -1rem -6rem;
+  background: linear-gradient(to bottom, var(--bg-base) 30%, transparent);
+  pointer-events: none;
+  z-index: -1;
+}
+
 .glass {
   backdrop-filter: blur(2px);
   box-shadow: var(--shadow-card);

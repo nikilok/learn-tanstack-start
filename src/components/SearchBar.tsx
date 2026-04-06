@@ -41,12 +41,15 @@ export default function SearchBar({
     }
   }, [showPill, portalTarget]);
 
-  // When the input is open via pill click while scrolled, dismiss on scroll
+  // When the input is open via pill click while scrolled, dismiss on deliberate scroll
   useEffect(() => {
     if (!isStuck || !pillClicked) return;
+    const startY = window.scrollY;
     const onScroll = () => {
-      inputRef.current?.blur();
-      onBlur();
+      if (Math.abs(window.scrollY - startY) > 100) {
+        inputRef.current?.blur();
+        onBlur();
+      }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);

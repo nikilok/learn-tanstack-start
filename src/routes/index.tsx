@@ -49,7 +49,9 @@ function Home() {
           Search UK skilled worker visa sponsors
         </p>
         <div ref={sentinelRef} className="mt-6" />
-        <div className="sticky top-24 z-40 -mx-4 px-4 pb-4">
+        <div
+          className={`sticky top-[56px] z-40 sm:top-[64px] -mx-4 px-4 ${isStuck && pillClicked ? 'search-glow pb-4 pt-2' : 'pb-4'}`}
+        >
           <SearchBar
             search={search}
             isStuck={isStuck}

@@ -33,15 +33,12 @@ function applyThemeMode(mode: ThemeMode) {
   document.documentElement.style.colorScheme = resolved;
 
   // Update mobile browser chrome to match the app background
-  let meta = document.querySelector<HTMLMetaElement>(
+  const meta = document.querySelector<HTMLMetaElement>(
     'meta[name="theme-color"]',
   );
-  if (!meta) {
-    meta = document.createElement('meta');
-    meta.setAttribute('name', 'theme-color');
-    document.head.appendChild(meta);
+  if (meta) {
+    meta.content = resolved === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light;
   }
-  meta.content = resolved === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light;
 }
 
 export default function ThemeToggle() {

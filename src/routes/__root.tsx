@@ -12,7 +12,6 @@ import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 import appCss from '../styles.css?url';
-import { THEME_COLORS } from '../theme';
 
 const queryClient = new QueryClient();
 
@@ -29,16 +28,6 @@ export const Route = createRootRoute({
       {
         name: 'viewport',
         content: 'width=device-width, initial-scale=1, viewport-fit=cover',
-      },
-      {
-        name: 'theme-color',
-        content: THEME_COLORS.light,
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        name: 'theme-color',
-        content: THEME_COLORS.dark,
-        media: '(prefers-color-scheme: dark)',
       },
       {
         title: 'Skilled Worker Sponsor Search',

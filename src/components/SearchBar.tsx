@@ -71,7 +71,7 @@ export default function SearchBar({
           ref={pillRef}
           type="button"
           onClick={onPillClick}
-          className="inline-flex items-center gap-3 whitespace-nowrap rounded-full bg-(--sea-ink) px-4 py-3 text-lg text-(--surface) transition hover:opacity-85"
+          className="inline-flex items-center gap-3 whitespace-nowrap rounded-full bg-(--sea-ink) px-4 py-3 text-lg text-(--surface) transition hover:opacity-85 focus:outline-none"
         >
           <span className="max-w-72 truncate">{search}</span>
           <SearchIcon className="h-4 w-4 shrink-0 opacity-60" />

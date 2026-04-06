@@ -14,6 +14,14 @@ export const searchHmrc = createServerFn()
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
     const regexEscaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const wordBoundaryPattern = `\\m${regexEscaped}`;
+    const scoreExpr = sql<number>`
+      CASE
+        WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
+          THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+        WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
+          THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+        ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
+      END`;
     const rows = await db
       .select({
         id: hmrcSkilledWorkers.id,
@@ -22,14 +30,7 @@ export const searchHmrc = createServerFn()
         county: hmrcSkilledWorkers.county,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
-        score: sql<number>`
-          CASE
-            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
-              THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
-              THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-            ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-          END`,
+        score: scoreExpr,
       })
       .from(hmrcSkilledWorkers)
       .where(
@@ -39,16 +40,7 @@ export const searchHmrc = createServerFn()
           OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
         )`,
       )
-      .orderBy(
-        desc(sql`
-          CASE
-            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
-              THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-            WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
-              THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-            ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-          END`),
-      )
+      .orderBy(desc(scoreExpr), sql`${hmrcSkilledWorkers.organisationName} ASC`)
       .limit(PAGE_SIZE + 1)
       .offset(offset);
 

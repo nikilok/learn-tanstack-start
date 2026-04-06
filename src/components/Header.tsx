@@ -5,7 +5,7 @@ import ThemeToggle from './ThemeToggle';
 export default function Header() {
   return (
     <header className="site-header sticky top-0 z-50 px-4 backdrop-blur-xl">
-      <nav className="page-wrap flex flex-wrap items-center gap-x-3 gap-y-2 py-3 sm:py-4">
+      <nav className="page-wrap flex items-center gap-x-3 py-3 sm:py-4">
         <h2 className="m-0 shrink-0">
           <Link
             to="/"
@@ -17,7 +17,9 @@ export default function Header() {
           </Link>
         </h2>
 
-        <div className="ml-auto flex items-center gap-1.5 sm:ml-0 sm:gap-2">
+        <div id="header-pill-portal" className="min-w-0 ml-auto sm:ml-0" />
+
+        <div className="shrink-0 flex items-center gap-1.5 sm:ml-auto sm:gap-2">
           <a
             href="https://x.com/NikilKuruvilla"
             target="_blank"

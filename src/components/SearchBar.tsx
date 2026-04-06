@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
@@ -26,14 +27,30 @@ export default function SearchBar({
 }) {
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
-  const pillRef = useRef<HTMLButtonElement>(null);
+  const portalRef = useRef<Element | null>(null);
+  if (!portalRef.current && typeof document !== 'undefined') {
+    portalRef.current = document.getElementById('header-pill-portal');
+  }
+  const portalTarget = portalRef.current;
 
   useEffect(() => {
     if (showPill) {
       // Focus the pill so the page retains focus and keyboard shortcuts work
-      pillRef.current?.focus({ preventScroll: true });
+      const pill = portalTarget?.querySelector('button');
+      pill?.focus({ preventScroll: true });
     }
-  }, [showPill]);
+  }, [showPill, portalTarget]);
+
+  // When the input is open via pill click while scrolled, dismiss on scroll
+  useEffect(() => {
+    if (!isStuck || !pillClicked) return;
+    const onScroll = () => {
+      inputRef.current?.blur();
+      onBlur();
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [isStuck, pillClicked, inputRef, onBlur]);
 
   return (
     <div className="relative">
@@ -58,25 +75,28 @@ export default function SearchBar({
         />
       </div>
 
-      {/* Pill — fades in and shrinks when stuck */}
-      <div
-        className="absolute left-0 top-0 origin-top-left transition-all duration-200 ease-out"
-        style={{
-          opacity: showPill ? 1 : 0,
-          pointerEvents: showPill ? 'auto' : 'none',
-          transform: showPill ? 'scale(0.65)' : 'scale(1)',
-        }}
-      >
-        <button
-          ref={pillRef}
-          type="button"
-          onClick={onPillClick}
-          className="inline-flex items-center gap-3 whitespace-nowrap rounded-full bg-(--sea-ink) px-4 py-3 text-lg text-(--surface) transition hover:opacity-85 focus:outline-none"
-        >
-          <span className="max-w-72 truncate">{search}</span>
-          <SearchIcon className="h-4 w-4 shrink-0 opacity-60" />
-        </button>
-      </div>
+      {/* Pill — portaled into the header */}
+      {portalTarget &&
+        createPortal(
+          <div
+            className="min-w-0"
+            style={{
+              transition: 'opacity 200ms ease-out',
+              opacity: showPill ? 1 : 0,
+              pointerEvents: showPill ? 'auto' : 'none',
+            }}
+          >
+            <button
+              type="button"
+              onClick={onPillClick}
+              className="inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none"
+            >
+              <span className="truncate">{search}</span>
+              <SearchIcon className="h-3 w-3 shrink-0 opacity-60" />
+            </button>
+          </div>,
+          portalTarget,
+        )}
     </div>
   );
 }

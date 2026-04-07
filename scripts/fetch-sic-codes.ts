@@ -1,9 +1,9 @@
 export {};
 
-const SIC_URL = "https://resources.companieshouse.gov.uk/sic/";
-const OUTPUT_PATH = "./src/data/sic-codes.json";
+const SIC_URL = 'https://resources.companieshouse.gov.uk/sic/';
+const OUTPUT_PATH = './src/data/sic-codes.json';
 
-console.log("Fetching SIC codes from Companies House...");
+console.log('Fetching SIC codes from Companies House...');
 const response = await fetch(SIC_URL);
 if (!response.ok) {
   console.error(`Failed to fetch: ${response.status} ${response.statusText}`);
@@ -19,7 +19,7 @@ for (const match of html.matchAll(regex)) {
 
 const count = Object.keys(codes).length;
 if (count === 0) {
-  console.error("No SIC codes found — page format may have changed");
+  console.error('No SIC codes found — page format may have changed');
   process.exit(1);
 }
 

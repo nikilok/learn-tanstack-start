@@ -132,8 +132,8 @@ Respond with JSON only.`;
 
 main()
   .then((url) => {
-    // Final output — this is what GitHub Actions would capture
-    console.log(`::set-output name=csv-url::${url}`);
+    // Print the raw URL as the last line for easy capture
+    console.log(url);
   })
   .catch((err) => {
     console.error('Failed:', err.message);

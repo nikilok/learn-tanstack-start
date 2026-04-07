@@ -1,0 +1,49 @@
+name: HMRC Sponsor List Ingestion
+
+on:
+  schedule:
+    # Every Monday at 8:00 AM UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  discover-and-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find HMRC CSV URL
+        id: find-csv
+        uses: ./.github/actions/run-playwright-script
+        with:
+          script-command: bun scripts/find-hmrc-csv-url.ts
+          extra-env: |
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            ANTHROPIC_MODEL=${{ vars.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001' }}
+
+      - name: Extract CSV URL
+        id: extract-url
+        run: |
+          # The find-csv script outputs the URL in the ::set-output line
+          # Parse it from the stdout
+          STDOUT="${{ steps.find-csv.outputs.stdout }}"
+          CSV_URL=$(echo "$STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
+          if [ -z "$CSV_URL" ]; then
+            echo "::error::Could not extract CSV URL from discovery script output"
+            echo "Script output was: $STDOUT"
+            exit 1
+          fi
+          echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
+          echo "Found CSV URL: $CSV_URL"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run ingestion
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+        run: bun run db:ingest "${{ steps.extract-url.outputs.csv-url }}"

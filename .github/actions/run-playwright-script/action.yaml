@@ -1,0 +1,78 @@
+name: Run Script in Playwright Container
+description: Runs a Bun script inside a Playwright Docker container with pre-installed browsers
+
+inputs:
+  script-command:
+    description: The command to run inside the container (e.g. "bun scripts/find-hmrc-csv-url.ts")
+    required: true
+  playwright-image-tag:
+    description: Playwright Docker image tag (e.g. v1.59.1-noble)
+    default: v1.59.1-noble
+  extra-env:
+    description: |
+      Additional environment variables to pass to the Docker container.
+      One KEY=VALUE per line. Lines starting with # and empty lines are ignored.
+    default: ""
+
+outputs:
+  stdout:
+    description: The stdout output from the script
+    value: ${{ steps.run-script.outputs.stdout }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Playwright image digest
+      id: resolve-image
+      shell: bash
+      env:
+        PLAYWRIGHT_IMAGE_TAG: ${{ inputs.playwright-image-tag }}
+      run: |
+        IMAGE="mcr.microsoft.com/playwright:${PLAYWRIGHT_IMAGE_TAG}"
+        echo "Pulling $IMAGE..."
+        docker pull "$IMAGE"
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")
+        echo "Resolved digest: $DIGEST"
+        echo "image=$DIGEST" >> "$GITHUB_OUTPUT"
+
+    - name: Write extra env file
+      id: extra-env
+      shell: bash
+      env:
+        EXTRA_ENV: ${{ inputs.extra-env }}
+      run: |
+        ENV_FILE=$(mktemp)
+        while IFS= read -r line; do
+          [[ -z "$line" || "$line" == \#* ]] && continue
+          echo "$line" >> "$ENV_FILE"
+        done <<< "$EXTRA_ENV"
+        echo "file=$ENV_FILE" >> "$GITHUB_OUTPUT"
+
+    - name: Run script in Playwright container
+      id: run-script
+      shell: bash
+      env:
+        WORKSPACE: ${{ github.workspace }}
+        SCRIPT_COMMAND: ${{ inputs.script-command }}
+        EXTRA_ENV_FILE: ${{ steps.extra-env.outputs.file }}
+        RESOLVED_IMAGE: ${{ steps.resolve-image.outputs.image }}
+      run: |
+        OUTPUT=$(docker run --rm \
+          --network host \
+          -v "${WORKSPACE}":/work \
+          -w /work \
+          -e CI=true \
+          -e GITHUB_ACTIONS=true \
+          --env-file "${EXTRA_ENV_FILE}" \
+          "${RESOLVED_IMAGE}" \
+          bash -c '
+            # Install Bun
+            curl -fsSL https://bun.sh/install | bash
+            export PATH="$HOME/.bun/bin:$PATH"
+            bun install --frozen-lockfile
+            eval "$SCRIPT_COMMAND"
+          ')
+        echo "$OUTPUT"
+        # Capture the last line as the primary output (the CSV URL or result)
+        LAST_LINE=$(echo "$OUTPUT" | tail -1)
+        echo "stdout=$LAST_LINE" >> "$GITHUB_OUTPUT"

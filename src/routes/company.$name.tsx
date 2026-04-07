@@ -23,14 +23,17 @@ export const Route = createFileRoute('/company/$name')({
   component: CompanyDetail,
 });
 
-function formatAddress(address: {
-  address_line_1?: string;
-  address_line_2?: string;
-  locality?: string;
-  region?: string;
-  postal_code?: string;
-  country?: string;
-}) {
+function formatAddress(
+  address?: {
+    address_line_1?: string;
+    address_line_2?: string;
+    locality?: string;
+    region?: string;
+    postal_code?: string;
+    country?: string;
+  } | null,
+) {
+  if (!address) return '';
   return [
     address.address_line_1,
     address.address_line_2,

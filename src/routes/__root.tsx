@@ -10,12 +10,15 @@ import {
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
+import NavigationProgress from '../components/NavigationProgress';
+import RouteError from '../components/RouteError';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 import appCss from '../styles.css?url';
 
 const queryClient = new QueryClient();
 
 export const Route = createRootRoute({
+  errorComponent: RouteError,
   notFoundComponent: () => {
     const params = new URLSearchParams(window.location.search);
     return <Navigate to="/" search={{ search: params.get('search') ?? '' }} />;
@@ -59,6 +62,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body className="font-sans antialiased wrap-anywhere selection:bg-[rgba(0,114,245,0.16)]">
         <QueryClientProvider client={queryClient}>
+          <NavigationProgress />
           <Header />
           {children}
           <Footer />

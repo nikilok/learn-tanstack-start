@@ -11,7 +11,7 @@ Search UK skilled worker visa sponsors and view detailed company profiles. Built
 - **Infinite scroll** with virtual rendering for fast performance on large result sets
 - **Google Maps link** for registered office addresses
 - **Dark mode** toggle
-- **Keyboard shortcut** (CMD/CTRL+K) to focus search
+- **Keyboard shortcut** (CMD/CTRL+K) to focus search, or just start typing anywhere on desktop
 - **URL-based search state** so results are shareable and back-navigation preserves context
 
 ## Tech stack

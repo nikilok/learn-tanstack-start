@@ -7,8 +7,10 @@ on:
   workflow_dispatch: # Allow manual trigger
 
 jobs:
-  discover-and-ingest:
+  discover-csv-url:
     runs-on: ubuntu-latest
+    outputs:
+      csv-url: ${{ steps.extract-url.outputs.csv-url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,8 +27,6 @@ jobs:
       - name: Extract CSV URL
         id: extract-url
         run: |
-          # The find-csv script outputs the URL in the ::set-output line
-          # Parse it from the stdout
           STDOUT="${{ steps.find-csv.outputs.stdout }}"
           CSV_URL=$(echo "$STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
           if [ -z "$CSV_URL" ]; then
@@ -37,6 +37,13 @@ jobs:
           echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
           echo "Found CSV URL: $CSV_URL"
 
+  ingest:
+    needs: discover-csv-url
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -46,4 +53,4 @@ jobs:
       - name: Run ingestion
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-        run: bun run db:ingest "${{ steps.extract-url.outputs.csv-url }}"
+        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}"

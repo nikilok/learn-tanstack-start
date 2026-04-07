@@ -35,6 +35,11 @@ export const Route = createRootRoute({
       {
         title: 'Skilled Worker Sponsor Search',
       },
+      {
+        name: 'description',
+        content:
+          'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+      },
     ],
     links: [
       {

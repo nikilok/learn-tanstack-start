@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, MapPin } from 'lucide-react';
 import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
 import { titleCase } from '../utils';
 
@@ -73,14 +73,6 @@ function CompanyDetail() {
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
-        <button
-          type="button"
-          onClick={() => window.history.back()}
-          className="mb-6 inline-block cursor-pointer text-sm text-(--sea-ink-soft) hover:text-(--sea-ink)"
-        >
-          &larr; Back to search
-        </button>
-
         {!profile ? (
           <div className="glass rounded-lg p-6">
             <h1 className="text-xl font-semibold text-(--sea-ink)">
@@ -149,8 +141,9 @@ function CompanyDetail() {
                     href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="no-underline inline-flex items-center gap-1 text-(--sea-ink-soft) hover:text-(--sea-ink)"
+                    className="no-underline inline-flex items-center gap-1.5 text-(--sea-ink-soft) hover:text-(--sea-ink)"
                   >
+                    <MapPin size={14} className="shrink-0" />
                     {formatAddress(profile.registered_office_address)}
                     <ExternalLink size={12} className="shrink-0" />
                   </a>
@@ -172,6 +165,14 @@ function CompanyDetail() {
             </dl>
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          className="mt-6 w-full cursor-pointer rounded-md border border-(--sea-ink-soft)/20 px-4 py-3 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink) hover:border-(--sea-ink-soft)/40"
+        >
+          &larr; Back to search
+        </button>
       </section>
     </main>
   );

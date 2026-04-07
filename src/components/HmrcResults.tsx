@@ -79,7 +79,7 @@ export default function HmrcResults({ search }: { search: string }) {
               transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
             }}
           >
-            <HmrcCard row={results[virtualRow.index]} />
+            <HmrcCard row={results[virtualRow.index]} search={search} />
           </div>
         ))}
       </div>

@@ -4,7 +4,13 @@ import { slugify, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 import Tooltip from './Tooltip';
 
-export default function HmrcCard({ row }: { row: HmrcRow }) {
+export default function HmrcCard({
+  row,
+  search,
+}: {
+  row: HmrcRow;
+  search: string;
+}) {
   return (
     <Link
       to="/company/$id/$slug"
@@ -12,6 +18,7 @@ export default function HmrcCard({ row }: { row: HmrcRow }) {
         id: row.slugId,
         slug: slugify(row.organisationName),
       }}
+      search={{ search }}
       className="block rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-4 transition-shadow hover:shadow-(--shadow-card-full)"
       onClick={() =>
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))

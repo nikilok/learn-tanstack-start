@@ -1,10 +1,13 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
 import { getHmrcById } from '../api/hmrc';
 import { titleCase } from '../utils';
 
 export const Route = createFileRoute('/company/$id/$slug')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    search: (search.search as string) || '',
+  }),
   loader: async ({ params }) => {
     const sponsor = await getHmrcById({ data: { slugId: params.id } });
 
@@ -75,6 +78,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function CompanyDetail() {
   const { sponsor, profile } = Route.useLoaderData();
+  const { search } = Route.useSearch();
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -193,13 +197,13 @@ function CompanyDetail() {
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => window.history.back()}
-          className="mt-6 w-full cursor-pointer px-4 py-3 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+        <Link
+          to="/"
+          search={{ search }}
+          className="no-underline mt-6 block w-full px-4 py-3 text-center text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
           &larr; Back to search
-        </button>
+        </Link>
       </section>
     </main>
   );

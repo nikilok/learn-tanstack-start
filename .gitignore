@@ -9,3 +9,4 @@ dist
 !.env.example
 .vercel
 .env*.local
+src/data/sic-codes.json

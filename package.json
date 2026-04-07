@@ -19,7 +19,10 @@
     "db:reset": "bun src/db/reset.ts",
     "db:create-migration": "bun scripts/create-migration.ts",
     "db:ingest": "bun scripts/ingest-hmrc-csv.ts",
-    "hmrc:find-csv": "bun scripts/find-hmrc-csv-url.ts"
+    "hmrc:find-csv": "bun scripts/find-hmrc-csv-url.ts",
+    "company:lookup": "bun scripts/lookup-company.ts",
+    "sic:fetch": "bun scripts/fetch-sic-codes.ts",
+    "db:seed-sic": "bun scripts/seed-sic-codes.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.2",

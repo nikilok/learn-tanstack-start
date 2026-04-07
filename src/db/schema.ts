@@ -40,6 +40,11 @@ export const hmrcSkilledWorkers = pgTable(
   ],
 );
 
+export const sicCodes = pgTable('sic_codes', {
+  code: varchar('code', { length: 10 }).primaryKey(),
+  description: text('description').notNull(),
+});
+
 export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {
   id: serial('id').primaryKey(),
   csvUrl: text('csv_url').notNull(),

@@ -20,6 +20,16 @@ export default function HmrcResults({ search }: { search: string }) {
   const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
+    const savedY = sessionStorage.getItem('hmrc-scroll-y');
+    if (savedY) {
+      sessionStorage.removeItem('hmrc-scroll-y');
+      requestAnimationFrame(() => {
+        window.scrollTo(0, Number.parseInt(savedY, 10));
+      });
+    }
+  }, []);
+
+  useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
     if (!lastItem) return;
     if (lastItem.index >= results.length - 10 && hasMore && !loadingMore) {

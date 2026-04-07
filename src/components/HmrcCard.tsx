@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import type { HmrcRow } from '../api/hmrc';
 import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
@@ -5,7 +6,14 @@ import Tooltip from './Tooltip';
 
 export default function HmrcCard({ row }: { row: HmrcRow }) {
   return (
-    <div className="glass rounded-lg p-4">
+    <Link
+      to="/company/$name"
+      params={{ name: encodeURIComponent(row.organisationName) }}
+      className="glass block rounded-lg p-4 transition-shadow hover:shadow-md"
+      onClick={() =>
+        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
+      }
+    >
       <Tooltip text={titleCase(row.organisationName)}>
         <h3 className="heading-card cursor-pointer truncate text-base font-semibold text-(--sea-ink)">
           {titleCase(row.organisationName)}
@@ -36,6 +44,6 @@ export default function HmrcCard({ row }: { row: HmrcRow }) {
           <RatingIcon rating={row.typeRating} />
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

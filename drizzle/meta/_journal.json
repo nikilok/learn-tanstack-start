@@ -71,6 +71,13 @@
       "when": 1775328497096,
       "tag": "0009_enable_pg_trgm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1775559415208,
+      "tag": "0010_left_luckman",
+      "breakpoints": true
     }
   ]
 }

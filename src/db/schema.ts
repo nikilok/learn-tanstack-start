@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   date,
@@ -30,5 +31,9 @@ export const hmrcSkilledWorkers = pgTable(
     index('idx_hmrc_org_name').on(table.organisationName),
     index('idx_hmrc_town_city').on(table.townCity),
     index('idx_hmrc_route').on(table.route),
+    index('idx_hmrc_org_name_trgm').using(
+      'gin',
+      sql`${table.organisationName} gin_trgm_ops`,
+    ),
   ],
 );

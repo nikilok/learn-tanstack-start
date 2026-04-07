@@ -49,17 +49,10 @@ async function main() {
   console.log('Step 1: Searching gov.uk for HMRC sponsor register...');
   await page.goto(
     'https://www.gov.uk/search/all?keywords=register+of+licensed+sponsors+workers&order=relevance',
+    { waitUntil: 'domcontentloaded' },
   );
-  await page.waitForSelector('.gem-c-document-list__item a');
 
-  const searchResults = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('.gem-c-document-list__item a'))
-      .slice(0, 10)
-      .map((a) => ({
-        text: (a.textContent ?? '').trim(),
-        href: a.getAttribute('href') ?? '',
-      }));
-  });
+  const searchResults = await extractLinks(page);
 
   console.log(`Found ${searchResults.length} search results`);
 

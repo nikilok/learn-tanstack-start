@@ -1,24 +1,28 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
+import { getHmrcById } from '../api/hmrc';
 import { titleCase } from '../utils';
 
-export const Route = createFileRoute('/company/$name')({
+export const Route = createFileRoute('/company/$id/$slug')({
   loader: async ({ params }) => {
-    const companyName = decodeURIComponent(params.name);
-    const searchResult = await searchCompany({
-      data: { query: companyName },
-    });
+    const sponsor = await getHmrcById({ data: { slugId: params.id } });
 
-    if (!searchResult) {
-      return { profile: null, companyName };
+    if (!sponsor) {
+      throw new Error('Sponsor not found');
     }
 
-    const profile = await getCompanyProfile({
-      data: { companyNumber: searchResult.company_number },
+    const searchResult = await searchCompany({
+      data: { query: sponsor.organisationName },
     });
 
-    return { profile, companyName };
+    const profile = searchResult
+      ? await getCompanyProfile({
+          data: { companyNumber: searchResult.company_number },
+        })
+      : null;
+
+    return { sponsor, profile };
   },
   component: CompanyDetail,
 });
@@ -59,7 +63,9 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
-        isActive ? 'bg-[#16a34a] text-white' : 'bg-[#dc2626] text-white'
+        isActive
+          ? 'border border-[#16a34a]/40 text-[#16a34a]'
+          : 'border border-[#dc2626]/40 text-[#dc2626]'
       }`}
     >
       {titleCase(status)}
@@ -68,38 +74,70 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function CompanyDetail() {
-  const { profile, companyName } = Route.useLoaderData();
+  const { sponsor, profile } = Route.useLoaderData();
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
-        {!profile ? (
-          <div className="glass rounded-lg p-6">
-            <h1 className="text-xl font-semibold text-(--sea-ink)">
-              {titleCase(companyName)}
-            </h1>
-            <p className="mt-4 text-(--sea-ink-soft)">
-              No matching company found on Companies House.
+        <div className="rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-6">
+          <h1 className="text-xl font-semibold text-(--sea-ink)">
+            {titleCase(sponsor.organisationName)}
+          </h1>
+          {profile?.sicDescriptions && profile.sicDescriptions.length > 0 && (
+            <p className="mt-1 text-sm text-(--sea-ink-soft)">
+              {profile.sicDescriptions.map((sic) => sic.description).join(', ')}
             </p>
-          </div>
-        ) : (
-          <div className="glass rounded-lg p-6">
-            <div className="flex items-start justify-between gap-4">
-              <h1 className="text-xl font-semibold text-(--sea-ink)">
-                {titleCase(profile.company_name)}
-              </h1>
-              <StatusBadge status={profile.company_status} />
+          )}
+          <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                Location
+              </dt>
+              <dd className="mt-1 text-sm text-(--sea-ink)">
+                {[sponsor.townCity, sponsor.county]
+                  .filter(Boolean)
+                  .map(titleCase)
+                  .join(', ') || 'Not specified'}
+              </dd>
             </div>
-
-            <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            {profile && (
               <div>
                 <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Registration No.
+                  Status
+                </dt>
+                <dd className="mt-1">
+                  <StatusBadge status={profile.company_status} />
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                Visa Route
+              </dt>
+              <dd className="mt-1 text-sm text-(--sea-ink)">
+                {titleCase(sponsor.route)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                Rating
+              </dt>
+              <dd className="mt-1 text-sm text-(--sea-ink)">
+                {titleCase(sponsor.typeRating)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        {profile && (
+          <div className="glass mt-4 rounded-lg p-6">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div>
+                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                  Incorporated
                 </dt>
                 <dd className="mt-1 text-sm text-(--sea-ink)">
-                  <span x-apple-data-detectors="false">
-                    {profile.company_number}
-                  </span>
+                  {formatDate(profile.date_of_creation)}
                 </dd>
               </div>
 
@@ -109,15 +147,6 @@ function CompanyDetail() {
                 </dt>
                 <dd className="mt-1 text-sm text-(--sea-ink)">
                   {titleCase(profile.type.replace(/-/g, ' '))}
-                </dd>
-              </div>
-
-              <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Incorporated
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {formatDate(profile.date_of_creation)}
                 </dd>
               </div>
 
@@ -131,6 +160,17 @@ function CompanyDetail() {
                   </dd>
                 </div>
               )}
+
+              <div>
+                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                  Registration No.
+                </dt>
+                <dd className="mt-1 text-sm text-(--sea-ink)">
+                  <span x-apple-data-detectors="false">
+                    {profile.company_number}
+                  </span>
+                </dd>
+              </div>
 
               <div className="col-span-2 sm:col-span-4">
                 <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
@@ -149,19 +189,6 @@ function CompanyDetail() {
                   </a>
                 </dd>
               </div>
-
-              {profile.sicDescriptions.length > 0 && (
-                <div className="col-span-2 sm:col-span-4">
-                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                    Industry
-                  </dt>
-                  <dd className="mt-1 text-sm text-(--sea-ink)">
-                    {profile.sicDescriptions
-                      .map((sic) => sic.description)
-                      .join(', ')}
-                  </dd>
-                </div>
-              )}
             </dl>
           </div>
         )}
@@ -169,7 +196,7 @@ function CompanyDetail() {
         <button
           type="button"
           onClick={() => window.history.back()}
-          className="mt-6 w-full cursor-pointer rounded-md border border-(--sea-ink-soft)/20 px-4 py-3 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink) hover:border-(--sea-ink-soft)/40"
+          className="mt-6 w-full cursor-pointer px-4 py-3 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
           &larr; Back to search
         </button>

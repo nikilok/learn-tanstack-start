@@ -44,6 +44,7 @@
   --dot-color: rgba(0, 0, 0, 0.12);
   --grid-line: rgba(0, 0, 0, 0.06);
   --grid-opacity: 0.7;
+  --sponsor-card-bg: #f0edf5;
 }
 
 :root[data-theme="dark"] {
@@ -80,6 +81,7 @@
   --dot-color: rgba(255, 255, 255, 0.06);
   --grid-line: rgba(255, 255, 255, 0.04);
   --grid-opacity: 0.6;
+  --sponsor-card-bg: #1a1a2e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -121,6 +123,7 @@
     --dot-color: rgba(255, 255, 255, 0.06);
     --grid-line: rgba(255, 255, 255, 0.08);
     --grid-opacity: 1;
+    --sponsor-card-bg: #1a1a2e;
   }
 }
 

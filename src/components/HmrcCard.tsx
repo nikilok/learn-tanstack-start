@@ -1,15 +1,18 @@
 import { Link } from '@tanstack/react-router';
 import type { HmrcRow } from '../api/hmrc';
-import { titleCase } from '../utils';
+import { slugify, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 import Tooltip from './Tooltip';
 
 export default function HmrcCard({ row }: { row: HmrcRow }) {
   return (
     <Link
-      to="/company/$name"
-      params={{ name: encodeURIComponent(row.organisationName) }}
-      className="glass block rounded-lg p-4 transition-shadow hover:shadow-md"
+      to="/company/$id/$slug"
+      params={{
+        id: row.slugId,
+        slug: slugify(row.organisationName),
+      }}
+      className="block rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-4 transition-shadow hover:shadow-(--shadow-card-full)"
       onClick={() =>
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
       }

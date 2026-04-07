@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as CompanyNameRouteImport } from './routes/company.$name'
+import { Route as CompanyIdSlugRouteImport } from './routes/company.$id.$slug'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -23,40 +23,40 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CompanyNameRoute = CompanyNameRouteImport.update({
-  id: '/company/$name',
-  path: '/company/$name',
+const CompanyIdSlugRoute = CompanyIdSlugRouteImport.update({
+  id: '/company/$id/$slug',
+  path: '/company/$id/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/company/$name': typeof CompanyNameRoute
+  '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/company/$name': typeof CompanyNameRoute
+  '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
-  '/company/$name': typeof CompanyNameRoute
+  '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$' | '/company/$name'
+  fullPaths: '/' | '/$' | '/company/$id/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$' | '/company/$name'
-  id: '__root__' | '/' | '/$' | '/company/$name'
+  to: '/' | '/$' | '/company/$id/$slug'
+  id: '__root__' | '/' | '/$' | '/company/$id/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SplatRoute: typeof SplatRoute
-  CompanyNameRoute: typeof CompanyNameRoute
+  CompanyIdSlugRoute: typeof CompanyIdSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +75,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/company/$name': {
-      id: '/company/$name'
-      path: '/company/$name'
-      fullPath: '/company/$name'
-      preLoaderRoute: typeof CompanyNameRouteImport
+    '/company/$id/$slug': {
+      id: '/company/$id/$slug'
+      path: '/company/$id/$slug'
+      fullPath: '/company/$id/$slug'
+      preLoaderRoute: typeof CompanyIdSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
-  CompanyNameRoute: CompanyNameRoute,
+  CompanyIdSlugRoute: CompanyIdSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

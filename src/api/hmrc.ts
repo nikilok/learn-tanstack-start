@@ -1,7 +1,8 @@
 import { createServerFn } from '@tanstack/react-start';
-import { desc, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { hmrcSkilledWorkers } from '../db/schema';
+import { decodeId, encodeId } from '../server/ids.server';
 
 const PAGE_SIZE = 50;
 
@@ -45,7 +46,35 @@ export const searchHmrc = createServerFn()
       .offset(offset);
 
     const hasMore = rows.length > PAGE_SIZE;
-    return { rows: rows.slice(0, PAGE_SIZE), hasMore };
+    return {
+      rows: rows.slice(0, PAGE_SIZE).map((row) => ({
+        ...row,
+        slugId: encodeId(row.id),
+      })),
+      hasMore,
+    };
+  });
+
+export const getHmrcById = createServerFn()
+  .inputValidator((input: unknown) => input as { slugId: string })
+  .handler(async ({ data: { slugId } }) => {
+    const id = decodeId(slugId);
+    if (id === null) return null;
+
+    const [row] = await db
+      .select({
+        id: hmrcSkilledWorkers.id,
+        organisationName: hmrcSkilledWorkers.organisationName,
+        townCity: hmrcSkilledWorkers.townCity,
+        county: hmrcSkilledWorkers.county,
+        typeRating: hmrcSkilledWorkers.typeRating,
+        route: hmrcSkilledWorkers.route,
+      })
+      .from(hmrcSkilledWorkers)
+      .where(eq(hmrcSkilledWorkers.id, id))
+      .limit(1);
+
+    return row ?? null;
   });
 
 export { PAGE_SIZE };

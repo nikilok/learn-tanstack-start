@@ -1,5 +1,3 @@
-import Tooltip from './Tooltip';
-
 function titleCase(str: string) {
   return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -141,14 +139,13 @@ export default function RatingIcon({ rating }: { rating: string }) {
   const { Icon, color } = getIcon(rating);
 
   return (
-    <Tooltip text={titleCase(rating)}>
-      <span
-        className={`inline-flex cursor-pointer ${color}`}
-        role="img"
-        aria-label={rating}
-      >
-        <Icon className="h-5 w-5" />
-      </span>
-    </Tooltip>
+    <span
+      className={`inline-flex ${color}`}
+      role="img"
+      aria-label={titleCase(rating)}
+      title={titleCase(rating)}
+    >
+      <Icon className="h-5 w-5" />
+    </span>
   );
 }

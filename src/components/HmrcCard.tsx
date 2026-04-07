@@ -2,7 +2,6 @@ import { Link } from '@tanstack/react-router';
 import type { HmrcRow } from '../api/hmrc';
 import { slugify, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
-import Tooltip from './Tooltip';
 
 export default function HmrcCard({
   row,
@@ -19,36 +18,25 @@ export default function HmrcCard({
         slug: slugify(row.organisationName),
       }}
       search={{ search }}
-      className="block rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-4 transition-shadow hover:shadow-(--shadow-card-full)"
+      className="block no-underline rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-4 transition-shadow hover:shadow-(--shadow-card-full)"
       onClick={() =>
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
       }
     >
-      <Tooltip text={titleCase(row.organisationName)}>
-        <h3 className="heading-card cursor-pointer truncate text-base font-semibold text-(--sea-ink)">
-          {titleCase(row.organisationName)}
-        </h3>
-      </Tooltip>
+      <h3 className="heading-card truncate text-base font-semibold text-(--sea-ink)">
+        {titleCase(row.organisationName)}
+      </h3>
       <div className="mt-1 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <Tooltip
-            text={[row.townCity, row.county]
+          <p className="truncate text-sm text-(--sea-ink-soft)">
+            {[row.townCity, row.county]
               .filter(Boolean)
               .map(titleCase)
               .join(', ')}
-          >
-            <p className="cursor-pointer truncate text-sm text-(--sea-ink-soft)">
-              {[row.townCity, row.county]
-                .filter(Boolean)
-                .map(titleCase)
-                .join(', ')}
-            </p>
-          </Tooltip>
-          <Tooltip text={titleCase(row.route)}>
-            <p className="mt-1 cursor-pointer truncate text-xs text-(--sea-ink-soft)">
-              {titleCase(row.route)}
-            </p>
-          </Tooltip>
+          </p>
+          <p className="mt-1 truncate text-xs text-(--sea-ink-soft)">
+            {titleCase(row.route)}
+          </p>
         </div>
         <div className="shrink-0">
           <RatingIcon rating={row.typeRating} />

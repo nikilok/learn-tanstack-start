@@ -52,7 +52,7 @@ export default function Tooltip({
     <button
       ref={triggerRef}
       type="button"
-      className="w-full text-left"
+      className="w-full min-h-6 text-left"
       onClick={() => setVisible((v) => !v)}
     >
       {children}

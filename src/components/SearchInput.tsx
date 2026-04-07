@@ -92,6 +92,7 @@ export default memo(function SearchInput({
           syncSearchButton();
           inputRef.current?.focus();
         }}
+        aria-label="Clear search"
         className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
       >
         <svg

@@ -31,7 +31,17 @@ if (!response.ok) {
 const csvText = await response.text();
 console.log(`Downloaded ${(csvText.length / 1024).toFixed(1)} KB`);
 
-// Step 2: Schema validation
+// Step 2: Checksum comparison
+const checksum = new Bun.CryptoHasher('sha256').update(csvText).digest('hex');
+const [lastIngestion] =
+  await sql`SELECT "checksum" FROM "hmrc_ingestion_meta" ORDER BY "ingested_at" DESC LIMIT 1`;
+if (lastIngestion?.checksum === checksum) {
+  console.log('CSV unchanged since last ingestion — skipping.');
+  process.exit(0);
+}
+
+// Step 3: Schema validation
+
 const records: Array<Record<string, string>> = parse(csvText, {
   columns: true,
   skip_empty_lines: true,
@@ -66,7 +76,7 @@ if (missingColumns.length > 0 || extraColumns.length > 0) {
 
 console.log(`Validated schema: ${records.length} records found`);
 
-// Step 3: Create staging table
+// Step 4: Create staging table
 console.log('Creating staging table...');
 await sql`DROP TABLE IF EXISTS "hmrc_skilled_workers_staging"`;
 await sql`
@@ -80,7 +90,7 @@ await sql`
   )
 `;
 
-// Step 4: Bulk insert into staging table
+// Step 5: Bulk insert into staging table
 console.log(
   `Inserting ${records.length} records in batches of ${BATCH_SIZE}...`,
 );
@@ -122,7 +132,7 @@ for (let i = 0; i < records.length; i += BATCH_SIZE) {
   );
 }
 
-// Step 5: Build indexes on staging table
+// Step 6: Build indexes on staging table
 console.log('Building indexes on staging table...');
 await Promise.all([
   sql`CREATE INDEX "stg_idx_hmrc_org_name" ON "hmrc_skilled_workers_staging" USING btree ("organisation_name")`,
@@ -132,7 +142,7 @@ await Promise.all([
 ]);
 console.log('Indexes built');
 
-// Step 6: Atomic swap via transaction
+// Step 7: Atomic swap via transaction
 // Drop old table first (removes its indexes), then rename staging to live
 console.log('Swapping tables...');
 await sql.transaction([
@@ -143,5 +153,8 @@ await sql.transaction([
   sql`ALTER INDEX "stg_idx_hmrc_route" RENAME TO "idx_hmrc_route"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name_trgm" RENAME TO "idx_hmrc_org_name_trgm"`,
 ]);
+
+// Step 8: Record ingestion metadata
+await sql`INSERT INTO "hmrc_ingestion_meta" ("csv_url", "checksum", "record_count") VALUES (${url}, ${checksum}, ${records.length})`;
 
 console.log(`Done! Ingested ${records.length} records with zero downtime.`);

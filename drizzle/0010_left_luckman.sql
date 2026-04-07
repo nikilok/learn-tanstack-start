@@ -1,0 +1,1 @@
+-- No-op: GIN trigram index on organisation_name is created by 0009_enable_pg_trgm.sql

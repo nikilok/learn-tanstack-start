@@ -3,9 +3,11 @@ import {
   boolean,
   date,
   index,
+  integer,
   pgTable,
   serial,
   text,
+  timestamp,
   varchar,
 } from 'drizzle-orm/pg-core';
 
@@ -37,3 +39,11 @@ export const hmrcSkilledWorkers = pgTable(
     ),
   ],
 );
+
+export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {
+  id: serial('id').primaryKey(),
+  csvUrl: text('csv_url').notNull(),
+  checksum: varchar('checksum', { length: 64 }).notNull(),
+  recordCount: integer('record_count').notNull(),
+  ingestedAt: timestamp('ingested_at').defaultNow().notNull(),
+});

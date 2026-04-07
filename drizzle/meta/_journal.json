@@ -78,6 +78,13 @@
       "when": 1775559415208,
       "tag": "0010_left_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1775564222559,
+      "tag": "0011_black_ironclad",
+      "breakpoints": true
     }
   ]
 }

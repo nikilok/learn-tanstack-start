@@ -23,12 +23,12 @@ export default function HmrcCard({
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
       }
     >
-      <h3 className="heading-card truncate text-base font-semibold text-(--sea-ink)">
+      <h3 className="heading-card text-base font-semibold text-(--sea-ink)">
         {titleCase(row.organisationName)}
       </h3>
       <div className="mt-1 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="truncate text-sm text-(--sea-ink-soft)">
+          <p className="text-sm text-(--sea-ink-soft)">
             {[row.townCity, row.county]
               .filter(Boolean)
               .map(titleCase)

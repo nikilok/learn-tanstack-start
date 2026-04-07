@@ -11,8 +11,8 @@ export default function HmrcResults({ search }: { search: string }) {
 
   const virtualizer = useWindowVirtualizer({
     count: results.length,
-    estimateSize: () => 120,
-    gap: 12,
+    estimateSize: () => 100,
+    gap: 16,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });

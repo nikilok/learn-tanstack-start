@@ -75,7 +75,7 @@ ${rows
   .map(
     (row) => `  <url>
     <loc>${BASE_URL}/company/${row.hash}/${slugify(row.organisationName)}</loc>
-    <changefreq>monthly</changefreq>
+    <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>`,
   )

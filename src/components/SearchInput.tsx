@@ -65,7 +65,7 @@ export default memo(function SearchInput({
   // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
-    if (el && el.value !== defaultValue) {
+    if (el && el.value !== defaultValue && document.activeElement !== el) {
       el.value = defaultValue;
       syncClearButton();
       syncSearchButton();

@@ -28,17 +28,50 @@ export const Route = createFileRoute('/company/$id/$slug')({
 
     return { sponsor, profile };
   },
-  head: ({ match }) => ({
-    links: [
-      {
-        rel: 'canonical',
-        href: buildCanonical(
-          match.pathname,
-          match.search as Record<string, string>,
-        ),
-      },
-    ],
-  }),
+  head: ({ match }) => {
+    const loaderData = match.loaderData as
+      | {
+          sponsor: {
+            organisationName: string;
+            townCity?: string | null;
+            county?: string | null;
+            route: string;
+          };
+        }
+      | undefined;
+
+    const name = loaderData
+      ? titleCase(loaderData.sponsor.organisationName)
+      : 'Company Details';
+    const location = loaderData
+      ? [loaderData.sponsor.townCity ?? null, loaderData.sponsor.county ?? null]
+          .filter(Boolean)
+          .map(titleCase)
+          .join(', ')
+      : '';
+    return {
+      meta: [
+        {
+          title: `${name} - UK Visa Sponsor | SponsorSearch`,
+        },
+        {
+          name: 'description',
+          content: location
+            ? `${name} in ${location} — licensed UK ${titleCase(loaderData?.sponsor.route ?? 'Skilled Worker')} visa sponsor. View sponsor details, ratings, and company information.`
+            : `${name} — licensed UK visa sponsor. View sponsor details, ratings, and company information.`,
+        },
+      ],
+      links: [
+        {
+          rel: 'canonical',
+          href: buildCanonical(
+            match.pathname,
+            match.search as Record<string, string>,
+          ),
+        },
+      ],
+    };
+  },
   component: CompanyDetail,
 });
 

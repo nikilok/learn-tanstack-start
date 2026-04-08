@@ -61,6 +61,17 @@ export default memo(function SearchInput({
     });
   }, [focus]);
 
+  // Sync uncontrolled input when the route search param changes externally
+  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
+  useEffect(() => {
+    const el = inputRef.current;
+    if (el && el.value !== defaultValue) {
+      el.value = defaultValue;
+      syncClearButton();
+      syncSearchButton();
+    }
+  }, [defaultValue]);
+
   return (
     <div className="relative" style={{ transform: 'translateZ(0)' }}>
       <input

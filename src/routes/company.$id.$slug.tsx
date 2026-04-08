@@ -3,10 +3,11 @@ import { ExternalLink, MapPin } from 'lucide-react';
 import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
 import { getHmrcById } from '../api/hmrc';
 import { titleCase } from '../utils';
+import { buildCanonical } from '../utils/canonical';
 
 export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
-    search: (search.search as string) || '',
+    search: ((search.search as string) || '').trim(),
   }),
   loader: async ({ params }) => {
     const sponsor = await getHmrcById({ data: { slugId: params.id } });
@@ -27,6 +28,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
 
     return { sponsor, profile };
   },
+  head: ({ match }) => ({
+    links: [
+      {
+        rel: 'canonical',
+        href: buildCanonical(match.pathname, match.search as Record<string, string>),
+      },
+    ],
+  }),
   component: CompanyDetail,
 });
 

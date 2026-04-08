@@ -1,13 +1,25 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, stripSearchParams, useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import { useSearchShortcut } from '../hooks/useSearchShortcut';
+import { buildCanonical } from '../utils/canonical';
 
 export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>) => ({
-    search: (search.search as string) || '',
+    search: ((search.search as string) || '').trim(),
+  }),
+  search: {
+    middlewares: [stripSearchParams({ search: '' })],
+  },
+  head: ({ match }) => ({
+    links: [
+      {
+        rel: 'canonical',
+        href: buildCanonical(match.pathname, match.search as Record<string, string>),
+      },
+    ],
   }),
   beforeLoad: async () => {
     const platformInfo = await getPlatform();

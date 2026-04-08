@@ -40,6 +40,24 @@ export const Route = createRootRoute({
         content:
           'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
       },
+      { property: 'og:type', content: 'website' },
+      { property: 'og:title', content: 'Skilled Worker Sponsor Search' },
+      {
+        property: 'og:description',
+        content:
+          'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+      },
+      { property: 'og:image', content: 'https://sponsorsearch.co.uk/og.png' },
+      { property: 'og:url', content: 'https://sponsorsearch.co.uk' },
+      { property: 'og:site_name', content: 'SponsorSearch' },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:title', content: 'Skilled Worker Sponsor Search' },
+      {
+        name: 'twitter:description',
+        content:
+          'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+      },
+      { name: 'twitter:image', content: 'https://sponsorsearch.co.uk/og.png' },
     ],
     links: [
       {

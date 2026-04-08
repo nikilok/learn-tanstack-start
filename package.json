@@ -41,6 +41,8 @@
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.545.0",
     "nitro": "^3.0.260311-beta",
+    "overlayscrollbars": "^2.15.1",
+    "overlayscrollbars-react": "^0.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sqids": "^0.3.0",

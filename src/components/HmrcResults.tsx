@@ -26,6 +26,15 @@ export default function HmrcResults({ search }: { search: string }) {
       requestAnimationFrame(() => {
         window.scrollTo(0, Number.parseInt(savedY, 10));
       });
+    } else {
+      // Nudge scroll to wake up the virtualizer after navigation
+      // (overlayscrollbars viewport may not fire initial scroll events)
+      requestAnimationFrame(() => {
+        window.scrollBy(0, 5);
+        requestAnimationFrame(() => {
+          window.scrollBy(0, -5);
+        });
+      });
     }
   }, []);
 

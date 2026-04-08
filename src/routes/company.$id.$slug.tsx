@@ -53,8 +53,11 @@ function formatAddress(
     .join(', ');
 }
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString('en-GB', {
+function formatDate(dateStr?: string | null) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
@@ -104,7 +107,7 @@ function CompanyDetail() {
                   .join(', ') || 'Not specified'}
               </dd>
             </div>
-            {profile && (
+            {profile?.company_status && (
               <div>
                 <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
                   Status
@@ -136,23 +139,27 @@ function CompanyDetail() {
         {profile && (
           <div className="glass mt-4 rounded-lg p-6">
             <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Incorporated
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {formatDate(profile.date_of_creation)}
-                </dd>
-              </div>
+              {formatDate(profile.date_of_creation) && (
+                <div>
+                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    Incorporated
+                  </dt>
+                  <dd className="mt-1 text-sm text-(--sea-ink)">
+                    {formatDate(profile.date_of_creation)}
+                  </dd>
+                </div>
+              )}
 
-              <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Company Type
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {titleCase(profile.type.replace(/-/g, ' '))}
-                </dd>
-              </div>
+              {profile.type && (
+                <div>
+                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    Company Type
+                  </dt>
+                  <dd className="mt-1 text-sm text-(--sea-ink)">
+                    {titleCase(profile.type.replace(/-/g, ' '))}
+                  </dd>
+                </div>
+              )}
 
               {profile.accounts?.last_accounts?.made_up_to && (
                 <div>
@@ -165,34 +172,38 @@ function CompanyDetail() {
                 </div>
               )}
 
-              <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Registration No.
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  <span x-apple-data-detectors="false">
-                    {profile.company_number}
-                  </span>
-                </dd>
-              </div>
+              {profile.company_number && (
+                <div>
+                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    Registration No.
+                  </dt>
+                  <dd className="mt-1 text-sm text-(--sea-ink)">
+                    <span x-apple-data-detectors="false">
+                      {profile.company_number}
+                    </span>
+                  </dd>
+                </div>
+              )}
 
-              <div className="col-span-2 sm:col-span-4">
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
-                  Registered Address
-                </dt>
-                <dd className="mt-1 text-sm">
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="no-underline inline-flex items-center gap-1.5 text-(--sea-ink-soft) hover:text-(--sea-ink)"
-                  >
-                    <MapPin size={14} className="shrink-0" />
-                    {formatAddress(profile.registered_office_address)}
-                    <ExternalLink size={12} className="shrink-0" />
-                  </a>
-                </dd>
-              </div>
+              {formatAddress(profile.registered_office_address) && (
+                <div className="col-span-2 sm:col-span-4">
+                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    Registered Address
+                  </dt>
+                  <dd className="mt-1 text-sm">
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="no-underline inline-flex items-center gap-1.5 text-(--sea-ink-soft) hover:text-(--sea-ink)"
+                    >
+                      <MapPin size={14} className="shrink-0" />
+                      {formatAddress(profile.registered_office_address)}
+                      <ExternalLink size={12} className="shrink-0" />
+                    </a>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
         )}

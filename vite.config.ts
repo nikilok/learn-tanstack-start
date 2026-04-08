@@ -12,7 +12,16 @@ const config = defineConfig({
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),
     tanstackStart(),
-    nitro(),
+    nitro({
+      routeRules: {
+        '/company/**': {
+          headers: {
+            'Cache-Control':
+              's-maxage=604800, stale-while-revalidate=86400',
+          },
+        },
+      },
+    }),
     viteReact(),
   ],
   optimizeDeps: {

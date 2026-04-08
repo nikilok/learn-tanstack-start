@@ -18,7 +18,7 @@ export default function HmrcCard({
         slug: slugify(row.organisationName),
       }}
       search={{ search }}
-      className="block no-underline rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-4 transition-shadow hover:shadow-(--shadow-card-full)"
+      className="block no-underline py-2"
       onClick={() =>
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
       }
@@ -26,21 +26,16 @@ export default function HmrcCard({
       <h3 className="heading-card text-base font-semibold text-(--sea-ink)">
         {titleCase(row.organisationName)}
       </h3>
-      <div className="mt-1 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-sm text-(--sea-ink-soft)">
-            {[row.townCity, row.county]
-              .filter(Boolean)
-              .map(titleCase)
-              .join(', ')}
-          </p>
-          <p className="mt-1 truncate text-xs text-(--sea-ink-soft)">
-            {titleCase(row.route)}
-          </p>
-        </div>
-        <div className="shrink-0">
-          <RatingIcon rating={row.typeRating} />
-        </div>
+      <div className="mt-0.5">
+        <RatingIcon rating={row.typeRating} />
+      </div>
+      <div className="mt-0.5">
+        <p className="text-sm text-(--sea-ink-soft)">
+          {[row.townCity, row.county].filter(Boolean).map(titleCase).join(', ')}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">
+          {titleCase(row.route)}
+        </p>
       </div>
     </Link>
   );

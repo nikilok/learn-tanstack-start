@@ -12,7 +12,7 @@ export default function HmrcResults({ search }: { search: string }) {
   const virtualizer = useWindowVirtualizer({
     count: results.length,
     estimateSize: () => 100,
-    gap: 16,
+    gap: 24,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
@@ -58,7 +58,10 @@ export default function HmrcResults({ search }: { search: string }) {
   if (results.length === 0) return null;
 
   return (
-    <div ref={listRef} className="mt-6">
+    <div
+      ref={listRef}
+      className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
+    >
       <div
         style={{
           height: virtualizer.getTotalSize(),
@@ -83,7 +86,7 @@ export default function HmrcResults({ search }: { search: string }) {
           </div>
         ))}
       </div>
-      {loadingMore && <SkeletonCards count={3} />}
+      {loadingMore && <SkeletonCards count={3} bare />}
     </div>
   );
 }

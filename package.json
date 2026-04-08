@@ -44,7 +44,6 @@
     "nitro": "^3.0.260311-beta",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "sqids": "^0.3.0",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {

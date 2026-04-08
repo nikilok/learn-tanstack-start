@@ -23,6 +23,7 @@ export const hmrcSkilledWorkers = pgTable(
   'hmrc_skilled_workers',
   {
     id: serial('id').primaryKey(),
+    hash: varchar('hash', { length: 11 }).notNull().unique(),
     organisationName: varchar('organisation_name', { length: 255 }).notNull(),
     townCity: varchar('town_city', { length: 100 }),
     county: varchar('county', { length: 100 }),

@@ -4,7 +4,12 @@ on:
   schedule:
     # Every Monday at 8:00 AM UTC
     - cron: "0 8 * * 1"
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      force-ingest:
+        description: "Force ingestion even if CSV hasn't changed"
+        type: boolean
+        default: false
 
 jobs:
   discover-csv-url:
@@ -53,4 +58,4 @@ jobs:
       - name: Run ingestion
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}"
+        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }}

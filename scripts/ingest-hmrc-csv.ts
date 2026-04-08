@@ -11,9 +11,10 @@ const EXPECTED_COLUMNS = [
 
 const BATCH_SIZE = 500;
 
-const url = process.argv[2];
+const force = process.argv.includes('--force');
+const url = process.argv.filter((a) => !a.startsWith('--'))[2];
 if (!url) {
-  console.error('Usage: bun run db:ingest <csv-url>');
+  console.error('Usage: bun run db:ingest <csv-url> [--force]');
   process.exit(1);
 }
 
@@ -35,10 +36,11 @@ console.log(`Downloaded ${(csvText.length / 1024).toFixed(1)} KB`);
 const checksum = new Bun.CryptoHasher('sha256').update(csvText).digest('hex');
 const [lastIngestion] =
   await sql`SELECT "checksum" FROM "hmrc_ingestion_meta" ORDER BY "ingested_at" DESC LIMIT 1`;
-if (lastIngestion?.checksum === checksum) {
+if (!force && lastIngestion?.checksum === checksum) {
   console.log('CSV unchanged since last ingestion — skipping.');
   process.exit(0);
 }
+if (force) console.log('Force flag set — skipping checksum comparison.');
 
 // Step 3: Schema validation
 
@@ -82,6 +84,7 @@ await sql`DROP TABLE IF EXISTS "hmrc_skilled_workers_staging"`;
 await sql`
   CREATE TABLE "hmrc_skilled_workers_staging" (
     "id" serial PRIMARY KEY NOT NULL,
+    "hash" varchar(11) NOT NULL UNIQUE,
     "organisation_name" varchar(255) NOT NULL,
     "town_city" varchar(100),
     "county" varchar(100),
@@ -102,33 +105,73 @@ function clean(val: string | undefined): string | null {
   return trimmed;
 }
 
-for (let i = 0; i < records.length; i += BATCH_SIZE) {
-  const batch = records.slice(i, i + BATCH_SIZE);
+function computeHash(
+  orgName: string,
+  townCity: string | null,
+  county: string | null,
+  typeRating: string,
+  route: string,
+): string {
+  const input = [orgName, townCity ?? '', county ?? '', typeRating, route].join(
+    '|',
+  );
+  const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
+  // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
+  return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);
+}
+
+// Deduplicate rows with identical content
+type CleanedRow = {
+  hash: string;
+  orgName: string;
+  townCity: string | null;
+  county: string | null;
+  typeRating: string;
+  route: string;
+};
+
+const seen = new Set<string>();
+const dedupedRows: CleanedRow[] = [];
+
+for (const r of records) {
+  const orgName = r['Organisation Name'].trim();
+  const townCity = clean(r['Town/City']);
+  const county = clean(r.County);
+  const typeRating = r['Type & Rating'].trim();
+  const route = r.Route.trim();
+  const hash = computeHash(orgName, townCity, county, typeRating, route);
+
+  if (!seen.has(hash)) {
+    seen.add(hash);
+    dedupedRows.push({ hash, orgName, townCity, county, typeRating, route });
+  }
+}
+
+console.log(
+  `Deduplicated: ${records.length} → ${dedupedRows.length} unique records`,
+);
+
+for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
+  const batch = dedupedRows.slice(i, i + BATCH_SIZE);
   const placeholders: string[] = [];
   const values: (string | null)[] = [];
 
   for (let j = 0; j < batch.length; j++) {
     const r = batch[j];
-    const offset = j * 5;
+    const offset = j * 6;
     placeholders.push(
-      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`,
+      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`,
     );
-    values.push(
-      r['Organisation Name'].trim(),
-      clean(r['Town/City']),
-      clean(r.County),
-      r['Type & Rating'].trim(),
-      r.Route.trim(),
-    );
+    values.push(r.hash, r.orgName, r.townCity, r.county, r.typeRating, r.route);
   }
 
   await sql.query(
-    `INSERT INTO "hmrc_skilled_workers_staging" ("organisation_name", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
+    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
     values,
   );
 
   console.log(
-    `  Inserted ${Math.min(i + BATCH_SIZE, records.length)}/${records.length}`,
+    `  Inserted ${Math.min(i + BATCH_SIZE, dedupedRows.length)}/${dedupedRows.length}`,
   );
 }
 
@@ -152,9 +195,10 @@ await sql.transaction([
   sql`ALTER INDEX "stg_idx_hmrc_town_city" RENAME TO "idx_hmrc_town_city"`,
   sql`ALTER INDEX "stg_idx_hmrc_route" RENAME TO "idx_hmrc_route"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name_trgm" RENAME TO "idx_hmrc_org_name_trgm"`,
+  sql`ALTER INDEX "hmrc_skilled_workers_staging_hash_key" RENAME TO "hmrc_skilled_workers_hash_unique"`,
 ]);
 
 // Step 8: Record ingestion metadata
-await sql`INSERT INTO "hmrc_ingestion_meta" ("csv_url", "checksum", "record_count") VALUES (${url}, ${checksum}, ${records.length})`;
+await sql`INSERT INTO "hmrc_ingestion_meta" ("csv_url", "checksum", "record_count") VALUES (${url}, ${checksum}, ${dedupedRows.length})`;
 
-console.log(`Done! Ingested ${records.length} records with zero downtime.`);
+console.log(`Done! Ingested ${dedupedRows.length} records with zero downtime.`);

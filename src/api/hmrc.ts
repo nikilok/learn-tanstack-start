@@ -2,7 +2,6 @@ import { createServerFn } from '@tanstack/react-start';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { hmrcSkilledWorkers } from '../db/schema';
-import { decodeId, encodeId } from '../server/ids.server';
 
 const PAGE_SIZE = 50;
 
@@ -25,7 +24,7 @@ export const searchHmrc = createServerFn()
       END`;
     const rows = await db
       .select({
-        id: hmrcSkilledWorkers.id,
+        hash: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
         townCity: hmrcSkilledWorkers.townCity,
         county: hmrcSkilledWorkers.county,
@@ -49,7 +48,7 @@ export const searchHmrc = createServerFn()
     return {
       rows: rows.slice(0, PAGE_SIZE).map((row) => ({
         ...row,
-        slugId: encodeId(row.id),
+        slugId: row.hash,
       })),
       hasMore,
     };
@@ -58,12 +57,9 @@ export const searchHmrc = createServerFn()
 export const getHmrcById = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {
-    const id = decodeId(slugId);
-    if (id === null) return null;
-
     const [row] = await db
       .select({
-        id: hmrcSkilledWorkers.id,
+        hash: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
         townCity: hmrcSkilledWorkers.townCity,
         county: hmrcSkilledWorkers.county,
@@ -71,7 +67,7 @@ export const getHmrcById = createServerFn()
         route: hmrcSkilledWorkers.route,
       })
       .from(hmrcSkilledWorkers)
-      .where(eq(hmrcSkilledWorkers.id, id))
+      .where(eq(hmrcSkilledWorkers.hash, slugId))
       .limit(1);
 
     return row ?? null;

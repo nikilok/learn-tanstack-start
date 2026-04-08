@@ -8,6 +8,7 @@ import {
   Scripts,
 } from '@tanstack/react-router';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import NavigationProgress from '../components/NavigationProgress';
@@ -118,6 +119,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             },
           ]}
         />
+        <SpeedInsights />
         <Scripts />
       </body>
     </html>

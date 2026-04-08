@@ -1,4 +1,8 @@
-import { createFileRoute, stripSearchParams, useNavigate } from '@tanstack/react-router';
+import {
+  createFileRoute,
+  stripSearchParams,
+  useNavigate,
+} from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
@@ -17,7 +21,10 @@ export const Route = createFileRoute('/')({
     links: [
       {
         rel: 'canonical',
-        href: buildCanonical(match.pathname, match.search as Record<string, string>),
+        href: buildCanonical(
+          match.pathname,
+          match.search as Record<string, string>,
+        ),
       },
     ],
   }),

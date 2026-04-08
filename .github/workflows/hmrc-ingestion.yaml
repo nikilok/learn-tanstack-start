@@ -59,3 +59,16 @@ jobs:
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
         run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }}
+
+      - name: Regenerate sitemaps
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+        run: bun run sitemap:generate
+
+      - name: Commit updated sitemaps
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/sitemap*.xml
+          git diff --staged --quiet || git commit -m "chore: regenerate sitemaps after ingestion"
+          git push

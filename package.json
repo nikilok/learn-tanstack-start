@@ -21,6 +21,7 @@
     "db:ingest": "bun scripts/ingest-hmrc-csv.ts",
     "hmrc:find-csv": "bun scripts/find-hmrc-csv-url.ts",
     "company:lookup": "bun scripts/lookup-company.ts",
+    "sitemap:generate": "bun scripts/generate-sitemap.ts",
     "sic:fetch": "bun scripts/fetch-sic-codes.ts",
     "db:seed-sic": "bun scripts/seed-sic-codes.ts"
   },

@@ -11,7 +11,6 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import NavigationProgress from '../components/NavigationProgress';
-import OverlayScrollbar from '../components/OverlayScrollbar';
 import RouteError from '../components/RouteError';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 import appCss from '../styles.css?url';
@@ -72,25 +71,13 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="en"
-      suppressHydrationWarning
-      style={
-        { overflow: 'auto', scrollbarWidth: 'none' } as React.CSSProperties
-      }
-    >
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#ffffff" />
-        <style
-          dangerouslySetInnerHTML={{
-            __html: 'html::-webkit-scrollbar{display:none}',
-          }}
-        />
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="font-sans antialiased wrap-anywhere selection:bg-[rgba(0,114,245,0.16)]">
-        <OverlayScrollbar />
         <QueryClientProvider client={queryClient}>
           <NavigationProgress />
           <Header />

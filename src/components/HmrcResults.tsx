@@ -26,18 +26,6 @@ export default function HmrcResults({ search }: { search: string }) {
       requestAnimationFrame(() => {
         window.scrollTo(0, Number.parseInt(savedY, 10));
       });
-    } else {
-      // Nudge scroll to wake up the virtualizer after navigation
-      // (overlayscrollbars viewport may not fire initial scroll events)
-      const nudge = () => {
-        window.scrollBy(0, 5);
-        requestAnimationFrame(() => window.scrollBy(0, -5));
-      };
-      // Fire multiple nudges to handle race conditions with overlayscrollbars init
-      requestAnimationFrame(nudge);
-      setTimeout(nudge, 50);
-      setTimeout(nudge, 150);
-      setTimeout(nudge, 300);
     }
   }, []);
 

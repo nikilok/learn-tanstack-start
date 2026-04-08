@@ -23,18 +23,6 @@
       }
     }
   },
-  "overrides": [
-    {
-      "includes": ["src/routes/__root.tsx"],
-      "linter": {
-        "rules": {
-          "security": {
-            "noDangerouslySetInnerHtml": "off"
-          }
-        }
-      }
-    }
-  ],
   "css": {
     "parser": {
       "cssModules": false,

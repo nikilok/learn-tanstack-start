@@ -2,7 +2,7 @@
 
 Search UK skilled worker visa sponsors and view detailed company profiles. Built with TanStack Start.
 
-**Live:** [learn-tanstack-start-ashy.vercel.app](https://learn-tanstack-start-ashy.vercel.app)
+**Live:** [sponsorsearch.co.uk](https://sponsorsearch.co.uk)
 
 ## Features
 

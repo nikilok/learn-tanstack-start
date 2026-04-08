@@ -1,8 +1,8 @@
-import { useWindowVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef } from "react";
-import { useHmrcSearch } from "../hooks/useHmrcSearch";
-import HmrcCard from "./HmrcCard";
-import SkeletonCards from "./SkeletonCards";
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useRef } from 'react';
+import { useHmrcSearch } from '../hooks/useHmrcSearch';
+import HmrcCard from './HmrcCard';
+import SkeletonCards from './SkeletonCards';
 
 export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
@@ -20,23 +20,24 @@ export default function HmrcResults({ search }: { search: string }) {
   const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
-    const savedY = sessionStorage.getItem("hmrc-scroll-y");
+    const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
-      sessionStorage.removeItem("hmrc-scroll-y");
+      sessionStorage.removeItem('hmrc-scroll-y');
       requestAnimationFrame(() => {
         window.scrollTo(0, Number.parseInt(savedY, 10));
       });
     } else {
       // Nudge scroll to wake up the virtualizer after navigation
       // (overlayscrollbars viewport may not fire initial scroll events)
-      setTimeout(() => {
-        requestAnimationFrame(() => {
-          window.scrollBy(0, 5);
-          requestAnimationFrame(() => {
-            window.scrollBy(0, -5);
-          });
-        });
-      }, 100);
+      const nudge = () => {
+        window.scrollBy(0, 5);
+        requestAnimationFrame(() => window.scrollBy(0, -5));
+      };
+      // Fire multiple nudges to handle race conditions with overlayscrollbars init
+      requestAnimationFrame(nudge);
+      setTimeout(nudge, 50);
+      setTimeout(nudge, 150);
+      setTimeout(nudge, 300);
     }
   }, []);
 
@@ -73,8 +74,8 @@ export default function HmrcResults({ search }: { search: string }) {
       <div
         style={{
           height: virtualizer.getTotalSize(),
-          width: "100%",
-          position: "relative",
+          width: '100%',
+          position: 'relative',
         }}
       >
         {virtualItems.map((virtualRow) => (
@@ -83,10 +84,10 @@ export default function HmrcResults({ search }: { search: string }) {
             ref={virtualizer.measureElement}
             data-index={virtualRow.index}
             style={{
-              position: "absolute",
+              position: 'absolute',
               top: 0,
               left: 0,
-              width: "100%",
+              width: '100%',
               transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
             }}
           >

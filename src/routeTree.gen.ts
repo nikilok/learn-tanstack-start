@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompanyIdSlugRouteImport } from './routes/company.$id.$slug'
 
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -32,35 +38,46 @@ const CompanyIdSlugRoute = CompanyIdSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$' | '/company/$id/$slug'
+  fullPaths: '/' | '/$' | '/privacy' | '/company/$id/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$' | '/company/$id/$slug'
-  id: '__root__' | '/' | '/$' | '/company/$id/$slug'
+  to: '/' | '/$' | '/privacy' | '/company/$id/$slug'
+  id: '__root__' | '/' | '/$' | '/privacy' | '/company/$id/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SplatRoute: typeof SplatRoute
+  PrivacyRoute: typeof PrivacyRoute
   CompanyIdSlugRoute: typeof CompanyIdSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$': {
       id: '/$'
       path: '/$'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
+  PrivacyRoute: PrivacyRoute,
   CompanyIdSlugRoute: CompanyIdSlugRoute,
 }
 export const routeTree = rootRouteImport

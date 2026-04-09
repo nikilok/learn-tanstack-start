@@ -1,6 +1,7 @@
 import { type RefObject, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
+import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
 
@@ -27,6 +28,7 @@ export default function SearchBar({
 }) {
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
+  const placeholder = useRotatingPlaceholder(shortcut);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   useEffect(() => {
     setPortalTarget(document.getElementById('header-pill-portal'));
@@ -71,9 +73,7 @@ export default function SearchBar({
           defaultValue={search}
           onChange={onSearch}
           onBlur={isStuck ? onBlur : undefined}
-          placeholder={
-            shortcut ? `search company... (${shortcut})` : 'search company...'
-          }
+          placeholder={placeholder}
         />
       </div>
 

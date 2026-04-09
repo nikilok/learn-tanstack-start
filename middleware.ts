@@ -3,6 +3,7 @@ import { next } from '@vercel/edge';
 const ALLOWED_PREFIXES = [
   '/', // home
   '/company/', // detail pages
+  '/privacy', // privacy policy
   '/_server', // TanStack server functions
 ];
 

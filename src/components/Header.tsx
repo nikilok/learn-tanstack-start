@@ -12,7 +12,7 @@ export default function Header() {
             search={{ search: '' }}
             className="inline-flex items-center rounded-md px-3 py-1.5 no-underline transition hover:bg-(--link-bg-hover)"
           >
-            <Logo className="h-6" />
+            <Logo className="h-6 sm:h-8" />
           </Link>
         </h2>
 

@@ -53,7 +53,7 @@ function Home() {
         </p>
         <div ref={sentinelRef} className="mt-6" />
         <div
-          className={`z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'fixed left-0 right-0 top-[61px] sm:top-[69px] mx-auto max-w-2xl search-glow pb-4 pt-2' : 'sticky top-[69px] sm:top-[77px] pb-4'}`}
+          className={`z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'fixed left-0 right-0 top-[61px] sm:top-[77px] mx-auto max-w-2xl search-glow pb-4 pt-2' : 'sticky top-[69px] sm:top-[85px] pb-4'}`}
         >
           <SearchBar
             search={search}

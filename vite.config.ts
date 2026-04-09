@@ -13,7 +13,6 @@ const config = defineConfig({
     tailwindcss(),
     tanstackStart(),
     nitro({
-      scanDirs: ['server'],
       routeRules: {
         '/company/**': {
           headers: {

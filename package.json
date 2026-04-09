@@ -38,6 +38,7 @@
     "@tanstack/react-start": "latest",
     "@tanstack/react-virtual": "^3.13.23",
     "@tanstack/router-plugin": "^1.132.0",
+    "@vercel/edge": "^1.2.2",
     "@vercel/speed-insights": "^2.0.0",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.0",

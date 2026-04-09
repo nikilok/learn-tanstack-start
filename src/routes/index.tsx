@@ -3,11 +3,11 @@ import {
   stripSearchParams,
   useNavigate,
 } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
-import { useSearchShortcut } from '../hooks/useSearchShortcut';
+import { useSearchPill } from '../hooks/useSearchPill';
 import { buildCanonical } from '../utils/canonical';
 
 export const Route = createFileRoute('/')({
@@ -40,26 +40,12 @@ function Home() {
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [isStuck, setIsStuck] = useState(false);
-  const [pillClicked, setPillClicked] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        setIsStuck(!entry.isIntersecting);
-        if (entry.isIntersecting) setPillClicked(false);
-      },
-      { threshold: 0 },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, []);
-
-  useSearchShortcut(inputRef, () => setPillClicked(true));
+  const { isStuck, pillClicked, onPillClick, onPillDismiss } = useSearchPill(
+    inputRef,
+    sentinelRef,
+  );
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -69,7 +55,7 @@ function Home() {
         </p>
         <div ref={sentinelRef} className="mt-6" />
         <div
-          className={`sticky top-[56px] z-40 sm:top-[64px] -mx-4 px-4 ${isStuck && pillClicked ? 'search-glow pb-4 pt-2' : 'pb-4'}`}
+          className={`z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'fixed left-0 right-0 top-[61px] sm:top-[69px] mx-auto max-w-2xl search-glow pb-4 pt-2' : 'sticky top-[69px] sm:top-[77px] pb-4'}`}
         >
           <SearchBar
             search={search}
@@ -88,8 +74,8 @@ function Home() {
                 });
               }, 300);
             }}
-            onPillClick={() => setPillClicked(true)}
-            onBlur={() => setPillClicked(false)}
+            onPillClick={onPillClick}
+            onBlur={onPillDismiss}
           />
         </div>
 

@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useState } from 'react';
+import { type RefObject, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
@@ -43,11 +43,18 @@ export default function SearchBar({
   }, [showPill, portalTarget]);
 
   // When the input is open via pill click while scrolled, dismiss on deliberate scroll
+  // Re-anchors startY when search changes so content-driven scroll shifts don't trigger dismiss
+  const scrollAnchorRef = useRef(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-anchor scroll baseline when search changes
+  useEffect(() => {
+    scrollAnchorRef.current = window.scrollY;
+  }, [search]);
+
   useEffect(() => {
     if (!isStuck || !pillClicked) return;
-    const startY = window.scrollY;
+    scrollAnchorRef.current = window.scrollY;
     const onScroll = () => {
-      if (Math.abs(window.scrollY - startY) > 100) {
+      if (Math.abs(window.scrollY - scrollAnchorRef.current) > 100) {
         inputRef.current?.blur();
         onBlur();
       }

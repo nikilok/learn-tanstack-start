@@ -1,1 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 22H5.5a1 1 0 0 1 0-5h4.501"/><path d="m21 22-1.879-1.878"/><path d="M3 19.5v-15A2.5 2.5 0 0 1 5.5 2H18a1 1 0 0 1 1 1v8"/><circle cx="17" cy="18" r="3"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 130 130">
+  <!-- Outer Frame (Stylized) -->
+  <path d="M75,10 H20 A10,10 0 0 0 10,20 V100 A10,10 0 0 0 20,110 H85" fill="none" stroke="#001C55" stroke-width="6" stroke-linecap="round"/>
+  <path d="M100,35 V20 A10,10 0 0 0 90,10 H85" fill="none" stroke="#001C55" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Magnifying Glass Handle -->
+  <rect x="95" y="100" width="14" height="30" rx="6" ry="6" fill="#001C55" transform="rotate(-45 95 100)" />
+
+  <!-- Magnifying Glass thin handle -->
+  <rect x="98" y="80" width="7" height="30" rx="6" ry="6" fill="#001C55" transform="rotate(-45 95 100)" />
+
+  <!-- Magnifying Glass Circle -->
+  <circle cx="60" cy="60" r="38" fill="#001C55" />
+
+  <!-- Union Jack inside Circle -->
+  <clipPath id="circleClip">
+    <circle cx="60" cy="60" r="29" />
+  </clipPath>
+
+  <g clip-path="url(#circleClip)">
+    <!-- UK Flag Background (Blue) -->
+    <rect x="18" y="18" width="84" height="84" fill="#012169" />
+    <!-- White Saltire -->
+    <path d="M18,18 L102,102 M102,18 L18,102" stroke="white" stroke-width="12" />
+    <!-- Red Saltire -->
+    <path d="M18,18 L102,102 M102,18 L18,102" stroke="#C8102E" stroke-width="4" />
+    <!-- White Cross -->
+    <path d="M60,18 V102 M18,60 H102" stroke="white" stroke-width="20" />
+    <!-- Red Cross -->
+    <path d="M60,18 V102 M18,60 H102" stroke="#C8102E" stroke-width="12" />
+  </g>
+</svg>

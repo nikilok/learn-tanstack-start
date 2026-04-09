@@ -17,7 +17,7 @@ Search UK skilled worker visa sponsors and view detailed company profiles. Built
 ## Tech stack
 
 - **Framework:** TanStack Start (React 19 + TanStack Router)
-- **Data fetching:** TanStack Query
+- **Data fetching & client-side caching:** TanStack Query
 - **Virtualisation:** TanStack Virtual
 - **Database:** Neon Postgres (serverless) via Drizzle ORM
 - **APIs:** Companies House API (server-side via `createServerFn`)
@@ -43,14 +43,38 @@ bun install
 bun run dev
 ```
 
-## Database commands
+## Scripts
+
+### Development
+
+```bash
+bun run dev                  # Start dev server on port 3000
+bun run build                # Production build
+bun run preview              # Preview production build
+bun run test                 # Run tests (Vitest)
+bun run lint                 # Lint with Biome
+bun run lint:fix             # Auto-fix lint issues
+```
+
+### Database
 
 ```bash
 bun run db:generate          # Generate migration from schema changes
 bun run db:create-migration  # Create a custom data migration
 bun run db:migrate           # Apply pending migrations
 bun run db:reset             # Drop all tables and re-migrate
+bun run db:push              # Push schema directly (no migration)
 bun run db:studio            # Open Drizzle Studio
 bun run db:ingest            # Ingest HMRC CSV data
 bun run db:seed-sic          # Seed SIC code descriptions
+```
+
+### Data & utilities
+
+```bash
+bun run hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
+bun run company:lookup       # Look up a company via Companies House API
+bun run sitemap:generate     # Generate sitemap.xml
+bun run sic:fetch            # Fetch SIC codes from Companies House
+bun run render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
 ```

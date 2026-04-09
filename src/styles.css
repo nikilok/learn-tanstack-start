@@ -44,6 +44,8 @@
   --grid-line: rgba(0, 0, 0, 0.06);
   --grid-opacity: 0.7;
   --sponsor-card-bg: #f0edf5;
+  --logo-navy: #001c55;
+  --logo-red: #c8102e;
 }
 
 :root[data-theme="dark"] {
@@ -81,6 +83,8 @@
   --grid-line: rgba(255, 255, 255, 0.04);
   --grid-opacity: 0.6;
   --sponsor-card-bg: #1a1a2e;
+  --logo-navy: #e0e7ff;
+  --logo-red: #f87171;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -123,6 +127,8 @@
     --grid-line: rgba(255, 255, 255, 0.08);
     --grid-opacity: 1;
     --sponsor-card-bg: #1a1a2e;
+    --logo-navy: #e0e7ff;
+    --logo-red: #f87171;
   }
 }
 

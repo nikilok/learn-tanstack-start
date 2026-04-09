@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import BookSearchIcon from './BookSearchIcon';
+import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
 export default function Header() {
@@ -10,10 +10,9 @@ export default function Header() {
           <Link
             to="/"
             search={{ search: '' }}
-            className="shadow-ring inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold text-(--sea-ink) no-underline transition hover:bg-(--link-bg-hover)"
+            className="inline-flex items-center rounded-md px-3 py-1.5 no-underline transition hover:bg-(--link-bg-hover)"
           >
-            <BookSearchIcon className="h-5 w-5" />
-            SponsorSearch.co.uk
+            <Logo className="h-8" />
           </Link>
         </h2>
 

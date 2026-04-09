@@ -282,7 +282,7 @@ a {
 .search-glow::after {
   content: "";
   position: absolute;
-  inset: 0 -1rem -6rem;
+  inset: 0 0 -6rem;
   background: linear-gradient(to bottom, var(--bg-base) 30%, transparent);
   pointer-events: none;
   z-index: -1;

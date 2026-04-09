@@ -51,6 +51,11 @@ ${Array.from(
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
+  <url>
+    <loc>${BASE_URL}/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.2</priority>
+  </url>
 </urlset>`;
 
   await Bun.write(join(OUT_DIR, 'sitemap-0.xml'), sitemap0);

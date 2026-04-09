@@ -142,8 +142,12 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             },
           ]}
         />
-        <Analytics />
-        <SpeedInsights />
+        {import.meta.env.PROD && (
+          <>
+            <Analytics />
+            <SpeedInsights />
+          </>
+        )}
         <Scripts />
       </body>
     </html>

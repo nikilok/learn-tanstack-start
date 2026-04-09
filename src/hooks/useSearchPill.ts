@@ -6,6 +6,7 @@ export function useSearchPill(
   sentinelRef: RefObject<HTMLDivElement | null>,
 ) {
   const [isStuck, setIsStuck] = useState(false);
+  const [ready, setReady] = useState(false);
   const [pillClicked, setPillClicked] = useState(false);
   const pillClickedRef = useRef(false);
 
@@ -27,6 +28,7 @@ export function useSearchPill(
     if (!sentinel) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
+        setReady(true);
         if (!pillClickedRef.current) {
           setIsStuck(!entry.isIntersecting);
         }
@@ -43,6 +45,7 @@ export function useSearchPill(
 
   return {
     isStuck,
+    ready,
     pillClicked,
     onPillClick: () => setPillClicked(true),
     onPillDismiss: () => setPillClicked(false),

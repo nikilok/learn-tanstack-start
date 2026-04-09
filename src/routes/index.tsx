@@ -42,10 +42,8 @@ function Home() {
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { isStuck, pillClicked, onPillClick, onPillDismiss } = useSearchPill(
-    inputRef,
-    sentinelRef,
-  );
+  const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
+    useSearchPill(inputRef, sentinelRef);
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -60,6 +58,7 @@ function Home() {
           <SearchBar
             search={search}
             isStuck={isStuck}
+            ready={ready}
             pillClicked={pillClicked}
             inputRef={inputRef}
             platform={platformInfo.platform}

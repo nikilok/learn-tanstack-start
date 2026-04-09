@@ -8,6 +8,7 @@ import SearchInput from './SearchInput';
 export default function SearchBar({
   search,
   isStuck,
+  ready,
   pillClicked,
   inputRef,
   platform,
@@ -18,6 +19,7 @@ export default function SearchBar({
 }: {
   search: string;
   isStuck: boolean;
+  ready: boolean;
   pillClicked: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   platform: Platform;
@@ -65,12 +67,11 @@ export default function SearchBar({
 
   return (
     <div className="relative">
-      {/* Input — fades out when pill shows */}
+      {/* Input — hidden until observer ready, hides when pill shows */}
       <div
-        className="transition-opacity duration-300"
         style={{
-          opacity: showPill ? 0 : 1,
-          pointerEvents: showPill ? 'none' : 'auto',
+          opacity: !ready || showPill ? 0 : 1,
+          pointerEvents: !ready || showPill ? 'none' : 'auto',
         }}
       >
         <SearchInput

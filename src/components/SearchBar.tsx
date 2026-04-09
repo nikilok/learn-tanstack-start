@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import SearchIcon from './SearchIcon';
@@ -27,11 +27,10 @@ export default function SearchBar({
 }) {
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
-  const portalRef = useRef<Element | null>(null);
-  if (!portalRef.current && typeof document !== 'undefined') {
-    portalRef.current = document.getElementById('header-pill-portal');
-  }
-  const portalTarget = portalRef.current;
+  const [portalTarget, setPortalTarget] = useState<Element | null>(null);
+  useEffect(() => {
+    setPortalTarget(document.getElementById('header-pill-portal'));
+  }, []);
 
   useEffect(() => {
     if (showPill) {

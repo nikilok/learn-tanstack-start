@@ -268,6 +268,7 @@ a {
 .site-header {
   background: var(--header-bg);
   box-shadow: var(--shadow-ring);
+  transform: translateZ(0);
 }
 
 .site-footer {

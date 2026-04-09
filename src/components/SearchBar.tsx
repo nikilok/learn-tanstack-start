@@ -91,6 +91,7 @@ export default function SearchBar({
             <button
               type="button"
               onClick={onPillClick}
+              aria-label={`Edit search for ${search}`}
               className="inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none"
             >
               <span className="truncate">{search}</span>

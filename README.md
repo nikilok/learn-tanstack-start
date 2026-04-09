@@ -1,6 +1,6 @@
 # UK Visa Sponsor Search
 
-Search UK skilled worker visa sponsors and view detailed company profiles. Built with TanStack Start.
+Search UK skilled worker visa sponsors and view detailed company profiles. Built with TanStack Start and [more](#tech-stack).
 
 **Live:** [sponsorsearch.co.uk](https://sponsorsearch.co.uk)
 
@@ -17,6 +17,8 @@ Search UK skilled worker visa sponsors and view detailed company profiles. Built
 ## Tech stack
 
 - **Framework:** TanStack Start (React 19 + TanStack Router)
+- **Data fetching:** TanStack Query
+- **Virtualisation:** TanStack Virtual
 - **Database:** Neon Postgres (serverless) via Drizzle ORM
 - **APIs:** Companies House API (server-side via `createServerFn`)
 - **Styling:** Tailwind CSS v4

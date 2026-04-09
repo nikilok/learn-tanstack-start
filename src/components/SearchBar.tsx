@@ -30,7 +30,7 @@ export default function SearchBar({
 }) {
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
-  const placeholder = useRotatingPlaceholder(shortcut);
+  const placeholder = useRotatingPlaceholder(shortcut, !!search);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   useEffect(() => {
     setPortalTarget(document.getElementById('header-pill-portal'));

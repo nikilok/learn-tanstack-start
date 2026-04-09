@@ -4,7 +4,7 @@ import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
 import {
   createRootRoute,
   HeadContent,
-  Navigate,
+  Link,
   Scripts,
 } from '@tanstack/react-router';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
@@ -21,8 +21,19 @@ const queryClient = new QueryClient();
 export const Route = createRootRoute({
   errorComponent: RouteError,
   notFoundComponent: () => {
-    const params = new URLSearchParams(window.location.search);
-    return <Navigate to="/" search={{ search: params.get('search') ?? '' }} />;
+    return (
+      <div className="page-wrap flex flex-col items-center justify-center py-20 text-center">
+        <h1 className="text-4xl font-bold text-(--sea-ink)">404</h1>
+        <p className="mt-2 text-(--sea-ink-soft)">This page does not exist.</p>
+        <Link
+          to="/"
+          search={{ search: '' }}
+          className="mt-4 text-(--link-blue) underline"
+        >
+          Go to home
+        </Link>
+      </div>
+    );
   },
   head: () => ({
     meta: [

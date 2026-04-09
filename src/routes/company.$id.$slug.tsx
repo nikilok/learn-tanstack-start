@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
 import { getHmrcById } from '../api/hmrc';
@@ -13,7 +13,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const sponsor = await getHmrcById({ data: { slugId: params.id } });
 
     if (!sponsor) {
-      throw new Error('Sponsor not found');
+      throw notFound();
     }
 
     const searchResult = await searchCompany({

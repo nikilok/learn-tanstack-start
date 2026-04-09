@@ -16,8 +16,7 @@ const config = defineConfig({
       routeRules: {
         '/company/**': {
           headers: {
-            'Cache-Control':
-              's-maxage=604800, stale-while-revalidate=86400',
+            'Cache-Control': 's-maxage=604800, stale-while-revalidate=86400',
           },
         },
       },

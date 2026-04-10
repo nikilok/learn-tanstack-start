@@ -15,13 +15,6 @@ export const THEME_INIT_SCRIPT = `(() => {
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(resolved);
-
-    if (mode === 'auto') {
-      root.removeAttribute('data-theme');
-    } else {
-      root.setAttribute('data-theme', mode);
-    }
-
     root.style.colorScheme = resolved;
 
     const meta = document.querySelector('meta[name="theme-color"]');

@@ -1,5 +1,7 @@
+@import "./fonts.css";
 @import "tailwindcss";
-@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: "Geist", system-ui, -apple-system, Arial, sans-serif;
@@ -48,7 +50,7 @@
   --logo-red: #c8102e;
 }
 
-:root[data-theme="dark"] {
+.dark {
   --black: #ededed;
   --white: #0a0a0a;
   --gray-50: #111111;
@@ -57,6 +59,8 @@
   --gray-400: #666666;
   --gray-500: #808080;
   --gray-600: #a0a0a0;
+  --badge-bg: rgba(0, 114, 245, 0.15);
+  --badge-text: #3b9eff;
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;
@@ -66,11 +70,14 @@
   --line: #2a2a2a;
   --bg-base: #0a0a0a;
   --header-bg: rgba(10, 10, 10, 0.88);
+  --chip-bg: #111111;
+  --chip-line: #2a2a2a;
   --link-bg-hover: #1a1a1a;
   --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
   --shadow-card:
     rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.2) 0px 2px 2px, rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
+    rgba(0, 0, 0, 0.2) 0px 2px 2px,
+    rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
   --shadow-card-full:
     rgba(255, 255, 255, 0.12) 0px 0px 0px 1px,
     rgba(0, 0, 0, 0.3) 0px 2px 2px, rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
@@ -80,60 +87,11 @@
   --glow-b: rgba(121, 40, 202, 0.12);
   --glow-c: rgba(0, 112, 243, 0.08);
   --dot-color: rgba(255, 255, 255, 0.06);
-  --grid-line: rgba(255, 255, 255, 0.04);
-  --grid-opacity: 0.6;
+  --grid-line: rgba(255, 255, 255, 0.08);
+  --grid-opacity: 1;
   --sponsor-card-bg: #1a1a2e;
   --logo-navy: #e0e7ff;
   --logo-red: #f87171;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --black: #ededed;
-    --white: #0a0a0a;
-    --gray-50: #111111;
-    --gray-100: #2a2a2a;
-    --gray-200: #3a3a3a;
-    --gray-400: #666666;
-    --gray-500: #808080;
-    --gray-600: #a0a0a0;
-    --badge-bg: rgba(0, 114, 245, 0.15);
-    --badge-text: #3b9eff;
-
-    --sea-ink: #ededed;
-    --sea-ink-soft: #a0a0a0;
-    --kicker: #808080;
-    --surface: #0a0a0a;
-    --surface-strong: #0a0a0a;
-    --line: #2a2a2a;
-    --bg-base: #0a0a0a;
-    --header-bg: rgba(10, 10, 10, 0.88);
-    --chip-bg: #111111;
-    --chip-line: #2a2a2a;
-    --link-bg-hover: #1a1a1a;
-    --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
-    --shadow-card:
-      rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,
-      rgba(0, 0, 0, 0.2) 0px 2px 2px,
-      rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
-    --shadow-card-full:
-      rgba(255, 255, 255, 0.12) 0px 0px 0px 1px,
-      rgba(0, 0, 0, 0.3) 0px 2px 2px, rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
-      rgba(255, 255, 255, 0.04) 0px 0px 0px 1px;
-    --glow-a: rgba(0, 114, 245, 0.15);
-    --glow-b: rgba(121, 40, 202, 0.12);
-    --glow-c: rgba(0, 112, 243, 0.08);
-    --dot-color: rgba(255, 255, 255, 0.06);
-    --grid-line: rgba(255, 255, 255, 0.08);
-    --grid-opacity: 1;
-    --sponsor-card-bg: #1a1a2e;
-    --logo-navy: #e0e7ff;
-    --logo-red: #f87171;
-  }
-}
-
-* {
-  box-sizing: border-box;
 }
 
 html,
@@ -205,7 +163,7 @@ a:hover {
   opacity: 0.85;
 }
 
-.page-wrap {
+@utility page-wrap {
   width: min(1200px, calc(100% - 2rem));
   margin-inline: auto;
 }
@@ -219,7 +177,7 @@ a {
     opacity 150ms ease;
 }
 
-.island-kicker {
+@utility island-kicker {
   font-family: var(--font-mono);
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -265,17 +223,17 @@ a {
   }
 }
 
-.site-header {
+@utility site-header {
   background: var(--header-bg);
   box-shadow: var(--shadow-ring);
   transform: translateZ(0);
 }
 
-.site-footer {
+@utility site-footer {
   border-top: 1px solid var(--line);
 }
 
-.shadow-ring {
+@utility shadow-ring {
   box-shadow: var(--shadow-ring);
 }
 
@@ -288,7 +246,7 @@ a {
   z-index: -1;
 }
 
-.glass {
+@utility glass {
   backdrop-filter: blur(2px);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.2s;
@@ -298,6 +256,6 @@ a {
   box-shadow: var(--shadow-card-full);
 }
 
-.heading-card {
+@utility heading-card {
   letter-spacing: -0.4px;
 }

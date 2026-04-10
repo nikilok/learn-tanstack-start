@@ -67,11 +67,11 @@ export default function SearchBar({
 
   return (
     <div className="relative">
-      {/* Input — hidden until observer ready, hides when pill shows */}
+      {/* Input — hides when pill shows, or briefly hidden until observer is ready (client-only) */}
       <div
         style={{
-          opacity: !ready || showPill ? 0 : 1,
-          pointerEvents: !ready || showPill ? 'none' : 'auto',
+          opacity: showPill || (!ready && isStuck) ? 0 : 1,
+          pointerEvents: showPill || (!ready && isStuck) ? 'none' : 'auto',
         }}
       >
         <SearchInput

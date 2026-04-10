@@ -86,7 +86,7 @@ function Home() {
                   search: { search: value },
                   replace: true,
                 });
-              }, 300);
+              }, 450);
             }}
             onPillClick={onPillClick}
             onBlur={onPillDismiss}

@@ -4,6 +4,7 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { useRef } from 'react';
+import { searchHmrc } from '../api/hmrc';
 import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
@@ -31,6 +32,17 @@ export const Route = createFileRoute('/')({
   beforeLoad: async () => {
     const platformInfo = await getPlatform();
     return { platformInfo };
+  },
+  loaderDeps: ({ search: { search } }) => ({ search }),
+  loader: async ({ context: { queryClient }, deps: { search } }) => {
+    if (typeof window !== 'undefined') return;
+    if (search.length >= 3) {
+      await queryClient.prefetchInfiniteQuery({
+        queryKey: ['hmrc-search', search],
+        queryFn: () => searchHmrc({ data: { query: search, offset: 0 } }),
+        initialPageParam: 0,
+      });
+    }
   },
   component: Home,
 });

@@ -3,11 +3,12 @@ import {
   stripSearchParams,
   useNavigate,
 } from '@tanstack/react-router';
-import { useRef } from 'react';
+import { Suspense, useRef } from 'react';
 import { searchHmrc } from '../api/hmrc';
 import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
+import SkeletonCards from '../components/SkeletonCards';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { buildCanonical } from '../utils/canonical';
 
@@ -34,10 +35,12 @@ export const Route = createFileRoute('/')({
     return { platformInfo };
   },
   loaderDeps: ({ search: { search } }) => ({ search }),
-  loader: async ({ context: { queryClient }, deps: { search } }) => {
+  loader: async ({ context: { queryClient }, deps }) => {
+    const { search } = deps as { search: string };
     if (typeof window !== 'undefined') return;
     if (search.length >= 3) {
-      await queryClient.prefetchInfiniteQuery({
+      // Don't await — let the query stream in while the shell renders
+      queryClient.prefetchInfiniteQuery({
         queryKey: ['hmrc-search', search],
         queryFn: () => searchHmrc({ data: { query: search, offset: 0 } }),
         initialPageParam: 0,
@@ -90,7 +93,9 @@ function Home() {
           />
         </div>
 
-        <HmrcResults search={search} />
+        <Suspense fallback={<SkeletonCards />}>
+          <HmrcResults search={search} />
+        </Suspense>
       </section>
     </main>
   );

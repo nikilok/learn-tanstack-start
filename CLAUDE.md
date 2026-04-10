@@ -25,20 +25,33 @@ causing the streaming response to delay. The skeleton cards show (from `HmrcResu
 
 ### The fix
 
-The opacity condition was changed from:
-```
-!ready || showPill
-```
-to:
-```
-showPill || (!ready && isStuck)
-```
+The input wrapper has NO inline style. Visibility is controlled entirely by `useLayoutEffect`
+in `SearchBar.tsx`, which sets `opacity` and `pointerEvents` on the wrapper ref.
 
-This ensures:
-- **SSR/initial load**: `ready=false`, `isStuck=false` → input is visible (opacity: 1)
-- **Navigating back while scrolled**: `ready=false`, `isStuck=true` → input is hidden briefly
-  until observer fires, preventing the flash
-- **Pill showing**: `showPill=true` → input is hidden, pill takes over
+**Why `useLayoutEffect`:**
+- On the server, `useLayoutEffect` is a no-op — so the SSR HTML renders the input with
+  no inline style (visible by default). Users see the search input immediately, even
+  before JS loads.
+- On the client, `useLayoutEffect` runs synchronously before the browser paints — so when
+  navigating back from a company page while scrolled, it sets `opacity: 0` before the
+  user sees anything. No flash.
+- When the IntersectionObserver fires and sets `ready=true`, `useLayoutEffect` runs again
+  and sets `opacity: 1`.
+
+### Approaches that were tried and failed — do NOT use
+
+1. **Inline `style={{ opacity: !ready || showPill ? 0 : 1 }}`** — the server bakes
+   `opacity: 0` into the HTML since `ready` is always `false` on the server. Input is
+   invisible until JS hydrates, which is noticeable on slow connections or serverless
+   cold starts.
+2. **Default `ready` to `true`** — causes a flash of the input when navigating back
+   from the company detail page while scrolled down.
+3. **Change opacity condition to `showPill || (!ready && isStuck)`** — causes the input
+   to flash on initial paint before hydration hides it, because the sentinel is briefly
+   in the viewport during layout before scroll position restores.
+4. **Synchronous `getBoundingClientRect` check in `useSearchPill` effect** — same flash
+   problem as #3. On back-navigation the sentinel is momentarily in-viewport before
+   scroll restores, so it incorrectly sets `ready=true`.
 
 ### Key files
 - `src/components/SearchBar.tsx` — opacity logic

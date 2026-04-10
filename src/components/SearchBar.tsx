@@ -1,4 +1,10 @@
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
@@ -31,10 +37,26 @@ export default function SearchBar({
   const showPill = isStuck && !pillClicked && !!search;
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
   const placeholder = useRotatingPlaceholder(shortcut, !!search);
+  const inputWrapRef = useRef<HTMLDivElement>(null);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   useEffect(() => {
     setPortalTarget(document.getElementById('header-pill-portal'));
   }, []);
+
+  // Hide the input before the browser paints on the client.
+  // This runs before paint (useLayoutEffect) so there's no visible flash.
+  // On the server, useLayoutEffect is a no-op, so the HTML renders with opacity: 1.
+  useLayoutEffect(() => {
+    const el = inputWrapRef.current;
+    if (!el) return;
+    if (!ready || showPill) {
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+    } else {
+      el.style.opacity = '1';
+      el.style.pointerEvents = 'auto';
+    }
+  }, [ready, showPill]);
 
   useEffect(() => {
     if (showPill) {
@@ -67,13 +89,8 @@ export default function SearchBar({
 
   return (
     <div className="relative">
-      {/* Input — hides when pill shows, or briefly hidden until observer is ready (client-only) */}
-      <div
-        style={{
-          opacity: showPill || (!ready && isStuck) ? 0 : 1,
-          pointerEvents: showPill || (!ready && isStuck) ? 'none' : 'auto',
-        }}
-      >
+      {/* Input — visible in SSR HTML, hidden by useLayoutEffect before paint on client */}
+      <div ref={inputWrapRef}>
         <SearchInput
           inputRef={inputRef}
           autoFocus={!isStuck && search.length < 3}

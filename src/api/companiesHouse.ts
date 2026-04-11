@@ -1,8 +1,12 @@
 import { createServerFn } from '@tanstack/react-start';
 import { waitUntil } from '@vercel/functions';
-import { ilike, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { companiesHouseProfiles, sicCodes } from '../db/schema';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  sicCodes,
+} from '../db/schema';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 
@@ -136,21 +140,43 @@ async function upsertProfile(profile: CompanyProfile) {
 export const getCompanyProfile = createServerFn()
   .inputValidator((input: unknown) => input as { companyName: string })
   .handler(async ({ data: { companyName } }) => {
-    // Check DB cache first
-    const [cached] = await db
+    // Look up company number via mapping table
+    const [mapping] = await db
       .select()
-      .from(companiesHouseProfiles)
-      .where(ilike(companiesHouseProfiles.companyName, companyName))
+      .from(hmrcCompanyMapping)
+      .where(eq(hmrcCompanyMapping.organisationName, companyName))
       .limit(1);
 
     let profile: CompanyProfile;
 
-    if (cached) {
-      console.log(`[Profile] cache hit: "${cached.companyName}"`);
-      profile = dbRowToProfile(cached);
+    if (mapping) {
+      // Found mapping — fetch profile from cache
+      const [cached] = await db
+        .select()
+        .from(companiesHouseProfiles)
+        .where(eq(companiesHouseProfiles.companyNumber, mapping.companyNumber))
+        .limit(1);
+
+      if (cached) {
+        console.log(`[Profile] cache hit: "${cached.companyName}"`);
+        profile = dbRowToProfile(cached);
+      } else {
+        // Mapping exists but profile missing — fetch from API
+        console.log(
+          `[Profile] mapping found but no profile, calling API for: ${mapping.companyNumber}`,
+        );
+        const profileResult = await fetchFromApi(
+          `/company/${mapping.companyNumber}`,
+        );
+
+        if (!profileResult.ok) return null;
+
+        profile = profileResult.data as CompanyProfile;
+        waitUntil(upsertProfile(profile));
+      }
     } else {
-      // Cache miss — search API for company number, then fetch profile
-      console.log(`[Profile] cache miss, calling API for: "${companyName}"`);
+      // No mapping — search API for company number, then fetch profile
+      console.log(`[Profile] no mapping, calling API for: "${companyName}"`);
       const searchResult = await fetchFromApi(
         `/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=1`,
       );
@@ -162,15 +188,23 @@ export const getCompanyProfile = createServerFn()
       };
       if (!searchData.items?.length) return null;
 
-      const profileResult = await fetchFromApi(
-        `/company/${searchData.items[0].company_number}`,
-      );
+      const companyNumber = searchData.items[0].company_number;
+
+      const profileResult = await fetchFromApi(`/company/${companyNumber}`);
 
       if (!profileResult.ok) return null;
 
       profile = profileResult.data as CompanyProfile;
-      // Save to cache after response is sent
-      waitUntil(upsertProfile(profile));
+      // Save mapping and profile after response is sent
+      waitUntil(
+        Promise.all([
+          db
+            .insert(hmrcCompanyMapping)
+            .values({ organisationName: companyName, companyNumber })
+            .onConflictDoNothing(),
+          upsertProfile(profile),
+        ]),
+      );
     }
 
     // Look up SIC code descriptions from our database

@@ -13,7 +13,7 @@
 import { neon } from '@neondatabase/serverless';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
-import { companiesHouseProfiles } from '../src/db/schema';
+import { companiesHouseProfiles, hmrcCompanyMapping } from '../src/db/schema';
 
 dotenv.config({ path: '.env.local' });
 
@@ -55,27 +55,23 @@ async function fetchApi(path: string): Promise<unknown | null> {
   return res.json();
 }
 
-// Get all distinct org names
-const allOrgs = await sql`
-  SELECT DISTINCT organisation_name
-  FROM hmrc_skilled_workers
-  ORDER BY organisation_name
+// Get only org names that aren't already cached
+const uncached = await sql`
+  SELECT DISTINCT h.organisation_name
+  FROM hmrc_skilled_workers h
+  LEFT JOIN companies_house_profiles c
+    ON UPPER(h.organisation_name) = UPPER(c.company_name)
+  WHERE c.company_number IS NULL
+  ORDER BY h.organisation_name
 `;
-console.log(`Found ${allOrgs.length} unique organisations`);
-
-// Get already-cached company names to skip
-const cached = await sql`SELECT company_name FROM companies_house_profiles`;
-const cachedNames = new Set(
-  cached.map((r) => (r.company_name as string).toUpperCase()),
-);
-console.log(`Already cached: ${cachedNames.size} — skipping those`);
+console.log(`Found ${uncached.length} uncached organisations to fetch`);
 
 let processed = 0;
 let inserted = 0;
 let skipped = 0;
 let failed = 0;
 const startTime = Date.now();
-const remaining = allOrgs.length - cachedNames.size;
+const total = uncached.length;
 
 function formatEta(ms: number) {
   const secs = Math.floor(ms / 1000);
@@ -86,21 +82,26 @@ function formatEta(ms: number) {
 
 function logProgress() {
   const elapsed = Date.now() - startTime;
-  const apiCalls = inserted + failed; // only non-skipped items hit the API
+  const apiCalls = inserted + failed;
   const rate = apiCalls > 0 ? elapsed / apiCalls : DELAY_MS * 2;
-  const left = remaining - apiCalls;
+  const left = total - processed;
   const eta = formatEta(left * rate);
   console.log(
-    `[${processed}/${allOrgs.length}] inserted=${inserted} skipped=${skipped} failed=${failed} | ETA: ${eta}`,
+    `[${processed}/${total}] inserted=${inserted} skipped=${skipped} failed=${failed} | ETA: ${eta}`,
   );
 }
 
-for (const row of allOrgs) {
+for (const row of uncached) {
   const orgName = row.organisation_name as string;
   processed++;
 
-  // Skip if already cached (case-insensitive match)
-  if (cachedNames.has(orgName.toUpperCase())) {
+  // Check if a crawler cached this while the seed was running
+  const [alreadyCached] = await sql`
+    SELECT 1 FROM companies_house_profiles
+    WHERE UPPER(company_name) = ${orgName.toUpperCase()}
+    LIMIT 1
+  `;
+  if (alreadyCached) {
     skipped++;
     if (processed % 100 === 0) {
       logProgress();
@@ -123,6 +124,12 @@ for (const row of allOrgs) {
   }
 
   const companyNumber = searchData.items[0].company_number;
+
+  // Store HMRC org name → company number mapping
+  await db
+    .insert(hmrcCompanyMapping)
+    .values({ organisationName: orgName, companyNumber })
+    .onConflictDoNothing();
 
   // 2. Fetch full profile
   await sleep(DELAY_MS);
@@ -217,7 +224,6 @@ for (const row of allOrgs) {
     });
 
   inserted++;
-  cachedNames.add(profile.company_name.toUpperCase());
 
   if (processed % 100 === 0) {
     logProgress();

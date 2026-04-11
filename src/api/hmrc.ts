@@ -24,7 +24,7 @@ export const searchHmrc = createServerFn()
       END`;
     const rows = await db
       .select({
-        hash: hmrcSkilledWorkers.hash,
+        slugId: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
         townCity: hmrcSkilledWorkers.townCity,
         county: hmrcSkilledWorkers.county,
@@ -46,20 +46,17 @@ export const searchHmrc = createServerFn()
 
     const hasMore = rows.length > PAGE_SIZE;
     return {
-      rows: rows.slice(0, PAGE_SIZE).map((row) => ({
-        ...row,
-        slugId: row.hash,
-      })),
+      rows: rows.slice(0, PAGE_SIZE),
       hasMore,
     };
   });
 
-export const getHmrcById = createServerFn()
+export const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {
     const [row] = await db
       .select({
-        hash: hmrcSkilledWorkers.hash,
+        slugId: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
         townCity: hmrcSkilledWorkers.townCity,
         county: hmrcSkilledWorkers.county,

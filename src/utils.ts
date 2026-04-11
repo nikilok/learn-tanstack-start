@@ -26,3 +26,37 @@ export function slugify(str: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 }
+
+export function formatAddress(
+  address?: {
+    address_line_1?: string;
+    address_line_2?: string;
+    locality?: string;
+    region?: string;
+    postal_code?: string;
+    country?: string;
+  } | null,
+) {
+  if (!address) return '';
+  return [
+    address.address_line_1,
+    address.address_line_2,
+    address.locality,
+    address.region,
+    address.postal_code,
+    address.country,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+export function formatDate(dateStr?: string | null) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}

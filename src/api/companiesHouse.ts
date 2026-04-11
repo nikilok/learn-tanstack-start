@@ -1,81 +1,177 @@
 import { createServerFn } from '@tanstack/react-start';
-import { inArray } from 'drizzle-orm';
+import { waitUntil } from '@vercel/functions';
+import { ilike, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { sicCodes } from '../db/schema';
+import { companiesHouseProfiles, sicCodes } from '../db/schema';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 
-export const searchCompany = createServerFn()
-  .inputValidator((input: unknown) => input as { query: string })
-  .handler(async ({ data: { query } }) => {
-    const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
-    if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY is not set');
+type CompanyProfile = {
+  company_name: string;
+  company_number: string;
+  company_status: string;
+  type: string;
+  date_of_creation: string;
+  registered_office_address: {
+    address_line_1?: string;
+    address_line_2?: string;
+    locality?: string;
+    region?: string;
+    postal_code?: string;
+    country?: string;
+  };
+  sic_codes?: string[];
+  accounts?: {
+    next_made_up_to?: string;
+    last_accounts?: { made_up_to?: string };
+    overdue?: boolean;
+  };
+  jurisdiction?: string;
+  has_been_liquidated?: boolean;
+  has_insolvency_history?: boolean;
+  has_charges?: boolean;
+  previous_company_names?: { name: string }[];
+  confirmation_statement?: {
+    last_made_up_to?: string;
+  };
+};
 
-    const res = await fetch(
-      `${BASE_URL}/search/companies?q=${encodeURIComponent(query)}&items_per_page=1`,
-      {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-        },
+function dbRowToProfile(
+  row: typeof companiesHouseProfiles.$inferSelect,
+): CompanyProfile {
+  return {
+    company_name: row.companyName,
+    company_number: row.companyNumber,
+    company_status: row.companyStatus ?? '',
+    type: row.companyType ?? '',
+    date_of_creation: row.dateOfCreation ?? '',
+    registered_office_address: {
+      address_line_1: row.addressLine1 ?? undefined,
+      address_line_2: row.addressLine2 ?? undefined,
+      locality: row.locality ?? undefined,
+      region: row.region ?? undefined,
+      postal_code: row.postalCode ?? undefined,
+      country: row.country ?? undefined,
+    },
+    sic_codes: row.sicCodes ?? [],
+    accounts: {
+      next_made_up_to: row.accountsNextMadeUpTo ?? undefined,
+      last_accounts: {
+        made_up_to: row.accountsLastMadeUpTo ?? undefined,
       },
-    );
+      overdue: row.accountsOverdue ?? undefined,
+    },
+    jurisdiction: row.jurisdiction ?? undefined,
+    has_been_liquidated: row.hasBeenLiquidated ?? undefined,
+    has_insolvency_history: row.hasInsolvencyHistory ?? undefined,
+    has_charges: row.hasCharges ?? undefined,
+    previous_company_names:
+      row.previousCompanyNames?.map((name) => ({ name })) ?? [],
+    confirmation_statement: {
+      last_made_up_to: row.confirmationStatementLastMadeUpTo ?? undefined,
+    },
+  };
+}
 
-    if (!res.ok) {
-      throw new Error(
-        `Companies House API error: ${res.status} ${res.statusText}`,
-      );
-    }
+function profileToDbRow(profile: CompanyProfile) {
+  return {
+    companyNumber: profile.company_number,
+    companyName: profile.company_name,
+    companyStatus: profile.company_status || null,
+    companyType: profile.type || null,
+    dateOfCreation: profile.date_of_creation || null,
+    addressLine1: profile.registered_office_address?.address_line_1 || null,
+    addressLine2: profile.registered_office_address?.address_line_2 || null,
+    locality: profile.registered_office_address?.locality || null,
+    region: profile.registered_office_address?.region || null,
+    postalCode: profile.registered_office_address?.postal_code || null,
+    country: profile.registered_office_address?.country || null,
+    sicCodes: profile.sic_codes ?? [],
+    accountsNextMadeUpTo: profile.accounts?.next_made_up_to || null,
+    accountsLastMadeUpTo: profile.accounts?.last_accounts?.made_up_to || null,
+    accountsOverdue: profile.accounts?.overdue ?? null,
+    jurisdiction: profile.jurisdiction || null,
+    hasBeenLiquidated: profile.has_been_liquidated ?? null,
+    hasInsolvencyHistory: profile.has_insolvency_history ?? null,
+    hasCharges: profile.has_charges ?? null,
+    previousCompanyNames:
+      profile.previous_company_names?.map((p) => p.name) ?? [],
+    confirmationStatementLastMadeUpTo:
+      profile.confirmation_statement?.last_made_up_to || null,
+    updatedAt: new Date(),
+  };
+}
 
-    const data = await res.json();
-    if (!data.items?.length) return null;
+async function fetchFromApi(
+  path: string,
+): Promise<{ ok: true; data: unknown } | { ok: false; status: number }> {
+  const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
+  if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY is not set');
 
-    return data.items[0] as {
-      company_number: string;
-      title: string;
-      company_status: string;
-      date_of_creation: string;
-      address_snippet: string;
-    };
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
+    },
   });
 
+  if (res.status === 429) {
+    return { ok: false, status: 429 };
+  }
+
+  if (!res.ok) {
+    return { ok: false, status: res.status };
+  }
+
+  return { ok: true, data: await res.json() };
+}
+
+async function upsertProfile(profile: CompanyProfile) {
+  const row = profileToDbRow(profile);
+  await db.insert(companiesHouseProfiles).values(row).onConflictDoUpdate({
+    target: companiesHouseProfiles.companyNumber,
+    set: row,
+  });
+}
+
 export const getCompanyProfile = createServerFn()
-  .inputValidator((input: unknown) => input as { companyNumber: string })
-  .handler(async ({ data: { companyNumber } }) => {
-    const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
-    if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY is not set');
+  .inputValidator((input: unknown) => input as { companyName: string })
+  .handler(async ({ data: { companyName } }) => {
+    // Check DB cache first
+    const [cached] = await db
+      .select()
+      .from(companiesHouseProfiles)
+      .where(ilike(companiesHouseProfiles.companyName, companyName))
+      .limit(1);
 
-    const res = await fetch(`${BASE_URL}/company/${companyNumber}`, {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-      },
-    });
+    let profile: CompanyProfile;
 
-    if (!res.ok) {
-      throw new Error(
-        `Companies House API error: ${res.status} ${res.statusText}`,
+    if (cached) {
+      console.log(`[Profile] cache hit: "${cached.companyName}"`);
+      profile = dbRowToProfile(cached);
+    } else {
+      // Cache miss — search API for company number, then fetch profile
+      console.log(`[Profile] cache miss, calling API for: "${companyName}"`);
+      const searchResult = await fetchFromApi(
+        `/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=1`,
       );
-    }
 
-    const profile = (await res.json()) as {
-      company_name: string;
-      company_number: string;
-      company_status: string;
-      type: string;
-      date_of_creation: string;
-      registered_office_address: {
-        address_line_1?: string;
-        address_line_2?: string;
-        locality?: string;
-        region?: string;
-        postal_code?: string;
-        country?: string;
+      if (!searchResult.ok) return null;
+
+      const searchData = searchResult.data as {
+        items?: { company_number: string }[];
       };
-      sic_codes?: string[];
-      accounts?: {
-        next_made_up_to?: string;
-        last_accounts?: { made_up_to?: string };
-      };
-    };
+      if (!searchData.items?.length) return null;
+
+      const profileResult = await fetchFromApi(
+        `/company/${searchData.items[0].company_number}`,
+      );
+
+      if (!profileResult.ok) return null;
+
+      profile = profileResult.data as CompanyProfile;
+      // Save to cache after response is sent
+      waitUntil(upsertProfile(profile));
+    }
 
     // Look up SIC code descriptions from our database
     let sicDescriptions: { code: string; description: string }[] = [];
@@ -89,5 +185,19 @@ export const getCompanyProfile = createServerFn()
         .where(inArray(sicCodes.code, profile.sic_codes));
     }
 
-    return { ...profile, sicDescriptions };
+    return {
+      company_number: profile.company_number,
+      company_status: profile.company_status,
+      type: profile.type,
+      date_of_creation: profile.date_of_creation,
+      registered_office_address: profile.registered_office_address,
+      accounts: profile.accounts?.last_accounts?.made_up_to
+        ? {
+            last_accounts: {
+              made_up_to: profile.accounts.last_accounts.made_up_to,
+            },
+          }
+        : undefined,
+      sicDescriptions,
+    };
   });

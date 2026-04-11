@@ -46,6 +46,46 @@ export const sicCodes = pgTable('sic_codes', {
   description: text('description').notNull(),
 });
 
+export const companiesHouseProfiles = pgTable(
+  'companies_house_profiles',
+  {
+    companyNumber: varchar('company_number', { length: 20 }).primaryKey(),
+    companyName: varchar('company_name', { length: 255 }).notNull(),
+    companyStatus: varchar('company_status', { length: 50 }),
+    companyType: varchar('company_type', { length: 100 }),
+    dateOfCreation: date('date_of_creation'),
+    addressLine1: varchar('address_line_1', { length: 255 }),
+    addressLine2: varchar('address_line_2', { length: 255 }),
+    locality: varchar('locality', { length: 100 }),
+    region: varchar('region', { length: 100 }),
+    postalCode: varchar('postal_code', { length: 20 }),
+    country: varchar('country', { length: 100 }),
+    sicCodes: text('sic_codes').array().default(sql`'{}'::text[]`),
+    accountsNextMadeUpTo: date('accounts_next_made_up_to'),
+    accountsLastMadeUpTo: date('accounts_last_made_up_to'),
+    accountsOverdue: boolean('accounts_overdue'),
+    jurisdiction: varchar('jurisdiction', { length: 100 }),
+    hasBeenLiquidated: boolean('has_been_liquidated'),
+    hasInsolvencyHistory: boolean('has_insolvency_history'),
+    hasCharges: boolean('has_charges'),
+    previousCompanyNames: text('previous_company_names')
+      .array()
+      .default(sql`'{}'::text[]`),
+    confirmationStatementLastMadeUpTo: date(
+      'confirmation_statement_last_made_up_to',
+    ),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ch_company_name').on(table.companyName),
+    index('idx_ch_company_status').on(table.companyStatus),
+    index('idx_ch_company_type').on(table.companyType),
+    index('idx_ch_sic_codes').using('gin', table.sicCodes),
+    index('idx_ch_jurisdiction').on(table.jurisdiction),
+    index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
+  ],
+);
+
 export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {
   id: serial('id').primaryKey(),
   csvUrl: text('csv_url').notNull(),

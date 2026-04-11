@@ -97,8 +97,8 @@ for (const row of uncached) {
 
   // Check if a crawler cached this while the seed was running
   const [alreadyCached] = await sql`
-    SELECT 1 FROM companies_house_profiles
-    WHERE UPPER(company_name) = ${orgName.toUpperCase()}
+    SELECT 1 FROM hmrc_company_mapping
+    WHERE organisation_name = ${orgName}
     LIMIT 1
   `;
   if (alreadyCached) {

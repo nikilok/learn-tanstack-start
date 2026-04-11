@@ -1,8 +1,9 @@
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { getCompanyProfile, searchCompany } from '../api/companiesHouse';
-import { getHmrcById } from '../api/hmrc';
-import { titleCase } from '../utils';
+import { getCompanyProfile } from '../api/companiesHouse';
+import { getHmrcBySlugId } from '../api/hmrc';
+import { StatusBadge } from '../components/StatusBadge';
+import { formatAddress, formatDate, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
 
 export const Route = createFileRoute('/company/$id/$slug')({
@@ -10,21 +11,15 @@ export const Route = createFileRoute('/company/$id/$slug')({
     search: ((search.search as string) || '').trim(),
   }),
   loader: async ({ params }) => {
-    const sponsor = await getHmrcById({ data: { slugId: params.id } });
+    const sponsor = await getHmrcBySlugId({ data: { slugId: params.id } });
 
     if (!sponsor) {
       throw notFound();
     }
 
-    const searchResult = await searchCompany({
-      data: { query: sponsor.organisationName },
+    const profile = await getCompanyProfile({
+      data: { companyName: sponsor.organisationName },
     });
-
-    const profile = searchResult
-      ? await getCompanyProfile({
-          data: { companyNumber: searchResult.company_number },
-        })
-      : null;
 
     return { sponsor, profile };
   },
@@ -37,6 +32,9 @@ export const Route = createFileRoute('/company/$id/$slug')({
             county?: string | null;
             route: string;
           };
+          profile?: {
+            sicDescriptions?: { code: string; description: string }[];
+          } | null;
         }
       | undefined;
 
@@ -49,17 +47,28 @@ export const Route = createFileRoute('/company/$id/$slug')({
           .map(titleCase)
           .join(', ')
       : '';
+    const industry = loaderData?.profile?.sicDescriptions
+      ?.map((sic) => sic.description)
+      .join(', ');
+    const route = titleCase(loaderData?.sponsor.route ?? 'Skilled Worker');
+    const description = [
+      industry ? `${name} — ${industry}` : name,
+      location
+        ? `Licensed UK ${route} visa sponsor in ${location}`
+        : `Licensed UK ${route} visa sponsor`,
+    ].join('. ');
+
+    const pageTitle = `${name} - UK Visa Sponsor | SponsorSearch`;
+    const pageDescription = `${description}.`;
+
     return {
       meta: [
-        {
-          title: `${name} - UK Visa Sponsor | SponsorSearch`,
-        },
-        {
-          name: 'description',
-          content: location
-            ? `${name} in ${location} — licensed UK ${titleCase(loaderData?.sponsor.route ?? 'Skilled Worker')} visa sponsor. View sponsor details, ratings, and company information.`
-            : `${name} — licensed UK visa sponsor. View sponsor details, ratings, and company information.`,
-        },
+        { title: pageTitle },
+        { name: 'description', content: pageDescription },
+        { property: 'og:title', content: pageTitle },
+        { property: 'og:description', content: pageDescription },
+        { name: 'twitter:title', content: pageTitle },
+        { name: 'twitter:description', content: pageDescription },
       ],
       links: [
         {
@@ -74,55 +83,6 @@ export const Route = createFileRoute('/company/$id/$slug')({
   },
   component: CompanyDetail,
 });
-
-function formatAddress(
-  address?: {
-    address_line_1?: string;
-    address_line_2?: string;
-    locality?: string;
-    region?: string;
-    postal_code?: string;
-    country?: string;
-  } | null,
-) {
-  if (!address) return '';
-  return [
-    address.address_line_1,
-    address.address_line_2,
-    address.locality,
-    address.region,
-    address.postal_code,
-    address.country,
-  ]
-    .filter(Boolean)
-    .join(', ');
-}
-
-function formatDate(dateStr?: string | null) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const isActive = status === 'active';
-  return (
-    <span
-      className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
-        isActive
-          ? 'border border-[#16a34a]/40 text-[#16a34a]'
-          : 'border border-[#dc2626]/40 text-[#dc2626]'
-      }`}
-    >
-      {titleCase(status)}
-    </span>
-  );
-}
 
 function CompanyDetail() {
   const { sponsor, profile } = Route.useLoaderData();

@@ -63,6 +63,17 @@ export const companiesHouseProfiles = pgTable(
     sicCodes: text('sic_codes').array().default(sql`'{}'::text[]`),
     accountsNextMadeUpTo: date('accounts_next_made_up_to'),
     accountsLastMadeUpTo: date('accounts_last_made_up_to'),
+    accountsOverdue: boolean('accounts_overdue'),
+    jurisdiction: varchar('jurisdiction', { length: 100 }),
+    hasBeenLiquidated: boolean('has_been_liquidated'),
+    hasInsolvencyHistory: boolean('has_insolvency_history'),
+    hasCharges: boolean('has_charges'),
+    previousCompanyNames: text('previous_company_names')
+      .array()
+      .default(sql`'{}'::text[]`),
+    confirmationStatementLastMadeUpTo: date(
+      'confirmation_statement_last_made_up_to',
+    ),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => [
@@ -70,6 +81,8 @@ export const companiesHouseProfiles = pgTable(
     index('idx_ch_company_status').on(table.companyStatus),
     index('idx_ch_company_type').on(table.companyType),
     index('idx_ch_sic_codes').using('gin', table.sicCodes),
+    index('idx_ch_jurisdiction').on(table.jurisdiction),
+    index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
   ],
 );
 

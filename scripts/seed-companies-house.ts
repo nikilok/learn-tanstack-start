@@ -10,24 +10,24 @@
  * - Logs progress every 100 companies
  */
 
-import { neon } from "@neondatabase/serverless";
-import dotenv from "dotenv";
-import { drizzle } from "drizzle-orm/neon-http";
-import { companiesHouseProfiles } from "../src/db/schema";
+import { neon } from '@neondatabase/serverless';
+import dotenv from 'dotenv';
+import { drizzle } from 'drizzle-orm/neon-http';
+import { companiesHouseProfiles } from '../src/db/schema';
 
-dotenv.config({ path: ".env.local" });
+dotenv.config({ path: '.env.local' });
 
 const sql = neon(process.env.POSTGRES_URL as string);
 const db = drizzle({ client: sql });
 
-const BASE_URL = "https://api.company-information.service.gov.uk";
+const BASE_URL = 'https://api.company-information.service.gov.uk';
 const API_KEY = process.env.COMPANIES_HOUSE_SEED_API_KEY as string;
 if (!API_KEY)
   throw new Error(
-    "Set COMPANIES_HOUSE_SEED_API_KEY in .env.local (use a separate key from production)",
+    'Set COMPANIES_HOUSE_SEED_API_KEY in .env.local (use a separate key from production)',
   );
 
-const AUTH_HEADER = `Basic ${Buffer.from(`${API_KEY}:`).toString("base64")}`;
+const AUTH_HEADER = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
 
 // ~2 requests per second to stay within 600/5min
 const DELAY_MS = 550;
@@ -43,7 +43,7 @@ async function fetchApi(path: string): Promise<unknown | null> {
 
   if (res.status === 429) {
     // Rate limited — back off for 60 seconds then retry
-    console.log("  Rate limited, backing off for 60s...");
+    console.log('  Rate limited, backing off for 60s...');
     await sleep(60_000);
     return fetchApi(path);
   }
@@ -144,6 +144,15 @@ for (const row of allOrgs) {
     accounts?: {
       next_made_up_to?: string;
       last_accounts?: { made_up_to?: string };
+      overdue?: boolean;
+    };
+    jurisdiction?: string;
+    has_been_liquidated?: boolean;
+    has_insolvency_history?: boolean;
+    has_charges?: boolean;
+    previous_company_names?: { name: string }[];
+    confirmation_statement?: {
+      last_made_up_to?: string;
     };
   } | null;
 
@@ -173,6 +182,15 @@ for (const row of allOrgs) {
       sicCodes: profile.sic_codes ?? [],
       accountsNextMadeUpTo: profile.accounts?.next_made_up_to || null,
       accountsLastMadeUpTo: profile.accounts?.last_accounts?.made_up_to || null,
+      accountsOverdue: profile.accounts?.overdue ?? null,
+      jurisdiction: profile.jurisdiction || null,
+      hasBeenLiquidated: profile.has_been_liquidated ?? null,
+      hasInsolvencyHistory: profile.has_insolvency_history ?? null,
+      hasCharges: profile.has_charges ?? null,
+      previousCompanyNames:
+        profile.previous_company_names?.map((p) => p.name) ?? [],
+      confirmationStatementLastMadeUpTo:
+        profile.confirmation_statement?.last_made_up_to || null,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -181,6 +199,19 @@ for (const row of allOrgs) {
         companyName: profile.company_name,
         companyStatus: profile.company_status || null,
         companyType: profile.type || null,
+        sicCodes: profile.sic_codes ?? [],
+        accountsNextMadeUpTo: profile.accounts?.next_made_up_to || null,
+        accountsLastMadeUpTo:
+          profile.accounts?.last_accounts?.made_up_to || null,
+        accountsOverdue: profile.accounts?.overdue ?? null,
+        jurisdiction: profile.jurisdiction || null,
+        hasBeenLiquidated: profile.has_been_liquidated ?? null,
+        hasInsolvencyHistory: profile.has_insolvency_history ?? null,
+        hasCharges: profile.has_charges ?? null,
+        previousCompanyNames:
+          profile.previous_company_names?.map((p) => p.name) ?? [],
+        confirmationStatementLastMadeUpTo:
+          profile.confirmation_statement?.last_made_up_to || null,
         updatedAt: new Date(),
       },
     });

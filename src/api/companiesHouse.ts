@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
-import { eq, ilike, inArray } from 'drizzle-orm';
+import { waitUntil } from '@vercel/functions';
+import { ilike, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { companiesHouseProfiles, sicCodes } from '../db/schema';
 
@@ -23,6 +24,15 @@ type CompanyProfile = {
   accounts?: {
     next_made_up_to?: string;
     last_accounts?: { made_up_to?: string };
+    overdue?: boolean;
+  };
+  jurisdiction?: string;
+  has_been_liquidated?: boolean;
+  has_insolvency_history?: boolean;
+  has_charges?: boolean;
+  previous_company_names?: { name: string }[];
+  confirmation_statement?: {
+    last_made_up_to?: string;
   };
 };
 
@@ -49,6 +59,16 @@ function dbRowToProfile(
       last_accounts: {
         made_up_to: row.accountsLastMadeUpTo ?? undefined,
       },
+      overdue: row.accountsOverdue ?? undefined,
+    },
+    jurisdiction: row.jurisdiction ?? undefined,
+    has_been_liquidated: row.hasBeenLiquidated ?? undefined,
+    has_insolvency_history: row.hasInsolvencyHistory ?? undefined,
+    has_charges: row.hasCharges ?? undefined,
+    previous_company_names:
+      row.previousCompanyNames?.map((name) => ({ name })) ?? [],
+    confirmation_statement: {
+      last_made_up_to: row.confirmationStatementLastMadeUpTo ?? undefined,
     },
   };
 }
@@ -69,6 +89,15 @@ function profileToDbRow(profile: CompanyProfile) {
     sicCodes: profile.sic_codes ?? [],
     accountsNextMadeUpTo: profile.accounts?.next_made_up_to || null,
     accountsLastMadeUpTo: profile.accounts?.last_accounts?.made_up_to || null,
+    accountsOverdue: profile.accounts?.overdue ?? null,
+    jurisdiction: profile.jurisdiction || null,
+    hasBeenLiquidated: profile.has_been_liquidated ?? null,
+    hasInsolvencyHistory: profile.has_insolvency_history ?? null,
+    hasCharges: profile.has_charges ?? null,
+    previousCompanyNames:
+      profile.previous_company_names?.map((p) => p.name) ?? [],
+    confirmationStatementLastMadeUpTo:
+      profile.confirmation_statement?.last_made_up_to || null,
     updatedAt: new Date(),
   };
 }
@@ -104,81 +133,44 @@ async function upsertProfile(profile: CompanyProfile) {
   });
 }
 
-export const searchCompany = createServerFn()
-  .inputValidator((input: unknown) => input as { query: string })
-  .handler(async ({ data: { query } }) => {
-    const result = await fetchFromApi(
-      `/search/companies?q=${encodeURIComponent(query)}&items_per_page=1`,
-    );
-
-    if (result.ok) {
-      const data = result.data as {
-        items?: {
-          company_number: string;
-          title: string;
-          company_status: string;
-          date_of_creation: string;
-          address_snippet: string;
-        }[];
-      };
-      if (!data.items?.length) return null;
-      return data.items[0];
-    }
-
-    // On 429 or other errors, fall back to cached data
+export const getCompanyProfile = createServerFn()
+  .inputValidator((input: unknown) => input as { companyName: string })
+  .handler(async ({ data: { companyName } }) => {
+    // Check DB cache first
     const [cached] = await db
       .select()
       .from(companiesHouseProfiles)
-      .where(ilike(companiesHouseProfiles.companyName, query))
+      .where(ilike(companiesHouseProfiles.companyName, companyName))
       .limit(1);
-
-    if (cached) {
-      return {
-        company_number: cached.companyNumber,
-        title: cached.companyName,
-        company_status: cached.companyStatus ?? '',
-        date_of_creation: cached.dateOfCreation ?? '',
-        address_snippet: [
-          cached.addressLine1,
-          cached.locality,
-          cached.postalCode,
-        ]
-          .filter(Boolean)
-          .join(', '),
-      };
-    }
-
-    throw new Error(
-      `Companies House API error: ${result.status} and no cached data available`,
-    );
-  });
-
-export const getCompanyProfile = createServerFn()
-  .inputValidator((input: unknown) => input as { companyNumber: string })
-  .handler(async ({ data: { companyNumber } }) => {
-    const result = await fetchFromApi(`/company/${companyNumber}`);
 
     let profile: CompanyProfile;
 
-    if (result.ok) {
-      profile = result.data as CompanyProfile;
-      // Update cache in the background — don't block the response
-      upsertProfile(profile).catch(() => {});
-    } else {
-      // On 429 or other errors, fall back to cached data
-      const [cached] = await db
-        .select()
-        .from(companiesHouseProfiles)
-        .where(eq(companiesHouseProfiles.companyNumber, companyNumber))
-        .limit(1);
-
-      if (!cached) {
-        throw new Error(
-          `Companies House API error: ${result.status} and no cached data available`,
-        );
-      }
-
+    if (cached) {
+      console.log(`[Profile] cache hit: "${cached.companyName}"`);
       profile = dbRowToProfile(cached);
+    } else {
+      // Cache miss — search API for company number, then fetch profile
+      console.log(`[Profile] cache miss, calling API for: "${companyName}"`);
+      const searchResult = await fetchFromApi(
+        `/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=1`,
+      );
+
+      if (!searchResult.ok) return null;
+
+      const searchData = searchResult.data as {
+        items?: { company_number: string }[];
+      };
+      if (!searchData.items?.length) return null;
+
+      const profileResult = await fetchFromApi(
+        `/company/${searchData.items[0].company_number}`,
+      );
+
+      if (!profileResult.ok) return null;
+
+      profile = profileResult.data as CompanyProfile;
+      // Save to cache after response is sent
+      waitUntil(upsertProfile(profile));
     }
 
     // Look up SIC code descriptions from our database
@@ -193,5 +185,19 @@ export const getCompanyProfile = createServerFn()
         .where(inArray(sicCodes.code, profile.sic_codes));
     }
 
-    return { ...profile, sicDescriptions };
+    return {
+      company_number: profile.company_number,
+      company_status: profile.company_status,
+      type: profile.type,
+      date_of_creation: profile.date_of_creation,
+      registered_office_address: profile.registered_office_address,
+      accounts: profile.accounts?.last_accounts?.made_up_to
+        ? {
+            last_accounts: {
+              made_up_to: profile.accounts.last_accounts.made_up_to,
+            },
+          }
+        : undefined,
+      sicDescriptions,
+    };
   });

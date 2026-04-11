@@ -86,6 +86,11 @@ export const companiesHouseProfiles = pgTable(
   ],
 );
 
+export const hmrcCompanyMapping = pgTable('hmrc_company_mapping', {
+  organisationName: text('organisation_name').primaryKey(),
+  companyNumber: varchar('company_number', { length: 20 }).notNull(),
+});
+
 export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {
   id: serial('id').primaryKey(),
   csvUrl: text('csv_url').notNull(),

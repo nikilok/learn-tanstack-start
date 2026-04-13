@@ -1,7 +1,9 @@
+import { join } from 'node:path';
 import { parse } from 'csv-parse/sync';
 
-const csvPath = './csv/2026-03-31-Worker.csv';
-const sqlPath = './drizzle/0008_seed_hmrc_skilled_workers.sql';
+const root = join(import.meta.dirname, '..');
+const csvPath = join(root, 'csv', '2026-03-31-Worker.csv');
+const sqlPath = join(root, 'drizzle', '0008_seed_hmrc_skilled_workers.sql');
 const file = await Bun.file(csvPath).text();
 
 const records: Array<{

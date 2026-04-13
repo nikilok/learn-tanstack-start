@@ -10,3 +10,6 @@ dist
 .vercel
 .env*.local
 src/data/sic-codes.json
+
+# Turborepo
+.turbo

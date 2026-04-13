@@ -1,0 +1,4 @@
+{
+  "regions": ["lhr1"],
+  "outputDirectory": ".vercel/output"
+}

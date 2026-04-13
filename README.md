@@ -1,80 +1,65 @@
 # UK Visa Sponsor Search
 
-Search UK skilled worker visa sponsors and view detailed company profiles. Built with TanStack Start and [more](#tech-stack).
+Monorepo for [sponsorsearch.co.uk](https://sponsorsearch.co.uk) — search UK skilled worker visa sponsors and view detailed company profiles.
 
-**Live:** [sponsorsearch.co.uk](https://sponsorsearch.co.uk)
+## Structure
 
-## Features
-
-- **Full-text search** of HMRC skilled worker sponsor register with relevance scoring
-- **Company detail pages** with Companies House profile data (status, SIC codes, registered address, accounts)
-- **Infinite scroll** with virtual rendering for fast performance on large result sets
-- **Google Maps link** for registered office addresses
-- **Dark mode** toggle
-- **Keyboard shortcut** (CMD/CTRL+K) to focus search, or just start typing anywhere on desktop
-- **URL-based search state** so results are shareable and back-navigation preserves context
-
-## Tech stack
-
-- **Framework:** TanStack Start (React 19 + TanStack Router)
-- **Data fetching & client-side caching:** TanStack Query
-- **Virtualisation:** TanStack Virtual
-- **Database:** Neon Postgres (serverless) via Drizzle ORM
-- **APIs:** Companies House API (server-side via `createServerFn`)
-- **Styling:** Tailwind CSS v4
-- **Testing:** Vitest + Playwright
-- **Linting:** Biome
-- **Deployment:** Vercel via Nitro
-- **Runtime:** Bun
-
-## Automated data sync
-
-A GitHub Actions workflow runs every Monday at 8:00 AM UTC to keep the sponsor data up to date.
-
-1. **Discover CSV URL** — An agentic script uses Claude (Anthropic SDK) + Playwright to navigate gov.uk headlessly and find the latest HMRC licensed sponsors CSV download link
-2. **Ingest** — Downloads the CSV, validates its checksum against the last ingestion to skip unchanged data, then performs a zero-downtime atomic table swap (staging table → bulk insert → index → swap)
-
-Ingestion metadata (URL, checksum, record count) is tracked in the database so duplicate runs are no-ops.
+```
+apps/
+  web/        → TanStack Start web app (deployed to Vercel)
+```
 
 ## Getting started
 
 ```bash
-bun install
-bun run dev
+bun install       # Install all workspace dependencies
 ```
 
-## Scripts
+### Local development
 
-### Development
+Dev servers use [portless](https://portless.sh) for clean `.localhost` URLs with HTTPS. One-time setup:
 
 ```bash
-bun run dev                  # Start dev server on port 3000
-bun run build                # Production build
-bun run preview              # Preview production build
-bun run test                 # Run tests (Vitest)
-bun run lint                 # Lint with Biome
-bun run lint:fix             # Auto-fix lint issues
+sudo bunx portless proxy start --https
 ```
 
-### Database
+Then start developing:
 
 ```bash
-bun run db:generate          # Generate migration from schema changes
-bun run db:create-migration  # Create a custom data migration
-bun run db:migrate           # Apply pending migrations
-bun run db:reset             # Drop all tables and re-migrate
-bun run db:push              # Push schema directly (no migration)
-bun run db:studio            # Open Drizzle Studio
-bun run db:ingest            # Ingest HMRC CSV data
-bun run db:seed-sic          # Seed SIC code descriptions
+bun run dev       # Start all apps (web → https://web.localhost)
 ```
 
-### Data & utilities
+To test on other devices (phone/tablet) on the same WiFi:
 
 ```bash
-bun run hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
-bun run company:lookup       # Look up a company via Companies House API
-bun run sitemap:generate     # Generate sitemap.xml
-bun run sic:fetch            # Fetch SIC codes from Companies House
-bun run render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
+sudo bunx portless proxy start --lan --https    # Restart proxy in LAN mode
+bun run dev                                      # Access via https://web.local on any device
 ```
+
+To skip portless and use `localhost:3000` directly:
+
+```bash
+bun run --filter @ss/web dev:no-proxy
+```
+
+### Other commands
+
+```bash
+bun run build     # Build all apps
+bun run lint      # Lint all apps
+```
+
+To target a specific app:
+
+```bash
+bun run build --filter=@ss/web
+```
+
+## Tech stack
+
+- **Monorepo:** Turborepo with bun workspaces
+- **Web app:** TanStack Start (React 19), Tailwind CSS v4, Drizzle ORM, Neon Postgres
+- **Deployment:** Vercel (web)
+- **CI:** GitHub Actions (automated HMRC data sync)
+
+See [apps/web/README.md](apps/web/README.md) for web app details.

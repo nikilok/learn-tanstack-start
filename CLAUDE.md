@@ -42,7 +42,7 @@ This is acceptable because:
    scroll restores, so it incorrectly sets `ready=true`.
 
 ### Key files
-- `src/components/SearchBar.tsx` — opacity logic (inline style)
-- `src/hooks/useSearchPill.ts` — `ready` and `isStuck` state
-- `src/components/HmrcResults.tsx` — skeleton shown via `isLoading`, not Suspense fallback
-- `src/routes/index.tsx` — Suspense boundary wraps HmrcResults only, not SearchBar
+- `apps/web/src/components/SearchBar.tsx` — opacity logic (inline style)
+- `apps/web/src/hooks/useSearchPill.ts` — `ready` and `isStuck` state
+- `apps/web/src/components/HmrcResults.tsx` — skeleton shown via `isLoading`, not Suspense fallback
+- `apps/web/src/routes/index.tsx` — Suspense boundary wraps HmrcResults only, not SearchBar

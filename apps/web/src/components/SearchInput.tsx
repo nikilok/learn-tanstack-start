@@ -73,7 +73,7 @@ export default memo(function SearchInput({
   }, [defaultValue]);
 
   return (
-    <div className="relative" style={{ transform: 'translateZ(0)' }}>
+    <div className={`relative ${styles.inputWrapper}`}>
       <input
         ref={inputRef}
         type="text"

@@ -1,48 +1,37 @@
 # Project Notes
 
-## Search input visibility (SearchBar + useSearchPill)
+## Search input visibility — things that break (non-obvious)
 
-The search input in `SearchBar.tsx` is wrapped in a div with inline `opacity: 0/1`
-controlled by two flags: `ready` and `showPill` from the `useSearchPill` hook.
+### Approaches that cause input flashes — do NOT use
 
-### How it works
-
-- `ready` starts `false`, becomes `true` when the IntersectionObserver fires
-- `showPill` is `true` when scrolled past the sentinel with an active search term
-- Input wrapper: `opacity: !ready || showPill ? 0 : 1`
-- Server renders `opacity: 0` (observer is client-only, so `ready` is always `false`)
-- After hydration, observer fires, `ready` becomes `true`, input appears
-
-### Known limitation
-
-If the Vercel serverless function or Neon DB cold-starts, the SSR HTML arrives with the
-input at `opacity: 0`. The input stays invisible until JS hydrates and the observer fires.
-During this time the skeleton cards show (from `HmrcResults` `isLoading` check, not the
-Suspense boundary) but the search input is hidden.
-
-This is acceptable because:
-- If the server is slow enough that the input is hidden, the user can't search anyway
-  (no JS = no interactivity)
-- The correct fix is graceful error handling on the query side (timeout/error boundary),
-  not visibility hacks on the input
-
-### Approaches that were tried and failed — do NOT use
-
-1. **`useLayoutEffect` to set opacity** (no inline style, server renders visible) — fixes
-   the cold-start visibility issue but causes the input to flash when reloading while
+1. **`useLayoutEffect` to set opacity** — causes the input to flash when reloading while
    scrolled down. `useLayoutEffect` is a no-op on the server so the HTML has no opacity
    style, and the input is visible for one frame before JS hides it.
-2. **Default `ready` to `true`** — causes a flash of the input when navigating back from
-   the company detail page while scrolled down.
-3. **Change opacity condition to `showPill || (!ready && isStuck)`** — causes the input
-   to flash on initial paint before hydration hides it, because the sentinel is briefly
-   in the viewport during layout before scroll position restores.
-4. **Synchronous `getBoundingClientRect` check in `useSearchPill` effect** — same flash
-   problem as #3. On back-navigation the sentinel is momentarily in-viewport before
-   scroll restores, so it incorrectly sets `ready=true`.
+2. **Default `ready` to `true`** — causes a flash when navigating back from the company
+   detail page while scrolled down.
+3. **`showPill || (!ready && isStuck)` opacity condition** — causes a flash on initial
+   paint because the sentinel is briefly in-viewport during layout before scroll restores.
+4. **Synchronous `getBoundingClientRect` in `useSearchPill` effect** — same flash as #3.
+   On back-navigation the sentinel is momentarily in-viewport before scroll restores.
 
-### Key files
-- `apps/web/src/components/SearchBar.tsx` — opacity logic (inline style)
-- `apps/web/src/hooks/useSearchPill.ts` — `ready` and `isStuck` state
-- `apps/web/src/components/HmrcResults.tsx` — skeleton shown via `isLoading`, not Suspense fallback
-- `apps/web/src/routes/index.tsx` — Suspense boundary wraps HmrcResults only, not SearchBar
+### Do NOT add `!pillClickedRef.current` guards in the observer
+
+The observer must always set `isStuck` and always reset `pillClicked` when the sentinel
+enters the viewport. Guards on these create a deadlock: `useSearchShortcut` sets
+`pillClicked = true` when a printable key is pressed with `activeElement: BODY` (happens
+on page load and back-navigation). The guard then prevents the observer from setting
+`isStuck = true`, and the only reset path (`onBlur`) requires `isStuck` to be `true`.
+Result: pill never shows. The `onActivate` callback must be conditional on
+`isStuckRef.current` to avoid this.
+
+### `isStuck = false` must be debounced
+
+When results reload, the page height changes (content → skeletons → new content) and can
+briefly pull the sentinel back into the viewport. Without debouncing, `isStuck` toggles
+rapidly and the input blinks between visible and pill mode (especially on iOS Safari).
+
+### `transform: translateZ(0)` on SearchInput — focus-within only
+
+Needed for iOS Safari cursor positioning in sticky containers, but applying it permanently
+causes iOS Safari's GPU compositor to garble rotating placeholder text. Must only apply
+via `:focus-within` in `SearchInput.module.css`. Do NOT add it as a permanent inline style.

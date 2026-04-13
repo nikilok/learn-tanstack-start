@@ -9,6 +9,7 @@ export function useSearchPill(
   const [ready, setReady] = useState(false);
   const [pillClicked, setPillClicked] = useState(false);
   const pillClickedRef = useRef(false);
+  const isStuckRef = useRef(false);
 
   useEffect(() => {
     pillClickedRef.current = pillClicked;
@@ -23,25 +24,54 @@ export function useSearchPill(
     }
   }, [pillClicked, sentinelRef]);
 
+  const unstickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
-      ([entry]) => {
+      (entries) => {
+        // Use the last entry — fast scrolling can batch multiple threshold
+        // crossings into a single callback; only the final one is current.
+        const entry = entries[entries.length - 1];
         setReady(true);
-        if (!pillClickedRef.current) {
-          setIsStuck(!entry.isIntersecting);
+
+        if (!entry.isIntersecting) {
+          // Sentinel left viewport — stick immediately
+          if (unstickTimerRef.current) {
+            clearTimeout(unstickTimerRef.current);
+            unstickTimerRef.current = null;
+          }
+          setIsStuck(true);
+          isStuckRef.current = true;
+        } else {
+          // Sentinel re-entered viewport — defer the reset to filter out
+          // transient reflows (results reloading can briefly shrink the page,
+          // pulling the sentinel back into view before new content pushes it
+          // out again). Without this, isStuck toggles rapidly → the input
+          // blinks between visible and pill mode on iOS Safari.
+          if (unstickTimerRef.current) clearTimeout(unstickTimerRef.current);
+          unstickTimerRef.current = setTimeout(() => {
+            setIsStuck(false);
+            isStuckRef.current = false;
+            setPillClicked(false);
+            unstickTimerRef.current = null;
+          }, 150);
         }
-        if (entry.isIntersecting && !pillClickedRef.current)
-          setPillClicked(false);
       },
       { threshold: 0 },
     );
     observer.observe(sentinel);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (unstickTimerRef.current) clearTimeout(unstickTimerRef.current);
+    };
   }, [sentinelRef]);
 
-  useSearchShortcut(inputRef, () => setPillClicked(true));
+  // Only activate pill mode when scrolled past the sentinel
+  useSearchShortcut(inputRef, () => {
+    if (isStuckRef.current) setPillClicked(true);
+  });
 
   return {
     isStuck,

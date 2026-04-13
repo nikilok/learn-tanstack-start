@@ -1,6 +1,6 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-const root = join(import.meta.dirname, '..', '..', '..', 'packages', 'db');
+const root = dirname(require.resolve('@ss/db/package.json'));
 
 const name = process.argv[2];
 if (!name) {

@@ -79,7 +79,7 @@ jobs:
             echo "No sitemap changes to commit"
             exit 0
           fi
-          BRANCH="chore/update-sitemaps-$(date +%Y%m%d)"
+          BRANCH="chore/update-sitemaps-$(date +%Y%m%d-%H%M%S)"
           git checkout -b "$BRANCH"
           git commit -m "chore: regenerate sitemaps after ingestion"
           git push -u origin "$BRANCH"

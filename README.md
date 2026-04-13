@@ -21,7 +21,7 @@ bun run lint      # Lint all apps
 To target a specific app:
 
 ```bash
-bun run build --filter=@repo/web
+bun run build --filter=@ss/web
 ```
 
 ## Tech stack

@@ -1,4 +1,4 @@
-# @repo/web
+# @ss/web
 
 The TanStack Start web app for [sponsorsearch.co.uk](https://sponsorsearch.co.uk).
 
@@ -36,36 +36,39 @@ Ingestion metadata (URL, checksum, record count) is tracked in the database so d
 
 ## Scripts
 
+All scripts can be run from the repo root using `bun run --filter @ss/web <script>`.
+
 ### Development
 
 ```bash
-bun run dev                  # Start dev server on port 3000
-bun run build                # Production build
-bun run preview              # Preview production build
-bun run test                 # Run tests (Vitest)
-bun run lint                 # Lint with Biome
-bun run lint:fix             # Auto-fix lint issues
+bun run --filter @ss/web dev                  # Start dev server on port 3000
+bun run --filter @ss/web dev:host             # Start dev server exposed to network
+bun run --filter @ss/web build                # Production build
+bun run --filter @ss/web preview              # Preview production build
+bun run --filter @ss/web test                 # Run tests (Vitest)
+bun run --filter @ss/web lint                 # Lint with Biome
+bun run --filter @ss/web lint:fix             # Auto-fix lint issues
 ```
 
 ### Database
 
 ```bash
-bun run db:generate          # Generate migration from schema changes
-bun run db:create-migration  # Create a custom data migration
-bun run db:migrate           # Apply pending migrations
-bun run db:reset             # Drop all tables and re-migrate
-bun run db:push              # Push schema directly (no migration)
-bun run db:studio            # Open Drizzle Studio
-bun run db:ingest            # Ingest HMRC CSV data
-bun run db:seed-sic          # Seed SIC code descriptions
+bun run --filter @ss/web db:generate          # Generate migration from schema changes
+bun run --filter @ss/web db:create-migration  # Create a custom data migration
+bun run --filter @ss/web db:migrate           # Apply pending migrations
+bun run --filter @ss/web db:reset             # Drop all tables and re-migrate
+bun run --filter @ss/web db:push              # Push schema directly (no migration)
+bun run --filter @ss/web db:studio            # Open Drizzle Studio
+bun run --filter @ss/web db:ingest            # Ingest HMRC CSV data
+bun run --filter @ss/web db:seed-sic          # Seed SIC code descriptions
 ```
 
 ### Data & utilities
 
 ```bash
-bun run hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
-bun run company:lookup       # Look up a company via Companies House API
-bun run sitemap:generate     # Generate sitemap.xml
-bun run sic:fetch            # Fetch SIC codes from Companies House
-bun run render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
+bun run --filter @ss/web hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
+bun run --filter @ss/web company:lookup       # Look up a company via Companies House API
+bun run --filter @ss/web sitemap:generate     # Generate sitemap.xml
+bun run --filter @ss/web sic:fetch            # Fetch SIC codes from Companies House
+bun run --filter @ss/web render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
 ```

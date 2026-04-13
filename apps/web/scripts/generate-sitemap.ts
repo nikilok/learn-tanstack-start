@@ -1,8 +1,8 @@
 import { join } from 'node:path';
+import { hmrcSkilledWorkers } from '@ss/db';
 import { Glob } from 'bun';
 import { sql } from 'drizzle-orm';
-import { db } from '../src/db';
-import { hmrcSkilledWorkers } from '../src/db/schema';
+import { db } from '../src/db.server';
 import { slugify } from '../src/utils';
 
 const BASE_URL = 'https://sponsorsearch.co.uk';

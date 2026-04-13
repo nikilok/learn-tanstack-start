@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-const root = join(import.meta.dirname, '..');
+const root = join(import.meta.dirname, '..', '..', '..', 'packages', 'db');
 
 const name = process.argv[2];
 if (!name) {
@@ -8,12 +8,12 @@ if (!name) {
   process.exit(1);
 }
 
-const journalPath = join(root, 'drizzle', 'meta', '_journal.json');
+const journalPath = join(root, 'migrations', 'meta', '_journal.json');
 const journal = await Bun.file(journalPath).json();
 
 const nextIdx = journal.entries.length;
 const tag = `${String(nextIdx).padStart(4, '0')}_${name}`;
-const sqlPath = join(root, 'drizzle', `${tag}.sql`);
+const sqlPath = join(root, 'migrations', `${tag}.sql`);
 
 await Bun.write(sqlPath, '-- Write your SQL here\n');
 

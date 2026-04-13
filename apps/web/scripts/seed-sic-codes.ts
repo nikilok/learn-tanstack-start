@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import sicCodes from '../src/data/sic-codes.json';
+import sicCodes from '../data/sic-codes.json';
 
 const sql = neon(process.env.POSTGRES_URL as string);
 

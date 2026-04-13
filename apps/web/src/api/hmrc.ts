@@ -1,7 +1,7 @@
+import { hmrcSkilledWorkers } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
 import { desc, eq, sql } from 'drizzle-orm';
-import { db } from '../db';
-import { hmrcSkilledWorkers } from '../db/schema';
+import { db } from '../db.server';
 
 const PAGE_SIZE = 50;
 

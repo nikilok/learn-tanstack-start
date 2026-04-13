@@ -17,7 +17,7 @@ The TanStack Start web app for [sponsorsearch.co.uk](https://sponsorsearch.co.uk
 - **Framework:** TanStack Start (React 19 + TanStack Router)
 - **Data fetching & client-side caching:** TanStack Query
 - **Virtualisation:** TanStack Virtual
-- **Database:** Neon Postgres (serverless) via Drizzle ORM
+- **Database:** [`@ss/db`](../../packages/db/README.md) (shared Neon Postgres schema + client)
 - **APIs:** Companies House API (server-side via `createServerFn`)
 - **Styling:** Tailwind CSS v4
 - **Testing:** Vitest + Playwright
@@ -30,45 +30,47 @@ The TanStack Start web app for [sponsorsearch.co.uk](https://sponsorsearch.co.uk
 A GitHub Actions workflow runs every Monday at 8:00 AM UTC to keep the sponsor data up to date.
 
 1. **Discover CSV URL** — An agentic script uses Claude (Anthropic SDK) + Playwright to navigate gov.uk headlessly and find the latest HMRC licensed sponsors CSV download link
-2. **Ingest** — Downloads the CSV, validates its checksum against the last ingestion to skip unchanged data, then performs a zero-downtime atomic table swap (staging table → bulk insert → index → swap)
+2. **Ingest** — Downloads the CSV, validates its checksum against the last ingestion to skip unchanged data, then performs a zero-downtime atomic table swap (staging table -> bulk insert -> index -> swap)
 
 Ingestion metadata (URL, checksum, record count) is tracked in the database so duplicate runs are no-ops.
 
 ## Scripts
 
-All scripts can be run from the repo root using `bun run --filter @ss/web <script>`.
+All scripts have root shortcuts via turbo (e.g. `bun run db:migrate` from the repo root).
 
 ### Development
 
 ```bash
-bun run --filter @ss/web dev                  # Start dev server (https://web.localhost)
-bun run --filter @ss/web dev:no-proxy         # Start dev server on localhost:3000 (no portless)
-bun run --filter @ss/web build                # Production build
-bun run --filter @ss/web preview              # Preview production build
-bun run --filter @ss/web test                 # Run tests (Vitest)
-bun run --filter @ss/web lint                 # Lint with Biome
-bun run --filter @ss/web lint:fix             # Auto-fix lint issues
+bun run dev                  # Start dev server (https://web.localhost)
+bun run build                # Production build
+bun run test                 # Run tests (Vitest)
+bun run lint                 # Lint with Biome
+bun run lint:fix             # Auto-fix lint issues
 ```
 
 ### Database
 
 ```bash
-bun run --filter @ss/web db:generate          # Generate migration from schema changes
-bun run --filter @ss/web db:create-migration  # Create a custom data migration
-bun run --filter @ss/web db:migrate           # Apply pending migrations
-bun run --filter @ss/web db:reset             # Drop all tables and re-migrate
-bun run --filter @ss/web db:push              # Push schema directly (no migration)
-bun run --filter @ss/web db:studio            # Open Drizzle Studio
-bun run --filter @ss/web db:ingest            # Ingest HMRC CSV data
-bun run --filter @ss/web db:seed-sic          # Seed SIC code descriptions
+bun run db:migrate           # Apply pending migrations
+bun run db:generate          # Generate migration from schema changes
+bun run db:create-migration  # Create a custom data migration
+bun run db:push              # Push schema directly (no migration)
+bun run db:studio            # Open Drizzle Studio
 ```
 
 ### Data & utilities
 
 ```bash
-bun run --filter @ss/web hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
-bun run --filter @ss/web company:lookup       # Look up a company via Companies House API
-bun run --filter @ss/web sitemap:generate     # Generate sitemap.xml
-bun run --filter @ss/web sic:fetch            # Fetch SIC codes from Companies House
-bun run --filter @ss/web render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
+bun run db:ingest            # Ingest HMRC CSV data
+bun run db:seed-sic          # Seed SIC code descriptions
+bun run hmrc:find-csv        # Find latest HMRC sponsors CSV URL via agentic script
+bun run company:lookup       # Look up a company via Companies House API
+bun run seed:companies-house # Seed Companies House profiles for all sponsors
+bun run sitemap:generate     # Generate sitemap.xml
+bun run sic:fetch            # Fetch SIC codes from Companies House
+bun run render:og            # Render OG images for all platforms (Facebook, Twitter, Instagram)
 ```
+
+## Environment variables
+
+See [`.env.example`](.env.example) for app-specific variables and [`../../.env.example`](../../.env.example) for shared database variables.

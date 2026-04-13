@@ -87,4 +87,4 @@ jobs:
           git commit -m "chore: regenerate sitemaps after ingestion"
           git push -u origin "$BRANCH"
           PR_URL=$(gh pr create --title "chore: regenerate sitemaps after ingestion" --body "Automated sitemap update from HMRC ingestion workflow." --base main)
-          gh pr merge "$PR_URL" --squash --delete-branch
+          gh pr merge "$PR_URL" --squash --auto

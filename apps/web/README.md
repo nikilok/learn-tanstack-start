@@ -41,8 +41,8 @@ All scripts can be run from the repo root using `bun run --filter @ss/web <scrip
 ### Development
 
 ```bash
-bun run --filter @ss/web dev                  # Start dev server on port 3000
-bun run --filter @ss/web dev:host             # Start dev server exposed to network
+bun run --filter @ss/web dev                  # Start dev server (https://web.localhost)
+bun run --filter @ss/web dev:no-proxy         # Start dev server on localhost:3000 (no portless)
 bun run --filter @ss/web build                # Production build
 bun run --filter @ss/web preview              # Preview production build
 bun run --filter @ss/web test                 # Run tests (Vitest)

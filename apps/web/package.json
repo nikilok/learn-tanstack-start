@@ -6,8 +6,8 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
-    "dev:host": "vite dev --port 3000 --host",
+    "dev": "portless web vite dev",
+    "dev:no-proxy": "vite dev --port 3000",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -71,6 +71,7 @@
     "drizzle-kit": "^0.31.10",
     "jsdom": "^28.1.0",
     "playwright": "^1.59.1",
+    "portless": "^0.10.1",
     "sharp": "^0.34.5",
     "typescript": "^5.7.2",
     "vite": "^7.3.1",

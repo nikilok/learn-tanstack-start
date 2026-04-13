@@ -1,4 +1,6 @@
-export {};
+import { join } from 'node:path';
+
+const root = join(import.meta.dirname, '..');
 
 const name = process.argv[2];
 if (!name) {
@@ -6,12 +8,12 @@ if (!name) {
   process.exit(1);
 }
 
-const journalPath = './drizzle/meta/_journal.json';
+const journalPath = join(root, 'drizzle', 'meta', '_journal.json');
 const journal = await Bun.file(journalPath).json();
 
 const nextIdx = journal.entries.length;
 const tag = `${String(nextIdx).padStart(4, '0')}_${name}`;
-const sqlPath = `./drizzle/${tag}.sql`;
+const sqlPath = join(root, 'drizzle', `${tag}.sql`);
 
 await Bun.write(sqlPath, '-- Write your SQL here\n');
 

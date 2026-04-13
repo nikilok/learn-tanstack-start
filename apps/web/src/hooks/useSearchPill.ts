@@ -9,6 +9,7 @@ export function useSearchPill(
   const [ready, setReady] = useState(false);
   const [pillClicked, setPillClicked] = useState(false);
   const pillClickedRef = useRef(false);
+  const isStuckRef = useRef(false);
 
   useEffect(() => {
     pillClickedRef.current = pillClicked;
@@ -27,13 +28,15 @@ export function useSearchPill(
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
-      ([entry]) => {
+      (entries) => {
+        // Use the last entry — fast scrolling can batch multiple threshold
+        // crossings into a single callback; only the final one is current.
+        const entry = entries[entries.length - 1];
         setReady(true);
-        if (!pillClickedRef.current) {
-          setIsStuck(!entry.isIntersecting);
-        }
-        if (entry.isIntersecting && !pillClickedRef.current)
-          setPillClicked(false);
+        const stuck = !entry.isIntersecting;
+        setIsStuck(stuck);
+        isStuckRef.current = stuck;
+        if (entry.isIntersecting) setPillClicked(false);
       },
       { threshold: 0 },
     );
@@ -41,7 +44,10 @@ export function useSearchPill(
     return () => observer.disconnect();
   }, [sentinelRef]);
 
-  useSearchShortcut(inputRef, () => setPillClicked(true));
+  // Only activate pill mode when scrolled past the sentinel
+  useSearchShortcut(inputRef, () => {
+    if (isStuckRef.current) setPillClicked(true);
+  });
 
   return {
     isStuck,

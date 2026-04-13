@@ -24,6 +24,8 @@ export function useSearchPill(
     }
   }, [pillClicked, sentinelRef]);
 
+  const unstickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
@@ -33,15 +35,37 @@ export function useSearchPill(
         // crossings into a single callback; only the final one is current.
         const entry = entries[entries.length - 1];
         setReady(true);
-        const stuck = !entry.isIntersecting;
-        setIsStuck(stuck);
-        isStuckRef.current = stuck;
-        if (entry.isIntersecting) setPillClicked(false);
+
+        if (!entry.isIntersecting) {
+          // Sentinel left viewport — stick immediately
+          if (unstickTimerRef.current) {
+            clearTimeout(unstickTimerRef.current);
+            unstickTimerRef.current = null;
+          }
+          setIsStuck(true);
+          isStuckRef.current = true;
+        } else {
+          // Sentinel re-entered viewport — defer the reset to filter out
+          // transient reflows (results reloading can briefly shrink the page,
+          // pulling the sentinel back into view before new content pushes it
+          // out again). Without this, isStuck toggles rapidly → the input
+          // blinks between visible and pill mode on iOS Safari.
+          if (unstickTimerRef.current) clearTimeout(unstickTimerRef.current);
+          unstickTimerRef.current = setTimeout(() => {
+            setIsStuck(false);
+            isStuckRef.current = false;
+            setPillClicked(false);
+            unstickTimerRef.current = null;
+          }, 150);
+        }
       },
       { threshold: 0 },
     );
     observer.observe(sentinel);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (unstickTimerRef.current) clearTimeout(unstickTimerRef.current);
+    };
   }, [sentinelRef]);
 
   // Only activate pill mode when scrolled past the sentinel

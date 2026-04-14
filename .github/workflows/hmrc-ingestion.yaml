@@ -60,18 +60,21 @@ jobs:
         working-directory: apps/web
 
       - name: Run ingestion
+        id: ingest
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
         run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }}
         working-directory: apps/web
 
       - name: Regenerate sitemaps
+        if: steps.ingest.outputs.data-changed == 'true'
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
         run: bun run sitemap:generate
         working-directory: apps/web
 
       - name: Commit updated sitemaps and create PR
+        if: steps.ingest.outputs.data-changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

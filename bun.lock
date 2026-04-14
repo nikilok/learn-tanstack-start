@@ -12,6 +12,13 @@
         "typescript": "^5.7.2",
       },
     },
+    "apps/ch-stream": {
+      "name": "@ss/ch-stream",
+      "dependencies": {
+        "@ss/db": "workspace:*",
+        "drizzle-orm": "^0.45.2",
+      },
+    },
     "apps/web": {
       "name": "@ss/web",
       "dependencies": {
@@ -401,6 +408,8 @@
     "@solid-primitives/static-store": ["@solid-primitives/static-store@0.1.3", "", { "dependencies": { "@solid-primitives/utils": "^6.4.0" }, "peerDependencies": { "solid-js": "^1.6.12" } }, "sha512-uxez7SXnr5GiRnzqO2IEDjOJRIXaG+0LZLBizmUA1FwSi+hrpuMzVBwyk70m4prcl8X6FDDXUl9O8hSq8wHbBQ=="],
 
     "@solid-primitives/utils": ["@solid-primitives/utils@6.4.0", "", { "peerDependencies": { "solid-js": "^1.6.12" } }, "sha512-AeGTBg8Wtkh/0s+evyLtP8piQoS4wyqqQaAFs2HJcFMMjYAtUgo+ZPduRXLjPlqKVc2ejeR544oeqpbn8Egn8A=="],
+
+    "@ss/ch-stream": ["@ss/ch-stream@workspace:apps/ch-stream"],
 
     "@ss/db": ["@ss/db@workspace:packages/db"],
 

@@ -1,0 +1,76 @@
+import { CONFIG } from './config.ts';
+import type { CHStreamEvent } from './types.ts';
+
+const AUTH_HEADER = `Basic ${Buffer.from(`${CONFIG.API_KEY}:`).toString('base64')}`;
+
+export class RateLimitError extends Error {
+  constructor() {
+    super('Rate limited (429)');
+    this.name = 'RateLimitError';
+  }
+}
+
+export class TimepointGoneError extends Error {
+  constructor() {
+    super('Timepoint too old (416)');
+    this.name = 'TimepointGoneError';
+  }
+}
+
+export async function connectStream(
+  timepoint: number | null,
+  onEvent: (event: CHStreamEvent) => Promise<void>,
+): Promise<void> {
+  const url = timepoint
+    ? `${CONFIG.STREAM_URL}?timepoint=${timepoint}`
+    : CONFIG.STREAM_URL;
+
+  const response = await fetch(url, {
+    headers: { Authorization: AUTH_HEADER },
+  });
+
+  if (response.status === 429) throw new RateLimitError();
+  if (response.status === 416) throw new TimepointGoneError();
+
+  if (!response.ok) {
+    throw new Error(
+      `Stream returned ${response.status}: ${response.statusText}`,
+    );
+  }
+
+  if (!response.body) {
+    throw new Error('Stream response has no body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === '') continue;
+        try {
+          const event = JSON.parse(trimmed) as CHStreamEvent;
+          await onEvent(event);
+        } catch (e) {
+          console.error(
+            'Failed to parse event line:',
+            trimmed.slice(0, 200),
+            e,
+          );
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

@@ -127,6 +127,13 @@
       "when": 1776111126599,
       "tag": "0017_clean_nova",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1776172289564,
+      "tag": "0018_swift_post",
+      "breakpoints": true
     }
   ]
 }

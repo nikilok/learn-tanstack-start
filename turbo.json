@@ -2,7 +2,8 @@
   "$schema": "https://turbo.build/schema.json",
   "globalEnv": [
     "POSTGRES_URL",
-    "COMPANIES_HOUSE_API_KEY"
+    "COMPANIES_HOUSE_API_KEY",
+    "COMPANIES_HOUSE_STREAM_API_KEY"
   ],
   "tasks": {
     "build": {

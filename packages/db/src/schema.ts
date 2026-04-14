@@ -90,3 +90,25 @@ export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {
   recordCount: integer('record_count').notNull(),
   ingestedAt: timestamp('ingested_at').defaultNow().notNull(),
 });
+
+export const companiesHouseProfileTrails = pgTable(
+  'companies_house_profile_trails',
+  {
+    id: serial('id').primaryKey(),
+    companyNumber: varchar('company_number', { length: 20 }).notNull(),
+    columnName: varchar('column_name', { length: 100 }).notNull(),
+    oldValue: text('old_value'),
+    newValue: text('new_value'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_ch_trail_company_number').on(table.companyNumber),
+    index('idx_ch_trail_created_at').on(table.createdAt),
+  ],
+);
+
+export const chStreamState = pgTable('ch_stream_state', {
+  key: varchar('key', { length: 50 }).primaryKey(),
+  lastTimepoint: integer('last_timepoint'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});

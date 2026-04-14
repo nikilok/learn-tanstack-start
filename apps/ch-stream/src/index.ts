@@ -65,7 +65,10 @@ while (true) {
       );
       lastTimepoint = null;
     } else {
-      console.error('[ch-stream] Connection error:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[ch-stream] Disconnected: ${msg}. Reconnecting in ${CONFIG.RECONNECT_DELAY_MS / 1000}s...`,
+      );
       await Bun.sleep(CONFIG.RECONNECT_DELAY_MS);
     }
   }

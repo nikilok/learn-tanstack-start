@@ -38,6 +38,11 @@ const [lastIngestion] =
   await sql`SELECT "checksum" FROM "hmrc_ingestion_meta" ORDER BY "ingested_at" DESC LIMIT 1`;
 if (!force && lastIngestion?.checksum === checksum) {
   console.log('CSV unchanged since last ingestion — skipping.');
+  const ghOutput = process.env.GITHUB_OUTPUT;
+  if (ghOutput) {
+    const fs = await import('node:fs');
+    fs.appendFileSync(ghOutput, 'data-changed=false\n');
+  }
   process.exit(0);
 }
 if (force) console.log('Force flag set — skipping checksum comparison.');
@@ -202,3 +207,9 @@ await sql.transaction([
 await sql`INSERT INTO "hmrc_ingestion_meta" ("csv_url", "checksum", "record_count") VALUES (${url}, ${checksum}, ${dedupedRows.length})`;
 
 console.log(`Done! Ingested ${dedupedRows.length} records with zero downtime.`);
+
+const ghOutput = process.env.GITHUB_OUTPUT;
+if (ghOutput) {
+  const fs = await import('node:fs');
+  fs.appendFileSync(ghOutput, 'data-changed=true\n');
+}

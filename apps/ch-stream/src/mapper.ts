@@ -1,39 +1,51 @@
 import type { CHCompanyProfile } from './types.ts';
 
 export function mapProfileToRow(data: CHCompanyProfile) {
-  return {
+  const row: Record<string, unknown> = {
     companyNumber: data.company_number,
     companyName: data.company_name,
-    companyStatus: data.company_status || null,
-    companyType: data.type || null,
-    dateOfCreation: data.date_of_creation || null,
-    addressLine1: data.registered_office_address?.address_line_1 || null,
-    addressLine2: data.registered_office_address?.address_line_2 || null,
-    locality: data.registered_office_address?.locality || null,
-    region: data.registered_office_address?.region || null,
-    postalCode: data.registered_office_address?.postal_code || null,
-    country: data.registered_office_address?.country || null,
-    sicCodes: data.sic_codes ?? [],
-    accountsNextMadeUpTo: data.accounts?.next_made_up_to || null,
-    accountsLastMadeUpTo: data.accounts?.last_accounts?.made_up_to || null,
-    accountsOverdue: data.accounts?.overdue ?? null,
-    jurisdiction: data.jurisdiction || null,
-    hasBeenLiquidated: data.has_been_liquidated ?? null,
-    hasInsolvencyHistory: data.has_insolvency_history ?? null,
-    hasCharges: data.has_charges ?? null,
-    previousCompanyNames: data.previous_company_names?.map((p) => p.name) ?? [],
-    confirmationStatementLastMadeUpTo:
-      data.confirmation_statement?.last_made_up_to || null,
   };
+
+  if (data.company_status !== undefined)
+    row.companyStatus = data.company_status || null;
+  if (data.type !== undefined) row.companyType = data.type || null;
+  if (data.date_of_creation !== undefined)
+    row.dateOfCreation = data.date_of_creation || null;
+
+  if (data.registered_office_address !== undefined) {
+    const addr = data.registered_office_address;
+    row.addressLine1 = addr.address_line_1 || null;
+    row.addressLine2 = addr.address_line_2 || null;
+    row.locality = addr.locality || null;
+    row.region = addr.region || null;
+    row.postalCode = addr.postal_code || null;
+    row.country = addr.country || null;
+  }
+
+  if (data.sic_codes !== undefined) row.sicCodes = data.sic_codes ?? [];
+  if (data.jurisdiction !== undefined)
+    row.jurisdiction = data.jurisdiction || null;
+  if (data.has_been_liquidated !== undefined)
+    row.hasBeenLiquidated = data.has_been_liquidated ?? null;
+  if (data.has_insolvency_history !== undefined)
+    row.hasInsolvencyHistory = data.has_insolvency_history ?? null;
+  if (data.has_charges !== undefined) row.hasCharges = data.has_charges ?? null;
+  if (data.previous_company_names !== undefined)
+    row.previousCompanyNames =
+      data.previous_company_names?.map((p) => p.name) ?? [];
+
+  if (data.accounts !== undefined) {
+    const acc = data.accounts;
+    if (acc.next_made_up_to !== undefined)
+      row.accountsNextMadeUpTo = acc.next_made_up_to || null;
+    if (acc.last_accounts?.made_up_to !== undefined)
+      row.accountsLastMadeUpTo = acc.last_accounts.made_up_to || null;
+    if (acc.overdue !== undefined) row.accountsOverdue = acc.overdue ?? null;
+  }
+
+  if (data.confirmation_statement?.last_made_up_to !== undefined)
+    row.confirmationStatementLastMadeUpTo =
+      data.confirmation_statement.last_made_up_to || null;
+
+  return row;
 }
-
-export type ProfileRow = ReturnType<typeof mapProfileToRow>;
-
-export type DiffableColumn = keyof Omit<ProfileRow, 'companyNumber'>;
-
-export const DIFFABLE_COLUMNS: DiffableColumn[] = Object.keys(
-  mapProfileToRow({
-    company_number: '',
-    company_name: '',
-  }),
-).filter((k): k is DiffableColumn => k !== 'companyNumber');

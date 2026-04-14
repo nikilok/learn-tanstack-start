@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts --dry-run",
+    "dev": "bun --env-file=.env.local --watch src/index.ts --dry-run",
     "lint": "biome check .",
     "lint:fix": "biome check --fix ."
   },

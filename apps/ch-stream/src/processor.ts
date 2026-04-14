@@ -6,11 +6,7 @@ import {
 } from '@ss/db/schema';
 import { eq } from 'drizzle-orm';
 import { CONFIG } from './config.ts';
-import {
-  DIFFABLE_COLUMNS,
-  type DiffableColumn,
-  mapProfileToRow,
-} from './mapper.ts';
+import { mapProfileToRow } from './mapper.ts';
 import type { CHStreamEvent } from './types.ts';
 
 const db = createClient(CONFIG.POSTGRES_URL);
@@ -63,9 +59,10 @@ export async function processEvent(
     newValue: string | null;
   }[] = [];
 
-  for (const col of DIFFABLE_COLUMNS) {
+  for (const col of Object.keys(newRow)) {
+    if (col === 'companyNumber' || col === 'companyName') continue;
     const oldVal = stringify(existing[col as keyof typeof existing]);
-    const newVal = stringify(newRow[col as DiffableColumn]);
+    const newVal = stringify(newRow[col]);
     if (oldVal !== newVal) {
       trails.push({
         companyNumber: event.resource_id,
@@ -88,7 +85,7 @@ export async function processEvent(
     return true;
   }
 
-  const { companyNumber: _, ...updateFields } = newRow;
+  const { companyNumber: _, companyName: __, ...updateFields } = newRow;
   await db
     .update(companiesHouseProfiles)
     .set({ ...updateFields, updatedAt: new Date() })

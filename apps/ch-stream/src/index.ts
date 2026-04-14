@@ -26,7 +26,7 @@ let updated = 0;
 let skipped = 0;
 
 async function handleEvent(event: CHStreamEvent): Promise<void> {
-  if (event.resource_kind !== 'company-profile#company-profile') return;
+  if (!event.resource_kind.startsWith('company-profile')) return;
 
   const wasUpdated = await processEvent(event, dryRun);
   if (wasUpdated) updated++;

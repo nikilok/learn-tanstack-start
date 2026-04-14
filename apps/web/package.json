@@ -13,13 +13,12 @@
     "test": "vitest run",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
-    "db:migrate": "bun src/db/migrate.ts",
+    "db:migrate": "bun scripts/db-migrate.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:reset": "bun src/db/reset.ts",
-    "render:og": "bun scripts/render-og.ts",
     "db:create-migration": "bun scripts/create-migration.ts",
+    "render:og": "bun scripts/render-og.ts",
     "db:ingest": "bun scripts/ingest-hmrc-csv.ts",
     "hmrc:find-csv": "bun scripts/find-hmrc-csv-url.ts",
     "company:lookup": "bun scripts/lookup-company.ts",
@@ -30,7 +29,7 @@
   },
   "dependencies": {
     "@mcp-b/global": "^2.2.0",
-    "@neondatabase/serverless": "^1.0.2",
+    "@ss/db": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-query": "^5.96.2",
@@ -58,13 +57,10 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
-    "@biomejs/biome": "^2.4.10",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.0",
-    "@types/bun": "^1.3.11",
-    "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.1.4",
@@ -73,15 +69,8 @@
     "playwright": "^1.59.1",
     "portless": "^0.10.1",
     "sharp": "^0.34.5",
-    "typescript": "^5.7.2",
     "vite": "^7.3.1",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.0.5"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ]
   }
 }

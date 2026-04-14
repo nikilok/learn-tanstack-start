@@ -1,12 +1,8 @@
+import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
 import { waitUntil } from '@vercel/functions';
 import { eq, inArray } from 'drizzle-orm';
-import { db } from '../db';
-import {
-  companiesHouseProfiles,
-  hmrcCompanyMapping,
-  sicCodes,
-} from '../db/schema';
+import { db } from '../db.server';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 

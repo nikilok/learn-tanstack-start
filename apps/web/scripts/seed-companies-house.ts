@@ -11,9 +11,9 @@
  */
 
 import { neon } from '@neondatabase/serverless';
+import { companiesHouseProfiles, hmrcCompanyMapping } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
-import { companiesHouseProfiles, hmrcCompanyMapping } from '../src/db/schema';
 
 dotenv.config({ path: '.env.local' });
 

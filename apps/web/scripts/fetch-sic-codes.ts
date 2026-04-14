@@ -1,13 +1,7 @@
 import { join } from 'node:path';
 
 const SIC_URL = 'https://resources.companieshouse.gov.uk/sic/';
-const OUTPUT_PATH = join(
-  import.meta.dirname,
-  '..',
-  'src',
-  'data',
-  'sic-codes.json',
-);
+const OUTPUT_PATH = join(import.meta.dirname, '..', 'data', 'sic-codes.json');
 
 console.log('Fetching SIC codes from Companies House...');
 const response = await fetch(SIC_URL);

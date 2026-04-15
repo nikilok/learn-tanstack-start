@@ -57,15 +57,13 @@ export async function connectStream(
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (trimmed === '') continue;
+        if (trimmed === '' || trimmed.startsWith('<')) continue;
         try {
           const event = JSON.parse(trimmed) as CHStreamEvent;
           await onEvent(event);
-        } catch (e) {
-          console.error(
-            'Failed to parse event line:',
-            trimmed.slice(0, 200),
-            e,
+        } catch {
+          console.warn(
+            `[ch-stream] Failed to parse event: ${trimmed.slice(0, 100)}`,
           );
         }
       }

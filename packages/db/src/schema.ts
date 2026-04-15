@@ -107,6 +107,15 @@ export const companiesHouseProfileTrails = pgTable(
   ],
 );
 
+export const companiesHouseProfileCache = pgTable(
+  'companies_house_profile_cache',
+  {
+    key: varchar('key', { length: 50 }).primaryKey(),
+    lastTrailId: integer('last_trail_id').notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+);
+
 export const chStreamState = pgTable('ch_stream_state', {
   key: varchar('key', { length: 50 }).primaryKey(),
   lastTimepoint: integer('last_timepoint'),

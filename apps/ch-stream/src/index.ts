@@ -5,6 +5,7 @@ import {
   processEvent,
   saveTimepoint,
 } from './processor.ts';
+import { triggerRevalidation } from './revalidate.ts';
 import { connectStream, RateLimitError, TimepointGoneError } from './stream.ts';
 import type { CHStreamEvent } from './types.ts';
 
@@ -23,14 +24,19 @@ let lastTimepoint = await getLastTimepoint();
 let eventsSinceFlush = 0;
 let processed = 0;
 let updated = 0;
+let updatedSinceFlush = 0;
 let skipped = 0;
 
 async function handleEvent(event: CHStreamEvent): Promise<void> {
   if (!event.resource_kind.startsWith('company-profile')) return;
 
   const wasUpdated = await processEvent(event, dryRun);
-  if (wasUpdated) updated++;
-  else skipped++;
+  if (wasUpdated) {
+    updated++;
+    updatedSinceFlush++;
+  } else {
+    skipped++;
+  }
   processed++;
 
   lastTimepoint = event.event.timepoint;
@@ -39,8 +45,12 @@ async function handleEvent(event: CHStreamEvent): Promise<void> {
   if (eventsSinceFlush >= CONFIG.TIMEPOINT_FLUSH_INTERVAL) {
     if (!dryRun) {
       await saveTimepoint(lastTimepoint);
+      if (updatedSinceFlush > 0) {
+        await triggerRevalidation();
+      }
     }
     eventsSinceFlush = 0;
+    updatedSinceFlush = 0;
     console.log(
       `[ch-stream] timepoint=${lastTimepoint} processed=${processed} updated=${updated} skipped=${skipped}`,
     );
@@ -75,5 +85,10 @@ while (true) {
 
   if (lastTimepoint !== null && !dryRun) {
     await saveTimepoint(lastTimepoint);
+  }
+
+  if (updatedSinceFlush > 0) {
+    await triggerRevalidation();
+    updatedSinceFlush = 0;
   }
 }

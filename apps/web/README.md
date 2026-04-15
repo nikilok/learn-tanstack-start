@@ -25,6 +25,15 @@ The TanStack Start web app for [sponsorsearch.co.uk](https://sponsorsearch.co.uk
 - **Deployment:** Vercel via Nitro
 - **Runtime:** Bun
 
+## Server routes (Nitro)
+
+TanStack Start's `createServerFn` only supports RPC-style endpoints called from components/loaders — not standalone REST APIs. For external-facing HTTP endpoints (webhooks, service-to-service calls), we use **Nitro server routes** via the `server/` directory.
+
+- `server/api/` — file-based API routes, mapped by filename (e.g. `revalidate.post.ts` → `POST /api/revalidate`)
+- HTTP method is set by the file suffix: `.post.ts`, `.get.ts`, `.put.ts`, `.delete.ts`
+- Requires `serverDir: 'server'` in the Nitro plugin config in `vite.config.ts`
+- These routes only run in production (Nitro build) — they are **not available** during `bun run dev`. Use `bun run build && bun run preview` to test locally.
+
 ## Automated data sync
 
 A GitHub Actions workflow runs every Monday at 8:00 AM UTC to keep the sponsor data up to date.

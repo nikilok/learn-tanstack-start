@@ -16,6 +16,7 @@ const config = defineConfig({
     tailwindcss(),
     tanstackStart(),
     nitro({
+      serverDir: 'server',
       routeRules: {
         '/company/**': {
           headers: {

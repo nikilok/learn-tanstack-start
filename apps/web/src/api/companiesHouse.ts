@@ -1,5 +1,6 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
+import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db.server';
@@ -214,6 +215,11 @@ export const getCompanyProfile = createServerFn()
         .from(sicCodes)
         .where(inArray(sicCodes.code, profile.sic_codes));
     }
+
+    setResponseHeader(
+      'x-vercel-cache-tag',
+      `company-${profile.company_number}`,
+    );
 
     return {
       company_number: profile.company_number,

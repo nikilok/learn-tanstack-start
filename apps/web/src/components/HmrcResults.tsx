@@ -103,7 +103,7 @@ export default function HmrcResults({ search }: { search: string }) {
       ref={listRef}
       className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
     >
-      {contentWidth > 0 && metricsReady ? (
+      {contentWidth > 0 && metricsReady && (
         <div
           style={{
             height: virtualizer.getTotalSize(),
@@ -127,8 +127,6 @@ export default function HmrcResults({ search }: { search: string }) {
             </div>
           ))}
         </div>
-      ) : (
-        <SkeletonCards bare />
       )}
       {loadingMore && <SkeletonCards count={3} bare />}
     </div>

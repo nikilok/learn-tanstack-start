@@ -1,28 +1,14 @@
 import { layout, prepare } from '@chenglou/pretext';
-import {
-  type RefObject,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type {
+  UseVirtualTextLayoutOptions,
+  UseVirtualTextLayoutResult,
+} from './types';
 
-interface TextField<T> {
-  getText: (item: T) => string;
-  font: string;
-  lineHeight: number;
-}
-
-interface UseCardMetricsOptions<T> {
-  fields: TextField<T>[];
-  fixedHeight: number;
-  containerRef: RefObject<HTMLDivElement | null>;
-}
-
-export function useCardMetrics<T>(
+export function useVirtualTextLayout<T>(
   items: T[],
-  options: UseCardMetricsOptions<T>,
-) {
+  options: UseVirtualTextLayoutOptions<T>,
+): UseVirtualTextLayoutResult {
   const { fields, fixedHeight, containerRef } = options;
   const metricsRef = useRef<ReturnType<typeof prepare>[][]>([]);
   const [fontsReady, setFontsReady] = useState(false);
@@ -74,6 +60,7 @@ export function useCardMetrics<T>(
   const estimateSize = (index: number): number => {
     const handles = metricsRef.current[index];
     if (!handles || !contentWidth) {
+      // Before width is measured — assume single-line text fields
       return fixedHeight + fields.reduce((sum, f) => sum + f.lineHeight, 0);
     }
     let height = fixedHeight;

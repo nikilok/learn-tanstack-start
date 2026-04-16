@@ -28,9 +28,9 @@
     "db:seed-sic": "bun scripts/seed-sic-codes.ts"
   },
   "dependencies": {
-    "@chenglou/pretext": "^0.0.5",
     "@mcp-b/global": "^2.2.0",
     "@ss/db": "workspace:*",
+    "@ss/virtual-text-layout": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-query": "^5.96.2",

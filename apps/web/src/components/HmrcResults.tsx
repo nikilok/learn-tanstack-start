@@ -1,6 +1,6 @@
+import { useVirtualTextLayout } from '@ss/virtual-text-layout';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
-import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
@@ -10,23 +10,29 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
-  const { estimateSize: estimateCardHeight, ready } = useCardMetrics(results, {
-    fields: [
-      {
-        getText: (row) => titleCase(row.organisationName),
-        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
-        lineHeight: 24,
-      },
-      {
-        getText: (row) =>
-          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
-        font: '14px Geist', // text-sm
-        lineHeight: 20,
-      },
-    ],
-    fixedHeight: 62, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8) + 4 (sub-pixel rounding)
-    containerRef: listRef,
-  });
+  const { estimateSize: estimateCardHeight, ready } = useVirtualTextLayout(
+    results,
+    {
+      fields: [
+        {
+          getText: (row) => titleCase(row.organisationName),
+          font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+          lineHeight: 24,
+        },
+        {
+          getText: (row) =>
+            [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+          font: '14px Geist', // text-sm
+          lineHeight: 20,
+        },
+      ],
+      fixedHeight: 62, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8) + 4 (sub-pixel rounding)
+      containerRef: listRef,
+    },
+  );
 
   const virtualizer = useWindowVirtualizer({
     count: ready ? results.length : 0,

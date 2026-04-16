@@ -5,6 +5,7 @@ const ALLOWED_PREFIXES = [
   '/company/', // detail pages
   '/privacy', // privacy policy
   '/_server', // TanStack server functions
+  '/api/revalidate', // Nitro cache revalidation endpoint
 ];
 
 const STATIC_EXTENSIONS = new Set([

@@ -1,5 +1,5 @@
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
@@ -45,17 +45,10 @@ export default function HmrcResults({ search }: { search: string }) {
   // Measure container content-box width before first paint, then track via
   // ResizeObserver. Items are gated on contentWidth > 0 in the JSX.
   const hasResults = results.length > 0;
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!hasResults) return;
     const el = listRef.current;
     if (!el) return;
-    // Synchronous initial measurement — matches contentBoxSize (excludes padding)
-    const style = getComputedStyle(el);
-    const paddingX =
-      parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-    setContentWidth(Math.floor(el.clientWidth - paddingX));
-    virtualizer.measure();
-    // ResizeObserver for subsequent width changes (e.g. resize, orientation)
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
       if (width) {

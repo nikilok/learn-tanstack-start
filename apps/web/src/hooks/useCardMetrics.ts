@@ -1,5 +1,11 @@
 import { layout, prepare } from '@chenglou/pretext';
-import { useEffect, useRef, useState } from 'react';
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 interface TextField<T> {
   getText: (item: T) => string;
@@ -10,15 +16,17 @@ interface TextField<T> {
 interface UseCardMetricsOptions<T> {
   fields: TextField<T>[];
   fixedHeight: number;
+  containerRef: RefObject<HTMLDivElement | null>;
 }
 
 export function useCardMetrics<T>(
   items: T[],
   options: UseCardMetricsOptions<T>,
 ) {
-  const { fields, fixedHeight } = options;
+  const { fields, fixedHeight, containerRef } = options;
   const metricsRef = useRef<ReturnType<typeof prepare>[][]>([]);
   const [fontsReady, setFontsReady] = useState(false);
+  const [contentWidth, setContentWidth] = useState(0);
 
   // Wait for fonts to be downloaded AND rendered before allowing prepare() —
   // canvas needs one frame after font load to use it for measurement.
@@ -27,6 +35,22 @@ export function useCardMetrics<T>(
       requestAnimationFrame(() => setFontsReady(true));
     });
   }, []);
+
+  // Measure container content-box width before paint, then track via ResizeObserver.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const style = getComputedStyle(el);
+    const paddingX =
+      parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    setContentWidth(Math.floor(el.clientWidth - paddingX));
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
+      if (width) setContentWidth(Math.floor(width));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef]);
 
   // Only prepare once fonts are loaded — single pass with correct metrics
   if (fontsReady) {
@@ -45,10 +69,11 @@ export function useCardMetrics<T>(
     }
   }
 
-  const estimateSize = (index: number, contentWidth: number): number => {
+  const ready = fontsReady && contentWidth > 0;
+
+  const estimateSize = (index: number): number => {
     const handles = metricsRef.current[index];
     if (!handles || !contentWidth) {
-      // Before width is measured — assume single-line text fields
       return fixedHeight + fields.reduce((sum, f) => sum + f.lineHeight, 0);
     }
     let height = fixedHeight;
@@ -58,5 +83,5 @@ export function useCardMetrics<T>(
     return height;
   };
 
-  return { estimateSize, ready: fontsReady };
+  return { estimateSize, ready, contentWidth };
 }

@@ -1,5 +1,5 @@
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
@@ -10,60 +10,33 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
-  const [contentWidth, setContentWidth] = useState(0);
-  const { estimateSize: estimateCardHeight, ready: metricsReady } =
-    useCardMetrics(results, {
-      fields: [
-        {
-          getText: (row) => titleCase(row.organisationName),
-          font: '600 16px Geist', // heading-card h3: text-base + font-semibold
-          lineHeight: 24,
-        },
-        {
-          getText: (row) =>
-            [row.townCity, row.county]
-              .filter(Boolean)
-              .map(titleCase)
-              .join(', '),
-          font: '14px Geist', // text-sm
-          lineHeight: 20,
-        },
-      ],
-      fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
-    });
-
-  const ready = metricsReady && contentWidth > 0;
+  const { estimateSize: estimateCardHeight, ready } = useCardMetrics(results, {
+    fields: [
+      {
+        getText: (row) => titleCase(row.organisationName),
+        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+        lineHeight: 24,
+      },
+      {
+        getText: (row) =>
+          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
+        font: '14px Geist', // text-sm
+        lineHeight: 20,
+      },
+    ],
+    fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
+    containerRef: listRef,
+  });
 
   const virtualizer = useWindowVirtualizer({
     count: ready ? results.length : 0,
-    estimateSize: (index) => estimateCardHeight(index, contentWidth),
+    estimateSize: (index) => estimateCardHeight(index),
     gap: 24,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
-
-  // Measure content width from a DOM element with matching horizontal padding.
-  // Runs before paint via useLayoutEffect — the measurement div is hidden
-  // and rendered alongside the skeleton while waiting for readiness.
-  useLayoutEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const style = getComputedStyle(el);
-    const paddingX =
-      parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-    setContentWidth(Math.floor(el.clientWidth - paddingX));
-    const ro = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
-      if (width) {
-        setContentWidth(Math.floor(width));
-        virtualizer.measure();
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [virtualizer]);
 
   useEffect(() => {
     if (!ready) return;

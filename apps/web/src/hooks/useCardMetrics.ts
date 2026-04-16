@@ -10,14 +10,13 @@ interface TextField<T> {
 interface UseCardMetricsOptions<T> {
   fields: TextField<T>[];
   fixedHeight: number;
-  fallback?: number;
 }
 
 export function useCardMetrics<T>(
   items: T[],
   options: UseCardMetricsOptions<T>,
 ) {
-  const { fields, fixedHeight, fallback = 100 } = options;
+  const { fields, fixedHeight } = options;
   const metricsRef = useRef<ReturnType<typeof prepare>[][]>([]);
 
   // Only prepare newly-loaded items — avoids re-mapping the full list on every render
@@ -36,10 +35,9 @@ export function useCardMetrics<T>(
   }
 
   return (index: number, contentWidth: number): number => {
-    const handles = metricsRef.current[index];
-    if (!handles || !contentWidth) return fallback;
     let height = fixedHeight;
-    for (let i = 0; i < fields.length; i++) {
+    const handles = metricsRef.current[index];
+    for (let i = 0; i < handles.length; i++) {
       height += layout(handles[i], contentWidth, fields[i].lineHeight).height;
     }
     return height;

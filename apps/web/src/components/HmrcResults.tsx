@@ -38,24 +38,25 @@ export default function HmrcResults({ search }: { search: string }) {
 
   const virtualItems = virtualizer.getVirtualItems();
 
-  // Track container content width for pretext layout calculations
+  // Measure container width and invalidate virtualizer sizes — items are gated
+  // on contentWidth > 0 in the JSX so nothing renders until sizes are accurate.
   const hasResults = results.length > 0;
   useEffect(() => {
     if (!hasResults) return;
     const el = listRef.current;
     if (!el) return;
+    setContentWidth(Math.floor(el.clientWidth));
+    virtualizer.measure();
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
-      if (width) setContentWidth(Math.floor(width));
+      if (width) {
+        setContentWidth(Math.floor(width));
+        virtualizer.measure();
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [hasResults]);
-
-  // Force re-estimation when container width changes
-  useEffect(() => {
-    if (contentWidth > 0) virtualizer.measure();
-  }, [contentWidth, virtualizer]);
+  }, [hasResults, virtualizer]);
 
   useEffect(() => {
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
@@ -100,29 +101,33 @@ export default function HmrcResults({ search }: { search: string }) {
       ref={listRef}
       className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
     >
-      <div
-        style={{
-          height: virtualizer.getTotalSize(),
-          width: '100%',
-          position: 'relative',
-        }}
-      >
-        {virtualItems.map((virtualRow) => (
-          <div
-            key={virtualRow.index}
-            data-index={virtualRow.index}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
-            }}
-          >
-            <HmrcCard row={results[virtualRow.index]} search={search} />
-          </div>
-        ))}
-      </div>
+      {contentWidth > 0 ? (
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {virtualItems.map((virtualRow) => (
+            <div
+              key={virtualRow.index}
+              data-index={virtualRow.index}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+              }}
+            >
+              <HmrcCard row={results[virtualRow.index]} search={search} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <SkeletonCards bare />
+      )}
       {loadingMore && <SkeletonCards count={3} bare />}
     </div>
   );

@@ -45,8 +45,6 @@ export default function HmrcResults({ search }: { search: string }) {
     if (!hasResults) return;
     const el = listRef.current;
     if (!el) return;
-    setContentWidth(Math.floor(el.clientWidth));
-    virtualizer.measure();
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
       if (width) {

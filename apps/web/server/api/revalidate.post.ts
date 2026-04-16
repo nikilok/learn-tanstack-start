@@ -68,11 +68,16 @@ async function processRevalidation() {
   }
 
   const vercel = new Vercel({ bearerToken: process.env.VERCEL_API_TOKEN });
+  const projectId = process.env.VERCEL_PROJECT_ID as string;
 
-  await vercel.edgeCache.invalidateByTags({
-    projectIdOrName: process.env.VERCEL_PROJECT_ID as string,
-    requestBody: { tags },
-  });
+  // Vercel API allows max 16 tags per request
+  for (let i = 0; i < tags.length; i += 16) {
+    const batch = tags.slice(i, i + 16);
+    await vercel.edgeCache.invalidateByTags({
+      projectIdOrName: projectId,
+      requestBody: { tags: batch },
+    });
+  }
 
   await db
     .insert(companiesHouseProfileCache)

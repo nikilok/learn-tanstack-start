@@ -32,6 +32,15 @@ export default function HmrcResults({ search }: { search: string }) {
       fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
     });
 
+  console.log(
+    '[HmrcResults] render: metricsReady =',
+    metricsReady,
+    'contentWidth =',
+    contentWidth,
+    'results =',
+    results.length,
+  );
+
   const virtualizer = useWindowVirtualizer({
     count: metricsReady ? results.length : 0,
     estimateSize: (index) => estimateCardHeight(index, contentWidth),
@@ -52,6 +61,12 @@ export default function HmrcResults({ search }: { search: string }) {
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
       if (width) {
+        console.log(
+          '[HmrcResults] ResizeObserver: contentWidth =',
+          Math.floor(width),
+          'at',
+          performance.now().toFixed(1),
+        );
         setContentWidth(Math.floor(width));
         virtualizer.measure();
       }
@@ -104,29 +119,39 @@ export default function HmrcResults({ search }: { search: string }) {
       className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
     >
       {contentWidth > 0 && metricsReady ? (
-        <div
-          style={{
-            height: virtualizer.getTotalSize(),
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          {virtualItems.map((virtualRow) => (
-            <div
-              key={virtualRow.index}
-              data-index={virtualRow.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
-              }}
-            >
-              <HmrcCard row={results[virtualRow.index]} search={search} />
-            </div>
-          ))}
-        </div>
+        (() => {
+          console.log(
+            '[HmrcResults] rendering items at',
+            performance.now().toFixed(1),
+            'totalSize =',
+            virtualizer.getTotalSize(),
+          );
+          return true;
+        })() && (
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {virtualItems.map((virtualRow) => (
+              <div
+                key={virtualRow.index}
+                data-index={virtualRow.index}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+                }}
+              >
+                <HmrcCard row={results[virtualRow.index]} search={search} />
+              </div>
+            ))}
+          </div>
+        )
       ) : (
         <SkeletonCards bare />
       )}

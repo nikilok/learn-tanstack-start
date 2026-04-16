@@ -23,8 +23,30 @@ export function useCardMetrics<T>(
   // Wait for fonts to be downloaded AND rendered before allowing prepare() —
   // canvas needs one frame after font load to use it for measurement.
   useEffect(() => {
+    console.log(
+      '[useCardMetrics] effect: fonts.status =',
+      document.fonts.status,
+    );
     document.fonts.ready.then(() => {
-      requestAnimationFrame(() => setFontsReady(true));
+      console.log(
+        '[useCardMetrics] fonts.ready resolved at',
+        performance.now().toFixed(1),
+      );
+      requestAnimationFrame(() => {
+        console.log(
+          '[useCardMetrics] rAF after fonts.ready at',
+          performance.now().toFixed(1),
+        );
+        console.log(
+          '[useCardMetrics] fonts.check 600 16px Geist =',
+          document.fonts.check('600 16px Geist'),
+        );
+        console.log(
+          '[useCardMetrics] fonts.check 14px Geist =',
+          document.fonts.check('14px Geist'),
+        );
+        setFontsReady(true);
+      });
     });
   }, []);
 
@@ -34,6 +56,12 @@ export function useCardMetrics<T>(
       metricsRef.current = []; // data reset (e.g. new search)
     }
     if (items.length > metricsRef.current.length) {
+      console.log(
+        '[useCardMetrics] preparing',
+        items.length - metricsRef.current.length,
+        'items at',
+        performance.now().toFixed(1),
+      );
       metricsRef.current = [
         ...metricsRef.current,
         ...items
@@ -43,6 +71,13 @@ export function useCardMetrics<T>(
           ),
       ];
     }
+  } else {
+    console.log(
+      '[useCardMetrics] render: skipping prepare, fontsReady =',
+      fontsReady,
+      'items =',
+      items.length,
+    );
   }
 
   const estimateSize = (index: number, contentWidth: number): number => {

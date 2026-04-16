@@ -1,5 +1,5 @@
 import { layout, prepare } from '@chenglou/pretext';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface TextField<T> {
   getText: (item: T) => string;
@@ -18,23 +18,34 @@ export function useCardMetrics<T>(
 ) {
   const { fields, fixedHeight } = options;
   const metricsRef = useRef<ReturnType<typeof prepare>[][]>([]);
+  const [fontsReady, setFontsReady] = useState(
+    () => typeof document !== 'undefined' && document.fonts.status === 'loaded',
+  );
 
-  // Only prepare newly-loaded items — avoids re-mapping the full list on every render
-  if (items.length < metricsRef.current.length) {
-    metricsRef.current = []; // data reset (e.g. new search)
-  }
-  if (items.length > metricsRef.current.length) {
-    metricsRef.current = [
-      ...metricsRef.current,
-      ...items
-        .slice(metricsRef.current.length)
-        .map((item) =>
-          fields.map((field) => prepare(field.getText(item), field.font)),
-        ),
-    ];
+  useEffect(() => {
+    if (!fontsReady) {
+      document.fonts.ready.then(() => setFontsReady(true));
+    }
+  }, [fontsReady]);
+
+  // Only prepare once fonts are loaded — canvas measurements need the real font
+  if (fontsReady) {
+    if (items.length < metricsRef.current.length) {
+      metricsRef.current = []; // data reset (e.g. new search)
+    }
+    if (items.length > metricsRef.current.length) {
+      metricsRef.current = [
+        ...metricsRef.current,
+        ...items
+          .slice(metricsRef.current.length)
+          .map((item) =>
+            fields.map((field) => prepare(field.getText(item), field.font)),
+          ),
+      ];
+    }
   }
 
-  return (index: number, contentWidth: number): number => {
+  const estimateSize = (index: number, contentWidth: number): number => {
     let height = fixedHeight;
     const handles = metricsRef.current[index];
     for (let i = 0; i < handles.length; i++) {
@@ -42,4 +53,6 @@ export function useCardMetrics<T>(
     }
     return height;
   };
+
+  return { estimateSize, ready: fontsReady };
 }

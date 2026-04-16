@@ -11,25 +11,29 @@ export default function HmrcResults({ search }: { search: string }) {
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
   const [contentWidth, setContentWidth] = useState(0);
-  const estimateCardHeight = useCardMetrics(results, {
-    fields: [
-      {
-        getText: (row) => titleCase(row.organisationName),
-        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
-        lineHeight: 24,
-      },
-      {
-        getText: (row) =>
-          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
-        font: '14px Geist', // text-sm
-        lineHeight: 20,
-      },
-    ],
-    fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
-  });
+  const { estimateSize: estimateCardHeight, ready: metricsReady } =
+    useCardMetrics(results, {
+      fields: [
+        {
+          getText: (row) => titleCase(row.organisationName),
+          font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+          lineHeight: 24,
+        },
+        {
+          getText: (row) =>
+            [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+          font: '14px Geist', // text-sm
+          lineHeight: 20,
+        },
+      ],
+      fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
+    });
 
   const virtualizer = useWindowVirtualizer({
-    count: results.length,
+    count: metricsReady ? results.length : 0,
     estimateSize: (index) => estimateCardHeight(index, contentWidth),
     gap: 24,
     overscan: 5,
@@ -106,7 +110,7 @@ export default function HmrcResults({ search }: { search: string }) {
       ref={listRef}
       className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
     >
-      {contentWidth > 0 ? (
+      {contentWidth > 0 && metricsReady ? (
         <div
           style={{
             height: virtualizer.getTotalSize(),

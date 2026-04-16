@@ -1,6 +1,8 @@
+import { useVirtualTextLayout } from '@ss/virtual-text-layout';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
+import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
@@ -8,10 +10,33 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
+  const { estimateSize: estimateCardHeight, ready } = useVirtualTextLayout(
+    results,
+    {
+      fields: [
+        {
+          getText: (row) => titleCase(row.organisationName),
+          font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+          lineHeight: 24,
+        },
+        {
+          getText: (row) =>
+            [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+          font: '14px Geist', // text-sm
+          lineHeight: 20,
+        },
+      ],
+      fixedHeight: 62, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8) + 4 (sub-pixel rounding)
+      containerRef: listRef,
+    },
+  );
 
   const virtualizer = useWindowVirtualizer({
-    count: results.length,
-    estimateSize: () => 100,
+    count: ready ? results.length : 0,
+    estimateSize: (index) => estimateCardHeight(index),
     gap: 24,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,
@@ -20,6 +45,7 @@ export default function HmrcResults({ search }: { search: string }) {
   const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
+    if (!ready) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
       sessionStorage.removeItem('hmrc-scroll-y');
@@ -27,7 +53,7 @@ export default function HmrcResults({ search }: { search: string }) {
         window.scrollTo(0, Number.parseInt(savedY, 10));
       });
     }
-  }, []);
+  }, [ready]);
 
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
@@ -45,7 +71,19 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  if (isLoading) return <SkeletonCards />;
+  if (isLoading || !ready) {
+    return (
+      <>
+        <SkeletonCards />
+        {/* Hidden element for width measurement — same px-4 as the real container */}
+        <div
+          ref={listRef}
+          className="px-4"
+          style={{ height: 0, overflow: 'hidden' }}
+        />
+      </>
+    );
+  }
 
   if (results.length === 0 && search.length >= 3) {
     return (
@@ -72,7 +110,6 @@ export default function HmrcResults({ search }: { search: string }) {
         {virtualItems.map((virtualRow) => (
           <div
             key={virtualRow.index}
-            ref={virtualizer.measureElement}
             data-index={virtualRow.index}
             style={{
               position: 'absolute',

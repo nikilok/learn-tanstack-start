@@ -1,0 +1,41 @@
+{
+  "name": "@ss/virtual-text-layout",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix ."
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "virtual-list",
+    "virtualization",
+    "text-layout",
+    "pretext",
+    "tanstack-virtual",
+    "react"
+  ],
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.5"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "tsup": "^8.5.1"
+  }
+}

@@ -18,15 +18,15 @@ export function useCardMetrics<T>(
 ) {
   const { fields, fixedHeight } = options;
   const metricsRef = useRef<ReturnType<typeof prepare>[][]>([]);
-  const [fontsReady, setFontsReady] = useState(
-    () => typeof document !== 'undefined' && document.fonts.status === 'loaded',
-  );
+  const [fontsReady, setFontsReady] = useState(false);
 
+  // Wait for fonts to be downloaded AND rendered before allowing prepare() —
+  // canvas needs one frame after font load to use it for measurement.
   useEffect(() => {
-    if (!fontsReady) {
-      document.fonts.ready.then(() => setFontsReady(true));
-    }
-  }, [fontsReady]);
+    document.fonts.ready.then(() => {
+      requestAnimationFrame(() => setFontsReady(true));
+    });
+  }, []);
 
   // Only prepare once fonts are loaded — canvas measurements need the real font
   if (fontsReady) {

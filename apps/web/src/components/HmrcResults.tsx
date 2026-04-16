@@ -1,67 +1,36 @@
-import { layout, prepare } from '@chenglou/pretext';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState } from 'react';
+import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
-
-// Font specs must match the rendered CSS
-const HEADING_FONT = '600 16px Geist'; // heading-card h3: text-base + font-semibold
-const HEADING_LINE_HEIGHT = 24; // text-base line-height: 1.5 × 16px
-const LOCATION_FONT = '14px Geist'; // text-sm, normal weight
-const LOCATION_LINE_HEIGHT = 20; // text-sm line-height: 1.25rem
-// Fixed card chrome (elements that never wrap):
-//   py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
-const CARD_CHROME = 58;
-
-interface CardMetrics {
-  heading: ReturnType<typeof prepare>;
-  location: ReturnType<typeof prepare>;
-}
 
 export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
   const [contentWidth, setContentWidth] = useState(0);
-  const cardMetricsRef = useRef<CardMetrics[]>([]);
-
-  // Only prepare newly-loaded rows — avoids re-mapping the full list on every render
-  if (results.length < cardMetricsRef.current.length) {
-    cardMetricsRef.current = []; // new search — reset
-  }
-  if (results.length > cardMetricsRef.current.length) {
-    cardMetricsRef.current = [
-      ...cardMetricsRef.current,
-      ...results.slice(cardMetricsRef.current.length).map((row) => ({
-        heading: prepare(titleCase(row.organisationName), HEADING_FONT),
-        location: prepare(
+  const estimateCardHeight = useCardMetrics(results, {
+    fields: [
+      {
+        getText: (row) => titleCase(row.organisationName),
+        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+        lineHeight: 24,
+      },
+      {
+        getText: (row) =>
           [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
-          LOCATION_FONT,
-        ),
-      })),
-    ];
-  }
-  const cardMetrics = cardMetricsRef.current;
+        font: '14px Geist', // text-sm
+        lineHeight: 20,
+      },
+    ],
+    fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
+  });
 
   const virtualizer = useWindowVirtualizer({
     count: results.length,
-    estimateSize: (index) => {
-      const m = cardMetrics[index];
-      if (!m || !contentWidth) return 100;
-      const { height: headingH } = layout(
-        m.heading,
-        contentWidth,
-        HEADING_LINE_HEIGHT,
-      );
-      const { height: locationH } = layout(
-        m.location,
-        contentWidth,
-        LOCATION_LINE_HEIGHT,
-      );
-      return headingH + locationH + CARD_CHROME;
-    },
+    estimateSize: (index) => estimateCardHeight(index, contentWidth),
     gap: 24,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,

@@ -2,7 +2,7 @@ import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState } from 'react';
 import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
-import { titleCase } from '../utils';
+import { dlog, titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
@@ -32,7 +32,7 @@ export default function HmrcResults({ search }: { search: string }) {
       fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
     });
 
-  console.log(
+  dlog(
     '[HmrcResults] render: metricsReady =',
     metricsReady,
     'contentWidth =',
@@ -61,7 +61,7 @@ export default function HmrcResults({ search }: { search: string }) {
     const ro = new ResizeObserver((entries) => {
       const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
       if (width) {
-        console.log(
+        dlog(
           '[HmrcResults] ResizeObserver: contentWidth =',
           Math.floor(width),
           'at',
@@ -120,7 +120,7 @@ export default function HmrcResults({ search }: { search: string }) {
     >
       {contentWidth > 0 && metricsReady ? (
         (() => {
-          console.log(
+          dlog(
             '[HmrcResults] rendering items at',
             performance.now().toFixed(1),
             'totalSize =',

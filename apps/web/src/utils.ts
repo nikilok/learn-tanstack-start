@@ -50,6 +50,16 @@ export function formatAddress(
     .join(', ');
 }
 
+/** Buffer logs to `window.__dlog` — immune to console.log stripping and hydration re-mounts. */
+export function dlog(...args: unknown[]) {
+  const w = globalThis as Record<string, unknown>;
+  if (!Array.isArray(w.__dlog)) w.__dlog = [];
+  const line = args
+    .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
+    .join(' ');
+  (w.__dlog as string[]).push(line);
+}
+
 export function formatDate(dateStr?: string | null) {
   if (!dateStr) return '';
   const d = new Date(dateStr);

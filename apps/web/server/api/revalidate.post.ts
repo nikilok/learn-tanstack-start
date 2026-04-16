@@ -41,6 +41,12 @@ async function processRevalidation() {
 
   const lastTrailId = cursor?.lastTrailId ?? 0;
 
+  // Vercel API: max 16 tags per request, 5 requests per minute.
+  // Limit to 80 companies (5 batches of 16) per invocation.
+  // Remaining companies are picked up on the next call.
+  const BATCH_SIZE = 16;
+  const MAX_COMPANIES = BATCH_SIZE * 5;
+
   const trails = await db
     .select({
       companyNumber: companiesHouseProfileTrails.companyNumber,
@@ -48,7 +54,8 @@ async function processRevalidation() {
     })
     .from(companiesHouseProfileTrails)
     .where(gt(companiesHouseProfileTrails.id, lastTrailId))
-    .groupBy(companiesHouseProfileTrails.companyNumber);
+    .groupBy(companiesHouseProfileTrails.companyNumber)
+    .limit(MAX_COMPANIES);
 
   if (trails.length === 0) {
     console.log('[revalidate] No new trails to process');
@@ -70,9 +77,8 @@ async function processRevalidation() {
   const vercel = new Vercel({ bearerToken: process.env.VERCEL_API_TOKEN });
   const projectId = process.env.VERCEL_PROJECT_ID as string;
 
-  // Vercel API allows max 16 tags per request
-  for (let i = 0; i < tags.length; i += 16) {
-    const batch = tags.slice(i, i + 16);
+  for (let i = 0; i < tags.length; i += BATCH_SIZE) {
+    const batch = tags.slice(i, i + BATCH_SIZE);
     await vercel.edgeCache.invalidateByTags({
       projectIdOrName: projectId,
       requestBody: { tags: batch },

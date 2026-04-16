@@ -6,30 +6,50 @@ import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
+/** Content width from known CSS layout: page-wrap(vw-32) - main px-4(32) - container px-4(32) capped by max-w-2xl(672) */
+function getContentWidth() {
+  return Math.min(document.documentElement.clientWidth - 96, 640);
+}
+
 export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
   const [contentWidth, setContentWidth] = useState(0);
-  const estimateCardHeight = useCardMetrics(results, {
-    fields: [
-      {
-        getText: (row) => titleCase(row.organisationName),
-        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
-        lineHeight: 24,
-      },
-      {
-        getText: (row) =>
-          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
-        font: '14px Geist', // text-sm
-        lineHeight: 20,
-      },
-    ],
-    fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
-  });
+  const { estimateSize: estimateCardHeight, ready: metricsReady } =
+    useCardMetrics(results, {
+      fields: [
+        {
+          getText: (row) => titleCase(row.organisationName),
+          font: '600 16px Geist', // heading-card h3: text-base + font-semibold
+          lineHeight: 24,
+        },
+        {
+          getText: (row) =>
+            [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+          font: '14px Geist', // text-sm
+          lineHeight: 20,
+        },
+      ],
+      fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
+    });
+
+  // Compute content width from viewport — no DOM element needed.
+  // Recalculates on resize/orientation change.
+  useEffect(() => {
+    setContentWidth(getContentWidth());
+    const onResize = () => setContentWidth(getContentWidth());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const ready = metricsReady && contentWidth > 0;
 
   const virtualizer = useWindowVirtualizer({
-    count: results.length,
+    count: ready ? results.length : 0,
     estimateSize: (index) => estimateCardHeight(index, contentWidth),
     gap: 24,
     overscan: 5,
@@ -37,31 +57,6 @@ export default function HmrcResults({ search }: { search: string }) {
   });
 
   const virtualItems = virtualizer.getVirtualItems();
-
-  // Measure container content-box width via ResizeObserver.
-  // Items are gated on contentWidth > 0 && metricsReady in the JSX.
-  const hasResults = results.length > 0;
-  useEffect(() => {
-    if (!hasResults) return;
-    const el = listRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
-      if (width) {
-        setContentWidth(Math.floor(width));
-        virtualizer.measure();
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [hasResults, virtualizer]);
-
-  // Invalidate virtualizer cache when fonts load and metrics are re-prepared
-  useEffect(() => {
-    document.fonts.ready.then(() => {
-      requestAnimationFrame(() => virtualizer.measure());
-    });
-  }, [virtualizer]);
 
   useEffect(() => {
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
@@ -89,7 +84,7 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  if (isLoading) return <SkeletonCards />;
+  if (isLoading || (results.length > 0 && !ready)) return <SkeletonCards />;
 
   if (results.length === 0 && search.length >= 3) {
     return (

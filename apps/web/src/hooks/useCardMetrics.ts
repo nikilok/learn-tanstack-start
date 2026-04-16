@@ -1,6 +1,5 @@
 import { layout, prepare } from '@chenglou/pretext';
 import { useEffect, useRef, useState } from 'react';
-import { dlog } from '../utils';
 
 interface TextField<T> {
   getText: (item: T) => string;
@@ -24,27 +23,8 @@ export function useCardMetrics<T>(
   // Wait for fonts to be downloaded AND rendered before allowing prepare() —
   // canvas needs one frame after font load to use it for measurement.
   useEffect(() => {
-    dlog('[useCardMetrics] effect: fonts.status =', document.fonts.status);
     document.fonts.ready.then(() => {
-      dlog(
-        '[useCardMetrics] fonts.ready resolved at',
-        performance.now().toFixed(1),
-      );
-      requestAnimationFrame(() => {
-        dlog(
-          '[useCardMetrics] rAF after fonts.ready at',
-          performance.now().toFixed(1),
-        );
-        dlog(
-          '[useCardMetrics] fonts.check 600 16px Geist =',
-          document.fonts.check('600 16px Geist'),
-        );
-        dlog(
-          '[useCardMetrics] fonts.check 14px Geist =',
-          document.fonts.check('14px Geist'),
-        );
-        setFontsReady(true);
-      });
+      requestAnimationFrame(() => setFontsReady(true));
     });
   }, []);
 
@@ -54,12 +34,6 @@ export function useCardMetrics<T>(
       metricsRef.current = []; // data reset (e.g. new search)
     }
     if (items.length > metricsRef.current.length) {
-      dlog(
-        '[useCardMetrics] preparing',
-        items.length - metricsRef.current.length,
-        'items at',
-        performance.now().toFixed(1),
-      );
       metricsRef.current = [
         ...metricsRef.current,
         ...items
@@ -69,13 +43,6 @@ export function useCardMetrics<T>(
           ),
       ];
     }
-  } else {
-    dlog(
-      '[useCardMetrics] render: skipping prepare, fontsReady =',
-      fontsReady,
-      'items =',
-      items.length,
-    );
   }
 
   const estimateSize = (index: number, contentWidth: number): number => {

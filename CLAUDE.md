@@ -35,3 +35,36 @@ rapidly and the input blinks between visible and pill mode (especially on iOS Sa
 Needed for iOS Safari cursor positioning in sticky containers, but applying it permanently
 causes iOS Safari's GPU compositor to garble rotating placeholder text. Must only apply
 via `:focus-within` in `SearchInput.module.css`. Do NOT add it as a permanent inline style.
+
+## Pretext virtual list sizing — keep in sync with CSS
+
+`HmrcResults.tsx` uses `@chenglou/pretext` for canvas-based card height estimation
+instead of DOM `measureElement`. This eliminates layout reflow during scroll (35-43%
+reduction in Layout/Recalculate style).
+
+### Two places to update when HmrcCard styling changes
+
+1. **`HmrcResults.tsx` lines ~13-29** — the `useCardMetrics` config:
+   - `fields[].font` — must match the card's CSS font (weight, size, family)
+   - `fields[].lineHeight` — must match the CSS line-height in px
+   - `fields[].getText` — must match the text transformation applied before render
+   - `fixedHeight` — sum of all fixed-height card elements (padding, margins, rating
+     line, route line) plus 4px for sub-pixel rounding
+2. **`HmrcResults.tsx` line ~75** — the hidden measurement div's `className="px-4"` must
+   match the real container's horizontal padding class (line ~95)
+
+### How the readiness gating works
+
+Items only render when three conditions are met:
+1. **Data** — query results available (`isLoading` is false)
+2. **Fonts** — `document.fonts.ready` + one `requestAnimationFrame` (canvas needs the
+   font rendered, not just downloaded)
+3. **Width** — container content-box width measured via `useLayoutEffect` on a hidden div
+
+Until all three are ready, `<SkeletonCards />` stays visible. This prevents layout shifts
+from fallback font measurements or missing width data.
+
+### Scroll restoration depends on `ready`
+
+The `hmrc-scroll-y` sessionStorage restore runs in a `useEffect([ready])` — it must wait
+for items to be in the DOM at correct heights before calling `window.scrollTo`.

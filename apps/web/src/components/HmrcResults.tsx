@@ -24,7 +24,7 @@ export default function HmrcResults({ search }: { search: string }) {
         lineHeight: 20,
       },
     ],
-    fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
+    fixedHeight: 62, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8) + 4 (sub-pixel rounding)
     containerRef: listRef,
   });
 

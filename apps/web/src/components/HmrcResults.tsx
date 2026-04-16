@@ -1,15 +1,10 @@
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCardMetrics } from '../hooks/useCardMetrics';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
-
-/** Content width from known CSS layout: page-wrap(vw-32) - main px-4(32) - container px-4(32) capped by max-w-2xl(672) */
-function getContentWidth() {
-  return Math.min(document.documentElement.clientWidth - 96, 640);
-}
 
 export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
@@ -37,15 +32,6 @@ export default function HmrcResults({ search }: { search: string }) {
       fixedHeight: 58, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8)
     });
 
-  // Compute content width from viewport — no DOM element needed.
-  // Recalculates on resize/orientation change.
-  useEffect(() => {
-    setContentWidth(getContentWidth());
-    const onResize = () => setContentWidth(getContentWidth());
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
   const ready = metricsReady && contentWidth > 0;
 
   const virtualizer = useWindowVirtualizer({
@@ -58,7 +44,29 @@ export default function HmrcResults({ search }: { search: string }) {
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  // Measure content width from a DOM element with matching horizontal padding.
+  // Runs before paint via useLayoutEffect — the measurement div is hidden
+  // and rendered alongside the skeleton while waiting for readiness.
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const style = getComputedStyle(el);
+    const paddingX =
+      parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    setContentWidth(Math.floor(el.clientWidth - paddingX));
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentBoxSize?.[0]?.inlineSize;
+      if (width) {
+        setContentWidth(Math.floor(width));
+        virtualizer.measure();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [virtualizer]);
+
   useEffect(() => {
+    if (!ready) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
       sessionStorage.removeItem('hmrc-scroll-y');
@@ -66,7 +74,7 @@ export default function HmrcResults({ search }: { search: string }) {
         window.scrollTo(0, Number.parseInt(savedY, 10));
       });
     }
-  }, []);
+  }, [ready]);
 
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
@@ -84,7 +92,19 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  if (isLoading || (results.length > 0 && !ready)) return <SkeletonCards />;
+  if (isLoading || !ready) {
+    return (
+      <>
+        <SkeletonCards />
+        {/* Hidden element for width measurement — same px-4 as the real container */}
+        <div
+          ref={listRef}
+          className="px-4"
+          style={{ height: 0, overflow: 'hidden' }}
+        />
+      </>
+    );
+  }
 
   if (results.length === 0 && search.length >= 3) {
     return (

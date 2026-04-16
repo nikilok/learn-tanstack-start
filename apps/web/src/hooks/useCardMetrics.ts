@@ -46,8 +46,12 @@ export function useCardMetrics<T>(
   }
 
   const estimateSize = (index: number, contentWidth: number): number => {
-    let height = fixedHeight;
     const handles = metricsRef.current[index];
+    if (!handles || !contentWidth) {
+      // Before width is measured — assume single-line text fields
+      return fixedHeight + fields.reduce((sum, f) => sum + f.lineHeight, 0);
+    }
+    let height = fixedHeight;
     for (let i = 0; i < handles.length; i++) {
       height += layout(handles[i], contentWidth, fields[i].lineHeight).height;
     }

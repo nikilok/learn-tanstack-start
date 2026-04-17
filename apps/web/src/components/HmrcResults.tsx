@@ -1,6 +1,6 @@
-import { useVirtualTextLayout } from '@ss/virtual-text-layout';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef } from 'react';
+import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';

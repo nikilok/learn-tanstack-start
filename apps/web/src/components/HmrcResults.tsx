@@ -65,7 +65,9 @@ export default function HmrcResults({ search }: { search: string }) {
     }
   }, [virtualItems, results.length, hasMore, loadingMore, fetchMore]);
 
-  if (search.length > 0 && search.length < 3) {
+  if (search.length === 0) return null;
+
+  if (search.length < 3) {
     return (
       <p className="mt-4 text-sm text-(--sea-ink-soft)">
         Type at least 3 characters to search...

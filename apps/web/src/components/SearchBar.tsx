@@ -69,6 +69,7 @@ export default function SearchBar({
     <div className="relative">
       {/* Input — hidden until observer ready, hides when pill shows */}
       <div
+        className="search-input-wrapper"
         style={{
           opacity: !ready || showPill ? 0 : 1,
           pointerEvents: !ready || showPill ? 'none' : 'auto',

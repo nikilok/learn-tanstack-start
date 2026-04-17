@@ -16,6 +16,7 @@ import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
+import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 import appCss from '../styles.css?url';
 
@@ -111,6 +112,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#ffffff" />
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static search input init script, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="font-sans antialiased wrap-anywhere selection:bg-[rgba(0,114,245,0.16)]">

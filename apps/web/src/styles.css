@@ -259,3 +259,21 @@ a {
 @utility heading-card {
   letter-spacing: -0.4px;
 }
+
+/*
+ * Pre-hydration gate for the search input.
+ *
+ * An inline <script> in <head> (see search-input-init.ts) sets this attribute
+ * on <html> when the page loads scrolled or is back-navigated from a detail
+ * page (sessionStorage key present). That means the sentinel is above the
+ * viewport and the pill — not the input — should render. Without this gate,
+ * the server-rendered input would paint for one frame before React swaps it
+ * for the pill. useSearchPill removes the attribute once the observer has
+ * confirmed sentinel visibility, after which React owns input/pill visibility.
+ */
+html[data-hide-search-input] .search-input-wrapper {
+  /* biome-ignore lint: needed to override inline opacity set by React */
+  opacity: 0 !important;
+  /* biome-ignore lint: needed to override inline pointer-events set by React */
+  pointer-events: none !important;
+}

@@ -1,28 +1,40 @@
 # Project Notes
 
-## Search input visibility — things that break (non-obvious)
+## Search input visibility — pre-hydration attribute pattern
 
-### Approaches that cause input flashes — do NOT use
+First-paint visibility is controlled by a blocking inline script
+(`scripts/search-input-init.ts`) that stamps `data-hide-search-input` on `<html>`,
+and a CSS rule in `styles.css` that gates `.search-input-wrapper` opacity off it
+with `!important` (needed to beat React's inline opacity). This lets React default
+`ready=true` without server/client divergence.
 
-1. **`useLayoutEffect` to set opacity** — causes the input to flash when reloading while
-   scrolled down. `useLayoutEffect` is a no-op on the server so the HTML has no opacity
-   style, and the input is visible for one frame before JS hides it.
-2. **Default `ready` to `true`** — causes a flash when navigating back from the company
-   detail page while scrolled down.
-3. **`showPill || (!ready && isStuck)` opacity condition** — causes a flash on initial
-   paint because the sentinel is briefly in-viewport during layout before scroll restores.
-4. **Synchronous `getBoundingClientRect` in `useSearchPill` effect** — same flash as #3.
-   On back-navigation the sentinel is momentarily in-viewport before scroll restores.
+### Cross-file invariants
 
-### Do NOT add `!pillClickedRef.current` guards in the observer
+- **`pagehide` listener in `useSearchPill` is load-bearing**: at script-time on the
+  next load the browser hasn't restored scroll yet, so `window.scrollY` is still 0.
+  Without `sessionStorage['hmrc-scroll-y']` saved on `pagehide`, reload-while-scrolled
+  flashes the input.
+- **Safety-net cleanup must NOT remove `hmrc-scroll-y`**: `HmrcResults` owns key
+  consumption, and its `ready` gate (data + fonts + width) can take many frames.
+  Clearing the key here races scroll-restore on back-nav.
+- **Attribute is cleared on `isStuck=true` via `useLayoutEffect`**: by then React's
+  inline `opacity:0` is in place, so dropping the CSS gate is safe.
 
-The observer must always set `isStuck` and always reset `pillClicked` when the sentinel
-enters the viewport. Guards on these create a deadlock: `useSearchShortcut` sets
-`pillClicked = true` when a printable key is pressed with `activeElement: BODY` (happens
-on page load and back-navigation). The guard then prevents the observer from setting
-`isStuck = true`, and the only reset path (`onBlur`) requires `isStuck` to be `true`.
-Result: pill never shows. The `onActivate` callback must be conditional on
-`isStuckRef.current` to avoid this.
+### Anti-patterns (past bugs)
+
+- **`useLayoutEffect` to set opacity directly**: no-op on server → first SSR paint
+  shows the input before JS hides it.
+- **Synchronous `getBoundingClientRect` in `useSearchPill`**: sentinel is briefly
+  in-viewport on back-nav before scroll restores, so the read lies.
+- **Diverging server/client initial state for `ready`**: hydration mismatch → React
+  reconciles to client and overwrites server HTML, producing a worse flash. The
+  pre-hydration attribute is the only correct way to encode client-only first-paint
+  state.
+- **`!pillClickedRef.current` guard in the IntersectionObserver**: deadlocks with
+  `useSearchShortcut` (which sets `pillClicked=true` on printable keys when
+  `activeElement: BODY`). Observer can no longer set `isStuck=true`, and the only
+  reset (`onBlur`) requires `isStuck=true`. Pill never shows. `onActivate` must be
+  conditional on `isStuckRef.current` instead.
 
 ### `isStuck = false` must be debounced
 

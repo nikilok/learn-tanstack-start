@@ -10,11 +10,7 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
-  const {
-    estimateSize: estimateCardHeight,
-    ready,
-    contentWidth,
-  } = useVirtualTextLayout(results, {
+  const { estimateSize, ready, contentWidth } = useVirtualTextLayout(results, {
     fields: [
       {
         getText: (row) => titleCase(row.organisationName),
@@ -34,7 +30,7 @@ export default function HmrcResults({ search }: { search: string }) {
 
   const virtualizer = useWindowVirtualizer({
     count: ready ? results.length : 0,
-    estimateSize: (index) => estimateCardHeight(index),
+    estimateSize,
     gap: 24,
     overscan: 5,
     scrollMargin: listRef.current?.offsetTop ?? 0,

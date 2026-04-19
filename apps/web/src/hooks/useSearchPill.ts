@@ -91,20 +91,6 @@ export function useSearchPill(
     if (isStuck) clearHideAttribute();
   }, [isStuck]);
 
-  // Save scroll position on pagehide so the pre-hydration inline script can
-  // detect "reload while scrolled" on the next load. The script runs before
-  // the browser has restored scroll, so window.scrollY is 0 at that point —
-  // sessionStorage is the only signal that survives the reload boundary.
-  useEffect(() => {
-    const onPageHide = () => {
-      if (window.scrollY > 0) {
-        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
-      }
-    };
-    window.addEventListener('pagehide', onPageHide);
-    return () => window.removeEventListener('pagehide', onPageHide);
-  }, []);
-
   // Safety net: if the inline script set the attribute but we end up at the
   // top of the page with nothing to restore (rare — e.g., the script fired
   // during a transient scroll that was then reset), remove it after two

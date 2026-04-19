@@ -61,6 +61,21 @@ export default function HmrcResults({ search }: { search: string }) {
     }
   }, [virtualItems, results.length, hasMore, loadingMore, fetchMore]);
 
+  // Save scroll position on pagehide so the pre-hydration script in <head> can
+  // hide the input on the next load. Only registered when there are results to
+  // scroll past — otherwise iOS keyboard auto-scroll on input focus would write
+  // a meaningless value that nothing consumes, leaving the input hidden.
+  useEffect(() => {
+    if (results.length === 0) return;
+    const onPageHide = () => {
+      if (window.scrollY > 0) {
+        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+      }
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
+  }, [results.length]);
+
   if (search.length === 0) return null;
 
   if (search.length < 3) {

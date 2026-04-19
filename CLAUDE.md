@@ -10,10 +10,13 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
 
 ### Cross-file invariants
 
-- **`pagehide` listener in `useSearchPill` is load-bearing**: at script-time on the
-  next load the browser hasn't restored scroll yet, so `window.scrollY` is still 0.
-  Without `sessionStorage['hmrc-scroll-y']` saved on `pagehide`, reload-while-scrolled
-  flashes the input.
+- **`pagehide` listener in `HmrcResults` is load-bearing AND must be conditioned on
+  `results.length > 0`**: at script-time on the next load the browser hasn't restored
+  scroll yet, so `window.scrollY` is still 0. Without `sessionStorage['hmrc-scroll-y']`
+  saved on `pagehide`, reload-while-scrolled flashes the input. But registering the
+  listener unconditionally breaks iOS: the soft keyboard auto-scrolls on input focus,
+  which `pagehide` would persist with no consumer to clear it (HmrcResults early-returns
+  on empty search), leaving the input hidden forever after reload.
 - **Safety-net cleanup must NOT remove `hmrc-scroll-y`**: `HmrcResults` owns key
   consumption, and its `ready` gate (data + fonts + width) can take many frames.
   Clearing the key here races scroll-restore on back-nav.

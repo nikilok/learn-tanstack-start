@@ -2,8 +2,9 @@ name: HMRC Sponsor List Ingestion
 
 on:
   schedule:
-    # Every day at 5:00 AM and 5:00 PM UTC
-    - cron: "0 5,17 * * *"
+    # 12:30 & 18:00 BST (11:30 & 17:00 GMT)
+    - cron: "30 11 * * *"
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       force-ingest:

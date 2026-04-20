@@ -10,15 +10,18 @@
  * - Logs progress every 100 companies
  */
 
-import { neon } from '@neondatabase/serverless';
-import { companiesHouseProfiles, hmrcCompanyMapping } from '@ss/db/schema';
+import { createClient } from '@ss/db/client';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+} from '@ss/db/schema';
 import dotenv from 'dotenv';
-import { drizzle } from 'drizzle-orm/neon-http';
+import { eq, isNull, sql } from 'drizzle-orm';
 
 dotenv.config({ path: '.env.local' });
 
-const sql = neon(process.env.POSTGRES_URL as string);
-const db = drizzle({ client: sql });
+const db = createClient(process.env.POSTGRES_URL as string);
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 const API_KEY = process.env.COMPANIES_HOUSE_SEED_API_KEY as string;
@@ -56,14 +59,15 @@ async function fetchApi(path: string): Promise<unknown | null> {
 }
 
 // Get only org names that aren't already cached
-const uncached = await sql`
-  SELECT DISTINCT h.organisation_name
-  FROM hmrc_skilled_workers h
-  LEFT JOIN companies_house_profiles c
-    ON UPPER(h.organisation_name) = UPPER(c.company_name)
-  WHERE c.company_number IS NULL
-  ORDER BY h.organisation_name
-`;
+const uncached = await db
+  .selectDistinct({ organisationName: hmrcSkilledWorkers.organisationName })
+  .from(hmrcSkilledWorkers)
+  .leftJoin(
+    companiesHouseProfiles,
+    sql`UPPER(${hmrcSkilledWorkers.organisationName}) = UPPER(${companiesHouseProfiles.companyName})`,
+  )
+  .where(isNull(companiesHouseProfiles.companyNumber))
+  .orderBy(hmrcSkilledWorkers.organisationName);
 console.log(`Found ${uncached.length} uncached organisations to fetch`);
 
 let processed = 0;
@@ -92,15 +96,15 @@ function logProgress() {
 }
 
 for (const row of uncached) {
-  const orgName = row.organisation_name as string;
+  const orgName = row.organisationName;
   processed++;
 
   // Check if a crawler cached this while the seed was running
-  const [alreadyCached] = await sql`
-    SELECT 1 FROM hmrc_company_mapping
-    WHERE organisation_name = ${orgName}
-    LIMIT 1
-  `;
+  const [alreadyCached] = await db
+    .select()
+    .from(hmrcCompanyMapping)
+    .where(eq(hmrcCompanyMapping.organisationName, orgName))
+    .limit(1);
   if (alreadyCached) {
     skipped++;
     if (processed % 100 === 0) {

@@ -1,4 +1,4 @@
-import { neon } from '@neondatabase/serverless';
+import { neon } from '@ss/db/client';
 import { parse } from 'csv-parse/sync';
 import { setGitHubOutput } from './ci-utils';
 

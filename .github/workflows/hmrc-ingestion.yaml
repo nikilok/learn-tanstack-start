@@ -91,4 +91,7 @@ jobs:
           git commit -m "chore: regenerate sitemaps after ingestion"
           git push -u origin "$BRANCH"
           PR_URL=$(gh pr create --title "chore: regenerate sitemaps after ingestion" --body "Automated sitemap update from HMRC ingestion workflow." --base main)
-          gh pr merge "$PR_URL" --squash --auto
+          # Try auto-merge (queues behind required checks); fall back to direct
+          # merge when the PR is already clean and GitHub refuses to enable auto.
+          gh pr merge "$PR_URL" --squash --delete-branch --auto \
+            || gh pr merge "$PR_URL" --squash --delete-branch

@@ -2,6 +2,11 @@ import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 
+/**
+ * Site footer with social links, a privacy link, and a copyright line. Renders
+ * the `LastUpdated` ingestion indicator in a centered pill anchored to the top
+ * edge of the footer, falling back to a skeleton while the query suspends.
+ */
 export default function Footer() {
   const year = new Date().getFullYear();
 

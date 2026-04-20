@@ -3,6 +3,10 @@ import { createServerFn } from '@tanstack/react-start';
 import { desc } from 'drizzle-orm';
 import { db } from '../db.server';
 
+/**
+ * Format the gap between `date` and now as a human-readable relative string
+ * (e.g. "a few seconds ago", "5 mins ago", "3 hours ago", "2 days ago").
+ */
 function formatRelative(date: Date): string {
   const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
   if (diffSec < 45) return 'a few seconds ago';
@@ -17,13 +21,24 @@ function formatRelative(date: Date): string {
   return `${diffDay} days ago`;
 }
 
+/**
+ * Server fn returning a human-readable "time ago" string for the most recent
+ * HMRC CSV ingestion, read from `hmrc_ingestion_meta`. Returns `null` when no
+ * ingestion row exists or the query fails — callers should treat `null` as
+ * "hide the indicator" rather than an error state.
+ */
 export const getLastIngestion = createServerFn().handler(async () => {
-  const [row] = await db
-    .select({ ingestedAt: hmrcIngestionMeta.ingestedAt })
-    .from(hmrcIngestionMeta)
-    .orderBy(desc(hmrcIngestionMeta.ingestedAt))
-    .limit(1);
+  try {
+    const [row] = await db
+      .select({ ingestedAt: hmrcIngestionMeta.ingestedAt })
+      .from(hmrcIngestionMeta)
+      .orderBy(desc(hmrcIngestionMeta.ingestedAt))
+      .limit(1);
 
-  if (!row) return null;
-  return formatRelative(row.ingestedAt);
+    if (!row) return null;
+    return formatRelative(row.ingestedAt);
+  } catch (err) {
+    console.error('[getLastIngestion] failed', err);
+    return null;
+  }
 });

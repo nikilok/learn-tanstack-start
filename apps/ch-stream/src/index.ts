@@ -27,6 +27,12 @@ let updated = 0;
 let updatedSinceFlush = 0;
 let skipped = 0;
 
+/**
+ * Per-event callback handed to `connectStream`: filters to company-profile
+ * events, updates counters, advances the local timepoint, and flushes the
+ * cursor + triggers revalidation every `TIMEPOINT_FLUSH_INTERVAL` events.
+ * Skips DB writes and revalidation when `--dry-run` is set.
+ */
 async function handleEvent(event: CHStreamEvent): Promise<void> {
   if (!event.resource_kind.startsWith('company-profile')) return;
 

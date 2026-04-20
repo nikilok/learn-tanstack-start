@@ -37,6 +37,11 @@ type CompanyProfile = {
   };
 };
 
+/**
+ * Map a `companies_house_profiles` DB row into the nested `CompanyProfile`
+ * shape returned by the Companies House REST API, using `undefined` for
+ * missing optional fields so the object round-trips cleanly to JSON.
+ */
 function dbRowToProfile(
   row: typeof companiesHouseProfiles.$inferSelect,
 ): CompanyProfile {
@@ -74,6 +79,11 @@ function dbRowToProfile(
   };
 }
 
+/**
+ * Flatten a `CompanyProfile` API payload into a `companies_house_profiles`
+ * row for insert/upsert — coerces empty strings to `null` and stamps a fresh
+ * `updatedAt`.
+ */
 function profileToDbRow(profile: CompanyProfile) {
   return {
     companyNumber: profile.company_number,
@@ -103,6 +113,12 @@ function profileToDbRow(profile: CompanyProfile) {
   };
 }
 
+/**
+ * Call the Companies House REST API with Basic auth. Returns a discriminated
+ * result — `{ ok: true, data }` on success, `{ ok: false, status }` for any
+ * non-2xx (including 429 rate-limits). Throws only when the API key env var
+ * is missing.
+ */
 async function fetchFromApi(
   path: string,
 ): Promise<{ ok: true; data: unknown } | { ok: false; status: number }> {
@@ -126,6 +142,10 @@ async function fetchFromApi(
   return { ok: true, data: await res.json() };
 }
 
+/**
+ * Upsert a `CompanyProfile` into `companies_house_profiles` keyed on
+ * `companyNumber`, overwriting all tracked fields on conflict.
+ */
 async function upsertProfile(profile: CompanyProfile) {
   const row = profileToDbRow(profile);
   await db.insert(companiesHouseProfiles).values(row).onConflictDoUpdate({
@@ -134,6 +154,13 @@ async function upsertProfile(profile: CompanyProfile) {
   });
 }
 
+/**
+ * Server fn resolving a company profile for a given HMRC organisation name.
+ * Looks up the company number via `hmrc_company_mapping`, returns the cached
+ * profile if present, otherwise calls the Companies House API (search →
+ * profile) and persists the mapping + profile via `waitUntil`. Returns
+ * `null` when no match is found or any upstream call fails.
+ */
 export const getCompanyProfile = createServerFn()
   .inputValidator((input: unknown) => input as { companyName: string })
   .handler(async ({ data: { companyName } }) => {

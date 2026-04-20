@@ -9,6 +9,12 @@ export const CONFIG = {
   TIMEPOINT_FLUSH_INTERVAL: 100,
 } as const;
 
+/**
+ * Assert required env vars are present. Throws for hard requirements
+ * (`POSTGRES_URL`, `COMPANIES_HOUSE_STREAM_API_KEY`) and warns — without
+ * throwing — when revalidation settings are missing, since revalidation is
+ * optional and the stream can still run without it.
+ */
 export function validateConfig() {
   if (!CONFIG.POSTGRES_URL) throw new Error('POSTGRES_URL is required');
   if (!CONFIG.API_KEY)

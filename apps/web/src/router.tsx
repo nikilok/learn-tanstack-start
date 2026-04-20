@@ -3,6 +3,12 @@ import { createRouter as createTanStackRouter } from '@tanstack/react-router';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
 import { routeTree } from './routeTree.gen';
 
+/**
+ * Build the TanStack Router instance with a shared QueryClient (5 min
+ * staleTime, 10 min gcTime), intent-based preloading, and SSR-aware query
+ * integration. Called once per request on the server and once on client
+ * bootstrap.
+ */
 export function getRouter() {
   const queryClient = new QueryClient({
     defaultOptions: {

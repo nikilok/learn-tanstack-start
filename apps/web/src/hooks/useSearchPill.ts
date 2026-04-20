@@ -7,11 +7,23 @@ import {
 } from 'react';
 import { useSearchShortcut } from './useSearchShortcut';
 
+/**
+ * Remove the `data-hide-search-input` attribute set by the pre-hydration
+ * inline script, handing first-paint control back to React. No-op on server.
+ */
 function clearHideAttribute() {
   if (typeof document === 'undefined') return;
   document.documentElement.removeAttribute('data-hide-search-input');
 }
 
+/**
+ * Drive the sticky search-pill state machine. Observes a sentinel to detect
+ * when the input has scrolled off, debounces the un-stick transition to
+ * avoid blinking during content reflow, clears the pre-hydration hide
+ * attribute safely, and wires `/`, `⌘K`, and printable keys to activate
+ * pill mode only once stuck. Returns `{ isStuck, ready, pillClicked,
+ * onPillClick, onPillDismiss }`.
+ */
 export function useSearchPill(
   inputRef: RefObject<HTMLInputElement | null>,
   sentinelRef: RefObject<HTMLDivElement | null>,

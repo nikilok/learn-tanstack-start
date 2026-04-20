@@ -6,6 +6,14 @@ import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
+/**
+ * Virtualized list of HMRC sponsor rows for the given search query. Gates
+ * rendering on data/fonts/width readiness (canvas-based height estimation via
+ * `virtual-text-layout`) to avoid layout shift, triggers infinite-scroll fetches
+ * near the end of the window, and wires up sessionStorage scroll restoration.
+ * Returns `null` for empty input, a hint for short queries, skeletons while
+ * loading, and a "no matches" message when the query yields zero rows.
+ */
 export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);

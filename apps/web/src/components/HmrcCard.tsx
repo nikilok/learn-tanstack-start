@@ -3,6 +3,12 @@ import type { HmrcRow } from '../api/hmrc';
 import { slugify, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 
+/**
+ * Single HMRC sponsor result card, rendered as a link into the company detail
+ * route. Persists `window.scrollY` to sessionStorage on click so `HmrcResults`
+ * can restore the list position on back-nav. `search` is forwarded so the
+ * "back to search" link on the detail page preserves the current query.
+ */
 export default function HmrcCard({
   row,
   search,

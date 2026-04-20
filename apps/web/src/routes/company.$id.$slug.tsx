@@ -84,6 +84,12 @@ export const Route = createFileRoute('/company/$id/$slug')({
   component: CompanyDetail,
 });
 
+/**
+ * Company detail page combining the HMRC sponsor row (location, visa route,
+ * rating) with the Companies House profile (status, incorporation date,
+ * registered address, SIC descriptions) loaded by the route's `loader`.
+ * Preserves the `search` param so the back-link returns to the same query.
+ */
 function CompanyDetail() {
   const { sponsor, profile } = Route.useLoaderData();
   const { search } = Route.useSearch();

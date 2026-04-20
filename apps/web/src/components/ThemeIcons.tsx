@@ -1,5 +1,6 @@
 const iconClass = 'h-[18px] w-[18px]';
 
+/** Sun glyph used by `ThemeToggle` to indicate light mode. */
 export function SunIcon() {
   return (
     <svg
@@ -25,6 +26,7 @@ export function SunIcon() {
   );
 }
 
+/** Crescent-moon glyph used by `ThemeToggle` to indicate dark mode. */
 export function MoonIcon() {
   return (
     <svg
@@ -42,6 +44,7 @@ export function MoonIcon() {
   );
 }
 
+/** Monitor-with-cog glyph used by `ThemeToggle` to indicate system/auto mode. */
 export function MonitorIcon() {
   return (
     <svg

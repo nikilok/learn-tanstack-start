@@ -104,6 +104,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   },
 );
 
+/**
+ * Root HTML shell for every route. Inlines the theme and search-input-init
+ * scripts in `<head>` to prevent first-paint flashes, wraps children in the
+ * shared QueryClientProvider, and mounts global chrome (Header, Footer,
+ * NavigationProgress, McpTools) plus devtools and Vercel analytics in prod.
+ */
 function RootDocument({ children }: { children: React.ReactNode }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   return (

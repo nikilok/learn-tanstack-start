@@ -3,6 +3,10 @@ import type { CHStreamEvent } from './types.ts';
 
 const AUTH_HEADER = `Basic ${Buffer.from(`${CONFIG.API_KEY}:`).toString('base64')}`;
 
+/**
+ * Thrown when the Companies House stream returns HTTP 429, signalling the
+ * caller should back off for `RETRY_DELAY_429_MS` before reconnecting.
+ */
 export class RateLimitError extends Error {
   constructor() {
     super('Rate limited (429)');
@@ -10,6 +14,11 @@ export class RateLimitError extends Error {
   }
 }
 
+/**
+ * Thrown on HTTP 416 when the requested timepoint has aged out of the stream
+ * window. Callers should drop the stored cursor and reconnect from the
+ * latest available timepoint.
+ */
 export class TimepointGoneError extends Error {
   constructor() {
     super('Timepoint too old (416)');
@@ -17,6 +26,12 @@ export class TimepointGoneError extends Error {
   }
 }
 
+/**
+ * Open the Companies House profile stream (optionally from `timepoint`) and
+ * invoke `onEvent` for each NDJSON event parsed from the response body. Maps
+ * 429/416 responses to typed errors so the caller can apply the right retry
+ * strategy; malformed lines are logged and skipped rather than fatal.
+ */
 export async function connectStream(
   timepoint: number | null,
   onEvent: (event: CHStreamEvent) => Promise<void>,

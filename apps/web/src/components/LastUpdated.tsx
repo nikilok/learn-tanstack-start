@@ -1,6 +1,12 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { getLastIngestion } from '../api/ingestion';
+import CheckCircleIcon from './CheckCircleIcon';
 
+/**
+ * Ingestion freshness pill showing "Last updated {relative time}" sourced from
+ * the `getLastIngestion` server fn. Suspends on first load; returns `null` when
+ * the query resolves to no data so the pill disappears cleanly.
+ */
 export default function LastUpdated() {
   const { data } = useSuspenseQuery({
     queryKey: ['last-ingestion'],
@@ -10,28 +16,16 @@ export default function LastUpdated() {
   if (!data) return null;
   return (
     <div className="flex items-center gap-2 rounded-full border border-(--line) bg-(--bg-base)/80 px-4 py-1 text-sm text-(--sea-ink-faint) backdrop-blur-sm">
-      <svg
-        viewBox="0 0 16 16"
-        aria-hidden="true"
-        width="14"
-        height="14"
-        className="text-(--ok)"
-      >
-        <circle cx="8" cy="8" r="7" fill="currentColor" />
-        <path
-          d="M4.8 8.2l2 2 4.4-4.6"
-          fill="none"
-          stroke="#ffffff"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <CheckCircleIcon className="h-3.5 w-3.5 text-(--ok)" />
       <span>Last updated {data}</span>
     </div>
   );
 }
 
+/**
+ * Shimmer placeholder matching the dimensions of `LastUpdated`. Rendered inside
+ * the Suspense fallback in `Footer` while the ingestion query is pending.
+ */
 export function LastUpdatedSkeleton() {
   return (
     <div className="flex items-center gap-2 rounded-full border border-(--line) bg-(--bg-base)/80 px-4 py-1 backdrop-blur-sm">

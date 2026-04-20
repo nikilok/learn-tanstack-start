@@ -1,5 +1,11 @@
 import type { CHCompanyProfile } from './types.ts';
 
+/**
+ * Flatten a Companies House profile payload into a row shaped for the
+ * `companies_house_profiles` table. Only keys present on the input are set on
+ * the output so callers can diff partial stream updates against the existing
+ * row without clobbering unspecified columns.
+ */
 export function mapProfileToRow(data: CHCompanyProfile) {
   const row: Record<string, unknown> = {
     companyNumber: data.company_number,

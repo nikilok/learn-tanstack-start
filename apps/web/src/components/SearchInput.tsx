@@ -3,6 +3,13 @@ import { memo, useEffect, useRef } from 'react';
 import SearchIcon from './SearchIcon';
 import styles from './SearchInput.module.css';
 
+/**
+ * Uncontrolled text input with integrated clear/search affordances. Uses a ref
+ * plus imperative DOM sync so parent-driven re-renders don't disrupt in-flight
+ * typing; `defaultValue` only re-syncs when the input isn't focused so external
+ * search-param updates apply without clobbering the user. `autoFocus` fires
+ * once, while `focus` re-focuses on every truthy transition.
+ */
 export default memo(function SearchInput({
   inputRef,
   defaultValue,

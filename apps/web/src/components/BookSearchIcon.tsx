@@ -1,3 +1,8 @@
+/**
+ * Decorative inline SVG of a book with a magnifying glass. Stroked with
+ * `currentColor` so it inherits the parent's text color; marked `aria-hidden`
+ * since it's purely ornamental.
+ */
 export default function BookSearchIcon({ className }: { className?: string }) {
   return (
     <svg

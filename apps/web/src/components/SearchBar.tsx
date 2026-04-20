@@ -5,6 +5,14 @@ import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
 
+/**
+ * Search UI that swaps between an inline input and a compact header pill as the
+ * user scrolls. The pill is portaled into `#header-pill-portal` so it visually
+ * lives in the sticky header while staying owned by this component. Hides the
+ * input until `ready` to avoid first-paint flashes, and auto-dismisses the
+ * expanded input on deliberate scroll (>100px from the anchor) while the pill
+ * is clicked open.
+ */
 export default function SearchBar({
   search,
   isStuck,

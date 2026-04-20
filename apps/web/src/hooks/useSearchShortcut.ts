@@ -7,6 +7,12 @@ const state: {
   registered: boolean;
 } = { inputRef: null, onActivate: null, registered: false };
 
+/**
+ * Global capture-phase keydown handler: focuses the search input on `/` or
+ * `⌘K`/`Ctrl+K`, and on any printable character (desktop auto-focus). No-op
+ * when the input is already focused or unmounted. Calls `state.onActivate`
+ * before focusing so consumers can open pill mode in the same tick.
+ */
 function handleKeyDown(e: KeyboardEvent) {
   const el = state.inputRef?.current;
   if (!el) return;
@@ -37,12 +43,22 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
+/**
+ * Register the global keydown listener once per page load. Idempotent and
+ * SSR-safe — the listener outlives React mount cycles so shortcut behaviour
+ * is uninterrupted by HMR or route transitions.
+ */
 function ensureListener() {
   if (state.registered || typeof window === 'undefined') return;
   window.addEventListener('keydown', handleKeyDown, true);
   state.registered = true;
 }
 
+/**
+ * Hook that wires an input ref and optional `onActivate` callback into the
+ * module-level keydown listener. `onActivate` is held in a ref so latest-
+ * closure values are always used without re-registering the global handler.
+ */
 export function useSearchShortcut(
   inputRef: RefObject<HTMLInputElement | null>,
   onActivate?: () => void,

@@ -3,6 +3,12 @@ import '@mcp-b/global';
 import { searchHmrc } from '../api/hmrc';
 import { titleCase } from '../utils';
 
+/**
+ * Registers a `search_uk_visa_sponsors` tool with the browser-side MCP host
+ * (`navigator.modelContext` via `@mcp-b/global`) so AI agents can query the
+ * HMRC sponsor list through the same server fn the UI uses. Renders nothing;
+ * returns early when the MCP host is not available and unregisters on unmount.
+ */
 export function McpTools() {
   useEffect(() => {
     const ctx = navigator.modelContext;

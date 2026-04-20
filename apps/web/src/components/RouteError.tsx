@@ -2,6 +2,12 @@ import type { ErrorComponentProps } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { logError } from '../api/logError';
 
+/**
+ * Router-level error boundary UI. Ships the error message and stack to the
+ * `logError` server fn on mount for server-side observability, then renders a
+ * generic "Something went wrong" card with `Try again` (calls `reset`) and
+ * `Go back` (history pop) affordances.
+ */
 export default function RouteError({ error, reset }: ErrorComponentProps) {
   useEffect(() => {
     logError({

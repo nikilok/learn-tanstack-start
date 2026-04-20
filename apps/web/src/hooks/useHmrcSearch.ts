@@ -3,6 +3,12 @@ import { type HmrcRow, searchHmrc } from '../api/hmrc';
 
 export type { HmrcRow };
 
+/**
+ * Hook wrapping `searchHmrc` in a React Query infinite query. Disabled while
+ * `search` is under 3 chars. Returns the flattened result rows plus paging
+ * state (`hasMore`, `loadingMore`, `fetchMore`) and an `isLoading` flag that
+ * stays `false` when the query is disabled.
+ */
 export function useHmrcSearch(search: string) {
   const enabled = search.length >= 3;
 

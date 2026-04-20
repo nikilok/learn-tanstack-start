@@ -2,6 +2,11 @@ import { Link } from '@tanstack/react-router';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
+/**
+ * Sticky top header with the site logo, social links, and theme toggle. Also
+ * provides the `#header-pill-portal` mount point that `SearchBar` uses to render
+ * its collapsed pill once the user scrolls past the inline search input.
+ */
 export default function Header() {
   return (
     <header className="site-header sticky top-0 z-50 px-4 backdrop-blur-xl">

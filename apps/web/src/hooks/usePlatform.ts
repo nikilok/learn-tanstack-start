@@ -1,5 +1,9 @@
 export type Platform = 'mac' | 'windows' | 'linux' | 'chromeos' | 'unknown';
 
+/**
+ * Derive `{ platform, isMobile }` from a user-agent string via case-insensitive
+ * substring checks. Unknown UAs fall back to `{ platform: 'unknown' }`.
+ */
 export function parsePlatform(ua: string): {
   platform: Platform;
   isMobile: boolean;
@@ -14,6 +18,10 @@ export function parsePlatform(ua: string): {
   return { platform, isMobile };
 }
 
+/**
+ * Return the platform-appropriate keyboard-shortcut label for the search
+ * input — `⌘K` on macOS, `Ctrl+K` everywhere else.
+ */
 export function getShortcutLabel(platform: Platform): string {
   return platform === 'mac' ? '⌘K' : 'Ctrl+K';
 }

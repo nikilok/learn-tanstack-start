@@ -1,6 +1,11 @@
 import { useRouterState } from '@tanstack/react-router';
 import styles from './NavigationProgress.module.css';
 
+/**
+ * Thin top-of-viewport progress bar shown during TanStack Router page
+ * transitions. Filters out search-param-only updates so debounced query typing
+ * doesn't flash the bar; returns `null` when the router is idle.
+ */
 export default function NavigationProgress() {
   const show = useRouterState({
     select: (s) => {

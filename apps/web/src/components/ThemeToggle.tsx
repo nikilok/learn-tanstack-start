@@ -4,6 +4,10 @@ import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
 
+/**
+ * Read the persisted theme choice from `localStorage`. Returns `'auto'` on the
+ * server (no `window`) and when the stored value is missing or unrecognized.
+ */
 function getInitialMode(): ThemeMode {
   if (typeof window === 'undefined') {
     return 'auto';
@@ -17,6 +21,12 @@ function getInitialMode(): ThemeMode {
   return 'auto';
 }
 
+/**
+ * Apply a theme mode to the document: toggles the `light`/`dark` class and
+ * `color-scheme` on `<html>`, and updates the `theme-color` meta so mobile
+ * browser chrome matches the app background. `'auto'` resolves via
+ * `prefers-color-scheme`.
+ */
 function applyThemeMode(mode: ThemeMode) {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const resolved = mode === 'auto' ? (prefersDark ? 'dark' : 'light') : mode;
@@ -34,6 +44,12 @@ function applyThemeMode(mode: ThemeMode) {
   }
 }
 
+/**
+ * Three-state theme toggle button cycling light -> dark -> auto -> light.
+ * Hydrates from `localStorage` after mount (the initial paint is handled by a
+ * blocking `<head>` script so there's no flash), and subscribes to the OS
+ * color-scheme media query only while in `'auto'` mode.
+ */
 export default function ThemeToggle() {
   const [mode, setMode] = useState<ThemeMode>('auto');
 
@@ -57,6 +73,10 @@ export default function ThemeToggle() {
     };
   }, [mode]);
 
+  /**
+   * Advance to the next mode in the light -> dark -> auto cycle, apply it to
+   * the DOM, and persist the choice to `localStorage`.
+   */
   function toggleMode() {
     const nextMode: ThemeMode =
       mode === 'light' ? 'dark' : mode === 'dark' ? 'auto' : 'light';

@@ -23,6 +23,7 @@
   /* Mapped tokens for components */
   --sea-ink: #171717;
   --sea-ink-soft: #4d4d4d;
+  --sea-ink-faint: #7a7a7a;
   --kicker: #666666;
   --surface: var(--white);
   --surface-strong: var(--white);
@@ -48,6 +49,7 @@
   --sponsor-card-bg: #f0edf5;
   --logo-navy: #001c55;
   --logo-red: #c8102e;
+  --ok: #74a0b8;
 }
 
 .dark {
@@ -64,6 +66,7 @@
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;
+  --sea-ink-faint: #7a7a7a;
   --kicker: #808080;
   --surface: #0a0a0a;
   --surface-strong: #0a0a0a;
@@ -92,6 +95,7 @@
   --sponsor-card-bg: #1a1a2e;
   --logo-navy: #e0e7ff;
   --logo-red: #f87171;
+  --ok: #4a425a;
 }
 
 html,

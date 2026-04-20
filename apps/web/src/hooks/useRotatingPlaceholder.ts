@@ -9,6 +9,12 @@ const PLACEHOLDERS = [
   'try "Royal Mail"',
 ];
 
+/**
+ * Hook that cycles through a fixed list of example-search placeholders every
+ * 3s, appending the shortcut hint (e.g. `(⌘K)`) when provided. Rotation stops
+ * and the index resets to 0 when `paused` is true — used while the input is
+ * focused or has a value.
+ */
 export function useRotatingPlaceholder(shortcut: string, paused = false) {
   const [index, setIndex] = useState(0);
 

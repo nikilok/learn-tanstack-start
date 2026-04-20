@@ -50,6 +50,12 @@ export const Route = createFileRoute('/')({
   component: Home,
 });
 
+/**
+ * Landing page component: renders the search bar (with sticky/pill behavior
+ * via `useSearchPill`) and a Suspense-wrapped `HmrcResults` list. Debounces
+ * typing by 450ms before pushing the query into the `search` URL param via
+ * `navigate({ replace: true })` so history isn't spammed on each keystroke.
+ */
 function Home() {
   const { search } = Route.useSearch();
   const { platformInfo } = Route.useRouteContext();

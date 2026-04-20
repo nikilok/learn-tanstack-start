@@ -1,7 +1,15 @@
+/**
+ * Lowercase-then-capitalize the first letter of each word. Local copy so this
+ * component can stand alone without pulling in the shared utils module.
+ */
 function titleCase(str: string) {
   return str.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Map an HMRC sponsor rating string to a Tailwind background class for the
+ * status dot. Falls back to a neutral color when no keyword matches.
+ */
 function getRatingColor(rating: string) {
   const r = rating.toLowerCase();
   if (r.includes('premium')) return 'bg-amber-500';
@@ -12,6 +20,11 @@ function getRatingColor(rating: string) {
   return 'bg-(--sea-ink-soft)';
 }
 
+/**
+ * Inline rating label plus a colored status dot whose hue reflects the rating
+ * tier (premium/sme+/provisional/A/B). The title-cased rating is also set as
+ * the `title` attribute for hover disambiguation.
+ */
 export default function RatingIcon({ rating }: { rating: string }) {
   return (
     <span

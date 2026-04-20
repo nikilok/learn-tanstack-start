@@ -5,6 +5,13 @@ import { db } from '../db.server';
 
 const PAGE_SIZE = 50;
 
+/**
+ * Server fn performing a paginated fuzzy search over `hmrc_skilled_workers`.
+ * Combines regex word-boundary matching with pg_trgm similarity, ranking
+ * prefix matches > word-boundary matches > trigram similarity. Returns an
+ * empty page when the query is under 3 chars. `hasMore` is derived by
+ * over-fetching one row past `PAGE_SIZE`.
+ */
 export const searchHmrc = createServerFn()
   .inputValidator(
     (input: unknown) => input as { query: string; offset: number },
@@ -51,6 +58,10 @@ export const searchHmrc = createServerFn()
     };
   });
 
+/**
+ * Server fn returning a single `hmrc_skilled_workers` row keyed by its stable
+ * `hash` slug id. Returns `null` when no matching row exists.
+ */
 export const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {

@@ -6,6 +6,12 @@ interface LogoProps {
   strokeColor?: string;
 }
 
+/**
+ * SponsorSearch.co.uk wordmark SVG with a Union-Jack-filled magnifying glass.
+ * All four color props are themeable and default to CSS variables so the logo
+ * responds to light/dark mode; `domainColor`/`strokeColor` fall back to
+ * `navyColor` when not supplied.
+ */
 export default function Logo({
   className,
   navyColor = 'var(--logo-navy)',

@@ -13,6 +13,10 @@ export const Route = createFileRoute('/privacy')({
   component: PrivacyPolicy,
 });
 
+/**
+ * Static `/privacy` page detailing what the site does and does not collect,
+ * plus UK GDPR rights and contact info. Purely presentational.
+ */
 function PrivacyPolicy() {
   return (
     <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:mt-2 [&_li]:leading-relaxed [&_a]:text-(--link-blue)">

@@ -1,3 +1,7 @@
+/**
+ * Decorative magnifying-glass SVG. Fills with `currentColor` so it inherits the
+ * parent's text color; marked `aria-hidden` since it's purely ornamental.
+ */
 export default function SearchIcon({ className }: { className?: string }) {
   return (
     <svg

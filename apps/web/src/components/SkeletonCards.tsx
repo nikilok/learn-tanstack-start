@@ -1,3 +1,7 @@
+/**
+ * Single shimmer row matching the layout of `HmrcCard` (title, rating, location,
+ * route) so the placeholder occupies the same vertical space as a real result.
+ */
 function SkeletonRow() {
   return (
     <div className="animate-pulse py-2">
@@ -25,6 +29,11 @@ function SkeletonRow() {
   );
 }
 
+/**
+ * Renders `count` skeleton rows inside the sponsor-card container, or a bare
+ * fragment when `bare` is true (used for the load-more footer inside an
+ * existing results panel so rows don't double up their background).
+ */
 export default function SkeletonCards({
   count = 6,
   bare = false,

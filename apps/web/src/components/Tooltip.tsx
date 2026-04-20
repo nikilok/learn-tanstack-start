@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+/**
+ * Click-to-toggle tooltip portaled into `document.body` so it escapes ancestor
+ * `overflow`/`transform` clipping. Auto-dismisses on outside click or any
+ * scroll, and nudges the position left when the tip would overflow the
+ * viewport's right edge.
+ */
 export default function Tooltip({
   text,
   children,

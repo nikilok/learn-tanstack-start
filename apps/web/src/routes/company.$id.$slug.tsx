@@ -73,10 +73,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
       links: [
         {
           rel: 'canonical',
-          href: buildCanonical(
-            match.pathname,
-            match.search as Record<string, string>,
-          ),
+          href: buildCanonical(match.pathname),
         },
       ],
     };

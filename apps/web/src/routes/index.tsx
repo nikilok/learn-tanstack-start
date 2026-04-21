@@ -23,10 +23,7 @@ export const Route = createFileRoute('/')({
     links: [
       {
         rel: 'canonical',
-        href: buildCanonical(
-          match.pathname,
-          match.search as Record<string, string>,
-        ),
+        href: buildCanonical(match.pathname),
       },
     ],
   }),

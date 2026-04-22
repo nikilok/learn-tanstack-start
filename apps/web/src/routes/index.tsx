@@ -5,10 +5,10 @@ import {
 } from '@tanstack/react-router';
 import { Suspense, useRef } from 'react';
 import { searchHmrc } from '../api/hmrc';
-import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
+import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { buildCanonical } from '../utils/canonical';
 
@@ -28,8 +28,13 @@ export const Route = createFileRoute('/')({
     ],
   }),
   beforeLoad: async () => {
-    const platformInfo = await getPlatform();
-    return { platformInfo };
+    if (typeof window !== 'undefined') {
+      return { platformInfo: parsePlatform(navigator.userAgent) };
+    }
+    const { getRequestHeader } = await import('@tanstack/start-server-core');
+    return {
+      platformInfo: parsePlatform(getRequestHeader('user-agent') ?? ''),
+    };
   },
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {

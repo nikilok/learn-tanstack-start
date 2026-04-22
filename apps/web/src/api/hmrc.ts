@@ -1,5 +1,6 @@
 import { hmrcSkilledWorkers } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
+import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db.server';
 
@@ -77,6 +78,15 @@ export const getHmrcBySlugId = createServerFn()
       .from(hmrcSkilledWorkers)
       .where(eq(hmrcSkilledWorkers.hash, slugId))
       .limit(1);
+
+    // slugId is a content hash of the row — (slugId → data) is immutable, so
+    // cache aggressively without tag-based invalidation
+    if (getRequestUrl().pathname.startsWith('/_serverFn/')) {
+      setResponseHeader(
+        'Cache-Control',
+        's-maxage=2592000, stale-while-revalidate=604800',
+      );
+    }
 
     return row ?? null;
   });

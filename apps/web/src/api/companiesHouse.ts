@@ -1,9 +1,11 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
+import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db.server';
+import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 
@@ -249,12 +251,7 @@ export const getCompanyProfile = createServerFn()
     );
 
     // RPC calls don't inherit the Nitro route rule's s-maxage, so set it explicitly
-    if (getRequestUrl().pathname.startsWith('/_serverFn/')) {
-      setResponseHeader(
-        'Cache-Control',
-        's-maxage=2592000, stale-while-revalidate=604800',
-      );
-    }
+    setRpcCacheControl(LONG_EDGE_CACHE);
 
     return {
       company_number: profile.company_number,
@@ -271,4 +268,16 @@ export const getCompanyProfile = createServerFn()
         : undefined,
       sicDescriptions,
     };
+  });
+
+/**
+ * React Query options for `getCompanyProfile`. Keyed by `companyName` to
+ * match the server fn's input and dedupe across HMRC rows that share an
+ * organisation name but differ by visa route / type-rating. Uses the
+ * router-level default `staleTime` (5 min).
+ */
+export const companyProfileQueryOptions = (companyName: string) =>
+  queryOptions({
+    queryKey: ['company-profile', companyName],
+    queryFn: () => getCompanyProfile({ data: { companyName } }),
   });

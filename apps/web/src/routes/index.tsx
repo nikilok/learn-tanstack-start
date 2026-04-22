@@ -3,14 +3,20 @@ import {
   stripSearchParams,
   useNavigate,
 } from '@tanstack/react-router';
+import { createIsomorphicFn } from '@tanstack/react-start';
+import { getRequestHeader } from '@tanstack/start-server-core';
 import { Suspense, useRef } from 'react';
 import { searchHmrc } from '../api/hmrc';
-import { getPlatform } from '../api/platform';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
+import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { buildCanonical } from '../utils/canonical';
+
+const getPlatformInfo = createIsomorphicFn()
+  .client(() => parsePlatform(navigator.userAgent))
+  .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
 export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -27,10 +33,7 @@ export const Route = createFileRoute('/')({
       },
     ],
   }),
-  beforeLoad: async () => {
-    const platformInfo = await getPlatform();
-    return { platformInfo };
-  },
+  beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     const { search } = deps as { search: string };

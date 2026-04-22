@@ -1,7 +1,9 @@
 import { hmrcSkilledWorkers } from '@ss/db';
+import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db.server';
+import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const PAGE_SIZE = 50;
 
@@ -78,7 +80,23 @@ export const getHmrcBySlugId = createServerFn()
       .where(eq(hmrcSkilledWorkers.hash, slugId))
       .limit(1);
 
+    // slugId is a content hash of the row — (slugId → data) is immutable, so
+    // cache aggressively without tag-based invalidation
+    setRpcCacheControl(LONG_EDGE_CACHE);
+
     return row ?? null;
+  });
+
+/**
+ * React Query options for `getHmrcBySlugId`. `staleTime: Infinity` since the
+ * slug id is a content hash — same id always maps to the same row data, so
+ * once cached on the client it never needs to be refetched for this session.
+ */
+export const hmrcBySlugIdQueryOptions = (slugId: string) =>
+  queryOptions({
+    queryKey: ['hmrc-by-slug-id', slugId],
+    queryFn: () => getHmrcBySlugId({ data: { slugId } }),
+    staleTime: Number.POSITIVE_INFINITY,
   });
 
 export { PAGE_SIZE };

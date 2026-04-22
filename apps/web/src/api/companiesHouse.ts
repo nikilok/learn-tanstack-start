@@ -1,4 +1,5 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
@@ -267,4 +268,16 @@ export const getCompanyProfile = createServerFn()
         : undefined,
       sicDescriptions,
     };
+  });
+
+/**
+ * React Query options for `getCompanyProfile`. Keyed by `companyName` to
+ * match the server fn's input and dedupe across HMRC rows that share an
+ * organisation name but differ by visa route / type-rating. Uses the
+ * router-level default `staleTime` (5 min).
+ */
+export const companyProfileQueryOptions = (companyName: string) =>
+  queryOptions({
+    queryKey: ['company-profile', companyName],
+    queryFn: () => getCompanyProfile({ data: { companyName } }),
   });

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { getCompanyProfile } from '../api/companiesHouse';
-import { getHmrcBySlugId } from '../api/hmrc';
+import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -10,16 +10,18 @@ export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
     search: ((search.search as string) || '').trim(),
   }),
-  loader: async ({ params }) => {
-    const sponsor = await getHmrcBySlugId({ data: { slugId: params.id } });
+  loader: async ({ params, context: { queryClient } }) => {
+    const sponsor = await queryClient.ensureQueryData(
+      hmrcBySlugIdQueryOptions(params.id),
+    );
 
     if (!sponsor) {
       throw notFound();
     }
 
-    const profile = await getCompanyProfile({
-      data: { companyName: sponsor.organisationName },
-    });
+    const profile = await queryClient.ensureQueryData(
+      companyProfileQueryOptions(sponsor.organisationName),
+    );
 
     return { sponsor, profile };
   },

@@ -3,7 +3,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db.server';
-import { setRpcCacheControl } from './cache-headers';
+import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const PAGE_SIZE = 50;
 
@@ -82,7 +82,7 @@ export const getHmrcBySlugId = createServerFn()
 
     // slugId is a content hash of the row — (slugId → data) is immutable, so
     // cache aggressively without tag-based invalidation
-    setRpcCacheControl('s-maxage=2592000, stale-while-revalidate=604800');
+    setRpcCacheControl(LONG_EDGE_CACHE);
 
     return row ?? null;
   });

@@ -5,7 +5,7 @@ import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db.server';
-import { setRpcCacheControl } from './cache-headers';
+import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 
@@ -251,7 +251,7 @@ export const getCompanyProfile = createServerFn()
     );
 
     // RPC calls don't inherit the Nitro route rule's s-maxage, so set it explicitly
-    setRpcCacheControl('s-maxage=2592000, stale-while-revalidate=604800');
+    setRpcCacheControl(LONG_EDGE_CACHE);
 
     return {
       company_number: profile.company_number,

@@ -1,4 +1,9 @@
-import { createFileRoute, Link, notFound } from '@tanstack/react-router';
+import {
+  createFileRoute,
+  Link,
+  notFound,
+  stripSearchParams,
+} from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -10,6 +15,9 @@ export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
     search: ((search.search as string) || '').trim(),
   }),
+  search: {
+    middlewares: [stripSearchParams({ search: '' })],
+  },
   loader: async ({ params, context: { queryClient } }) => {
     const sponsor = await queryClient.ensureQueryData(
       hmrcBySlugIdQueryOptions(params.id),

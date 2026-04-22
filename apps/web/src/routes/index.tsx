@@ -3,6 +3,8 @@ import {
   stripSearchParams,
   useNavigate,
 } from '@tanstack/react-router';
+import { createIsomorphicFn } from '@tanstack/react-start';
+import { getRequestHeader } from '@tanstack/start-server-core';
 import { Suspense, useRef } from 'react';
 import { searchHmrc } from '../api/hmrc';
 import HmrcResults from '../components/HmrcResults';
@@ -11,6 +13,10 @@ import SkeletonCards from '../components/SkeletonCards';
 import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { buildCanonical } from '../utils/canonical';
+
+const getPlatformInfo = createIsomorphicFn()
+  .client(() => parsePlatform(navigator.userAgent))
+  .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
 export const Route = createFileRoute('/')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -27,15 +33,7 @@ export const Route = createFileRoute('/')({
       },
     ],
   }),
-  beforeLoad: async () => {
-    if (typeof window !== 'undefined') {
-      return { platformInfo: parsePlatform(navigator.userAgent) };
-    }
-    const { getRequestHeader } = await import('@tanstack/start-server-core');
-    return {
-      platformInfo: parsePlatform(getRequestHeader('user-agent') ?? ''),
-    };
-  },
+  beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     const { search } = deps as { search: string };

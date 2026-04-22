@@ -1,8 +1,8 @@
 import { hmrcSkilledWorkers } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
-import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
 import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db.server';
+import { setRpcCacheControl } from './cache-headers';
 
 const PAGE_SIZE = 50;
 
@@ -81,12 +81,7 @@ export const getHmrcBySlugId = createServerFn()
 
     // slugId is a content hash of the row — (slugId → data) is immutable, so
     // cache aggressively without tag-based invalidation
-    if (getRequestUrl().pathname.startsWith('/_serverFn/')) {
-      setResponseHeader(
-        'Cache-Control',
-        's-maxage=2592000, stale-while-revalidate=604800',
-      );
-    }
+    setRpcCacheControl('s-maxage=2592000, stale-while-revalidate=604800');
 
     return row ?? null;
   });

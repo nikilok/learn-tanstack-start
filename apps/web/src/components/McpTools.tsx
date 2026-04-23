@@ -1,15 +1,21 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import '@mcp-b/global';
-import { searchHmrc } from '../api/hmrc';
+import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { searchHmrcQueryOptions } from '../api/hmrc';
 import { titleCase } from '../utils';
 
 /**
- * Registers a `search_uk_visa_sponsors` tool with the browser-side MCP host
- * (`navigator.modelContext` via `@mcp-b/global`) so AI agents can query the
- * HMRC sponsor list through the same server fn the UI uses. Renders nothing;
- * returns early when the MCP host is not available and unregisters on unmount.
+ * Registers browser-side MCP tools with `navigator.modelContext` (via
+ * `@mcp-b/global`) so AI agents can query UK visa sponsor data through the
+ * same server fns the UI uses: `search_uk_visa_sponsors` for paginated
+ * fuzzy search and `get_uk_visa_sponsor_details` for combined HMRC +
+ * Companies House detail. Renders nothing; returns early when the MCP host
+ * is not available and unregisters all tools on unmount.
  */
 export function McpTools() {
+  const queryClient = useQueryClient();
+
   useEffect(() => {
     const ctx = navigator.modelContext;
     if (!ctx) return;
@@ -52,55 +58,206 @@ export function McpTools() {
           };
         }
 
-        const result = await searchHmrc({
-          data: { query, offset },
-        });
+        try {
+          const result = await queryClient.ensureQueryData(
+            searchHmrcQueryOptions(query, offset),
+          );
 
-        if (!result.rows.length) {
+          if (!result.rows.length) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `No UK visa sponsors found matching "${query}".`,
+                },
+              ],
+            };
+          }
+
+          const formatted = result.rows.map((row) => ({
+            name: titleCase(row.organisationName),
+            location: [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+            visaRoute: titleCase(row.route),
+            rating: titleCase(row.typeRating),
+          }));
+
           return {
             content: [
               {
                 type: 'text',
-                text: `No UK visa sponsors found matching "${query}".`,
+                text: JSON.stringify(
+                  {
+                    query,
+                    totalResults: formatted.length,
+                    hasMore: result.hasMore,
+                    sponsors: formatted,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        } catch (error) {
+          console.error('[MCP search_uk_visa_sponsors] failed', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Failed to fetch UK visa sponsor search results due to a network error. Please try again in a moment.',
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    });
+
+    ctx.registerTool({
+      name: 'get_uk_visa_sponsor_details',
+      description:
+        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          companyName: {
+            type: 'string',
+            description:
+              'Full or partial company name (minimum 3 characters). Prefer the exact name returned by search_uk_visa_sponsors.',
+          },
+        },
+        required: ['companyName'],
+      },
+      execute: async ({ companyName }: { companyName: string }) => {
+        if (!companyName || companyName.length < 3) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Please provide a company name with at least 3 characters.',
               },
             ],
           };
         }
 
-        const formatted = result.rows.map((row) => ({
-          name: titleCase(row.organisationName),
-          location: [row.townCity, row.county]
-            .filter(Boolean)
-            .map(titleCase)
-            .join(', '),
-          visaRoute: titleCase(row.route),
-          rating: titleCase(row.typeRating),
-        }));
+        try {
+          const hmrcResult = await queryClient.ensureQueryData(
+            searchHmrcQueryOptions(companyName, 0),
+          );
 
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
+          if (!hmrcResult.rows.length) {
+            return {
+              content: [
                 {
-                  query,
-                  totalResults: formatted.length,
-                  hasMore: result.hasMore,
-                  sponsors: formatted,
+                  type: 'text',
+                  text: `No UK visa sponsor found matching "${companyName}".`,
                 },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
+              ],
+            };
+          }
+
+          const normalised = companyName.toLowerCase();
+          const exactRow = hmrcResult.rows.find(
+            (row) => row.organisationName.toLowerCase() === normalised,
+          );
+          const distinctNames = Array.from(
+            new Map(
+              hmrcResult.rows.map((row) => [
+                row.organisationName.toLowerCase(),
+                titleCase(row.organisationName),
+              ]),
+            ).values(),
+          );
+
+          // Multiple fuzzy matches with no exact hit — ask the agent to
+          // disambiguate instead of silently picking the top-scoring row.
+          if (!exactRow && distinctNames.length > 1) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      message: `No exact match for "${companyName}". Multiple sponsors matched this query — call this tool again with one of the exact names below.`,
+                      candidates: distinctNames.slice(0, 10),
+                    },
+                    null,
+                    2,
+                  ),
+                },
+              ],
+            };
+          }
+
+          const top = exactRow ?? hmrcResult.rows[0];
+          const profile = await queryClient.ensureQueryData(
+            companyProfileQueryOptions(top.organisationName),
+          );
+
+          const sponsorship = hmrcResult.rows
+            .filter(
+              (row) =>
+                row.organisationName.toLowerCase() ===
+                top.organisationName.toLowerCase(),
+            )
+            .map((row) => ({
+              visaRoute: titleCase(row.route),
+              rating: titleCase(row.typeRating),
+            }));
+
+          const details = {
+            name: titleCase(top.organisationName),
+            location:
+              [top.townCity, top.county]
+                .filter(Boolean)
+                .map(titleCase)
+                .join(', ') || null,
+            sponsorship,
+            companiesHouse: profile
+              ? {
+                  companyNumber: profile.company_number,
+                  status: profile.company_status,
+                  type: profile.type,
+                  incorporatedOn: profile.date_of_creation,
+                  lastAccountsFiledTo:
+                    profile.accounts?.last_accounts?.made_up_to ?? null,
+                  registeredAddress: profile.registered_office_address,
+                  industries: profile.sicDescriptions,
+                }
+              : null,
+          };
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(details, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          console.error('[MCP get_uk_visa_sponsor_details] failed', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to fetch details for "${companyName}" due to a network error. Please try again in a moment.`,
+              },
+            ],
+            isError: true,
+          };
+        }
       },
     });
 
     return () => {
       ctx.unregisterTool('search_uk_visa_sponsors');
+      ctx.unregisterTool('get_uk_visa_sponsor_details');
     };
-  }, []);
+  }, [queryClient]);
 
   return null;
 }

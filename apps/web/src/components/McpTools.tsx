@@ -58,48 +58,61 @@ export function McpTools() {
           };
         }
 
-        const result = await queryClient.ensureQueryData(
-          searchHmrcQueryOptions(query, offset),
-        );
+        try {
+          const result = await queryClient.ensureQueryData(
+            searchHmrcQueryOptions(query, offset),
+          );
 
-        if (!result.rows.length) {
+          if (!result.rows.length) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `No UK visa sponsors found matching "${query}".`,
+                },
+              ],
+            };
+          }
+
+          const formatted = result.rows.map((row) => ({
+            name: titleCase(row.organisationName),
+            location: [row.townCity, row.county]
+              .filter(Boolean)
+              .map(titleCase)
+              .join(', '),
+            visaRoute: titleCase(row.route),
+            rating: titleCase(row.typeRating),
+          }));
+
           return {
             content: [
               {
                 type: 'text',
-                text: `No UK visa sponsors found matching "${query}".`,
+                text: JSON.stringify(
+                  {
+                    query,
+                    totalResults: formatted.length,
+                    hasMore: result.hasMore,
+                    sponsors: formatted,
+                  },
+                  null,
+                  2,
+                ),
               },
             ],
           };
+        } catch (error) {
+          console.error('[MCP search_uk_visa_sponsors] failed', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Failed to fetch UK visa sponsor search results due to a network error. Please try again in a moment.',
+              },
+            ],
+            isError: true,
+          };
         }
-
-        const formatted = result.rows.map((row) => ({
-          name: titleCase(row.organisationName),
-          location: [row.townCity, row.county]
-            .filter(Boolean)
-            .map(titleCase)
-            .join(', '),
-          visaRoute: titleCase(row.route),
-          rating: titleCase(row.typeRating),
-        }));
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  query,
-                  totalResults: formatted.length,
-                  hasMore: result.hasMore,
-                  sponsors: formatted,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
       },
     });
 
@@ -130,67 +143,80 @@ export function McpTools() {
           };
         }
 
-        const hmrcResult = await queryClient.ensureQueryData(
-          searchHmrcQueryOptions(companyName, 0),
-        );
+        try {
+          const hmrcResult = await queryClient.ensureQueryData(
+            searchHmrcQueryOptions(companyName, 0),
+          );
 
-        if (!hmrcResult.rows.length) {
+          if (!hmrcResult.rows.length) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `No UK visa sponsor found matching "${companyName}".`,
+                },
+              ],
+            };
+          }
+
+          const top = hmrcResult.rows[0];
+          const profile = await queryClient.ensureQueryData(
+            companyProfileQueryOptions(top.organisationName),
+          );
+
+          const sponsorship = hmrcResult.rows
+            .filter(
+              (row) =>
+                row.organisationName.toLowerCase() ===
+                top.organisationName.toLowerCase(),
+            )
+            .map((row) => ({
+              visaRoute: titleCase(row.route),
+              rating: titleCase(row.typeRating),
+            }));
+
+          const details = {
+            name: titleCase(top.organisationName),
+            location:
+              [top.townCity, top.county]
+                .filter(Boolean)
+                .map(titleCase)
+                .join(', ') || null,
+            sponsorship,
+            companiesHouse: profile
+              ? {
+                  companyNumber: profile.company_number,
+                  status: profile.company_status,
+                  type: profile.type,
+                  incorporatedOn: profile.date_of_creation,
+                  lastAccountsFiledTo:
+                    profile.accounts?.last_accounts?.made_up_to ?? null,
+                  registeredAddress: profile.registered_office_address,
+                  industries: profile.sicDescriptions,
+                }
+              : null,
+          };
+
           return {
             content: [
               {
                 type: 'text',
-                text: `No UK visa sponsor found matching "${companyName}".`,
+                text: JSON.stringify(details, null, 2),
               },
             ],
           };
+        } catch (error) {
+          console.error('[MCP get_uk_visa_sponsor_details] failed', error);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to fetch details for "${companyName}" due to a network error. Please try again in a moment.`,
+              },
+            ],
+            isError: true,
+          };
         }
-
-        const top = hmrcResult.rows[0];
-        const profile = await queryClient.ensureQueryData(
-          companyProfileQueryOptions(top.organisationName),
-        );
-
-        const sponsorship = hmrcResult.rows
-          .filter(
-            (row) =>
-              row.organisationName.toLowerCase() ===
-              top.organisationName.toLowerCase(),
-          )
-          .map((row) => ({
-            visaRoute: titleCase(row.route),
-            rating: titleCase(row.typeRating),
-          }));
-
-        const details = {
-          name: titleCase(top.organisationName),
-          location:
-            [top.townCity, top.county]
-              .filter(Boolean)
-              .map(titleCase)
-              .join(', ') || null,
-          sponsorship,
-          companiesHouse: profile
-            ? {
-                companyNumber: profile.company_number,
-                status: profile.company_status,
-                type: profile.type,
-                incorporatedOn: profile.date_of_creation,
-                lastAccountsFiledTo:
-                  profile.accounts?.last_accounts?.made_up_to ?? null,
-                registeredAddress: profile.registered_office_address,
-                industries: profile.sicDescriptions,
-              }
-            : null,
-        };
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(details, null, 2),
-            },
-          ],
-        };
       },
     });
 

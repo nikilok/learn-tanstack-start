@@ -11,8 +11,8 @@ export function StatusBadge({ status }: { status: string }) {
     <span
       className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${
         isActive
-          ? 'border border-[#16a34a]/40 text-[#16a34a]'
-          : 'border border-[#dc2626]/40 text-[#dc2626]'
+          ? 'border border-[#166534]/40 text-[#166534] dark:border-[#4ade80]/40 dark:text-[#4ade80]'
+          : 'border border-[#b91c1c]/40 text-[#b91c1c] dark:border-[#f87171]/40 dark:text-[#f87171]'
       }`}
     >
       {titleCase(status)}

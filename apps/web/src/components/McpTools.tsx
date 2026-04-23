@@ -159,7 +159,40 @@ export function McpTools() {
             };
           }
 
-          const top = hmrcResult.rows[0];
+          const normalised = companyName.toLowerCase();
+          const exactRow = hmrcResult.rows.find(
+            (row) => row.organisationName.toLowerCase() === normalised,
+          );
+          const distinctNames = Array.from(
+            new Map(
+              hmrcResult.rows.map((row) => [
+                row.organisationName.toLowerCase(),
+                titleCase(row.organisationName),
+              ]),
+            ).values(),
+          );
+
+          // Multiple fuzzy matches with no exact hit — ask the agent to
+          // disambiguate instead of silently picking the top-scoring row.
+          if (!exactRow && distinctNames.length > 1) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      message: `No exact match for "${companyName}". Multiple sponsors matched this query — call this tool again with one of the exact names below.`,
+                      candidates: distinctNames.slice(0, 10),
+                    },
+                    null,
+                    2,
+                  ),
+                },
+              ],
+            };
+          }
+
+          const top = exactRow ?? hmrcResult.rows[0];
           const profile = await queryClient.ensureQueryData(
             companyProfileQueryOptions(top.organisationName),
           );

@@ -27,6 +27,8 @@ const config = defineConfig({
             'X-Permitted-Cross-Domain-Policies': 'none',
             'Cross-Origin-Opener-Policy': 'same-origin',
             'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+            'Content-Security-Policy':
+              "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
           },
         },
         '/company/**': {

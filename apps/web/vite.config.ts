@@ -18,6 +18,17 @@ const config = defineConfig({
     nitro({
       serverDir: 'server',
       routeRules: {
+        '/**': {
+          headers: {
+            'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            'X-Frame-Options': 'DENY',
+            'X-Permitted-Cross-Domain-Policies': 'none',
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+          },
+        },
         '/company/**': {
           headers: {
             'Cache-Control': 's-maxage=2592000, stale-while-revalidate=604800',

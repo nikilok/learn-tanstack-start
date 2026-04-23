@@ -99,6 +99,18 @@ export const hmrcBySlugIdQueryOptions = (slugId: string) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+/**
+ * React Query options for a single-page `searchHmrc` call. Separate cache
+ * key from the UI's infinite query (`hmrc-search`) so non-paginated callers
+ * (e.g. the MCP tool bridge) can share cache entries across repeated calls
+ * without clobbering the infinite-query shape.
+ */
+export const searchHmrcQueryOptions = (query: string, offset: number) =>
+  queryOptions({
+    queryKey: ['hmrc-search-page', query, offset],
+    queryFn: () => searchHmrc({ data: { query, offset } }),
+  });
+
 export { PAGE_SIZE };
 
 export type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>['rows'][number];

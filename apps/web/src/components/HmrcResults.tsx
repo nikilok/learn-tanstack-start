@@ -24,6 +24,7 @@ export default function HmrcResults({ search }: { search: string }) {
         getText: (row) => titleCase(row.organisationName),
         font: '600 16px Geist', // heading-card h3: text-base + font-semibold
         lineHeight: 24,
+        letterSpacing: -0.4, // heading-card utility
       },
       {
         getText: (row) =>

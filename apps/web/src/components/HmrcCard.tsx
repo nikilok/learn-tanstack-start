@@ -1,6 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import type { HmrcRow } from '../api/hmrc';
-import { slugify, titleCase } from '../utils';
+import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 
 /**
@@ -21,7 +21,7 @@ export default function HmrcCard({
       to="/company/$id/$slug"
       params={{
         id: row.slugId,
-        slug: slugify(row.organisationName),
+        slug: row.nameSlug,
       }}
       search={{ search }}
       className="block no-underline py-2"

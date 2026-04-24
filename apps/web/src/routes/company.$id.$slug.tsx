@@ -2,11 +2,12 @@ import {
   createFileRoute,
   Link,
   notFound,
+  redirect,
   stripSearchParams,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
-import { hmrcBySlugIdQueryOptions } from '../api/hmrc';
+import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -24,6 +25,22 @@ export const Route = createFileRoute('/company/$id/$slug')({
     );
 
     if (!sponsor) {
+      const matches = await getHmrcBySlug({ data: { slug: params.slug } });
+      if (matches.length === 1) {
+        throw redirect({
+          to: '/company/$id/$slug',
+          params: { id: matches[0].slugId, slug: params.slug },
+          search: (prev) => ({ search: prev.search ?? '' }),
+          statusCode: 301,
+        });
+      }
+      if (matches.length > 1) {
+        throw redirect({
+          to: '/',
+          search: { search: matches[0].organisationName },
+          statusCode: 302,
+        });
+      }
       throw notFound();
     }
 

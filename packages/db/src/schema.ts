@@ -17,6 +17,7 @@ export const hmrcSkilledWorkers = pgTable(
     id: serial('id').primaryKey(),
     hash: varchar('hash', { length: 11 }).notNull().unique(),
     organisationName: varchar('organisation_name', { length: 255 }).notNull(),
+    nameSlug: varchar('name_slug', { length: 255 }).notNull(),
     townCity: varchar('town_city', { length: 100 }),
     county: varchar('county', { length: 100 }),
     typeRating: varchar('type_rating', { length: 100 }).notNull(),
@@ -24,6 +25,7 @@ export const hmrcSkilledWorkers = pgTable(
   },
   (table) => [
     index('idx_hmrc_org_name').on(table.organisationName),
+    index('idx_hmrc_name_slug').on(table.nameSlug),
     index('idx_hmrc_town_city').on(table.townCity),
     index('idx_hmrc_route').on(table.route),
     index('idx_hmrc_org_name_trgm').using(

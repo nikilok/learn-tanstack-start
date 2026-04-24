@@ -1,0 +1,640 @@
+{
+  "id": "1483c733-4441-4172-ad48-df49c150c26a",
+  "prevId": "c32db84f-10fe-4523-9fc2-3a97ca8cf253",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ch_stream_state": {
+      "name": "ch_stream_state",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "varchar(50)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_timepoint": {
+          "name": "last_timepoint",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.companies_house_profile_cache": {
+      "name": "companies_house_profile_cache",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "varchar(50)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_trail_id": {
+          "name": "last_trail_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.companies_house_profile_trails": {
+      "name": "companies_house_profile_trails",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "company_number": {
+          "name": "company_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "column_name": {
+          "name": "column_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "old_value": {
+          "name": "old_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "new_value": {
+          "name": "new_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_ch_trail_company_number": {
+          "name": "idx_ch_trail_company_number",
+          "columns": [
+            {
+              "expression": "company_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ch_trail_created_at": {
+          "name": "idx_ch_trail_created_at",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.companies_house_profiles": {
+      "name": "companies_house_profiles",
+      "schema": "",
+      "columns": {
+        "company_number": {
+          "name": "company_number",
+          "type": "varchar(20)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "company_name": {
+          "name": "company_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_status": {
+          "name": "company_status",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "company_type": {
+          "name": "company_type",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "date_of_creation": {
+          "name": "date_of_creation",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address_line_1": {
+          "name": "address_line_1",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address_line_2": {
+          "name": "address_line_2",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "locality": {
+          "name": "locality",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "region": {
+          "name": "region",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "postal_code": {
+          "name": "postal_code",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "name": "country",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sic_codes": {
+          "name": "sic_codes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "accounts_next_made_up_to": {
+          "name": "accounts_next_made_up_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounts_last_made_up_to": {
+          "name": "accounts_last_made_up_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "accounts_overdue": {
+          "name": "accounts_overdue",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jurisdiction": {
+          "name": "jurisdiction",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_been_liquidated": {
+          "name": "has_been_liquidated",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_insolvency_history": {
+          "name": "has_insolvency_history",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "has_charges": {
+          "name": "has_charges",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previous_company_names": {
+          "name": "previous_company_names",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'{}'::text[]"
+        },
+        "confirmation_statement_last_made_up_to": {
+          "name": "confirmation_statement_last_made_up_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_ch_company_name": {
+          "name": "idx_ch_company_name",
+          "columns": [
+            {
+              "expression": "company_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ch_company_status": {
+          "name": "idx_ch_company_status",
+          "columns": [
+            {
+              "expression": "company_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ch_company_type": {
+          "name": "idx_ch_company_type",
+          "columns": [
+            {
+              "expression": "company_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ch_sic_codes": {
+          "name": "idx_ch_sic_codes",
+          "columns": [
+            {
+              "expression": "sic_codes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "idx_ch_jurisdiction": {
+          "name": "idx_ch_jurisdiction",
+          "columns": [
+            {
+              "expression": "jurisdiction",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_ch_previous_names": {
+          "name": "idx_ch_previous_names",
+          "columns": [
+            {
+              "expression": "previous_company_names",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hmrc_company_mapping": {
+      "name": "hmrc_company_mapping",
+      "schema": "",
+      "columns": {
+        "organisation_name": {
+          "name": "organisation_name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "company_number": {
+          "name": "company_number",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hmrc_ingestion_meta": {
+      "name": "hmrc_ingestion_meta",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "csv_url": {
+          "name": "csv_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "checksum": {
+          "name": "checksum",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "record_count": {
+          "name": "record_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ingested_at": {
+          "name": "ingested_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hmrc_skilled_workers": {
+      "name": "hmrc_skilled_workers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "hash": {
+          "name": "hash",
+          "type": "varchar(11)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "organisation_name": {
+          "name": "organisation_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name_slug": {
+          "name": "name_slug",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "town_city": {
+          "name": "town_city",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "county": {
+          "name": "county",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type_rating": {
+          "name": "type_rating",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "route": {
+          "name": "route",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_hmrc_org_name": {
+          "name": "idx_hmrc_org_name",
+          "columns": [
+            {
+              "expression": "organisation_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_hmrc_name_slug": {
+          "name": "idx_hmrc_name_slug",
+          "columns": [
+            {
+              "expression": "name_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_hmrc_town_city": {
+          "name": "idx_hmrc_town_city",
+          "columns": [
+            {
+              "expression": "town_city",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_hmrc_route": {
+          "name": "idx_hmrc_route",
+          "columns": [
+            {
+              "expression": "route",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_hmrc_org_name_trgm": {
+          "name": "idx_hmrc_org_name_trgm",
+          "columns": [
+            {
+              "expression": "\"organisation_name\" gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "hmrc_skilled_workers_hash_unique": {
+          "name": "hmrc_skilled_workers_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": ["hash"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sic_codes": {
+      "name": "sic_codes",
+      "schema": "",
+      "columns": {
+        "code": {
+          "name": "code",
+          "type": "varchar(10)",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

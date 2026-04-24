@@ -1,5 +1,6 @@
 import { neon } from '@ss/db/client';
 import { parse } from 'csv-parse/sync';
+import { slugify } from '../src/utils';
 import { setGitHubOutput } from './ci-utils';
 
 const EXPECTED_COLUMNS = [
@@ -88,6 +89,7 @@ await sql`
     "id" serial PRIMARY KEY NOT NULL,
     "hash" varchar(11) NOT NULL UNIQUE,
     "organisation_name" varchar(255) NOT NULL,
+    "name_slug" varchar(255) NOT NULL,
     "town_city" varchar(100),
     "county" varchar(100),
     "type_rating" varchar(100) NOT NULL,
@@ -126,6 +128,7 @@ function computeHash(
 type CleanedRow = {
   hash: string;
   orgName: string;
+  nameSlug: string;
   townCity: string | null;
   county: string | null;
   typeRating: string;
@@ -142,10 +145,19 @@ for (const r of records) {
   const typeRating = r['Type & Rating'].trim();
   const route = r.Route.trim();
   const hash = computeHash(orgName, townCity, county, typeRating, route);
+  const nameSlug = slugify(orgName);
 
   if (!seen.has(hash)) {
     seen.add(hash);
-    dedupedRows.push({ hash, orgName, townCity, county, typeRating, route });
+    dedupedRows.push({
+      hash,
+      orgName,
+      nameSlug,
+      townCity,
+      county,
+      typeRating,
+      route,
+    });
   }
 }
 
@@ -160,15 +172,23 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
 
   for (let j = 0; j < batch.length; j++) {
     const r = batch[j];
-    const offset = j * 6;
+    const offset = j * 7;
     placeholders.push(
-      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`,
+      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`,
     );
-    values.push(r.hash, r.orgName, r.townCity, r.county, r.typeRating, r.route);
+    values.push(
+      r.hash,
+      r.orgName,
+      r.nameSlug,
+      r.townCity,
+      r.county,
+      r.typeRating,
+      r.route,
+    );
   }
 
   await sql.query(
-    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
+    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "name_slug", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
     values,
   );
 
@@ -181,6 +201,7 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
 console.log('Building indexes on staging table...');
 await Promise.all([
   sql`CREATE INDEX "stg_idx_hmrc_org_name" ON "hmrc_skilled_workers_staging" USING btree ("organisation_name")`,
+  sql`CREATE INDEX "stg_idx_hmrc_name_slug" ON "hmrc_skilled_workers_staging" USING btree ("name_slug")`,
   sql`CREATE INDEX "stg_idx_hmrc_town_city" ON "hmrc_skilled_workers_staging" USING btree ("town_city")`,
   sql`CREATE INDEX "stg_idx_hmrc_route" ON "hmrc_skilled_workers_staging" USING btree ("route")`,
   sql`CREATE INDEX "stg_idx_hmrc_org_name_trgm" ON "hmrc_skilled_workers_staging" USING gin ("organisation_name" gin_trgm_ops)`,
@@ -194,6 +215,7 @@ await sql.transaction([
   sql`DROP TABLE "hmrc_skilled_workers"`,
   sql`ALTER TABLE "hmrc_skilled_workers_staging" RENAME TO "hmrc_skilled_workers"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name" RENAME TO "idx_hmrc_org_name"`,
+  sql`ALTER INDEX "stg_idx_hmrc_name_slug" RENAME TO "idx_hmrc_name_slug"`,
   sql`ALTER INDEX "stg_idx_hmrc_town_city" RENAME TO "idx_hmrc_town_city"`,
   sql`ALTER INDEX "stg_idx_hmrc_route" RENAME TO "idx_hmrc_route"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name_trgm" RENAME TO "idx_hmrc_org_name_trgm"`,

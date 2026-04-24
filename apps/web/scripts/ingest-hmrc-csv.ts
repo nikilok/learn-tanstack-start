@@ -145,7 +145,7 @@ for (const r of records) {
   const typeRating = r['Type & Rating'].trim();
   const route = r.Route.trim();
   const hash = computeHash(orgName, townCity, county, typeRating, route);
-  const nameSlug = slugify(orgName);
+  const nameSlug = slugify(orgName) || hash;
 
   if (!seen.has(hash)) {
     seen.add(hash);

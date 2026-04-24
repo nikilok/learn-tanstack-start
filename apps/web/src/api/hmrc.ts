@@ -111,7 +111,7 @@ export const hmrcBySlugIdQueryOptions = (slugId: string) =>
 export const getHmrcBySlug = createServerFn()
   .inputValidator((input: unknown) => input as { slug: string })
   .handler(async ({ data: { slug } }) => {
-    if (!/^[a-z0-9-]{1,100}$/.test(slug)) return [];
+    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
     const rows = await db
       .select({
         slugId: hmrcSkilledWorkers.hash,

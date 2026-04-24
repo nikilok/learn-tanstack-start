@@ -148,6 +148,13 @@
       "when": 1777026426819,
       "tag": "0020_typical_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1777030679962,
+      "tag": "0021_backfill_empty_name_slug_with_hash",
+      "breakpoints": true
     }
   ]
 }

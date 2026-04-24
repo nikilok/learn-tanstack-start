@@ -30,7 +30,7 @@
   "dependencies": {
     "@mcp-b/global": "^2.2.0",
     "@ss/db": "workspace:*",
-    "virtual-text-layout": "^0.1.9",
+    "virtual-text-layout": "0.2.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-query": "^5.96.2",

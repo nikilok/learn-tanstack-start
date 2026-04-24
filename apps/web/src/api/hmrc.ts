@@ -35,6 +35,7 @@ export const searchHmrc = createServerFn()
       .select({
         slugId: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
+        nameSlug: hmrcSkilledWorkers.nameSlug,
         townCity: hmrcSkilledWorkers.townCity,
         county: hmrcSkilledWorkers.county,
         typeRating: hmrcSkilledWorkers.typeRating,
@@ -97,6 +98,29 @@ export const hmrcBySlugIdQueryOptions = (slugId: string) =>
     queryKey: ['hmrc-by-slug-id', slugId],
     queryFn: () => getHmrcBySlugId({ data: { slugId } }),
     staleTime: Number.POSITIVE_INFINITY,
+  });
+
+/**
+ * Server fn returning `hmrc_skilled_workers` rows whose `name_slug` matches
+ * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
+ * lookup 404s, the loader checks whether the name still maps to a current row
+ * and 301s to its new hash. Capped at 2 since callers only branch on 0 / 1 / many.
+ * Not wrapped in queryOptions — only the loader calls it, and the redirect
+ * moves the user off this page so there's no second reader for the result.
+ */
+export const getHmrcBySlug = createServerFn()
+  .inputValidator((input: unknown) => input as { slug: string })
+  .handler(async ({ data: { slug } }) => {
+    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
+    const rows = await db
+      .select({
+        slugId: hmrcSkilledWorkers.hash,
+        organisationName: hmrcSkilledWorkers.organisationName,
+      })
+      .from(hmrcSkilledWorkers)
+      .where(eq(hmrcSkilledWorkers.nameSlug, slug))
+      .limit(2);
+    return rows;
   });
 
 /**

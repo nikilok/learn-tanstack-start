@@ -28,6 +28,7 @@ export function titleCase(str: string | null) {
 /**
  * Lowercase and replace runs of non-alphanumeric characters with `-`,
  * trimming leading/trailing dashes. Used to build URL-safe path segments.
+ * Shared with the Bun ingestion script — keep browser-only APIs out.
  */
 export function slugify(str: string): string {
   return str

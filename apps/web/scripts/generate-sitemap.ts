@@ -8,6 +8,12 @@ const BASE_URL = 'https://sponsorsearch.co.uk';
 const BATCH_SIZE = 45000;
 const OUT_DIR = join(import.meta.dirname, '..', 'public');
 
+/**
+ * Regenerate the full sitemap set from scratch: the index (`sitemap.xml`),
+ * a static-pages file (`sitemap-0.xml`), and paginated company sitemaps
+ * over `BATCH_SIZE` chunks of `hmrc_skilled_workers`. Reads `name_slug` from
+ * the DB so URLs stay consistent with HmrcCard and the detail-route loader.
+ */
 async function generate() {
   console.log('Generating sitemap...');
 

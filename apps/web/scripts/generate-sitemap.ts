@@ -3,7 +3,6 @@ import { hmrcSkilledWorkers } from '@ss/db';
 import { Glob } from 'bun';
 import { sql } from 'drizzle-orm';
 import { db } from '../src/db.server';
-import { slugify } from '../src/utils';
 
 const BASE_URL = 'https://sponsorsearch.co.uk';
 const BATCH_SIZE = 45000;
@@ -67,7 +66,7 @@ ${Array.from(
     const rows = await db
       .select({
         hash: hmrcSkilledWorkers.hash,
-        organisationName: hmrcSkilledWorkers.organisationName,
+        nameSlug: hmrcSkilledWorkers.nameSlug,
       })
       .from(hmrcSkilledWorkers)
       .orderBy(hmrcSkilledWorkers.hash)
@@ -79,8 +78,8 @@ ${Array.from(
 ${rows
   .map(
     (row) => `  <url>
-    <loc>${BASE_URL}/company/${row.hash}/${slugify(row.organisationName)}</loc>
-    <changefreq>weekly</changefreq>
+    <loc>${BASE_URL}/company/${row.hash}/${row.nameSlug}</loc>
+    <changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>`,
   )

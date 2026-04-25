@@ -246,6 +246,7 @@ function CompanyDetail() {
         <Link
           to="/"
           search={{ search }}
+          viewTransition={{ types: ['back'] }}
           className="no-underline mt-6 block w-full px-4 py-3 text-center text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
           &larr; Back to search

@@ -281,3 +281,113 @@ html[data-hide-search-input] .search-input-wrapper {
   /* biome-ignore lint: needed to override inline pointer-events set by React */
   pointer-events: none !important;
 }
+
+/*
+ * Page transitions: outgoing page recedes (scale + slight slide + fade),
+ * incoming page rises into place (scale + slide + fade). The combined
+ * scale + translate gives a subtle "depth pass" feel without long travel
+ * distances that can trigger motion sickness. Outgoing distance is small
+ * (12%) and dampened with a blur tick so the eye doesn't track it.
+ */
+@keyframes route-recede-left {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(-12%, 0, 0) scale(0.96);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes route-rise-from-right {
+  from {
+    transform: translate3d(8%, 0, 0) scale(0.985);
+    opacity: 0;
+    filter: blur(2px);
+    clip-path: inset(0 0 0 50%);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes route-recede-right {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(12%, 0, 0) scale(0.96);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes route-rise-from-left {
+  from {
+    transform: translate3d(-8%, 0, 0) scale(0.985);
+    opacity: 0;
+    filter: blur(2px);
+    clip-path: inset(0 50% 0 0);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+::view-transition-group(root) {
+  animation-duration: 280ms;
+}
+
+::view-transition-old(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  animation-fill-mode: forwards;
+  mix-blend-mode: normal;
+  transform-origin: center center;
+}
+
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: forwards;
+  mix-blend-mode: normal;
+  transform-origin: center center;
+}
+
+html:active-view-transition-type(forward)::view-transition-old(root) {
+  animation-name: route-recede-left;
+}
+html:active-view-transition-type(forward)::view-transition-new(root) {
+  animation-name: route-rise-from-right;
+}
+
+html:active-view-transition-type(back)::view-transition-old(root) {
+  animation-name: route-recede-right;
+}
+html:active-view-transition-type(back)::view-transition-new(root) {
+  animation-name: route-rise-from-left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

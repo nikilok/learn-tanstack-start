@@ -24,6 +24,7 @@ export default function HmrcCard({
         slug: row.nameSlug,
       }}
       search={{ search }}
+      viewTransition={{ types: ['forward'] }}
       className="block no-underline py-2"
       onClick={() =>
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))

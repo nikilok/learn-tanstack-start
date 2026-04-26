@@ -67,65 +67,27 @@
   }
 }
 
-/*
- * Listing wrapper fades in/out — only the surrounding cards animate via
- * this keyframe. The clicked card is carved out as `active-card` and gets
- * its own slide animation below.
- */
-@keyframes listing-fade-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
-}
-
-@keyframes listing-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-/*
- * Each page assigns a distinct view-transition-name to its results wrapper.
- * Because each name only exists on one page, the browser never pairs them
- * as a single morphing snapshot — the listing wrapper has only an outgoing
- * snapshot, the details wrapper has only an incoming one. That avoids the
- * positional interpolation you'd get with a shared name when the two
- * wrappers sit at different y-offsets on each page.
- */
-.page-flip-listing {
-  view-transition-name: results-listing;
-}
-
 /* Shares the `active-card` name with the clicked card on the listing so
    the browser pairs them as a single shared element — the card morphs
-   into the details wrapper on forward. */
+   into the details wrapper on forward. The surrounding listing is
+   intentionally NOT named: a named region whose bbox extends above the
+   viewport (because the user scrolled) renders its snapshot in front of
+   `root` and visually covers the header. Keeping the listing in `root`
+   means the live header (in NEW root) sits in front for the entire
+   transition. */
 .page-flip-details {
   view-transition-name: active-card;
 }
 
 /*
- * On back-nav the named regions are dropped so the entire page (header
- * included) is captured into a single `root` snapshot. Without this, a
- * tall listing wrapper whose bbox extends above the viewport would carve
- * a hole out of root that covers the header — making the header
- * invisible during the slide and "pop back" when the live DOM takes over.
+ * On back-nav the active-card name is dropped so the entire page is
+ * captured into a single `root` snapshot and animates as one piece.
+ * (A shrink-back morph isn't practical here — the listing is virtualized
+ * and scroll-restored asynchronously, so the morph target isn't reliably
+ * in the DOM at NEW-snapshot capture time. See CLAUDE.md.)
  */
-html:active-view-transition-type(back) .page-flip-listing,
 html:active-view-transition-type(back) .page-flip-details {
   view-transition-name: none;
-}
-
-::view-transition-old(results-listing),
-::view-transition-new(results-listing) {
-  animation-fill-mode: both;
-  mix-blend-mode: normal;
-  transform-origin: center center;
 }
 
 /*
@@ -169,7 +131,6 @@ html:active-view-transition-type(back) .page-flip-details {
  * `!important` because the name is set as an inline style by HmrcCard
  * — that's the only way to beat inline-style specificity from CSS.
  */
-html[data-browser="safari"] .page-flip-listing,
 html[data-browser="safari"] .page-flip-details {
   view-transition-name: none;
 }
@@ -196,13 +157,6 @@ html[data-browser="safari"]:active-view-transition-type(
   )::view-transition-new(root) {
   animation: route-rise-from-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: center center;
-}
-
-/* Forward: surrounding listing fades out under the morphing card. */
-html:active-view-transition-type(forward)::view-transition-old(
-    results-listing
-  ) {
-  animation: listing-fade-out 180ms ease-out forwards;
 }
 
 ::view-transition-group(root),
@@ -243,8 +197,6 @@ html:active-view-transition-type(back)::view-transition-new(root) {
   ::view-transition-old(root),
   ::view-transition-new(root),
   ::view-transition-group(active-card),
-  ::view-transition-old(results-listing),
-  ::view-transition-new(results-listing),
   ::view-transition-old(active-card),
   ::view-transition-new(active-card) {
     animation: none;

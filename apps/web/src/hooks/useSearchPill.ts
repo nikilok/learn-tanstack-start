@@ -104,22 +104,25 @@ export function useSearchPill(
   }, [isStuck]);
 
   // Safety net: if the inline script set the attribute but we end up at the
-  // top of the page with nothing to restore, drop it. Polls every frame for
-  // up to 1s rather than checking once after 2 frames — HmrcResults'
-  // scroll-restore is gated on the virtualizer's font/width readiness, which
-  // can take many frames on a SPA back-nav from a reloaded details page,
-  // leaving `hmrc-scroll-y` in sessionStorage past the original 2-frame
-  // window. Without polling, the attribute persists, the input stays hidden
-  // at scroll-y=0, and the user has to scroll down + back up to surface it.
-  // The poll exits early once the attribute is gone (cleared by another
-  // path) or the conditions are met.
+  // top of the page with nothing to restore, drop it. Polls every animation
+  // frame and terminates only when one of three conditions is met:
+  //   1. The attribute has been removed by another path (e.g., `isStuck=true`
+  //      via the useLayoutEffect above).
+  //   2. `scrollY === 0` and `hmrc-scroll-y` has been consumed by HmrcResults.
+  //   3. The component unmounts (cancelled flag stops the next tick).
+  //
+  // A naive timeout cutoff isn't safe — HmrcResults' scroll-restore is gated
+  // on the virtualizer's font/width readiness, which can take an indefinite
+  // number of frames on slow loads. Anything shorter than "wait until the
+  // restore actually happens" leaves a race window where the attribute
+  // persists with no remaining clearer. rAF auto-pauses on background tabs,
+  // so an open-ended poll has no idle cost when the user isn't looking.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!document.documentElement.hasAttribute('data-hide-search-input')) {
       return;
     }
     let cancelled = false;
-    const start = performance.now();
     const tick = () => {
       if (cancelled) return;
       if (!document.documentElement.hasAttribute('data-hide-search-input')) {
@@ -129,7 +132,6 @@ export function useSearchPill(
         clearHideAttribute();
         return;
       }
-      if (performance.now() - start > 1000) return;
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);

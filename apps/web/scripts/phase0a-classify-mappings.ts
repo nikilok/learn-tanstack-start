@@ -15,6 +15,16 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
+import {
+  type CHCandidate,
+  type MatchMethod,
+  matchTierA,
+  matchTierB,
+  matchTierC,
+  normaliseForComparison,
+  parseHmrcName,
+  TIER_C_THRESHOLD,
+} from './lib/hmrc-ch-pipeline';
 
 // .env.local lives at the monorepo root, not under apps/web — resolve relative
 // to this script's location so the run works from any cwd.
@@ -32,36 +42,16 @@ const sql = neon(process.env.POSTGRES_URL as string);
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TIER_C_THRESHOLD = 0.85;
-const MIN_TOKENS_FOR_TIER_C = 2;
 const INSERT_BATCH_SIZE = 500;
 const CSV_SAMPLE_SIZE = 50;
 
-const PUBLIC_BODY_REGEX =
-  /\b(NHS|National Health Service|Foundation Trust|Integrated Care Board|ICB|(?:Borough|City|County|District|Parish|Town) Council|Reserve Forces|Cadets? Association|Ministry of|Department for|Department of|Office for|Police Federation|Fire and Rescue Service)\b/i;
-
-const STOPWORDS = new Set(['the', 'and', 'of', 'for', 'at', 'in', 'on']);
-const CORPORATE_SUFFIXES = new Set(['limited', 'ltd', 'llp', 'plc', 'uk']);
+const TRADING_AS_IN_PREV_REGEX = /(TRADING\s+AS|T\/A|D\/B\/A)/i;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type CHProfile = {
-  company_number: string;
-  company_name: string;
-  company_status: string | null;
-  previous_company_names: string[] | null;
-  locality: string | null;
-  region: string | null;
-};
-
-type ParsedHmrcName = {
-  candidates: string[];
-  parsedLegal: string;
-  parsedTrading: string | null;
-  isPublicBody: boolean;
-};
+type CHProfile = CHCandidate;
 
 type Verdict =
   | 'verified_locally'
@@ -69,15 +59,6 @@ type Verdict =
   | 'suspect_with_local_alternative'
   | 'requires_human_review'
   | 'suspect_no_local_alternative';
-
-type MatchMethod =
-  | 'exact'
-  | 'previous_name'
-  | 'token_sim'
-  | 'public_body'
-  | 'local_replacement_exact'
-  | 'local_replacement_previous_name'
-  | null;
 
 type ProposedRow = {
   organisation_name: string;
@@ -97,133 +78,6 @@ type ProposedRow = {
     | { company_number: string; company_name: string; status: string | null }[]
     | null;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HMRC name parser
-// ─────────────────────────────────────────────────────────────────────────────
-
-const TA_REGEX =
-  /^(.*?)\s+(?:T\/A|t\/a|Trading\s+[Aa]s:?|d\/b\/a|D\/B\/A)\s+(.+)$/;
-const TRADING_NAME_OF_REGEX = /^(.*?)\s+Trading\s+[Nn]ame\s+of\s+(.+)$/;
-const BRANCH_REGEX =
-  /^(.*?)\s*(?:\([^)]*Branch[^)]*\)|\bUK\s+Branch\b|\bUK\s+Establishment\b)\s*$/i;
-
-/** Parses an HMRC organisation name into ordered (legal, trading) candidates. */
-function parseHmrcName(orgName: string): ParsedHmrcName {
-  const trimmed = orgName.trim();
-  const isPublicBody = PUBLIC_BODY_REGEX.test(trimmed);
-
-  const tradingNameOf = trimmed.match(TRADING_NAME_OF_REGEX);
-  if (tradingNameOf) {
-    const trading = tradingNameOf[1].trim();
-    const legal = tradingNameOf[2].trim();
-    return {
-      candidates: [legal, trading],
-      parsedLegal: legal,
-      parsedTrading: trading,
-      isPublicBody,
-    };
-  }
-
-  const ta = trimmed.match(TA_REGEX);
-  if (ta) {
-    const legal = ta[1].trim();
-    const trading = ta[2].trim();
-    return {
-      candidates: [legal, trading],
-      parsedLegal: legal,
-      parsedTrading: trading,
-      isPublicBody,
-    };
-  }
-
-  const branch = trimmed.match(BRANCH_REGEX);
-  if (branch) {
-    const legal = branch[1].trim();
-    return {
-      candidates: [legal],
-      parsedLegal: legal,
-      parsedTrading: null,
-      isPublicBody,
-    };
-  }
-
-  return {
-    candidates: [trimmed],
-    parsedLegal: trimmed,
-    parsedTrading: null,
-    isPublicBody,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Comparison helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SUFFIX_STRIP_REGEX = /\s+(LIMITED|LTD|LLP|PLC)\.?\s*$/i;
-
-/** Uppercases and strips trailing corporate suffix for direct equality checks. */
-function normaliseForComparison(name: string): string {
-  return name.replace(SUFFIX_STRIP_REGEX, '').trim().toUpperCase();
-}
-
-const TOKEN_SPLIT_REGEX = /[\s,&\-./()]+/;
-
-/** Lowercases, splits, drops stopwords + corporate suffixes for Jaccard comparison. */
-function tokenise(name: string): string[] {
-  return name
-    .toLowerCase()
-    .split(TOKEN_SPLIT_REGEX)
-    .filter(
-      (t) =>
-        t.length > 0 &&
-        !STOPWORDS.has(t) &&
-        !CORPORATE_SUFFIXES.has(t) &&
-        /[a-z0-9]/.test(t),
-    );
-}
-
-/** Jaccard similarity over two token sets. */
-function jaccard(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const setA = new Set(a);
-  const setB = new Set(b);
-  let intersection = 0;
-  for (const t of setA) if (setB.has(t)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-const TRADING_AS_IN_PREV_REGEX = /(TRADING\s+AS|T\/A|D\/B\/A)/i;
-
-/** Tier A: exact name match (after suffix strip + uppercase). */
-function matchTierA(candidate: string, ch: CHProfile): number | null {
-  const c = normaliseForComparison(candidate);
-  const n = normaliseForComparison(ch.company_name);
-  return c === n ? 1.0 : null;
-}
-
-/** Tier B: candidate appears verbatim in previous_company_names, ignoring entries that themselves contain "TRADING AS" / "T/A" / "D/B/A". */
-function matchTierB(candidate: string, ch: CHProfile): number | null {
-  if (!ch.previous_company_names || ch.previous_company_names.length === 0)
-    return null;
-  const c = normaliseForComparison(candidate);
-  for (const prev of ch.previous_company_names) {
-    if (TRADING_AS_IN_PREV_REGEX.test(prev)) continue;
-    if (normaliseForComparison(prev) === c) return 0.95;
-  }
-  return null;
-}
-
-/** Tier C: token-set Jaccard similarity above threshold; requires both sides to retain at least MIN_TOKENS_FOR_TIER_C tokens after stripping. */
-function matchTierC(candidate: string, ch: CHProfile): number | null {
-  const tA = tokenise(candidate);
-  const tB = tokenise(ch.company_name);
-  if (tA.length < MIN_TOKENS_FOR_TIER_C || tB.length < MIN_TOKENS_FOR_TIER_C)
-    return null;
-  const score = jaccard(tA, tB);
-  return score >= TIER_C_THRESHOLD ? score : null;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local CH index (built once, queried per row)

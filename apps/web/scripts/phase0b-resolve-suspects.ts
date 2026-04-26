@@ -23,6 +23,15 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
+import {
+  type CHCandidate,
+  matchTierA,
+  matchTierB,
+  matchTierC,
+  parseLegalCandidate,
+  pickByLocality,
+  type ScoredCandidate,
+} from './lib/hmrc-ch-pipeline';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env loading — POSTGRES_URL lives at monorepo root, COMPANIES_HOUSE_SEED_API_KEY at apps/web/.env.local
@@ -50,18 +59,13 @@ const AUTH_HEADER = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 const DELAY_MS = 550; // ~1.8 req/sec, matches seed-companies-house.ts
 const SEARCH_PAGE_SIZE = 20;
-const TIER_C_THRESHOLD = 0.85;
-const MIN_TOKENS_FOR_TIER_C = 2;
 const TIER_B_PROFILE_FETCH_TOP_N = 3; // fetch profiles for top-N when Tier A misses, to enable Tier B
 const PROGRESS_EVERY = 100;
 const INTERIM_SUMMARY_EVERY = 1000;
 const CACHE_DIR = resolve(SCRIPT_DIR, '../.cache/phase0b');
 
-const STOPWORDS = new Set(['the', 'and', 'of', 'for', 'at', 'in', 'on']);
-const CORPORATE_SUFFIXES = new Set(['limited', 'ltd', 'llp', 'plc', 'uk']);
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Types specific to Phase 0b's CH-search pipeline (CHCandidate / ScoredCandidate live in the shared lib)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type CHSearchItem = {
@@ -82,21 +86,6 @@ type CHFullProfile = {
   registered_office_address?: { locality?: string; region?: string };
 } | null;
 
-type CHCandidate = {
-  company_number: string;
-  company_name: string;
-  company_status: string | null;
-  previous_company_names: string[] | null;
-  locality: string | null;
-  region: string | null;
-};
-
-type ScoredCandidate = {
-  candidate: CHCandidate;
-  tier: 'A' | 'B' | 'C';
-  score: number;
-};
-
 type SuspectRow = {
   organisation_name: string;
   current_company_number: string;
@@ -105,117 +94,6 @@ type SuspectRow = {
   hmrc_town_city: string | null;
   hmrc_county: string | null;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HMRC name parser (duplicated from phase0a — extract to shared lib once a third user appears)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const TA_REGEX =
-  /^(.*?)\s+(?:T\/A|t\/a|Trading\s+[Aa]s:?|d\/b\/a|D\/B\/A)\s+(.+)$/;
-const TRADING_NAME_OF_REGEX = /^(.*?)\s+Trading\s+[Nn]ame\s+of\s+(.+)$/;
-const BRANCH_REGEX =
-  /^(.*?)\s*(?:\([^)]*Branch[^)]*\)|\bUK\s+Branch\b|\bUK\s+Establishment\b)\s*$/i;
-
-/** Returns the legal candidate string for CH search. Mirrors Phase 0a's parser. */
-function parseLegalCandidate(orgName: string): string {
-  const trimmed = orgName.trim();
-  const tradingNameOf = trimmed.match(TRADING_NAME_OF_REGEX);
-  if (tradingNameOf) return tradingNameOf[2].trim();
-  const ta = trimmed.match(TA_REGEX);
-  if (ta) return ta[1].trim();
-  const branch = trimmed.match(BRANCH_REGEX);
-  if (branch) return branch[1].trim();
-  return trimmed;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Comparison helpers (duplicated from phase0a)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SUFFIX_STRIP_REGEX = /\s+(LIMITED|LTD|LLP|PLC)\.?\s*$/i;
-const TOKEN_SPLIT_REGEX = /[\s,&\-./()]+/;
-const TRADING_AS_IN_PREV_REGEX = /(TRADING\s+AS|T\/A|D\/B\/A)/i;
-
-function normaliseForComparison(name: string): string {
-  return name.replace(SUFFIX_STRIP_REGEX, '').trim().toUpperCase();
-}
-
-function tokenise(name: string): string[] {
-  return name
-    .toLowerCase()
-    .split(TOKEN_SPLIT_REGEX)
-    .filter(
-      (t) =>
-        t.length > 0 &&
-        !STOPWORDS.has(t) &&
-        !CORPORATE_SUFFIXES.has(t) &&
-        /[a-z0-9]/.test(t),
-    );
-}
-
-function jaccard(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const setA = new Set(a);
-  const setB = new Set(b);
-  let intersection = 0;
-  for (const t of setA) if (setB.has(t)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function matchTierA(candidate: string, ch: CHCandidate): number | null {
-  return normaliseForComparison(candidate) ===
-    normaliseForComparison(ch.company_name)
-    ? 1.0
-    : null;
-}
-
-function matchTierB(candidate: string, ch: CHCandidate): number | null {
-  if (!ch.previous_company_names || ch.previous_company_names.length === 0)
-    return null;
-  const c = normaliseForComparison(candidate);
-  for (const prev of ch.previous_company_names) {
-    if (TRADING_AS_IN_PREV_REGEX.test(prev)) continue;
-    if (normaliseForComparison(prev) === c) return 0.95;
-  }
-  return null;
-}
-
-function matchTierC(candidate: string, ch: CHCandidate): number | null {
-  const tA = tokenise(candidate);
-  const tB = tokenise(ch.company_name);
-  if (tA.length < MIN_TOKENS_FOR_TIER_C || tB.length < MIN_TOKENS_FOR_TIER_C)
-    return null;
-  const score = jaccard(tA, tB);
-  return score >= TIER_C_THRESHOLD ? score : null;
-}
-
-/** Picks the best candidate by locality match. Returns 'tied' if no unique winner. */
-function pickByLocality(
-  candidates: ScoredCandidate[],
-  hmrcTown: string | null,
-  hmrcCounty: string | null,
-): ScoredCandidate | 'tied' {
-  if (candidates.length === 1) return candidates[0];
-  if (!hmrcTown && !hmrcCounty) return 'tied';
-
-  const hmrcTownU = hmrcTown?.toUpperCase() ?? '';
-  const hmrcCountyU = hmrcCounty?.toUpperCase() ?? '';
-
-  const scored = candidates.map((c) => {
-    const locU = (c.candidate.locality ?? '').toUpperCase();
-    const regU = (c.candidate.region ?? '').toUpperCase();
-    let s = 0;
-    if (hmrcTownU && (locU === hmrcTownU || regU === hmrcTownU)) s += 2;
-    if (hmrcCountyU && (locU === hmrcCountyU || regU === hmrcCountyU)) s += 1;
-    return { ...c, localityScore: s };
-  });
-
-  const max = Math.max(...scored.map((s) => s.localityScore));
-  if (max === 0) return 'tied';
-  const winners = scored.filter((s) => s.localityScore === max);
-  return winners.length === 1 ? winners[0] : 'tied';
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CH API client with disk cache

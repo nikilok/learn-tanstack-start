@@ -18,6 +18,7 @@ import {
 } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { eq, isNull, sql } from 'drizzle-orm';
+import { resolveOneSponsor } from './lib/resolve-sponsor';
 
 dotenv.config({ path: '.env.local' });
 
@@ -58,9 +59,16 @@ async function fetchApi(path: string): Promise<unknown | null> {
   return res.json();
 }
 
-// Get only org names that aren't already cached
+// Get only org names that aren't already cached, plus a representative
+// town_city/county per org for the locality tiebreaker in the verification
+// pipeline. selectDistinctOn(orgName) collapses multi-row sponsors (one per
+// route/rating) to a single representative row.
 const uncached = await db
-  .selectDistinct({ organisationName: hmrcSkilledWorkers.organisationName })
+  .selectDistinctOn([hmrcSkilledWorkers.organisationName], {
+    organisationName: hmrcSkilledWorkers.organisationName,
+    townCity: hmrcSkilledWorkers.townCity,
+    county: hmrcSkilledWorkers.county,
+  })
   .from(hmrcSkilledWorkers)
   .leftJoin(
     companiesHouseProfiles,
@@ -73,7 +81,9 @@ console.log(`Found ${uncached.length} uncached organisations to fetch`);
 let processed = 0;
 let inserted = 0;
 let skipped = 0;
-let failed = 0;
+let publicBody = 0;
+let humanReview = 0;
+let noMatch = 0;
 const startTime = Date.now();
 const total = uncached.length;
 
@@ -86,14 +96,22 @@ function formatEta(ms: number) {
 
 function logProgress() {
   const elapsed = Date.now() - startTime;
-  const apiCalls = inserted + failed;
-  const rate = apiCalls > 0 ? elapsed / apiCalls : DELAY_MS * 2;
+  const completed = inserted + noMatch + publicBody + humanReview;
+  const rate = completed > 0 ? elapsed / completed : DELAY_MS * 2;
   const left = total - processed;
   const eta = formatEta(left * rate);
   console.log(
-    `[${processed}/${total}] inserted=${inserted} skipped=${skipped} failed=${failed} | ETA: ${eta}`,
+    `[${processed}/${total}] inserted=${inserted} skipped=${skipped} ` +
+      `no_match=${noMatch} public_body=${publicBody} review=${humanReview} | ETA: ${eta}`,
   );
 }
+
+// Throttled fetch — sleeps before every call to keep us under CH's 600/5min
+// limit. resolveOneSponsor calls this 1-4 times per row internally.
+const throttledFetchApi = async (path: string) => {
+  await sleep(DELAY_MS);
+  return fetchApi(path);
+};
 
 for (const row of uncached) {
   const orgName = row.organisationName;
@@ -107,75 +125,51 @@ for (const row of uncached) {
     .limit(1);
   if (alreadyCached) {
     skipped++;
-    if (processed % 100 === 0) {
-      logProgress();
-    }
+    if (processed % 100 === 0) logProgress();
     continue;
   }
 
-  // 1. Search for company number
-  await sleep(DELAY_MS);
-  const searchData = (await fetchApi(
-    `/search/companies?q=${encodeURIComponent(orgName)}&items_per_page=1`,
-  )) as { items?: { company_number: string }[] } | null;
+  // Run the verified resolution pipeline (parse → search → tier scoring →
+  // locality tiebreak → fail closed). See lib/resolve-sponsor.ts for the
+  // full decision tree. Any verdict other than 'verified' deliberately
+  // does NOT insert a mapping — better to leave a sponsor unmapped than to
+  // point users at the wrong CH entity. See docs/hmrc-ch-mapping-fix.md.
+  const result = await resolveOneSponsor(
+    orgName,
+    { townCity: row.townCity, county: row.county },
+    throttledFetchApi,
+  );
 
-  if (!searchData?.items?.length) {
-    failed++;
-    if (processed % 100 === 0) {
-      logProgress();
-    }
+  if (result.verdict === 'public_body') {
+    publicBody++;
+    if (processed % 100 === 0) logProgress();
     continue;
   }
 
-  const companyNumber = searchData.items[0].company_number;
+  if (result.verdict === 'human_review') {
+    humanReview++;
+    console.log(
+      `  human_review: "${orgName}" → ${result.contenders.length} tied candidates ` +
+        `(${result.contenders.map((c) => `${c.candidate.company_name} [${c.candidate.company_number}]`).join(', ')})`,
+    );
+    if (processed % 100 === 0) logProgress();
+    continue;
+  }
 
-  // Store HMRC org name → company number mapping
+  if (result.verdict === 'no_match') {
+    noMatch++;
+    if (processed % 100 === 0) logProgress();
+    continue;
+  }
+
+  // result.verdict === 'verified' — write the mapping and upsert the profile.
+  const profile = result.profile;
+
   await db
     .insert(hmrcCompanyMapping)
-    .values({ organisationName: orgName, companyNumber })
+    .values({ organisationName: orgName, companyNumber: result.companyNumber })
     .onConflictDoNothing();
 
-  // 2. Fetch full profile
-  await sleep(DELAY_MS);
-  const profile = (await fetchApi(`/company/${companyNumber}`)) as {
-    company_name: string;
-    company_number: string;
-    company_status?: string;
-    type?: string;
-    date_of_creation?: string;
-    registered_office_address?: {
-      address_line_1?: string;
-      address_line_2?: string;
-      locality?: string;
-      region?: string;
-      postal_code?: string;
-      country?: string;
-    };
-    sic_codes?: string[];
-    accounts?: {
-      next_made_up_to?: string;
-      last_accounts?: { made_up_to?: string };
-      overdue?: boolean;
-    };
-    jurisdiction?: string;
-    has_been_liquidated?: boolean;
-    has_insolvency_history?: boolean;
-    has_charges?: boolean;
-    previous_company_names?: { name: string }[];
-    confirmation_statement?: {
-      last_made_up_to?: string;
-    };
-  } | null;
-
-  if (!profile) {
-    failed++;
-    if (processed % 100 === 0) {
-      logProgress();
-    }
-    continue;
-  }
-
-  // 3. Upsert into DB
   await db
     .insert(companiesHouseProfiles)
     .values({
@@ -228,12 +222,10 @@ for (const row of uncached) {
     });
 
   inserted++;
-
-  if (processed % 100 === 0) {
-    logProgress();
-  }
+  if (processed % 100 === 0) logProgress();
 }
 
 console.log(
-  `\nDone! Processed=${processed} Inserted=${inserted} Skipped=${skipped} Failed=${failed}`,
+  `\nDone! Processed=${processed} Inserted=${inserted} Skipped=${skipped} ` +
+    `NoMatch=${noMatch} PublicBody=${publicBody} HumanReview=${humanReview}`,
 );

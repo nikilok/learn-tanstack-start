@@ -723,6 +723,104 @@ For the record, things considered and rejected:
 
 ---
 
+## Future v2: enriching public bodies via CH officer records
+
+Out of scope for the current fix, but worth capturing while it's fresh.
+
+### What we discovered
+
+CH has two distinct identifier spaces, and statutory public bodies (Councils,
+NHS Trusts, Reserve Forces, etc.) live exclusively in the second one:
+
+| Concept | Identifier scheme | URL pattern | API endpoint |
+|---|---|---|---|
+| **Company** (files accounts) | numeric/prefixed (`14337994`, `SL004112`, `BR011845`) | `/company/<number>` | `/company/{number}` |
+| **Officer** (person OR corporate body that holds appointments) | opaque base64-ish hash (`4E4AxVgMkEr1imLfqNB7QijqNHQ`) | `/officers/<id>/appointments` | `/officers/{id}` and `/officers/{id}/appointments` |
+
+A statutory body like Aberdeen City Council can hold *appointments* (e.g. as
+LLP Designated Member of `ABERDEEN NHT 2014 LLP`) without itself *being* a
+registered company. CH's officer record for the council shows:
+
+- Legal form: "A LOCAL AUTHORITY CONSTITUTED AND..." (truncated by CH UI)
+- Law governed: "SCOTS LAW"
+- Correspondence address: "Town House, Broad Street, Aberdeen, AB10 1AQ"
+- List of company appointments
+
+That's strictly more useful information than what we currently show (a wrong
+or unrelated Ltd), but it's a different data shape from `companies_house_profiles`.
+
+### Why we're deferring it
+
+1. Phase 2 (null + `is_public_body=true`) already stops the bleeding —
+   users stop seeing wrong-entity data for these 388 sponsors.
+2. Officer enrichment requires a second scrape pipeline, a second schema,
+   and a UI panel that doesn't exist yet. None of that is on the critical
+   path for fixing the misleading Rainbow Care / NHS Trust / Council cards.
+3. Product demand isn't proven. The `is_public_body=true` UI ("This sponsor
+   is a public body and is not registered with Companies House") is honest
+   and complete by itself.
+
+### Sketch of v2 if we ever build it
+
+**Schema additions** (alongside the existing nullable `company_number`):
+
+```sql
+ALTER TABLE hmrc_company_mapping
+  ADD COLUMN ch_officer_id varchar(64);  -- nullable; only populated for is_public_body=true rows
+
+CREATE TABLE companies_house_officers (
+  officer_id           varchar(64) PRIMARY KEY,
+  name                 varchar(255) NOT NULL,
+  legal_form           text,           -- "A LOCAL AUTHORITY CONSTITUTED AND..."
+  law_governed         varchar(100),   -- "SCOTS LAW", "ENGLAND AND WALES", etc.
+  correspondence_address text,
+  appointments_count   integer,
+  fetched_at           timestamp DEFAULT now()
+);
+
+CREATE TABLE companies_house_officer_appointments (
+  officer_id      varchar(64) REFERENCES companies_house_officers,
+  company_number  varchar(20),
+  role            varchar(100),       -- 'LLP Designated Member', etc.
+  appointed_on    date,
+  resigned_on     date,
+  PRIMARY KEY (officer_id, company_number, appointed_on)
+);
+```
+
+**Resolution pipeline** (mirrors the company pipeline, same discipline):
+
+1. **Search**: `GET /search/officers?q=<hmrc_name>&items_per_page=20` —
+   same fuzzy-ranking risk as `/search/companies`, so same verification rule
+   applies.
+2. **Verify**: accept only when `UPPER(returned.name) = UPPER(hmrc_name)`,
+   or via a Tier-B equivalent on previous officer names if CH exposes them.
+   Reject otherwise — fail closed exactly as Phase 0a/0b do.
+3. **Hydrate**: on first verified match, fetch `/officers/{id}` and
+   `/officers/{id}/appointments` and upsert.
+4. **Refresh**: same daily/periodic cadence as the company seed.
+
+**UI implication**: when `is_public_body=true` and `ch_officer_id` is set,
+render a separate "Officer record" panel on the detail page (legal form,
+governing law, correspondence address, recent appointments). When
+`is_public_body=true` and `ch_officer_id` is NULL, fall back to the Phase 2
+default ("not registered with CH").
+
+### Triggers for prioritising v2
+
+Build this when *any* of:
+
+- User feedback explicitly asks for richer detail on public-body sponsors
+- A material fraction of search traffic lands on `is_public_body=true` cards
+- We need it for SEO (public-body pages are too thin to rank well)
+- A product feature requires officer-level information (e.g. "show all
+  companies this council is a designated member of")
+
+Until then: leave the v2 columns and tables uncreated, and revisit when
+the trigger fires.
+
+---
+
 ## Appendix: queries used in this analysis
 
 For reproducibility — these are the ones that produced the numbers above.

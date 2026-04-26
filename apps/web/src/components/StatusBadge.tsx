@@ -5,22 +5,19 @@ import { titleCase } from '../utils';
  * `companies_house_profiles.company_status` column. New values added by
  * Companies House will fall through to the neutral grey tone.
  */
-export const COMPANY_STATUSES = [
-  'active',
-  'dissolved',
-  'liquidation',
-  'open',
-  'registered',
-  'converted-closed',
-  'administration',
-  'closed',
-  'voluntary-arrangement',
-  'insolvency-proceedings',
-  'receivership',
-  'removed',
-] as const;
-
-export type CompanyStatus = (typeof COMPANY_STATUSES)[number];
+export type CompanyStatus =
+  | 'active'
+  | 'dissolved'
+  | 'liquidation'
+  | 'open'
+  | 'registered'
+  | 'converted-closed'
+  | 'administration'
+  | 'closed'
+  | 'voluntary-arrangement'
+  | 'insolvency-proceedings'
+  | 'receivership'
+  | 'removed';
 
 type Tone = 'green' | 'amber' | 'red' | 'grey';
 

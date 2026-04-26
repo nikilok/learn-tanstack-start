@@ -63,9 +63,15 @@ export default function HmrcResults({ search }: { search: string }) {
     if (!ready) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
-      sessionStorage.removeItem('hmrc-scroll-y');
+      // Scroll first, then clear the key — in that order, atomically inside
+      // a single rAF. If we cleared the key before the rAF fired, there
+      // would be a one-frame window where `scrollY === 0` AND the key is
+      // gone, which `useSearchPill`'s safety-net poll reads as "nothing to
+      // restore" and clears `data-hide-search-input` prematurely. That would
+      // briefly unhide the input on a scrolled back-nav restore.
       requestAnimationFrame(() => {
         window.scrollTo(0, Number.parseInt(savedY, 10));
+        sessionStorage.removeItem('hmrc-scroll-y');
       });
     }
   }, [ready]);

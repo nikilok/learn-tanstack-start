@@ -104,28 +104,39 @@ export function useSearchPill(
   }, [isStuck]);
 
   // Safety net: if the inline script set the attribute but we end up at the
-  // top of the page with nothing to restore (rare — e.g., the script fired
-  // during a transient scroll that was then reset), remove it after two
-  // animation frames. HmrcResults' scroll-restore rAF fires in the same
-  // window, so by the second frame scroll position reflects reality.
+  // top of the page with nothing to restore, drop it. Polls every animation
+  // frame and terminates only when one of three conditions is met:
+  //   1. The attribute has been removed by another path (e.g., `isStuck=true`
+  //      via the useLayoutEffect above).
+  //   2. `scrollY === 0` and `hmrc-scroll-y` has been consumed by HmrcResults.
+  //   3. The component unmounts (cancelled flag stops the next tick).
+  //
+  // A naive timeout cutoff isn't safe — HmrcResults' scroll-restore is gated
+  // on the virtualizer's font/width readiness, which can take an indefinite
+  // number of frames on slow loads. Anything shorter than "wait until the
+  // restore actually happens" leaves a race window where the attribute
+  // persists with no remaining clearer. rAF auto-pauses on background tabs,
+  // so an open-ended poll has no idle cost when the user isn't looking.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!document.documentElement.hasAttribute('data-hide-search-input')) {
       return;
     }
     let cancelled = false;
-    const outer = requestAnimationFrame(() => {
+    const tick = () => {
       if (cancelled) return;
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        if (window.scrollY === 0 && !sessionStorage.getItem('hmrc-scroll-y')) {
-          clearHideAttribute();
-        }
-      });
-    });
+      if (!document.documentElement.hasAttribute('data-hide-search-input')) {
+        return;
+      }
+      if (window.scrollY === 0 && !sessionStorage.getItem('hmrc-scroll-y')) {
+        clearHideAttribute();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
     return () => {
       cancelled = true;
-      cancelAnimationFrame(outer);
     };
   }, []);
 

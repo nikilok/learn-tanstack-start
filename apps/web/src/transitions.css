@@ -1,0 +1,204 @@
+/*
+ * Page transitions: outgoing page recedes (scale + slight slide + fade),
+ * incoming page rises into place (scale + slide + fade). The combined
+ * scale + translate gives a subtle "depth pass" feel without long travel
+ * distances that can trigger motion sickness. Outgoing distance is small
+ * (12%) and dampened with a blur tick so the eye doesn't track it.
+ */
+@keyframes route-recede-left {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(-12%, 0, 0) scale(0.96);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes route-rise-from-right {
+  from {
+    transform: translate3d(8%, 0, 0) scale(0.985);
+    opacity: 0;
+    filter: blur(2px);
+    clip-path: inset(0 0 0 50%);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes route-recede-right {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(12%, 0, 0) scale(0.96);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes route-rise-from-left {
+  from {
+    transform: translate3d(-8%, 0, 0) scale(0.985);
+    opacity: 0;
+    filter: blur(2px);
+    clip-path: inset(0 50% 0 0);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Shares the `active-card` name with the clicked card on the listing so
+   the browser pairs them as a single shared element — the card morphs
+   into the details wrapper on forward. The surrounding listing is
+   intentionally NOT named: a named region whose bbox extends above the
+   viewport (because the user scrolled) renders its snapshot in front of
+   `root` and visually covers the header. Keeping the listing in `root`
+   means the live header (in NEW root) sits in front for the entire
+   transition. */
+.page-flip-details {
+  view-transition-name: active-card;
+}
+
+/*
+ * On back-nav the active-card name is dropped so the entire page is
+ * captured into a single `root` snapshot and animates as one piece.
+ * (A shrink-back morph isn't practical here — the listing is virtualized
+ * and scroll-restored asynchronously, so the morph target isn't reliably
+ * in the DOM at NEW-snapshot capture time. See CLAUDE.md.)
+ */
+html:active-view-transition-type(back) .page-flip-details {
+  view-transition-name: none;
+}
+
+/*
+ * Active card morph: the browser pairs the listing card with the details
+ * wrapper (both share `view-transition-name: active-card`) and animates
+ * the group's bbox from the small card to the full-size wrapper — which
+ * produces the magnify-in / shrink-back effect. We just tune the timing
+ * and let the default cross-fade between the two snapshots run.
+ */
+::view-transition-group(active-card) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-old(active-card),
+::view-transition-new(active-card) {
+  animation-duration: 420ms;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  mix-blend-mode: normal;
+  /* Force the snapshot to fill the morphing group bbox. Without this the
+     browser keeps the snapshot at its captured natural size and the
+     image-pair just clips a smaller window onto it as the group shrinks
+     — which reads as "the card disappears" rather than "the card shrinks".
+     `object-fit: fill` stretches the snapshot to match the group at every
+     frame, so the rendered content visibly scales with the morph. */
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+/*
+ * Safari: skip the shared-element morph entirely and use the original
+ * page-level slide that was on main before the morph was added. Drop
+ * the named regions so the whole page is captured into a single `root`
+ * snapshot, then animate root with the same recede-left / rise-from-
+ * right pattern used on back. WebKit handles a single root pair
+ * cleanly without the cumulative GPU pressure that the active-card
+ * pairing was causing.
+ *
+ * The override on the listing card uses an attribute selector +
+ * `!important` because the name is set as an inline style by HmrcCard
+ * — that's the only way to beat inline-style specificity from CSS.
+ */
+html[data-browser="safari"] .page-flip-details {
+  view-transition-name: none;
+}
+html[data-browser="safari"] .page-flip-listing [style*="view-transition-name"] {
+  /* biome-ignore lint: needed to override the inline view-transition-name set by HmrcCard */
+  view-transition-name: none !important;
+}
+
+/* Forward root animation for Safari. Higher specificity than the shared
+   `forward root: animation: none` rule below, so it wins on Safari. */
+html[data-browser="safari"]:active-view-transition-type(
+    forward
+  )::view-transition-group(root) {
+  animation-duration: 280ms;
+}
+html[data-browser="safari"]:active-view-transition-type(
+    forward
+  )::view-transition-old(root) {
+  animation: route-recede-left 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  transform-origin: center center;
+}
+html[data-browser="safari"]:active-view-transition-type(
+    forward
+  )::view-transition-new(root) {
+  animation: route-rise-from-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center center;
+}
+
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+}
+
+/* Forward: root stays put — only the active-card group morphs and the
+   listing wrapper fades. */
+html:active-view-transition-type(forward)::view-transition-group(root),
+html:active-view-transition-type(forward)::view-transition-old(root),
+html:active-view-transition-type(forward)::view-transition-new(root) {
+  animation: none;
+}
+
+/*
+ * Back: page-level slide. With no named regions carved out on back, the
+ * whole page (header, footer, content) is captured into the `root`
+ * snapshot and animates as one piece — old recedes right, new rises in
+ * from the left. The header stays in its normal stacking position so
+ * it never gets covered by a tall listing snapshot mid-animation.
+ */
+html:active-view-transition-type(back)::view-transition-group(root) {
+  animation-duration: 380ms;
+}
+html:active-view-transition-type(back)::view-transition-old(root) {
+  animation: route-recede-right 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  transform-origin: center center;
+}
+html:active-view-transition-type(back)::view-transition-new(root) {
+  animation: route-rise-from-left 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transform-origin: center center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-group(active-card),
+  ::view-transition-old(active-card),
+  ::view-transition-new(active-card) {
+    animation: none;
+  }
+}

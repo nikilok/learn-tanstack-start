@@ -83,3 +83,30 @@ from fallback font measurements or missing width data.
 
 The `hmrc-scroll-y` sessionStorage restore runs in a `useEffect([ready])` — it must wait
 for items to be in the DOM at correct heights before calling `window.scrollTo`.
+
+## Page transitions live in `transitions.css`, not `styles.css`
+
+All View Transitions API rules — keyframes, `view-transition-name` declarations on
+`.page-flip-listing` / `.page-flip-details`, `::view-transition-*(active-card)` and
+`::view-transition-*(root)` styling, `:active-view-transition-type(forward|back)`
+direction-keyed animations, and `html[data-browser="…"]` browser-targeted overrides —
+live in `apps/web/src/transitions.css`. It's imported from `styles.css` at the top.
+
+When adding or editing transition behaviour, edit `transitions.css`. Do not put view-
+transition rules back into `styles.css` — the split exists so the (substantial) transition
+logic doesn't tangle with base tokens, utilities, and component styles.
+
+### Cross-file moving parts to know about
+
+- `HmrcCard` sets `style={{ viewTransitionName: 'active-card' }}` on the clicked card via
+  React state in `HmrcResults` (`flushSync` on click so the DOM is committed before
+  TanStack Router calls `startViewTransition`). Safari overrides the active-card name to
+  `none` via `[style*="view-transition-name"] { ... !important }` because that's the only
+  way to beat an inline style from CSS.
+- The `data-browser` attribute on `<html>` is stamped pre-hydration by
+  `scripts/browser-init.ts`. Generic mechanism — add `html[data-browser="chrome"] { … }`
+  rules in `transitions.css` for future per-browser tweaks.
+- Forward navigation passes `viewTransition={{ types: ['forward'] }}` on the `Link` in
+  `HmrcCard`; back navigation passes `['back']` on the back link in `company.$id.$slug.tsx`.
+  Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`
+  so they don't trigger animations.

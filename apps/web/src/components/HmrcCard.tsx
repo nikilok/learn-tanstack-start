@@ -6,15 +6,21 @@ import RatingIcon from './RatingIcon';
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
  * route. Persists `window.scrollY` to sessionStorage on click so `HmrcResults`
- * can restore the list position on back-nav. `search` is forwarded so the
- * "back to search" link on the detail page preserves the current query.
+ * can restore the list position on back-nav. When `isActive` is true the card
+ * is given `view-transition-name: active-card`, which carves it out of the
+ * `results-listing` snapshot so it can run its own slide animation while the
+ * remaining cards fade.
  */
 export default function HmrcCard({
   row,
   search,
+  isActive,
+  onActivate,
 }: {
   row: HmrcRow;
   search: string;
+  isActive: boolean;
+  onActivate: () => void;
 }) {
   return (
     <Link
@@ -26,9 +32,12 @@ export default function HmrcCard({
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
       className="block no-underline py-2"
-      onClick={() =>
-        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY))
-      }
+      style={isActive ? { viewTransitionName: 'active-card' } : undefined}
+      onClick={() => {
+        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+        sessionStorage.setItem('hmrc-active-id', row.slugId);
+        onActivate();
+      }}
     >
       <h3 className="heading-card text-base font-semibold text-(--sea-ink)">
         {titleCase(row.organisationName)}

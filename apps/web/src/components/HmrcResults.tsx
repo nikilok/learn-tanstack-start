@@ -1,5 +1,6 @@
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { titleCase } from '../utils';
@@ -18,6 +19,13 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
+  // `activeId` only gets set when the user clicks a card on this very
+  // mount (via flushSync below). On a remount after back-nav we leave it
+  // null on purpose — that way the listing's matching card does *not*
+  // receive `view-transition-name: active-card`, so the browser won't
+  // pair it with the details wrapper and morph back. Back-nav uses a
+  // page-level slide instead (see styles.css).
+  const [activeId, setActiveId] = useState<string | null>(null);
   const { estimateSize, ready, contentWidth } = useVirtualTextLayout(results, {
     fields: [
       {
@@ -55,9 +63,15 @@ export default function HmrcResults({ search }: { search: string }) {
     if (!ready) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
-      sessionStorage.removeItem('hmrc-scroll-y');
+      // Scroll first, then clear the key — in that order, atomically inside
+      // a single rAF. If we cleared the key before the rAF fired, there
+      // would be a one-frame window where `scrollY === 0` AND the key is
+      // gone, which `useSearchPill`'s safety-net poll reads as "nothing to
+      // restore" and clears `data-hide-search-input` prematurely. That would
+      // briefly unhide the input on a scrolled back-nav restore.
       requestAnimationFrame(() => {
         window.scrollTo(0, Number.parseInt(savedY, 10));
+        sessionStorage.removeItem('hmrc-scroll-y');
       });
     }
   }, [ready]);
@@ -143,7 +157,20 @@ export default function HmrcResults({ search }: { search: string }) {
               transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
             }}
           >
-            <HmrcCard row={results[virtualRow.index]} search={search} />
+            <HmrcCard
+              row={results[virtualRow.index]}
+              search={search}
+              isActive={activeId === results[virtualRow.index].slugId}
+              onActivate={() => {
+                // flushSync forces React to commit the state update before
+                // TanStack Router's click handler triggers
+                // startViewTransition — otherwise the OLD snapshot would be
+                // captured before the active card has its name applied.
+                flushSync(() => {
+                  setActiveId(results[virtualRow.index].slugId);
+                });
+              }}
+            />
           </div>
         ))}
       </div>

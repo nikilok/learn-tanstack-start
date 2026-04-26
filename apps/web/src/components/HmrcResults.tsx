@@ -26,14 +26,6 @@ export default function HmrcResults({ search }: { search: string }) {
   // pair it with the details wrapper and morph back. Back-nav uses a
   // page-level slide instead (see styles.css).
   const [activeId, setActiveId] = useState<string | null>(null);
-  // `eagerRender` is true when sessionStorage indicates we just came
-  // from a card click — that's enough signal to render the cards
-  // immediately (skipping the `ready` gate) so the slide-in animation
-  // doesn't show skeletons during back-nav.
-  const [eagerRender] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return sessionStorage.getItem('hmrc-active-id') !== null;
-  });
   const { estimateSize, ready, contentWidth } = useVirtualTextLayout(results, {
     fields: [
       {
@@ -53,15 +45,8 @@ export default function HmrcResults({ search }: { search: string }) {
     containerRef: listRef,
   });
 
-  // On back-nav we have a known activeId — render the cards immediately
-  // (even before width is measured) so the matching card has its
-  // `view-transition-name: active-card` in the DOM when the browser
-  // captures the NEW snapshot. Without this the snapshot would be of
-  // skeletons, the morph would have no target, and the back transition
-  // would just be a fade with the live page leaking through underneath.
-  const showCards = ready || eagerRender;
   const virtualizer = useWindowVirtualizer({
-    count: showCards ? results.length : 0,
+    count: ready ? results.length : 0,
     estimateSize,
     gap: 24,
     overscan: 5,
@@ -118,7 +103,7 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  if (isLoading || !showCards) {
+  if (isLoading || !ready) {
     return (
       <>
         <SkeletonCards />

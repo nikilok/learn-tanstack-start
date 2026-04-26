@@ -239,6 +239,9 @@ html:active-view-transition-type(back)::view-transition-new(root) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(root),
+  ::view-transition-old(root),
+  ::view-transition-new(root),
   ::view-transition-group(active-card),
   ::view-transition-old(results-listing),
   ::view-transition-new(results-listing),

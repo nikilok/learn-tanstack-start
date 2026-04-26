@@ -104,28 +104,37 @@ export function useSearchPill(
   }, [isStuck]);
 
   // Safety net: if the inline script set the attribute but we end up at the
-  // top of the page with nothing to restore (rare — e.g., the script fired
-  // during a transient scroll that was then reset), remove it after two
-  // animation frames. HmrcResults' scroll-restore rAF fires in the same
-  // window, so by the second frame scroll position reflects reality.
+  // top of the page with nothing to restore, drop it. Polls every frame for
+  // up to 1s rather than checking once after 2 frames — HmrcResults'
+  // scroll-restore is gated on the virtualizer's font/width readiness, which
+  // can take many frames on a SPA back-nav from a reloaded details page,
+  // leaving `hmrc-scroll-y` in sessionStorage past the original 2-frame
+  // window. Without polling, the attribute persists, the input stays hidden
+  // at scroll-y=0, and the user has to scroll down + back up to surface it.
+  // The poll exits early once the attribute is gone (cleared by another
+  // path) or the conditions are met.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!document.documentElement.hasAttribute('data-hide-search-input')) {
       return;
     }
     let cancelled = false;
-    const outer = requestAnimationFrame(() => {
+    const start = performance.now();
+    const tick = () => {
       if (cancelled) return;
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        if (window.scrollY === 0 && !sessionStorage.getItem('hmrc-scroll-y')) {
-          clearHideAttribute();
-        }
-      });
-    });
+      if (!document.documentElement.hasAttribute('data-hide-search-input')) {
+        return;
+      }
+      if (window.scrollY === 0 && !sessionStorage.getItem('hmrc-scroll-y')) {
+        clearHideAttribute();
+        return;
+      }
+      if (performance.now() - start > 1000) return;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
     return () => {
       cancelled = true;
-      cancelAnimationFrame(outer);
     };
   }, []);
 

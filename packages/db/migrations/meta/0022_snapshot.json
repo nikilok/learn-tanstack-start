@@ -686,9 +686,7 @@
         "hmrc_skilled_workers_hash_unique": {
           "name": "hmrc_skilled_workers_hash_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "hash"
-          ]
+          "columns": ["hash"]
         }
       },
       "policies": {},

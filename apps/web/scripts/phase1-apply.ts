@@ -188,7 +188,10 @@ async function applyRow(row: Row, p: Plan) {
     WHERE organisation_name = ${row.organisation_name}
   `) as { company_number: string | null; match_method: string | null }[];
   const oldMethod = old[0]?.match_method ?? null;
-  const oldNumberLive = old[0]?.company_number ?? oldNumber;
+  // `?? oldNumber` would clobber an explicit NULL company_number with the
+  // staging snapshot's original value, defeating idempotency for already-NULLed
+  // rows on a re-run. Distinguish "row missing" from "column is NULL".
+  const oldNumberLive = old.length > 0 ? old[0].company_number : oldNumber;
 
   if (p.kind === 'skip') return { changed: false, was: 'no-op' };
 

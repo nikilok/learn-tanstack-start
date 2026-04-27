@@ -1,11 +1,14 @@
 # HMRC sponsor → Companies House mapping: failure analysis & fix design
 
-Status: **Phase 0a complete · Phase 0b in progress · Phase 1 designed, not yet
-applied · shared library + seed refactor merged.**
+Status: **Phase 0a, 0b, 1 all complete and applied to production · shared
+library + seed refactor merged · UI null-handling shipped · Phase 3 + Phase 5
+remain as follow-up work.**
 
-This is a design doc, not a postmortem — there has been no incident, but there
-is a critical data-quality bug in production right now (see [Concrete reproduction](#concrete-reproduction-rainbow-care-solutions-hertfordshire))
-and we want a principled fix that lets us re-run a batch backfill safely.
+This is a design doc, not a postmortem — there was no incident, but there
+was a critical data-quality bug in production (see [Concrete reproduction](#concrete-reproduction-rainbow-care-solutions-hertfordshire))
+that this work has now repaired. ~19,583 sponsor cards now show either
+correct CH data or correctly degrade to "no Companies House data" instead
+of pointing at a wrong / dissolved / unrelated entity.
 
 ---
 
@@ -768,17 +771,31 @@ ranking for any given query.
 - Subsequent re-runs (after threshold tuning, regex updates): **minutes**,
   because cached responses are re-scored locally without re-calling CH
 
-#### Interim numbers at 300/19,340 (1.6%)
+#### Final results
 
-| Verdict | Count | Share | Extrapolated to 19,340 |
-|---|---|---|---|
-| verified_via_ch_search | 77 | 25.7% | ~5,000 |
-| no_match_after_ch_search | 220 | 73.3% | ~14,200 |
-| requires_human_review_ch | 3 | 1.0% | ~200 |
+Completed in 10h 00m 51s. 60,537 API calls (search + Tier B profile
+fetches), no errors, no 429 backoffs.
 
-Subject to change as the run progresses (the SELECT is alphabetical, so
-early rows may not be representative). Final numbers replace this table
-when the run completes.
+| Verdict | Count | Share |
+|---|---|---|
+| `verified_via_ch_search` | 3,249 | 16.8% |
+| `no_match_after_ch_search` | 15,895 | 82.2% |
+| `requires_human_review_ch` | 196 | 1.0% |
+
+Tier breakdown for `verified_via_ch_search` (3,249 rows):
+
+| Tier | Count | Share |
+|---|---|---|
+| `exact` (Tier A) | 2,535 | 78% |
+| `token_sim` (Tier C) | 690 | 21% |
+| `previous_name` (Tier B) | 24 | 1% |
+
+The 73% `no_match` rate is higher than the early-sample extrapolation
+suggested (~80% in the final), reflecting Policy A doing exactly what was
+asked of it: failing closed when the legal candidate doesn't have a
+verifiable CH entity. These sponsors include sole traders, unincorporated
+partnerships, foreign entities, and franchisees whose own Ltd isn't
+registered — entities for which "no CH data" is the correct outcome.
 
 ---
 
@@ -861,46 +878,77 @@ WHERE organisation_name = $organisation_name;
 -- For requires_human_review_*: skip (no automatic write)
 ```
 
-### Expected scope (with Phase 0b extrapolation)
+### Actual outcome
 
 | Verdict | Action | Rows | User-visible change? |
 |---|---|---|---|
-| `verified_locally` | provenance backfill only | ~106,143 | No (mapping unchanged) |
-| `verified_via_ch_search` | swap company_number + provenance | ~5,000 | Yes — corrected mapping |
+| `verified_locally` | provenance backfill only | 106,143 | No (mapping unchanged) |
+| `verified_via_ch_search` | swap `company_number` + provenance | 3,249 | Yes — corrected mapping |
 | `suspect_with_local_alternative` | swap + provenance | 51 | Yes — corrected mapping |
-| `public_body_skip` | NULL number + flag | 388 | Yes — UI shows "no CH data" instead of wrong entity |
-| `no_match_after_ch_search` | NULL number + mark | ~14,200 | Yes — UI shows "no CH data" |
-| `requires_human_review_*` | skip | ~200 | None — leave for manual review |
+| `public_body_skip` | NULL number + `is_public_body=true` | 388 | Yes — UI shows "no CH data" instead of wrong entity |
+| `no_match_after_ch_search` | NULL number + `match_method='no_match'` | 15,895 | Yes — UI shows "no CH data" |
+| `requires_human_review_ch` | skip | 196 | None — left for manual review |
 
-**Total writes**: ~125k (most are provenance backfills). Of those,
-~19,500 actually change `company_number` — the meaningful user-visible
-delta.
+**Total writes applied**: 125,726. Of those, **19,583 changed
+`company_number`** (3,300 swaps + 16,283 NULLs) — the meaningful
+user-visible delta. The remaining 106,143 were provenance backfills
+(invisible to users; populates the new `match_method`/`match_score`/
+`verified_at` columns for any future drift-correction job).
 
-### Safety properties
+Audit table now has 126,114 rows attributed to `phase1_apply` (slightly
+more than the row count due to a known idempotency bug — see "Known
+issues" below).
+
+### Safety properties (as designed)
 
 - **Dry-run mode** — `--dry-run` prints the diff (counts by verdict +
   sample rows per category) before any writes hit the live table
 - **Sub-phasing** — script accepts `--apply-verdict=public_body_skip,suspect_with_local_alternative`
-  flags so high-confidence corrections (the 439) can ship first,
-  inspected for a day, then the larger Phase 0b batch
-- **Revertibility** — every change goes through the audit table; any
-  row can be restored individually with one SQL statement
-- **UI dependency** — must land alongside a small UI change in the
-  company detail page to handle `company_number IS NULL` rows (render
-  a "no Companies House data" panel instead of a broken card; same
-  state as the public-body case)
+  flags so high-confidence corrections (the 439) ship first,
+  inspected, then the larger Phase 0b batch
+- **Revertibility** — every change goes through the `hmrc_company_mapping_audit`
+  table; any row can be restored individually with one SQL statement
+- **UI dependency** — landed before the data writes: the
+  `getCompanyProfile` server fn now returns `null` when `mapping.companyNumber`
+  is NULL, the company-detail page already had `{profile && (...)}`
+  guards on the CH panel, so the page degrades to base sponsor data only
 
-### Suggested rollout order
+### Rollout that actually happened
 
-1. Generate + apply the schema migration (cheap, reversible)
-2. Ship the UI change for `company_number IS NULL` rows
-3. Run `phase1-apply --dry-run` → review diff
-4. Run `phase1-apply --apply-verdict=suspect_with_local_alternative,public_body_skip`
-   (the 439 high-confidence corrections)
-5. Spot-check production for a day
-6. Run `phase1-apply` for the remaining ~19k Phase 0b corrections
-7. Done with the cleanup; Phase 5 (re-verification cron) becomes the
-   ongoing safety net
+1. ✅ Schema migration generated + applied
+   (`packages/db/migrations/0022_jittery_famine.sql`)
+2. ✅ UI null-handling shipped (one-line guard in `getCompanyProfile`)
+3. ✅ `phase1-apply --dry-run` showed expected counts
+4. ✅ Applied the 439 high-confidence subset
+   (`--apply-verdict=suspect_with_local_alternative,public_body_skip`)
+5. ✅ Spot-checked Rainbow Care Solutions Hertfordshire (now correctly
+   shows PRIME MARQUE SERVICES LIMITED active in Stevenage),
+   AB Offlicence Limited, A Patel, BABUL'S (DARLINGTON) LTD,
+   Aberdeen City Council, Birmingham & Solihull NHS Trust,
+   Reserve Forces' and Cadets' Association — all rendering correctly
+6. ✅ `phase1-apply` (full run) applied the remaining ~125k rows over
+   a few hours, no errors
+7. ⏭ Cache flush via Vercel deploy (push to main triggered automatic
+   data-cache invalidation)
+
+### Known issues from the run
+
+**Idempotency bug for repeat-applied NULL rows**. The 388
+`public_body_skip` rows were re-written on the second run instead of
+detected as "already in target state" no-ops. Cause: in `applyRow`,
+`oldNumberLive = old[0]?.company_number ?? oldNumber` clobbered an
+explicit NULL with the staging snapshot's original value, so the
+idempotency guard never fired. **No data corruption** — the same
+correct values were written twice; just 388 redundant UPDATEs + 388
+extra audit rows. Fixed in a follow-up to `phase1-apply.ts`:
+
+```ts
+// before
+const oldNumberLive = old[0]?.company_number ?? oldNumber;
+
+// after — distinguishes "row missing" from "column is NULL"
+const oldNumberLive = old.length > 0 ? old[0].company_number : oldNumber;
+```
 
 ---
 

@@ -795,10 +795,11 @@ Tier breakdown for `verified_via_ch_search` (3,249 rows):
 | `token_sim` (Tier C) | 690 | 21% |
 | `previous_name` (Tier B) | 24 | 1% |
 
-The 73% `no_match` rate is higher than the early-sample extrapolation
-suggested (~80% in the final), reflecting Policy A doing exactly what was
-asked of it: failing closed when the legal candidate doesn't have a
-verifiable CH entity. These sponsors include sole traders, unincorporated
+The 82% `no_match` rate is higher than the mid-run sample at 300/19,340
+suggested (~73% at that point — see the in-progress numbers earlier in
+the doc), reflecting Policy A doing exactly what was asked of it:
+failing closed when the legal candidate doesn't have a verifiable CH
+entity. These sponsors include sole traders, unincorporated
 partnerships, foreign entities, and franchisees whose own Ltd isn't
 registered — entities for which "no CH data" is the correct outcome.
 

@@ -1137,11 +1137,12 @@ bun apps/web/scripts/phase1-sanity-check.ts
 ```
 
 - **Anytime** — pure read-only, no writes, no API calls. ~5 seconds wall time.
-- **Weekly cadence recommended** until Phase 3 hardening lands. The
-  `new_since_phase1` count tells us how aggressively the on-demand resolver
-  leak (`getCompanyProfile.else` — see Phase 3) is creating new untracked
-  mappings. If the count climbs faster than ~50/day, Phase 3 priority should
-  be raised.
+- **Weekly cadence as a post-hardening regression check.** Now that Phase 3 has
+  shipped, the `new_since_phase1` count should stay near zero — every new
+  sponsor that hits the on-demand resolver gets verified provenance written, so
+  it stops counting toward this proxy. Sustained linear growth indicates a
+  regression (provenance not being written) or a new writer path bypassing the
+  resolver. Treat any week-over-week climb as an alert.
 - After running Phase 5's re-verification cron (when it ships), to spot-check
   that the cron's writes look right.
 
@@ -1167,13 +1168,9 @@ total_null_provenance:                        211   = 196 human_review skips + ~
 Manually resolved human_review rows:           19   17 from prior buggy classification + 2 phase0a
 ```
 
-The 15-mappings/24h leak rate is the actual headline finding. Annualised
-(naive linear): ~5,000 new mappings/year via the unfixed on-demand resolver,
-of which ~15% historically map wrong → **~750 new wrong mappings/year**
-silently re-corrupting the dataset Phase 1 just cleaned. That's not
-catastrophic in one year but accumulates. Confirms Phase 3 hardening (issue
-[#70](https://github.com/nikilok/learn-tanstack-start/issues/70)) should be
-prioritised over deferring further.
+The 15-mappings/24h leak rate was the pre-hardening headline finding that
+motivated Phase 3 (issue [#70](https://github.com/nikilok/learn-tanstack-start/issues/70)).
+Post-Phase-3, treat it as baseline history; renewed growth is a regression signal.
 
 The sample of untracked mappings was the smoking gun: every single one
 matched the population most vulnerable to the `items[0]` bug — T/A

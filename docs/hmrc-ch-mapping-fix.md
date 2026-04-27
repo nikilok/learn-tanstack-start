@@ -668,11 +668,11 @@ apps/web/scripts/phase0a-classify-mappings.ts  ← imports lib, adds local-index
 
 `phase0a-classify-mappings.ts` does:
 
-```
+```text
 main():
   create staging table (idempotent — drops & recreates)
   load all 125k CH profiles into in-memory indexes (byName, byPrevName)
-  read all mappings + locality via JOIN
+  read all mappings + locality via JOIN (also loaded into memory as an array)
   for each row:
     parseHmrcName(orgName) → candidates
     public-body short-circuit
@@ -684,8 +684,13 @@ main():
 
 #### Cost
 
-- **Memory**: O(1) — streams the join cursor
-- **DB**: 1 join read pass + 125k inserts to staging (~2-3 minutes)
+- **Memory**: O(n) in CH profiles + mappings. The two in-memory indexes
+  (`byName`, `byPrevName` keyed on uppercased name) plus the mappings array
+  put peak heap at ~120-150 MB for a 125k-row corpus. Acceptable on any
+  developer laptop; would need to be re-architected as a streaming join
+  if the corpus ever grew past low-millions.
+- **DB**: 1 SELECT for profiles + 1 SELECT for mappings join + 125k
+  bulk-buffered inserts to staging (~2-3 minutes total)
 - **API**: zero
 - **Disk**: ~190 MB staging table, ~5 MB CSV samples
 

@@ -20,7 +20,7 @@ The bug exists in **two places** that both blindly take `items[0]` from
 | File | When it runs | Practical impact today |
 |---|---|---|
 | [`apps/web/scripts/seed-companies-house.ts`](../apps/web/scripts/seed-companies-house.ts) | One-time, when bootstrapping a new environment | Created the bulk corruption originally — ~125k mappings, ~5–15k of which we estimate are wrong |
-| [`apps/web/src/api/companiesHouse.ts:166-234`](../apps/web/src/api/companiesHouse.ts#L166-L234) — `getCompanyProfile` | Server-side, on user requests for unmapped sponsors | Slow leak for any *new* HMRC sponsor not yet in the mapping table — but the existing 125k mappings short-circuit this path on every request, so the leak rate is small |
+| [`apps/web/src/api/companiesHouse.ts`](../apps/web/src/api/companiesHouse.ts) — `getCompanyProfile` | Server-side, on user requests for unmapped sponsors | Slow leak for any *new* HMRC sponsor not yet in the mapping table — but the existing 125k mappings short-circuit this path on every request, so the leak rate is small |
 
 This is wrong because:
 
@@ -906,6 +906,19 @@ issues" below).
 
 ### Safety properties (as designed)
 
+> **Known reliability gap — non-atomic write path.** `applyRow` in
+> `apps/web/scripts/phase1-apply.ts` performs `SELECT` → `UPDATE
+> hmrc_company_mapping` → `INSERT INTO hmrc_company_mapping_audit` as
+> three separate statements. If the script exits between the UPDATE and
+> the INSERT, or if another writer modifies the row between those
+> statements, the live mapping and audit table can diverge. The two
+> Phase 1 runs that have shipped both reconciled exactly (audit count
+> matches expected delta), but the race window is real. Atomic
+> CTE-based writes (`WITH updated AS (UPDATE ... RETURNING ...) INSERT
+> INTO audit ... SELECT FROM updated`) are deferred to Phase 5, where
+> the recurring cron context makes the gap matter more than it does for
+> a one-shot backfill.
+
 - **Dry-run mode** — `--dry-run` prints the diff (counts by verdict +
   sample rows per category) before any writes hit the live table
 - **Sub-phasing** — script accepts `--apply-verdict=public_body_skip,suspect_with_local_alternative`
@@ -1048,7 +1061,7 @@ header here only because earlier conversations referenced "Phase 2".
 
 ## Phase 3 — on-demand resolver hardening (low urgency)
 
-The on-demand resolver in [`apps/web/src/api/companiesHouse.ts:166-234`](../apps/web/src/api/companiesHouse.ts#L166-L234)
+The on-demand resolver in [`apps/web/src/api/companiesHouse.ts`](../apps/web/src/api/companiesHouse.ts)
 (`getCompanyProfile`) has the same `items_per_page=1 → take items[0]`
 bug as the seed. **It almost never runs in production today** because
 the mapping table is fully populated and every request hits the

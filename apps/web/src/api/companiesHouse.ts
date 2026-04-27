@@ -176,6 +176,11 @@ export const getCompanyProfile = createServerFn()
     let profile: CompanyProfile;
 
     if (mapping) {
+      // Mapping deliberately points at no CH entity (public body or no_match
+      // outcome from the Phase 1 backfill). Return null so the UI suppresses
+      // the CH panel and renders base sponsor data only.
+      if (!mapping.companyNumber) return null;
+
       // Found mapping — fetch profile from cache
       const [cached] = await db
         .select()

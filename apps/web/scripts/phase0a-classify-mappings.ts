@@ -24,7 +24,7 @@ import {
   normaliseForComparison,
   parseHmrcName,
   TIER_C_THRESHOLD,
-} from './lib/hmrc-ch-pipeline';
+} from '../src/lib/hmrc-ch/pipeline';
 
 // .env.local lives at the monorepo root, not under apps/web — resolve relative
 // to this script's location so the run works from any cwd.
@@ -325,8 +325,18 @@ function classifyOne(row: MappingRow, index: CHIndex): ProposedRow {
     };
   }
 
+  // If any exact-name local replacement exists, restrict the tiebreak pool to
+  // those — a previous-name alternative in the right town must never beat an
+  // exact legal-name match elsewhere. (Same score-before-locality discipline
+  // pickByLocality enforces in src/lib/hmrc-ch/pipeline.ts.)
+  const rankedAlternatives = alternatives.some(
+    (a) => a.method === 'local_replacement_exact',
+  )
+    ? alternatives.filter((a) => a.method === 'local_replacement_exact')
+    : alternatives;
+
   const picked = pickByLocality(
-    alternatives.map((a) => ({
+    rankedAlternatives.map((a) => ({
       profile: a.profile,
       method: a.method as MatchMethod,
     })),

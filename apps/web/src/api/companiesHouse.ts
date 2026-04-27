@@ -1,10 +1,16 @@
-import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+  sicCodes,
+} from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db.server';
+import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
@@ -206,32 +212,87 @@ export const getCompanyProfile = createServerFn()
         waitUntil(upsertProfile(profile));
       }
     } else {
-      // No mapping — search API for company number, then fetch profile
-      console.log(`[Profile] no mapping, calling API for: "${companyName}"`);
-      const searchResult = await fetchFromApi(
-        `/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=1`,
+      // No mapping — run the verified resolution pipeline (parse → search →
+      // tier scoring → locality tiebreak → fail closed). Same code path the
+      // bootstrap seed uses; replaces the legacy items_per_page=1 take-the-
+      // top-hit logic that was silently mapping new sponsors to wrong CH
+      // entities. See docs/hmrc-ch-mapping-fix.md "Phase 3 — on-demand
+      // resolver hardening".
+      const [hmrcRow] = await db
+        .select({
+          townCity: hmrcSkilledWorkers.townCity,
+          county: hmrcSkilledWorkers.county,
+        })
+        .from(hmrcSkilledWorkers)
+        .where(eq(hmrcSkilledWorkers.organisationName, companyName))
+        .limit(1);
+
+      console.log(
+        `[Profile] no mapping, resolving via CH for: "${companyName}"`,
+      );
+      const result = await resolveOneSponsor(
+        companyName,
+        {
+          townCity: hmrcRow?.townCity ?? null,
+          county: hmrcRow?.county ?? null,
+        },
+        async (path) => {
+          const r = await fetchFromApi(path);
+          return r.ok ? r.data : null;
+        },
       );
 
-      if (!searchResult.ok) return null;
+      if (result.verdict === 'public_body') {
+        waitUntil(
+          db
+            .insert(hmrcCompanyMapping)
+            .values({
+              organisationName: companyName,
+              companyNumber: null,
+              isPublicBody: true,
+              matchMethod: 'public_body',
+              verifiedAt: new Date(),
+            })
+            .onConflictDoNothing(),
+        );
+        return null;
+      }
 
-      const searchData = searchResult.data as {
-        items?: { company_number: string }[];
-      };
-      if (!searchData.items?.length) return null;
+      if (result.verdict === 'no_match' || result.verdict === 'human_review') {
+        // human_review (multiple tied candidates) is cached as no_match for the
+        // on-demand path: re-running the 5-call pipeline on every visit would
+        // be expensive and the verdict won't change without ch-stream data
+        // updates. Phase 5 re-verification can revisit later.
+        waitUntil(
+          db
+            .insert(hmrcCompanyMapping)
+            .values({
+              organisationName: companyName,
+              companyNumber: null,
+              matchMethod: 'no_match',
+              queryUsed: result.queryUsed,
+              verifiedAt: new Date(),
+            })
+            .onConflictDoNothing(),
+        );
+        return null;
+      }
 
-      const companyNumber = searchData.items[0].company_number;
-
-      const profileResult = await fetchFromApi(`/company/${companyNumber}`);
-
-      if (!profileResult.ok) return null;
-
-      profile = profileResult.data as CompanyProfile;
-      // Save mapping and profile after response is sent
+      // verdict === 'verified' — CHFullProfile and CompanyProfile come from the
+      // same CH endpoint, so a structural cast is safe.
+      profile = result.profile as CompanyProfile;
       waitUntil(
         Promise.all([
           db
             .insert(hmrcCompanyMapping)
-            .values({ organisationName: companyName, companyNumber })
+            .values({
+              organisationName: companyName,
+              companyNumber: result.companyNumber,
+              matchMethod: result.matchMethod,
+              matchScore: result.matchScore.toString(),
+              queryUsed: result.queryUsed,
+              verifiedAt: new Date(),
+            })
             .onConflictDoNothing(),
           upsertProfile(profile),
         ]),

@@ -1,8 +1,9 @@
 # HMRC sponsor → Companies House mapping: failure analysis & fix design
 
 Status: **Phase 0a, 0b, 1 all complete and applied to production · shared
-library + seed refactor merged · UI null-handling shipped · Phase 3 + Phase 5
-remain as follow-up work.**
+library + seed refactor merged · UI null-handling shipped · Phase 3 on-demand
+resolver hardening shipped · Phase 5 re-verification cron remains as follow-up
+work.**
 
 This is a design doc, not a postmortem — there was no incident, but there
 was a critical data-quality bug in production (see [Concrete reproduction](#concrete-reproduction-rainbow-care-solutions-hertfordshire))
@@ -661,8 +662,8 @@ Phase 0b, and the seed (see [Code organisation](#code-organisation) for
 the full layout):
 
 ```
-apps/web/scripts/lib/hmrc-ch-pipeline.ts   ← pure functions (parser, scoring, tokenisation)
-apps/web/scripts/lib/resolve-sponsor.ts    ← orchestration helper (search → score → tiebreak)
+apps/web/src/lib/hmrc-ch/pipeline.ts        ← pure functions (parser, scoring, tokenisation)
+apps/web/src/lib/hmrc-ch/resolve-sponsor.ts ← orchestration helper (search → score → tiebreak)
 apps/web/scripts/phase0a-classify-mappings.ts  ← imports lib, adds local-index + DB orchestration
 ```
 
@@ -1060,60 +1061,53 @@ header here only because earlier conversations referenced "Phase 2".
 
 ---
 
-## Phase 3 — on-demand resolver hardening (low urgency)
+## Phase 3 — on-demand resolver hardening (shipped)
 
 The on-demand resolver in [`apps/web/src/api/companiesHouse.ts`](../apps/web/src/api/companiesHouse.ts)
-(`getCompanyProfile`) has the same `items_per_page=1 → take items[0]`
-bug as the seed. **It almost never runs in production today** because
-the mapping table is fully populated and every request hits the
-`if (mapping) → return cached` branch. The buggy `else` branch only
-fires for sponsors not yet mapped — rare-to-never given the seed
-already covered the corpus.
+(`getCompanyProfile`) had the same `items_per_page=1 → take items[0]` bug
+as the original seed. It rarely fired post-Phase 1 because the mapping
+table was fully populated, but `phase1-sanity-check` measured ~15
+unverified mappings/24h leaking through the buggy `else` branch (≈ 1
+per hour, naive-linear ≈ 5,000/year, of which ~15% historically map
+wrong → ~750 wrong mappings/year silently re-corrupting the dataset
+Phase 1 just cleaned). All sample leaks matched the populations most
+vulnerable to `items[0]` — T/A franchisees and BR-prefix UK Establishments.
 
-So fixing it is good hygiene but not urgent. The fix is the same
-pattern used by the seed: replace the inline search → take items[0]
-block with a call to `resolveOneSponsor` from
-[`lib/resolve-sponsor.ts`](../apps/web/scripts/lib/resolve-sponsor.ts):
+The fix replaces the buggy `else` branch with `resolveOneSponsor` from
+[`src/lib/hmrc-ch/resolve-sponsor.ts`](../apps/web/src/lib/hmrc-ch/resolve-sponsor.ts),
+the same orchestration helper used by the seed and Phase 0b. The
+resolver returns one of four verdicts; each is now persisted with full
+provenance so the row never hits the resolver again on the next visit:
 
-```ts
-// before:
-const searchResult = await fetchFromApi(
-  `/search/companies?q=${encodeURIComponent(companyName)}&items_per_page=1`,
-);
-// ... blindly take items[0] ...
+| Verdict | Mapping row written |
+|---|---|
+| `verified` | `company_number` + `match_method` (exact / previous_name / token_sim) + `match_score` + `query_used` + `verified_at` |
+| `public_body` | `company_number = NULL`, `is_public_body = true`, `match_method = 'public_body'`, `verified_at` |
+| `no_match` | `company_number = NULL`, `match_method = 'no_match'`, `query_used`, `verified_at` |
+| `human_review` | cached as `no_match` (multiple-tied verdicts won't disambiguate without ch-stream data updates; Phase 5 re-verification can revisit) |
 
-// after:
-const result = await resolveOneSponsor(
-  companyName,
-  { townCity: ?, county: ? },  // requires plumbing HMRC location to this handler
-  fetchFromApi,
-);
-if (result.verdict === 'verified') {
-  // insert mapping + profile (existing logic)
-} else {
-  // public_body | no_match | human_review
-  // → return null (UI shows "no CH data" — same state as Phase 1's NULLs)
-}
-```
+### Locality plumbing
 
-**Latency note**: the verified pipeline can issue up to 5 sequential CH
-API calls (1 search + 3 Tier B profile fetches + 1 verified-profile
-fetch). At ~200-500ms each, worst case adds ~1.0-2.5s to the *first*
-user request that creates a new mapping. Subsequent requests hit the
-cache. Acceptable for an infrequent path.
+`getCompanyProfile` queries `hmrc_skilled_workers` for the sponsor's
+`town_city` / `county` inside the resolver branch (one extra DB read on
+the cold path only — never fires once a mapping is cached). Querying
+inside the handler keeps the server-fn input surface unchanged and avoids
+trusting client-supplied locality.
 
-**Locality plumbing**: `getCompanyProfile` doesn't currently receive
-HMRC town/county — it'd need a small refactor of the calling code to
-pass it through. Without it, the locality tiebreaker can't run, so
-ambiguous cases fall to `human_review` more often.
+### Latency
 
-### Status: refactored seed already done
+The verified pipeline issues up to 5 sequential CH API calls (1 search +
+3 Tier B profile fetches + 1 verified-profile fetch). At ~200-500ms
+each, worst case adds ~1.0-2.5s to the *first* user request that
+creates a new mapping. Subsequent requests hit the cache. Acceptable
+for an infrequent path.
 
-`apps/web/scripts/seed-companies-house.ts` was refactored in this same
-work to use `resolveOneSponsor`. The seed is one-time-use so this
-doesn't fix any production behaviour, but it's correct now and
-demonstrates how the same `resolveOneSponsor` plugs into the
-`getCompanyProfile` handler when we get to it.
+### Validation
+
+Run `bun apps/web/scripts/phase1-sanity-check.ts` daily for a week
+post-deploy. The `new_since_phase1` count (Section 4) should plateau —
+new sponsors now get verified provenance and are no longer counted in
+that proxy. Pre-fix it climbed roughly linearly at ~15/day.
 
 ---
 
@@ -1125,6 +1119,88 @@ Phase 0a actuals showed only 33 Tier C hits scored below 0.95 across
 look correct on spot-check. So Phase 4 is a small-volume manual review
 of those 33 rows after Phase 1 ships, not a major project. Probably
 gets folded into the Phase 1 spot-check step (#5 in the rollout order).
+
+---
+
+## Operational monitoring: `phase1-sanity-check`
+
+A lightweight, on-demand integrity check that runs against the live mapping
+table and the staging table to verify Phase 1 is holding and to surface
+drift / leak between full re-verification runs. Implemented at
+[`apps/web/scripts/phase1-sanity-check.ts`](../apps/web/scripts/phase1-sanity-check.ts)
+(landed in PR #74).
+
+### When to run it
+
+```sh
+bun apps/web/scripts/phase1-sanity-check.ts
+```
+
+- **Anytime** — pure read-only, no writes, no API calls. ~5 seconds wall time.
+- **Weekly cadence recommended** until Phase 3 hardening lands. The
+  `new_since_phase1` count tells us how aggressively the on-demand resolver
+  leak (`getCompanyProfile.else` — see Phase 3) is creating new untracked
+  mappings. If the count climbs faster than ~50/day, Phase 3 priority should
+  be raised.
+- After running Phase 5's re-verification cron (when it ships), to spot-check
+  that the cron's writes look right.
+
+### Six sections it reports
+
+| # | Section | What it answers |
+|---|---|---|
+| 1 | `match_method` breakdown of all mappings + totals | Provenance distribution looks like the documented Phase 1 outcome. ~103k exact, ~16k no_match, ~4k token_sim, ~2k previous_name, 388 public_body, ~211 NULL. |
+| 2 | Audit table breakdown by `changed_by` | Should show ~126,850 rows attributed to `phase1_apply`. Any other `changed_by` value would indicate a different actor (manual ops, future Phase 5 cron). |
+| 3 | Mappings modified after the most recent `phase1_apply` audit timestamp | Drift detection. The cutoff is dynamically derived from `MAX(changed_at) WHERE changed_by = 'phase1_apply'` so it self-resets on Phase 1 re-runs and is safe in fresh environments. |
+| 4 | New mappings created since Phase 1 (Phase 3 leak proxy) | The headline metric. Counts mappings with NULL `match_method` whose org name is *not* in the staging table as a `human_review` verdict. Excludes the 196+2 deliberate human_review skips so the number reflects only genuinely new sponsors created by something other than `phase1_apply` — almost always `getCompanyProfile.else`. |
+| 5 | Sanity-check the 196+2 `requires_human_review` rows | Are any manually resolved? Did any get deleted from the live table (LEFT JOIN surfaces this via `missing_in_live`)? Should be `manually_resolved=0` and `missing_in_live=0` unless someone has been picking off ambiguous cases by hand. |
+| 6 | Method distribution sanity (printed expected vs. read in section 1) | Eyeball comparison against the documented post-Phase-1 numbers. |
+
+### What the first run found (2026-04-27, ~24h after Phase 1)
+
+```
+Total mappings:                           125,938   (Phase 0a snapshot was 125,922 → +16 since Phase 1)
+phase1_apply audit rows:                  126,850   ✓ matches expected
+Drift rows since phase1_apply cutoff:           0   ✓ no anomalous activity
+new_since_phase1 (leak proxy):                ~15   ⚠ first measurement of Phase 3 leak rate
+total_null_provenance:                        211   = 196 human_review skips + ~15 new
+Manually resolved human_review rows:           19   17 from prior buggy classification + 2 phase0a
+```
+
+The 15-mappings/24h leak rate is the actual headline finding. Annualised
+(naive linear): ~5,000 new mappings/year via the unfixed on-demand resolver,
+of which ~15% historically map wrong → **~750 new wrong mappings/year**
+silently re-corrupting the dataset Phase 1 just cleaned. That's not
+catastrophic in one year but accumulates. Confirms Phase 3 hardening (issue
+[#70](https://github.com/nikilok/learn-tanstack-start/issues/70)) should be
+prioritised over deferring further.
+
+The sample of untracked mappings was the smoking gun: every single one
+matched the population most vulnerable to the `items[0]` bug — T/A
+franchisees (`AKM Trading Ltd T/A Gosport Community Pharmacy`,
+`ASDF LTD t/a Papa Johns`, `AL AMANA LTD T/A GREEN LEAF`, etc.) and BR-prefix
+UK Establishments (`A.Menarini Farmaceutica Internazionale SRL-UK Branch`,
+`ABN AMRO Bank N.V., UK Branch`). Same bug class, different code path.
+
+### Notable design choices in the script
+
+- **`changed_at` cutoff sourced from the audit table itself**, not a hardcoded
+  date. Re-runs of `phase1_apply` advance the cutoff naturally; fresh
+  environments fall back to epoch-zero (so the query is safe before any
+  `phase1_apply` rows exist). Both the comparison and the displayed cutoff
+  use the same `COALESCE(MAX(changed_at), '1970-01-01'::timestamp)` so they
+  always agree.
+- **`new_since_phase1` excludes deliberate human_review skips** by checking
+  the staging table directly (`NOT EXISTS … verdict IN ('requires_human_review',
+  'requires_human_review_ch')`). Without this guard the count would conflate
+  the genuine leak with the 196+2 skip rows that legitimately have NULL
+  provenance.
+- **Section 5 uses `LEFT JOIN`** on the staging-to-live join so any future
+  deletion from `hmrc_company_mapping` shows up as `missing_in_live` rather
+  than silently dropping the row from `staging_count`. Sanity checks should
+  fail loud, not silent.
+
+These were all CodeRabbit-prompted refinements during PR #74 review.
 
 ---
 
@@ -1271,8 +1347,8 @@ The verification pipeline lives in shared library files used by every
 mechanism that touches the mapping table:
 
 ```
-apps/web/scripts/lib/
-  hmrc-ch-pipeline.ts     Pure functions only (no I/O):
+apps/web/src/lib/hmrc-ch/
+  pipeline.ts             Pure functions only (no I/O):
                             parseHmrcName / parseLegalCandidate
                             normaliseForComparison / tokenise / jaccard
                             matchTierA / matchTierB / matchTierC
@@ -1289,16 +1365,21 @@ apps/web/scripts/lib/
                             fetch for Tier B → locality tiebreak → fail closed
 ```
 
+The library lives under `src/lib/` rather than `scripts/lib/` because it's
+runtime code now — the on-demand resolver in `apps/web/src/api/companiesHouse.ts`
+imports it on every request that hits an unmapped sponsor (Phase 3). The
+scripts continue to import via the same path.
+
 Callers:
 
 | File | Uses |
 |---|---|
-| `phase0a-classify-mappings.ts` | `hmrc-ch-pipeline` (pure helpers, no resolveOneSponsor — local-only) |
-| `phase0b-resolve-suspects.ts` | `hmrc-ch-pipeline` (pure helpers); has its own search/cache orchestration today, could be refactored to use `resolveOneSponsor` after the current run finishes |
-| `seed-companies-house.ts` | `resolveOneSponsor` directly (Phase 3 fix shipped) |
+| `phase0a-classify-mappings.ts` | `pipeline` (pure helpers, no resolveOneSponsor — local-only) |
+| `phase0b-resolve-suspects.ts` | `pipeline` (pure helpers); has its own search/cache orchestration today, could be refactored to use `resolveOneSponsor` after the current run finishes |
+| `seed-companies-house.ts` | `resolveOneSponsor` directly |
+| `getCompanyProfile` ([api/companiesHouse.ts](../apps/web/src/api/companiesHouse.ts)) | `resolveOneSponsor` (Phase 3 hardening) |
 | Future: `phase1-apply.ts` | reads staging table, no pipeline calls needed |
 | Future: `phase5-reverify.ts` | `resolveOneSponsor` |
-| Future: `getCompanyProfile` ([api/companiesHouse.ts](../apps/web/src/api/companiesHouse.ts)) | `resolveOneSponsor` once we get to Phase 3 hardening |
 
 The injected-`fetchApi` shape lets each caller bring its own auth,
 rate-limiting, caching, and retry behaviour without the pipeline lib

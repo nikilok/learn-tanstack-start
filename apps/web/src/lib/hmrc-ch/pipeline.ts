@@ -2,9 +2,10 @@
  * Shared HMRC↔Companies House mapping pipeline. Pure functions only — no I/O.
  *
  * Used by:
+ *   - apps/web/src/api/companiesHouse.ts (via resolve-sponsor.ts)
+ *   - apps/web/scripts/seed-companies-house.ts (via resolve-sponsor.ts)
  *   - apps/web/scripts/phase0a-classify-mappings.ts
  *   - apps/web/scripts/phase0b-resolve-suspects.ts
- *   - apps/web/scripts/seed-companies-house.ts
  *
  * See docs/hmrc-ch-mapping-fix.md for the design rationale and verdict semantics.
  */
@@ -71,9 +72,8 @@ export type MatchMethod =
 // HMRC name parser
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TA_REGEX =
-  /^(.*?)\s+(?:T\/A|t\/a|Trading\s+[Aa]s:?|d\/b\/a|D\/B\/A)\s+(.+)$/;
-const TRADING_NAME_OF_REGEX = /^(.*?)\s+Trading\s+[Nn]ame\s+of\s+(.+)$/;
+const TA_REGEX = /^(.*?)\s+(?:t\/a|trading\s+as:?|d\/b\/a)\s+(.+)$/i;
+const TRADING_NAME_OF_REGEX = /^(.*?)\s+trading\s+name\s+of\s+(.+)$/i;
 const BRANCH_REGEX =
   /^(.*?)\s*(?:\([^)]*Branch[^)]*\)|\bUK\s+Branch\b|\bUK\s+Establishment\b)\s*$/i;
 
@@ -212,9 +212,10 @@ export function matchTierC(candidate: string, ch: CHCandidate): number | null {
 }
 
 /**
- * Picks the best candidate by locality match against the HMRC sponsor's
- * town/county. +2 for town/city match, +1 for county match. Returns 'tied'
- * if no unique winner.
+ * Picks the best candidate by lexical score first, then locality match against
+ * the HMRC sponsor's town/county as tiebreak (+2 town/city, +1 county). Score
+ * always wins over locality so a Tier-A exact match in the wrong town beats a
+ * Tier-C threshold match in the right town. Returns 'tied' if no unique winner.
  */
 export function pickByLocality(
   candidates: ScoredCandidate[],
@@ -222,12 +223,17 @@ export function pickByLocality(
   hmrcCounty: string | null,
 ): ScoredCandidate | 'tied' {
   if (candidates.length === 1) return candidates[0];
+
+  const bestScore = Math.max(...candidates.map((c) => c.score));
+  const topScored = candidates.filter((c) => c.score === bestScore);
+  if (topScored.length === 1) return topScored[0];
+
   if (!hmrcTown && !hmrcCounty) return 'tied';
 
   const hmrcTownU = hmrcTown?.toUpperCase() ?? '';
   const hmrcCountyU = hmrcCounty?.toUpperCase() ?? '';
 
-  const scored = candidates.map((c) => {
+  const scored = topScored.map((c) => {
     const locU = (c.candidate.locality ?? '').toUpperCase();
     const regU = (c.candidate.region ?? '').toUpperCase();
     let s = 0;

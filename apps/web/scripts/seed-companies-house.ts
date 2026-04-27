@@ -18,7 +18,7 @@ import {
 } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { eq, isNull, sql } from 'drizzle-orm';
-import { resolveOneSponsor } from './lib/resolve-sponsor';
+import { resolveOneSponsor } from '../src/lib/hmrc-ch/resolve-sponsor';
 
 dotenv.config({ path: '.env.local' });
 
@@ -130,8 +130,8 @@ for (const row of uncached) {
   }
 
   // Run the verified resolution pipeline (parse → search → tier scoring →
-  // locality tiebreak → fail closed). See lib/resolve-sponsor.ts for the
-  // full decision tree. Any verdict other than 'verified' deliberately
+  // locality tiebreak → fail closed). See src/lib/hmrc-ch/resolve-sponsor.ts
+  // for the full decision tree. Any verdict other than 'verified' deliberately
   // does NOT insert a mapping — better to leave a sponsor unmapped than to
   // point users at the wrong CH entity. See docs/hmrc-ch-mapping-fix.md.
   const result = await resolveOneSponsor(
@@ -167,7 +167,14 @@ for (const row of uncached) {
 
   await db
     .insert(hmrcCompanyMapping)
-    .values({ organisationName: orgName, companyNumber: result.companyNumber })
+    .values({
+      organisationName: orgName,
+      companyNumber: result.companyNumber,
+      matchMethod: result.matchMethod,
+      matchScore: result.matchScore.toString(),
+      queryUsed: result.queryUsed,
+      verifiedAt: new Date(),
+    })
     .onConflictDoNothing();
 
   await db

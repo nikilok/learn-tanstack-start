@@ -153,16 +153,19 @@ if (newSample.length > 0) {
 
 // 5. The 196 requires_human_review_ch — see if any were manually updated
 console.log('\n5) requires_human_review_ch staging rows — any manual updates?');
+// LEFT JOIN so staging rows whose live mapping has since been deleted are
+// surfaced via missing_in_live rather than silently dropped from staging_count.
 const reviewStatus = await sql`
   SELECT
     a.verdict,
     COUNT(*)::int AS staging_count,
+    COUNT(*) FILTER (WHERE m.organisation_name IS NULL)::int AS missing_in_live,
     COUNT(*) FILTER (WHERE m.match_method IS NOT NULL AND m.match_method != 'no_match')::int
       AS manually_resolved,
     COUNT(*) FILTER (WHERE m.company_number IS NOT NULL AND m.match_method IS NULL)::int
       AS unchanged_in_live
   FROM hmrc_company_mapping_audit_phase0a a
-  JOIN hmrc_company_mapping m ON m.organisation_name = a.organisation_name
+  LEFT JOIN hmrc_company_mapping m ON m.organisation_name = a.organisation_name
   WHERE a.verdict IN ('requires_human_review', 'requires_human_review_ch')
   GROUP BY a.verdict
 `;

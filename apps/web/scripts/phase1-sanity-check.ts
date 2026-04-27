@@ -70,7 +70,9 @@ console.log(
 const drift = await sql`
   SELECT
     COUNT(*)::int AS rows_modified_post_phase1,
-    (SELECT MAX(changed_at) FROM hmrc_company_mapping_audit WHERE changed_by = 'phase1_apply')::text
+    (SELECT COALESCE(MAX(changed_at), '1970-01-01'::timestamp)
+     FROM hmrc_company_mapping_audit
+     WHERE changed_by = 'phase1_apply')::text
       AS phase1_cutoff_used
   FROM hmrc_company_mapping
   WHERE verified_at > (

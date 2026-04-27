@@ -31,7 +31,7 @@ import {
   parseLegalCandidate,
   pickByLocality,
   type ScoredCandidate,
-} from './lib/hmrc-ch-pipeline';
+} from '../src/lib/hmrc-ch/pipeline';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env loading — POSTGRES_URL lives at monorepo root, COMPANIES_HOUSE_SEED_API_KEY at apps/web/.env.local

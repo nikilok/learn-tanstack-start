@@ -5,7 +5,8 @@
  * caching, and retry policy.
  *
  * Used by:
- *   - apps/web/scripts/seed-companies-house.ts (Phase 3 — fresh ingests)
+ *   - apps/web/src/api/companiesHouse.ts (on-demand resolver, Phase 3)
+ *   - apps/web/scripts/seed-companies-house.ts (one-time bootstrap)
  *   - phase0b can be refactored to use this once its current run completes
  *
  * Pipeline (see docs/hmrc-ch-mapping-fix.md for rationale):
@@ -27,7 +28,7 @@ import {
   parseHmrcName,
   pickByLocality,
   type ScoredCandidate,
-} from './hmrc-ch-pipeline';
+} from './pipeline';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

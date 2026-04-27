@@ -1270,6 +1270,10 @@ Sizing:
 Same code path as `phase0b-resolve-suspects.ts`, just running against a
 different SELECT.
 
+Runs as a **GitHub Actions cron** alongside the existing HMRC ingestion
+workflow, with its own dedicated CH API key so rate-limit budgets and
+telemetry stay independent from the seed and on-demand-resolver paths.
+
 #### B. ch-stream-triggered re-verification
 
 When ch-stream observes a name-change or dissolution event for a

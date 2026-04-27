@@ -4,6 +4,7 @@ import {
   date,
   index,
   integer,
+  numeric,
   pgTable,
   serial,
   text,
@@ -82,7 +83,23 @@ export const companiesHouseProfiles = pgTable(
 
 export const hmrcCompanyMapping = pgTable('hmrc_company_mapping', {
   organisationName: text('organisation_name').primaryKey(),
-  companyNumber: varchar('company_number', { length: 20 }).notNull(),
+  companyNumber: varchar('company_number', { length: 20 }),
+  isPublicBody: boolean('is_public_body').notNull().default(false),
+  matchMethod: varchar('match_method', { length: 32 }),
+  matchScore: numeric('match_score', { precision: 4, scale: 3 }),
+  queryUsed: text('query_used'),
+  verifiedAt: timestamp('verified_at'),
+});
+
+export const hmrcCompanyMappingAudit = pgTable('hmrc_company_mapping_audit', {
+  id: serial('id').primaryKey(),
+  organisationName: text('organisation_name').notNull(),
+  oldCompanyNumber: varchar('old_company_number', { length: 20 }),
+  newCompanyNumber: varchar('new_company_number', { length: 20 }),
+  oldMatchMethod: varchar('old_match_method', { length: 32 }),
+  newMatchMethod: varchar('new_match_method', { length: 32 }),
+  changedAt: timestamp('changed_at').defaultNow().notNull(),
+  changedBy: varchar('changed_by', { length: 100 }),
 });
 
 export const hmrcIngestionMeta = pgTable('hmrc_ingestion_meta', {

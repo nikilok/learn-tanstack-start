@@ -397,7 +397,7 @@ CREATE TABLE hmrc_company_mapping_audit (
   new_company_number  varchar(20),
   old_match_method    varchar(32),
   new_match_method    varchar(32),
-  changed_at          timestamp DEFAULT now(),
+  changed_at          timestamp DEFAULT now() NOT NULL,
   changed_by          varchar(100)  -- 'backfill_v1', 'manual:nikilok@', etc.
 );
 ```
@@ -840,7 +840,7 @@ CREATE TABLE hmrc_company_mapping_audit (
   new_company_number varchar(20),
   old_match_method   varchar(32),
   new_match_method   varchar(32),
-  changed_at         timestamp DEFAULT now(),
+  changed_at         timestamp DEFAULT now() NOT NULL,
   changed_by         varchar(100)  -- 'phase1_apply' / 'manual:nikilok@'
 );
 ```
@@ -851,7 +851,7 @@ Generated via Drizzle's normal migration flow (`db:generate` then
 ### Sub-piece 2: `phase1-apply` script
 
 Walks the staging table; per row, writes one of these UPDATEs to
-`hmrc_company_mapping`, preceded by an INSERT into the audit table:
+`hmrc_company_mapping`, followed by an INSERT into the audit table:
 
 ```sql
 -- For verified_locally / verified_via_ch_search / suspect_with_local_alternative:

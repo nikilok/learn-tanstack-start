@@ -1,6 +1,8 @@
 import { CONFIG } from './config.ts';
 
 let lastRevalidatedAt = 0;
+let lastThrottleLogAt = 0;
+const THROTTLE_LOG_INTERVAL_MS = 10_000;
 
 /**
  * POST to the web app's revalidation endpoint so freshly updated Companies
@@ -18,12 +20,15 @@ export async function triggerRevalidation(): Promise<void> {
   const now = Date.now();
   const elapsed = now - lastRevalidatedAt;
   if (elapsed < CONFIG.REVALIDATE_MIN_INTERVAL_MS) {
-    const wait = Math.ceil(
-      (CONFIG.REVALIDATE_MIN_INTERVAL_MS - elapsed) / 1000,
-    );
-    console.log(
-      `[ch-stream] Revalidation skipped (throttled, ${wait}s until next allowed)`,
-    );
+    if (now - lastThrottleLogAt >= THROTTLE_LOG_INTERVAL_MS) {
+      const wait = Math.ceil(
+        (CONFIG.REVALIDATE_MIN_INTERVAL_MS - elapsed) / 1000,
+      );
+      console.log(
+        `[ch-stream] Revalidation skipped (throttled, ${wait}s until next allowed)`,
+      );
+      lastThrottleLogAt = now;
+    }
     return;
   }
 

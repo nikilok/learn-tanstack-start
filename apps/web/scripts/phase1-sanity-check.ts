@@ -19,10 +19,6 @@ if (!process.env.POSTGRES_URL)
 
 const sql = neon(process.env.POSTGRES_URL);
 
-// Cutoff: the date Phase 1 was applied. Anything modified after this is drift
-// (ch-stream renames, on-demand resolver creating new mappings, manual fixes).
-const PHASE1_APPLIED_DATE = '2026-04-27';
-
 console.log('Phase 1 sanity check');
 console.log(
   '═════════════════════════════════════════════════════════════════\n',
@@ -64,59 +60,92 @@ console.log(
   '  (Expect ~126,850 rows attributed to phase1_apply across the two Phase 1 runs.)',
 );
 
-// 3. Drift detection — rows modified after Phase 1 cutoff that aren't from phase1_apply
+// 3. Drift detection — rows modified after the most recent phase1_apply audit
+//    write. Anchored to the actual Phase 1 application time (not the calendar
+//    date) so drift on the same day is caught. Falls back to epoch-zero if
+//    phase1_apply has never run, so the query is safe in fresh environments.
 console.log(
-  `\n3) Mappings modified since ${PHASE1_APPLIED_DATE} (drift / new activity)`,
+  `\n3) Mappings modified since the last phase1_apply audit entry (drift / new activity)`,
 );
 const drift = await sql`
   SELECT
-    COUNT(*)::int AS rows_modified_post_phase1
+    COUNT(*)::int AS rows_modified_post_phase1,
+    (SELECT MAX(changed_at) FROM hmrc_company_mapping_audit WHERE changed_by = 'phase1_apply')::text
+      AS phase1_cutoff_used
   FROM hmrc_company_mapping
-  WHERE verified_at > ${PHASE1_APPLIED_DATE}::date + interval '1 day'
+  WHERE verified_at > (
+    SELECT COALESCE(MAX(changed_at), '1970-01-01'::timestamp)
+    FROM hmrc_company_mapping_audit
+    WHERE changed_by = 'phase1_apply'
+  )
 `;
 console.table(drift);
 console.log(
-  '  Caveat: phase1_apply itself sets verified_at = now() so re-running it would inflate this.',
+  '  Cutoff is the most recent phase1_apply audit timestamp. Re-running phase1_apply',
 );
-console.log('  Cross-reference with audit-table changed_at to distinguish.');
-
-// 4. New mappings added since Phase 1 (Phase 3 leak proxy — new HMRC sponsors that came in via getCompanyProfile)
 console.log(
-  `\n4) New mappings created since ${PHASE1_APPLIED_DATE} (Phase 3 leak proxy)`,
+  '  will advance this cutoff, so this metric self-resets after each apply.',
+);
+
+// 4. New-mapping leak proxy (Phase 3) — sponsors in hmrc_company_mapping that
+//    didn't exist in the staging snapshot AND weren't deliberately skipped as
+//    human_review. Counts only genuinely-new rows from the on-demand resolver,
+//    not the human_review skips that legitimately have NULL provenance.
+console.log(
+  `\n4) New mappings created since Phase 1 (Phase 3 leak proxy — strictly post-Phase-1 only)`,
 );
 const newMappings = await sql`
-  WITH recent_audit AS (
-    SELECT organisation_name, MIN(changed_at) AS first_seen
-    FROM hmrc_company_mapping_audit
-    GROUP BY organisation_name
-  )
   SELECT
-    COUNT(*) FILTER (WHERE m.organisation_name NOT IN (SELECT organisation_name FROM recent_audit))::int
-      AS untracked_mappings,
-    COUNT(*) FILTER (WHERE m.verified_at IS NULL)::int AS no_provenance
+    COUNT(*) FILTER (
+      WHERE m.match_method IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM hmrc_company_mapping_audit_phase0a a
+        WHERE a.organisation_name = m.organisation_name
+          AND a.verdict IN ('requires_human_review', 'requires_human_review_ch')
+      )
+    )::int AS new_since_phase1,
+    COUNT(*) FILTER (WHERE m.match_method IS NULL)::int AS total_null_provenance,
+    COUNT(*) FILTER (WHERE m.match_method IS NULL)::int -
+      COUNT(*) FILTER (
+        WHERE m.match_method IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM hmrc_company_mapping_audit_phase0a a
+          WHERE a.organisation_name = m.organisation_name
+            AND a.verdict IN ('requires_human_review', 'requires_human_review_ch')
+        )
+      )::int AS deliberate_human_review_skips
   FROM hmrc_company_mapping m
 `;
 console.table(newMappings);
 console.log(
-  '  Untracked rows = sponsors with no phase1_apply audit entry. Most likely created',
+  '  new_since_phase1 = sponsors whose org name is NOT in the human_review staging',
 );
 console.log(
-  '  by getCompanyProfile or the seed since Phase 1 ran. Higher count = more urgent Phase 3.',
+  '  AND has no provenance — i.e. created post-Phase-1 by something other than',
+);
+console.log(
+  '  phase1_apply (likely getCompanyProfile.else). Higher = more urgent Phase 3.',
 );
 
-// Sample 10 such rows
+// Sample 10 such rows, ordered by organisation_name for a stable, debugger-friendly
+// view (verified_at is NULL on most leak rows since the on-demand resolver
+// doesn't write provenance, so ordering by it isn't meaningful).
 const newSample = await sql`
-  WITH audited AS (
-    SELECT DISTINCT organisation_name FROM hmrc_company_mapping_audit
-  )
   SELECT m.organisation_name, m.company_number, m.match_method, m.verified_at
   FROM hmrc_company_mapping m
-  WHERE m.organisation_name NOT IN (SELECT organisation_name FROM audited)
-  ORDER BY m.verified_at DESC NULLS LAST
+  WHERE m.match_method IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM hmrc_company_mapping_audit_phase0a a
+      WHERE a.organisation_name = m.organisation_name
+        AND a.verdict IN ('requires_human_review', 'requires_human_review_ch')
+    )
+  ORDER BY m.organisation_name
   LIMIT 10
 `;
 if (newSample.length > 0) {
-  console.log('\n  Sample of untracked mappings (oldest verified_at first):');
+  console.log(
+    '\n  Sample of new-since-Phase-1 mappings (alphabetical by org name):',
+  );
   console.table(newSample);
 }
 

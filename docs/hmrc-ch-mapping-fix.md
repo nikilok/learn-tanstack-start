@@ -1158,7 +1158,7 @@ bun apps/web/scripts/phase1-sanity-check.ts
 
 ### What the first run found (2026-04-27, ~24h after Phase 1)
 
-```
+```text
 Total mappings:                           125,938   (Phase 0a snapshot was 125,922 → +16 since Phase 1)
 phase1_apply audit rows:                  126,850   ✓ matches expected
 Drift rows since phase1_apply cutoff:           0   ✓ no anomalous activity

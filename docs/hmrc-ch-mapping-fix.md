@@ -950,6 +950,86 @@ const oldNumberLive = old[0]?.company_number ?? oldNumber;
 const oldNumberLive = old.length > 0 ? old[0].company_number : oldNumber;
 ```
 
+### Round 2: post-merge re-run (after PR #69 review)
+
+A CodeRabbit review on PR #69 surfaced a **second instance of the
+franchisee→brand-owner trap** that wasn't caught during initial
+implementation. The original "Local-replacement policy: legal-only"
+subsection in this doc only addresses `findLocalAlternatives`. The
+*verification* loop in `classifyOne` (`phase0a-classify-mappings.ts`)
+was still iterating `parsed.candidates` (legal + trading), which meant
+any franchisee currently mapped to its brand owner would pass
+`verified_locally` via Tier A on the trading-name candidate — same
+class of bug, different code path.
+
+```ts
+// before — verifies against trading candidate too
+for (const candidate of parsed.candidates) {
+  const a = matchTierA(candidate, currentCh);
+  if (a !== null) return { verdict: 'verified_locally', ... };
+  // ...
+}
+
+// after — legal candidate only (matches findLocalAlternatives policy)
+{
+  const candidate = parsed.parsedLegal;
+  const a = matchTierA(candidate, currentCh);
+  if (a !== null) return { verdict: 'verified_locally', ... };
+  // ...
+}
+```
+
+**Re-run sequence**: fix landed → Phase 0a re-run → Phase 0b re-run →
+Phase 1 re-run. All three were cheap thanks to existing artefacts
+(staging table is dropped & recreated each time, Phase 0b's disk cache
+made the second resolution run mostly cache-hit).
+
+**Phase 0a re-run results** (~109k rows in scope; 16,283 already-NULLed
+rows excluded by the inner join):
+
+| Verdict | Count | vs. original run |
+|---|---|---|
+| `verified_locally` | 105,525 | −618 (rows reclassified out via the fix) |
+| `suspect_with_local_alternative` | 13 | new |
+| `requires_human_review` | 2 | new |
+| `suspect_no_local_alternative` | 884 | the workload for Phase 0b round 2 |
+
+**Phase 0b re-run** completed in **10 minutes** (vs 10 hours for the
+original) thanks to disk cache hits; 884 rows resolved with only 1,014
+fresh API calls:
+
+| Verdict transition | Count | Share |
+|---|---|---|
+| `verified_via_ch_search` | 537 | 60.7% |
+| `requires_human_review_ch` | 213 | 24.1% |
+| `no_match_after_ch_search` | 134 | 15.2% |
+
+**Phase 1 re-run** processed 106,209 rows in ~2h. The idempotency
+check (post-bug-fix) correctly short-circuited 105,473 verified_locally
+rows that already had matching provenance from the previous Phase 1
+run. Actual writes:
+
+| Action | Rows |
+|---|---|
+| `company_number` swapped | 550 |
+| Provenance reclassified (verified_locally rows whose match_method changed) | 52 |
+| NULLed + `match_method='no_match'` | 134 |
+| Already in target state (no-op) | 105,473 |
+
+**Audit table delta**: +736 rows (550 + 52 + 134). New total: 126,850.
+
+### Cumulative impact across both rounds
+
+| Round | Swaps | NULLs | Total user-visible corrections |
+|---|---|---|---|
+| Round 1 (original Phase 1) | 3,300 | 16,283 | 19,583 |
+| Round 2 (post-fix re-run) | 550 | 134 | 684 |
+| **Grand total** | **3,850** | **16,417** | **20,267** |
+
+Out of 125,922 mappings, **~16.1% had user-visible corrections
+applied**. Plus 105,525 silent provenance backfills for the rows that
+were already correct.
+
 ---
 
 ## Phase 2 — (folded into Phase 1 above)

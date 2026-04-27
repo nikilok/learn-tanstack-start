@@ -238,7 +238,13 @@ function classifyOne(row: MappingRow, index: CHIndex): ProposedRow {
     region: null,
   };
 
-  for (const candidate of parsed.candidates) {
+  // Verify the current mapping against the LEGAL candidate ONLY. Iterating
+  // parsed.candidates (which includes the trading candidate) would let
+  // franchisee-to-brand-owner mappings pass via Tier A on the trading name —
+  // the same class of bug the legal-only restriction in findLocalAlternatives
+  // closes. See docs/hmrc-ch-mapping-fix.md "Local-replacement policy: legal-only".
+  {
+    const candidate = parsed.parsedLegal;
     const a = matchTierA(candidate, currentCh);
     if (a !== null) {
       return {

@@ -1111,14 +1111,64 @@ that proxy. Pre-fix it climbed roughly linearly at ~15/day.
 
 ---
 
-## Phase 4 — Tier-C audit
+## Phase 4 — agentic resolver for `requires_human_review_*` (pending)
 
-Token-similarity matches are inherently fuzzier than exact-name. The
-Phase 0a actuals showed only 33 Tier C hits scored below 0.95 across
-3,524 total — the rest are punctuation/word-order variants that all
-look correct on spot-check. So Phase 4 is a small-volume manual review
-of those 33 rows after Phase 1 ships, not a major project. Probably
-gets folded into the Phase 1 spot-check step (#5 in the rollout order).
+Phase 0b ended with **196 rows tied at the same tier with no locality
+winner** (`requires_human_review_ch`), plus 0 from Phase 0a after the
+legal-only fix. Phase 1 deliberately skips these — they have no
+deterministic answer. They sit unmapped today.
+
+These are the only rows where token-Jaccard runs out of road, and they
+are a small enough population (~196) that a per-row LLM call is cheap
+(~$1 total at small-model rates). The model has clear signal to work
+with: CH search results, `previous_company_names`, candidate
+registered addresses, and (if needed) the candidates' websites for
+franchisee-vs-brand-owner disambiguation.
+
+Sketch (`apps/web/scripts/phase4-resolve-human-review.ts`, not yet
+written):
+
+1. Read every row from `hmrc_company_mapping_audit_phase0a` where
+   `verdict IN ('requires_human_review', 'requires_human_review_ch')`.
+2. For each, pull the cached CH search response (already on disk under
+   `apps/web/.cache/phase0b/`) plus the top-N candidate profiles.
+3. Hand the HMRC name, locality, and the candidate set to the model.
+   Same agentic shape as
+   [`find-hmrc-csv-url.ts`](../apps/web/scripts/find-hmrc-csv-url.ts) —
+   structured JSON output, max-steps loop, fail-closed if the model
+   isn't confident.
+4. Write the model's verdict + reasoning into new staging columns
+   (`agent_verdict`, `agent_reasoning`).
+5. **Strict output contract + fail-closed.** The script must parse the
+   model's response as JSON against a fixed schema:
+   - `agent_verdict` must be one of:
+     `verified` | `no_match` | `low_confidence`. Any other value, missing
+     fields, or extra keys → reject and write `low_confidence` to
+     staging. No silent coercion.
+   - `agent_company_number` is required only when `agent_verdict =
+     'verified'`; must match `^[A-Z0-9]{6,10}$`.
+   - `agent_reasoning` is capped at 500 chars and stripped of any
+     prompt fragments before storage (defence against the model echoing
+     its instructions back).
+   - `low_confidence` is the fail-closed default — keeps the row in
+     `requires_human_review_*`, never proposes a mapping change.
+6. **Verdict → action mapping** (only `phase4-apply.ts` writes; the
+   agent never touches the live table):
+   - `verified` → eligible for swap to `agent_company_number` with
+     `match_method='manual'`, pending human approval.
+   - `no_match` → eligible for NULL + `match_method='no_match'`,
+     pending human approval.
+   - `low_confidence` → no proposed change; row stays in the staging
+     bucket for the next pass.
+7. **Human approval gate** — `phase4-apply.ts` shows each validated
+   agent verdict for one-key approve/reject before any write hits the
+   live mapping table.
+
+The Tier-C sub-0.95 spot-check originally scoped under Phase 4 was
+absorbed into Phase 1's rollout step #5 and is complete.
+
+This is the *only* place an LLM is appropriate in this pipeline. See
+"Decisions locked in" below for why.
 
 ---
 
@@ -1241,6 +1291,18 @@ Sizing:
 Same code path as `phase0b-resolve-suspects.ts`, just running against a
 different SELECT.
 
+Runs as a **GitHub Actions cron** alongside the existing HMRC ingestion
+workflow, with its own dedicated CH API key so rate-limit budgets and
+telemetry stay independent from the seed and on-demand-resolver paths.
+
+Phase 5 must use an **atomic CTE-based update+audit** (`UPDATE …
+RETURNING` feeding `INSERT INTO hmrc_company_mapping_audit … SELECT
+FROM updated`) rather than the two-statement pattern Phase 1 used. The
+non-atomic write path was knowingly deferred (see Phase 1's "Known
+reliability gap"); it doesn't matter for a one-shot backfill but does
+matter for a recurring cron, where the UPDATE↔INSERT race window
+multiplies across runs.
+
 #### B. ch-stream-triggered re-verification
 
 When ch-stream observes a name-change or dissolution event for a
@@ -1315,6 +1377,33 @@ Recorded here so future readers don't relitigate them:
 13. **UI for `company_number IS NULL`** — render a "no Companies
     House data" panel state. Same component used for both
     `is_public_body=true` and `match_method='no_match'` cases.
+
+### Deterministic vs agentic boundary
+
+14. **Bulk classification stays deterministic.** Phase 0a, 0b, 1, 3,
+    and 5 all use deterministic verification logic (Tier A/B/C scoring +
+    locality tiebreak) given the fetched CH search/profile results —
+    the call chain still does I/O, but the verdict given a fixed input
+    set never varies. Reasons:
+    - **Cost** — 125k rows × per-call LLM pricing dwarfs the free CH
+      API budget the deterministic path uses.
+    - **Reproducibility** — re-running Phase 0a on the same input
+      produces bit-identical output. LLM verdicts vary run-to-run,
+      which makes regression queries (e.g. `phase1-sanity-check`'s
+      `new_since_phase1`) un-auditable.
+    - **The 84% case is trivially deterministic.** Sending exact-name
+      and punctuation-variant matches through a model is paying tax on
+      the easy cases to maybe-do-better on the 0.5% that's hard.
+15. **LLM use is allowed only for the `requires_human_review_*`
+    long tail (Phase 4).** ~196 rows where token-Jaccard ran out of
+    road and locality didn't break the tie. Cost-effective at this
+    scale, and a human approval gate sits between the agent and the
+    live mapping table.
+16. **The on-demand resolver (Phase 3) must stay deterministic.**
+    Runs on every cold-path page request; LLM latency would push the
+    1–2.5s budget to 4–6s, and "model hallucinates a plausible-sounding
+    company number" is exactly the bug class this whole document
+    exists to prevent.
 
 ## Open questions (still need decisions)
 

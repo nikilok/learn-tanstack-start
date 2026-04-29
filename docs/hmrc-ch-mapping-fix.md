@@ -1251,25 +1251,59 @@ These were all CodeRabbit-prompted refinements during PR #74 review.
 
 ---
 
-## Phase 5 — periodic re-verification (drift correction)
+## Phase 5 — periodic re-verification (sweep + optional event-driven layer)
 
-Phase 1 fixes a snapshot. Phase 5 keeps it correct over time.
+Phase 1 fixes a snapshot. Phase 5 keeps the HMRC-name → CH-profile
+mappings correct over time. The naive framing is "drift correction",
+but that buries the actual structure: prevention and correction are
+layered, not alternatives.
 
-### What this addresses
+### Two kinds of drift
 
-- **CH renames / dissolutions / acquisitions** that happen after a
-  mapping is verified
-- **HMRC sponsor name updates** between ingest cycles
-- **Newly-seeded CH profiles** that would now win a previously-failing
-  match (e.g. ch-stream just added the right entity to our local cache
-  for a row that was previously `no_match_after_ch_search`)
-- **Improvements to the verification pipeline itself** — when we tighten
-  a rule or add a regex, periodic re-verification picks up the
-  improvement organically
+**State we control — preventable in principle.**
+Verification logic and ingest paths. Phase 3 hardened the
+`getCompanyProfile.else` leak that was creating untracked mappings; new
+leaks of the same shape can be fixed at the source so bad mappings stop
+being created.
 
-### Three options, in order of complexity
+**State we don't control — not preventable.**
+Companies House and HMRC are external systems. CH may rename or
+re-register a company, HMRC may edit a sponsor name, ch-stream may
+finally add an entity our cache was missing. The mapping was correct
+at verification time and silently becomes either suboptimal or
+newly-resolvable at T+N. The only way to detect this class of change
+is to re-check.
 
-#### A. Periodic batch job (simplest — recommended for v1)
+A sweep is also the only mechanism that picks up improvements to our
+own verification pipeline — when we tighten a rule or add a regex,
+existing mappings were verified under the *old* rules and there is no
+event to trigger a re-check on. So even with perfect leak prevention,
+the sweep earns its keep.
+
+### What Phase 5 corrects
+
+`hmrc_company_mapping` stores HMRC name → `company_number` plus
+`match_method` and `verified_at`. Phase 5 re-evaluates those fields
+against current CH state.
+
+- **Newly-seeded CH profiles that would now win a previously-failing
+  match.** HMRC rows sitting at `no_match_after_ch_search` because the
+  right CH entity didn't exist in our cache at verification time.
+  ch-stream eventually creates the entity; the next sweep flips
+  `company_number` from NULL to a value.
+- **`match_method` improvements after CH name edits.** A row that was
+  `token_sim` because of a punctuation difference can become `exact`
+  once CH normalises the name (or vice versa). The `company_number`
+  usually doesn't change; the provenance label does.
+- **Verification logic improvements.** Tightened rules / new regexes
+  re-evaluate against the existing corpus on the next pass.
+- **Backstop for prevention failures.** If a future ingest bug recreates
+  a Phase-3-shaped leak, the sweep makes it visible (compare against
+  the `phase1-sanity-check` `new_since_phase1` proxy).
+
+### Two options, layered
+
+#### A. Periodic batch job (the sweep — recommended for v1, on its own)
 
 A daily/weekly cron that:
 
@@ -1277,7 +1311,7 @@ A daily/weekly cron that:
    (oldest first)
 2. For each, runs `resolveOneSponsor` exactly like Phase 0b
 3. If the new verdict differs from the current one AND the new one has
-   higher confidence (better tier, exact-name, or active vs dissolved),
+   higher confidence (better tier, exact-name, or NULL→matched),
    updates the mapping and writes to the audit table
 4. Otherwise, just updates `verified_at = now()` so the row drops to the
    bottom of the queue
@@ -1303,30 +1337,41 @@ reliability gap"); it doesn't matter for a one-shot backfill but does
 matter for a recurring cron, where the UPDATE↔INSERT race window
 multiplies across runs.
 
-#### B. ch-stream-triggered re-verification
+A is sufficient for correctness on its own — every mapping eventually
+gets re-verified on the rotation cadence. B only reduces *latency* of
+correction; it does not change the eventual-consistency guarantee.
 
-When ch-stream observes a name-change or dissolution event for a
-`company_number` that's referenced in `hmrc_company_mapping`, queue a
-re-verification of every HMRC sponsor pointing at that number. More
-targeted, more "live", but requires changes on the ch-stream side.
+#### B. ch-stream-triggered re-verification (latency optimization for A)
 
-#### C. Visit-driven refresh
+When ch-stream observes an event that could change a *mapping outcome*,
+queue a targeted re-verification instead of waiting for the sweep to
+reach that row. The events that qualify:
 
-In `getCompanyProfile`, when serving a cached profile, check the
-mapping's `verified_at`. If older than 90 days, `waitUntil(reverify(...))`
-in the background. Uses real user traffic as the priority signal —
-popular sponsors get verified more often.
+- **Incorporation of a new entity whose name plausibly matches an
+  existing `no_match_after_ch_search` row.** Resolves a mapping that
+  was previously unresolvable. Requires either a name-token index over
+  unresolved HMRC rows or a periodic cross-check on the ch-stream side.
+- **Name change of a `company_number` already referenced in
+  `hmrc_company_mapping`.** Lets `match_method` re-classify (e.g.
+  `token_sim` → `exact`) sooner than the sweep would. Low value on its
+  own — the `company_number` is unchanged — but useful if downstream
+  surfaces care about provenance.
 
-**Trade-off**: adds modest complexity to the hot path. Could ship A
-first and add C later for popularity-weighted priority on top of the
-default cron schedule.
+Worth shipping only if the staleness window from A's cadence has a
+concrete cost. For a visa-job-seeker filter, the marginal benefit of
+resolving a few `no_match` rows hours earlier instead of weeks earlier
+is small. Default: skip B until a real case shows the lag bites.
 
 ### Recommendation
 
-Ship A first (simple cron, predictable schedule, easy to reason about).
-Layer C later if popularity-weighted refresh would be useful (probably
-not unless we get user traffic data showing high concentration on a
-small subset of sponsors).
+Ship A on its own. It covers every correctness concern Phase 5 is
+responsible for; B is a pure latency optimization.
+
+Add B only if a concrete unresolved-`no_match` case shows up that the
+sweep cadence handled too slowly. At 1k–5k rows/day the full corpus
+turns over every ~25 days to ~4 months, so the staleness window is
+already short enough that targeted event-driven refresh is unlikely
+to be worth the integration cost.
 
 ---
 

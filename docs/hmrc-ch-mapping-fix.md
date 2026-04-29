@@ -1139,9 +1139,30 @@ written):
    isn't confident.
 4. Write the model's verdict + reasoning into new staging columns
    (`agent_verdict`, `agent_reasoning`).
-5. **Human approval gate** — `phase4-apply.ts` shows each agent verdict
-   for one-key approve/reject before any write hits the live mapping
-   table. The agent never writes directly.
+5. **Strict output contract + fail-closed.** The script must parse the
+   model's response as JSON against a fixed schema:
+   - `agent_verdict` must be one of:
+     `verified` | `no_match` | `low_confidence`. Any other value, missing
+     fields, or extra keys → reject and write `low_confidence` to
+     staging. No silent coercion.
+   - `agent_company_number` is required only when `agent_verdict =
+     'verified'`; must match `^[A-Z0-9]{6,10}$`.
+   - `agent_reasoning` is capped at 500 chars and stripped of any
+     prompt fragments before storage (defence against the model echoing
+     its instructions back).
+   - `low_confidence` is the fail-closed default — keeps the row in
+     `requires_human_review_*`, never proposes a mapping change.
+6. **Verdict → action mapping** (only `phase4-apply.ts` writes; the
+   agent never touches the live table):
+   - `verified` → eligible for swap to `agent_company_number` with
+     `match_method='manual'`, pending human approval.
+   - `no_match` → eligible for NULL + `match_method='no_match'`,
+     pending human approval.
+   - `low_confidence` → no proposed change; row stays in the staging
+     bucket for the next pass.
+7. **Human approval gate** — `phase4-apply.ts` shows each validated
+   agent verdict for one-key approve/reject before any write hits the
+   live mapping table.
 
 The Tier-C sub-0.95 spot-check originally scoped under Phase 4 was
 absorbed into Phase 1's rollout step #5 and is complete.
@@ -1274,6 +1295,14 @@ Runs as a **GitHub Actions cron** alongside the existing HMRC ingestion
 workflow, with its own dedicated CH API key so rate-limit budgets and
 telemetry stay independent from the seed and on-demand-resolver paths.
 
+Phase 5 must use an **atomic CTE-based update+audit** (`UPDATE …
+RETURNING` feeding `INSERT INTO hmrc_company_mapping_audit … SELECT
+FROM updated`) rather than the two-statement pattern Phase 1 used. The
+non-atomic write path was knowingly deferred (see Phase 1's "Known
+reliability gap"); it doesn't matter for a one-shot backfill but does
+matter for a recurring cron, where the UPDATE↔INSERT race window
+multiplies across runs.
+
 #### B. ch-stream-triggered re-verification
 
 When ch-stream observes a name-change or dissolution event for a
@@ -1352,8 +1381,10 @@ Recorded here so future readers don't relitigate them:
 ### Deterministic vs agentic boundary
 
 14. **Bulk classification stays deterministic.** Phase 0a, 0b, 1, 3,
-    and 5 all use pure-function scoring (Tier A/B/C, locality
-    tiebreak). Reasons:
+    and 5 all use deterministic verification logic (Tier A/B/C scoring +
+    locality tiebreak) given the fetched CH search/profile results —
+    the call chain still does I/O, but the verdict given a fixed input
+    set never varies. Reasons:
     - **Cost** — 125k rows × per-call LLM pricing dwarfs the free CH
       API budget the deterministic path uses.
     - **Reproducibility** — re-running Phase 0a on the same input

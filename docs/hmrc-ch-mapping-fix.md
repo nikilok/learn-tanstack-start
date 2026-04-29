@@ -1268,11 +1268,11 @@ being created.
 
 **State we don't control — not preventable.**
 Companies House and HMRC are external systems. CH may rename or
-re-register a company, HMRC may edit a sponsor name, ch-stream may
-finally add an entity our cache was missing. The mapping was correct
-at verification time and silently becomes either suboptimal or
-newly-resolvable at T+N. The only way to detect this class of change
-is to re-check.
+re-register a company, or incorporate a new entity that would now
+satisfy a previously-failing match. HMRC may edit a sponsor name. The
+mapping was correct at verification time and silently becomes either
+suboptimal or newly-resolvable at T+N. The only way to detect this
+class of change is to re-check.
 
 A sweep is also the only mechanism that picks up improvements to our
 own verification pipeline — when we tighten a rule or add a regex,
@@ -1286,11 +1286,11 @@ the sweep earns its keep.
 `match_method` and `verified_at`. Phase 5 re-evaluates those fields
 against current CH state.
 
-- **Newly-seeded CH profiles that would now win a previously-failing
+- **Newly-incorporated CH entities that would now win a previously-failing
   match.** HMRC rows sitting at `no_match_after_ch_search` because the
-  right CH entity didn't exist in our cache at verification time.
-  ch-stream eventually creates the entity; the next sweep flips
-  `company_number` from NULL to a value.
+  right CH entity didn't exist on the CH side at verification time. Once
+  CH incorporates the entity, the next sweep's `resolveOneSponsor` call
+  hits CH search again and flips `company_number` from NULL to a value.
 - **`match_method` improvements after CH name edits.** A row that was
   `token_sim` because of a punctuation difference can become `exact`
   once CH normalises the name (or vice versa). The `company_number`
@@ -1310,11 +1310,71 @@ A daily/weekly cron that:
 1. Selects N rows from `hmrc_company_mapping` ordered by `verified_at` ASC
    (oldest first)
 2. For each, runs `resolveOneSponsor` exactly like Phase 0b
-3. If the new verdict differs from the current one AND the new one has
-   higher confidence (better tier, exact-name, or NULL→matched),
-   updates the mapping and writes to the audit table
-4. Otherwise, just updates `verified_at = now()` so the row drops to the
-   bottom of the queue
+3. Applies the **upgrade-only sweep policy** (below) to the new verdict
+   vs. the existing mapping
+4. If the policy says *update*, writes the new verdict and bumps
+   `verified_at`; if *no-op*, just bumps `verified_at` so the row drops
+   to the bottom of the queue
+
+##### Sweep policy: upgrades only, never downgrades
+
+The sweep is allowed to **promote** a mapping to a stronger state but
+never to silently demote one. Today's CH search returning a weaker
+result than the original verification is far more likely to mean
+"transient indexing issue / search ranking shifted" than "the original
+mapping was wrong" — auto-overwriting on the weaker signal would
+destroy correct mappings.
+
+State precedence — combines `verdict` with `match_method` (since a
+`verified` mapping's `match_method` carries its own confidence ranking
+inherited from Phase 0b's tier system):
+
+| State                          | Rank | Meaning                                                    |
+|--------------------------------|------|------------------------------------------------------------|
+| `no_match`                     | 0    | CH search returned nothing useful                          |
+| `human_review`                 | 1    | Ambiguous — needs human / agentic decision                 |
+| `verified` · `token_sim`       | 2    | Tier C — token Jaccard above threshold                     |
+| `verified` · `previous_name`   | 3    | Tier B — matched a CH previous name                        |
+| `verified` · `exact`           | 4    | Tier A — exact name match                                  |
+| `public_body`                  | T    | Deliberate skip — terminal peer (see rule 5)               |
+
+`public_body` is given a separate "terminal peer" status rather than a
+numeric rank because its decision basis (regex classifier on the HMRC
+name) is orthogonal to CH search — it should never be auto-traded with
+any `verified` rank in either direction.
+
+Sweep decision rules, applied in order:
+
+1. **`new = human_review` → always no-op + bump `verified_at`.** The
+   sweep never assigns `human_review`; it defers to the agentic flow
+   planned for the `requires_human_review` long tail.
+2. **`existing = public_body` OR `new = public_body` (and the other
+   side is `verified` at any rank) → queue for review.** Both are
+   terminal in different ways; neither auto-overrides the other.
+   `public_body` ↔ `public_body` (no change) → bump `verified_at`.
+3. **`rank(new) > rank(existing)` → update.** Pure promotion. Includes
+   `no_match` → any verified tier, `human_review` → verified, and
+   intra-`verified` upgrades like `token_sim` → `exact`.
+4. **`rank(new) < rank(existing)` → no-op + bump.** Demotions are
+   always rejected; the existing stronger verdict stands.
+5. **`rank(new) = rank(existing)`:**
+   - Same `company_number` (or both terminal with no number, e.g.
+     `no_match` → `no_match`) → bump `verified_at`.
+   - Different `company_number` (the `verified:X` → `verified:X`
+     same-tier-different-number case) → **queue for review**, never
+     auto-overwrite. This is the riskiest transition: legitimate
+     correction and CH search ranking drift look identical to the
+     sweep.
+
+Action labels:
+
+- **bump** = update `verified_at` only
+- **update** = write new state + audit row, bump `verified_at`
+- **no-op** = leave mapping untouched; bump `verified_at` so the row
+  exits the head of the queue
+- **queue** = leave mapping untouched, flag for human / agentic review
+  (mechanism TBD — likely the same surface used for the Phase 0a
+  `requires_human_review` long tail)
 
 Sizing:
 - 1k rows/day → full corpus re-verified every ~4 months
@@ -1349,8 +1409,10 @@ reach that row. The events that qualify:
 
 - **Incorporation of a new entity whose name plausibly matches an
   existing `no_match_after_ch_search` row.** Resolves a mapping that
-  was previously unresolvable. Requires either a name-token index over
-  unresolved HMRC rows or a periodic cross-check on the ch-stream side.
+  was previously unresolvable. Today's ch-stream only updates entities
+  already in our cache; acting on incorporations would require it to
+  also process new-entity events and cross-check incoming names against
+  unresolved HMRC rows. Non-trivial integration work.
 - **Name change of a `company_number` already referenced in
   `hmrc_company_mapping`.** Lets `match_method` re-classify (e.g.
   `token_sim` → `exact`) sooner than the sweep would. Low value on its

@@ -1411,10 +1411,19 @@ Proposed tier schedule (single CH API key, ~10% utilization of the
 
 | Tier | Target rows                                  | Cadence                         | Rows/run | Full sweep time |
 |------|----------------------------------------------|----------------------------------|----------|-----------------|
-| 1    | `match_method = 'no_match'` OR `company_number IS NULL` | daily 02:00 UTC                  | 4,000    | **~4 days**     |
-| 2    | `match_method IN ('token_sim', 'previous_name')`        | twice weekly (Sun + Wed) 04:00   | 3,000    | **~1 week**     |
+| 1    | `match_method = 'no_match'`                              | daily 02:00 UTC                  | 4,000    | **~4 days**     |
+| 2    | `match_method IN ('token_sim', 'previous_name')`         | twice weekly (Sun + Wed) 04:00   | 3,000    | **~1 week**     |
 | 3    | `match_method = 'exact'`                                 | daily 06:00 UTC                  | 1,500    | **~10 weeks**   |
-| 4    | `match_method = 'public_body'`                           | monthly (1st of month) 08:00    | 500      | **~12× / year** |
+| 4    | `match_method = 'public_body'`                           | monthly (1st of month) 08:00     | 500      | **~12× / year** |
+
+Note that Tier 1 narrows on `match_method = 'no_match'` rather than
+"company_number IS NULL". `is_public_body=true` rows also have a NULL
+`company_number` (they're a deliberate skip, not a missing match), and
+sweeping them daily would defeat the whole point of Tier 4's monthly
+cadence. Filtering by `match_method` gives a clean partition over the
+four tiers with no overlap. The 196 `requires_human_review` skips
+from Phase 0a (NULL `match_method`) are deliberately not in any
+sweep — they're owned by the Phase 4 agentic flow.
 
 Daily peak CH usage: 4k + 1.5k = 5.5k rows × 3.3 calls = ~18k calls/day.
 Per-key daily ceiling at 1.8 req/sec sustained: ~155k calls/day. Plenty
@@ -1482,11 +1491,13 @@ matter for a recurring cron, where the UPDATE↔INSERT race window
 multiplies across runs.
 
 The UPDATE's WHERE clause carries an **optimistic lock**
-(`WHERE id = $id AND verified_at = $originalVerifiedAt`) so concurrent
-modifications from any other actor (manual ops, future ch-stream
-worker, another tier whose SELECT happened to overlap) are detected
-rather than clobbered. Lock misses are logged and skipped — the row
-naturally reappears in a future sweep window.
+(`WHERE organisation_name = $organisationName AND verified_at = $originalVerifiedAt`)
+so concurrent modifications from any other actor (manual ops, future
+ch-stream worker, another tier whose SELECT happened to overlap) are
+detected rather than clobbered. `organisation_name` is the table's
+primary key, so the equality check is point-lookup-cheap. Lock misses
+are logged and skipped — the row naturally reappears in a future sweep
+window.
 
 A is sufficient for correctness on its own — every mapping eventually
 gets re-verified on its tier's rotation cadence. B only reduces

@@ -1251,42 +1251,227 @@ These were all CodeRabbit-prompted refinements during PR #74 review.
 
 ---
 
-## Phase 5 — periodic re-verification (drift correction)
+## Phase 5 — periodic re-verification (sweep + optional event-driven layer)
 
-Phase 1 fixes a snapshot. Phase 5 keeps it correct over time.
+Phase 1 fixes a snapshot. Phase 5 keeps the HMRC-name → CH-profile
+mappings correct over time. The naive framing is "drift correction",
+but that buries the actual structure: prevention and correction are
+layered, not alternatives.
 
-### What this addresses
+### Two kinds of drift
 
-- **CH renames / dissolutions / acquisitions** that happen after a
-  mapping is verified
-- **HMRC sponsor name updates** between ingest cycles
-- **Newly-seeded CH profiles** that would now win a previously-failing
-  match (e.g. ch-stream just added the right entity to our local cache
-  for a row that was previously `no_match_after_ch_search`)
-- **Improvements to the verification pipeline itself** — when we tighten
-  a rule or add a regex, periodic re-verification picks up the
-  improvement organically
+**State we control — preventable in principle.**
+Verification logic and ingest paths. Phase 3 hardened the
+`getCompanyProfile.else` leak that was creating untracked mappings; new
+leaks of the same shape can be fixed at the source so bad mappings stop
+being created.
 
-### Three options, in order of complexity
+**State we don't control — not preventable.**
+Companies House and HMRC are external systems. CH may rename or
+re-register a company, or incorporate a new entity that would now
+satisfy a previously-failing match. HMRC may edit a sponsor name. The
+mapping was correct at verification time and silently becomes either
+suboptimal or newly-resolvable at T+N. The only way to detect this
+class of change is to re-check.
 
-#### A. Periodic batch job (simplest — recommended for v1)
+A sweep is also the only mechanism that picks up improvements to our
+own verification pipeline — when we tighten a rule or add a regex,
+existing mappings were verified under the *old* rules and there is no
+event to trigger a re-check on. So even with perfect leak prevention,
+the sweep earns its keep.
 
-A daily/weekly cron that:
+### What Phase 5 corrects
 
-1. Selects N rows from `hmrc_company_mapping` ordered by `verified_at` ASC
-   (oldest first)
+`hmrc_company_mapping` stores HMRC name → `company_number` plus
+`match_method` and `verified_at`. Phase 5 re-evaluates those fields
+against current CH state.
+
+- **Newly-incorporated CH entities that would now win a previously-failing
+  match.** HMRC rows sitting at `no_match_after_ch_search` because the
+  right CH entity didn't exist on the CH side at verification time. Once
+  CH incorporates the entity, the next sweep's `resolveOneSponsor` call
+  hits CH search again and flips `company_number` from NULL to a value.
+- **`match_method` improvements after CH name edits.** A row that was
+  `token_sim` because of a punctuation difference can become `exact`
+  once CH normalises the name (or vice versa). The `company_number`
+  usually doesn't change; the provenance label does.
+- **Verification logic improvements.** Tightened rules / new regexes
+  re-evaluate against the existing corpus on the next pass.
+- **Backstop for prevention failures.** If a future ingest bug recreates
+  a Phase-3-shaped leak, the sweep makes it visible (compare against
+  the `phase1-sanity-check` `new_since_phase1` proxy).
+
+### Two options, layered
+
+#### A. Periodic batch job (the sweep — recommended for v1, on its own)
+
+A set of tiered scheduled crons, each one a GitHub Actions workflow
+that:
+
+1. Selects N rows from `hmrc_company_mapping` filtered by the tier's
+   target predicate (e.g. `match_method = 'no_match'`), ordered by
+   `verified_at ASC NULLS FIRST` (oldest first within the tier)
 2. For each, runs `resolveOneSponsor` exactly like Phase 0b
-3. If the new verdict differs from the current one AND the new one has
-   higher confidence (better tier, exact-name, or active vs dissolved),
-   updates the mapping and writes to the audit table
-4. Otherwise, just updates `verified_at = now()` so the row drops to the
-   bottom of the queue
+3. Applies the **upgrade-only sweep policy** (below) to the new verdict
+   vs. the existing mapping
+4. If the policy says *update*, writes the new verdict and bumps
+   `verified_at`; if *no-op*, just bumps `verified_at` so the row drops
+   to the bottom of the tier's queue
 
-Sizing:
-- 1k rows/day → full corpus re-verified every ~4 months
-- 5k rows/day → ~25 days
-- Either is well within the CH API rate limit (1k calls × 3.3 = 3.3k =
-  ~30 minutes/day)
+The choice of "tiered crons rather than one flat sweep" is itself a
+deliberate decision — see the **Tiered cadence** section below for why
+one cron over the whole corpus is the wrong shape.
+
+##### Sweep policy: upgrades only, never downgrades
+
+The sweep is allowed to **promote** a mapping to a stronger state but
+never to silently demote one. Today's CH search returning a weaker
+result than the original verification is far more likely to mean
+"transient indexing issue / search ranking shifted" than "the original
+mapping was wrong" — auto-overwriting on the weaker signal would
+destroy correct mappings.
+
+State precedence — combines `verdict` with `match_method` (since a
+`verified` mapping's `match_method` carries its own confidence ranking
+inherited from Phase 0b's tier system):
+
+| State                          | Rank | Meaning                                                    |
+|--------------------------------|------|------------------------------------------------------------|
+| `no_match`                     | 0    | CH search returned nothing useful                          |
+| `human_review`                 | 1    | Ambiguous — needs human / agentic decision                 |
+| `verified` · `token_sim`       | 2    | Tier C — token Jaccard above threshold                     |
+| `verified` · `previous_name`   | 3    | Tier B — matched a CH previous name                        |
+| `verified` · `exact`           | 4    | Tier A — exact name match                                  |
+| `public_body`                  | T    | Deliberate skip — terminal peer (see rule 5)               |
+
+`public_body` is given a separate "terminal peer" status rather than a
+numeric rank because its decision basis (regex classifier on the HMRC
+name) is orthogonal to CH search — it should never be auto-traded with
+any `verified` rank in either direction.
+
+Sweep decision rules, applied in order:
+
+1. **`new = human_review` → always no-op + bump `verified_at`.** The
+   sweep never assigns `human_review`; it defers to the agentic flow
+   planned for the `requires_human_review` long tail.
+2. **`existing = public_body` OR `new = public_body` (and the other
+   side is `verified` at any rank) → queue for review.** Both are
+   terminal in different ways; neither auto-overrides the other.
+   `public_body` ↔ `public_body` (no change) → bump `verified_at`.
+3. **`rank(new) > rank(existing)` → update.** Pure promotion. Includes
+   `no_match` → any verified tier, `human_review` → verified, and
+   intra-`verified` upgrades like `token_sim` → `exact`.
+4. **`rank(new) < rank(existing)` → no-op + bump.** Demotions are
+   always rejected; the existing stronger verdict stands.
+5. **`rank(new) = rank(existing)`:**
+   - Same `company_number` (or both terminal with no number, e.g.
+     `no_match` → `no_match`) → bump `verified_at`.
+   - Different `company_number` (the `verified:X` → `verified:X`
+     same-tier-different-number case) → **queue for review**, never
+     auto-overwrite. This is the riskiest transition: legitimate
+     correction and CH search ranking drift look identical to the
+     sweep.
+
+Action labels:
+
+- **bump** = update `verified_at` only
+- **update** = write new state + audit row, bump `verified_at`
+- **no-op** = leave mapping untouched; bump `verified_at` so the row
+  exits the head of the queue
+- **queue** = leave mapping untouched, flag for human / agentic review
+  (mechanism TBD — likely the same surface used for the Phase 0a
+  `requires_human_review` long tail)
+
+##### Tiered cadence — not a single flat sweep
+
+A naive flat sweep ("1k rows/day, oldest first") puts every row on the
+same rotation regardless of how likely it is to need correction. With
+~126k rows and 1k/day that's a ~4-month full-corpus turnover, which
+is far too slow for the rows that actually matter — and almost all of
+that budget gets spent re-confirming `verified·exact` rows that are
+overwhelmingly likely to still be correct.
+
+Phase 1's distribution makes the right shape obvious:
+
+| State                          | Count   | Re-verification value                                                  |
+|--------------------------------|---------|------------------------------------------------------------------------|
+| `verified` · `exact`           | ~103k   | Very low — CH had the exact name and we matched it. Rarely wrong.      |
+| `no_match`                     | ~16k    | **Very high** — every re-check is a chance to flip "no answer" to a real mapping if CH has incorporated the missing entity since last check. |
+| `verified` · `token_sim`       | ~4k     | Moderate — CH name normalisations can promote these to `exact`.        |
+| `verified` · `previous_name`   | ~2k     | Moderate — same as `token_sim`, plus catches further name evolution.   |
+| `public_body`                  | ~388    | Near-zero — deliberate classifier skip, almost never changes.          |
+
+A flat schedule wastes 82% of its CH calls on the lowest-value bucket
+(`exact`) and starves the highest-value bucket (`no_match`). The fix
+is to run **separate scheduled sweeps per state class**, each with its
+own cadence, batch size, and SELECT predicate.
+
+Proposed tier schedule (single CH API key, ~10% utilization of the
+600 req / 5 min budget):
+
+| Tier | Target rows                                  | Cadence                         | Rows/run | Full sweep time |
+|------|----------------------------------------------|----------------------------------|----------|-----------------|
+| 1    | `match_method = 'no_match'`                              | daily 02:00 UTC                  | 4,000    | **~4 days**     |
+| 2    | `match_method IN ('token_sim', 'previous_name')`         | twice weekly (Sun + Wed) 04:00   | 3,000    | **~1 week**     |
+| 3    | `match_method = 'exact'`                                 | daily 06:00 UTC                  | 1,500    | **~10 weeks**   |
+| 4    | `match_method = 'public_body'`                           | monthly (1st of month) 08:00     | 500      | **~12× / year** |
+
+Note that Tier 1 narrows on `match_method = 'no_match'` rather than
+"company_number IS NULL". `is_public_body=true` rows also have a NULL
+`company_number` (they're a deliberate skip, not a missing match), and
+sweeping them daily would defeat the whole point of Tier 4's monthly
+cadence. Filtering by `match_method` gives a clean partition over the
+four tiers with no overlap. The 196 `requires_human_review` skips
+from Phase 0a (NULL `match_method`) are deliberately not in any
+sweep — they're owned by the Phase 4 agentic flow.
+
+Daily peak CH usage: 4k + 1.5k = 5.5k rows × 3.3 calls = ~18k calls/day.
+Per-key daily ceiling at 1.8 req/sec sustained: ~155k calls/day. Plenty
+of headroom for ad-hoc `workflow_dispatch` runs without bumping into
+the rate limit.
+
+Each tier is its own GitHub Actions workflow file
+(`phase5-sweep-no-match.yml`, `phase5-sweep-non-exact.yml`,
+`phase5-sweep-exact.yml`, `phase5-sweep-public-body.yml`) calling the
+same `phase5-sweep.ts` script with a `--tier` argument that selects the
+SELECT predicate. Same atomic CTE write path, same upgrade-only sweep
+policy, same audit table — the only difference is which slice of the
+corpus is targeted.
+
+Why the tiers run on staggered cron times (02:00 / 04:00 / 06:00 /
+08:00 UTC): all four use the same dedicated CH API key, so spreading
+their start times prevents accidental rate-limit collisions if a long
+Tier 1 run overlaps with the next-tier kick-off.
+
+##### Why no caching layer
+
+Phase 0b had an on-disk CH response cache (`apps/web/.cache/phase0b/...`)
+because re-running the script during development with tweaked tier
+thresholds would otherwise burn CH calls on identical queries. That
+was a dev-loop optimization — its hit rate depended on iterating over
+the same input set repeatedly.
+
+In Phase 5 the math inverts:
+
+- **Within a single run:** every row has a unique HMRC name, so every
+  CH query is unique. Cache hit rate is approximately zero.
+- **Across runs:** the same row only reappears on its next rotation
+  cycle (4 days for Tier 1, ~10 weeks for Tier 3). When it does, we
+  *want* fresh CH data — that's the entire point of the sweep.
+
+Combined with ~10% budget utilization, there's no scenario where a
+cache earns its keep. The script processes each row, persists its
+decision, and discards the response — memory profile stays flat at
+the working set of a single row regardless of `--rows` size, which
+also avoids the unbounded-growth smell of accumulating responses for
+the lifetime of a long-running runner job.
+
+If a shared cross-surface CH cache becomes interesting later (live web
++ Phase 5 + ch-stream worker), it should live as a Postgres-backed
+`ch_search_cache` table consumed by all three — not as Phase-5-internal
+runner state.
+
+##### Implementation invariants
 
 Same code path as `phase0b-resolve-suspects.ts`, just running against a
 different SELECT.
@@ -1294,6 +1479,8 @@ different SELECT.
 Runs as a **GitHub Actions cron** alongside the existing HMRC ingestion
 workflow, with its own dedicated CH API key so rate-limit budgets and
 telemetry stay independent from the seed and on-demand-resolver paths.
+A `concurrency: phase5-sweep` group on each workflow prevents
+overlapping runs (scheduled + manual `workflow_dispatch`).
 
 Phase 5 must use an **atomic CTE-based update+audit** (`UPDATE …
 RETURNING` feeding `INSERT INTO hmrc_company_mapping_audit … SELECT
@@ -1303,30 +1490,53 @@ reliability gap"); it doesn't matter for a one-shot backfill but does
 matter for a recurring cron, where the UPDATE↔INSERT race window
 multiplies across runs.
 
-#### B. ch-stream-triggered re-verification
+The UPDATE's WHERE clause carries an **optimistic lock**
+(`WHERE organisation_name = $organisationName AND verified_at = $originalVerifiedAt`)
+so concurrent modifications from any other actor (manual ops, future
+ch-stream worker, another tier whose SELECT happened to overlap) are
+detected rather than clobbered. `organisation_name` is the table's
+primary key, so the equality check is point-lookup-cheap. Lock misses
+are logged and skipped — the row naturally reappears in a future sweep
+window.
 
-When ch-stream observes a name-change or dissolution event for a
-`company_number` that's referenced in `hmrc_company_mapping`, queue a
-re-verification of every HMRC sponsor pointing at that number. More
-targeted, more "live", but requires changes on the ch-stream side.
+A is sufficient for correctness on its own — every mapping eventually
+gets re-verified on its tier's rotation cadence. B only reduces
+*latency* of correction; it does not change the eventual-consistency
+guarantee.
 
-#### C. Visit-driven refresh
+#### B. ch-stream-triggered re-verification (latency optimization for A)
 
-In `getCompanyProfile`, when serving a cached profile, check the
-mapping's `verified_at`. If older than 90 days, `waitUntil(reverify(...))`
-in the background. Uses real user traffic as the priority signal —
-popular sponsors get verified more often.
+When ch-stream observes an event that could change a *mapping outcome*,
+queue a targeted re-verification instead of waiting for the sweep to
+reach that row. The events that qualify:
 
-**Trade-off**: adds modest complexity to the hot path. Could ship A
-first and add C later for popularity-weighted priority on top of the
-default cron schedule.
+- **Incorporation of a new entity whose name plausibly matches an
+  existing `no_match_after_ch_search` row.** Resolves a mapping that
+  was previously unresolvable. Today's ch-stream only updates entities
+  already in our cache; acting on incorporations would require it to
+  also process new-entity events and cross-check incoming names against
+  unresolved HMRC rows. Non-trivial integration work.
+- **Name change of a `company_number` already referenced in
+  `hmrc_company_mapping`.** Lets `match_method` re-classify (e.g.
+  `token_sim` → `exact`) sooner than the sweep would. Low value on its
+  own — the `company_number` is unchanged — but useful if downstream
+  surfaces care about provenance.
+
+Worth shipping only if the staleness window from A's cadence has a
+concrete cost. For a visa-job-seeker filter, the marginal benefit of
+resolving a few `no_match` rows hours earlier instead of weeks earlier
+is small. Default: skip B until a real case shows the lag bites.
 
 ### Recommendation
 
-Ship A first (simple cron, predictable schedule, easy to reason about).
-Layer C later if popularity-weighted refresh would be useful (probably
-not unless we get user traffic data showing high concentration on a
-small subset of sponsors).
+Ship A on its own. It covers every correctness concern Phase 5 is
+responsible for; B is a pure latency optimization.
+
+Add B only if a concrete unresolved-`no_match` case shows up that the
+sweep cadence handled too slowly. At 1k–5k rows/day the full corpus
+turns over every ~25 days to ~4 months, so the staleness window is
+already short enough that targeted event-driven refresh is unlikely
+to be worth the integration cost.
 
 ---
 

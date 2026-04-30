@@ -1,4 +1,5 @@
 {
   "regions": ["lhr1"],
-  "outputDirectory": ".vercel/output"
+  "outputDirectory": ".vercel/output",
+  "ignoreCommand": "! git diff --name-only HEAD^ HEAD | grep -qv '^docs/'"
 }

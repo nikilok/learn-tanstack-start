@@ -1342,12 +1342,16 @@ inherited from Phase 0b's tier system):
 | `verified` · `token_sim`       | 2    | Tier C — token Jaccard above threshold                     |
 | `verified` · `previous_name`   | 3    | Tier B — matched a CH previous name                        |
 | `verified` · `exact`           | 4    | Tier A — exact name match                                  |
-| `public_body`                  | T    | Deliberate skip — terminal peer (see rule 5)               |
+| `public_body`                  | T    | Deliberate classifier skip — terminal peer (see rule 2)    |
+| `manual`                       | T    | Human override — terminal peer (see rule 2a)               |
 
-`public_body` is given a separate "terminal peer" status rather than a
-numeric rank because its decision basis (regex classifier on the HMRC
-name) is orthogonal to CH search — it should never be auto-traded with
-any `verified` rank in either direction.
+`public_body` and `manual` are both given "terminal peer" status rather
+than numeric ranks because their decision basis is orthogonal to CH
+search — `public_body` is a regex classifier on the HMRC name, `manual`
+is explicit human judgement that may rely on signals (HMRC town,
+licence type/rating, sponsor route, sector knowledge) the deterministic
+matcher does not see. Neither should ever be auto-traded with a
+`verified` rank in either direction.
 
 Sweep decision rules, applied in order:
 
@@ -1358,6 +1362,14 @@ Sweep decision rules, applied in order:
    side is `verified` at any rank) → queue for review.** Both are
    terminal in different ways; neither auto-overrides the other.
    `public_body` ↔ `public_body` (no change) → bump `verified_at`.
+2a. **`existing = manual` → never auto-overwrite.** Human judgement
+    supersedes deterministic verification. If the new verdict matches
+    the existing `company_number`, bump `verified_at` (the manual
+    override has been independently re-confirmed). If the new verdict
+    differs in any way (`company_number` change, `match_method` shift,
+    or `no_match`), **queue for review** — only another manual action
+    should change a `manual` row. The sweep must never assign
+    `match_method = 'manual'` itself.
 3. **`rank(new) > rank(existing)` → update.** Pure promotion. Includes
    `no_match` → any verified tier, `human_review` → verified, and
    intra-`verified` upgrades like `token_sim` → `exact`.

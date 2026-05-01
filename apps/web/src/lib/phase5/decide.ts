@@ -29,10 +29,14 @@ export type ProposedVerdict =
   | 'no_match'
   | 'human_review';
 
+/** Structural superset of the CH `/company/{number}` payload. Kept loose
+ *  (extra `[key: string]: unknown` index) so this type stays compatible with
+ *  the resolver's own `CHFullProfile` declaration in
+ *  `apps/web/src/lib/hmrc-ch/resolve-sponsor.ts`. */
 export type CHFullProfile = {
   company_number: string;
   company_name: string;
-  company_status: string | null;
+  company_status?: string;
   [key: string]: unknown;
 };
 

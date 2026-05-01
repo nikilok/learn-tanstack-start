@@ -63,7 +63,12 @@ const CHANGED_BY: Record<Tier, string> = {
   public_body: 'phase5_sweep_public_body',
 };
 
-const DELAY_MS = 550;
+/** Inter-row sleep. Sized for the resolver's post-patch worst case of 4 CH
+ *  calls per row (1 search + 3 Tier-B profile fetches when Tier-A returned
+ *  only inactive candidates). 4 calls / 2200ms ≈ 1.8 req/sec, under CH's
+ *  600/5min budget. Pre-patch this was 550ms; bumped after dev-branch
+ *  testing surfaced 429 backoffs on slices with many dissolved namesakes. */
+const DELAY_MS = 2200;
 
 /** Run a single tier sweep against the injected dependencies. */
 export async function sweep(

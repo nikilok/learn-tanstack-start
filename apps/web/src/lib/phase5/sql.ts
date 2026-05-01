@@ -16,6 +16,8 @@
  * reliability gap").
  */
 
+import type { NeonQueryFunction } from '@neondatabase/serverless';
+import type { ResolveResult } from '../hmrc-ch/resolve-sponsor.ts';
 import type {
   ApplyPromotionDeps,
   CommitPromotionInput,
@@ -29,13 +31,10 @@ import type {
 } from './decide.ts';
 import type { SweepDeps, SweepLocality, Tier } from './sweep.ts';
 
-/** Minimal type for the `neon` HTTP client's tagged-template `sql`. Avoids
- *  a hard import of the `@ss/db/client` package so this file can be unit
- *  tested in isolation if we ever want to. */
-type Sql = <T = Record<string, unknown>>(
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-) => Promise<T[]>;
+/** Tagged-template SQL function shape returned by `neon(url)` with default
+ *  flags — arrayMode=false, fullResults=false. Each query returns
+ *  `Record<string, any>[]`; callers cast to their expected row shape. */
+type Sql = NeonQueryFunction<false, false>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SweepDeps factories
@@ -65,43 +64,43 @@ async function selectRowsForTier(
   maxRows: number,
 ): Promise<RawMappingRow[]> {
   if (tier === 'no_match') {
-    return sql<RawMappingRow>`
+    return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
       FROM hmrc_company_mapping
       WHERE match_method = 'no_match'
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
-    `;
+    `) as RawMappingRow[];
   }
   if (tier === 'non_exact') {
-    return sql<RawMappingRow>`
+    return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
       FROM hmrc_company_mapping
       WHERE match_method IN ('token_sim', 'previous_name')
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
-    `;
+    `) as RawMappingRow[];
   }
   if (tier === 'exact') {
-    return sql<RawMappingRow>`
+    return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
       FROM hmrc_company_mapping
       WHERE match_method = 'exact'
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
-    `;
+    `) as RawMappingRow[];
   }
-  return sql<RawMappingRow>`
+  return (await sql`
     SELECT organisation_name, company_number, match_method, match_score,
            verified_at, is_public_body
     FROM hmrc_company_mapping
     WHERE match_method = 'public_body'
     ORDER BY verified_at ASC NULLS FIRST
     LIMIT ${maxRows}
-  `;
+  `) as RawMappingRow[];
 }
 
 function toExistingMapping(row: RawMappingRow): ExistingMapping {
@@ -120,12 +119,12 @@ function toExistingMapping(row: RawMappingRow): ExistingMapping {
  *  tiebreak inside `resolveOneSponsor`. */
 export function makeLookupLocality(sql: Sql): SweepDeps['lookupLocality'] {
   return async (organisationName) => {
-    const rows = await sql<{ town_city: string | null; county: string | null }>`
+    const rows = (await sql`
       SELECT town_city, county
       FROM hmrc_skilled_workers
       WHERE organisation_name = ${organisationName}
       LIMIT 1
-    `;
+    `) as { town_city: string | null; county: string | null }[];
     const first = rows[0];
     return {
       townCity: first?.town_city ?? null,
@@ -206,34 +205,12 @@ export function makeSleep(): SweepDeps['sleep'] {
 // Resolver wiring (calls into the existing hmrc-ch shared lib)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Result shape returned by `resolveOneSponsor` (re-declared structurally
- *  here so this file doesn't have to import from `../hmrc-ch/`). The CLI
- *  passes the real function in. */
+/** Resolver function shape — the CLI passes a closure around `resolveOneSponsor`
+ *  with `fetchApi` already curried in. */
 type ResolverFn = (
   organisationName: string,
   locality: { townCity: string | null; county: string | null },
-) => Promise<ResolverResult>;
-
-type ResolverResult =
-  | {
-      verdict: 'verified';
-      companyNumber: string;
-      matchMethod: 'exact' | 'previous_name' | 'token_sim';
-      matchScore: number;
-      queryUsed: string;
-      profile: CHFullProfile;
-    }
-  | { verdict: 'public_body'; reason: 'matched_public_body_regex' }
-  | {
-      verdict: 'no_match';
-      queryUsed: string;
-      topResults: unknown[];
-    }
-  | {
-      verdict: 'human_review';
-      queryUsed: string;
-      topResults: unknown[];
-    };
+) => Promise<ResolveResult>;
 
 /** Build a `resolveSponsor` matching `SweepDeps['resolveSponsor']`. Wraps
  *  the existing `resolveOneSponsor` helper from the shared HMRC↔CH
@@ -247,7 +224,7 @@ export function makeResolveSponsor(
   };
 }
 
-function toProposedResolution(result: ResolverResult): ProposedResolution {
+function toProposedResolution(result: ResolveResult): ProposedResolution {
   if (result.verdict === 'verified') {
     return {
       verdict: 'verified',
@@ -255,7 +232,7 @@ function toProposedResolution(result: ResolverResult): ProposedResolution {
       matchMethod: result.matchMethod,
       matchScore: result.matchScore,
       queryUsed: result.queryUsed,
-      profile: result.profile,
+      profile: result.profile as CHFullProfile,
     };
   }
   if (result.verdict === 'public_body') {
@@ -309,7 +286,7 @@ export function makeCommitPromotion(
   return async (
     input: CommitPromotionInput,
   ): Promise<CommitPromotionResult> => {
-    const rows = await sql<RawCommitResult>`
+    const rows = (await sql`
       WITH updated AS (
         UPDATE hmrc_company_mapping
         SET company_number = ${input.newCompanyNumber},
@@ -342,7 +319,7 @@ export function makeCommitPromotion(
         RETURNING 1
       )
       SELECT company_number, match_method FROM updated
-    `;
+    `) as RawCommitResult[];
     const row = rows[0];
     if (!row) return null;
     return {

@@ -162,6 +162,13 @@
       "when": 1777278620177,
       "tag": "0022_jittery_famine",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1777667960210,
+      "tag": "0023_overconfident_klaw",
+      "breakpoints": true
     }
   ]
 }

@@ -131,6 +131,14 @@ function profileToCandidate(p: CHFullProfile): CHCandidate {
   };
 }
 
+/** Treat only `company_status === 'active'` as operationally live. Dissolved,
+ *  liquidation, closed, converted-closed, removed, and missing/null status are
+ *  all treated as inactive — used by the resolver to prefer live entities over
+ *  similarly-named dissolved namesakes. See "Active-status preference" below. */
+function isActive(s: string | null | undefined): boolean {
+  return s === 'active';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main entry point
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,14 +183,34 @@ export async function resolveOneSponsor(
 
   const profilesByNumber = new Map<string, CHFullProfile>();
 
-  const tierAB: ScoredCandidate[] = [];
+  // ───────────────────────────────────────────────────────────────────────
+  // Active-status preference
+  //
+  // Pre-fix bug: a Tier-A match on a *dissolved* namesake (e.g. CH search
+  // returns `3DC LIMITED` dissolved at company_number X) would short-circuit
+  // and beat a Tier-B match on the *active* renamed entity (`SHOP3D LTD` whose
+  // previous_company_names contains `3DC LTD`). The downstream `decide()`
+  // upgrade-only policy treats Tier A as strictly stronger than Tier B/C, so
+  // an inactive Tier-A match would silently overwrite an active Tier-B
+  // mapping during a Phase 5 sweep.
+  //
+  // Fix: scan all three tiers, partition each by active vs. inactive, and
+  // prefer active matches at the strongest tier. Only fall back to inactive
+  // matches when no tier produced any active match — this preserves the
+  // "sponsor's company has actually wound up" path while killing the
+  // dissolved-namesake trap.
+  // ───────────────────────────────────────────────────────────────────────
+
+  const tierA: ScoredCandidate[] = [];
   for (const item of items) {
     const cand = searchItemToCandidate(item);
     const a = matchTierA(legal, cand);
-    if (a !== null) tierAB.push({ candidate: cand, tier: 'A', score: a });
+    if (a !== null) tierA.push({ candidate: cand, tier: 'A', score: a });
   }
+  const tierAActive = tierA.filter((s) => isActive(s.candidate.company_status));
 
-  if (tierAB.length === 0) {
+  const tierB: ScoredCandidate[] = [];
+  if (tierAActive.length === 0) {
     for (const item of items.slice(0, tierBTopN)) {
       const profile = (await fetchApi(
         `/company/${encodeURIComponent(item.company_number)}`,
@@ -191,20 +219,30 @@ export async function resolveOneSponsor(
       profilesByNumber.set(profile.company_number, profile);
       const cand = profileToCandidate(profile);
       const b = matchTierB(legal, cand);
-      if (b !== null) tierAB.push({ candidate: cand, tier: 'B', score: b });
+      if (b !== null) tierB.push({ candidate: cand, tier: 'B', score: b });
     }
   }
+  const tierBActive = tierB.filter((s) => isActive(s.candidate.company_status));
 
-  let acceptedTier: ScoredCandidate[] = tierAB;
-  if (acceptedTier.length === 0) {
-    const tierC: ScoredCandidate[] = [];
+  const tierC: ScoredCandidate[] = [];
+  if (tierAActive.length === 0 && tierBActive.length === 0) {
     for (const item of items) {
       const cand = searchItemToCandidate(item);
       const c = matchTierC(legal, cand);
       if (c !== null) tierC.push({ candidate: cand, tier: 'C', score: c });
     }
-    acceptedTier = tierC;
   }
+  const tierCActive = tierC.filter((s) => isActive(s.candidate.company_status));
+
+  // Prefer active at the strongest tier; fall back to inactive only when
+  // no tier produced any active candidate.
+  let acceptedTier: ScoredCandidate[];
+  if (tierAActive.length > 0) acceptedTier = tierAActive;
+  else if (tierBActive.length > 0) acceptedTier = tierBActive;
+  else if (tierCActive.length > 0) acceptedTier = tierCActive;
+  else if (tierA.length > 0) acceptedTier = tierA;
+  else if (tierB.length > 0) acceptedTier = tierB;
+  else acceptedTier = tierC;
 
   if (acceptedTier.length === 0) {
     return { verdict: 'no_match', queryUsed: legal, topResults };

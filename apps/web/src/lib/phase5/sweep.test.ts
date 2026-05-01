@@ -108,7 +108,7 @@ describe('sweep — mixed-decision batch', () => {
 });
 
 describe('sweep — rate-limit sleep', () => {
-  test('sleep(550) is called between rows but not after the last one', async () => {
+  test('sleep(2200) is called between rows but not after the last one', async () => {
     const r1 = row({ organisationName: 'ONE LTD' });
     const r2 = row({ organisationName: 'TWO LTD' });
     const r3 = row({ organisationName: 'THREE LTD' });
@@ -121,7 +121,7 @@ describe('sweep — rate-limit sleep', () => {
 
     // 3 rows → 2 sleeps (between row 1↔2 and row 2↔3)
     expect(deps.sleep).toHaveBeenCalledTimes(2);
-    expect(deps.sleep).toHaveBeenCalledWith(550);
+    expect(deps.sleep).toHaveBeenCalledWith(2200);
   });
 
   test('empty result set: sleep is not called', async () => {

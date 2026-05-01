@@ -29,12 +29,20 @@ export type ProposedVerdict =
   | 'no_match'
   | 'human_review';
 
+export type CHFullProfile = {
+  company_number: string;
+  company_name: string;
+  company_status: string | null;
+  [key: string]: unknown;
+};
+
 export type ProposedResolution = {
   verdict: ProposedVerdict;
   companyNumber: string | null;
   matchMethod: MatchMethod | null;
   matchScore: number | null;
   queryUsed: string | null;
+  profile?: CHFullProfile;
 };
 
 export type QueueReason =

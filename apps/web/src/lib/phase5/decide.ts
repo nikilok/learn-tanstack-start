@@ -43,6 +43,8 @@ export type ProposedResolution = {
   matchScore: number | null;
   queryUsed: string | null;
   profile?: CHFullProfile;
+  /** Top CH search results captured for the review queue's audit jsonb. */
+  topResults?: unknown[];
 };
 
 export type QueueReason =

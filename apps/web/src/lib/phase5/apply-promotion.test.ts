@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test';
 import type {
   ApplyPromotionDeps,
   CHFullProfile,
-  MappingUpdateResult,
+  CommitPromotionResult,
 } from './apply-promotion.ts';
 import { applyPromotion } from './apply-promotion.ts';
 import type { ExistingMapping, ProposedResolution } from './decide.ts';
@@ -28,7 +28,7 @@ const verifiedExact = (
   ...over,
 });
 
-const updatedRow: MappingUpdateResult = {
+const committedRow: CommitPromotionResult = {
   organisationName: 'ACME LTD',
   newCompanyNumber: '12345678',
   newMatchMethod: 'exact',
@@ -37,22 +37,27 @@ const updatedRow: MappingUpdateResult = {
 const makeDeps = (
   over: Partial<ApplyPromotionDeps> = {},
 ): ApplyPromotionDeps => ({
-  updateMapping: mock(async () => updatedRow),
-  insertAudit: mock(async () => undefined),
+  commitPromotion: mock(async () => committedRow),
   upsertProfile: mock(async () => undefined),
   ...over,
 });
 
-describe('applyPromotion — mapping write', () => {
-  test('successful update: returns ok with the new state from RETURNING', async () => {
-    const e = existing();
-    const p = verifiedExact();
+describe('applyPromotion — atomic commit', () => {
+  test('successful commit: returns ok, calls commitPromotion with full update + audit input', async () => {
+    const e = existing({
+      matchMethod: 'no_match',
+      companyNumber: null,
+    });
+    const p = verifiedExact({
+      companyNumber: '12345678',
+      matchMethod: 'exact',
+    });
     const deps = makeDeps();
 
     const result = await applyPromotion(e, p, 'phase5_sweep_no_match', deps);
 
-    expect(deps.updateMapping).toHaveBeenCalledTimes(1);
-    expect(deps.updateMapping).toHaveBeenCalledWith({
+    expect(deps.commitPromotion).toHaveBeenCalledTimes(1);
+    expect(deps.commitPromotion).toHaveBeenCalledWith({
       organisationName: 'ACME LTD',
       originalVerifiedAt: e.verifiedAt,
       newCompanyNumber: '12345678',
@@ -60,6 +65,9 @@ describe('applyPromotion — mapping write', () => {
       newMatchScore: 1,
       newQueryUsed: 'ACME LTD',
       newIsPublicBody: false,
+      oldCompanyNumber: null,
+      oldMatchMethod: 'no_match',
+      changedBy: 'phase5_sweep_no_match',
     });
     expect(result).toEqual({ ok: true });
   });
@@ -72,17 +80,14 @@ describe('applyPromotion — profile upsert', () => {
     company_status: 'active',
   };
 
-  test('verified verdict with profile: upsertProfile is called AFTER updateMapping + insertAudit', async () => {
+  test('verified verdict with profile: upsertProfile is called AFTER commitPromotion', async () => {
     const calls: string[] = [];
     const e = existing({ matchMethod: 'no_match', companyNumber: null });
     const p = verifiedExact({ profile });
     const deps = makeDeps({
-      updateMapping: mock(async () => {
-        calls.push('updateMapping');
-        return updatedRow;
-      }),
-      insertAudit: mock(async () => {
-        calls.push('insertAudit');
+      commitPromotion: mock(async () => {
+        calls.push('commitPromotion');
+        return committedRow;
       }),
       upsertProfile: mock(async () => {
         calls.push('upsertProfile');
@@ -93,7 +98,7 @@ describe('applyPromotion — profile upsert', () => {
 
     expect(deps.upsertProfile).toHaveBeenCalledTimes(1);
     expect(deps.upsertProfile).toHaveBeenCalledWith(profile);
-    expect(calls).toEqual(['updateMapping', 'insertAudit', 'upsertProfile']);
+    expect(calls).toEqual(['commitPromotion', 'upsertProfile']);
   });
 
   test('verified verdict with no profile in payload: upsertProfile is NOT called', async () => {
@@ -141,7 +146,7 @@ describe('applyPromotion — profile upsert', () => {
 });
 
 describe('applyPromotion — public_body promotion shape', () => {
-  test('no_match → public_body: updateMapping called with newIsPublicBody=true and null company_number', async () => {
+  test('no_match → public_body: commitPromotion called with newIsPublicBody=true and null company_number', async () => {
     const e = existing({ matchMethod: 'no_match', companyNumber: null });
     const p: ProposedResolution = {
       verdict: 'public_body',
@@ -151,8 +156,8 @@ describe('applyPromotion — public_body promotion shape', () => {
       queryUsed: 'NHS BRISTOL ICB',
     };
     const deps = makeDeps({
-      updateMapping: mock(
-        async (): Promise<MappingUpdateResult> => ({
+      commitPromotion: mock(
+        async (): Promise<CommitPromotionResult> => ({
           organisationName: 'ACME LTD',
           newCompanyNumber: null,
           newMatchMethod: 'public_body',
@@ -162,7 +167,7 @@ describe('applyPromotion — public_body promotion shape', () => {
 
     const result = await applyPromotion(e, p, 'phase5_sweep_no_match', deps);
 
-    expect(deps.updateMapping).toHaveBeenCalledWith({
+    expect(deps.commitPromotion).toHaveBeenCalledWith({
       organisationName: 'ACME LTD',
       originalVerifiedAt: e.verifiedAt,
       newCompanyNumber: null,
@@ -170,52 +175,27 @@ describe('applyPromotion — public_body promotion shape', () => {
       newMatchScore: null,
       newQueryUsed: 'NHS BRISTOL ICB',
       newIsPublicBody: true,
+      oldCompanyNumber: null,
+      oldMatchMethod: 'no_match',
+      changedBy: 'phase5_sweep_no_match',
     });
-    expect(deps.insertAudit).toHaveBeenCalledTimes(1);
     expect(deps.upsertProfile).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: true });
   });
 });
 
 describe('applyPromotion — lock missed', () => {
-  test('updateMapping returns null: no audit, no profile upsert, returns lock_missed', async () => {
+  test('commitPromotion returns null: no profile upsert, returns lock_missed', async () => {
     const e = existing();
     const p = verifiedExact();
     const deps = makeDeps({
-      updateMapping: mock(async () => null),
+      commitPromotion: mock(async () => null),
     });
 
     const result = await applyPromotion(e, p, 'phase5_sweep_no_match', deps);
 
-    expect(deps.updateMapping).toHaveBeenCalledTimes(1);
-    expect(deps.insertAudit).not.toHaveBeenCalled();
+    expect(deps.commitPromotion).toHaveBeenCalledTimes(1);
     expect(deps.upsertProfile).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: false, reason: 'lock_missed' });
-  });
-});
-
-describe('applyPromotion — audit row', () => {
-  test('successful update inserts one audit row capturing old + new state', async () => {
-    const e = existing({
-      matchMethod: 'no_match',
-      companyNumber: null,
-    });
-    const p = verifiedExact({
-      companyNumber: '12345678',
-      matchMethod: 'exact',
-    });
-    const deps = makeDeps();
-
-    await applyPromotion(e, p, 'phase5_sweep_no_match', deps);
-
-    expect(deps.insertAudit).toHaveBeenCalledTimes(1);
-    expect(deps.insertAudit).toHaveBeenCalledWith({
-      organisationName: 'ACME LTD',
-      oldCompanyNumber: null,
-      newCompanyNumber: '12345678',
-      oldMatchMethod: 'no_match',
-      newMatchMethod: 'exact',
-      changedBy: 'phase5_sweep_no_match',
-    });
   });
 });

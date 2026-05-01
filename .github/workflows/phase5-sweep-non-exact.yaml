@@ -1,0 +1,41 @@
+name: Phase 5 Sweep — Tier 2 (non_exact)
+
+# Verified-but-soft matches (token_sim + previous_name) that may promote to
+# `exact` once CH normalises a name or HMRC catches up with a rename.
+# ~6k rows total; 3000/run → ~1-week full turnover.
+
+on:
+  schedule:
+    - cron: "0 4 * * 0,3"
+  workflow_dispatch:
+    inputs:
+      max-rows:
+        description: "Override per-run row limit (default 3000)"
+        required: false
+        type: number
+      dry-run:
+        description: "Dry run — no DB writes"
+        type: boolean
+        default: false
+
+concurrency:
+  group: phase5-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+      COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run sweep
+        uses: ./.github/actions/run-phase5-sweep
+        with:
+          tier: non_exact
+          max-rows: ${{ github.event.inputs.max-rows }}
+          dry-run: ${{ github.event.inputs.dry-run }}

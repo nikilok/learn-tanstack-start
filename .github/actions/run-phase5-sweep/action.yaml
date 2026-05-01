@@ -1,0 +1,43 @@
+name: Run Phase 5 Sweep
+description: |
+  Wraps the per-tier wiring (Bun setup, install, script invocation) for the
+  Phase 5 sweep so each tier workflow only declares its own cron + tier name.
+  Caller must do `actions/checkout@v4` first so the action.yaml is on disk,
+  and must set POSTGRES_URL + COMPANIES_HOUSE_SEED_API_KEY as job-level env.
+
+inputs:
+  tier:
+    description: "Tier name passed to --tier (no_match | non_exact | exact | public_body)"
+    required: true
+  max-rows:
+    description: "Optional override for the per-run row limit; falls back to the script's tier default"
+    required: false
+    default: ""
+  dry-run:
+    description: "Dry run — no DB writes"
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: apps/web
+      run: bun install --frozen-lockfile
+
+    - name: Run Phase 5 sweep
+      shell: bash
+      run: |
+        ROWS_FLAG=""
+        if [ -n "${{ inputs.max-rows }}" ]; then
+          ROWS_FLAG="--max-rows=${{ inputs.max-rows }}"
+        fi
+        DRY_FLAG=""
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          DRY_FLAG="--dry-run"
+        fi
+        bun apps/web/scripts/phase5-sweep.ts --tier=${{ inputs.tier }} $ROWS_FLAG $DRY_FLAG

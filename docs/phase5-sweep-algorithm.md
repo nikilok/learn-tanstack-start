@@ -59,7 +59,6 @@ process(row, changed_by):
     update → applyPromotion(row, proposed, changed_by)
     queue  → enqueueReview(row, proposed, action.reason, changed_by)
              bumpVerifiedAt(row)   # so it doesn't re-queue every run
-    no_op  → bumpVerifiedAt(row)
 ```
 
 ## The decision (upgrade-only, never demote)
@@ -89,11 +88,18 @@ decide(existing, proposed):
           return bump                       # human override re-confirmed
       return queue("manual_conflict")
 
-  # 3. public_body is a terminal peer
+  # 3. public_body is a terminal peer (4 distinct cases — not a clean xor)
   if existing.match_method == 'public_body' and proposed.verdict == 'public_body':
       return bump
-  if existing.match_method == 'public_body' xor proposed.verdict == 'public_body':
+  if existing.match_method == 'public_body' and proposed.verdict == 'verified':
       return queue("public_body_conflict")
+  if proposed.verdict == 'public_body' and existing.match_method != 'no_match':
+      return queue("public_body_conflict")
+  if proposed.verdict == 'public_body' and existing.match_method == 'no_match':
+      return update                              # promote rank 0 → terminal
+  # existing=public_body + proposed=no_match falls through to step 4 — the
+  # rank ladder treats public_body's missing entry via the human_review
+  # fallback (rank 1), so no_match (rank 0) loses → bump.
 
   # 4. ranked comparison
   if rank(proposed) > rank(existing):  return update         # promote
@@ -306,6 +312,7 @@ describe('rule 2: manual is sacred')
 describe('rule 3: public_body terminal peer')
   existing = public_body, proposed = public_body                → bump
   existing = public_body, proposed = verified                   → queue public_body_conflict
+  existing = public_body, proposed = no_match                   → bump (via rank fallback: public_body→1, no_match→0)
   existing = verified,    proposed = public_body                → queue public_body_conflict
   existing = no_match,    proposed = public_body                → update (rank 0 → terminal: promote)
   # ↑ debatable — see "open test cases" below

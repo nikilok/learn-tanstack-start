@@ -119,6 +119,22 @@ describe('rule 3: public_body terminal peer', () => {
     );
     expect(result).toEqual({ action: 'update' });
   });
+
+  test('public_body + no_match → bump (rank fallthrough: pb→1, no_match→0)', () => {
+    // Existing is public_body; proposed verdict is no_match. None of the
+    // rule-3 explicit branches catch this combo, so it falls through to the
+    // rank ladder. existingRank treats public_body as human_review (rank 1)
+    // via the fallback, and no_match is rank 0 → demotion rejected → bump.
+    const result = decide(
+      existing({ matchMethod: 'public_body', companyNumber: null }),
+      proposed({
+        verdict: 'no_match',
+        companyNumber: null,
+        matchMethod: 'no_match',
+      }),
+    );
+    expect(result).toEqual({ action: 'bump' });
+  });
 });
 
 describe('rule 4: rank promotion (proposed > existing)', () => {

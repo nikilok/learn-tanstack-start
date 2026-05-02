@@ -4,7 +4,7 @@ version: 2
 # fixtures (test inputs, sample configs) that legitimately must look like
 # real credentials to be useful.
 secret:
-  ignored-paths:
+  ignored_paths:
     # describeDbHost's credential-leak resistance tests build a synthetic
     # postgresql://user:pass@host/db string to assert the function never
     # returns anything but the host segment. The "password" is a fixture,

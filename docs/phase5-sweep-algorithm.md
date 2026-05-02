@@ -166,18 +166,16 @@ queue.
 
 ```pseudo
 enqueueReview(row, proposed, reason, changed_by):
-  if exists(review_queue WHERE organisation_name = row.organisation_name
-                           AND reason = reason
-                           AND resolved_at IS NULL):
-      return                          # idempotent across sweep cycles
-
   INSERT INTO hmrc_company_mapping_review_queue
     (organisation_name, reason,
      existing_company_number, existing_match_method, existing_match_score,
      proposed_company_number, proposed_match_method, proposed_match_score,
      proposed_query_used, ch_search_results_top5,
      detected_by)
-  VALUES (...);
+  VALUES (...)
+  ON CONFLICT (organisation_name, reason) WHERE resolved_at IS NULL
+    DO NOTHING;        # atomic dedup via the partial unique index
+                       # ux_review_queue_unresolved_org_reason
 ```
 
 ## DDL (single migration)
@@ -205,6 +203,17 @@ CREATE TABLE hmrc_company_mapping_review_queue (
 
 CREATE INDEX idx_review_queue_unresolved
   ON hmrc_company_mapping_review_queue (detected_at)
+  WHERE resolved_at IS NULL;
+
+CREATE INDEX idx_review_queue_org
+  ON hmrc_company_mapping_review_queue (organisation_name);
+
+-- Required by enqueueReview's ON CONFLICT clause — guarantees at-most-one
+-- unresolved row per (organisation_name, reason) pair. Without this index
+-- the INSERT … ON CONFLICT statement fails with "no unique or exclusion
+-- constraint matching the ON CONFLICT specification".
+CREATE UNIQUE INDEX ux_review_queue_unresolved_org_reason
+  ON hmrc_company_mapping_review_queue (organisation_name, reason)
   WHERE resolved_at IS NULL;
 
 CREATE INDEX idx_mapping_method_verified

@@ -30,6 +30,7 @@ import type {
   CHFullProfile,
 } from '../src/lib/phase5/apply-promotion.ts';
 import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
+import { describeDbHost } from '../src/lib/phase5/db-host.ts';
 import {
   makeBumpVerifiedAt,
   makeCommitPromotion,
@@ -108,21 +109,6 @@ const maxRows = maxRowsArg
 
 if (!Number.isFinite(maxRows) || maxRows <= 0) {
   throw new Error(`Invalid --max-rows value (must be positive integer)`);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DB host descriptor — extracts only the hostname from POSTGRES_URL so the
-// startup banner can show which Neon branch we're connected to without
-// leaking credentials. Never include user, password, or query params.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function describeDbHost(url: string | undefined): string {
-  if (!url) return '(not set)';
-  try {
-    return new URL(url).host;
-  } catch {
-    return '(unparseable)';
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

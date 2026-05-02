@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
+import { describeDbHost } from '../src/lib/phase5/db-host.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT_ENV = resolve(SCRIPT_DIR, '../../../.env.local');
@@ -21,15 +22,6 @@ if (!process.env.POSTGRES_URL)
   throw new Error(`POSTGRES_URL not in ${ROOT_ENV}`);
 
 const sql = neon(process.env.POSTGRES_URL);
-
-function describeDbHost(url: string | undefined): string {
-  if (!url) return '(not set)';
-  try {
-    return new URL(url).host;
-  } catch {
-    return '(unparseable)';
-  }
-}
 
 console.log('Phase 5 sanity check');
 console.log(`  db host: ${describeDbHost(process.env.POSTGRES_URL)}`);

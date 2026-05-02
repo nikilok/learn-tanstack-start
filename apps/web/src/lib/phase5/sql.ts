@@ -119,10 +119,16 @@ function toExistingMapping(row: RawMappingRow): ExistingMapping {
  *  tiebreak inside `resolveOneSponsor`. */
 export function makeLookupLocality(sql: Sql): SweepDeps['lookupLocality'] {
   return async (organisationName) => {
+    // `ORDER BY id ASC` for deterministic row selection — `hmrc_skilled_workers`
+    // has multiple rows per organisation_name (one per route × type_rating
+    // combination). Without an explicit order, the locality picked for the
+    // resolver's tiebreak depends on Postgres's storage order, which can
+    // shift between runs. (CodeRabbit PR #85, comment 2.)
     const rows = (await sql`
       SELECT town_city, county
       FROM hmrc_skilled_workers
       WHERE organisation_name = ${organisationName}
+      ORDER BY id ASC
       LIMIT 1
     `) as { town_city: string | null; county: string | null }[];
     const first = rows[0];
@@ -159,6 +165,10 @@ export function makeEnqueueReview(sql: Sql): SweepDeps['enqueueReview'] {
     const topResultsJson = proposed.topResults
       ? JSON.stringify(proposed.topResults)
       : null;
+    // ON CONFLICT inferred against the partial unique index
+    // `ux_review_queue_unresolved_org_reason`. Atomic deduplication —
+    // closes the race window the prior WHERE NOT EXISTS check left open
+    // (CodeRabbit PR #85, comment 5).
     await sql`
       INSERT INTO hmrc_company_mapping_review_queue (
         organisation_name,
@@ -173,7 +183,7 @@ export function makeEnqueueReview(sql: Sql): SweepDeps['enqueueReview'] {
         ch_search_results_top5,
         detected_by
       )
-      SELECT
+      VALUES (
         ${existing.organisationName},
         ${reason},
         ${existing.companyNumber},
@@ -185,12 +195,10 @@ export function makeEnqueueReview(sql: Sql): SweepDeps['enqueueReview'] {
         ${proposed.queryUsed},
         ${topResultsJson}::jsonb,
         ${detectedBy}
-      WHERE NOT EXISTS (
-        SELECT 1 FROM hmrc_company_mapping_review_queue
-        WHERE organisation_name = ${existing.organisationName}
-          AND reason = ${reason}
-          AND resolved_at IS NULL
       )
+      ON CONFLICT (organisation_name, reason)
+        WHERE resolved_at IS NULL
+        DO NOTHING
     `;
   };
 }

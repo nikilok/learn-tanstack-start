@@ -9,7 +9,7 @@ One script: `phase5-sweep.ts`. Invoked per tier from a GitHub Actions
 cron with `--tier=<name>`. Tiers differ only by SELECT predicate and
 cadence; the per-row logic is identical.
 
-```
+```text
 Tier 1  match_method = 'no_match'                       daily,    4000 rows
 Tier 2  match_method IN ('token_sim','previous_name')   2×/week,  3000 rows
 Tier 3  match_method = 'exact'                          daily,    1500 rows
@@ -35,7 +35,11 @@ sweep(tier):
 
   for row in rows:
     process(row, changed_by = "phase5_sweep_" + tier)
-    sleep(550ms)         # ~1.8 req/sec, single CH key
+    sleep(2200ms)        # ~1.8 req/sec at the post-patch worst case of
+                         # 4 CH calls/row (1 search + 3 Tier-B profile
+                         # fetches when Tier-A returned only inactive
+                         # candidates). See active-status preference in
+                         # apps/web/src/lib/hmrc-ch/resolve-sponsor.ts.
 
   print summary(updated, bumped, queued, lock_missed, errored)
 ```
@@ -62,7 +66,7 @@ process(row, changed_by):
 
 Rank ladder for ordinary states:
 
-```
+```text
 0  no_match
 1  human_review
 2  verified · token_sim
@@ -228,7 +232,7 @@ ends at "row written to `companies_house_profiles`".
 
 ## Per-run summary (stdout, captured by GH Actions)
 
-```
+```text
 Phase 5 sweep — tier=<name>
   selected     : N
   updated      : N
@@ -251,7 +255,7 @@ branch in the rank table.
 
 ### Code split for testability
 
-```
+```text
 apps/web/src/lib/phase5/
   decide.ts          pure: (existing, proposed) → DecideResult
                      no imports from db, fs, fetch, or resolveOneSponsor
@@ -280,7 +284,7 @@ One `describe` per rule in the decision table; one `test` per
 representative case. Every test is `expect(decide(existing,
 proposed)).toEqual({ action: '...', reason?: '...' })`.
 
-```
+```text
 describe('rule 1: human_review never overwrites')
   proposed.verdict = human_review, existing = anything → bump
 
@@ -337,7 +341,7 @@ Open test cases (decisions to lock in via the test, not the doc):
 
 Mock the four injected functions and assert dispatch + arguments.
 
-```
+```text
 test('verified row passes through resolveSponsor and dispatches update')
   resolveSponsor returns verified
   expect(applyPromotion).toHaveBeenCalledWith(row, proposed, "phase5_sweep_no_match")
@@ -370,7 +374,7 @@ test('CH errors are caught and counted, not thrown')
 
 ### Run
 
-```
+```sh
 bun test apps/web/src/lib/phase5/
 ```
 

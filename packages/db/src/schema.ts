@@ -10,6 +10,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
 
@@ -143,6 +144,13 @@ export const hmrcCompanyMappingReviewQueue = pgTable(
       .on(table.detectedAt)
       .where(sql`${table.resolvedAt} IS NULL`),
     index('idx_review_queue_org').on(table.organisationName),
+    // Partial unique index — guarantees at-most-one unresolved row per
+    // (organisation_name, reason) pair. Closes the race window between
+    // concurrent enqueueReview calls; lets sql.ts use ON CONFLICT DO NOTHING
+    // for atomic deduplication. (CodeRabbit PR #85, comment 5.)
+    uniqueIndex('ux_review_queue_unresolved_org_reason')
+      .on(table.organisationName, table.reason)
+      .where(sql`${table.resolvedAt} IS NULL`),
   ],
 );
 

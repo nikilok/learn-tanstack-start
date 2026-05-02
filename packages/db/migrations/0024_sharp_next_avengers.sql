@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "ux_review_queue_unresolved_org_reason" ON "hmrc_company_mapping_review_queue" USING btree ("organisation_name","reason") WHERE "hmrc_company_mapping_review_queue"."resolved_at" IS NULL;

@@ -136,14 +136,29 @@ function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-async function fetchApi(path: string): Promise<unknown | null> {
+/** Retry budget for 429 backoffs. With 3 retries × 60s, a single request can
+ *  spend up to ~3 minutes recovering before the row is given up on as
+ *  errored. Prevents an exhausted CH quota from looping the sweep against
+ *  the workflow's 240-minute timeout (CodeRabbit PR #85, comment 1). */
+const FETCH_MAX_RETRIES = 3;
+
+async function fetchApi(
+  path: string,
+  retriesLeft = FETCH_MAX_RETRIES,
+): Promise<unknown | null> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: { Authorization: AUTH_HEADER },
   });
   if (res.status === 429) {
-    console.log('  Rate limited, backing off for 60s…');
+    if (retriesLeft <= 0) {
+      console.error(`  Rate limit retries exhausted for ${path}, giving up`);
+      return null;
+    }
+    console.log(
+      `  Rate limited, backing off for 60s… (${retriesLeft} retries left)`,
+    );
     await delay(60_000);
-    return fetchApi(path);
+    return fetchApi(path, retriesLeft - 1);
   }
   if (!res.ok) return null;
   return res.json();

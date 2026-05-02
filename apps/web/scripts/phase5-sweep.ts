@@ -111,6 +111,22 @@ if (!Number.isFinite(maxRows) || maxRows <= 0) {
   throw new Error(`Invalid --max-rows value (must be positive integer)`);
 }
 
+// Per-row sleep override. Read from PHASE5_DELAY_MS env var (set via repo
+// `vars` in the GH Actions workflow) so we can throttle up/down without a
+// redeploy. Falls back to the orchestrator's DEFAULT_DELAY_MS (2200) when
+// unset.
+const delayMsRaw = process.env.PHASE5_DELAY_MS;
+let delayMs: number | undefined;
+if (delayMsRaw !== undefined && delayMsRaw !== '') {
+  const parsed = Number.parseInt(delayMsRaw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(
+      `Invalid PHASE5_DELAY_MS="${delayMsRaw}" — must be a non-negative integer`,
+    );
+  }
+  delayMs = parsed;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CH API client (rate-limit aware)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,11 +266,12 @@ const sweepDeps: SweepDeps = {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-const config: SweepConfig = { tier, maxRows };
+const config: SweepConfig = { tier, maxRows, delayMs };
 const startedAt = Date.now();
 
+const delayLabel = delayMs !== undefined ? ` delay=${delayMs}ms` : '';
 console.log(
-  `Phase 5 sweep — tier=${tier} max_rows=${maxRows}${DRY_RUN ? ' (DRY RUN — no writes)' : ''}`,
+  `Phase 5 sweep — tier=${tier} max_rows=${maxRows}${delayLabel}${DRY_RUN ? ' (DRY RUN — no writes)' : ''}`,
 );
 console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
@@ -271,3 +288,20 @@ console.log(`  queued       : ${summary.queued}`);
 console.log(`  lock_missed  : ${summary.lockMissed}`);
 console.log(`  errored      : ${summary.errored}`);
 console.log(`  duration     : ${durationSec}s`);
+
+// Fail the workflow run loudly when the error rate is too high — likely a
+// sustained CH 429 / outage / auth failure that no auto-retry can recover.
+// GitHub Actions sends an email to the workflow owner on failed runs.
+const ERROR_RATE_THRESHOLD = 0.1;
+const errorRate = summary.selected > 0 ? summary.errored / summary.selected : 0;
+if (errorRate > ERROR_RATE_THRESHOLD) {
+  console.error('');
+  console.error(
+    `  ERROR RATE ${(errorRate * 100).toFixed(1)}% exceeds ${ERROR_RATE_THRESHOLD * 100}% threshold.`,
+  );
+  console.error(
+    '  Likely a sustained CH outage, rate-limit exhaustion, or auth failure.',
+  );
+  console.error('  Check the run log for /search and /company error details.');
+  process.exit(1);
+}

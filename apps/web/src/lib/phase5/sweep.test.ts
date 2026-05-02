@@ -133,6 +133,20 @@ describe('sweep — rate-limit sleep', () => {
 
     expect(deps.sleep).not.toHaveBeenCalled();
   });
+
+  test('config.delayMs override is honoured (CLI uses this for PHASE5_DELAY_MS env)', async () => {
+    const r1 = row({ organisationName: 'ONE LTD' });
+    const r2 = row({ organisationName: 'TWO LTD' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r1, r2]),
+      resolveSponsor: mock(async () => verifiedExact()),
+    });
+
+    await sweep({ tier: 'no_match', maxRows: 10, delayMs: 5000 }, deps);
+
+    expect(deps.sleep).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).toHaveBeenCalledWith(5000);
+  });
 });
 
 describe('sweep — error handling', () => {

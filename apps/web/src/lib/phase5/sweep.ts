@@ -21,6 +21,10 @@ export type SweepLocality = {
 export type SweepConfig = {
   tier: Tier;
   maxRows: number;
+  /** Inter-row sleep in ms. Default `DEFAULT_DELAY_MS` (2200) gives ~1.8
+   *  req/sec at the resolver's worst-case 4 CH calls/row. CLI can override
+   *  via the `PHASE5_DELAY_MS` env var without redeploying. */
+  delayMs?: number;
 };
 
 export type ApplyResult = { ok: true } | { ok: false; reason: 'lock_missed' };
@@ -63,12 +67,12 @@ const CHANGED_BY: Record<Tier, string> = {
   public_body: 'phase5_sweep_public_body',
 };
 
-/** Inter-row sleep. Sized for the resolver's post-patch worst case of 4 CH
- *  calls per row (1 search + 3 Tier-B profile fetches when Tier-A returned
- *  only inactive candidates). 4 calls / 2200ms ≈ 1.8 req/sec, under CH's
- *  600/5min budget. Pre-patch this was 550ms; bumped after dev-branch
- *  testing surfaced 429 backoffs on slices with many dissolved namesakes. */
-const DELAY_MS = 2200;
+/** Default inter-row sleep when the caller doesn't override via `config.delayMs`.
+ *  Sized for the resolver's post-patch worst case of 4 CH calls per row
+ *  (1 search + 3 Tier-B profile fetches when Tier-A returned only inactive
+ *  candidates). 4 calls / 2200ms ≈ 1.8 req/sec, under CH's 600/5min budget.
+ *  CLI can override via `PHASE5_DELAY_MS` env var without redeploying. */
+export const DEFAULT_DELAY_MS = 2200;
 
 /** Run a single tier sweep against the injected dependencies. */
 export async function sweep(
@@ -86,9 +90,10 @@ export async function sweep(
   };
 
   const changedBy = CHANGED_BY[config.tier];
+  const delayMs = config.delayMs ?? DEFAULT_DELAY_MS;
 
   for (let i = 0; i < rows.length; i += 1) {
-    if (i > 0) await deps.sleep(DELAY_MS);
+    if (i > 0) await deps.sleep(delayMs);
     const row = rows[i];
     try {
       const locality = await deps.lookupLocality(row.organisationName);

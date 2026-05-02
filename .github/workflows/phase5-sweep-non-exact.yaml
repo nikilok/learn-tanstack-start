@@ -29,6 +29,7 @@ jobs:
     env:
       POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
       COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
+      PHASE5_DELAY_MS: ${{ vars.PHASE5_DELAY_MS }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

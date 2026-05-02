@@ -29,6 +29,10 @@ jobs:
     env:
       POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
       COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
+      # Optional: override the per-row sleep without redeploying. Set
+      # PHASE5_DELAY_MS in repo Settings → Secrets and variables → Actions
+      # → Variables. Falls back to the script's DEFAULT_DELAY_MS (2200ms).
+      PHASE5_DELAY_MS: ${{ vars.PHASE5_DELAY_MS }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

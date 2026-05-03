@@ -103,29 +103,35 @@ if (!VALID_TIERS.includes(tier)) {
   );
 }
 
-const maxRows = maxRowsArg
-  ? Number.parseInt(maxRowsArg.replace('--max-rows=', ''), 10)
-  : TIER_DEFAULT_MAX_ROWS[tier];
-
-if (!Number.isFinite(maxRows) || maxRows <= 0) {
-  throw new Error(`Invalid --max-rows value (must be positive integer)`);
+/** Strict whole-number parse. Rejects partial strings like "100abc",
+ *  decimals like "100.5", scientific notation like "1e3", and negative
+ *  numbers — `Number.parseInt` silently truncates all of those. */
+function parseStrictInt(raw: string, label: string, min: number): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(
+      `Invalid ${label}="${raw}" — must be a whole non-negative integer`,
+    );
+  }
+  const n = Number.parseInt(raw, 10);
+  if (n < min) {
+    throw new Error(`Invalid ${label}="${raw}" — must be >= ${min}`);
+  }
+  return n;
 }
+
+const maxRows = maxRowsArg
+  ? parseStrictInt(maxRowsArg.replace('--max-rows=', ''), '--max-rows', 1)
+  : TIER_DEFAULT_MAX_ROWS[tier];
 
 // Per-row sleep override. Read from PHASE5_DELAY_MS env var (set via repo
 // `vars` in the GH Actions workflow) so we can throttle up/down without a
 // redeploy. Falls back to the orchestrator's DEFAULT_DELAY_MS (2200) when
 // unset.
 const delayMsRaw = process.env.PHASE5_DELAY_MS;
-let delayMs: number | undefined;
-if (delayMsRaw !== undefined && delayMsRaw !== '') {
-  const parsed = Number.parseInt(delayMsRaw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(
-      `Invalid PHASE5_DELAY_MS="${delayMsRaw}" — must be a non-negative integer`,
-    );
-  }
-  delayMs = parsed;
-}
+const delayMs =
+  delayMsRaw !== undefined && delayMsRaw !== ''
+    ? parseStrictInt(delayMsRaw, 'PHASE5_DELAY_MS', 0)
+    : undefined;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CH API client (rate-limit aware)
@@ -187,6 +193,22 @@ async function fetchApi(
     }
     console.log(
       `  Rate limited, backing off for 60s… (${retriesLeft} retries left)`,
+    );
+    await delay(60_000);
+    return fetchApi(path, retriesLeft - 1);
+  }
+  // 5xx — transient CH-side outages (502/503/504 during their deploys etc).
+  // Same retry shape as 429 but distinct log messages so operators can
+  // tell quota-exhaustion apart from server outage.
+  if (res.status >= 500 && res.status < 600) {
+    if (retriesLeft <= 0) {
+      console.error(
+        `  Server error ${res.status} retries exhausted for ${path}, giving up`,
+      );
+      return null;
+    }
+    console.log(
+      `  Server error ${res.status}, backing off for 60s… (${retriesLeft} retries left)`,
     );
     await delay(60_000);
     return fetchApi(path, retriesLeft - 1);

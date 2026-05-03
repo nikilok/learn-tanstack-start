@@ -10,7 +10,7 @@
     "dev:no-proxy": "vite dev --port 3000",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "bun test",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
     "db:migrate": "bun scripts/db-migrate.ts",

@@ -1,0 +1,12 @@
+version: 2
+
+# Paths excluded from secret scanning. Add only files containing synthetic
+# fixtures (test inputs, sample configs) that legitimately must look like
+# real credentials to be useful.
+secret:
+  ignored_paths:
+    # describeDbHost's credential-leak resistance tests build a synthetic
+    # postgresql://<USER>:<PASS>@<HOST>/<DB> string to assert the function
+    # never returns anything but the host segment. The "password" is a
+    # fixture, never used against any real system.
+    - apps/web/src/lib/phase5/db-host.test.ts

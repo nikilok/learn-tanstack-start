@@ -1301,6 +1301,65 @@ against current CH state.
   a Phase-3-shaped leak, the sweep makes it visible (compare against
   the `phase1-sanity-check` `new_since_phase1` proxy).
 
+### Phase 5 is also a `companies_house_profiles` writer
+
+Worth calling out explicitly because earlier phases didn't behave this
+way. Today, `companies_house_profiles` only grows via two paths:
+
+1. `seed-companies-house.ts` — manual cold-start.
+2. `getCompanyProfile`'s resolver branch — fires only the **first** time
+   a never-seen HMRC name is requested. Once a row is written with
+   `match_method='no_match'`, `getCompanyProfile` short-circuits at the
+   `if (!mapping.companyNumber) return null` guard and never re-resolves,
+   so no new CH entity ever enters the cache via this path either.
+
+ch-stream (`apps/ch-stream/src/processor.ts`) is **not** a writer of new
+rows — it loads the existing `company_number` set into memory at startup
+and drops every event for a number outside that set. It's a pure
+updater of profiles already cached.
+
+This means the `no_match` bucket (~16k rows) is structurally frozen:
+the only way an existing `no_match` row can ever flip to `verified` is
+if **something deliberately re-resolves it against CH**. That something
+is Phase 5.
+
+Concretely, when the sweep flips a row from `no_match` → `verified`, it
+performs **two writes**, not one:
+
+1. `UPDATE hmrc_company_mapping` — set `company_number`,
+   `match_method`, `match_score`, `query_used`, `verified_at`. Audit
+   row via the atomic CTE.
+2. **`UPSERT companies_house_profiles`** with the resolved profile, if
+   not already present. The resolver already returns the full profile
+   payload alongside the verdict (it fetched `/company/{number}` for
+   the locality tiebreak / Tier B lookup), so no extra CH call is
+   needed — we just have to persist it. Reuse `upsertProfile` from
+   `apps/web/src/api/companiesHouse.ts` rather than duplicating the
+   `onConflictDoUpdate` block.
+
+#### Implications
+
+- **`companies_house_profiles` row count grows over time** in
+  proportion to the rate at which `no_match` rows successfully resolve.
+  Today its size is bounded by "HMRC names ever resolved to a verified
+  CH entity"; post-Phase-5 it tracks that population *plus* whatever
+  the sweep recovers. This is the desired behaviour — without it, the
+  newly-resolved CH entity wouldn't enter the cache and ch-stream would
+  never start tracking it.
+- **ch-stream needs to refresh its `companyNumbers` set after Phase 5
+  writes.** ch-stream loads the set once at startup. A Phase-5-added
+  company stays un-tracked until the next ch-stream restart, which
+  delays drift correction on it. Two options:
+  - Restart ch-stream after each sweep run (simple but coarse).
+  - Have ch-stream poll-refresh its `companyNumbers` set periodically
+    (e.g. every 30 min) — small SELECT, no event-stream impact.
+  Recommend the polling option; revisit if the cost shows up.
+- **Audit attribution.** Any new entry in
+  `companies_house_profile_trails` could now come from ch-stream OR
+  Phase 5. They're easy to tell apart by timing (Phase 5 runs at fixed
+  cron windows), but if disambiguation ever matters, add a `source`
+  column to the trails table. Not needed for v1.
+
 ### Two options, layered
 
 #### A. Periodic batch job (the sweep — recommended for v1, on its own)

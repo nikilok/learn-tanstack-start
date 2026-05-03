@@ -6,7 +6,7 @@ version: 2
 secret:
   ignored_paths:
     # describeDbHost's credential-leak resistance tests build a synthetic
-    # postgresql://user:pass@host/db string to assert the function never
-    # returns anything but the host segment. The "password" is a fixture,
-    # never used against any real system.
+    # postgresql://<USER>:<PASS>@<HOST>/<DB> string to assert the function
+    # never returns anything but the host segment. The "password" is a
+    # fixture, never used against any real system.
     - apps/web/src/lib/phase5/db-host.test.ts

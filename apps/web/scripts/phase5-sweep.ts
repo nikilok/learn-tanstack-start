@@ -138,19 +138,48 @@ function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-/** Retry budget for 429 backoffs. With 3 retries × 60s, a single request can
- *  spend up to ~3 minutes recovering before the row is given up on as
- *  errored. Prevents an exhausted CH quota from looping the sweep against
- *  the workflow's 240-minute timeout (CodeRabbit PR #85, comment 1). */
+/** Retry budget for 429 backoffs and network errors. With 3 retries × 60s,
+ *  a single request can spend up to ~3 minutes recovering before the row
+ *  is given up on as errored. */
 const FETCH_MAX_RETRIES = 3;
+
+/** Per-request timeout. CH's /search and /company endpoints normally respond
+ *  in 200-500ms; anything past 30s is almost certainly a hung connection
+ *  (network blip, NAT idle drop, DNS issue) — abort and retry rather than
+ *  waste the workflow's 240-min timeout on a single stalled request. */
+const FETCH_TIMEOUT_MS = 30_000;
 
 async function fetchApi(
   path: string,
   retriesLeft = FETCH_MAX_RETRIES,
 ): Promise<unknown | null> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Authorization: AUTH_HEADER },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      headers: { Authorization: AUTH_HEADER },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    // AbortError (timeout) and other transient network errors are retryable.
+    // Distinguished from CH-side failures (4xx/5xx) which are handled below.
+    if (retriesLeft <= 0) {
+      console.error(
+        `  Network error/timeout for ${path}, giving up: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+    console.log(
+      `  Network error/timeout, backing off for 60s… (${retriesLeft} retries left)`,
+    );
+    await delay(60_000);
+    return fetchApi(path, retriesLeft - 1);
+  }
+  clearTimeout(timeoutId);
+
   if (res.status === 429) {
     if (retriesLeft <= 0) {
       console.error(`  Rate limit retries exhausted for ${path}, giving up`);

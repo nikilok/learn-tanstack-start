@@ -40,4 +40,37 @@ runs:
         if [ "${{ inputs.dry-run }}" = "true" ]; then
           DRY_FLAG="--dry-run"
         fi
-        bun apps/web/scripts/phase5-sweep.ts --tier=${{ inputs.tier }} $ROWS_FLAG $DRY_FLAG
+        set -o pipefail
+        bun apps/web/scripts/phase5-sweep.ts --tier=${{ inputs.tier }} $ROWS_FLAG $DRY_FLAG | tee /tmp/phase5-sweep.log
+
+    - name: Write job summary
+      if: always()
+      shell: bash
+      run: |
+        LOG=/tmp/phase5-sweep.log
+        if [ ! -f "$LOG" ]; then exit 0; fi
+        extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //"; }
+        SELECTED=$(extract selected)
+        UPDATED=$(extract updated)
+        BUMPED=$(extract bumped)
+        QUEUED=$(extract queued)
+        LOCK_MISSED=$(extract lock_missed)
+        ERRORED=$(extract errored)
+        DURATION=$(extract duration)
+        DRY_NOTE=""
+        if [ "${{ inputs.dry-run }}" = "true" ]; then
+          DRY_NOTE=" — dry run"
+        fi
+        {
+          echo "## Phase 5 Sweep — tier \`${{ inputs.tier }}\`${DRY_NOTE}"
+          echo ""
+          echo "| Metric | Value |"
+          echo "| --- | --- |"
+          echo "| 🎯 Selected | ${SELECTED:-—} |"
+          echo "| ✅ Updated | ${UPDATED:-—} |"
+          echo "| ⬆️ Bumped | ${BUMPED:-—} |"
+          echo "| 📋 Queued | ${QUEUED:-—} |"
+          echo "| 🔒 Lock missed | ${LOCK_MISSED:-—} |"
+          echo "| ❌ Errored | ${ERRORED:-—} |"
+          echo "| ⏱️ Duration | ${DURATION:-—} |"
+        } >> "$GITHUB_STEP_SUMMARY"

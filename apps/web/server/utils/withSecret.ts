@@ -10,7 +10,8 @@ export function withSecret(
     const expected = process.env.REVALIDATE_SECRET ?? '';
     const a = Buffer.from(secret);
     const b = Buffer.from(expected);
-    if (a.length === b.length && timingSafeEqual(a, b)) {
+    const equal = a.length === b.length && timingSafeEqual(a, b);
+    if (equal && expected.length > 0) {
       handler();
     }
     return { accepted: true };

@@ -31,21 +31,28 @@ runs:
 
     - name: Run Phase 5 sweep
       shell: bash
+      env:
+        TIER: ${{ inputs.tier }}
+        MAX_ROWS: ${{ inputs.max-rows }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         ROWS_FLAG=""
-        if [ -n "${{ inputs.max-rows }}" ]; then
-          ROWS_FLAG="--max-rows=${{ inputs.max-rows }}"
+        if [ -n "$MAX_ROWS" ]; then
+          ROWS_FLAG="--max-rows=$MAX_ROWS"
         fi
         DRY_FLAG=""
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           DRY_FLAG="--dry-run"
         fi
         set -o pipefail
-        bun apps/web/scripts/phase5-sweep.ts --tier=${{ inputs.tier }} $ROWS_FLAG $DRY_FLAG | tee /tmp/phase5-sweep.log
+        bun apps/web/scripts/phase5-sweep.ts --tier="$TIER" $ROWS_FLAG $DRY_FLAG | tee /tmp/phase5-sweep.log
 
     - name: Write job summary
       if: always()
       shell: bash
+      env:
+        TIER: ${{ inputs.tier }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         LOG=/tmp/phase5-sweep.log
         if [ ! -f "$LOG" ]; then exit 0; fi
@@ -58,11 +65,11 @@ runs:
         ERRORED=$(extract errored)
         DURATION=$(extract duration)
         DRY_NOTE=""
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           DRY_NOTE=" — dry run"
         fi
         {
-          echo "## Phase 5 Sweep — tier \`${{ inputs.tier }}\`${DRY_NOTE}"
+          echo "## Phase 5 Sweep — tier \`$TIER\`${DRY_NOTE}"
           echo ""
           echo "| Metric | Value |"
           echo "| --- | --- |"

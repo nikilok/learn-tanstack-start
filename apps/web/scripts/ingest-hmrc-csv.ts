@@ -116,9 +116,13 @@ function computeHash(
   typeRating: string,
   route: string,
 ): string {
-  const input = [orgName, townCity ?? '', county ?? '', typeRating, route].join(
-    '|',
-  );
+  const input = JSON.stringify([
+    orgName,
+    townCity ?? '',
+    county ?? '',
+    typeRating,
+    route,
+  ]);
   const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
   // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
   return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);

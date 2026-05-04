@@ -56,7 +56,7 @@ runs:
       run: |
         LOG=/tmp/phase5-sweep.log
         if [ ! -f "$LOG" ]; then exit 0; fi
-        extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //"; }
+        extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
         SELECTED=$(extract selected)
         UPDATED=$(extract updated)
         BUMPED=$(extract bumped)

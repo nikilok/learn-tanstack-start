@@ -29,6 +29,11 @@ generic CWE categories — built-in matchers cover those>
   Bun-native Postgres bindings, and `Bun.CryptoHasher` — they never shell out
   via `child_process.exec`/`spawn`. Don't construct shell-injection payloads
   against URL/argv inputs; they never reach a shell.
+- **`computeHash` in `apps/web/scripts/ingest-hmrc-csv.ts` uses a `|`-joined
+  sha256 as a stable slug ID** for company URLs. Hash stability is a hard
+  requirement — bookmarks, slugs, and external references depend on it. The
+  theoretical `|` collision case is an accepted risk: HMRC sponsor data
+  contains no `|` in any field. Do not flag this as a dedup bug.
 
 <3–5 paths/patterns that look risky but are intentional —
 fork-specific stubs, dev fixtures, intended-public endpoints>

@@ -31,13 +31,53 @@ runs:
 
     - name: Run Phase 5 sweep
       shell: bash
+      env:
+        TIER: ${{ inputs.tier }}
+        MAX_ROWS: ${{ inputs.max-rows }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         ROWS_FLAG=""
-        if [ -n "${{ inputs.max-rows }}" ]; then
-          ROWS_FLAG="--max-rows=${{ inputs.max-rows }}"
+        if [ -n "$MAX_ROWS" ]; then
+          ROWS_FLAG="--max-rows=$MAX_ROWS"
         fi
         DRY_FLAG=""
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
+        if [ "$DRY_RUN" = "true" ]; then
           DRY_FLAG="--dry-run"
         fi
-        bun apps/web/scripts/phase5-sweep.ts --tier=${{ inputs.tier }} $ROWS_FLAG $DRY_FLAG
+        set -o pipefail
+        bun apps/web/scripts/phase5-sweep.ts --tier="$TIER" $ROWS_FLAG $DRY_FLAG | tee /tmp/phase5-sweep.log
+
+    - name: Write job summary
+      if: always()
+      shell: bash
+      env:
+        TIER: ${{ inputs.tier }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        LOG=/tmp/phase5-sweep.log
+        if [ ! -f "$LOG" ]; then exit 0; fi
+        extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
+        SELECTED=$(extract selected)
+        UPDATED=$(extract updated)
+        BUMPED=$(extract bumped)
+        QUEUED=$(extract queued)
+        LOCK_MISSED=$(extract lock_missed)
+        ERRORED=$(extract errored)
+        DURATION=$(extract duration)
+        DRY_NOTE=""
+        if [ "$DRY_RUN" = "true" ]; then
+          DRY_NOTE=" — dry run"
+        fi
+        {
+          echo "## Phase 5 Sweep — tier \`$TIER\`${DRY_NOTE}"
+          echo ""
+          echo "| Metric | Value |"
+          echo "| --- | --- |"
+          echo "| 🎯 Selected | ${SELECTED:-—} |"
+          echo "| ✅ Updated | ${UPDATED:-—} |"
+          echo "| ⬆️ Bumped | ${BUMPED:-—} |"
+          echo "| 📋 Queued | ${QUEUED:-—} |"
+          echo "| 🔒 Lock missed | ${LOCK_MISSED:-—} |"
+          echo "| ❌ Errored | ${ERRORED:-—} |"
+          echo "| ⏱️ Duration | ${DURATION:-—} |"
+        } >> "$GITHUB_STEP_SUMMARY"

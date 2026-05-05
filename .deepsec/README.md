@@ -71,4 +71,4 @@ After `bun install`:
 - Full docs: `node_modules/deepsec/dist/docs/{getting-started,configuration,models,writing-matchers,plugins,architecture,data-layout,vercel-setup,faq}.md`
 
 Or browse on
-[GitHub](https://github.com/vercel/deepsec/tree/main/docs).
+[GitHub](https://github.com/vercel-labs/deepsec/tree/main/docs).

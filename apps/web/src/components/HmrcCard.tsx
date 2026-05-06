@@ -33,7 +33,7 @@ export default function HmrcCard({
       }}
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
-      className={`block no-underline py-2 -mx-4 px-4 ${isHighlighted ? 'bg-(--link-bg-hover)' : ''}`}
+      className="block no-underline py-2 -mx-4 px-4"
       style={{
         transition: 'none',
         ...(isActive ? { viewTransitionName: 'active-card' } : {}),
@@ -44,7 +44,9 @@ export default function HmrcCard({
         onActivate();
       }}
     >
-      <h3 className="heading-card text-base font-semibold text-(--sea-ink)">
+      <h3
+        className={`heading-card text-base font-semibold ${isHighlighted ? 'text-(--logo-red)' : 'text-(--sea-ink)'}`}
+      >
         {titleCase(row.organisationName)}
       </h3>
       <div className="mt-0.5">

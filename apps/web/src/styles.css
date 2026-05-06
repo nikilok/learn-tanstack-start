@@ -51,6 +51,7 @@
   --logo-navy: #001c55;
   --logo-red: #c8102e;
   --ok: #74a0b8;
+  --bg-page-edge: #f4f4f8;
 }
 
 .dark {
@@ -97,12 +98,22 @@
   --logo-navy: #e0e7ff;
   --logo-red: #f87171;
   --ok: #4a425a;
+  --bg-page-edge: #0a0a0a;
 }
 
 html,
 body,
 #app {
   min-height: 100%;
+}
+
+html {
+  /* Reserve the vertical scrollbar's space so centred layouts don't shift left
+   * when content grows tall enough to introduce a scrollbar. Uses its own
+   * theme-aware token (`--bg-page-edge`) so the gutter colour can be tuned
+   * independently of body's tinted gradient backdrop. */
+  scrollbar-gutter: stable;
+  background-color: var(--bg-page-edge);
 }
 
 body {
@@ -168,7 +179,7 @@ a:hover {
   opacity: 0.85;
 }
 
-@utility page-wrap {
+.page-wrap {
   width: min(1200px, calc(100% - 2rem));
   margin-inline: auto;
 }
@@ -193,7 +204,7 @@ a {
     opacity 150ms ease;
 }
 
-@utility island-kicker {
+.island-kicker {
   font-family: var(--font-mono);
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -239,17 +250,17 @@ a {
   }
 }
 
-@utility site-header {
+.site-header {
   background: var(--header-bg);
   box-shadow: var(--shadow-ring);
   transform: translateZ(0);
 }
 
-@utility site-footer {
+.site-footer {
   border-top: 1px solid var(--line);
 }
 
-@utility shadow-ring {
+.shadow-ring {
   box-shadow: var(--shadow-ring);
 }
 
@@ -262,7 +273,7 @@ a {
   z-index: -1;
 }
 
-@utility glass {
+.glass {
   backdrop-filter: blur(2px);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.2s;
@@ -272,7 +283,7 @@ a {
   box-shadow: var(--shadow-card-full);
 }
 
-@utility heading-card {
+.heading-card {
   letter-spacing: -0.4px;
 }
 

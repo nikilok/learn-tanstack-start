@@ -30,12 +30,10 @@ function nudgeBelowStickyHeader(index: number) {
  */
 export function useResultsKeyboardNav({
   count,
-  search,
   virtualizer,
   onActivate,
 }: {
   count: number;
-  search: string;
   virtualizer: Virtualizer<Window, Element>;
   onActivate: (index: number) => void;
 }) {
@@ -56,11 +54,6 @@ export function useResultsKeyboardNav({
     setRotation(({ to }) => ({ from: to, to: to + delta }));
     setHighlightedIndex(next);
   }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: search is the reset trigger
-  useEffect(() => {
-    setHighlightedIndex(-1);
-  }, [search]);
 
   useEffect(() => {
     if (count === 0) return;
@@ -143,5 +136,5 @@ export function useResultsKeyboardNav({
     };
   }, [moveHighlight]);
 
-  return { highlightedIndex, rotation };
+  return { highlightedIndex, rotation, moveHighlight };
 }

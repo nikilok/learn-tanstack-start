@@ -71,6 +71,18 @@ function Home() {
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">
           Search UK skilled worker visa sponsors
+          {!platformInfo.isMobile && (
+            <span
+              style={{
+                opacity: search.length >= 3 ? 1 : 0,
+                transition: 'opacity 250ms ease',
+                pointerEvents: 'none',
+              }}
+            >
+              {' · '}
+              <kbd>↑</kbd> <kbd>↓</kbd> to navigate
+            </span>
+          )}
         </p>
         <div ref={sentinelRef} className="pointer-events-none mt-6" />
         <div

@@ -45,6 +45,10 @@ export default function HmrcCard({
       onClick={() => {
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
         sessionStorage.setItem('hmrc-active-id', row.slugId);
+        sessionStorage.setItem(
+          'hmrc-highlight',
+          JSON.stringify({ search, slugId: row.slugId }),
+        );
         onActivate();
       }}
     >

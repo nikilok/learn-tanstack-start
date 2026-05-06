@@ -1,6 +1,6 @@
 import { useRouter } from '@tanstack/react-router';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
@@ -60,9 +60,12 @@ export default function HmrcResults({ search }: { search: string }) {
     if (contentWidth > 0) virtualizer.measure();
   }, [contentWidth, virtualizer]);
 
-  const { highlightedIndex, rotation: lensRotation } = useResultsKeyboardNav({
+  const {
+    highlightedIndex,
+    rotation: lensRotation,
+    moveHighlight,
+  } = useResultsKeyboardNav({
     count: results.length,
-    search,
     virtualizer,
     onActivate: (index) => {
       const link = listRef.current?.querySelector<HTMLAnchorElement>(
@@ -71,6 +74,40 @@ export default function HmrcResults({ search }: { search: string }) {
       link?.click();
     },
   });
+
+  // Auto-select the first row (or restore the previously activated one on
+  // back-nav) once results are available for the current search. We do the
+  // lookup here rather than in the hook because it requires the actual row
+  // data — virtual indices aren't stable when the virtualizer rerenders or
+  // results refetch, so we save the row's stable slugId on click and find it
+  // again here.
+  const lastRestoredSearchRef = useRef<string | null>(null);
+  // useLayoutEffect (not useEffect) so the highlight is committed before the
+  // browser paints / view-transition snapshots — otherwise the back-nav
+  // transition captures a frame with highlight=-1 and the lens never appears
+  // until after the animation, often imperceptibly.
+  useLayoutEffect(() => {
+    if (results.length === 0) return;
+    if (lastRestoredSearchRef.current === search) return;
+    lastRestoredSearchRef.current = search;
+    let initial = 0;
+    const saved = sessionStorage.getItem('hmrc-highlight');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as {
+          search?: string;
+          slugId?: string;
+        };
+        if (parsed.search === search && parsed.slugId) {
+          const idx = results.findIndex((r) => r.slugId === parsed.slugId);
+          if (idx >= 0) initial = idx;
+        }
+      } catch {
+        // ignore malformed entry
+      }
+    }
+    moveHighlight(initial);
+  }, [results, search, moveHighlight]);
 
   // Mirror the router's intent-preload for keyboard nav: <Link> only fires
   // intent on hover/focus, which arrow-key nav never triggers. Debounce by

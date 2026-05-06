@@ -109,9 +109,10 @@ body,
 
 html {
   /* Reserve the vertical scrollbar's space so centred layouts don't shift left
-   * when content grows tall enough to introduce a scrollbar. Uses its own
-   * theme-aware token (`--bg-page-edge`) so the gutter colour can be tuned
-   * independently of body's tinted gradient backdrop. */
+   * when content grows tall enough to introduce a scrollbar. The page bg-color
+   * lives here (rather than on body) so that body remains transparent and the
+   * `body::after` grid pseudo-element (z-index: -1) isn't hidden behind body's
+   * own opaque bg. Uses --bg-page-edge so the gutter colour stays theme-aware. */
   scrollbar-gutter: stable;
   background-color: var(--bg-page-edge);
 }
@@ -121,7 +122,6 @@ body {
   color: var(--sea-ink);
   font-family: var(--font-sans);
   font-feature-settings: "liga" 1;
-  background-color: var(--bg-base);
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
     radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),

@@ -15,11 +15,13 @@ export default function HmrcCard({
   row,
   search,
   isActive,
+  isHighlighted,
   onActivate,
 }: {
   row: HmrcRow;
   search: string;
   isActive: boolean;
+  isHighlighted: boolean;
   onActivate: () => void;
 }) {
   return (
@@ -31,7 +33,7 @@ export default function HmrcCard({
       }}
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
-      className="block no-underline py-2"
+      className={`block no-underline py-2 -mx-4 px-4 transition-none ${isHighlighted ? 'bg-(--link-bg-hover)' : ''}`}
       style={isActive ? { viewTransitionName: 'active-card' } : undefined}
       onClick={() => {
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));

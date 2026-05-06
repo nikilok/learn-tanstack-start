@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
+import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
@@ -56,6 +57,18 @@ export default function HmrcResults({ search }: { search: string }) {
   useEffect(() => {
     if (contentWidth > 0) virtualizer.measure();
   }, [contentWidth, virtualizer]);
+
+  const highlightedIndex = useResultsKeyboardNav({
+    count: results.length,
+    search,
+    virtualizer,
+    onActivate: (index) => {
+      const link = listRef.current?.querySelector<HTMLAnchorElement>(
+        `[data-index="${index}"] a`,
+      );
+      link?.click();
+    },
+  });
 
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -161,6 +174,7 @@ export default function HmrcResults({ search }: { search: string }) {
               row={results[virtualRow.index]}
               search={search}
               isActive={activeId === results[virtualRow.index].slugId}
+              isHighlighted={highlightedIndex === virtualRow.index}
               onActivate={() => {
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers

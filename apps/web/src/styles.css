@@ -76,7 +76,7 @@
   --header-bg: rgba(10, 10, 10, 0.88);
   --chip-bg: #111111;
   --chip-line: #2a2a2a;
-  --link-bg-hover: #1a1a1a;
+  --link-bg-hover: #000000;
   --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
   --shadow-card:
     rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,

@@ -54,6 +54,8 @@ export function useResultsKeyboardNav({
       const s = stateRef.current;
       if (s.count === 0) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // Don't steal arrow/enter from the IME candidate popup during composition.
+      if (e.isComposing) return;
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();

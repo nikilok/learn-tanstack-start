@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import type { HmrcRow } from '../api/hmrc';
 import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
+import UnionJackLens from './UnionJackLens';
 
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
@@ -33,7 +34,7 @@ export default function HmrcCard({
       }}
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
-      className="block no-underline py-2 -mx-4 px-4"
+      className="relative block no-underline py-2 -mx-4 px-4"
       style={{
         transition: 'none',
         ...(isActive ? { viewTransitionName: 'active-card' } : {}),
@@ -44,6 +45,14 @@ export default function HmrcCard({
         onActivate();
       }}
     >
+      {isHighlighted && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -left-2 top-3 block h-4 w-4"
+        >
+          <UnionJackLens className="h-full w-full" />
+        </span>
+      )}
       <h3
         className={`heading-card text-base font-semibold ${isHighlighted ? 'text-(--logo-red)' : 'text-(--sea-ink)'}`}
       >

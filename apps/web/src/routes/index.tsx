@@ -71,9 +71,22 @@ function Home() {
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">
           Search UK skilled worker visa sponsors
+          {!platformInfo.isMobile && (
+            <span
+              style={{
+                opacity: search.length >= 3 ? 1 : 0,
+                transition: 'opacity 250ms ease',
+                pointerEvents: 'none',
+              }}
+            >
+              {' · '}
+              <kbd>↑</kbd> <kbd>↓</kbd> to navigate
+            </span>
+          )}
         </p>
         <div ref={sentinelRef} className="pointer-events-none mt-6" />
         <div
+          data-sticky-search
           className={`pointer-events-none z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'fixed left-0 right-0 top-[61px] sm:top-[77px] mx-auto max-w-2xl search-glow pb-4 pt-2' : 'sticky top-[69px] sm:top-[85px] pb-4'}`}
         >
           <SearchBar

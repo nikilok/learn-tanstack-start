@@ -1,8 +1,10 @@
+import { useRouter } from '@tanstack/react-router';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
+import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
@@ -19,6 +21,7 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   // `activeId` only gets set when the user clicks a card on this very
   // mount (via flushSync below). On a remount after back-nav we leave it
   // null on purpose — that way the listing's matching card does *not*
@@ -56,6 +59,72 @@ export default function HmrcResults({ search }: { search: string }) {
   useEffect(() => {
     if (contentWidth > 0) virtualizer.measure();
   }, [contentWidth, virtualizer]);
+
+  const {
+    highlightedIndex,
+    rotation: lensRotation,
+    moveHighlight,
+  } = useResultsKeyboardNav({
+    count: results.length,
+    virtualizer,
+    onActivate: (index) => {
+      const link = listRef.current?.querySelector<HTMLAnchorElement>(
+        `[data-index="${index}"] a`,
+      );
+      link?.click();
+    },
+  });
+
+  // Auto-select the first row (or restore the previously activated one on
+  // back-nav) once results are available for the current search. We do the
+  // lookup here rather than in the hook because it requires the actual row
+  // data — virtual indices aren't stable when the virtualizer rerenders or
+  // results refetch, so we save the row's stable slugId on click and find it
+  // again here.
+  const lastRestoredSearchRef = useRef<string | null>(null);
+  // useLayoutEffect (not useEffect) so the highlight is committed before the
+  // browser paints / view-transition snapshots — otherwise the back-nav
+  // transition captures a frame with highlight=-1 and the lens never appears
+  // until after the animation, often imperceptibly.
+  useLayoutEffect(() => {
+    if (results.length === 0) return;
+    if (lastRestoredSearchRef.current === search) return;
+    lastRestoredSearchRef.current = search;
+    let initial = 0;
+    const saved = sessionStorage.getItem('hmrc-highlight');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved) as {
+          search?: string;
+          slugId?: string;
+        };
+        if (parsed.search === search && parsed.slugId) {
+          const idx = results.findIndex((r) => r.slugId === parsed.slugId);
+          if (idx >= 0) initial = idx;
+        }
+      } catch {
+        // ignore malformed entry
+      }
+    }
+    moveHighlight(initial);
+  }, [results, search, moveHighlight]);
+
+  // Mirror the router's intent-preload for keyboard nav: <Link> only fires
+  // intent on hover/focus, which arrow-key nav never triggers. Debounce by
+  // 150ms so a held arrow key doesn't spam preloads for every row passed.
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    const row = results[highlightedIndex];
+    if (!row) return;
+    const timer = setTimeout(() => {
+      router.preloadRoute({
+        to: '/company/$id/$slug',
+        params: { id: row.slugId, slug: row.nameSlug },
+        search: { search },
+      });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [highlightedIndex, results, router, search]);
 
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -161,6 +230,8 @@ export default function HmrcResults({ search }: { search: string }) {
               row={results[virtualRow.index]}
               search={search}
               isActive={activeId === results[virtualRow.index].slugId}
+              isHighlighted={highlightedIndex === virtualRow.index}
+              lensRotation={lensRotation}
               onActivate={() => {
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers

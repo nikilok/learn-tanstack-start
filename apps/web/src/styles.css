@@ -175,24 +175,13 @@ a:where(:not([class*="no-underline"])) {
   text-underline-offset: 2px;
 }
 
-a:hover {
+a:where(:not([class*="no-underline"])):hover {
   opacity: 0.85;
 }
 
 .page-wrap {
   width: min(1200px, calc(100% - 2rem));
   margin-inline: auto;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  @keyframes lens-spin {
-    from {
-      transform: rotate(var(--lens-from, 0deg));
-    }
-    to {
-      transform: rotate(var(--lens-to, 0deg));
-    }
-  }
 }
 
 button,

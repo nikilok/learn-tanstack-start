@@ -1,9 +1,12 @@
 import { Link } from '@tanstack/react-router';
-import type { CSSProperties } from 'react';
 import type { HmrcRow } from '../api/hmrc';
 import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 import UnionJackLens from './UnionJackLens';
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
@@ -56,16 +59,13 @@ export default function HmrcCard({
         <span
           aria-hidden
           className="pointer-events-none absolute -left-2 top-3 block h-4 w-4"
-          style={
-            {
-              '--lens-from': `${lensRotation.from}deg`,
-              '--lens-to': `${lensRotation.to}deg`,
-              transform: 'rotate(var(--lens-to))',
-              animation: 'lens-spin 720ms ease-out',
-            } as CSSProperties
-          }
         >
-          <UnionJackLens className="h-full w-full" />
+          <UnionJackLens
+            className="h-full w-full"
+            fromDeg={lensRotation.from}
+            toDeg={lensRotation.to}
+            durationMs={prefersReducedMotion() ? 0 : 720}
+          />
         </span>
       )}
       <h3

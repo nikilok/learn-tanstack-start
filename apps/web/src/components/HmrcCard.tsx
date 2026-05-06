@@ -17,12 +17,14 @@ export default function HmrcCard({
   search,
   isActive,
   isHighlighted,
+  highlightDirection,
   onActivate,
 }: {
   row: HmrcRow;
   search: string;
   isActive: boolean;
   isHighlighted: boolean;
+  highlightDirection: 'up' | 'down';
   onActivate: () => void;
 }) {
   return (
@@ -49,6 +51,9 @@ export default function HmrcCard({
         <span
           aria-hidden
           className="pointer-events-none absolute -left-2 top-3 block h-4 w-4"
+          style={{
+            animation: `${highlightDirection === 'down' ? 'lens-spin-cw' : 'lens-spin-ccw'} 550ms ease-out`,
+          }}
         >
           <UnionJackLens className="h-full w-full" />
         </span>

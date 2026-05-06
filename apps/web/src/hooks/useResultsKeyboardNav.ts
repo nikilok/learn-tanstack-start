@@ -1,5 +1,5 @@
 import type { Virtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
 /**
@@ -40,9 +40,17 @@ export function useResultsKeyboardNav({
   onActivate: (index: number) => void;
 }) {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [direction, setDirection] = useState<'down' | 'up'>('down');
 
   const stateRef = useRef({ count, highlightedIndex, virtualizer, onActivate });
   stateRef.current = { count, highlightedIndex, virtualizer, onActivate };
+
+  const moveHighlight = useCallback((next: number) => {
+    const prev = stateRef.current.highlightedIndex;
+    if (next === prev) return;
+    setDirection(next > prev ? 'down' : 'up');
+    setHighlightedIndex(next);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: search is the reset trigger
   useEffect(() => {
@@ -67,13 +75,13 @@ export function useResultsKeyboardNav({
         // flushSync commits the highlight DOM update before the synchronous
         // scroll, otherwise the browser paints one frame with the new scroll
         // position but the old highlight class.
-        flushSync(() => setHighlightedIndex(next));
+        flushSync(() => moveHighlight(next));
         s.virtualizer.scrollToIndex(next);
         nudgeBelowStickyHeader(next);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const next = s.highlightedIndex <= 0 ? 0 : s.highlightedIndex - 1;
-        flushSync(() => setHighlightedIndex(next));
+        flushSync(() => moveHighlight(next));
         // At the top, scroll past the list to reveal the search input above it.
         if (next === 0) {
           window.scrollTo({ top: 0 });
@@ -88,7 +96,7 @@ export function useResultsKeyboardNav({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [count]);
+  }, [count, moveHighlight]);
 
   // Real pointer movement sets the highlight to whatever card sits under the
   // cursor. Coord-delta filter ignores Safari's synthetic mousemove during
@@ -109,9 +117,7 @@ export function useResultsKeyboardNav({
       if (!wrapper) return;
       const index = Number(wrapper.dataset.index);
       if (Number.isNaN(index)) return;
-      if (stateRef.current.highlightedIndex !== index) {
-        setHighlightedIndex(index);
-      }
+      moveHighlight(index);
     };
 
     const handler = (e: MouseEvent) => {
@@ -130,7 +136,7 @@ export function useResultsKeyboardNav({
       window.removeEventListener('mousemove', handler);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, []);
+  }, [moveHighlight]);
 
-  return highlightedIndex;
+  return { highlightedIndex, direction };
 }

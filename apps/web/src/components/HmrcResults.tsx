@@ -58,17 +58,18 @@ export default function HmrcResults({ search }: { search: string }) {
     if (contentWidth > 0) virtualizer.measure();
   }, [contentWidth, virtualizer]);
 
-  const highlightedIndex = useResultsKeyboardNav({
-    count: results.length,
-    search,
-    virtualizer,
-    onActivate: (index) => {
-      const link = listRef.current?.querySelector<HTMLAnchorElement>(
-        `[data-index="${index}"] a`,
-      );
-      link?.click();
-    },
-  });
+  const { highlightedIndex, direction: highlightDirection } =
+    useResultsKeyboardNav({
+      count: results.length,
+      search,
+      virtualizer,
+      onActivate: (index) => {
+        const link = listRef.current?.querySelector<HTMLAnchorElement>(
+          `[data-index="${index}"] a`,
+        );
+        link?.click();
+      },
+    });
 
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -175,6 +176,7 @@ export default function HmrcResults({ search }: { search: string }) {
               search={search}
               isActive={activeId === results[virtualRow.index].slugId}
               isHighlighted={highlightedIndex === virtualRow.index}
+              highlightDirection={highlightDirection}
               onActivate={() => {
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers

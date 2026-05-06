@@ -173,6 +173,24 @@ a:hover {
   margin-inline: auto;
 }
 
+@keyframes lens-spin-cw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lens-spin-ccw {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
 button,
 a {
   transition:

@@ -33,8 +33,11 @@ export default function HmrcCard({
       }}
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
-      className={`block no-underline py-2 -mx-4 px-4 transition-none ${isHighlighted ? 'bg-(--link-bg-hover)' : ''}`}
-      style={isActive ? { viewTransitionName: 'active-card' } : undefined}
+      className={`block no-underline py-2 -mx-4 px-4 ${isHighlighted ? 'bg-(--link-bg-hover)' : ''}`}
+      style={{
+        transition: 'none',
+        ...(isActive ? { viewTransitionName: 'active-card' } : {}),
+      }}
       onClick={() => {
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
         sessionStorage.setItem('hmrc-active-id', row.slugId);

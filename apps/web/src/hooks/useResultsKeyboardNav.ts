@@ -40,7 +40,11 @@ export function useResultsKeyboardNav({
   onActivate: (index: number) => void;
 }) {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [direction, setDirection] = useState<'down' | 'up'>('down');
+  // Accumulated lens rotation: each step adds (or subtracts) the per-step
+  // delta so the lens picks up where it left off, instead of snapping to 0
+  // before each animation. `from` is the angle the new card's lens should
+  // start at; `to` is where it should land.
+  const [rotation, setRotation] = useState({ from: 0, to: 0 });
 
   const stateRef = useRef({ count, highlightedIndex, virtualizer, onActivate });
   stateRef.current = { count, highlightedIndex, virtualizer, onActivate };
@@ -48,7 +52,8 @@ export function useResultsKeyboardNav({
   const moveHighlight = useCallback((next: number) => {
     const prev = stateRef.current.highlightedIndex;
     if (next === prev) return;
-    setDirection(next > prev ? 'down' : 'up');
+    const delta = next > prev ? 120 : -120;
+    setRotation(({ to }) => ({ from: to, to: to + delta }));
     setHighlightedIndex(next);
   }, []);
 
@@ -138,5 +143,5 @@ export function useResultsKeyboardNav({
     };
   }, [moveHighlight]);
 
-  return { highlightedIndex, direction };
+  return { highlightedIndex, rotation };
 }

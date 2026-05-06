@@ -1,3 +1,4 @@
+import { useRouter } from '@tanstack/react-router';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -20,6 +21,7 @@ export default function HmrcResults({ search }: { search: string }) {
   const { results, isLoading, hasMore, loadingMore, fetchMore } =
     useHmrcSearch(search);
   const listRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
   // `activeId` only gets set when the user clicks a card on this very
   // mount (via flushSync below). On a remount after back-nav we leave it
   // null on purpose — that way the listing's matching card does *not*
@@ -58,18 +60,34 @@ export default function HmrcResults({ search }: { search: string }) {
     if (contentWidth > 0) virtualizer.measure();
   }, [contentWidth, virtualizer]);
 
-  const { highlightedIndex, direction: highlightDirection } =
-    useResultsKeyboardNav({
-      count: results.length,
-      search,
-      virtualizer,
-      onActivate: (index) => {
-        const link = listRef.current?.querySelector<HTMLAnchorElement>(
-          `[data-index="${index}"] a`,
-        );
-        link?.click();
-      },
-    });
+  const { highlightedIndex, rotation: lensRotation } = useResultsKeyboardNav({
+    count: results.length,
+    search,
+    virtualizer,
+    onActivate: (index) => {
+      const link = listRef.current?.querySelector<HTMLAnchorElement>(
+        `[data-index="${index}"] a`,
+      );
+      link?.click();
+    },
+  });
+
+  // Mirror the router's intent-preload for keyboard nav: <Link> only fires
+  // intent on hover/focus, which arrow-key nav never triggers. Debounce by
+  // 150ms so a held arrow key doesn't spam preloads for every row passed.
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    const row = results[highlightedIndex];
+    if (!row) return;
+    const timer = setTimeout(() => {
+      router.preloadRoute({
+        to: '/company/$id/$slug',
+        params: { id: row.slugId, slug: row.nameSlug },
+        search: { search },
+      });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [highlightedIndex, results, router, search]);
 
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -176,7 +194,7 @@ export default function HmrcResults({ search }: { search: string }) {
               search={search}
               isActive={activeId === results[virtualRow.index].slugId}
               isHighlighted={highlightedIndex === virtualRow.index}
-              highlightDirection={highlightDirection}
+              lensRotation={lensRotation}
               onActivate={() => {
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers

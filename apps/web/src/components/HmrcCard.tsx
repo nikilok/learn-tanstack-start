@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router';
+import type { CSSProperties } from 'react';
 import type { HmrcRow } from '../api/hmrc';
 import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
@@ -17,14 +18,14 @@ export default function HmrcCard({
   search,
   isActive,
   isHighlighted,
-  highlightDirection,
+  lensRotation,
   onActivate,
 }: {
   row: HmrcRow;
   search: string;
   isActive: boolean;
   isHighlighted: boolean;
-  highlightDirection: 'up' | 'down';
+  lensRotation: { from: number; to: number };
   onActivate: () => void;
 }) {
   return (
@@ -51,9 +52,14 @@ export default function HmrcCard({
         <span
           aria-hidden
           className="pointer-events-none absolute -left-2 top-3 block h-4 w-4"
-          style={{
-            animation: `${highlightDirection === 'down' ? 'lens-spin-cw' : 'lens-spin-ccw'} 550ms ease-out`,
-          }}
+          style={
+            {
+              '--lens-from': `${lensRotation.from}deg`,
+              '--lens-to': `${lensRotation.to}deg`,
+              transform: 'rotate(var(--lens-to))',
+              animation: 'lens-spin 720ms ease-out',
+            } as CSSProperties
+          }
         >
           <UnionJackLens className="h-full w-full" />
         </span>

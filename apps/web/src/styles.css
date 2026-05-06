@@ -174,21 +174,12 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  @keyframes lens-spin-cw {
+  @keyframes lens-spin {
     from {
-      transform: rotate(0deg);
+      transform: rotate(var(--lens-from, 0deg));
     }
     to {
-      transform: rotate(180deg);
-    }
-  }
-
-  @keyframes lens-spin-ccw {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(-180deg);
+      transform: rotate(var(--lens-to, 0deg));
     }
   }
 }

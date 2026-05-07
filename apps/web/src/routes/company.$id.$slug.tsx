@@ -4,8 +4,10 @@ import {
   notFound,
   redirect,
   stripSearchParams,
+  useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
+import { useEffect } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { StatusBadge } from '../components/StatusBadge';
@@ -117,6 +119,22 @@ export const Route = createFileRoute('/company/$id/$slug')({
 function CompanyDetail() {
   const { sponsor, profile } = Route.useLoaderData();
   const { search } = Route.useSearch();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      navigate({
+        to: '/',
+        search: { search },
+        viewTransition: { types: ['back'] },
+      });
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigate, search]);
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -254,6 +272,9 @@ function CompanyDetail() {
           className="no-underline mt-6 block w-full px-4 py-3 text-center text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
           &larr; Back to search
+          <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
+            (Esc)
+          </kbd>
         </Link>
       </section>
     </main>

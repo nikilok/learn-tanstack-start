@@ -273,7 +273,7 @@ function CompanyDetail() {
         >
           &larr; Back to search
           <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
-            (Esc)
+            Esc
           </kbd>
         </Link>
       </section>

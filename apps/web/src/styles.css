@@ -161,6 +161,7 @@ body::after {
   pointer-events: none;
   z-index: -1;
   opacity: var(--grid-opacity);
+  transform: rotate(26deg) scale(1.02);
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);

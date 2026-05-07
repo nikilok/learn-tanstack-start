@@ -67,6 +67,24 @@
   }
 }
 
+/*
+ * Pull the rotated grid pseudo out of the `root` snapshot. Without this,
+ * iOS Safari has to composite a rotated/transformed layer through every
+ * frame of the page-level recede/rise animation, which causes glitchy
+ * stutter on real devices. Naming the pseudo gives it its own snapshot;
+ * `animation: none` keeps it visually static so the grid reads as a
+ * stable backdrop while the foreground content slides.
+ */
+body::after {
+  view-transition-name: bg-grid;
+}
+
+::view-transition-group(bg-grid),
+::view-transition-old(bg-grid),
+::view-transition-new(bg-grid) {
+  animation: none;
+}
+
 /* Shares the `active-card` name with the clicked card on the listing so
    the browser pairs them as a single shared element — the card morphs
    into the details wrapper on forward. The surrounding listing is

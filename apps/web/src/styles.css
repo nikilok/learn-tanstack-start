@@ -49,6 +49,7 @@
   --grid-line: rgba(62, 147, 244, 0.369);
   --grid-opacity: 0.7;
   --sponsor-card-bg: #f5f6f8;
+  --footer-line: var(--gray-200);
   --logo-navy: #001c55;
   --logo-red: #c8102e;
   --ok: #74a0b8;
@@ -96,6 +97,7 @@
   --grid-line: rgba(255, 255, 255, 0.08);
   --grid-opacity: 1;
   --sponsor-card-bg: #1a1a2e;
+  --footer-line: var(--line);
   --logo-navy: #e0e7ff;
   --logo-red: #f87171;
   --ok: #4a425a;
@@ -160,7 +162,7 @@ body::after {
   z-index: -1;
   opacity: var(--grid-opacity);
   /* scale compensates for corners exposed by the rotation */
-  transform: rotate(-4deg) scale(1.15);
+  transform: rotate(26deg) scale(1.02);
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
@@ -194,6 +196,20 @@ a {
     color 150ms ease,
     box-shadow 150ms ease,
     opacity 150ms ease;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.1em 0.45em;
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  line-height: 1.4;
+  color: var(--sea-ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 1.5px 0 var(--line);
+  vertical-align: middle;
 }
 
 .island-kicker {
@@ -249,7 +265,7 @@ a {
 }
 
 .site-footer {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--footer-line);
 }
 
 .shadow-ring {
@@ -266,7 +282,9 @@ a {
 }
 
 .glass {
-  backdrop-filter: blur(2px);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.2s;
 }

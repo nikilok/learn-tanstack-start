@@ -81,6 +81,8 @@ function Home() {
             >
               {' · '}
               <kbd>↑</kbd> <kbd>↓</kbd> to navigate
+              {' · '}
+              <kbd>↵</kbd> to view
             </span>
           )}
         </p>

@@ -34,20 +34,21 @@
   --link-bg-hover: var(--gray-50);
   --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
   --shadow-card:
-    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 2px 2px,
-    #fafafa 0px 0px 0px 1px;
+    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.04) 0px 1px 2px,
+    rgba(0, 0, 0, 0.06) 0px 6px 16px -4px;
   --shadow-card-full:
     rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.04) 0px 2px 2px, rgba(0, 0, 0, 0.04) 0px 8px 8px -8px,
-    #fafafa 0px 0px 0px 1px;
+    rgba(0, 0, 0, 0.04) 0px 1px 2px,
+    rgba(0, 0, 0, 0.08) 0px 12px 24px -6px;
   --glass-bg: rgba(255, 255, 255, 0.5);
   --glow-a: rgba(0, 114, 245, 0.18);
   --glow-b: rgba(121, 40, 202, 0.12);
   --glow-c: rgba(0, 112, 243, 0.1);
   --dot-color: rgba(0, 0, 0, 0.12);
-  --grid-line: rgba(0, 0, 0, 0.06);
+  --grid-line: rgba(62, 147, 244, 0.369);
   --grid-opacity: 0.7;
-  --sponsor-card-bg: #f0edf5;
+  --sponsor-card-bg: #f5f6f8;
   --logo-navy: #001c55;
   --logo-red: #c8102e;
   --ok: #74a0b8;
@@ -158,6 +159,8 @@ body::after {
   pointer-events: none;
   z-index: -1;
   opacity: var(--grid-opacity);
+  /* scale compensates for corners exposed by the rotation */
+  transform: rotate(-4deg) scale(1.15);
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);

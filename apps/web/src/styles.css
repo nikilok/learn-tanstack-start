@@ -198,18 +198,20 @@ a {
     opacity 150ms ease;
 }
 
-kbd {
-  display: inline-block;
-  padding: 0.1em 0.45em;
-  font-family: var(--font-mono);
-  font-size: 0.8em;
-  line-height: 1.4;
-  color: var(--sea-ink);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 1.5px 0 var(--line);
-  vertical-align: middle;
+@layer base {
+  kbd {
+    display: inline-block;
+    padding: 0.1em 0.45em;
+    font-family: var(--font-mono);
+    font-size: 0.8em;
+    line-height: 1.4;
+    color: var(--sea-ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: 0 1.5px 0 var(--line);
+    vertical-align: middle;
+  }
 }
 
 .island-kicker {

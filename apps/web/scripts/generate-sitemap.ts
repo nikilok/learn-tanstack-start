@@ -1,18 +1,21 @@
 import { join } from 'node:path';
-import { hmrcSkilledWorkers } from '@ss/db';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+} from '@ss/db';
 import { Glob } from 'bun';
-import { sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../src/db.server';
 
 const BASE_URL = 'https://sponsorsearch.co.uk';
-const BATCH_SIZE = 45000;
+const URLS_PER_SITEMAP = 45000;
 const OUT_DIR = join(import.meta.dirname, '..', 'public');
 
 /**
- * Regenerate the full sitemap set from scratch: the index (`sitemap.xml`),
- * a static-pages file (`sitemap-0.xml`), and paginated company sitemaps
- * over `BATCH_SIZE` chunks of `hmrc_skilled_workers`. Reads `name_slug` from
- * the DB so URLs stay consistent with HmrcCard and the detail-route loader.
+ * Regenerate the full sitemap set: index, static-pages file, and paginated
+ * company sitemaps. URLs use `name_slug`; `<lastmod>` is sourced via the
+ * HMRC → mapping → CH profile chain and omitted when the row has no profile.
  */
 async function generate() {
   console.log('Generating sitemap...');
@@ -24,12 +27,40 @@ async function generate() {
     console.log(`Deleted old ${file}`);
   }
 
-  const [{ count }] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(hmrcSkilledWorkers);
+  // Single pass over all rows; LEFT JOIN keeps HMRC entries without a CH match.
+  const allRows = await db
+    .select({
+      hash: hmrcSkilledWorkers.hash,
+      nameSlug: hmrcSkilledWorkers.nameSlug,
+      updatedAt: companiesHouseProfiles.updatedAt,
+    })
+    .from(hmrcSkilledWorkers)
+    .leftJoin(
+      hmrcCompanyMapping,
+      eq(
+        hmrcCompanyMapping.organisationName,
+        hmrcSkilledWorkers.organisationName,
+      ),
+    )
+    .leftJoin(
+      companiesHouseProfiles,
+      eq(
+        companiesHouseProfiles.companyNumber,
+        hmrcCompanyMapping.companyNumber,
+      ),
+    )
+    .orderBy(hmrcSkilledWorkers.hash);
 
-  console.log(`Total companies: ${count}`);
-  const totalPages = Math.ceil(count / BATCH_SIZE);
+  const entries = new Map(
+    allRows.map((row) => [
+      row.hash,
+      { nameSlug: row.nameSlug, updatedAt: row.updatedAt },
+    ]),
+  );
+  const ordered = Array.from(entries.entries());
+
+  console.log(`Total companies: ${ordered.length}`);
+  const totalPages = Math.ceil(ordered.length / URLS_PER_SITEMAP);
 
   // Generate sitemap index
   const index = `<?xml version="1.0" encoding="UTF-8"?>
@@ -53,47 +84,36 @@ ${Array.from(
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>${BASE_URL}/</loc>
-    <changefreq>daily</changefreq>
-    <priority>1.0</priority>
   </url>
   <url>
     <loc>${BASE_URL}/privacy</loc>
-    <changefreq>yearly</changefreq>
-    <priority>0.2</priority>
   </url>
 </urlset>`;
 
   await Bun.write(join(OUT_DIR, 'sitemap-0.xml'), sitemap0);
   console.log('Written sitemap-0.xml (static pages)');
 
-  // Generate company sitemaps
+  // Generate company sitemaps from the prebuilt Map
   for (let page = 1; page <= totalPages; page++) {
-    const offset = (page - 1) * BATCH_SIZE;
-    const rows = await db
-      .select({
-        hash: hmrcSkilledWorkers.hash,
-        nameSlug: hmrcSkilledWorkers.nameSlug,
-      })
-      .from(hmrcSkilledWorkers)
-      .orderBy(hmrcSkilledWorkers.hash)
-      .limit(BATCH_SIZE)
-      .offset(offset);
+    const offset = (page - 1) * URLS_PER_SITEMAP;
+    const batch = ordered.slice(offset, offset + URLS_PER_SITEMAP);
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${rows
-  .map(
-    (row) => `  <url>
-    <loc>${BASE_URL}/company/${row.hash}/${row.nameSlug}</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.7</priority>
-  </url>`,
-  )
+${batch
+  .map(([hash, { nameSlug, updatedAt }]) => {
+    const lastmod = updatedAt
+      ? `\n    <lastmod>${updatedAt.toISOString()}</lastmod>`
+      : '';
+    return `  <url>
+    <loc>${BASE_URL}/company/${hash}/${nameSlug}</loc>${lastmod}
+  </url>`;
+  })
   .join('\n')}
 </urlset>`;
 
     await Bun.write(join(OUT_DIR, `sitemap-${page}.xml`), xml);
-    console.log(`Written sitemap-${page}.xml (${rows.length} companies)`);
+    console.log(`Written sitemap-${page}.xml (${batch.length} companies)`);
   }
 
   console.log('Done!');

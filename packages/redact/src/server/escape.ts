@@ -210,7 +210,20 @@ export function attrToHtml(name: string, value: unknown): string {
   ) {
     return ''
   }
-  if (name[0] === 'o' && name[1] === 'n' && typeof value === 'function') return ''
+  // Drop every on*-shaped prop on the server, regardless of value type or
+  // case. Functions can't be serialized; a string value would land in the
+  // catch-all and be emitted as `onclick="…"`, an inline event handler that
+  // browsers execute as JS — a direct XSS sink when untrusted props are
+  // spread onto a host element. Catches both the camelCase JSX form
+  // (`onClick`) and the lowercase HTML form (`onclick`); there is no
+  // legitimate non-handler HTML attribute starting with `on`.
+  if (
+    name.length >= 3 &&
+    (name[0] === 'o' || name[0] === 'O') &&
+    (name[1] === 'n' || name[1] === 'N')
+  ) {
+    return ''
+  }
   if (value == null) return ''
   // Reject attribute names that don't match the HTML spec. Without this
   // gate, a prop named `foo"><script>` would render as literal markup

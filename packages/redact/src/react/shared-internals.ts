@@ -50,9 +50,14 @@ interface SharedInternals {
 const KEY = Symbol.for('@ss/redact.ReactSharedInternals')
 const g = globalThis as unknown as { [k: symbol]: SharedInternals | undefined }
 
-export const ReactSharedInternals: SharedInternals =
-  g[KEY] ??
-  (g[KEY] = {
+// Use an explicit conditional-init instead of the `??` + assignment-in-
+// expression form. Biome's `noAssignInExpressions` lint flags the inline
+// `(g[KEY] = {...})` pattern, which gates CI in linters that treat warnings
+// as errors. Functionally identical: register-or-reuse the singleton.
+function initReactSharedInternals(): SharedInternals {
+  const existing = g[KEY]
+  if (existing) return existing
+  const fresh: SharedInternals = {
     H: null,
     T: null,
     S: null,
@@ -60,7 +65,12 @@ export const ReactSharedInternals: SharedInternals =
     currentRoot: null,
     currentHook: null,
     hookIndex: 0,
-  })
+  }
+  g[KEY] = fresh
+  return fresh
+}
+
+export const ReactSharedInternals: SharedInternals = initReactSharedInternals()
 
 export function getDispatcher(): Dispatcher {
   const d = ReactSharedInternals.H

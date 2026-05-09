@@ -29,6 +29,32 @@ export interface OrchestratorState {
   pending: Set<Promise<void>>
   closed: boolean
   errored: unknown | null
+  // Resolves when the stream is forcibly closed (abort, controller error,
+  // pipeable handle.abort). `drain()` races pending boundary promises
+  // against this so a never-settling boundary doesn't keep the SSR
+  // dispatcher pinned forever after abort. Without it, an aborted stream
+  // with an unsettled `<Suspense>` would leak `installSSRDispatcher`'s
+  // module state past the lifetime of the request.
+  closePromise: Promise<void>
+  resolveClosed: () => void
+}
+
+// Lazily wires up the abort sentinel. Both render entry points create one
+// of these; threading a factory keeps the chicken-and-egg between
+// `closePromise` and `resolveClosed` in one place.
+function createOrchestratorState(): OrchestratorState {
+  let resolveClosed!: () => void
+  const closePromise = new Promise<void>((r) => {
+    resolveClosed = r
+  })
+  return {
+    nextId: 0,
+    pending: new Set(),
+    closed: false,
+    errored: null,
+    closePromise,
+    resolveClosed,
+  }
 }
 
 type Emit = (chunk: string) => void
@@ -142,8 +168,14 @@ function streamBoundary(
 }
 
 async function drain(state: OrchestratorState): Promise<void> {
+  // Race pending against the abort sentinel so a never-settling boundary
+  // doesn't keep us spinning after the consumer aborts. Re-check
+  // `state.closed` after the wait and bail without throwing — the abort
+  // path is responsible for surfacing the cancellation through its own
+  // channels (controller.close / dest.end).
   while (state.pending.size > 0) {
-    await Promise.race(state.pending)
+    if (state.closed) return
+    await Promise.race([...state.pending, state.closePromise])
   }
 }
 
@@ -172,12 +204,7 @@ export function renderToReadableStream(
   children: ReactNode,
   options: StreamOptions = {},
 ): Promise<ReadableStreamResult> {
-  const state: OrchestratorState = {
-    nextId: 0,
-    pending: new Set(),
-    closed: false,
-    errored: null,
-  }
+  const state = createOrchestratorState()
   const encoder = new TextEncoder()
 
   let allReadyResolve!: () => void
@@ -212,6 +239,7 @@ export function renderToReadableStream(
 
       options.signal?.addEventListener('abort', () => {
         state.closed = true
+        state.resolveClosed()
         try {
           controller.close()
         } catch {}
@@ -241,12 +269,7 @@ export function renderToPipeableStream(
   children: ReactNode,
   options: PipeableOptions = {},
 ): PipeableHandle {
-  const state: OrchestratorState = {
-    nextId: 0,
-    pending: new Set(),
-    closed: false,
-    errored: null,
-  }
+  const state = createOrchestratorState()
 
   const buffers: string[] = []
   let dest: NodeJS.WritableStream | null = null
@@ -302,6 +325,7 @@ export function renderToPipeableStream(
     abort(_reason?: unknown) {
       aborted = true
       state.closed = true
+      state.resolveClosed()
       if (dest) dest.end()
     },
   }

@@ -252,6 +252,133 @@ describe('SSR escaping — attribute names', () => {
   })
 })
 
+describe('SSR escaping — on* event-handler props', () => {
+  // Function-typed `on*` props can't be serialized at all and were already
+  // dropped pre-fix. The vector this guards against is *non-function*
+  // values (strings, typically from `{...untrustedJson}`): they used to
+  // fall through `VALID_ATTR_NAME` (the name shape is valid) and land in
+  // the catch-all, where they'd render as inline event handlers
+  // (`onclick="alert(1)"`) — directly executable JS at hydration time.
+
+  it('drops onClick (camelCase JSX form) when value is a string', () => {
+    const html = renderToString(
+      <div {...({ onClick: 'alert(1)' } as any)} />,
+    )
+    expect(html).toBe('<div></div>')
+    expect(html).not.toContain('onclick')
+    expect(html).not.toContain('alert(1)')
+  })
+
+  it('drops onclick (lowercase HTML form) when value is a string', () => {
+    // Spread coming from JSON / CMS / hydration data can use lowercase
+    // attribute names. These bypass React's `on[A-Z]` heuristic but still
+    // render as inline handlers in HTML, so we drop them too.
+    const html = renderToString(
+      <div {...({ onclick: 'alert(1)' } as any)} />,
+    )
+    expect(html).toBe('<div></div>')
+    expect(html).not.toContain('alert(1)')
+  })
+
+  it('drops every common on* handler regardless of value', () => {
+    const cases = [
+      'onClick',
+      'onclick',
+      'onSubmit',
+      'onsubmit',
+      'onChange',
+      'onError',
+      'onerror',
+      'onLoad',
+      'onMouseOver',
+      'onmouseover',
+    ]
+    for (const handlerName of cases) {
+      const html = renderToString(
+        <div {...({ [handlerName]: 'alert(1)' } as any)} />,
+      )
+      expect(html).toBe('<div></div>')
+    }
+  })
+
+  it('drops on* even when value is a number/boolean (defense in depth)', () => {
+    expect(
+      renderToString(<div {...({ onClick: 0 } as any)} />),
+    ).toBe('<div></div>')
+    expect(
+      renderToString(<div {...({ onClick: true } as any)} />),
+    ).toBe('<div></div>')
+  })
+
+  it('does NOT drop legitimate non-on* props that happen to start with `o`', () => {
+    // Sanity: `open` (HTML <details> attr), `optimum` (<meter>), etc. must
+    // still pass through. The drop is gated on length>=3 AND starts with
+    // exactly `on`/`oN`.
+    expect(renderToString(<details open />)).toContain('open')
+    expect(
+      renderToString(<div {...({ optimum: '0.5' } as any)} />),
+    ).toContain('optimum="0.5"')
+  })
+
+  it('does NOT drop the literal name "on" (length 2, indistinguishable from a handler prefix)', () => {
+    // No real HTML attribute is named `on`; this just guards the
+    // length>=3 boundary so unrelated names like `oN` (which would also
+    // be invalid HTML and fail VALID_ATTR_NAME for other reasons) don't
+    // accidentally pass.
+    const html = renderToString(<div {...({ on: 'x' } as any)} />)
+    expect(html).toContain('on="x"')
+  })
+})
+
+describe('SSR streaming — abort unblocks drain', () => {
+  // The orchestrator races pending boundaries against an abort sentinel
+  // promise. Without that race, an aborted stream with a never-settling
+  // <Suspense> child would keep `streamHtml` looping in `Promise.race`
+  // forever — the stream is closed but the SSR dispatcher state stays
+  // installed, leaking module-level dispatcher slots across requests.
+
+  it('renderToReadableStream returns when AbortSignal fires before all boundaries settle', async () => {
+    let resolveBoundary: () => void = () => {}
+    const neverSettlingPromise = new Promise<void>((r) => {
+      resolveBoundary = r
+    })
+    const NeverReady = () => {
+      throw neverSettlingPromise
+    }
+
+    const controller = new AbortController()
+    const stream = await renderToReadableStream(
+      <html>
+        <body>
+          <React.Suspense fallback={<span>loading</span>}>
+            <NeverReady />
+          </React.Suspense>
+        </body>
+      </html>,
+      { signal: controller.signal },
+    )
+
+    // Read the shell, then abort. `allReady` should resolve (or reject
+    // with abort), not hang.
+    const readDone = streamToString(stream)
+    // Give the shell a tick to flush.
+    await new Promise((r) => setTimeout(r, 10))
+    controller.abort()
+
+    // The race is between this assertion completing and a 2-second timeout.
+    // Pre-fix this would have hung indefinitely on `Promise.race(state.pending)`.
+    await Promise.race([
+      readDone,
+      new Promise<void>((_, rej) =>
+        setTimeout(() => rej(new Error('drain did not unblock on abort')), 2000),
+      ),
+    ])
+
+    // Cleanup
+    resolveBoundary()
+  })
+})
+
 describe('SSR escaping — bootstrap script attributes (nonce, src)', () => {
   // The bootstrap-script and stream layers interpolate `nonce` and `src`
   // directly into <script> attribute values. Both come from the consumer

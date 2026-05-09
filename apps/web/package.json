@@ -39,7 +39,7 @@
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
     "@tanstack/react-virtual": "^3.13.23",
-    "@tanstack/redact": "^0.0.10",
+    "@ss/redact": "workspace:*",
     "@tanstack/router-plugin": "^1.132.0",
     "@tanstack/start-server-core": "^1.167.18",
     "@vercel/analytics": "^2.0.1",

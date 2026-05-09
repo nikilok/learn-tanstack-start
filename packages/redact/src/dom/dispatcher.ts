@@ -62,8 +62,14 @@ export function makeDispatcher() {
 
 function makeDispatcherImpl() {
   return {
-    useState<S>(initial: S | (() => S)) {
-      return this.useReducer<S, S | ((p: S) => S)>(
+    useState<S>(initial: S | (() => S)): [S, (action: S | ((p: S) => S)) => void] {
+      // `this` inside an object-literal method has no static type, so TS
+      // refuses generic type arguments on `this.useReducer<S, A>(...)`
+      // (TS2347 — generics on an untyped call). The dispatcher is self-
+      // referencing by design; instead of restructuring the literal or
+      // forging a `this` type, drop the call-site type arguments and
+      // express the same contract via the return-type annotation above.
+      return (this as any).useReducer(
         basicReducer as any,
         typeof initial === 'function' ? (initial as () => S)() : initial,
       )

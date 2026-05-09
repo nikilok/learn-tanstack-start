@@ -1,0 +1,93 @@
+{
+  "name": "@ss/redact",
+  "version": "0.0.0",
+  "description": "Vendored @tanstack/redact (React-API-compatible drop-in) — local fork carrying SVG-attribute aliasing pending upstream PR.",
+  "private": true,
+  "type": "module",
+  "main": "./dist/react/index.js",
+  "module": "./dist/react/index.js",
+  "types": "./dist/react/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/react/jsx-runtime.d.ts",
+      "default": "./dist/react/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/react/jsx-runtime.d.ts",
+      "default": "./dist/react/jsx-runtime.js"
+    },
+    "./compiler-runtime": {
+      "types": "./dist/react/compiler-runtime.d.ts",
+      "default": "./dist/react/compiler-runtime.js"
+    },
+    "./dom": {
+      "types": "./dist/dom/index.d.ts",
+      "default": "./dist/dom/index.js"
+    },
+    "./dom-client": {
+      "types": "./dist/dom/client.d.ts",
+      "default": "./dist/dom/client.js"
+    },
+    "./dom-test-utils": {
+      "types": "./dist/dom/test-utils.d.ts",
+      "default": "./dist/dom/test-utils.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./scheduler": {
+      "types": "./dist/scheduler/index.d.ts",
+      "default": "./dist/scheduler/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite/index.d.ts",
+      "default": "./dist/vite/index.js"
+    },
+    "./features/*": {
+      "types": "./dist/dom/features/*.d.ts",
+      "default": "./dist/dom/features/*.js"
+    },
+    "./_all": {
+      "types": "./dist/dom/_all.d.ts",
+      "default": "./dist/dom/_all.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": [
+    "./src/dom/features/**",
+    "./dist/dom/features/**",
+    "./src/dom/index.ts",
+    "./src/dom/client.ts",
+    "./src/dom/_all.ts",
+    "./dist/dom/index.js",
+    "./dist/dom/client.js",
+    "./dist/dom/_all.js"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.mjs",
+    "test": "vitest run --config tests/vitest.config.ts",
+    "test:watch": "vitest --config tests/vitest.config.ts"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,3 +1,4 @@
+import { redact } from '@ss/redact/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { devtools } from '@tanstack/devtools-vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
@@ -11,6 +12,7 @@ dotenv.config({ path: '../../.env.local' });
 
 const config = defineConfig({
   plugins: [
+    redact(),
     devtools(),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),

@@ -41,12 +41,20 @@ export const BOUNDARY_REVEAL_RUNTIME =
     `window.$RE_stop=function(){for(var j=0;j<evs.length;j++)document.removeEventListener(evs[j],h,true)};` +
   `})();`
 
+import { escapeAttr } from './escape'
+
+// `nonce` is HTML-escaped on every interpolation. A correctly-issued CSP
+// nonce is base64 random and never contains `"`/`<`/`>`, but the runtime
+// can't enforce that on whatever the consumer passes — so we treat the
+// nonce as untrusted input at the attribute boundary. Without escaping, a
+// malformed or attacker-controlled nonce could break out of the attribute
+// context and inject markup adjacent to a script we control.
 export function injectBootstrapScript(nonce?: string): string {
-  const n = nonce ? ` nonce="${nonce}"` : ''
+  const n = nonce ? ` nonce="${escapeAttr(nonce)}"` : ''
   return `<script${n}>${BOUNDARY_REVEAL_RUNTIME}</script>`
 }
 
 export function revealScript(id: number, nonce?: string): string {
-  const n = nonce ? ` nonce="${nonce}"` : ''
+  const n = nonce ? ` nonce="${escapeAttr(nonce)}"` : ''
   return `<script${n}>$RC(${id})</script>`
 }

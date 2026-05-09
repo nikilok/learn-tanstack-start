@@ -186,6 +186,17 @@ const BOOLEAN_ATTRS = new Set([
   'selected',
 ])
 
+// HTML attribute names: must start with a letter or underscore and contain
+// only letters/digits/`_.-:$`. Anything else (whitespace, quotes, `>`, `/`,
+// `=`, etc.) is illegal per the HTML spec and would break out of the
+// attribute-name context if emitted, opening attribute-injection XSS via
+// untrusted spread props (e.g. `<div {...untrustedJson} />`). React drops
+// invalid attribute names; we do the same. The character set is
+// deliberately narrow so it accepts every standard HTML/SVG attribute,
+// custom data-/aria-* names, and xlink:/xml: namespaced forms — but
+// nothing that contains attribute-context delimiters.
+const VALID_ATTR_NAME = /^[a-zA-Z_][a-zA-Z0-9_.\-:$]*$/
+
 export function attrToHtml(name: string, value: unknown): string {
   if (
     name === 'children' ||
@@ -201,6 +212,13 @@ export function attrToHtml(name: string, value: unknown): string {
   }
   if (name[0] === 'o' && name[1] === 'n' && typeof value === 'function') return ''
   if (value == null) return ''
+  // Reject attribute names that don't match the HTML spec. Without this
+  // gate, a prop named `foo"><script>` would render as literal markup
+  // because the `aria-`/`data-` branch and the catch-all both interpolate
+  // the name without escaping. Aliased names from ATTR_ALIASES (and the
+  // case-folded `name.toLowerCase()` form) are derived from `name` and
+  // can't introduce new characters, so validating `name` covers both.
+  if (!VALID_ATTR_NAME.test(name)) return ''
 
   const htmlName = ATTR_ALIASES[name] ?? name.toLowerCase()
 

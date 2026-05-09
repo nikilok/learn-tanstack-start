@@ -8,6 +8,7 @@ import {
 } from './dispatcher'
 import { walk, type SuspendedBoundary } from './walk'
 import { BOUNDARY_REVEAL_RUNTIME, revealScript } from './bootstrap-script'
+import { escapeAttr } from './escape'
 
 export interface StreamOptions {
   identifierPrefix?: string
@@ -74,7 +75,7 @@ export async function streamHtml(
       (options.bootstrapScripts?.length ?? 0) > 0 ||
       (options.bootstrapModules?.length ?? 0) > 0
     if (boundaries.length > 0 || hasBootstrap) {
-      shellChunks.push(`<script${nonce ? ` nonce="${nonce}"` : ''}>${BOUNDARY_REVEAL_RUNTIME}</script>`)
+      shellChunks.push(`<script${nonce ? ` nonce="${escapeAttr(nonce)}"` : ''}>${BOUNDARY_REVEAL_RUNTIME}</script>`)
       for (const s of options.bootstrapScripts ?? []) {
         shellChunks.push(bootstrapTag(s, 'script', nonce))
       }
@@ -153,9 +154,14 @@ function bootstrapTag(
 ): string {
   const src = typeof entry === 'string' ? entry : entry.src
   const nonce = typeof entry === 'string' ? defaultNonce : entry.nonce ?? defaultNonce
-  const nAttr = nonce ? ` nonce="${nonce}"` : ''
-  if (kind === 'module') return `<script type="module"${nAttr} src="${src}"></script>`
-  return `<script async${nAttr} src="${src}"></script>`
+  // Both `src` and `nonce` are interpolated into HTML attribute values.
+  // Even though the consumer typically controls them, we cannot assume
+  // they're free of `"`/`<`/`>` — a malformed config or runtime-derived
+  // URL could break out of the attribute context. Always escape.
+  const nAttr = nonce ? ` nonce="${escapeAttr(nonce)}"` : ''
+  const srcAttr = escapeAttr(src)
+  if (kind === 'module') return `<script type="module"${nAttr} src="${srcAttr}"></script>`
+  return `<script async${nAttr} src="${srcAttr}"></script>`
 }
 
 // ---------------------------------------------------------------------------

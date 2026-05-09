@@ -72,7 +72,9 @@
     "./dist/dom/_all.js"
   ],
   "scripts": {
-    "build": "bun scripts/build.mjs"
+    "build": "bun scripts/build.mjs",
+    "test": "vitest run --config tests/vitest.config.ts",
+    "test:watch": "vitest --config tests/vitest.config.ts"
   },
   "peerDependencies": {
     "vite": ">=5"
@@ -84,6 +86,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.0",
-    "typescript": "^5.7.2"
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

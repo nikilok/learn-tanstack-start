@@ -1,4 +1,4 @@
 [install]
-# Refuse to install package versions younger than 7 days. Mitigates supply-chain
-# attacks where compromised releases are typically caught and yanked within days.
-minimumReleaseAge = 604800
+# Refuse to install package versions younger than 3 days. Mitigates supply-chain
+# attacks where compromised releases are typically caught and yanked within hours.
+minimumReleaseAge = 259200

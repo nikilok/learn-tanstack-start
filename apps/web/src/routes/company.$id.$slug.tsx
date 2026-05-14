@@ -258,11 +258,13 @@ function CompanyDetail() {
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
-                      <AddressMap
-                        address={formatAddress(
-                          profile.registered_office_address,
-                        )}
-                      />
+                      <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
+                        <AddressMap
+                          address={formatAddress(
+                            profile.registered_office_address,
+                          )}
+                        />
+                      </div>
                     </dd>
                   </div>
                 )}

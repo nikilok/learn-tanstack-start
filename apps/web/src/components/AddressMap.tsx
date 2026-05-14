@@ -78,12 +78,12 @@ export function AddressMap({ address }: { address: string }) {
     : null;
 
   return (
-    <div className="relative mt-3 h-64 w-full overflow-hidden rounded-lg bg-(--sea-ink-soft)/10">
+    <div className="relative h-64 w-full bg-(--sea-ink-soft)/10">
       {iframeSrc && (
         <iframe
           title="Map of registered address"
           src={iframeSrc}
-          className="absolute inset-0 h-full w-full border-0 dark:filter-[invert(1)_hue-rotate(180deg)]"
+          className="absolute inset-0 h-full w-full border-0 saturate-0 dark:invert dark:hue-rotate-180"
           loading="lazy"
         />
       )}

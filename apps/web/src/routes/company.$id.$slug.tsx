@@ -10,6 +10,7 @@ import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
+import { AddressMap } from '../components/AddressMap';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -257,6 +258,11 @@ function CompanyDetail() {
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
+                      <AddressMap
+                        address={formatAddress(
+                          profile.registered_office_address,
+                        )}
+                      />
                     </dd>
                   </div>
                 )}

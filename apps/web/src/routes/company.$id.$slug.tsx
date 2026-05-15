@@ -283,10 +283,10 @@ function CompanyDetail() {
           to="/"
           search={{ search }}
           viewTransition={{ types: ['back'] }}
-          className="no-underline mt-6 block w-full px-4 py-3 text-center text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+          className="glass backdrop-blur-md! no-underline sticky bottom-6 z-10 mx-auto mt-6 flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
           &larr; Back to search
-          <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
+          <kbd className="pointer-fine:inline hidden font-sans text-xs">
             Esc
           </kbd>
         </Link>

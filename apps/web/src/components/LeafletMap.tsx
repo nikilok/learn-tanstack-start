@@ -33,7 +33,7 @@ const lensSvg = renderToStaticMarkup(
 );
 
 const unionJackIcon = L.divIcon({
-  html: `<div style="--logo-navy:var(--surface);position:relative;width:${ICON_W}px;height:${ICON_H}px;">${teardropSvg}${lensSvg}</div>`,
+  html: `<div style="--logo-navy:var(--surface);position:relative;width:${ICON_W}px;height:${ICON_H}px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));">${teardropSvg}${lensSvg}</div>`,
   className: '',
   iconSize: [ICON_W, ICON_H],
   iconAnchor: [ICON_W / 2, ICON_H],
@@ -46,7 +46,7 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
   return (
     <MapContainer
       center={position}
-      zoom={17}
+      zoom={16}
       scrollWheelZoom={false}
       className="absolute inset-0 h-full w-full"
     >

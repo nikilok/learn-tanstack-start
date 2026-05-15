@@ -1,0 +1,16 @@
+/* Re-skin leaflet's attribution pill to match the page background. Leaflet's own `.leaflet-container .leaflet-control-attribution` rule has higher specificity AND loads later in the lazy chunk, so we need !important to override both bg and link color. */
+.leaflet-control-attribution {
+  /* biome-ignore lint: override leaflet's white-ish background which clashes with the dark tile theme */
+  background: var(--bg-base) !important;
+  color: var(--sea-ink-soft);
+}
+.leaflet-control-attribution a {
+  /* biome-ignore lint: override leaflet's blue link colour to match site branding */
+  color: var(--gray-400) !important;
+}
+
+/* Leaflet's container defaults to background:#ddd, which flashes a light grey panel while tiles load — jarring on dark theme. */
+.leaflet-container {
+  /* biome-ignore lint: override leaflet's default container background which flashes light during tile load */
+  background: var(--surface) !important;
+}

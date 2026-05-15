@@ -42,7 +42,7 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
       className="absolute inset-0 h-full w-full transition-[filter] duration-200 pointer-fine:saturate-0 pointer-fine:hover:saturate-100 pointer-fine:dark:invert pointer-fine:dark:hue-rotate-180 pointer-fine:dark:hover:invert-0 pointer-fine:dark:hover:hue-rotate-0"
     >
       <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution='&copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Marker position={position} icon={unionJackIcon} />

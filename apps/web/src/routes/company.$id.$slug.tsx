@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -129,6 +129,8 @@ function CompanyDetail() {
   const { sponsor, profile, geo } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(true);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -144,6 +146,16 @@ function CompanyDetail() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navigate, search]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(([entry]) =>
+      setStuck(!entry.isIntersecting),
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -283,13 +295,18 @@ function CompanyDetail() {
           to="/"
           search={{ search }}
           viewTransition={{ types: ['back'] }}
-          className="glass backdrop-blur-md! no-underline sticky bottom-6 z-10 mx-auto mt-6 flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+          className={`no-underline sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink) ${
+            stuck
+              ? 'glass backdrop-blur-md! mx-auto flex w-fit items-center rounded-full px-5 py-2.5'
+              : 'block w-full px-4 py-3 text-center'
+          }`}
         >
           &larr; Back to search
-          <kbd className="pointer-fine:inline hidden font-sans text-xs">
+          <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
             Esc
           </kbd>
         </Link>
+        <div ref={sentinelRef} aria-hidden className="h-px w-px" />
       </section>
     </main>
   );

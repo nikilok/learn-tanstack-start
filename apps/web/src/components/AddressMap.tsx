@@ -21,7 +21,7 @@ export function AddressMap({ geo }: { geo: Geocoded }) {
       <iframe
         title="Map of registered address"
         src={iframeSrc}
-        className="absolute inset-0 h-full w-full border-0 saturate-0 dark:invert dark:hue-rotate-180"
+        className="absolute inset-0 h-full w-full border-0 transition-[filter] duration-200 pointer-fine:saturate-0 pointer-fine:hover:saturate-100 pointer-fine:dark:invert pointer-fine:dark:hue-rotate-180 pointer-fine:dark:hover:invert-0 pointer-fine:dark:hover:hue-rotate-0"
         loading="lazy"
       />
     </div>

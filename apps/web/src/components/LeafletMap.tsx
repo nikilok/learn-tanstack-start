@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
+import './LeafletMap.css';
 import UnionJackLens from './UnionJackLens';
 
 const LIGHT_TILES =
@@ -48,7 +49,7 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
       center={position}
       zoom={16}
       scrollWheelZoom={false}
-      className="absolute inset-0 h-full w-full"
+      className="absolute inset-0 isolate h-full w-full"
     >
       <TileLayer
         attribution={TILE_ATTRIBUTION}

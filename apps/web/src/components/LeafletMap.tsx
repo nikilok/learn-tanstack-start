@@ -39,7 +39,7 @@ const unionJackIcon = L.divIcon({
   iconAnchor: [ICON_W / 2, ICON_H],
 });
 
-/** Leaflet map centered on `geo` with a custom Union-Jack-pin marker (teardrop body + the shared `UnionJackLens` overlaid as the head). Tile theme switches with the page's light/dark mode via CartoDB Positron / Dark Matter. Loaded client-side only via the `AddressMap` lazy import — Leaflet touches `window`/`document` at import time and can't run on the SSR server. */
+/** Leaflet map centered on `geo` with a custom Union-Jack-pin marker (teardrop body + the shared `UnionJackLens` overlaid as the head). Tile theme switches with the page's light/dark mode via Stadia Maps `alidade_smooth` / `alidade_smooth_dark`. Loaded client-side only via the `AddressMap` lazy import — Leaflet touches `window`/`document` at import time and can't run on the SSR server. */
 export default function LeafletMap({ geo }: { geo: Geocoded }) {
   const position: [number, number] = [geo.lat, geo.lon];
   const isDark = useIsDark();

@@ -3,7 +3,15 @@ import 'leaflet/dist/leaflet.css';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MapContainer, Marker, TileLayer } from 'react-leaflet';
 import type { Geocoded } from '../api/geocode';
+import { useIsDark } from '../hooks/useIsDark';
 import UnionJackLens from './UnionJackLens';
+
+const LIGHT_TILES =
+  'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png';
+const DARK_TILES =
+  'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png';
+const TILE_ATTRIBUTION =
+  '&copy; <a target="_blank" href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a target="_blank" href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
 
 const ICON_W = 32;
 const ICON_H = 42;
@@ -25,25 +33,26 @@ const lensSvg = renderToStaticMarkup(
 );
 
 const unionJackIcon = L.divIcon({
-  html: `<div style="--logo-navy:var(--logo-red);position:relative;width:${ICON_W}px;height:${ICON_H}px;">${teardropSvg}${lensSvg}</div>`,
+  html: `<div style="--logo-navy:var(--surface);position:relative;width:${ICON_W}px;height:${ICON_H}px;">${teardropSvg}${lensSvg}</div>`,
   className: '',
   iconSize: [ICON_W, ICON_H],
   iconAnchor: [ICON_W / 2, ICON_H],
 });
 
-/** OSM-tiled Leaflet map centered on `geo` with a custom Union-Jack-pin marker (teardrop body + the shared `UnionJackLens` overlaid as the head). Loaded client-side only via the `AddressMap` lazy import — Leaflet touches `window`/`document` at import time and can't run on the SSR server. */
+/** Leaflet map centered on `geo` with a custom Union-Jack-pin marker (teardrop body + the shared `UnionJackLens` overlaid as the head). Tile theme switches with the page's light/dark mode via CartoDB Positron / Dark Matter. Loaded client-side only via the `AddressMap` lazy import — Leaflet touches `window`/`document` at import time and can't run on the SSR server. */
 export default function LeafletMap({ geo }: { geo: Geocoded }) {
   const position: [number, number] = [geo.lat, geo.lon];
+  const isDark = useIsDark();
   return (
     <MapContainer
       center={position}
       zoom={17}
       scrollWheelZoom={false}
-      className="absolute inset-0 h-full w-full transition-[filter] duration-200 pointer-fine:saturate-0 pointer-fine:hover:saturate-100 pointer-fine:dark:invert pointer-fine:dark:hue-rotate-180 pointer-fine:dark:hover:invert-0 pointer-fine:dark:hover:hue-rotate-0"
+      className="absolute inset-0 h-full w-full"
     >
       <TileLayer
-        attribution='&copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution={TILE_ATTRIBUTION}
+        url={isDark ? DARK_TILES : LIGHT_TILES}
       />
       <Marker position={position} icon={unionJackIcon} />
     </MapContainer>

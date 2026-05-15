@@ -298,6 +298,17 @@ a {
   letter-spacing: -0.4px;
 }
 
+/* Re-skin leaflet's attribution pill to match the page background. Leaflet's own `.leaflet-container .leaflet-control-attribution` rule has higher specificity AND loads later (lazy chunk), so we need !important to override both bg and link color. */
+.leaflet-control-attribution {
+  /* biome-ignore lint: override leaflet's white-ish background which clashes with the dark tile theme */
+  background: var(--bg-base) !important;
+  color: var(--sea-ink-soft);
+}
+.leaflet-control-attribution a {
+  /* biome-ignore lint: override leaflet's blue link colour to match site branding */
+  color: var(--gray-400) !important;
+}
+
 /*
  * Pre-hydration gate for the search input.
  *

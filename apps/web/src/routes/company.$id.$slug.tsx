@@ -9,6 +9,7 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import { StatusBadge } from '../components/StatusBadge';
@@ -51,7 +52,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
-    return { sponsor, profile };
+    const address = profile?.registered_office_address
+      ? formatAddress(profile.registered_office_address)
+      : '';
+    const geo = address
+      ? await queryClient.ensureQueryData(geocodeQueryOptions(address))
+      : null;
+
+    return { sponsor, profile, geo };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -118,7 +126,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile } = Route.useLoaderData();
+  const { sponsor, profile, geo } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
 
@@ -258,13 +266,11 @@ function CompanyDetail() {
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
-                      <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
-                        <AddressMap
-                          address={formatAddress(
-                            profile.registered_office_address,
-                          )}
-                        />
-                      </div>
+                      {geo && (
+                        <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
+                          <AddressMap geo={geo} />
+                        </div>
+                      )}
                     </dd>
                   </div>
                 )}

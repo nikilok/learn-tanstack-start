@@ -40,16 +40,23 @@ export const getGeocode = createServerFn()
 
     if (!res.ok) return null;
 
-    setRpcCacheControl(LONG_EDGE_CACHE);
+    let data: Array<{ lat: string; lon: string }>;
+    try {
+      data = (await res.json()) as Array<{ lat: string; lon: string }>;
+    } catch {
+      return null;
+    }
 
-    const data = (await res.json()) as Array<{ lat: string; lon: string }>;
     const hit = data[0];
     if (!hit) return null;
 
-    return {
-      lat: Number.parseFloat(hit.lat),
-      lon: Number.parseFloat(hit.lon),
-    };
+    const lat = Number.parseFloat(hit.lat);
+    const lon = Number.parseFloat(hit.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    setRpcCacheControl(LONG_EDGE_CACHE);
+
+    return { lat, lon };
   });
 
 /** React Query options for `getGeocode`. Normalises to a UK postcode so addresses sharing a postcode dedupe in both the React Query cache and the Vercel edge cache. `staleTime: Infinity` since postcode coords are immutable. */

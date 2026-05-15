@@ -7,9 +7,11 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
+import { AddressMap } from '../components/AddressMap';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -50,7 +52,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
-    return { sponsor, profile };
+    const address = profile?.registered_office_address
+      ? formatAddress(profile.registered_office_address)
+      : '';
+    const geo = address
+      ? await queryClient.ensureQueryData(geocodeQueryOptions(address))
+      : null;
+
+    return { sponsor, profile, geo };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -117,9 +126,11 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile } = Route.useLoaderData();
+  const { sponsor, profile, geo } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(true);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -135,6 +146,16 @@ function CompanyDetail() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navigate, search]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(([entry]) =>
+      setStuck(!entry.isIntersecting),
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -257,6 +278,11 @@ function CompanyDetail() {
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
+                      {geo && (
+                        <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
+                          <AddressMap geo={geo} />
+                        </div>
+                      )}
                     </dd>
                   </div>
                 )}
@@ -269,13 +295,18 @@ function CompanyDetail() {
           to="/"
           search={{ search }}
           viewTransition={{ types: ['back'] }}
-          className="no-underline mt-6 block w-full px-4 py-3 text-center text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+          className={`no-underline sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink) ${
+            stuck
+              ? 'glass backdrop-blur-md! mx-auto flex w-fit items-center rounded-full px-5 py-2.5'
+              : 'block w-full px-4 py-3 text-center'
+          }`}
         >
           &larr; Back to search
           <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
             Esc
           </kbd>
         </Link>
+        <div ref={sentinelRef} aria-hidden className="h-px w-px" />
       </section>
     </main>
   );

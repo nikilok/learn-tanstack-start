@@ -280,7 +280,10 @@ function CompanyDetail() {
                       </a>
                       {geo && (
                         <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
-                          <AddressMap geo={geo} />
+                          <AddressMap
+                            geo={geo}
+                            companyName={titleCase(sponsor.organisationName)}
+                          />
                         </div>
                       )}
                     </dd>

@@ -45,9 +45,18 @@ const unionJackIcon = L.divIcon({
 });
 
 /** Leaflet map centered on `geo` with a custom Union-Jack-pin marker (teardrop body + the shared `UnionJackLens` overlaid as the head). Tile theme switches with the page's light/dark mode via Stadia Maps `alidade_smooth` / `alidade_smooth_dark`. Loaded client-side only via the `AddressMap` lazy import — Leaflet touches `window`/`document` at import time and can't run on the SSR server. */
-export default function LeafletMap({ geo }: { geo: Geocoded }) {
+export default function LeafletMap({
+  geo,
+  companyName,
+}: {
+  geo: Geocoded;
+  companyName?: string;
+}) {
   const position: [number, number] = [geo.lat, geo.lon];
   const isDark = useIsDark();
+  const markerTitle = companyName
+    ? `Location of ${companyName}`
+    : 'Company location';
   return (
     <MapContainer
       center={position}
@@ -63,7 +72,7 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
         attribution={TILE_ATTRIBUTION}
         url={isDark ? DARK_TILES : LIGHT_TILES}
       />
-      <Marker position={position} icon={unionJackIcon} />
+      <Marker position={position} icon={unionJackIcon} title={markerTitle} />
     </MapContainer>
   );
 }

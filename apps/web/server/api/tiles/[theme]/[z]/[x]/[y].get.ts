@@ -129,8 +129,6 @@ export default defineEventHandler(async (event) => {
     status: 200,
     headers: {
       'Content-Type': 'image/png',
-      'Cache-Control':
-        'public, max-age=3600, s-maxage=31536000, immutable, stale-if-error=86400',
     },
   });
 });

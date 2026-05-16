@@ -298,6 +298,40 @@ a {
   letter-spacing: -0.4px;
 }
 
+/* iOS-lockscreen-style shimmer: a bright stripe sweeps across the text periodically with a pause between sweeps. Used on the sticky "Back to search" pill when it floats over the map for extra readability. */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -150% 0;
+  }
+  50%,
+  100% {
+    background-position: 250% 0;
+  }
+}
+.shimmer-text {
+  background: linear-gradient(
+    100deg,
+    var(--sea-ink-soft) 0%,
+    var(--sea-ink-soft) 42%,
+    var(--sea-ink) 50%,
+    var(--sea-ink-soft) 58%,
+    var(--sea-ink-soft) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 3.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    color: var(--sea-ink-soft);
+    -webkit-text-fill-color: var(--sea-ink-soft);
+  }
+}
+
 /*
  * Pre-hydration gate for the search input.
  *

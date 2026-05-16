@@ -1,7 +1,12 @@
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MapContainer, Marker, TileLayer } from 'react-leaflet';
+import {
+  AttributionControl,
+  MapContainer,
+  Marker,
+  TileLayer,
+} from 'react-leaflet';
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
 import './LeafletMap.css';
@@ -12,7 +17,7 @@ const LIGHT_TILES =
 const DARK_TILES =
   'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png';
 const TILE_ATTRIBUTION =
-  '&copy; <a target="_blank" href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a target="_blank" href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
+  '&copy; <a target="_blank" href="https://leafletjs.com">Leaflet</a> &copy; <a target="_blank" href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
 
 const ICON_W = 32;
 const ICON_H = 42;
@@ -49,8 +54,10 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
       center={position}
       zoom={16}
       scrollWheelZoom={false}
+      attributionControl={false}
       className="absolute inset-0 isolate h-full w-full"
     >
+      <AttributionControl prefix={false} />
       <TileLayer
         attribution={TILE_ATTRIBUTION}
         url={isDark ? DARK_TILES : LIGHT_TILES}

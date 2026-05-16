@@ -295,13 +295,16 @@ function CompanyDetail() {
           to="/"
           search={{ search }}
           viewTransition={{ types: ['back'] }}
-          className={`no-underline sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) transition hover:text-(--sea-ink) ${
+          style={{ transition: 'none' }}
+          className={`no-underline sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) hover:text-(--sea-ink) ${
             stuck
               ? 'glass backdrop-blur-md! mx-auto flex w-fit items-center rounded-full px-5 py-2.5'
               : 'block w-full px-4 py-3 text-center'
           }`}
         >
-          &larr; Back to search
+          <span className={stuck ? 'shimmer-text' : undefined}>
+            &larr; Back to search
+          </span>
           <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
             Esc
           </kbd>

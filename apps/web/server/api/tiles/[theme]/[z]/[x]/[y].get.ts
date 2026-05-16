@@ -130,7 +130,7 @@ export default defineEventHandler(async (event) => {
     headers: {
       'Content-Type': 'image/png',
       'Cache-Control':
-        'public, max-age=3600, s-maxage=31536000, immutable, stale-if-error=86400',
+        'public, max-age=3600, s-maxage=31536000, immutable, stale-while-revalidate=86400',
     },
   });
 });

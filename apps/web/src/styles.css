@@ -54,6 +54,8 @@
   --logo-red: #c8102e;
   --ok: #74a0b8;
   --bg-page-edge: #f4f4f8;
+  --shimmer-base: var(--sea-ink-faint);
+  --shimmer-peak: var(--sea-ink);
 }
 
 .dark {
@@ -102,6 +104,8 @@
   --logo-red: #f87171;
   --ok: #4a425a;
   --bg-page-edge: #0a0a0a;
+  --shimmer-base: var(--sea-ink-soft);
+  --shimmer-peak: var(--sea-ink);
 }
 
 html,
@@ -311,11 +315,11 @@ a {
 .shimmer-text {
   background: linear-gradient(
     100deg,
-    var(--sea-ink-soft) 0%,
-    var(--sea-ink-soft) 42%,
-    var(--sea-ink) 50%,
-    var(--sea-ink-soft) 58%,
-    var(--sea-ink-soft) 100%
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 42%,
+    var(--shimmer-peak) 50%,
+    var(--shimmer-base) 58%,
+    var(--shimmer-base) 100%
   );
   background-size: 250% 100%;
   background-clip: text;
@@ -327,8 +331,8 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
     animation: none;
-    color: var(--sea-ink-soft);
-    -webkit-text-fill-color: var(--sea-ink-soft);
+    color: var(--shimmer-base);
+    -webkit-text-fill-color: var(--shimmer-base);
   }
 }
 

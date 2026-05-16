@@ -9,13 +9,12 @@ import {
 } from 'react-leaflet';
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
+import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '../utils/tileBounds';
 import './LeafletMap.css';
 import UnionJackLens from './UnionJackLens';
 
-const LIGHT_TILES =
-  'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png';
-const DARK_TILES =
-  'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png';
+const LIGHT_TILES = '/api/tiles/alidade_smooth/{z}/{x}/{y}{r}';
+const DARK_TILES = '/api/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}';
 const TILE_ATTRIBUTION =
   '&copy; <a target="_blank" href="https://leafletjs.com">Leaflet</a> &copy; <a target="_blank" href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
 
@@ -53,6 +52,8 @@ export default function LeafletMap({ geo }: { geo: Geocoded }) {
     <MapContainer
       center={position}
       zoom={16}
+      minZoom={TILE_MIN_ZOOM}
+      maxZoom={TILE_MAX_ZOOM}
       scrollWheelZoom={false}
       attributionControl={false}
       className="absolute inset-0 isolate h-full w-full"

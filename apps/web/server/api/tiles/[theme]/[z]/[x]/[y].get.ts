@@ -12,8 +12,10 @@
  *  - y:     tile y (0 <= y < 2^z), optional @2x retina suffix
  *
  * Access control — three cheap layers, ordered cheapest-first:
- *  - Referer must match prod domain (browsers send this automatically;
- *    skipped on non-prod NODE_ENV so localhost works).
+ *  - Referer's parsed hostname must match the prod custom domain OR a
+ *    Vercel deployment URL anchored on both the project prefix and the
+ *    team suffix (only this team can deploy under that suffix). Skipped
+ *    on non-prod NODE_ENV so localhost works.
  *  - Sec-Fetch-Site, when present, must be same-origin (browser-computed,
  *    cannot be set by in-browser JS — blocks cross-site embed attempts).
  *  - Zoom + tile-coord bounds reject world-scrape patterns (z=0..4).
@@ -25,17 +27,35 @@ import { defineEventHandler } from 'h3';
 import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '#/utils/tileBounds';
 
 const ALLOWED_THEMES = new Set(['alidade_smooth', 'alidade_smooth_dark']);
-const ALLOWED_REFERERS = [
-  'https://sponsorsearch.co.uk',
-  'https://www.sponsorsearch.co.uk',
-];
+const ALLOWED_HOSTS = new Set([
+  'sponsorsearch.co.uk',
+  'www.sponsorsearch.co.uk',
+]);
+const VERCEL_TEAM_SUFFIX = '-nikil-kuruvillas-projects.vercel.app';
+const VERCEL_PROJECT_PREFIX = 'learn-tanstack-start-';
+
+/** Returns true when the Referer's parsed hostname matches the prod custom domain or a Vercel deployment URL anchored on both this team's suffix and this project's prefix. */
+function isAllowedReferer(referer: string): boolean {
+  if (!referer) return false;
+  try {
+    const url = new URL(referer);
+    if (url.protocol !== 'https:') return false;
+    if (ALLOWED_HOSTS.has(url.hostname)) return true;
+    return (
+      url.hostname.startsWith(VERCEL_PROJECT_PREFIX) &&
+      url.hostname.endsWith(VERCEL_TEAM_SUFFIX)
+    );
+  } catch {
+    return false;
+  }
+}
 
 export default defineEventHandler(async (event) => {
   const isProd = process.env.NODE_ENV === 'production';
 
   if (isProd) {
     const referer = event.req.headers.get('referer') ?? '';
-    if (!ALLOWED_REFERERS.some((r) => referer.startsWith(r))) {
+    if (!isAllowedReferer(referer)) {
       return new Response(null, { status: 403 });
     }
   }

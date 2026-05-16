@@ -46,8 +46,7 @@ const config = defineConfig({
         },
         '/api/tiles/**': {
           headers: {
-            'Cache-Control':
-              'public, max-age=3600, s-maxage=31536000, stale-while-revalidate=86400',
+            'Cache-Control': 's-maxage=31536000, stale-while-revalidate=86400',
           },
         },
       },

@@ -101,14 +101,25 @@ export default defineEventHandler(async (event) => {
     return new Response(null, { status: 500 });
   }
 
-  const upstream = await fetch(
-    `https://tiles.stadiamaps.com/tiles/${theme}/${z}/${x}/${y}.png?api_key=${apiKey}`,
-    {
-      headers: {
-        'User-Agent': 'SponsorSearch/1.0 (+https://sponsorsearch.co.uk)',
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  let upstream: Response;
+  try {
+    upstream = await fetch(
+      `https://tiles.stadiamaps.com/tiles/${theme}/${z}/${x}/${y}.png?api_key=${apiKey}`,
+      {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'SponsorSearch/1.0 (+https://sponsorsearch.co.uk)',
+        },
       },
-    },
-  );
+    );
+  } catch (err) {
+    console.error('[tiles] upstream fetch failed:', err);
+    return new Response(null, { status: 502 });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!upstream.ok) {
     return new Response(null, { status: upstream.status });
@@ -118,7 +129,8 @@ export default defineEventHandler(async (event) => {
     status: 200,
     headers: {
       'Content-Type': 'image/png',
-      'Cache-Control': 'public, max-age=3600, s-maxage=31536000, immutable',
+      'Cache-Control':
+        'public, max-age=3600, s-maxage=31536000, immutable, stale-if-error=86400',
     },
   });
 });

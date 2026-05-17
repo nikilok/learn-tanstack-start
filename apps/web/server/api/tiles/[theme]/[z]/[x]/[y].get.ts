@@ -16,8 +16,13 @@
  *    Vercel deployment URL anchored on both the project prefix and the
  *    team suffix (only this team can deploy under that suffix). Skipped
  *    on non-prod NODE_ENV so localhost works.
- *  - Sec-Fetch-Site, when present, must be same-origin (browser-computed,
- *    cannot be set by in-browser JS — blocks cross-site embed attempts).
+ *  - Sec-Fetch-Site must be same-origin (browser-computed Fetch Metadata
+ *    header, unspoofable from page JS — blocks cross-site embed attempts).
+ *    The 200 response also sets `Vary: Sec-Fetch-Site` so Vercel's edge
+ *    cache partitions entries by this value — cross-site browser fetches
+ *    look up a different cache key from same-origin ones, so they can
+ *    never hit a same-origin-warmed cache entry and always fall through
+ *    to the function's 403.
  *  - Zoom + tile-coord bounds reject world-scrape patterns (z=0..4).
  *
  * Env vars:
@@ -61,7 +66,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const fetchSite = event.req.headers.get('sec-fetch-site');
-  if (fetchSite && fetchSite !== 'same-origin') {
+  if (fetchSite !== 'same-origin') {
     return new Response(null, { status: 403 });
   }
 
@@ -129,6 +134,7 @@ export default defineEventHandler(async (event) => {
     status: 200,
     headers: {
       'Content-Type': 'image/png',
+      Vary: 'Sec-Fetch-Site',
     },
   });
 });

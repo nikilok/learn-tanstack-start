@@ -20,9 +20,10 @@ Tier 4  match_method = 'public_body'                    monthly,   500 rows
 
 - `hmrc_company_mapping` — read tier slice, UPDATE on promote
 - `hmrc_company_mapping_audit` — INSERT one row per UPDATE
-- `companies_house_profiles` — UPSERT when a `no_match` flips to `verified`
-- `hmrc_company_mapping_review_queue` *(new)* — INSERT for ambiguous cases
-- `hmrc_skilled_workers` — read for locality tiebreak
+- `companies_house_profiles` — UPSERT when a `no_match` flips to `verified`; read existing profile for the inline scorer
+- `hmrc_skilled_workers` — read for locality + route tiebreak
+
+Earlier versions of this design used an `hmrc_company_mapping_review_queue` table for `same_rank_different_number` cases. That table is being dropped (2026-05-11) — the inline scorer (see "Same-rank inline resolution" below) now decides these cases at sweep time. The other reason classes the queue theoretically held (`manual_conflict`, `public_body_conflict`) never fired in production and are replaced with log-and-bump.
 
 ## Top-level flow
 
@@ -41,7 +42,7 @@ sweep(tier):
                          # candidates). See active-status preference in
                          # apps/web/src/lib/hmrc-ch/resolve-sponsor.ts.
 
-  print summary(updated, bumped, queued, lock_missed, errored)
+  print summary(updated, bumped, lock_missed, warned, errored)
 ```
 
 ## Per-row flow
@@ -55,10 +56,16 @@ process(row, changed_by):
   action = decide(existing = row, proposed)
 
   match action:
-    bump   → bumpVerifiedAt(row)
-    update → applyPromotion(row, proposed, changed_by)
-    queue  → enqueueReview(row, proposed, action.reason, changed_by)
-             bumpVerifiedAt(row)   # so it doesn't re-queue every run
+    bump          → bumpVerifiedAt(row)
+    update        → applyPromotion(row, proposed, changed_by)
+    inline_score  → run scoreCandidate on existing + proposed profiles,
+                    dispatch to applyPromotion / bumpVerifiedAt /
+                    log_and_bump based on score margin
+                    (see "Same-rank inline resolution" below)
+    log_and_bump  → console.warn(reason); bumpVerifiedAt(row)
+                    # used for the rare manual_conflict / public_body_conflict
+                    # cases. Sweep summary's `warned` counter goes non-zero;
+                    # operator decides whether to act manually.
 ```
 
 ## The decision (upgrade-only, never demote)
@@ -85,31 +92,36 @@ decide(existing, proposed):
   # 2. manual is sacred — only a human overwrites it
   if existing.match_method == 'manual':
       if proposed agrees on company_number:
-          return bump                       # human override re-confirmed
-      return queue("manual_conflict")
+          return bump                                  # human override re-confirmed
+      return log_and_bump("manual_conflict")           # surfaces in sweep summary
 
   # 3. public_body is a terminal peer (4 distinct cases — not a clean xor)
   if existing.match_method == 'public_body' and proposed.verdict == 'public_body':
       return bump
   if existing.match_method == 'public_body' and proposed.verdict == 'verified':
-      return queue("public_body_conflict")
+      return log_and_bump("public_body_conflict")
   if proposed.verdict == 'public_body' and existing.match_method != 'no_match':
-      return queue("public_body_conflict")
+      return log_and_bump("public_body_conflict")
   if proposed.verdict == 'public_body' and existing.match_method == 'no_match':
-      return update                              # promote rank 0 → terminal
+      return update                                    # promote rank 0 → terminal
   # existing=public_body + proposed=no_match falls through to step 4 — the
   # rank ladder treats public_body's missing entry via the human_review
   # fallback (rank 1), so no_match (rank 0) loses → bump.
 
   # 4. ranked comparison
-  if rank(proposed) > rank(existing):  return update         # promote
-  if rank(proposed) < rank(existing):  return bump           # reject demote
+  if rank(proposed) > rank(existing):  return update   # promote
+  if rank(proposed) < rank(existing):  return bump     # reject demote
 
   # rank(proposed) == rank(existing)
   if proposed.company_number == existing.company_number:
       return bump
-  return queue("same_rank_different_number")
+  return inline_score                                  # see "Same-rank inline
+                                                       # resolution" below
 ```
+
+`decide()` stays pure — it returns the *intent*. The scorer call happens in
+the sweep orchestrator, not inside `decide()`. This keeps the decision
+table fully unit-testable without DB or CH access.
 
 ## The atomic write (promote)
 
@@ -168,67 +180,179 @@ No audit row — the audit table is for material corrections, not
 heartbeats. Rows that bumped just fall to the bottom of their tier's
 queue.
 
-## The queue (defer to human/agentic review)
+## Same-rank inline resolution
+
+When the rank ladder ties (`rank(proposed) == rank(existing)`) and the
+two candidates have different company numbers, the sweep orchestrator
+runs `scoreCandidate` on both profiles and decides inline. No queue
+table, no follow-up job — the decision lands in the same sweep run.
+
+### Why the queue went away
+
+The historical design enqueued these cases as
+`same_rank_different_number` rows in `hmrc_company_mapping_review_queue`
+for a separate resolver to process. As of 2026-05-11 that queue has 140
+unresolved rows (every row ever enqueued; nothing has ever drained
+them). Inspecting the data showed that ~90% of those rows fall into
+deterministic patterns that a small rule-based scorer resolves cleanly:
+
+- **BR ↔ FC** (UK Establishment ↔ Foreign Company): the same legal
+  entity registered twice. Picked by canonical preference + locality.
+- **OE ↔ FC** (Overseas Establishment ↔ Foreign Company): same pattern.
+- **CE ↔ regular Ltd** (Charity ↔ private limited): solved by route-type
+  compatibility — if `hmrc_skilled_workers.route = 'Charity Worker'`, a
+  `private-limited-company` candidate is incompatible.
+- **Ltd ↔ Ltd** (two unrelated companies sharing a name): solved by HMRC
+  locality match.
+
+The remaining ~10% are genuine ambiguities, and the scorer's confidence
+threshold (`MARGIN`) keeps the row at status quo (bump) with a warning
+rather than committing a wrong promotion.
+
+### `scoreCandidate` — pure scoring function
 
 ```pseudo
-enqueueReview(row, proposed, reason, changed_by):
-  INSERT INTO hmrc_company_mapping_review_queue
-    (organisation_name, reason,
-     existing_company_number, existing_match_method, existing_match_score,
-     proposed_company_number, proposed_match_method, proposed_match_score,
-     proposed_query_used, ch_search_results_top5,
-     detected_by)
-  VALUES (...)
-  ON CONFLICT (organisation_name, reason) WHERE resolved_at IS NULL
-    DO NOTHING;        # atomic dedup via the partial unique index
-                       # ux_review_queue_unresolved_org_reason
+scoreCandidate(candidate, sponsor, existing):
+  # Hard gate — domain rule that's never wrong
+  if not routeTypeCompatible(sponsor.route, candidate.company_type):
+      return -infinity
+
+  score = 0
+
+  # Succession evidence (strongest positive signal)
+  if normalised(existing.name) in candidate.previous_company_names:
+      score += 5
+
+  # HMRC locality match
+  if candidate.locality == sponsor.town_city:        score += 3
+  if candidate.postcode_area == sponsor.postcode_area: score += 2
+
+  # Status
+  if candidate.status == 'active':                   score += 1
+  if candidate.status in ('dissolved', 'liquidation'): score -= 2
+
+  # Same-entity hint
+  if candidate.company_type == existing.company_type: score += 1
+
+  return score
 ```
 
-## DDL (single migration)
+The function is pure: no I/O, no DB, no fetches. Profiles are passed in
+as already-loaded objects. Unit-testable with fixture profiles.
+
+### Dispatch in the sweep orchestrator
+
+```pseudo
+on action == 'inline_score':
+  sponsor          = lookupHmrcSponsor(row.organisation_name)
+  existing_profile = getProfile(row.company_number)         # usually local
+  proposed_profile = proposed.profile                       # already loaded
+
+  s_e = scoreCandidate(existing_profile, sponsor, existing_profile)
+  s_p = scoreCandidate(proposed_profile, sponsor, existing_profile)
+
+  if s_p > s_e + MARGIN:
+      applyPromotion(row, proposed, changed_by)
+  elif s_e > s_p + MARGIN:
+      bumpVerifiedAt(row)
+  else:
+      console.warn(`inline_score inconclusive for ${row.organisation_name}`)
+      bumpVerifiedAt(row)        # surfaces in sweep summary's `warned` counter
+```
+
+`MARGIN` starts at 3 (conservative — at least one strong signal of
+difference needed). Tunable as the route-type compat table and feature
+set evolve.
+
+### Route-type compatibility (domain-knowledge artefact)
+
+```text
+apps/web/src/lib/phase5/route-type-compat.ts
+```
+
+Maps HMRC sponsorship `route` values to the set of CH `company_type`
+values eligible to hold that route. Encodes Home Office sponsor
+licence rules.
+
+```ts
+export const ROUTE_TYPE_COMPAT: Record<HmrcRoute, Set<CHCompanyType>> = {
+  'Charity Worker': new Set([
+    'charitable-incorporated-organisation',
+    'private-limited-guarant-nsc',       // + charity reg, in practice
+    'registered-society-non-jurisdictional',
+    // …
+  ]),
+  'Skilled Worker': new Set([
+    'private-limited-company',
+    'public-limited-company',
+    'private-limited-guarant-nsc',
+    'oversea-company',
+    'uk-establishment',
+    // virtually all corporate forms
+  ]),
+  // … Religious Worker, Scale-up, Global Business Mobility, etc.
+};
+```
+
+This file is the auditable source of truth for "what company types can
+hold this licence". Reviewable by anyone, regardless of ML / scoring
+knowledge.
+
+### Migration of the existing 140 rows
+
+One-shot script at `apps/web/scripts/resolve-same-rank-queue.ts`:
+
+```pseudo
+for row in SELECT * FROM hmrc_company_mapping_review_queue
+           WHERE resolved_at IS NULL
+           ORDER BY id ASC:
+    sponsor          = lookupHmrcSponsor(row.organisation_name)
+    existing_profile = fetchProfile(row.existing_company_number)
+    proposed_profile = fetchProfile(row.proposed_company_number)
+
+    s_e = scoreCandidate(existing_profile, sponsor, existing_profile)
+    s_p = scoreCandidate(proposed_profile, sponsor, existing_profile)
+
+    if s_p > s_e + MARGIN:
+        applyPromotion(/* swap to proposed */, 'resolve_queue_oneshot')
+    elif s_e > s_p + MARGIN:
+        pass     # existing wins, no change
+    else:
+        record inconclusive case → markdown TODO list for manual triage
+```
+
+Run once. Inconclusive residue (expected: a handful) gets manually
+resolved by inspection. Then the queue table is dropped.
+
+### Dropping the table
+
+After the one-shot drain:
 
 ```sql
-CREATE TABLE hmrc_company_mapping_review_queue (
-  id                       serial PRIMARY KEY,
-  organisation_name        text NOT NULL,
-  reason                   varchar(40) NOT NULL,
-    -- 'manual_conflict' | 'public_body_conflict' | 'same_rank_different_number'
-  existing_company_number  varchar(20),
-  existing_match_method    varchar(32),
-  existing_match_score     numeric(4,3),
-  proposed_company_number  varchar(20),
-  proposed_match_method    varchar(32),
-  proposed_match_score     numeric(4,3),
-  proposed_query_used      text,
-  ch_search_results_top5   jsonb,
-  detected_by              varchar(100) NOT NULL,
-  detected_at              timestamp NOT NULL DEFAULT now(),
-  resolved_at              timestamp,
-  resolved_by              varchar(100),
-  resolution               varchar(40)
-);
-
-CREATE INDEX idx_review_queue_unresolved
-  ON hmrc_company_mapping_review_queue (detected_at)
-  WHERE resolved_at IS NULL;
-
-CREATE INDEX idx_review_queue_org
-  ON hmrc_company_mapping_review_queue (organisation_name);
-
--- Required by enqueueReview's ON CONFLICT clause — guarantees at-most-one
--- unresolved row per (organisation_name, reason) pair. Without this index
--- the INSERT … ON CONFLICT statement fails with "no unique or exclusion
--- constraint matching the ON CONFLICT specification".
-CREATE UNIQUE INDEX ux_review_queue_unresolved_org_reason
-  ON hmrc_company_mapping_review_queue (organisation_name, reason)
-  WHERE resolved_at IS NULL;
-
-CREATE INDEX idx_mapping_method_verified
-  ON hmrc_company_mapping (match_method, verified_at NULLS FIRST);
+DROP TABLE hmrc_company_mapping_review_queue;
 ```
 
-No changes to `hmrc_company_mapping`, `hmrc_company_mapping_audit`, or
-`companies_house_profiles` — those already have everything Phase 5
-needs.
+…plus removing its schema definition, the `makeEnqueueReview` factory
+in `sql.ts`, the `enqueueReview` slot from `SweepDeps`, and the `queue`
+action from `decide()`'s return type. The audit table
+(`hmrc_company_mapping_audit`) continues to carry the full history of
+mapping changes — nothing is lost.
+
+## DDL
+
+```sql
+CREATE INDEX idx_mapping_method_verified
+  ON hmrc_company_mapping (match_method, verified_at NULLS FIRST);
+
+-- Drop the review queue table (and its indexes) once the one-shot
+-- migration of the existing 140 rows is complete.
+DROP TABLE hmrc_company_mapping_review_queue;
+```
+
+No new tables. `hmrc_company_mapping`, `hmrc_company_mapping_audit`, and
+`companies_house_profiles` already have everything Phase 5 needs.
+`hmrc_company_mapping_review_queue` was the only addition the previous
+design required, and is now being removed.
 
 ## ch-stream coordination
 
@@ -249,49 +373,66 @@ ends at "row written to `companies_house_profiles`".
 
 ```text
 Phase 5 sweep — tier=<name>
-  selected     : N
-  updated      : N
-  bumped       : N
-  queued       : N
-  lock_missed  : N
-  errored      : N
-  api_calls    : N
-  duration     : Xs
+  selected         : N
+  updated          : N
+  bumped           : N
+  inline_resolved  : N    # same-rank cases the scorer decided
+  inline_inconclusive : N # same-rank cases the scorer punted on (with warning)
+  warned           : N    # manual_conflict / public_body_conflict log lines
+  lock_missed      : N
+  errored          : N
+  api_calls        : N
+  duration         : Xs
 ```
+
+The `inline_inconclusive` and `warned` counters are the operational
+signal that something needs human attention. Non-zero values in those
+fields are the closest analogue to the old "queue grew by N today"
+metric — but they surface inline in the sweep summary rather than as a
+silent table growing in the background.
 
 ## Testing strategy (TDD)
 
 The decision logic is non-trivial and easy to break silently — a
-single missed branch could demote a `manual` row, swallow a
-legitimate promotion, or stack duplicate review-queue entries. The
-fix is to keep the decision function **pure** (no I/O, no DB, no CH
-calls) and drive it with `bun:test` cases that enumerate every
-branch in the rank table.
+single missed branch could demote a `manual` row or swallow a
+legitimate promotion. The fix is to keep the decision function **pure**
+(no I/O, no DB, no CH calls) and drive it with `bun:test` cases that
+enumerate every branch in the rank table.
 
 ### Code split for testability
 
 ```text
 apps/web/src/lib/phase5/
-  decide.ts          pure: (existing, proposed) → DecideResult
-                     no imports from db, fs, fetch, or resolveOneSponsor
+  decide.ts                pure: (existing, proposed) → DecideResult
+                           no imports from db, fs, fetch, or resolveOneSponsor
 
-  rank.ts            pure: rank(matchMethod) → number
-                     plus the terminal-peer predicates
+  rank.ts                  pure: rank(matchMethod) → number
+                           plus the terminal-peer predicates
 
-  sweep.ts           orchestration: selects tier rows, calls
-                     resolveOneSponsor (injected), calls decide,
-                     dispatches to applyPromotion / bumpVerifiedAt /
-                     enqueueReview (all injected as fns)
+  score-candidate.ts       pure: (candidate, sponsor, existing) → number
+                           the inline scorer; no I/O
+
+  route-type-compat.ts     pure data table: HmrcRoute → Set<CHCompanyType>
+
+  sweep.ts                 orchestration: selects tier rows, calls
+                           resolveOneSponsor (injected), calls decide,
+                           dispatches to applyPromotion / bumpVerifiedAt /
+                           inline-scorer flow (deps injected)
 
 apps/web/scripts/
-  phase5-sweep.ts    thin CLI: parses --tier flag, wires real db /
-                     fetchApi / upsertProfile into sweep.ts
+  phase5-sweep.ts                  thin CLI: parses --tier flag, wires
+                                   real db / fetchApi / upsertProfile
+                                   into sweep.ts
+
+  resolve-same-rank-queue.ts       one-shot: drains the existing 140
+                                   queue rows using the same scorer,
+                                   then is deleted
 ```
 
-`decide.ts` is the unit-test surface. `sweep.ts` is integration —
-mock the four injected functions (`resolveSponsor`, `applyPromotion`,
-`bumpVerifiedAt`, `enqueueReview`) and assert it dispatches them in
-the right shape.
+`decide.ts` and `score-candidate.ts` are both unit-test surfaces. `sweep.ts`
+is integration — mock the injected functions (`resolveSponsor`,
+`applyPromotion`, `bumpVerifiedAt`, `getProfile`, `lookupHmrcSponsor`)
+and assert dispatch + arguments.
 
 ### What to test (`decide.test.ts`)
 
@@ -305,15 +446,15 @@ describe('rule 1: human_review never overwrites')
 
 describe('rule 2: manual is sacred')
   existing = manual:X, proposed verifies same X     → bump
-  existing = manual:X, proposed verifies different Y → queue manual_conflict
-  existing = manual:X, proposed = no_match           → queue manual_conflict
-  existing = manual:X, proposed = public_body        → queue manual_conflict
+  existing = manual:X, proposed verifies different Y → log_and_bump('manual_conflict')
+  existing = manual:X, proposed = no_match           → log_and_bump('manual_conflict')
+  existing = manual:X, proposed = public_body        → log_and_bump('manual_conflict')
 
 describe('rule 3: public_body terminal peer')
   existing = public_body, proposed = public_body                → bump
-  existing = public_body, proposed = verified                   → queue public_body_conflict
+  existing = public_body, proposed = verified                   → log_and_bump('public_body_conflict')
   existing = public_body, proposed = no_match                   → bump (via rank fallback: public_body→1, no_match→0)
-  existing = verified,    proposed = public_body                → queue public_body_conflict
+  existing = verified,    proposed = public_body                → log_and_bump('public_body_conflict')
   existing = no_match,    proposed = public_body                → update (rank 0 → terminal: promote)
   # ↑ debatable — see "open test cases" below
 
@@ -333,11 +474,40 @@ describe('rule 5: rank demotion rejected')
 
 describe('rule 6: same rank')
   existing = exact:X,      proposed = exact:X      → bump
-  existing = exact:X,      proposed = exact:Y      → queue same_rank_different_number
+  existing = exact:X,      proposed = exact:Y      → inline_score
   existing = no_match,     proposed = no_match     → bump
-  existing = token_sim:X,  proposed = token_sim:Y  → queue same_rank_different_number
+  existing = token_sim:X,  proposed = token_sim:Y  → inline_score
   existing = token_sim:X·0.85, proposed = token_sim:X·0.92 → bump
-                                                   # same number, score wobble doesn't queue
+                                                   # same number, score wobble does NOT trigger inline_score
+```
+
+### What to test (`score-candidate.test.ts`)
+
+The scorer is pure too — pass fixture profiles in, assert numeric output.
+
+```text
+describe('hard gate: routeTypeCompatible')
+  Charity Worker + private-limited-company candidate    → -Infinity
+  Charity Worker + charitable-incorporated-organisation → finite score
+  Skilled Worker + private-limited-company              → finite score
+
+describe('succession evidence')
+  existing.name in candidate.previous_company_names     → +5 vs without
+
+describe('locality match')
+  candidate.locality == sponsor.town_city               → +3
+  candidate.postcode_area == sponsor.postcode_area      → +2
+
+describe('status weighting')
+  candidate.status == 'active'                          → +1
+  candidate.status == 'dissolved'                       → -2
+  candidate.status == 'liquidation'                     → -2
+
+describe('AsiaLink regression fixture')
+  HMRC: Northwich, route=Charity Worker
+  existing (CE006188, CIO, no address)                  → finite
+  proposed (16920968, private Ltd, Manchester)          → -Infinity (hard gate)
+  → existing wins by infinity-margin → bump
 ```
 
 Open test cases (decisions to lock in via the test, not the doc):
@@ -368,10 +538,29 @@ test('lock-missed promotion still increments lock_missed counter')
   expect(summary.lock_missed).toBe(1)
   expect(summary.updated).toBe(0)
 
-test('queued rows also bump verified_at to avoid re-queueing')
-  decide returns { action: 'queue', reason: 'manual_conflict' }
-  expect(enqueueReview).toHaveBeenCalled()
-  expect(bumpVerifiedAt).toHaveBeenCalled()       # both, in that order
+test('log_and_bump rows increment warned counter and bump verified_at')
+  decide returns { action: 'log_and_bump', reason: 'manual_conflict' }
+  expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('manual_conflict'))
+  expect(bumpVerifiedAt).toHaveBeenCalled()
+  expect(summary.warned).toBe(1)
+
+test('inline_score dispatches to applyPromotion when proposed wins by MARGIN')
+  decide returns { action: 'inline_score' }
+  scoreCandidate stubbed: existing=2, proposed=7, MARGIN=3
+  expect(applyPromotion).toHaveBeenCalled()
+  expect(summary.inline_resolved).toBe(1)
+
+test('inline_score bumps when existing wins by MARGIN')
+  scoreCandidate stubbed: existing=7, proposed=2
+  expect(applyPromotion).not.toHaveBeenCalled()
+  expect(bumpVerifiedAt).toHaveBeenCalled()
+  expect(summary.inline_resolved).toBe(1)
+
+test('inline_score increments inconclusive counter when scores tie')
+  scoreCandidate stubbed: existing=4, proposed=4
+  expect(applyPromotion).not.toHaveBeenCalled()
+  expect(bumpVerifiedAt).toHaveBeenCalled()
+  expect(summary.inline_inconclusive).toBe(1)
 
 test('CH errors are caught and counted, not thrown')
   resolveSponsor throws

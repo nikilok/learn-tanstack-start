@@ -18,12 +18,15 @@
  *    on non-prod NODE_ENV so localhost works.
  *  - Sec-Fetch-Site must be same-origin (browser-computed Fetch Metadata
  *    header, unspoofable from page JS — blocks cross-site embed attempts).
- *    The 200 response also sets `Vary: Sec-Fetch-Site` so Vercel's edge
- *    cache partitions entries by this value — cross-site browser fetches
- *    look up a different cache key from same-origin ones, so they can
- *    never hit a same-origin-warmed cache entry and always fall through
- *    to the function's 403.
  *  - Zoom + tile-coord bounds reject world-scrape patterns (z=0..4).
+ *
+ * Auth failures (Referer or Sec-Fetch-Site) redirect to /blocked-tile.png
+ * with `Vary: Sec-Fetch-Site` so anyone hotlinking sees a visible branded
+ * placeholder rather than a broken-image icon. The 200 success response
+ * also sets `Vary: Sec-Fetch-Site` so Vercel's edge cache partitions
+ * entries by this value — cross-site browser fetches look up a different
+ * cache key from same-origin ones, so a same-origin-warmed PNG cache
+ * entry can never be served to a cross-site request.
  *
  * Env vars:
  *  - STADIA_API_KEY — server-only Stadia API key.
@@ -38,6 +41,17 @@ const ALLOWED_HOSTS = new Set([
 ]);
 const VERCEL_TEAM_SUFFIX = '-nikil-kuruvillas-projects.vercel.app';
 const VERCEL_PROJECT_PREFIX = 'learn-tanstack-start-';
+
+/** Builds a 302 to the branded blocked-tile placeholder; used for both Referer and Sec-Fetch-Site auth failures so hotlinkers see a visible "blocked" tile instead of a broken-image icon. `Vary` keeps the redirect partitioned in the CDN cache. */
+function blockedTileRedirect(): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: '/blocked-tile.png',
+      Vary: 'Sec-Fetch-Site',
+    },
+  });
+}
 
 /** Returns true when the Referer's parsed hostname matches the prod custom domain or a Vercel deployment URL anchored on both this team's suffix and this project's prefix. */
 function isAllowedReferer(referer: string): boolean {
@@ -61,13 +75,13 @@ export default defineEventHandler(async (event) => {
   if (isProd) {
     const referer = event.req.headers.get('referer') ?? '';
     if (!isAllowedReferer(referer)) {
-      return new Response(null, { status: 403 });
+      return blockedTileRedirect();
     }
   }
 
   const fetchSite = event.req.headers.get('sec-fetch-site');
   if (fetchSite !== 'same-origin') {
-    return new Response(null, { status: 403 });
+    return blockedTileRedirect();
   }
 
   const params = event.context.params ?? {};

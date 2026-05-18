@@ -30,7 +30,7 @@ export default function Header() {
             rel="noreferrer"
             className="hidden rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink) sm:block"
           >
-            <span className="sr-only">Follow TanStack on X</span>
+            <span className="sr-only">Follow NikilKuruvilla on X</span>
             <svg viewBox="0 0 16 16" aria-hidden="true" width="18" height="18">
               <path
                 fill="currentColor"
@@ -44,7 +44,7 @@ export default function Header() {
             rel="noreferrer"
             className="hidden rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink) sm:block"
           >
-            <span className="sr-only">Go to TanStack GitHub</span>
+            <span className="sr-only">Go to NikilKuruvilla GitHub</span>
             <svg viewBox="0 0 16 16" aria-hidden="true" width="18" height="18">
               <path
                 fill="currentColor"

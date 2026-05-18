@@ -76,6 +76,28 @@ export function dlog(...args: unknown[]) {
 }
 
 /**
+ * Combine HMRC `townCity` + `county` into a comma-separated display string.
+ * Dedupes case-insensitively (so "London, London" collapses to "London") and
+ * titleCases each remaining part. Returns an empty string when both are
+ * falsy.
+ */
+export function formatLocation(
+  townCity?: string | null,
+  county?: string | null,
+): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const value of [townCity, county]) {
+    if (!value) continue;
+    const key = value.toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    parts.push(titleCase(value));
+  }
+  return parts.join(', ');
+}
+
+/**
  * Format an ISO date string as a UK long-form date (`5 April 2026`). Returns
  * an empty string for missing or unparseable input.
  */

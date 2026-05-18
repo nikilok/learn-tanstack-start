@@ -44,8 +44,10 @@ function postalAddress(address: Address | null | undefined) {
   if (address.locality) parts.addressLocality = address.locality;
   if (address.region) parts.addressRegion = address.region;
   if (address.postal_code) parts.postalCode = address.postal_code;
-  parts.addressCountry = address.country || 'GB';
-  return Object.keys(parts).length > 1 ? parts : null;
+  if (address.country) parts.addressCountry = address.country;
+  if (Object.keys(parts).length === 1) return null;
+  if (!parts.addressCountry) parts.addressCountry = 'GB';
+  return parts;
 }
 
 /** Build an Organization schema describing the sponsor — includes legal name, Companies House identifier, founding date, and registered address when available. */

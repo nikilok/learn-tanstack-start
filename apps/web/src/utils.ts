@@ -89,10 +89,11 @@ export function formatLocation(
   const parts: string[] = [];
   for (const value of [townCity, county]) {
     if (!value) continue;
-    const key = value.toLowerCase().trim();
+    const trimmed = value.trim();
+    const key = trimmed.toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    parts.push(titleCase(value));
+    parts.push(titleCase(trimmed));
   }
   return parts.join(', ');
 }

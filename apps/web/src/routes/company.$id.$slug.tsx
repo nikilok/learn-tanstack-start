@@ -351,6 +351,17 @@ function CompanyDetail() {
           <p className="text-sm leading-relaxed text-(--sea-ink-soft)">
             {summary}
           </p>
+          {profile?.company_number && (
+            <a
+              href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="no-underline glass mt-4 inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-[#0072f5] dark:text-[#3b9eff]"
+            >
+              View on Companies House
+              <ExternalLink size={14} aria-hidden="true" />
+            </a>
+          )}
         </section>
 
         <Link

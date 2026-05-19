@@ -6,6 +6,7 @@ const ALLOWED_PREFIXES = [
   '/privacy', // privacy policy
   '/_server', // TanStack server functions
   '/api/revalidate', // Nitro cache revalidation endpoint
+  '/api/tiles/', // Nitro Stadia Maps tile proxy
 ];
 
 const STATIC_EXTENSIONS = new Set([

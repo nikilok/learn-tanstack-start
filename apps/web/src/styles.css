@@ -54,6 +54,8 @@
   --logo-red: #c8102e;
   --ok: #74a0b8;
   --bg-page-edge: #f4f4f8;
+  --shimmer-base: var(--sea-ink-faint);
+  --shimmer-peak: var(--sea-ink);
 }
 
 .dark {
@@ -102,6 +104,8 @@
   --logo-red: #f87171;
   --ok: #4a425a;
   --bg-page-edge: #0a0a0a;
+  --shimmer-base: var(--sea-ink-soft);
+  --shimmer-peak: var(--sea-ink);
 }
 
 html,
@@ -296,6 +300,40 @@ a {
 
 .heading-card {
   letter-spacing: -0.4px;
+}
+
+/* iOS-lockscreen-style shimmer: a bright stripe sweeps across the text periodically with a pause between sweeps. Used on the sticky "Back to search" pill when it floats over the map for extra readability. */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -150% 0;
+  }
+  50%,
+  100% {
+    background-position: 250% 0;
+  }
+}
+.shimmer-text {
+  background: linear-gradient(
+    100deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 42%,
+    var(--shimmer-peak) 50%,
+    var(--shimmer-base) 58%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-sweep 3.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    color: var(--shimmer-base);
+    -webkit-text-fill-color: var(--shimmer-base);
+  }
 }
 
 /*

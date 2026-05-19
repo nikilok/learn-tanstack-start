@@ -1,5 +1,6 @@
 {
   "regions": ["lhr1"],
   "outputDirectory": ".vercel/output",
+  "installCommand": "bun install --frozen-lockfile",
   "ignoreCommand": "! git diff --name-only HEAD^ HEAD | grep -qv '^docs/'"
 }

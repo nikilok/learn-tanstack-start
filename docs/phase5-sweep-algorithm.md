@@ -191,7 +191,7 @@ table, no follow-up job — the decision lands in the same sweep run.
 
 The historical design enqueued these cases as
 `same_rank_different_number` rows in `hmrc_company_mapping_review_queue`
-for a separate resolver to process. As of 2026-05-11 that queue has 140
+for a separate resolver to process. As of 2026-05-19 that queue has 190
 unresolved rows (every row ever enqueued; nothing has ever drained
 them). Inspecting the data showed that ~90% of those rows fall into
 deterministic patterns that a small rule-based scorer resolves cleanly:
@@ -206,22 +206,18 @@ deterministic patterns that a small rule-based scorer resolves cleanly:
   locality match.
 
 The remaining ~10% are genuine ambiguities, and the scorer's confidence
-threshold (`MARGIN`) keeps the row at status quo (bump) with a warning
-rather than committing a wrong promotion.
+threshold (`SCORE_MARGIN`) keeps the row at status quo (bump) with a
+warning rather than committing a wrong promotion.
 
-### `scoreCandidate` — pure scoring function
+### `scoreCandidate` — pure sponsor-fit scorer
 
 ```pseudo
-scoreCandidate(candidate, sponsor, existing):
+scoreCandidate(candidate, sponsor):
   # Hard gate — domain rule that's never wrong
   if not routeTypeCompatible(sponsor.route, candidate.company_type):
       return -infinity
 
   score = 0
-
-  # Succession evidence (strongest positive signal)
-  if normalised(existing.name) in candidate.previous_company_names:
-      score += 5
 
   # HMRC locality match
   if candidate.locality == sponsor.town_city:        score += 3
@@ -231,14 +227,55 @@ scoreCandidate(candidate, sponsor, existing):
   if candidate.status == 'active':                   score += 1
   if candidate.status in ('dissolved', 'liquidation'): score -= 2
 
-  # Same-entity hint
-  if candidate.company_type == existing.company_type: score += 1
-
   return score
 ```
 
-The function is pure: no I/O, no DB, no fetches. Profiles are passed in
-as already-loaded objects. Unit-testable with fixture profiles.
+Purely about "how well does this CH candidate fit this HMRC sponsor?"
+No I/O, no DB, no fetches, no comparison to a baseline. Unit-testable
+with a single fixture profile + sponsor. Score range: `-Infinity`
+(route-type-incompatible) to `+6` (active + matching locality +
+matching postcode area).
+
+### `compareForInlineResolution` — pairwise decision
+
+The pairwise decision (existing vs proposed) lives in a small helper
+that both the live sweep and the drain script call. Single source of
+truth for the comparison logic — there's no second implementation to
+drift out of sync.
+
+```pseudo
+STATUS_QUO_BONUS = 1
+SCORE_MARGIN     = 3
+
+compareForInlineResolution(existing, proposed, sponsor):
+  s_e = scoreCandidate(existing, sponsor) + STATUS_QUO_BONUS
+  s_p = scoreCandidate(proposed, sponsor)
+
+  # Succession evidence — directional and explicit
+  if canonical(proposed.name) in existing.previous_company_names:
+      s_e += 5    # proposed was previously known as existing (rare reverse)
+  if canonical(existing.name) in proposed.previous_company_names:
+      s_p += 5    # existing was renamed to proposed (the common case)
+
+  if s_p > s_e + SCORE_MARGIN: return { s_e, s_p, action: 'promote' }
+  if s_e > s_p + SCORE_MARGIN: return { s_e, s_p, action: 'keep' }
+  return { s_e, s_p, action: 'inconclusive' }
+```
+
+Why split this out from `scoreCandidate`:
+
+- The +1 `STATUS_QUO_BONUS` is an explicit, named bias toward the
+  incumbent — tunable separately from sponsor-fit features. In the
+  earlier 3-arg design this was buried as a "same `company_type` as
+  existing" feature that masqueraded as content scoring; between two
+  *different* CH companies, sharing a `company_type` carries almost no
+  signal anyway (most UK firms are `private-limited-company`).
+- Succession is **symmetric**: both "existing renamed to proposed" and
+  the rarer reverse are checked. Forces the reader to think about both
+  directions instead of hiding the asymmetry inside the scorer.
+- `scoreCandidate` itself stays pure on sponsor-fit features only,
+  testable with a single profile + sponsor fixture without constructing
+  a baseline parameter.
 
 ### Dispatch in the sweep orchestrator
 
@@ -248,21 +285,20 @@ on action == 'inline_score':
   existing_profile = getProfile(row.company_number)         # usually local
   proposed_profile = proposed.profile                       # already loaded
 
-  s_e = scoreCandidate(existing_profile, sponsor, existing_profile)
-  s_p = scoreCandidate(proposed_profile, sponsor, existing_profile)
+  { s_e, s_p, action } = compareForInlineResolution(
+                            existing_profile, proposed_profile, sponsor)
 
-  if s_p > s_e + MARGIN:
-      applyPromotion(row, proposed, changed_by)
-  elif s_e > s_p + MARGIN:
-      bumpVerifiedAt(row)
-  else:
-      console.warn(`inline_score inconclusive for ${row.organisation_name}`)
-      bumpVerifiedAt(row)        # surfaces in sweep summary's `warned` counter
+  match action:
+    promote      → applyPromotion(row, proposed, changed_by)
+    keep         → bumpVerifiedAt(row)
+    inconclusive → console.warn(`inline_score inconclusive for ${row.organisation_name}`)
+                   bumpVerifiedAt(row)    # surfaces in sweep summary's `warned`
 ```
 
-`MARGIN` starts at 3 (conservative — at least one strong signal of
-difference needed). Tunable as the route-type compat table and feature
-set evolve.
+`SCORE_MARGIN = 3` is conservative — at least one strong signal of
+difference needed. `STATUS_QUO_BONUS = 1` codifies the bias toward the
+incumbent. Both tunable as the route-type compat table and feature set
+evolve.
 
 ### Route-type compatibility (domain-knowledge artefact)
 
@@ -298,31 +334,120 @@ This file is the auditable source of truth for "what company types can
 hold this licence". Reviewable by anyone, regardless of ML / scoring
 knowledge.
 
-### Migration of the existing 140 rows
+### Migration of the existing 190 rows
 
-One-shot script at `apps/web/scripts/resolve-same-rank-queue.ts`:
+The drain uses a one-shot CLI script with two pluggable strategies.
+Both share profile hydration and the audit-trail mechanism; they differ
+only in the per-row decision.
+
+- **Trust strategy** — every queue row is swapped to its
+  `proposed_company_number`. Based on manual verification of the data,
+  the resolver's proposed picks are consistently the right entity for
+  the 190 cases. No scoring, no inconclusive bucket. Resolution column
+  records `drain_trust_swap` so the strategy stays recoverable from the
+  audit trail.
+
+- **Scorer strategy** — runs `compareForInlineResolution` (the same
+  helper the live sweep uses) per row and dispatches to swap / keep /
+  inconclusive. Resolution column records `drain_scorer_swap`,
+  `drain_scorer_keep`, or `drain_scorer_inconclusive`.
+
+Both strategies write through `applyPromotion` for the swap, so the
+optimistic lock on `verified_at` and the audit-INSERT side-effect are
+identical to a normal sweep promotion. `changed_by` in audit is
+`'drain_trust'` or `'drain_scorer'` — distinguishable forever.
+
+#### Step A — hydrate missing proposed profiles
+
+One-shot script at `apps/web/scripts/hydrate-queue-proposed-profiles.ts`.
 
 ```pseudo
-for row in SELECT * FROM hmrc_company_mapping_review_queue
-           WHERE resolved_at IS NULL
-           ORDER BY id ASC:
-    sponsor          = lookupHmrcSponsor(row.organisation_name)
-    existing_profile = fetchProfile(row.existing_company_number)
-    proposed_profile = fetchProfile(row.proposed_company_number)
+to_fetch = SELECT DISTINCT q.proposed_company_number
+           FROM hmrc_company_mapping_review_queue q
+           LEFT JOIN companies_house_profiles p
+                  ON p.company_number = q.proposed_company_number
+           WHERE q.resolved_at IS NULL
+             AND p.company_number IS NULL
 
-    s_e = scoreCandidate(existing_profile, sponsor, existing_profile)
-    s_p = scoreCandidate(proposed_profile, sponsor, existing_profile)
-
-    if s_p > s_e + MARGIN:
-        applyPromotion(/* swap to proposed */, 'resolve_queue_oneshot')
-    elif s_e > s_p + MARGIN:
-        pass     # existing wins, no change
-    else:
-        record inconclusive case → markdown TODO list for manual triage
+for number in to_fetch:
+    profile = fetchProfile(number)
+    upsertProfile(profile)
+    sleep(550ms)        # ~2 req/sec; well under CH 600/5min limit
 ```
 
-Run once. Inconclusive residue (expected: a handful) gets manually
-resolved by inspection. Then the queue table is dropped.
+~183 calls, ~92s wall. Idempotent — re-runs are no-ops because the
+LEFT JOIN already excludes cached rows. If a number 404s, log and
+continue — that queue row falls into the orphan bucket in step B.
+
+After this step every queue row has both profiles available locally;
+remaining steps make zero CH calls.
+
+#### Step B — dry-run both strategies, emit comparison
+
+```sh
+bun apps/web/scripts/drain-review-queue.ts --compare
+```
+
+Runs both `trust` and `scorer` `decide()` over all unresolved queue
+rows (no writes) and emits a markdown report at
+`docs/phase5-drain-comparison.md` sorted disagreement-first:
+
+```text
+| org | e_num → p_num | trust  | scorer       | s_e | s_p | reason            |
+|-----|---------------|--------|--------------|-----|-----|-------------------|
+| ... | ... → ...     | swap   | keep         |   8 |   3 | scorer disagrees  |
+| ... | ... → ...     | swap   | inconclusive |   4 |   5 | scorer uncertain  |
+| ... | ... → ...     | swap   | swap         |   2 |   9 | both agree        |
+| ... | ... → ...     | swap   | orphan       |  —  |  —  | no sponsor record |
+```
+
+Eyeball the report. Rows where strategies agree are uncontroversial;
+the disagreements are where the decision matters. Use this output to
+choose which strategy to actually run in step C.
+
+#### Step C — apply the chosen strategy
+
+```sh
+bun drain-review-queue.ts --strategy=trust  --apply
+bun drain-review-queue.ts --strategy=scorer --apply
+bun drain-review-queue.ts --strategy=scorer --apply --limit=10  # partial
+```
+
+Per row:
+
+```pseudo
+mapping = SELECT * FROM hmrc_company_mapping
+          WHERE organisation_name = row.organisation_name
+if mapping.company_number != row.existing_company_number:
+    log("queue row stale — mapping moved on since enqueue"); skip
+
+existing = getProfile(mapping.company_number)
+proposed = getProfile(row.proposed_company_number)
+sponsor  = lookupHmrcSponsor(row.organisation_name)
+
+{ action, reason } = strategy.decide(row, existing, proposed, sponsor)
+
+match action:
+  swap         → applyPromotion(mapping,
+                                syntheticResolveResult(row, proposed),
+                                changed_by = `drain_${strategy.name}`)
+                 markResolved(row, `drain_${strategy.name}_swap`, reason)
+  keep         → markResolved(row, `drain_${strategy.name}_keep`, reason)
+  inconclusive → markResolved(row, `drain_${strategy.name}_inconclusive`, reason)
+```
+
+`--limit=N` enables partial drains for safety (e.g.
+`--strategy=scorer --apply --limit=10` → spot-check the 10 resolved
+rows in the audit table → re-run for the rest).
+
+#### Step D — hand-resolve residue, then drop the table
+
+Only the scorer strategy can produce residue (`drain_scorer_keep` and
+`drain_scorer_inconclusive` rows that an operator may want to revisit).
+Dump those to `docs/phase5-drain-residue.md` and resolve by inspection.
+The trust strategy leaves zero residue.
+
+Once the queue is fully drained, proceed to "Dropping the table" below.
 
 ### Dropping the table
 
@@ -409,10 +534,21 @@ apps/web/src/lib/phase5/
   rank.ts                  pure: rank(matchMethod) → number
                            plus the terminal-peer predicates
 
-  score-candidate.ts       pure: (candidate, sponsor, existing) → number
-                           the inline scorer; no I/O
+  score-candidate.ts       pure: (candidate, sponsor) → number
+                           sponsor-fit scorer only; no I/O, no comparison
+
+  compare-candidates.ts    pure: (existing, proposed, sponsor) →
+                           { s_e, s_p, action }; calls scoreCandidate,
+                           adds status-quo bias and succession checks;
+                           single source of truth for the inline
+                           pairwise decision (live sweep + drain both
+                           call this)
 
   route-type-compat.ts     pure data table: HmrcRoute → Set<CHCompanyType>
+
+  drain-strategies.ts      pure: DrainStrategy interface plus `trust`
+                           and `scorer` implementations. Scorer strategy
+                           calls compareForInlineResolution.
 
   sweep.ts                 orchestration: selects tier rows, calls
                            resolveOneSponsor (injected), calls decide,
@@ -420,13 +556,24 @@ apps/web/src/lib/phase5/
                            inline-scorer flow (deps injected)
 
 apps/web/scripts/
-  phase5-sweep.ts                  thin CLI: parses --tier flag, wires
-                                   real db / fetchApi / upsertProfile
-                                   into sweep.ts
+  phase5-sweep.ts                       thin CLI: parses --tier flag,
+                                        wires real db / fetchApi /
+                                        upsertProfile into sweep.ts
 
-  resolve-same-rank-queue.ts       one-shot: drains the existing 140
-                                   queue rows using the same scorer,
-                                   then is deleted
+  hydrate-queue-proposed-profiles.ts    one-shot (Step A of the drain):
+                                        fetches the ~183 missing proposed
+                                        profiles from CH and UPSERTs them
+                                        into companies_house_profiles.
+                                        Delete after the queue table is
+                                        dropped.
+
+  drain-review-queue.ts                 one-shot (Steps B+C of the drain):
+                                        drains the 190 existing queue
+                                        rows using a pluggable strategy.
+                                        Modes: --strategy={trust,scorer},
+                                        --dry-run / --apply / --compare,
+                                        --limit=N. Delete after the
+                                        queue table is dropped.
 ```
 
 `decide.ts` and `score-candidate.ts` are both unit-test surfaces. `sweep.ts`
@@ -483,16 +630,15 @@ describe('rule 6: same rank')
 
 ### What to test (`score-candidate.test.ts`)
 
-The scorer is pure too — pass fixture profiles in, assert numeric output.
+The scorer is pure: profile + sponsor → number. Tests sponsor-fit
+features only. Pairwise comparison logic lives in
+`compare-candidates.test.ts`.
 
 ```text
 describe('hard gate: routeTypeCompatible')
   Charity Worker + private-limited-company candidate    → -Infinity
   Charity Worker + charitable-incorporated-organisation → finite score
   Skilled Worker + private-limited-company              → finite score
-
-describe('succession evidence')
-  existing.name in candidate.previous_company_names     → +5 vs without
 
 describe('locality match')
   candidate.locality == sponsor.town_city               → +3
@@ -503,11 +649,47 @@ describe('status weighting')
   candidate.status == 'dissolved'                       → -2
   candidate.status == 'liquidation'                     → -2
 
+describe('combined max')
+  active + matching locality + matching postcode area   → +6
+```
+
+### What to test (`compare-candidates.test.ts`)
+
+`compareForInlineResolution` takes two profiles + sponsor and returns
+`{ s_e, s_p, action }`. Tests cover the status-quo bias, succession
+evidence (both directions), and the `SCORE_MARGIN` threshold.
+
+```text
+describe('status-quo bias')
+  identical existing & proposed (same sponsor-fit score)
+    → action='inconclusive'  (bias of +1 is below SCORE_MARGIN=3,
+                              so neither side wins by the threshold;
+                              status quo holds via the inconclusive
+                              path. Lock the expected behaviour here.)
+
+describe('succession evidence — forward (the common case)')
+  canonical(existing.name) in proposed.previous_company_names
+    → s_p += 5, expect action='promote' when other features tie
+
+describe('succession evidence — reverse (rare)')
+  canonical(proposed.name) in existing.previous_company_names
+    → s_e += 5, expect action='keep'
+
+describe('SCORE_MARGIN threshold')
+  s_p - s_e > SCORE_MARGIN     → action='promote'
+  s_e - s_p > SCORE_MARGIN     → action='keep'
+  |s_p - s_e| ≤ SCORE_MARGIN   → action='inconclusive'
+
+describe('hard gate plumbing through')
+  scoreCandidate returns -Infinity for existing → s_e = -Infinity + bias
+    = -Infinity, so any finite s_p wins                → action='promote'
+
 describe('AsiaLink regression fixture')
   HMRC: Northwich, route=Charity Worker
-  existing (CE006188, CIO, no address)                  → finite
-  proposed (16920968, private Ltd, Manchester)          → -Infinity (hard gate)
-  → existing wins by infinity-margin → bump
+  existing: CE006188, CIO, no address                   → s_e finite
+  proposed: 16920968, private Ltd, Manchester           → s_p = -Infinity
+                                                          (route-type hard gate)
+  → action='keep' (existing wins by infinity-margin)
 ```
 
 Open test cases (decisions to lock in via the test, not the doc):
@@ -544,20 +726,20 @@ test('log_and_bump rows increment warned counter and bump verified_at')
   expect(bumpVerifiedAt).toHaveBeenCalled()
   expect(summary.warned).toBe(1)
 
-test('inline_score dispatches to applyPromotion when proposed wins by MARGIN')
+test('inline_score dispatches to applyPromotion when scorer says promote')
   decide returns { action: 'inline_score' }
-  scoreCandidate stubbed: existing=2, proposed=7, MARGIN=3
+  compareForInlineResolution stubbed: { s_e: 2, s_p: 7, action: 'promote' }
   expect(applyPromotion).toHaveBeenCalled()
   expect(summary.inline_resolved).toBe(1)
 
-test('inline_score bumps when existing wins by MARGIN')
-  scoreCandidate stubbed: existing=7, proposed=2
+test('inline_score bumps when scorer says keep')
+  compareForInlineResolution stubbed: { s_e: 7, s_p: 2, action: 'keep' }
   expect(applyPromotion).not.toHaveBeenCalled()
   expect(bumpVerifiedAt).toHaveBeenCalled()
   expect(summary.inline_resolved).toBe(1)
 
-test('inline_score increments inconclusive counter when scores tie')
-  scoreCandidate stubbed: existing=4, proposed=4
+test('inline_score increments inconclusive counter when scorer says inconclusive')
+  compareForInlineResolution stubbed: { s_e: 4, s_p: 4, action: 'inconclusive' }
   expect(applyPromotion).not.toHaveBeenCalled()
   expect(bumpVerifiedAt).toHaveBeenCalled()
   expect(summary.inline_inconclusive).toBe(1)

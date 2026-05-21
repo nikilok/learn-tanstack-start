@@ -31,8 +31,8 @@ const config = defineConfig({
             'X-Frame-Options': 'DENY',
             // Block legacy Flash/Acrobat cross-domain policy files.
             'X-Permitted-Cross-Domain-Policies': 'none',
-            // Isolate browsing context from cross-origin openers (Spectre-era hardening).
-            'Cross-Origin-Opener-Policy': 'same-origin',
+            // Isolate browsing context from cross-origin openers (Spectre-era hardening). 'allow-popups' lets popups we open (e.g. the Vercel Toolbar auth flow) postMessage back via window.opener.
+            'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
             // Disable browser APIs we don't use; loosen per-route if a feature ships.
             'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
             // CSP subset: clickjacking + base-URL/plugin/form-hijack defense + HTTP→HTTPS upgrade. Script/style lockdown deferred.

@@ -7,6 +7,7 @@ const ALLOWED_PREFIXES = [
   '/_server', // TanStack server functions
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy
+  '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint
 ];
 
 const STATIC_EXTENSIONS = new Set([

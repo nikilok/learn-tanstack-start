@@ -9,6 +9,7 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { getFlagState } from '../api/flags';
 import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
@@ -57,11 +58,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const address = profile?.registered_office_address
       ? formatAddress(profile.registered_office_address)
       : '';
-    const geo = address
-      ? await queryClient.ensureQueryData(geocodeQueryOptions(address))
-      : null;
+    const [geo, flagState] = await Promise.all([
+      address
+        ? queryClient.ensureQueryData(geocodeQueryOptions(address))
+        : null,
+      getFlagState(),
+    ]);
 
-    return { sponsor, profile, geo };
+    return { sponsor, profile, geo, flagState };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -160,7 +164,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, geo } = Route.useLoaderData();
+  const { sponsor, profile, geo, flagState } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -367,7 +371,11 @@ function CompanyDetail() {
                   rel="noopener noreferrer"
                   className="no-underline glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black transition-[color,background-color,box-shadow]! duration-300! dark:text-white hover:bg-[#1d70b8]! hover:text-white"
                 >
-                  <GovUkLogo className="h-5 w-auto" />
+                  {flagState.govukBranded ? (
+                    <GovUkLogo className="h-5 w-auto" />
+                  ) : (
+                    'gov.uk'
+                  )}
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
               </div>

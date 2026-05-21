@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import { devtools } from '@tanstack/devtools-vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import { vercelToolbar } from '@vercel/toolbar/plugins/vite';
 import viteReact from '@vitejs/plugin-react';
 import dotenv from 'dotenv';
 import { nitro } from 'nitro/vite';
@@ -52,6 +53,7 @@ const config = defineConfig({
       },
     }),
     viteReact(),
+    vercelToolbar(),
   ],
   optimizeDeps: {
     exclude: ['@tanstack/start-server-core'],

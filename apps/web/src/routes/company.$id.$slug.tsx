@@ -374,7 +374,7 @@ function CompanyDetail() {
                   {flagState.govukBranded ? (
                     <GovUkLogo className="h-5 w-auto" />
                   ) : (
-                    'gov.uk'
+                    'GOV.UK'
                   )}
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>

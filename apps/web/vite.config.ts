@@ -40,6 +40,11 @@ const config = defineConfig({
               "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
           },
         },
+        '/company/**': {
+          headers: {
+            'Cache-Control': 's-maxage=2592000, stale-while-revalidate=604800',
+          },
+        },
         '/api/tiles/**': {
           headers: {
             'Cache-Control': 's-maxage=31536000, stale-while-revalidate=86400',

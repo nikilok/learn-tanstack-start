@@ -1,4 +1,4 @@
-import { get } from '@vercel/edge-config';
+import { vercelAdapter } from '@flags-sdk/vercel';
 import { decryptOverrides } from 'flags';
 
 /** Minimal flag spec — kept framework-agnostic so the same declaration is consumed by the discovery endpoint metadata and the server-side evaluator. */
@@ -7,10 +7,9 @@ export type FlagSpec<T> = {
   description: string;
   defaultValue: T;
   options: { value: T; label: string }[];
-  decide: () => T | Promise<T>;
 };
 
-/** GOV.UK branded logo on outbound Companies House links. Off by default pending Cabinet Office permission. Source of truth is the `govuk-branded` key in our Vercel Edge Config (dashboard-managed); per-user overrides come from the Flags Explorer cookie. */
+/** GOV.UK branded logo on outbound Companies House links. Off by default pending Cabinet Office permission. Value is read from the Vercel Flags dashboard (per-environment toggle); per-user overrides come from the Flags Explorer cookie. */
 export const govukBranded: FlagSpec<boolean> = {
   key: 'govuk-branded',
   description:
@@ -20,19 +19,11 @@ export const govukBranded: FlagSpec<boolean> = {
     { value: false, label: 'Off — plain "gov.uk" text' },
     { value: true, label: 'On — branded GOV.UK logo' },
   ],
-  decide: async () => {
-    try {
-      return (await get<boolean>('govuk-branded')) ?? false;
-    } catch {
-      // EDGE_CONFIG unset (e.g. before local setup) — fall back to default off.
-      return false;
-    }
-  },
 };
 
 export const flags = { govukBranded } as const;
 
-/** Resolves a flag server-side: a signed Flags Explorer override cookie value wins; otherwise the spec's decide() runs. Cookie signatures are verified against FLAGS_SECRET so client tampering invalidates the override and we fall through to decide(). */
+/** Resolves a flag server-side: a signed Flags Explorer override cookie value wins; otherwise the Vercel Flags adapter looks up the dashboard-managed value for this environment. Cookie signatures are verified against FLAGS_SECRET so client tampering invalidates the override. */
 export async function evaluateFlag<T>(
   spec: FlagSpec<T>,
   overrideCookieValue: string | undefined,
@@ -47,8 +38,29 @@ export async function evaluateFlag<T>(
         return overrides[spec.key] as T;
       }
     } catch {
-      // Tampered/expired cookie — fall through to decide().
+      // Tampered/expired cookie — fall through to dashboard value.
     }
   }
-  return spec.decide();
+  try {
+    const adapter = vercelAdapter<T, unknown>();
+    return await adapter.decide({
+      key: spec.key,
+      headers: EMPTY_HEADERS,
+      cookies: EMPTY_COOKIES,
+      defaultValue: spec.defaultValue,
+    });
+  } catch {
+    // FLAGS env var missing or Vercel Flags unreachable — fall back to default.
+    return spec.defaultValue;
+  }
 }
+
+const EMPTY_HEADERS = new Headers() as unknown as Parameters<
+  ReturnType<typeof vercelAdapter>['decide']
+>[0]['headers'];
+
+const EMPTY_COOKIES = {
+  get: () => undefined,
+} as unknown as Parameters<
+  ReturnType<typeof vercelAdapter>['decide']
+>[0]['cookies'];

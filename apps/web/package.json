@@ -28,6 +28,7 @@
     "db:seed-sic": "bun scripts/seed-sic-codes.ts"
   },
   "dependencies": {
+    "@flags-sdk/vercel": "1.3.0",
     "@mcp-b/global": "^2.2.0",
     "@ss/db": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
@@ -46,9 +47,11 @@
     "@vercel/functions": "^3.4.3",
     "@vercel/sdk": "^1.19.36",
     "@vercel/speed-insights": "^2.0.0",
+    "@vercel/toolbar": "0.2.6",
     "csv-parse": "^6.2.1",
     "dotenv": "^17.4.0",
     "drizzle-orm": "^0.45.2",
+    "flags": "4.0.6",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.545.0",
     "nitro": "^3.0.260311-beta",

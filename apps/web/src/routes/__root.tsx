@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
 import {
+  ClientOnly,
   createRootRouteWithContext,
   HeadContent,
   Link,
@@ -11,6 +12,8 @@ import {
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
+import { mountVercelToolbar } from '@vercel/toolbar/vite';
+import { useEffect } from 'react';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
@@ -154,8 +157,21 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <SpeedInsights />
           </>
         )}
+        {import.meta.env.DEV && (
+          <ClientOnly>
+            <VercelToolbarMount />
+          </ClientOnly>
+        )}
         <Scripts />
       </body>
     </html>
   );
+}
+
+/** Mounts the Vercel Toolbar in local dev so the Flags Explorer is available here. Preview deploys get the toolbar auto-injected by Vercel; production stays unmounted. */
+function VercelToolbarMount() {
+  useEffect(() => {
+    mountVercelToolbar();
+  }, []);
+  return null;
 }

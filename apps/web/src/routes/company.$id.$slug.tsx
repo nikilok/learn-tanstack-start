@@ -9,9 +9,11 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { flagStateQueryOptions } from '../api/flags';
 import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
+import GovUkLogo from '../components/GovUkLogo';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, formatLocation, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -56,11 +58,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const address = profile?.registered_office_address
       ? formatAddress(profile.registered_office_address)
       : '';
-    const geo = address
-      ? await queryClient.ensureQueryData(geocodeQueryOptions(address))
-      : null;
+    const [geo, flagState] = await Promise.all([
+      address
+        ? queryClient.ensureQueryData(geocodeQueryOptions(address))
+        : null,
+      queryClient.ensureQueryData(flagStateQueryOptions),
+    ]);
 
-    return { sponsor, profile, geo };
+    return { sponsor, profile, geo, flagState };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -159,7 +164,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, geo } = Route.useLoaderData();
+  const { sponsor, profile, geo, flagState } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -345,22 +350,36 @@ function CompanyDetail() {
         </div>
 
         <section className="mt-6" aria-labelledby="sponsor-about-heading">
-          <h2 id="sponsor-about-heading" className="sr-only">
-            About this sponsor
+          <h2
+            id="sponsor-about-heading"
+            className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)"
+          >
+            About
           </h2>
-          <p className="text-sm leading-relaxed text-(--sea-ink-soft)">
+          <p className="mt-1 text-sm leading-relaxed text-(--sea-ink-soft)">
             {summary}
           </p>
           {profile?.company_number && (
-            <a
-              href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="no-underline glass mt-4 inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-[#0072f5] dark:text-[#3b9eff]"
-            >
-              View on Companies House
-              <ExternalLink size={14} aria-hidden="true" />
-            </a>
+            <div className="mt-4">
+              <h3 className="mb-2 text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                See more on
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="no-underline glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black transition-[color,background-color,box-shadow]! duration-300! dark:text-white hover:bg-[#1d70b8]! hover:text-white"
+                >
+                  {flagState.govukBranded ? (
+                    <GovUkLogo className="h-5 w-auto" />
+                  ) : (
+                    'GOV.UK'
+                  )}
+                  <ExternalLink size={14} aria-hidden="true" />
+                </a>
+              </div>
+            </div>
           )}
         </section>
 

@@ -9,7 +9,7 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
-import { getFlagState } from '../api/flags';
+import { flagStateQueryOptions } from '../api/flags';
 import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
@@ -62,7 +62,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
       address
         ? queryClient.ensureQueryData(geocodeQueryOptions(address))
         : null,
-      getFlagState(),
+      queryClient.ensureQueryData(flagStateQueryOptions),
     ]);
 
     return { sponsor, profile, geo, flagState };

@@ -19,11 +19,11 @@
     "db:studio": "turbo run db:studio --filter @ss/web"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
-    "@types/bun": "^1.3.12",
-    "@types/node": "^22.10.2",
-    "turbo": "^2.5.4",
-    "typescript": "^5.7.2"
+    "@biomejs/biome": "^2.4.15",
+    "@types/bun": "^1.3.14",
+    "@types/node": "^25.8.0",
+    "turbo": "^2.9.14",
+    "typescript": "^6.0.3"
   },
   "packageManager": "bun@1.3.13",
   "dependencies": {

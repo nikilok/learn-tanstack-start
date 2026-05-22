@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import type { ExistingMapping, ProposedResolution } from './decide.ts';
 import { decide } from './decide.ts';
 

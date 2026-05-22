@@ -1,4 +1,5 @@
 import L from 'leaflet';
+
 import 'leaflet/dist/leaflet.css';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
@@ -7,9 +8,11 @@ import {
   Marker,
   TileLayer,
 } from 'react-leaflet';
+
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
 import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '../utils/tileBounds';
+
 import './LeafletMap.css';
 import UnionJackLens from './UnionJackLens';
 

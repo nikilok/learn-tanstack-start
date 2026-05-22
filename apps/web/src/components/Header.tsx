@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router';
+
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 

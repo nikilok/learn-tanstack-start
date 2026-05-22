@@ -160,30 +160,30 @@ html:active-view-transition-type(back) .page-flip-details {
  * `!important` because the name is set as an inline style by HmrcCard
  * — that's the only way to beat inline-style specificity from CSS.
  */
-html[data-browser="safari"] .page-flip-details {
+html[data-browser='safari'] .page-flip-details {
   view-transition-name: none;
 }
-html[data-browser="safari"] .page-flip-listing [style*="view-transition-name"] {
+html[data-browser='safari'] .page-flip-listing [style*='view-transition-name'] {
   /* biome-ignore lint: needed to override the inline view-transition-name set by HmrcCard */
   view-transition-name: none !important;
 }
 
 /* Forward root animation for Safari. Higher specificity than the shared
    `forward root: animation: none` rule below, so it wins on Safari. */
-html[data-browser="safari"]:active-view-transition-type(
-  forward
-)::view-transition-group(root) {
+html[data-browser='safari']:active-view-transition-type(
+    forward
+  )::view-transition-group(root) {
   animation-duration: 280ms;
 }
-html[data-browser="safari"]:active-view-transition-type(
-  forward
-)::view-transition-old(root) {
+html[data-browser='safari']:active-view-transition-type(
+    forward
+  )::view-transition-old(root) {
   animation: route-recede-left 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
   transform-origin: center center;
 }
-html[data-browser="safari"]:active-view-transition-type(
-  forward
-)::view-transition-new(root) {
+html[data-browser='safari']:active-view-transition-type(
+    forward
+  )::view-transition-new(root) {
   animation: route-rise-from-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: center center;
 }

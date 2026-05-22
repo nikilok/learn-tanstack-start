@@ -1,6 +1,9 @@
+/* oxlint-disable react-hooks/exhaustive-deps -- inputRef is a stable RefObject prop; exhaustive-deps reports stable refs as missing deps in oxlint */
 import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
+
 import SearchIcon from './SearchIcon';
+
 import styles from './SearchInput.module.css';
 
 /**
@@ -45,7 +48,6 @@ export default memo(function SearchInput({
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -58,7 +60,6 @@ export default memo(function SearchInput({
     }
   }, [autoFocus]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el || !focus) return;
@@ -69,7 +70,6 @@ export default memo(function SearchInput({
   }, [focus]);
 
   // Sync uncontrolled input when the route search param changes externally
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (el && el.value !== defaultValue && document.activeElement !== el) {

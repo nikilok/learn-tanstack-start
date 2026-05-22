@@ -6,15 +6,15 @@ name: Phase 5 Sweep — Tier 2 (non_exact)
 
 on:
   schedule:
-    - cron: "0 4 * * 0,3"
+    - cron: '0 4 * * 0,3'
   workflow_dispatch:
     inputs:
       max-rows:
-        description: "Override per-run row limit (default 3000)"
+        description: 'Override per-run row limit (default 3000)'
         required: false
         type: number
       dry-run:
-        description: "Dry run — no DB writes"
+        description: 'Dry run — no DB writes'
         type: boolean
         default: false
 

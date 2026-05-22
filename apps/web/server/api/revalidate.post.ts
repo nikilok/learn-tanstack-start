@@ -28,6 +28,7 @@ import {
 import { waitUntil } from '@vercel/functions';
 import { Vercel } from '@vercel/sdk';
 import { eq, gt, max } from 'drizzle-orm';
+
 import { withSecret } from '../utils/withSecret.ts';
 
 const db = createClient(process.env.POSTGRES_URL as string);

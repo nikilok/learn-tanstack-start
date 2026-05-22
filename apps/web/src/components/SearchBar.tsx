@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
 import SearchIcon from './SearchIcon';
@@ -55,7 +56,7 @@ export default function SearchBar({
   // When the input is open via pill click while scrolled, dismiss on deliberate scroll
   // Re-anchors startY when search changes so content-driven scroll shifts don't trigger dismiss
   const scrollAnchorRef = useRef(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-anchor scroll baseline when search changes
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- re-anchor scroll baseline when search changes
   useEffect(() => {
     scrollAnchorRef.current = window.scrollY;
   }, [search]);

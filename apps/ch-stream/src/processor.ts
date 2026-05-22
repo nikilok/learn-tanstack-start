@@ -5,6 +5,7 @@ import {
   companiesHouseProfileTrails,
 } from '@ss/db/schema';
 import { eq } from 'drizzle-orm';
+
 import { CONFIG } from './config.ts';
 import { mapProfileToRow } from './mapper.ts';
 import type { CHStreamEvent } from './types.ts';

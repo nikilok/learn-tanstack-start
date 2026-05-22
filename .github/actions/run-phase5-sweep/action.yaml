@@ -7,16 +7,16 @@ description: |
 
 inputs:
   tier:
-    description: "Tier name passed to --tier (no_match | non_exact | exact | public_body)"
+    description: 'Tier name passed to --tier (no_match | non_exact | exact | public_body)'
     required: true
   max-rows:
     description: "Optional override for the per-run row limit; falls back to the script's tier default"
     required: false
-    default: ""
+    default: ''
   dry-run:
-    description: "Dry run — no DB writes"
+    description: 'Dry run — no DB writes'
     required: false
-    default: "false"
+    default: 'false'
 
 runs:
   using: composite

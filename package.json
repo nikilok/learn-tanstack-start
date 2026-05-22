@@ -11,6 +11,8 @@
     "dev:ch-stream": "turbo run dev --filter @ss/ch-stream",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "test": "turbo run test",
     "db:generate": "turbo run db:generate --filter @ss/web",
     "db:create-migration": "turbo run db:create-migration --filter @ss/web",
@@ -18,15 +20,16 @@
     "db:push": "turbo run db:push --filter @ss/web",
     "db:studio": "turbo run db:studio --filter @ss/web"
   },
+  "dependencies": {
+    "vercel": "^54.1.0"
+  },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.8.0",
+    "oxfmt": "^0.51.0",
+    "oxlint": "^1.66.0",
     "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   },
-  "packageManager": "bun@1.3.13",
-  "dependencies": {
-    "vercel": "^54.1.0"
-  }
+  "packageManager": "bun@1.3.13"
 }

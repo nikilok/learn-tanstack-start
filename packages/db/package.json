@@ -2,14 +2,14 @@
   "name": "@ss/db",
   "private": true,
   "type": "module",
-  "scripts": {
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix ."
-  },
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
     "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

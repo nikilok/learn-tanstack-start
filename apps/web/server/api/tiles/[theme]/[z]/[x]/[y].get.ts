@@ -32,6 +32,7 @@
  *  - STADIA_API_KEY — server-only Stadia API key.
  */
 import { defineEventHandler } from 'h3';
+
 import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '#/utils/tileBounds';
 
 const ALLOWED_THEMES = new Set(['alidade_smooth', 'alidade_smooth_dark']);

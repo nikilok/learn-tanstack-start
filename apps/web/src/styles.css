@@ -1,13 +1,13 @@
-@import "./fonts.css";
-@import "tailwindcss";
-@import "./transitions.css";
+@import './fonts.css';
+@import 'tailwindcss';
+@import './transitions.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Geist", system-ui, -apple-system, Arial, sans-serif;
+  --font-sans: 'Geist', system-ui, -apple-system, Arial, sans-serif;
   --font-mono:
-    "Geist Mono", ui-monospace, SFMono-Regular, "Roboto Mono", Menlo, monospace;
+    'Geist Mono', ui-monospace, SFMono-Regular, 'Roboto Mono', Menlo, monospace;
 }
 
 :root {
@@ -34,12 +34,10 @@
   --link-bg-hover: var(--gray-50);
   --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
   --shadow-card:
-    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.04) 0px 1px 2px,
+    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 1px 2px,
     rgba(0, 0, 0, 0.06) 0px 6px 16px -4px;
   --shadow-card-full:
-    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.04) 0px 1px 2px,
+    rgba(0, 0, 0, 0.08) 0px 0px 0px 1px, rgba(0, 0, 0, 0.04) 0px 1px 2px,
     rgba(0, 0, 0, 0.08) 0px 12px 24px -6px;
   --glass-bg: rgba(255, 255, 255, 0.5);
   --glow-a: rgba(0, 114, 245, 0.18);
@@ -84,12 +82,11 @@
   --link-bg-hover: #000000;
   --shadow-ring: rgba(255, 255, 255, 0.1) 0px 0px 0px 1px;
   --shadow-card:
-    rgba(255, 255, 255, 0.1) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.2) 0px 2px 2px,
+    rgba(255, 255, 255, 0.1) 0px 0px 0px 1px, rgba(0, 0, 0, 0.2) 0px 2px 2px,
     rgba(255, 255, 255, 0.03) 0px 0px 0px 1px;
   --shadow-card-full:
-    rgba(255, 255, 255, 0.12) 0px 0px 0px 1px,
-    rgba(0, 0, 0, 0.3) 0px 2px 2px, rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
+    rgba(255, 255, 255, 0.12) 0px 0px 0px 1px, rgba(0, 0, 0, 0.3) 0px 2px 2px,
+    rgba(0, 0, 0, 0.2) 0px 8px 8px -8px,
     rgba(255, 255, 255, 0.04) 0px 0px 0px 1px;
   --glass-bg: rgba(255, 255, 255, 0.04);
   --glow-a: rgba(0, 114, 245, 0.15);
@@ -128,7 +125,7 @@ body {
   margin: 0;
   color: var(--sea-ink);
   font-family: var(--font-sans);
-  font-feature-settings: "liga" 1;
+  font-feature-settings: 'liga' 1;
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
     radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
@@ -139,7 +136,7 @@ body {
 }
 
 body::before {
-  content: "";
+  content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -159,7 +156,7 @@ body::before {
 }
 
 body::after {
-  content: "";
+  content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -177,13 +174,13 @@ body::after {
   );
 }
 
-a:where(:not([class*="no-underline"])) {
+a:where(:not([class*='no-underline'])) {
   color: var(--link-blue);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-a:where(:not([class*="no-underline"])):hover {
+a:where(:not([class*='no-underline'])):hover {
   opacity: 0.85;
 }
 
@@ -235,7 +232,7 @@ a {
 }
 
 .nav-link::after {
-  content: "";
+  content: '';
   position: absolute;
   left: 0;
   bottom: -6px;
@@ -278,7 +275,7 @@ a {
 }
 
 .search-glow::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 0 -6rem;
   background: linear-gradient(to bottom, var(--bg-base) 30%, transparent);

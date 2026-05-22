@@ -1,4 +1,5 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
+
 import { getLastIngestion } from '../api/ingestion';
 import CheckCircleIcon from './CheckCircleIcon';
 

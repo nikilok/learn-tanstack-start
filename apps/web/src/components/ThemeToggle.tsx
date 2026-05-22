@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+
 import { THEME_COLORS } from '../theme';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 

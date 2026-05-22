@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { describeDbHost } from './db-host.ts';
 
 describe('describeDbHost — happy path', () => {

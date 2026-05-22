@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router';
+
 import type { HmrcRow } from '../api/hmrc';
 import { titleCase } from '../utils';
 import RatingIcon from './RatingIcon';

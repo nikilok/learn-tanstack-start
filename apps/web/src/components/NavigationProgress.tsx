@@ -1,4 +1,5 @@
 import { useRouterState } from '@tanstack/react-router';
+
 import styles from './NavigationProgress.module.css';
 
 /**

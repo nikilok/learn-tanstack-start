@@ -10,6 +10,7 @@
  */
 import { verifyAccess, version } from 'flags';
 import { defineEventHandler } from 'h3';
+
 import { flags } from '#/flags.server';
 
 export default defineEventHandler(async (event) => {

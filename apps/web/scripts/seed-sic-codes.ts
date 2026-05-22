@@ -1,6 +1,7 @@
 import { createClient } from '@ss/db/client';
 import { sicCodes } from '@ss/db/schema';
 import { sql } from 'drizzle-orm';
+
 import sicCodeData from '../data/sic-codes.json';
 
 const db = createClient(process.env.POSTGRES_URL as string);

@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
+
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 export interface Geocoded {

@@ -1,5 +1,6 @@
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import { useEffect } from 'react';
+
 import { logError } from '../api/logError';
 
 /**

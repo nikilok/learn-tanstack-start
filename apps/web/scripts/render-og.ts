@@ -15,6 +15,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import sharp from 'sharp';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

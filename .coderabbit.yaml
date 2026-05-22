@@ -1,3 +1,3 @@
 reviews:
   path_filters:
-    - "!apps/web/public/sitemap*.xml"
+    - '!apps/web/public/sitemap*.xml'

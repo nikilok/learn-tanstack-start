@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+
 import { defineEventHandler } from 'h3';
 
 export function withSecret(

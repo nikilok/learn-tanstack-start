@@ -12,7 +12,7 @@ inputs:
     description: |
       Additional environment variables to pass to the Docker container.
       One KEY=VALUE per line. Lines starting with # and empty lines are ignored.
-    default: ""
+    default: ''
 
 outputs:
   stdout:

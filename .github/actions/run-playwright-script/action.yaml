@@ -7,7 +7,7 @@ inputs:
     required: true
   playwright-image-tag:
     description: Playwright Docker image tag (e.g. v1.59.1-noble)
-    default: v1.59.1-noble
+    default: v1.60.0-noble
   extra-env:
     description: |
       Additional environment variables to pass to the Docker container.

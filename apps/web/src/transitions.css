@@ -171,19 +171,19 @@ html[data-browser="safari"] .page-flip-listing [style*="view-transition-name"] {
 /* Forward root animation for Safari. Higher specificity than the shared
    `forward root: animation: none` rule below, so it wins on Safari. */
 html[data-browser="safari"]:active-view-transition-type(
-    forward
-  )::view-transition-group(root) {
+  forward
+)::view-transition-group(root) {
   animation-duration: 280ms;
 }
 html[data-browser="safari"]:active-view-transition-type(
-    forward
-  )::view-transition-old(root) {
+  forward
+)::view-transition-old(root) {
   animation: route-recede-left 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
   transform-origin: center center;
 }
 html[data-browser="safari"]:active-view-transition-type(
-    forward
-  )::view-transition-new(root) {
+  forward
+)::view-transition-new(root) {
   animation: route-rise-from-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: center center;
 }

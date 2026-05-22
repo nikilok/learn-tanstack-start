@@ -35,7 +35,7 @@ export function AddressMap({
   companyName?: string;
 }) {
   return (
-    <ClientOnly>
+    <ClientOnly fallback={placeholder}>
       <Suspense fallback={placeholder}>
         <GeocodedMap address={address} companyName={companyName} />
       </Suspense>

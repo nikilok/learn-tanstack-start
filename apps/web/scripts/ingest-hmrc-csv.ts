@@ -1,5 +1,6 @@
 import { neon } from '@ss/db/client';
 import { parse } from 'csv-parse/sync';
+
 import { slugify } from '../src/utils';
 import { setGitHubOutput } from './ci-utils';
 

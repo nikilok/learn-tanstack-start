@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+
 import type { ExistingMapping, ProposedResolution } from './decide.ts';
 import type { ApplyResult, SweepDeps, SweepLocality } from './sweep.ts';
 import { sweep } from './sweep.ts';

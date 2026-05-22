@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+
 import { parse } from 'csv-parse/sync';
 
 const root = join(import.meta.dirname, '..');

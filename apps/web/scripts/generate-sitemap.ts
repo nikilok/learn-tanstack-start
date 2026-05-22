@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+
 import {
   companiesHouseProfiles,
   hmrcCompanyMapping,
@@ -6,6 +7,7 @@ import {
 } from '@ss/db';
 import { Glob } from 'bun';
 import { eq } from 'drizzle-orm';
+
 import { db } from '../src/db.server';
 
 const BASE_URL = 'https://sponsorsearch.co.uk';

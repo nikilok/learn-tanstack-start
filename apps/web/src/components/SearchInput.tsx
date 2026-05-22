@@ -1,6 +1,8 @@
 import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
+
 import SearchIcon from './SearchIcon';
+
 import styles from './SearchInput.module.css';
 
 /**
@@ -45,7 +47,6 @@ export default memo(function SearchInput({
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
@@ -56,9 +57,9 @@ export default memo(function SearchInput({
         el.setSelectionRange(el.value.length, el.value.length);
       });
     }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (!el || !focus) return;
@@ -66,10 +67,10 @@ export default memo(function SearchInput({
     requestAnimationFrame(() => {
       el.setSelectionRange(el.value.length, el.value.length);
     });
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
   // Sync uncontrolled input when the route search param changes externally
-  // biome-ignore lint/correctness/useExhaustiveDependencies: inputRef is a stable ref
   useEffect(() => {
     const el = inputRef.current;
     if (el && el.value !== defaultValue && document.activeElement !== el) {
@@ -77,6 +78,7 @@ export default memo(function SearchInput({
       syncClearButton();
       syncSearchButton();
     }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultValue]);
 
   return (
@@ -95,7 +97,7 @@ export default memo(function SearchInput({
         }}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
       />
       {/* Clear button — visible when text exists */}
       <button
@@ -111,7 +113,7 @@ export default memo(function SearchInput({
           inputRef.current?.focus();
         }}
         aria-label="Clear search"
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+        className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
       >
         <svg
           viewBox="0 0 20 20"
@@ -128,7 +130,7 @@ export default memo(function SearchInput({
         type="button"
         style={{ display: defaultValue ? 'none' : '' }}
         onClick={() => inputRef.current?.focus()}
-        className="absolute right-[8px] top-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
+        className="absolute top-[8px] right-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
       >
         <SearchIcon className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">search</span>

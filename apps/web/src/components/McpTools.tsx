@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import '@mcp-b/global';
+
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { searchHmrcQueryOptions } from '../api/hmrc';
 import { titleCase } from '../utils';

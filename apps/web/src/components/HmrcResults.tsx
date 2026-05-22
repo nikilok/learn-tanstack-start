@@ -3,6 +3,7 @@ import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
+
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { titleCase } from '../utils';
@@ -205,7 +206,7 @@ export default function HmrcResults({ search }: { search: string }) {
   return (
     <div
       ref={listRef}
-      className="mt-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2"
+      className="mt-6 rounded-lg bg-(--sponsor-card-bg) px-4 py-2 shadow-(--shadow-card)"
     >
       <div
         style={{

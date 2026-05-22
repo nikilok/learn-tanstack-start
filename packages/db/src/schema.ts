@@ -57,7 +57,9 @@ export const companiesHouseProfiles = pgTable(
     region: varchar('region', { length: 100 }),
     postalCode: varchar('postal_code', { length: 20 }),
     country: varchar('country', { length: 100 }),
-    sicCodes: text('sic_codes').array().default(sql`'{}'::text[]`),
+    sicCodes: text('sic_codes')
+      .array()
+      .default(sql`'{}'::text[]`),
     accountsNextMadeUpTo: date('accounts_next_made_up_to'),
     accountsLastMadeUpTo: date('accounts_last_made_up_to'),
     accountsOverdue: boolean('accounts_overdue'),

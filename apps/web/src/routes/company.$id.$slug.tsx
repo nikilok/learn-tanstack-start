@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -210,7 +211,7 @@ function CompanyDetail() {
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <div className="page-flip-details">
-          <div className="rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) p-6">
+          <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
             <h1 className="text-xl font-semibold text-(--sea-ink)">
               {displayName}
             </h1>
@@ -223,7 +224,7 @@ function CompanyDetail() {
             )}
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                   Location
                 </dt>
                 <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -232,7 +233,7 @@ function CompanyDetail() {
               </div>
               {profile?.company_status && (
                 <div>
-                  <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                     Status
                   </dt>
                   <dd className="mt-1">
@@ -241,7 +242,7 @@ function CompanyDetail() {
                 </div>
               )}
               <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                   Visa Route
                 </dt>
                 <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -249,7 +250,7 @@ function CompanyDetail() {
                 </dd>
               </div>
               <div>
-                <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                   Rating
                 </dt>
                 <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -264,7 +265,7 @@ function CompanyDetail() {
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 {formatDate(profile.date_of_creation) && (
                   <div>
-                    <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Incorporated
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -275,7 +276,7 @@ function CompanyDetail() {
 
                 {profile.type && (
                   <div>
-                    <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Company Type
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -286,7 +287,7 @@ function CompanyDetail() {
 
                 {profile.accounts?.last_accounts?.made_up_to && (
                   <div>
-                    <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Last Accounts Filed
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -297,7 +298,7 @@ function CompanyDetail() {
 
                 {profile.company_number && (
                   <div>
-                    <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Registration No.
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
@@ -310,7 +311,7 @@ function CompanyDetail() {
 
                 {formatAddress(profile.registered_office_address) && (
                   <div className="col-span-2 sm:col-span-4">
-                    <dt className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Registered Address
                     </dt>
                     <dd className="mt-1 text-sm">
@@ -318,13 +319,13 @@ function CompanyDetail() {
                         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="no-underline inline-flex items-center gap-1.5 text-(--sea-ink-soft) hover:text-(--sea-ink)"
+                        className="inline-flex items-center gap-1.5 text-(--sea-ink-soft) no-underline hover:text-(--sea-ink)"
                       >
                         <MapPin size={14} className="shrink-0" />
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
-                      <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
+                      <div className="-mx-6 mt-3 -mb-6 overflow-hidden rounded-b-lg">
                         <AddressMap
                           address={formatAddress(
                             profile.registered_office_address,
@@ -343,7 +344,7 @@ function CompanyDetail() {
         <section className="mt-6" aria-labelledby="sponsor-about-heading">
           <h2
             id="sponsor-about-heading"
-            className="text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)"
+            className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase"
           >
             About
           </h2>
@@ -352,7 +353,7 @@ function CompanyDetail() {
           </p>
           {profile?.company_number && (
             <div className="mt-4">
-              <h3 className="mb-2 text-[10px] font-medium uppercase tracking-wider text-(--sea-ink-soft)">
+              <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                 See more on
               </h3>
               <div className="flex flex-wrap gap-2">
@@ -360,7 +361,7 @@ function CompanyDetail() {
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="no-underline glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black transition-[color,background-color,box-shadow]! duration-300! dark:text-white hover:bg-[#1d70b8]! hover:text-white"
+                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#1d70b8]! hover:text-white dark:text-white"
                 >
                   {flagState.govukBranded ? (
                     <GovUkLogo className="h-5 w-auto" />
@@ -379,16 +380,16 @@ function CompanyDetail() {
           search={{ search }}
           viewTransition={{ types: ['back'] }}
           style={{ transition: 'none' }}
-          className={`no-underline sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) hover:text-(--sea-ink) ${
+          className={`sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) no-underline hover:text-(--sea-ink) ${
             stuck
-              ? 'glass backdrop-blur-md! mx-auto flex w-fit items-center rounded-full px-5 py-2.5'
+              ? 'glass mx-auto flex w-fit items-center rounded-full px-5 py-2.5 backdrop-blur-md!'
               : 'block w-full px-4 py-3 text-center'
           }`}
         >
           <span className={stuck ? 'shimmer-text' : undefined}>
             &larr; Back to search
           </span>
-          <kbd className="ml-2 hidden pointer-fine:inline font-sans text-xs">
+          <kbd className="ml-2 hidden font-sans text-xs pointer-fine:inline">
             Esc
           </kbd>
         </Link>

@@ -11,8 +11,10 @@
 
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
+
 import { describeDbHost } from '../src/lib/phase5/db-host.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));

@@ -21,7 +21,7 @@ The TanStack Start web app for [sponsorsearch.co.uk](https://sponsorsearch.co.uk
 - **APIs:** Companies House API (server-side via `createServerFn`)
 - **Styling:** Tailwind CSS v4
 - **Testing:** Vitest + Playwright
-- **Linting:** Biome
+- **Linting & formatting:** oxlint + oxfmt
 - **Deployment:** Vercel via Nitro
 - **Runtime:** Bun
 
@@ -53,8 +53,10 @@ All scripts have root shortcuts via turbo (e.g. `bun run db:migrate` from the re
 bun run dev                  # Start dev server (https://web.localhost)
 bun run build                # Production build
 bun run test                 # Run tests (Vitest)
-bun run lint                 # Lint with Biome
+bun run lint                 # Lint with oxlint
 bun run lint:fix             # Auto-fix lint issues
+bun run format               # Format with oxfmt
+bun run format:check         # Check formatting without writing
 ```
 
 ### Database

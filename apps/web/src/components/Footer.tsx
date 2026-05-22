@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
+
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 
 /**
@@ -11,7 +12,7 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="site-footer relative mt-20 px-4 pb-10 pt-8">
+    <footer className="site-footer relative mt-20 px-4 pt-8 pb-10">
       <div className="pointer-events-none absolute inset-x-0 top-0 flex -translate-y-1/2 justify-center">
         <div className="pointer-events-auto">
           <Suspense fallback={<LastUpdatedSkeleton />}>

@@ -45,7 +45,7 @@ export default function SkeletonCards({
     return (
       <>
         {Array.from({ length: count }).map((_, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders never reorder
+          // oxlint-disable-next-line react/no-array-index-key -- static skeleton placeholders never reorder
           <SkeletonRow key={i} />
         ))}
       </>
@@ -53,9 +53,9 @@ export default function SkeletonCards({
   }
 
   return (
-    <div className="mt-6 flex flex-col gap-6 rounded-lg bg-(--sponsor-card-bg) shadow-(--shadow-card) px-4 py-2">
+    <div className="mt-6 flex flex-col gap-6 rounded-lg bg-(--sponsor-card-bg) px-4 py-2 shadow-(--shadow-card)">
       {Array.from({ length: count }).map((_, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders never reorder
+        // oxlint-disable-next-line react/no-array-index-key -- static skeleton placeholders never reorder
         <SkeletonRow key={i} />
       ))}
     </div>

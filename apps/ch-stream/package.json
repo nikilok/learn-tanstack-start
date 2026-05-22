@@ -5,8 +5,8 @@
   "scripts": {
     "start": "bun src/index.ts",
     "dev": "bun --env-file=.env.local --watch src/index.ts --dry-run",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix ."
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
   },
   "dependencies": {
     "@ss/db": "workspace:*",

@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
+
 import { geocodeQueryOptions } from '../api/geocode';
 
 const LeafletMap = lazy(() => import('./LeafletMap'));

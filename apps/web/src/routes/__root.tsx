@@ -14,6 +14,7 @@ import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mountVercelToolbar } from '@vercel/toolbar/vite';
 import { useEffect } from 'react';
+
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
@@ -22,6 +23,7 @@ import RouteError from '../components/RouteError';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
+
 import appCss from '../styles.css?url';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
@@ -120,15 +122,15 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#ffffff" />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static theme init script, no user input */}
+        {/* oxlint-disable-next-line react/no-danger -- static theme init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static search input init script, no user input */}
+        {/* oxlint-disable-next-line react/no-danger -- static search input init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static browser detection script, no user input */}
+        {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
         <HeadContent />
       </head>
-      <body className="font-sans antialiased wrap-anywhere selection:bg-[rgba(0,114,245,0.16)]">
+      <body className="font-sans wrap-anywhere antialiased selection:bg-[rgba(0,114,245,0.16)]">
         <QueryClientProvider client={queryClient}>
           <McpTools />
           <NavigationProgress />

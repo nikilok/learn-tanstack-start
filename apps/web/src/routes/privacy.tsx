@@ -19,7 +19,7 @@ export const Route = createFileRoute('/privacy')({
  */
 function PrivacyPolicy() {
   return (
-    <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6 [&_li]:mt-2 [&_li]:leading-relaxed [&_a]:text-(--link-blue)">
+    <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_a]:text-(--link-blue) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:mt-2 [&_li]:leading-relaxed [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6">
       <h1>Privacy Policy</h1>
       <p className="text-(--sea-ink-soft)">Last updated: 9 April 2026</p>
 

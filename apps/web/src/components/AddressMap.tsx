@@ -1,24 +1,44 @@
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
-import type { Geocoded } from '../api/geocode';
+import { geocodeQueryOptions } from '../api/geocode';
 
 const LeafletMap = lazy(() => import('./LeafletMap'));
 
-/** Renders a Leaflet map of `geo` on the client only. The Leaflet bundle is code-split via `React.lazy`, and `<ClientOnly>` keeps it out of the SSR render (Leaflet can't run on the server). */
-export function AddressMap({
-  geo,
+const placeholder = (
+  <div className="relative h-64 w-full bg-(--sea-ink-soft)/10" />
+);
+
+/** Geocodes `address` client-side and renders a Leaflet map. Suspends on the geocode query so the route loader doesn't block on Nominatim (~600ms). Returns nothing if geocoding fails so the placeholder collapses. */
+function GeocodedMap({
+  address,
   companyName,
 }: {
-  geo: Geocoded;
+  address: string;
+  companyName?: string;
+}) {
+  const { data: geo } = useSuspenseQuery(geocodeQueryOptions(address));
+  if (!geo) return null;
+  return (
+    <div className="relative h-64 w-full bg-(--sea-ink-soft)/10">
+      <LeafletMap geo={geo} companyName={companyName} />
+    </div>
+  );
+}
+
+/** Client-only map for `address`. Streams in after the rest of the page renders — Leaflet can't SSR and Nominatim is too slow to block on. */
+export function AddressMap({
+  address,
+  companyName,
+}: {
+  address: string;
   companyName?: string;
 }) {
   return (
-    <div className="relative h-64 w-full bg-(--sea-ink-soft)/10">
-      <ClientOnly>
-        <Suspense>
-          <LeafletMap geo={geo} companyName={companyName} />
-        </Suspense>
-      </ClientOnly>
-    </div>
+    <ClientOnly fallback={placeholder}>
+      <Suspense fallback={placeholder}>
+        <GeocodedMap address={address} companyName={companyName} />
+      </Suspense>
+    </ClientOnly>
   );
 }

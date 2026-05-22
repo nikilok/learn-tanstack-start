@@ -10,7 +10,6 @@ import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
-import { geocodeQueryOptions } from '../api/geocode';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import GovUkLogo from '../components/GovUkLogo';
@@ -55,17 +54,9 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
-    const address = profile?.registered_office_address
-      ? formatAddress(profile.registered_office_address)
-      : '';
-    const [geo, flagState] = await Promise.all([
-      address
-        ? queryClient.ensureQueryData(geocodeQueryOptions(address))
-        : null,
-      queryClient.ensureQueryData(flagStateQueryOptions),
-    ]);
+    const flagState = await queryClient.ensureQueryData(flagStateQueryOptions);
 
-    return { sponsor, profile, geo, flagState };
+    return { sponsor, profile, flagState };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -164,7 +155,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, geo, flagState } = Route.useLoaderData();
+  const { sponsor, profile, flagState } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -333,14 +324,14 @@ function CompanyDetail() {
                         {formatAddress(profile.registered_office_address)}
                         <ExternalLink size={12} className="shrink-0" />
                       </a>
-                      {geo && (
-                        <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
-                          <AddressMap
-                            geo={geo}
-                            companyName={titleCase(sponsor.organisationName)}
-                          />
-                        </div>
-                      )}
+                      <div className="-mx-6 -mb-6 mt-3 overflow-hidden rounded-b-lg">
+                        <AddressMap
+                          address={formatAddress(
+                            profile.registered_office_address,
+                          )}
+                          companyName={titleCase(sponsor.organisationName)}
+                        />
+                      </div>
                     </dd>
                   </div>
                 )}

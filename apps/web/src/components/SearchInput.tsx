@@ -1,4 +1,3 @@
-/* oxlint-disable react-hooks/exhaustive-deps -- inputRef is a stable RefObject prop; exhaustive-deps reports stable refs as missing deps in oxlint */
 import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
 
@@ -58,6 +57,7 @@ export default memo(function SearchInput({
         el.setSelectionRange(el.value.length, el.value.length);
       });
     }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocus]);
 
   useEffect(() => {
@@ -67,6 +67,7 @@ export default memo(function SearchInput({
     requestAnimationFrame(() => {
       el.setSelectionRange(el.value.length, el.value.length);
     });
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [focus]);
 
   // Sync uncontrolled input when the route search param changes externally
@@ -77,6 +78,7 @@ export default memo(function SearchInput({
       syncClearButton();
       syncSearchButton();
     }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultValue]);
 
   return (

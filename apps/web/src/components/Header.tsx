@@ -22,9 +22,9 @@ export default function Header() {
           </Link>
         </h2>
 
-        <div id="header-pill-portal" className="min-w-0 ml-auto sm:ml-0" />
+        <div id="header-pill-portal" className="ml-auto min-w-0 sm:ml-0" />
 
-        <div className="shrink-0 flex items-center gap-1.5 sm:ml-auto sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
           <a
             href="https://x.com/NikilKuruvilla"
             target="_blank"

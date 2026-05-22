@@ -3,6 +3,10 @@
   "printWidth": 80,
   "singleQuote": true,
   "sortImports": true,
+  "sortTailwindcss": {
+    "stylesheet": "apps/web/src/styles.css",
+    "functions": ["clsx", "cn"]
+  },
   "ignorePatterns": [
     "**/node_modules/**",
     "**/dist/**",

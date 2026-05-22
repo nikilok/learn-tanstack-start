@@ -57,7 +57,7 @@ export function StatusBadge({ status }: { status: string }) {
   const tone = STATUS_TONES[status as CompanyStatus] ?? 'grey';
   return (
     <span
-      className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${TONE_CLASSES[tone]}`}
+      className={`inline-block rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${TONE_CLASSES[tone]}`}
     >
       {titleCase(status)}
     </span>

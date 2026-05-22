@@ -41,7 +41,7 @@ export default function HmrcCard({
       }}
       search={{ search }}
       viewTransition={{ types: ['forward'] }}
-      className="relative block no-underline py-2 -mx-4 px-4"
+      className="relative -mx-4 block px-4 py-2 no-underline"
       style={{
         transition: 'none',
         ...(isActive ? { viewTransitionName: 'active-card' } : {}),
@@ -59,7 +59,7 @@ export default function HmrcCard({
       {isHighlighted && (
         <span
           aria-hidden
-          className="pointer-events-none absolute -left-2 top-3 block h-4 w-4"
+          className="pointer-events-none absolute top-3 -left-2 block h-4 w-4"
         >
           <UnionJackLens
             className="h-full w-full"

@@ -97,7 +97,7 @@ export default memo(function SearchInput({
         }}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:outline-none focus:ring-0 ${styles.input}`}
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
       />
       {/* Clear button — visible when text exists */}
       <button
@@ -113,7 +113,7 @@ export default memo(function SearchInput({
           inputRef.current?.focus();
         }}
         aria-label="Clear search"
-        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+        className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
       >
         <svg
           viewBox="0 0 20 20"
@@ -130,7 +130,7 @@ export default memo(function SearchInput({
         type="button"
         style={{ display: defaultValue ? 'none' : '' }}
         onClick={() => inputRef.current?.focus()}
-        className="absolute right-[8px] top-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
+        className="absolute top-[8px] right-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
       >
         <SearchIcon className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">search</span>

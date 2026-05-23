@@ -22,7 +22,7 @@ function buildQuery(address: string): string {
  * Vercel edge cache means each unique postcode hits Nominatim once
  * globally. Returns `null` for misses or upstream errors.
  */
-export const getGeocode = createServerFn()
+const getGeocode = createServerFn()
   .inputValidator((input: unknown) => input as { q: string })
   .handler(async ({ data: { q } }) => {
     const raw = q.trim();

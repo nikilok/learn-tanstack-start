@@ -23,7 +23,7 @@ export type ExistingMapping = {
   isPublicBody: boolean;
 };
 
-export type ProposedVerdict =
+type ProposedVerdict =
   | 'verified'
   | 'public_body'
   | 'no_match'
@@ -51,7 +51,7 @@ export type ProposedResolution = {
   topResults?: unknown[];
 };
 
-export type QueueReason =
+type QueueReason =
   | 'manual_conflict'
   | 'public_body_conflict'
   | 'same_rank_different_number';

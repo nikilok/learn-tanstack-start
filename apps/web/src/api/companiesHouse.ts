@@ -170,7 +170,7 @@ async function upsertProfile(profile: CompanyProfile) {
  * profile) and persists the mapping + profile via `waitUntil`. Returns
  * `null` when no match is found or any upstream call fails.
  */
-export const getCompanyProfile = createServerFn()
+const getCompanyProfile = createServerFn()
   .inputValidator((input: unknown) => input as { companyName: string })
   .handler(async ({ data: { companyName } }) => {
     // Look up company number via mapping table

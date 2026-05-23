@@ -66,7 +66,7 @@ export const searchHmrc = createServerFn()
  * Server fn returning a single `hmrc_skilled_workers` row keyed by its stable
  * `hash` slug id. Returns `null` when no matching row exists.
  */
-export const getHmrcBySlugId = createServerFn()
+const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {
     const [row] = await db
@@ -135,7 +135,5 @@ export const searchHmrcQueryOptions = (query: string, offset: number) =>
     queryKey: ['hmrc-search-page', query, offset],
     queryFn: () => searchHmrc({ data: { query, offset } }),
   });
-
-export { PAGE_SIZE };
 
 export type HmrcRow = Awaited<ReturnType<typeof searchHmrc>>['rows'][number];

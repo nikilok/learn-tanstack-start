@@ -40,7 +40,6 @@
     "@tanstack/react-router-ssr-query": "1.167.0",
     "@tanstack/react-start": "1.168.6",
     "@tanstack/react-virtual": "^3.13.24",
-    "@tanstack/router-plugin": "^1.168.6",
     "@tanstack/start-server-core": "^1.168.4",
     "@vercel/analytics": "^2.0.1",
     "@vercel/edge": "^1.3.1",
@@ -59,27 +58,21 @@
     "react-dom": "^19.2.6",
     "react-leaflet": "^5.0.0",
     "tailwindcss": "^4.3.0",
-    "virtual-text-layout": "0.2.1",
-    "zod-to-json-schema": "^3.25.2"
+    "virtual-text-layout": "0.2.1"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
-    "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "0.7.0",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.0",
     "@types/leaflet": "^1.9.21",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.2",
     "drizzle-kit": "^0.31.10",
     "h3": "^2.0.1-rc.20",
-    "jsdom": "^29.1.1",
     "playwright": "^1.60.0",
     "portless": "^0.13.0",
     "sharp": "^0.34.5",
     "vite": "^8.0.13",
-    "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.6"
+    "vite-tsconfig-paths": "^6.1.1"
   }
 }

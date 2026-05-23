@@ -5,7 +5,7 @@ import { getCookie } from '@tanstack/react-start/server';
 import { evaluateFlag, govukBranded } from '../flags.server';
 
 /** Evaluates every declared flag for the current request and returns the resolved values. Route loaders call this via flagStateQueryOptions so values land in TanStack Query and survive client-side navigation. */
-export const getFlagState = createServerFn({ method: 'GET' }).handler(
+const getFlagState = createServerFn({ method: 'GET' }).handler(
   async () => {
     const overrideCookie = getCookie('vercel-flag-overrides');
     return {

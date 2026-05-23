@@ -1,8 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 
-import { type HmrcRow, searchHmrc } from '../api/hmrc';
-
-export type { HmrcRow };
+import { searchHmrc } from '../api/hmrc';
 
 /**
  * Hook wrapping `searchHmrc` in a React Query infinite query. Disabled while

@@ -23,11 +23,7 @@ export type ExistingMapping = {
   isPublicBody: boolean;
 };
 
-type ProposedVerdict =
-  | 'verified'
-  | 'public_body'
-  | 'no_match'
-  | 'human_review';
+type ProposedVerdict = 'verified' | 'public_body' | 'no_match' | 'human_review';
 
 /** Structural superset of the CH `/company/{number}` payload. Kept loose
  *  (extra `[key: string]: unknown` index) so this type stays compatible with

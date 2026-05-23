@@ -22,13 +22,7 @@ const PUBLIC_BODY_REGEX =
   /\b(NHS|National Health Service|Foundation Trust|Integrated Care Board|ICB|(?:Borough|City|County|District|Parish|Town) Council|Reserve Forces|Cadets? Association|Ministry of|Department for|Department of|Office for|Police Federation|Fire and Rescue Service)\b/i;
 
 const STOPWORDS = new Set(['the', 'and', 'of', 'for', 'at', 'in', 'on']);
-const CORPORATE_SUFFIXES = new Set([
-  'limited',
-  'ltd',
-  'llp',
-  'plc',
-  'uk',
-]);
+const CORPORATE_SUFFIXES = new Set(['limited', 'ltd', 'llp', 'plc', 'uk']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

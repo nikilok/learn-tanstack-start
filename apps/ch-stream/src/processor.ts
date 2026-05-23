@@ -29,15 +29,6 @@ export async function loadCompanyNumbers(): Promise<number> {
 }
 
 /**
- * Fast membership check against the in-memory cache populated by
- * `loadCompanyNumbers`. Used to skip stream events for companies we don't
- * track before hitting the database.
- */
-export function hasCompany(companyNumber: string): boolean {
-  return companyNumbers.has(companyNumber);
-}
-
-/**
  * Coerce a column value to a stable string for diffing old vs new rows.
  * Arrays are sorted before serialisation so reordered-but-equal lists don't
  * register as changes. Returns `null` for `null`/`undefined`.

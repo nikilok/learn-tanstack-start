@@ -34,7 +34,7 @@ import {
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type CHSearchItem = {
+type CHSearchItem = {
   company_number: string;
   title: string;
   company_status?: string;
@@ -42,9 +42,9 @@ export type CHSearchItem = {
   matches?: Record<string, unknown>;
 };
 
-export type CHSearchResponse = { items?: CHSearchItem[] } | null;
+type CHSearchResponse = { items?: CHSearchItem[] } | null;
 
-export type CHFullProfile = {
+type CHFullProfile = {
   company_number: string;
   company_name: string;
   company_status?: string;

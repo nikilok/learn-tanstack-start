@@ -23,11 +23,7 @@ export type ExistingMapping = {
   isPublicBody: boolean;
 };
 
-export type ProposedVerdict =
-  | 'verified'
-  | 'public_body'
-  | 'no_match'
-  | 'human_review';
+type ProposedVerdict = 'verified' | 'public_body' | 'no_match' | 'human_review';
 
 /** Structural superset of the CH `/company/{number}` payload. Kept loose
  *  (extra `[key: string]: unknown` index) so this type stays compatible with
@@ -51,7 +47,7 @@ export type ProposedResolution = {
   topResults?: unknown[];
 };
 
-export type QueueReason =
+type QueueReason =
   | 'manual_conflict'
   | 'public_body_conflict'
   | 'same_rank_different_number';

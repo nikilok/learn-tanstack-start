@@ -18,14 +18,14 @@
     "db:create-migration": "turbo run db:create-migration --filter @ss/web",
     "db:migrate": "turbo run db:migrate --filter @ss/web",
     "db:push": "turbo run db:push --filter @ss/web",
-    "db:studio": "turbo run db:studio --filter @ss/web"
+    "db:studio": "turbo run db:studio --filter @ss/web",
+    "knip": "knip"
   },
-  "dependencies": {
-    "vercel": "^54.1.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "@types/node": "^25.8.0",
+    "@types/node": "^25.9.1",
+    "knip": "^6.14.1",
     "oxfmt": "^0.51.0",
     "oxlint": "^1.66.0",
     "turbo": "^2.9.14",

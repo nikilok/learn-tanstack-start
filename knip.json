@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "tags": ["-lintignore"],
+  "workspaces": {
+    ".": {},
+    "apps/web": {
+      "entry": [
+        "vite.config.ts",
+        "middleware.ts",
+        "drizzle.config.ts",
+        "server/**/*.ts",
+        "scripts/**/*.ts",
+        "src/router.tsx",
+        "src/routes/**/*.{ts,tsx}",
+        "src/routeTree.gen.ts",
+        "src/scripts/*.ts"
+      ],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "apps/ch-stream": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/*": {}
+  }
+}

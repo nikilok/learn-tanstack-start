@@ -15,20 +15,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const TIER_C_THRESHOLD = 0.85;
-export const MIN_TOKENS_FOR_TIER_C = 2;
+const MIN_TOKENS_FOR_TIER_C = 2;
 
 /** Patterns that identify statutory public bodies not registered as CH companies. */
-export const PUBLIC_BODY_REGEX =
+const PUBLIC_BODY_REGEX =
   /\b(NHS|National Health Service|Foundation Trust|Integrated Care Board|ICB|(?:Borough|City|County|District|Parish|Town) Council|Reserve Forces|Cadets? Association|Ministry of|Department for|Department of|Office for|Police Federation|Fire and Rescue Service)\b/i;
 
-export const STOPWORDS = new Set(['the', 'and', 'of', 'for', 'at', 'in', 'on']);
-export const CORPORATE_SUFFIXES = new Set([
-  'limited',
-  'ltd',
-  'llp',
-  'plc',
-  'uk',
-]);
+const STOPWORDS = new Set(['the', 'and', 'of', 'for', 'at', 'in', 'on']);
+const CORPORATE_SUFFIXES = new Set(['limited', 'ltd', 'llp', 'plc', 'uk']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -50,7 +44,7 @@ export type CHCandidate = {
   region: string | null;
 };
 
-export type Tier = 'A' | 'B' | 'C';
+type Tier = 'A' | 'B' | 'C';
 
 export type ScoredCandidate = {
   candidate: CHCandidate;
@@ -148,7 +142,7 @@ export function normaliseForComparison(name: string): string {
 }
 
 /** Lowercases, splits, drops stopwords + corporate suffixes for Jaccard comparison. */
-export function tokenise(name: string): string[] {
+function tokenise(name: string): string[] {
   return name
     .toLowerCase()
     .split(TOKEN_SPLIT_REGEX)
@@ -162,7 +156,7 @@ export function tokenise(name: string): string[] {
 }
 
 /** Jaccard similarity over two token sets. Returns 0 for empty inputs. */
-export function jaccard(a: string[], b: string[]): number {
+function jaccard(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;
   const setA = new Set(a);
   const setB = new Set(b);

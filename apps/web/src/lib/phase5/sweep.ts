@@ -72,7 +72,7 @@ const CHANGED_BY: Record<Tier, string> = {
  *  (1 search + 3 Tier-B profile fetches when Tier-A returned only inactive
  *  candidates). 4 calls / 2200ms ≈ 1.8 req/sec, under CH's 600/5min budget.
  *  CLI can override via `PHASE5_DELAY_MS` env var without redeploying. */
-export const DEFAULT_DELAY_MS = 2200;
+const DEFAULT_DELAY_MS = 2200;
 
 /** Run a single tier sweep against the injected dependencies. */
 export async function sweep(

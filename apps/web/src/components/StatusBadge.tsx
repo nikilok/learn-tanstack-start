@@ -5,7 +5,7 @@ import { titleCase } from '../utils';
  * `companies_house_profiles.company_status` column. New values added by
  * Companies House will fall through to the neutral grey tone.
  */
-export type CompanyStatus =
+type CompanyStatus =
   | 'active'
   | 'dissolved'
   | 'liquidation'

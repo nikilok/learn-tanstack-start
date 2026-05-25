@@ -21,7 +21,10 @@
     "db:studio": "turbo run db:studio --filter @ss/web",
     "knip": "knip"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.25",
+    "@tanstack/start-server-core": "^1.169.2"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "@types/node": "^25.9.1",
@@ -31,5 +34,10 @@
     "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   },
-  "packageManager": "bun@1.3.13"
+  "packageManager": "bun@1.3.13",
+  "overrides": {
+    "@tanstack/start-server-core": "link:@tanstack/start-server-core",
+    "@tanstack/react-router": "link:@tanstack/react-router",
+    "@tanstack/router-core": "link:@tanstack/router-core"
+  }
 }

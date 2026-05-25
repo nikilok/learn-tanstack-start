@@ -2,3 +2,19 @@
 # Refuse to install package versions younger than 3 days. Mitigates supply-chain
 # attacks where compromised releases are typically caught and yanked within hours.
 minimumReleaseAge = 259200
+# Temporary exclusion to test TanStack Start's bundledDev support (PR #7482,
+# published 2026-05-24). Remove once the 3-day cooldown elapses (~2026-05-27).
+minimumReleaseAgeExcludes = [
+  "@tanstack/react-start",
+  "@tanstack/start-plugin-core",
+  "@tanstack/react-router",
+  "@tanstack/router-core",
+  "@tanstack/router-plugin",
+  "@tanstack/router-generator",
+  "@tanstack/react-start-client",
+  "@tanstack/react-start-server",
+  "@tanstack/react-start-rsc",
+  "@tanstack/start-client-core",
+  "@tanstack/start-server-core",
+  "@tanstack/start-storage-context",
+]

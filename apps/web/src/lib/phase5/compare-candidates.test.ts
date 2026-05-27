@@ -215,6 +215,54 @@ describe('UK-presence preference (BR ↔ FC / OE)', () => {
     );
     expect(result.action).toBe('inconclusive');
   });
+
+  test('Unrelated BR/FC pair (different canonical names) → no UK-presence boost', () => {
+    // Same setup as the 60 Decibels-style promote test, but the BR and FC
+    // have different canonical names — so the same-entity guard fires and
+    // the +3 boost is suppressed. Without the boost the diff doesn't clear
+    // SCORE_MARGIN, so the result lands inconclusive instead of promote.
+    const result = compareForInlineResolution(
+      candidate({
+        company_name: 'ACME US INC',
+        type: 'oversea-company',
+        company_status: 'active',
+        registered_office_address: { locality: 'Delaware' },
+        previous_company_names: null,
+      }),
+      candidate({
+        company_name: 'BRAVO UK LTD',
+        type: 'uk-establishment',
+        company_status: 'open',
+        registered_office_address: { locality: 'London' },
+        previous_company_names: null,
+      }),
+      sponsor({ townCity: 'London' }),
+    );
+    expect(result.action).toBe('inconclusive');
+  });
+
+  test('Same-entity by previous-name linkage → UK-presence boost still fires', () => {
+    // Names differ today but a previous-name link establishes same-entity.
+    // Boost should still apply.
+    const result = compareForInlineResolution(
+      candidate({
+        company_name: 'WIDGET COMPANY (US) INC',
+        type: 'oversea-company',
+        company_status: 'active',
+        registered_office_address: { locality: 'Delaware' },
+        previous_company_names: null,
+      }),
+      candidate({
+        company_name: 'WIDGET COMPANY UK',
+        type: 'uk-establishment',
+        company_status: 'open',
+        registered_office_address: { locality: 'London' },
+        previous_company_names: [{ name: 'WIDGET COMPANY (US) INC' }],
+      }),
+      sponsor({ townCity: 'London' }),
+    );
+    expect(result.action).toBe('promote');
+  });
 });
 
 describe('AsiaLink-style regression fixture', () => {

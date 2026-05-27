@@ -30,7 +30,7 @@ import type {
   MatchMethod,
   ProposedResolution,
 } from './decide.ts';
-import type { SweepDeps, SweepLocality, Tier } from './sweep.ts';
+import type { SweepDeps, SweepSponsor, Tier } from './sweep.ts';
 
 /** Tagged-template SQL function shape returned by `neon(url)` with default
  *  flags — arrayMode=false, fullResults=false. Each query returns
@@ -115,28 +115,70 @@ function toExistingMapping(row: RawMappingRow): ExistingMapping {
   };
 }
 
-/** Build a `lookupLocality` matching `SweepDeps['lookupLocality']`. Pulls
- *  `town_city` / `county` from `hmrc_skilled_workers` for the locality
- *  tiebreak inside `resolveOneSponsor`. */
-export function makeLookupLocality(sql: Sql): SweepDeps['lookupLocality'] {
+/** Build a `lookupSponsor` matching `SweepDeps['lookupSponsor']`. Pulls
+ *  `town_city` / `county` / `route` from `hmrc_skilled_workers` — the
+ *  locality fields feed the resolver's tiebreak, the route feeds the inline
+ *  scorer's route-type hard gate. */
+export function makeLookupSponsor(sql: Sql): SweepDeps['lookupSponsor'] {
   return async (organisationName) => {
     // `ORDER BY id ASC` for deterministic row selection — `hmrc_skilled_workers`
     // has multiple rows per organisation_name (one per route × type_rating
-    // combination). Without an explicit order, the locality picked for the
+    // combination). Without an explicit order, the row picked for the
     // resolver's tiebreak depends on Postgres's storage order, which can
     // shift between runs. (CodeRabbit PR #85, comment 2.)
     const rows = (await sql`
-      SELECT town_city, county
+      SELECT town_city, county, route
       FROM hmrc_skilled_workers
       WHERE organisation_name = ${organisationName}
       ORDER BY id ASC
       LIMIT 1
-    `) as { town_city: string | null; county: string | null }[];
+    `) as {
+      town_city: string | null;
+      county: string | null;
+      route: string | null;
+    }[];
     const first = rows[0];
     return {
       townCity: first?.town_city ?? null,
       county: first?.county ?? null,
-    } satisfies SweepLocality;
+      route: first?.route ?? null,
+    } satisfies SweepSponsor;
+  };
+}
+
+/** Build a `getProfile` matching `SweepDeps['getProfile']`. Reads from the
+ *  `companies_house_profiles` cache and reconstructs the structural shape
+ *  the comparer expects. Returns null when the row isn't cached. */
+export function makeGetProfile(sql: Sql): SweepDeps['getProfile'] {
+  return async (companyNumber) => {
+    const rows = (await sql`
+      SELECT company_number, company_name, company_status, company_type,
+             locality, previous_company_names
+      FROM companies_house_profiles
+      WHERE company_number = ${companyNumber}
+      LIMIT 1
+    `) as {
+      company_number: string;
+      company_name: string;
+      company_status: string | null;
+      company_type: string | null;
+      locality: string | null;
+      previous_company_names: string[] | null;
+    }[];
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      company_number: r.company_number,
+      company_name: r.company_name,
+      company_status: r.company_status ?? undefined,
+      type: r.company_type ?? undefined,
+      registered_office_address: r.locality
+        ? { locality: r.locality }
+        : undefined,
+      previous_company_names: (r.previous_company_names ?? []).map((name) => ({
+        name,
+      })),
+    } satisfies CHFullProfile;
   };
 }
 
@@ -161,54 +203,6 @@ export function makeBumpVerifiedAt(sql: Sql): SweepDeps['bumpVerifiedAt'] {
   };
 }
 
-/** Build an `enqueueReview` matching `SweepDeps['enqueueReview']`. Uses an
- *  INSERT … WHERE NOT EXISTS for DB-level idempotency: if an unresolved
- *  row already exists for the same (organisation_name, reason), the INSERT
- *  is skipped. Prevents the queue stacking duplicate rows for a sponsor
- *  whose review is still pending across sweep cycles. */
-export function makeEnqueueReview(sql: Sql): SweepDeps['enqueueReview'] {
-  return async (existing, proposed, reason, detectedBy) => {
-    const topResultsJson = proposed.topResults
-      ? JSON.stringify(proposed.topResults)
-      : null;
-    // ON CONFLICT inferred against the partial unique index
-    // `ux_review_queue_unresolved_org_reason`. Atomic deduplication —
-    // closes the race window the prior WHERE NOT EXISTS check left open
-    // (CodeRabbit PR #85, comment 5).
-    await sql`
-      INSERT INTO hmrc_company_mapping_review_queue (
-        organisation_name,
-        reason,
-        existing_company_number,
-        existing_match_method,
-        existing_match_score,
-        proposed_company_number,
-        proposed_match_method,
-        proposed_match_score,
-        proposed_query_used,
-        ch_search_results_top5,
-        detected_by
-      )
-      VALUES (
-        ${existing.organisationName},
-        ${reason},
-        ${existing.companyNumber},
-        ${existing.matchMethod},
-        ${existing.matchScore},
-        ${proposed.companyNumber},
-        ${proposed.matchMethod},
-        ${proposed.matchScore},
-        ${proposed.queryUsed},
-        ${topResultsJson}::jsonb,
-        ${detectedBy}
-      )
-      ON CONFLICT (organisation_name, reason)
-        WHERE resolved_at IS NULL
-        DO NOTHING
-    `;
-  };
-}
-
 /** Promise-based sleep for the per-row rate-limit delay. Real impl wraps
  *  `setTimeout`; tests pass a mock that records the requested ms. */
 export function makeSleep(): SweepDeps['sleep'] {
@@ -228,12 +222,17 @@ type ResolverFn = (
 
 /** Build a `resolveSponsor` matching `SweepDeps['resolveSponsor']`. Wraps
  *  the existing `resolveOneSponsor` helper from the shared HMRC↔CH
- *  pipeline and maps its `ResolveResult` shape to `ProposedResolution`. */
+ *  pipeline and maps its `ResolveResult` shape to `ProposedResolution`.
+ *  The resolver only consumes `townCity` / `county`; `route` is sweep-scope
+ *  and projected out before the call. */
 export function makeResolveSponsor(
   resolver: ResolverFn,
 ): SweepDeps['resolveSponsor'] {
-  return async (organisationName, locality) => {
-    const result = await resolver(organisationName, locality);
+  return async (organisationName, sponsor) => {
+    const result = await resolver(organisationName, {
+      townCity: sponsor.townCity,
+      county: sponsor.county,
+    });
     return toProposedResolution(result);
   };
 }

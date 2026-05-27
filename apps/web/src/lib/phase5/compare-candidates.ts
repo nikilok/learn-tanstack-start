@@ -114,12 +114,33 @@ export function compareForInlineResolution(
 
   // Canonical UK-presence preference — only fires when one side is the BR
   // (uk-establishment) and the other is the foreign parent (FC / OE) of what
-  // is in practice the same legal entity. Symmetric: works whether the BR is
-  // existing or proposed.
-  if (isUkEstablishment(existing.type) && isForeignEntity(proposed.type)) {
+  // is in practice the same legal entity. The same-entity guard prevents
+  // over-biasing unrelated pairs that happen to share a name token: the
+  // boost only applies when canonical names match exactly OR there's a
+  // previous-name linkage between them.
+  const sameEntityByName =
+    existingCanon !== null &&
+    proposedCanon !== null &&
+    existingCanon === proposedCanon;
+  const sameEntityByHistory =
+    (proposedCanon !== null &&
+      previousNamesInclude(existing.previous_company_names, proposedCanon)) ||
+    (existingCanon !== null &&
+      previousNamesInclude(proposed.previous_company_names, existingCanon));
+  const sameEntity = sameEntityByName || sameEntityByHistory;
+
+  if (
+    sameEntity &&
+    isUkEstablishment(existing.type) &&
+    isForeignEntity(proposed.type)
+  ) {
     s_e += UK_PRESENCE_WEIGHT;
   }
-  if (isUkEstablishment(proposed.type) && isForeignEntity(existing.type)) {
+  if (
+    sameEntity &&
+    isUkEstablishment(proposed.type) &&
+    isForeignEntity(existing.type)
+  ) {
     s_p += UK_PRESENCE_WEIGHT;
   }
 

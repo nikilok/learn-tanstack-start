@@ -36,8 +36,8 @@ import { describeDbHost } from '../src/lib/phase5/db-host.ts';
 import {
   makeBumpVerifiedAt,
   makeCommitPromotion,
-  makeEnqueueReview,
-  makeLookupLocality,
+  makeGetProfile,
+  makeLookupSponsor,
   makeResolveSponsor,
   makeSelectRows,
   makeSleep,
@@ -302,16 +302,16 @@ const dryRunNoOp = async () => {};
 
 const sweepDeps: SweepDeps = {
   selectRows: makeSelectRows(sql),
-  lookupLocality: makeLookupLocality(sql),
+  lookupSponsor: makeLookupSponsor(sql),
   resolveSponsor: makeResolveSponsor((orgName, locality) =>
     resolveOneSponsor(orgName, locality, fetchApi),
   ),
+  getProfile: makeGetProfile(sql),
   applyPromotion: DRY_RUN
     ? async () => ({ ok: true })
     : (existing, proposed, changedBy) =>
         applyPromotion(existing, proposed, changedBy, applyDeps),
   bumpVerifiedAt: DRY_RUN ? dryRunNoOp : makeBumpVerifiedAt(sql),
-  enqueueReview: DRY_RUN ? dryRunNoOp : makeEnqueueReview(sql),
   sleep: makeSleep(),
 };
 
@@ -334,13 +334,15 @@ const summary: SweepSummary = await sweep(config, sweepDeps);
 const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 
 console.log('');
-console.log(`  selected     : ${summary.selected}`);
-console.log(`  updated      : ${summary.updated}`);
-console.log(`  bumped       : ${summary.bumped}`);
-console.log(`  queued       : ${summary.queued}`);
-console.log(`  lock_missed  : ${summary.lockMissed}`);
-console.log(`  errored      : ${summary.errored}`);
-console.log(`  duration     : ${durationSec}s`);
+console.log(`  selected            : ${summary.selected}`);
+console.log(`  updated             : ${summary.updated}`);
+console.log(`  bumped              : ${summary.bumped}`);
+console.log(`  inline_resolved     : ${summary.inlineResolved}`);
+console.log(`  inline_inconclusive : ${summary.inlineInconclusive}`);
+console.log(`  warned              : ${summary.warned}`);
+console.log(`  lock_missed         : ${summary.lockMissed}`);
+console.log(`  errored             : ${summary.errored}`);
+console.log(`  duration            : ${durationSec}s`);
 
 // Fail the workflow run loudly when the error rate is too high — likely a
 // sustained CH 429 / outage / auth failure that no auto-retry can recover.

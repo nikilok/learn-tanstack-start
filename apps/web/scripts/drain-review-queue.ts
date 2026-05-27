@@ -34,21 +34,21 @@ import { fileURLToPath } from 'node:url';
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
 
-import type { CompareCandidate } from '../src/lib/phase5/compare-candidates.ts';
-import { compareForInlineResolution } from '../src/lib/phase5/compare-candidates.ts';
 import type {
   ApplyPromotionDeps,
   CHFullProfile,
 } from '../src/lib/phase5/apply-promotion.ts';
 import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
+import type { CompareCandidate } from '../src/lib/phase5/compare-candidates.ts';
+import { compareForInlineResolution } from '../src/lib/phase5/compare-candidates.ts';
 import { describeDbHost } from '../src/lib/phase5/db-host.ts';
-import type { ScorerSponsor } from '../src/lib/phase5/score-candidate.ts';
-import { makeCommitPromotion } from '../src/lib/phase5/sql.ts';
 import type {
   ExistingMapping,
   MatchMethod,
   ProposedResolution,
 } from '../src/lib/phase5/decide.ts';
+import type { ScorerSponsor } from '../src/lib/phase5/score-candidate.ts';
+import { makeCommitPromotion } from '../src/lib/phase5/sql.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env loading
@@ -196,8 +196,12 @@ async function loadSponsors(
          WHERE organisation_name = ANY(${orgNames})
          GROUP BY organisation_name, town_city, route
       ) ranked
-     ORDER BY organisation_name, n DESC, route
-  `) as { organisation_name: string; town_city: string | null; route: string }[];
+     ORDER BY organisation_name, n DESC, route, town_city NULLS LAST
+  `) as {
+    organisation_name: string;
+    town_city: string | null;
+    route: string;
+  }[];
   return new Map(rows.map((r) => [r.organisation_name, r]));
 }
 
@@ -370,7 +374,8 @@ async function runCompare(): Promise<void> {
   const sliced = limit !== undefined ? queue.slice(0, limit) : queue;
 
   console.log(`  queue rows (unresolved) : ${queue.length}`);
-  if (limit !== undefined) console.log(`  scoring                 : ${sliced.length}`);
+  if (limit !== undefined)
+    console.log(`  scoring                 : ${sliced.length}`);
 
   const numbers = uniq(
     sliced.flatMap((r) => [
@@ -379,7 +384,9 @@ async function runCompare(): Promise<void> {
     ]),
   ).filter((n): n is string => n !== null);
   const profiles = await loadProfiles(numbers);
-  const sponsors = await loadSponsors(uniq(sliced.map((r) => r.organisation_name)));
+  const sponsors = await loadSponsors(
+    uniq(sliced.map((r) => r.organisation_name)),
+  );
 
   const rows: CompareRow[] = sliced.map((r) => {
     const existing = r.existing_company_number
@@ -399,8 +406,18 @@ async function runCompare(): Promise<void> {
       p_num: r.proposed_company_number,
       trust: t.action,
       scorer: s.action,
-      s_e: s.action === 'swap' || s.action === 'keep' || s.action === 'inconclusive' ? s.s_e : undefined,
-      s_p: s.action === 'swap' || s.action === 'keep' || s.action === 'inconclusive' ? s.s_p : undefined,
+      s_e:
+        s.action === 'swap' ||
+        s.action === 'keep' ||
+        s.action === 'inconclusive'
+          ? s.s_e
+          : undefined,
+      s_p:
+        s.action === 'swap' ||
+        s.action === 'keep' ||
+        s.action === 'inconclusive'
+          ? s.s_p
+          : undefined,
       reason: s.reason,
     };
   });
@@ -482,7 +499,8 @@ async function runApply(strategy: StrategyName): Promise<void> {
 
   console.log(`  queue rows (unresolved) : ${queue.length}`);
   console.log(`  applying strategy       : ${strategy}`);
-  if (limit !== undefined) console.log(`  draining                : ${sliced.length}`);
+  if (limit !== undefined)
+    console.log(`  draining                : ${sliced.length}`);
 
   const numbers = uniq(
     sliced.flatMap((r) => [
@@ -491,7 +509,9 @@ async function runApply(strategy: StrategyName): Promise<void> {
     ]),
   ).filter((n): n is string => n !== null);
   const profiles = await loadProfiles(numbers);
-  const sponsors = await loadSponsors(uniq(sliced.map((r) => r.organisation_name)));
+  const sponsors = await loadSponsors(
+    uniq(sliced.map((r) => r.organisation_name)),
+  );
 
   // No-op upsertProfile — profiles are already cached from the hydrate step,
   // and the drain works entirely from cache. applyPromotion will still call
@@ -528,7 +548,9 @@ async function runApply(strategy: StrategyName): Promise<void> {
     if (outcome.action === 'orphan') {
       orphaned += 1;
       await markResolved(r.id, `drain_${strategy}_orphan`, changedBy);
-      console.log(`  ${idx} ${r.organisation_name} → orphan (${outcome.reason})`);
+      console.log(
+        `  ${idx} ${r.organisation_name} → orphan (${outcome.reason})`,
+      );
       continue;
     }
 
@@ -542,14 +564,16 @@ async function runApply(strategy: StrategyName): Promise<void> {
     if (outcome.action === 'inconclusive') {
       inconclusive += 1;
       await markResolved(r.id, `drain_${strategy}_inconclusive`, changedBy);
-      console.log(`  ${idx} ${r.organisation_name} → inconclusive (${outcome.reason})`);
+      console.log(
+        `  ${idx} ${r.organisation_name} → inconclusive (${outcome.reason})`,
+      );
       continue;
     }
 
     // swap path — needs staleness check + applyPromotion
     const mapping = await loadCurrentMapping(r.organisation_name);
     if (!mapping) {
-      orphaned += 1;
+      stale += 1;
       await markResolved(r.id, `drain_${strategy}_stale`, changedBy);
       console.log(`  ${idx} ${r.organisation_name} → stale (no mapping row)`);
       continue;
@@ -566,7 +590,9 @@ async function runApply(strategy: StrategyName): Promise<void> {
     if (!proposed || !r.proposed_company_number) {
       orphaned += 1;
       await markResolved(r.id, `drain_${strategy}_orphan`, changedBy);
-      console.log(`  ${idx} ${r.organisation_name} → orphan (proposed profile missing)`);
+      console.log(
+        `  ${idx} ${r.organisation_name} → orphan (proposed profile missing)`,
+      );
       continue;
     }
 
@@ -574,7 +600,9 @@ async function runApply(strategy: StrategyName): Promise<void> {
       verdict: 'verified',
       companyNumber: r.proposed_company_number,
       matchMethod: r.proposed_match_method,
-      matchScore: r.proposed_match_score ? Number(r.proposed_match_score) : null,
+      matchScore: r.proposed_match_score
+        ? Number(r.proposed_match_score)
+        : null,
       queryUsed: r.proposed_query_used,
       profile: profileRowToFullProfile(proposed),
     };

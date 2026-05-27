@@ -1,7 +1,11 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import type { ExistingMapping, ProposedResolution } from './decide.ts';
-import type { ApplyResult, SweepDeps, SweepLocality } from './sweep.ts';
+import type {
+  CHFullProfile,
+  ExistingMapping,
+  ProposedResolution,
+} from './decide.ts';
+import type { ApplyResult, SweepDeps, SweepSponsor } from './sweep.ts';
 import { sweep } from './sweep.ts';
 
 const row = (over: Partial<ExistingMapping> = {}): ExistingMapping => ({
@@ -25,86 +29,287 @@ const verifiedExact = (
   ...over,
 });
 
-const noLocality: SweepLocality = { townCity: null, county: null };
+const noSponsor: SweepSponsor = { townCity: null, county: null, route: null };
+
+const ukProfile = (over: Partial<CHFullProfile> = {}): CHFullProfile => ({
+  company_number: 'BR000001',
+  company_name: 'ACME LTD',
+  company_status: 'open',
+  type: 'uk-establishment',
+  registered_office_address: { locality: 'London' },
+  ...over,
+});
+
+const fcProfile = (over: Partial<CHFullProfile> = {}): CHFullProfile => ({
+  company_number: 'FC000001',
+  company_name: 'ACME LTD',
+  company_status: 'active',
+  type: 'oversea-company',
+  registered_office_address: { locality: 'Wilmington' },
+  ...over,
+});
 
 const makeDeps = (over: Partial<SweepDeps> = {}): SweepDeps => ({
   selectRows: mock(async () => []),
-  lookupLocality: mock(async () => noLocality),
+  lookupSponsor: mock(async () => noSponsor),
   resolveSponsor: mock(async () => verifiedExact()),
+  getProfile: mock(async () => null),
   applyPromotion: mock(async () => ({ ok: true as const })),
   bumpVerifiedAt: mock(async () => undefined),
-  enqueueReview: mock(async () => undefined),
   sleep: mock(async () => undefined),
   ...over,
 });
 
-describe('sweep — mixed-decision batch', () => {
-  test('one update + one bump + one queue + one lock_miss + one error → summary tallies all five', async () => {
-    const rUpdate = row({
-      organisationName: 'PROMOTE LTD',
-      matchMethod: 'no_match',
-    });
-    const rBump = row({
-      organisationName: 'STAY LTD',
-      matchMethod: 'no_match',
-    });
-    const rQueue = row({
-      organisationName: 'CONFLICT LTD',
-      matchMethod: 'manual',
-      companyNumber: '11111111',
-    });
-    const rLockMiss = row({
-      organisationName: 'RACE LTD',
-      matchMethod: 'no_match',
-    });
-    const rError = row({
-      organisationName: 'BREAKS LTD',
-      matchMethod: 'no_match',
-    });
-
-    const resolveSponsor = mock(async (orgName: string) => {
-      if (orgName === 'PROMOTE LTD') return verifiedExact();
-      if (orgName === 'STAY LTD') {
-        return {
-          verdict: 'no_match' as const,
-          companyNumber: null,
-          matchMethod: 'no_match' as const,
-          matchScore: null,
-          queryUsed: orgName,
-        };
-      }
-      if (orgName === 'CONFLICT LTD') {
-        return verifiedExact({ companyNumber: '99999999' });
-      }
-      if (orgName === 'RACE LTD') return verifiedExact();
-      throw new Error('CH 500');
-    });
-
-    const applyPromotion = mock(
-      async (existing: ExistingMapping): Promise<ApplyResult> => {
-        if (existing.organisationName === 'RACE LTD') {
-          return { ok: false, reason: 'lock_missed' };
-        }
-        return { ok: true };
-      },
-    );
-
+describe('sweep — happy path dispatch', () => {
+  test('row that promotes is routed to applyPromotion with the right changedBy', async () => {
+    const r = row({ matchMethod: 'no_match' });
     const deps = makeDeps({
-      selectRows: mock(async () => [rUpdate, rBump, rQueue, rLockMiss, rError]),
-      resolveSponsor,
-      applyPromotion,
+      selectRows: mock(async () => [r]),
+      resolveSponsor: mock(async () =>
+        verifiedExact({ companyNumber: '12345678' }),
+      ),
     });
 
     const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
 
-    expect(summary).toEqual({
-      selected: 5,
+    expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
+    expect(deps.applyPromotion).toHaveBeenCalledWith(
+      r,
+      verifiedExact({ companyNumber: '12345678' }),
+      'phase5_sweep_no_match',
+    );
+    expect(deps.bumpVerifiedAt).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({
+      selected: 1,
       updated: 1,
-      bumped: 1,
-      queued: 1,
-      lockMissed: 1,
-      errored: 1,
+      bumped: 0,
+      inlineResolved: 0,
+      inlineInconclusive: 0,
+      warned: 0,
+      lockMissed: 0,
+      errored: 0,
     });
+  });
+});
+
+describe('sweep — bump dispatch', () => {
+  test('no_match → no_match calls bumpVerifiedAt, not applyPromotion', async () => {
+    const r = row({ matchMethod: 'no_match' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      resolveSponsor: mock(async () => ({
+        verdict: 'no_match' as const,
+        companyNumber: null,
+        matchMethod: 'no_match' as const,
+        matchScore: null,
+        queryUsed: 'ACME LTD',
+      })),
+    });
+
+    const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
+
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledWith(r);
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({
+      selected: 1,
+      bumped: 1,
+      updated: 0,
+    });
+  });
+});
+
+describe('sweep — log_and_bump dispatch', () => {
+  test('manual conflict warns AND bumps; warned counter increments', async () => {
+    const r = row({ matchMethod: 'manual', companyNumber: '12345678' });
+    const warnSpy = mock((_msg: string) => undefined);
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+    try {
+      const deps = makeDeps({
+        selectRows: mock(async () => [r]),
+        resolveSponsor: mock(async () =>
+          verifiedExact({ companyNumber: '99999999' }),
+        ),
+      });
+
+      const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+      expect(warnSpy).toHaveBeenCalled();
+      expect(warnSpy.mock.calls[0][0]).toContain('manual_conflict');
+      expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
+      expect(deps.applyPromotion).not.toHaveBeenCalled();
+      expect(summary).toMatchObject({
+        selected: 1,
+        warned: 1,
+        bumped: 0,
+        updated: 0,
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+});
+
+describe('sweep — inline_score dispatch', () => {
+  test('scorer says promote → applyPromotion, inlineResolved increments', async () => {
+    const r = row({
+      organisationName: 'ACME LTD',
+      matchMethod: 'exact',
+      companyNumber: 'FC000001',
+    });
+    // Sponsor in London → existing FC (Wilmington) has no locality match,
+    // proposed BR (London) does + UK-presence boost → promote.
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      lookupSponsor: mock(async () => ({
+        townCity: 'London',
+        county: null,
+        route: 'Skilled Worker',
+      })),
+      resolveSponsor: mock(async () =>
+        verifiedExact({
+          companyNumber: 'BR000001',
+          profile: ukProfile(),
+        }),
+      ),
+      getProfile: mock(async () => fcProfile()),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
+    expect(summary).toMatchObject({
+      selected: 1,
+      inlineResolved: 1,
+      updated: 0,
+      inlineInconclusive: 0,
+    });
+  });
+
+  test('scorer says keep → bumpVerifiedAt, inlineResolved increments (not applyPromotion)', async () => {
+    const r = row({
+      organisationName: 'ACME LTD',
+      matchMethod: 'exact',
+      companyNumber: 'BR000001',
+    });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      lookupSponsor: mock(async () => ({
+        townCity: 'London',
+        county: null,
+        route: 'Skilled Worker',
+      })),
+      resolveSponsor: mock(async () =>
+        verifiedExact({
+          companyNumber: 'FC000001',
+          profile: fcProfile(),
+        }),
+      ),
+      getProfile: mock(async () => ukProfile()),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
+    expect(summary).toMatchObject({
+      selected: 1,
+      inlineResolved: 1,
+      inlineInconclusive: 0,
+    });
+  });
+
+  test('scorer inconclusive → bumpVerifiedAt + warn; inlineInconclusive increments', async () => {
+    const r = row({
+      organisationName: 'ACME LTD',
+      matchMethod: 'exact',
+      companyNumber: 'AAAA1111',
+    });
+    const warnSpy = mock((_msg: string) => undefined);
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+    try {
+      // Two identical ltd profiles with same locality → effective diff < margin.
+      const deps = makeDeps({
+        selectRows: mock(async () => [r]),
+        lookupSponsor: mock(async () => ({
+          townCity: 'Manchester',
+          county: null,
+          route: 'Skilled Worker',
+        })),
+        resolveSponsor: mock(async () =>
+          verifiedExact({
+            companyNumber: 'BBBB2222',
+            profile: {
+              company_number: 'BBBB2222',
+              company_name: 'ACME LTD',
+              company_status: 'active',
+              type: 'ltd',
+              registered_office_address: { locality: 'Manchester' },
+            },
+          }),
+        ),
+        getProfile: mock(async () => ({
+          company_number: 'AAAA1111',
+          company_name: 'ACME LTD',
+          company_status: 'active',
+          type: 'ltd',
+          registered_office_address: { locality: 'Manchester' },
+        })),
+      });
+
+      const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+      expect(deps.applyPromotion).not.toHaveBeenCalled();
+      expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalled();
+      expect(warnSpy.mock.calls[0][0]).toContain('inconclusive');
+      expect(summary).toMatchObject({
+        selected: 1,
+        inlineInconclusive: 1,
+        inlineResolved: 0,
+      });
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test('inline_score missing existing profile → bump + warn + inlineInconclusive++', async () => {
+    const r = row({
+      organisationName: 'ACME LTD',
+      matchMethod: 'exact',
+      companyNumber: 'BR999999',
+    });
+    const warnSpy = mock((_msg: string) => undefined);
+    const originalWarn = console.warn;
+    console.warn = warnSpy;
+    try {
+      const deps = makeDeps({
+        selectRows: mock(async () => [r]),
+        lookupSponsor: mock(async () => ({
+          townCity: 'London',
+          county: null,
+          route: 'Skilled Worker',
+        })),
+        resolveSponsor: mock(async () =>
+          verifiedExact({
+            companyNumber: 'FC000001',
+            profile: fcProfile(),
+          }),
+        ),
+        getProfile: mock(async () => null), // existing not cached
+      });
+
+      const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+      expect(deps.applyPromotion).not.toHaveBeenCalled();
+      expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('missing profile');
+      expect(summary.inlineInconclusive).toBe(1);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });
 
@@ -120,7 +325,6 @@ describe('sweep — rate-limit sleep', () => {
 
     await sweep({ tier: 'no_match', maxRows: 10 }, deps);
 
-    // 3 rows → 2 sleeps (between row 1↔2 and row 2↔3)
     expect(deps.sleep).toHaveBeenCalledTimes(2);
     expect(deps.sleep).toHaveBeenCalledWith(2200);
   });
@@ -188,10 +392,12 @@ describe('sweep — lock_missed handling', () => {
     const deps = makeDeps({
       selectRows: mock(async () => [r]),
       resolveSponsor: mock(async () => verifiedExact()),
-      applyPromotion: mock(async () => ({
-        ok: false as const,
-        reason: 'lock_missed' as const,
-      })),
+      applyPromotion: mock(
+        async (): Promise<ApplyResult> => ({
+          ok: false,
+          reason: 'lock_missed',
+        }),
+      ),
     });
 
     const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
@@ -203,108 +409,6 @@ describe('sweep — lock_missed handling', () => {
       updated: 0,
       bumped: 0,
       lockMissed: 1,
-      errored: 0,
-    });
-  });
-});
-
-describe('sweep — queue dispatch', () => {
-  test('manual conflict calls enqueueReview AND bumpVerifiedAt (in that order)', async () => {
-    const r = row({ matchMethod: 'manual', companyNumber: '12345678' });
-    const calls: string[] = [];
-    const deps = makeDeps({
-      selectRows: mock(async () => [r]),
-      resolveSponsor: mock(async () =>
-        verifiedExact({ companyNumber: '99999999' }),
-      ),
-      enqueueReview: mock(async () => {
-        calls.push('enqueueReview');
-      }),
-      bumpVerifiedAt: mock(async () => {
-        calls.push('bumpVerifiedAt');
-      }),
-    });
-
-    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
-
-    expect(deps.enqueueReview).toHaveBeenCalledTimes(1);
-    expect(deps.enqueueReview).toHaveBeenCalledWith(
-      r,
-      verifiedExact({ companyNumber: '99999999' }),
-      'manual_conflict',
-      'phase5_sweep_exact',
-    );
-    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
-    expect(calls).toEqual(['enqueueReview', 'bumpVerifiedAt']);
-    expect(deps.applyPromotion).not.toHaveBeenCalled();
-    expect(summary).toMatchObject({
-      selected: 1,
-      updated: 0,
-      bumped: 0,
-      queued: 1,
-      lockMissed: 0,
-      errored: 0,
-    });
-  });
-});
-
-describe('sweep — bump dispatch', () => {
-  test('no_match → no_match calls bumpVerifiedAt, not applyPromotion', async () => {
-    const r = row({ matchMethod: 'no_match' });
-    const deps = makeDeps({
-      selectRows: mock(async () => [r]),
-      resolveSponsor: mock(async () => ({
-        verdict: 'no_match' as const,
-        companyNumber: null,
-        matchMethod: 'no_match' as const,
-        matchScore: null,
-        queryUsed: 'ACME LTD',
-      })),
-    });
-
-    const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
-
-    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
-    expect(deps.bumpVerifiedAt).toHaveBeenCalledWith(r);
-    expect(deps.applyPromotion).not.toHaveBeenCalled();
-    expect(deps.enqueueReview).not.toHaveBeenCalled();
-    expect(summary).toMatchObject({
-      selected: 1,
-      updated: 0,
-      bumped: 1,
-      queued: 0,
-      lockMissed: 0,
-      errored: 0,
-    });
-  });
-});
-
-describe('sweep — happy path dispatch', () => {
-  test('row that promotes is routed to applyPromotion with the right changedBy', async () => {
-    const r = row({ matchMethod: 'no_match' });
-    const deps = makeDeps({
-      selectRows: mock(async () => [r]),
-      resolveSponsor: mock(async () =>
-        verifiedExact({ companyNumber: '12345678' }),
-      ),
-    });
-
-    const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
-
-    expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
-    expect(deps.applyPromotion).toHaveBeenCalledWith(
-      r,
-      verifiedExact({ companyNumber: '12345678' }),
-      'phase5_sweep_no_match',
-    );
-    expect(deps.bumpVerifiedAt).not.toHaveBeenCalled();
-    expect(deps.enqueueReview).not.toHaveBeenCalled();
-    expect(summary).toMatchObject({
-      selected: 1,
-      updated: 1,
-      bumped: 0,
-      queued: 0,
-      lockMissed: 0,
       errored: 0,
     });
   });

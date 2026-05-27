@@ -1,7 +1,12 @@
 /**
  * Pure decision function for the Phase 5 sweep. Maps an existing mapping +
  * the resolver's proposed verdict to one of four sweep actions: bump, update,
- * queue, no_op. No I/O.
+ * inline_score, log_and_bump. No I/O.
+ *
+ * `inline_score` signals the orchestrator to run `compareForInlineResolution`
+ * over the existing + proposed CH profiles and dispatch the result. The
+ * scorer call lives in the orchestrator, not here, so `decide()` stays pure
+ * and unit-testable without DB / CH access.
  *
  * See docs/phase5-sweep-algorithm.md for the rule table.
  */
@@ -47,15 +52,13 @@ export type ProposedResolution = {
   topResults?: unknown[];
 };
 
-type QueueReason =
-  | 'manual_conflict'
-  | 'public_body_conflict'
-  | 'same_rank_different_number';
+export type LogAndBumpReason = 'manual_conflict' | 'public_body_conflict';
 
 export type DecideResult =
   | { action: 'bump' }
   | { action: 'update' }
-  | { action: 'queue'; reason: QueueReason };
+  | { action: 'inline_score' }
+  | { action: 'log_and_bump'; reason: LogAndBumpReason };
 
 /** Numeric rank for the upgrade-only ladder. Terminal peers (`public_body`,
  *  `manual`) are handled separately and intentionally not in this map. */
@@ -96,17 +99,17 @@ export function decide(
     ) {
       return { action: 'bump' };
     }
-    return { action: 'queue', reason: 'manual_conflict' };
+    return { action: 'log_and_bump', reason: 'manual_conflict' };
   }
 
   const existingIsPublicBody = existing.matchMethod === 'public_body';
   const proposedIsPublicBody = proposed.verdict === 'public_body';
   if (existingIsPublicBody && proposedIsPublicBody) return { action: 'bump' };
   if (existingIsPublicBody && proposed.verdict === 'verified') {
-    return { action: 'queue', reason: 'public_body_conflict' };
+    return { action: 'log_and_bump', reason: 'public_body_conflict' };
   }
   if (proposedIsPublicBody && existing.matchMethod !== 'no_match') {
-    return { action: 'queue', reason: 'public_body_conflict' };
+    return { action: 'log_and_bump', reason: 'public_body_conflict' };
   }
   if (proposedIsPublicBody && existing.matchMethod === 'no_match') {
     return { action: 'update' };
@@ -120,5 +123,5 @@ export function decide(
   if (existing.companyNumber === proposed.companyNumber) {
     return { action: 'bump' };
   }
-  return { action: 'queue', reason: 'same_rank_different_number' };
+  return { action: 'inline_score' };
 }

@@ -141,7 +141,9 @@ async function fetchCompanyProfile(
       console.error(`  Rate limit retries exhausted for ${path}, giving up`);
       return { kind: 'error' };
     }
-    console.log(`  Rate limited, backing off 60s (${retriesLeft} retries left)`);
+    console.log(
+      `  Rate limited, backing off 60s (${retriesLeft} retries left)`,
+    );
     await delay(60_000);
     return fetchCompanyProfile(number, retriesLeft - 1);
   }
@@ -157,6 +159,12 @@ async function fetchCompanyProfile(
     );
     await delay(60_000);
     return fetchCompanyProfile(number, retriesLeft - 1);
+  }
+  // Auth failures (401/403) are non-retryable with the same credentials —
+  // fail fast rather than burn the rest of the work and only trip on the
+  // tail-end error-rate threshold.
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`CH authentication failed with ${res.status} for ${path}`);
   }
   if (!res.ok) {
     console.error(`  Unexpected status ${res.status} for ${path}`);
@@ -262,7 +270,9 @@ console.log(`  missing      : ${allMissing.length}`);
 if (limit !== undefined) console.log(`  to fetch     : ${toFetch.length}`);
 
 if (toFetch.length === 0) {
-  console.log('  nothing to do — every queue row already has its profile cached.');
+  console.log(
+    '  nothing to do — every queue row already has its profile cached.',
+  );
   process.exit(0);
 }
 

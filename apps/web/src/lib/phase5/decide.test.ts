@@ -43,15 +43,18 @@ describe('rule 2: manual is sacred', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 
-  test('manual + proposed differs on company_number → queue manual_conflict', () => {
+  test('manual + proposed differs on company_number → log_and_bump manual_conflict', () => {
     const result = decide(
       existing({ matchMethod: 'manual', companyNumber: '12345678' }),
       proposed({ verdict: 'verified', companyNumber: '99999999' }),
     );
-    expect(result).toEqual({ action: 'queue', reason: 'manual_conflict' });
+    expect(result).toEqual({
+      action: 'log_and_bump',
+      reason: 'manual_conflict',
+    });
   });
 
-  test('manual + proposed=no_match → queue manual_conflict', () => {
+  test('manual + proposed=no_match → log_and_bump manual_conflict', () => {
     const result = decide(
       existing({ matchMethod: 'manual', companyNumber: '12345678' }),
       proposed({
@@ -60,10 +63,13 @@ describe('rule 2: manual is sacred', () => {
         matchMethod: 'no_match',
       }),
     );
-    expect(result).toEqual({ action: 'queue', reason: 'manual_conflict' });
+    expect(result).toEqual({
+      action: 'log_and_bump',
+      reason: 'manual_conflict',
+    });
   });
 
-  test('manual + proposed=public_body → queue manual_conflict', () => {
+  test('manual + proposed=public_body → log_and_bump manual_conflict', () => {
     const result = decide(
       existing({ matchMethod: 'manual', companyNumber: '12345678' }),
       proposed({
@@ -72,7 +78,10 @@ describe('rule 2: manual is sacred', () => {
         matchMethod: 'public_body',
       }),
     );
-    expect(result).toEqual({ action: 'queue', reason: 'manual_conflict' });
+    expect(result).toEqual({
+      action: 'log_and_bump',
+      reason: 'manual_conflict',
+    });
   });
 });
 
@@ -89,15 +98,18 @@ describe('rule 3: public_body terminal peer', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 
-  test('public_body + verified → queue public_body_conflict', () => {
+  test('public_body + verified → log_and_bump public_body_conflict', () => {
     const result = decide(
       existing({ matchMethod: 'public_body', companyNumber: null }),
       proposed({ verdict: 'verified', companyNumber: '12345678' }),
     );
-    expect(result).toEqual({ action: 'queue', reason: 'public_body_conflict' });
+    expect(result).toEqual({
+      action: 'log_and_bump',
+      reason: 'public_body_conflict',
+    });
   });
 
-  test('verified + public_body → queue public_body_conflict', () => {
+  test('verified + public_body → log_and_bump public_body_conflict', () => {
     const result = decide(
       existing({ matchMethod: 'exact', companyNumber: '12345678' }),
       proposed({
@@ -106,7 +118,10 @@ describe('rule 3: public_body terminal peer', () => {
         matchMethod: 'public_body',
       }),
     );
-    expect(result).toEqual({ action: 'queue', reason: 'public_body_conflict' });
+    expect(result).toEqual({
+      action: 'log_and_bump',
+      reason: 'public_body_conflict',
+    });
   });
 
   test('no_match + public_body → update (regex hit beats no_match)', () => {
@@ -289,7 +304,7 @@ describe('rule 6: same rank', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 
-  test('exact:X → exact:Y different number → queue same_rank_different_number', () => {
+  test('exact:X → exact:Y different number → inline_score', () => {
     const result = decide(
       existing({ matchMethod: 'exact', companyNumber: '12345678' }),
       proposed({
@@ -298,10 +313,7 @@ describe('rule 6: same rank', () => {
         companyNumber: '99999999',
       }),
     );
-    expect(result).toEqual({
-      action: 'queue',
-      reason: 'same_rank_different_number',
-    });
+    expect(result).toEqual({ action: 'inline_score' });
   });
 
   test('no_match → no_match → bump', () => {
@@ -316,7 +328,7 @@ describe('rule 6: same rank', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 
-  test('token_sim:X different number from token_sim:Y → queue', () => {
+  test('token_sim:X different number from token_sim:Y → inline_score', () => {
     const result = decide(
       existing({ matchMethod: 'token_sim', companyNumber: '12345678' }),
       proposed({
@@ -325,13 +337,10 @@ describe('rule 6: same rank', () => {
         companyNumber: '99999999',
       }),
     );
-    expect(result).toEqual({
-      action: 'queue',
-      reason: 'same_rank_different_number',
-    });
+    expect(result).toEqual({ action: 'inline_score' });
   });
 
-  test('token_sim:X with score wobble (same number) → bump, not queue', () => {
+  test('token_sim:X with score wobble (same number) → bump, not inline_score', () => {
     const result = decide(
       existing({
         matchMethod: 'token_sim',

@@ -143,6 +143,80 @@ describe('hard gate plumbing through', () => {
   });
 });
 
+describe('UK-presence preference (BR ↔ FC / OE)', () => {
+  test('60 Decibels-style: FC existing, BR proposed → promote', () => {
+    const result = compareForInlineResolution(
+      candidate({
+        company_name: '60 DECIBELS, INC.',
+        type: 'oversea-company',
+        company_status: 'active',
+        registered_office_address: { locality: 'Delaware' },
+      }),
+      candidate({
+        company_name: '60 DECIBELS, INC.',
+        type: 'uk-establishment',
+        company_status: 'open',
+        registered_office_address: { locality: 'London' },
+      }),
+      sponsor({ townCity: 'London' }),
+    );
+    expect(result.action).toBe('promote');
+  });
+
+  test('Reverse: BR existing, FC proposed → keep (preserves the 99-row pattern)', () => {
+    const result = compareForInlineResolution(
+      candidate({
+        company_name: 'AIR NEW ZEALAND LIMITED',
+        type: 'uk-establishment',
+        company_status: 'open',
+        registered_office_address: { locality: 'London' },
+      }),
+      candidate({
+        company_name: 'AIR NEW ZEALAND LIMITED',
+        type: 'oversea-company',
+        company_status: 'active',
+        registered_office_address: { locality: 'Auckland' },
+      }),
+      sponsor({ townCity: 'London' }),
+    );
+    expect(result.action).toBe('keep');
+  });
+
+  test('OE existing (ROE), uk-establishment proposed → promote', () => {
+    const result = compareForInlineResolution(
+      candidate({
+        type: 'registered-overseas-entity',
+        company_status: 'registered',
+        registered_office_address: { locality: 'Guernsey' },
+      }),
+      candidate({
+        type: 'uk-establishment',
+        company_status: 'open',
+        registered_office_address: { locality: 'London' },
+      }),
+      sponsor({ townCity: 'London' }),
+    );
+    expect(result.action).toBe('promote');
+  });
+
+  test('Neither side is uk-establishment → no UK-presence boost applied', () => {
+    const result = compareForInlineResolution(
+      candidate({
+        type: 'ltd',
+        company_status: 'active',
+        registered_office_address: { locality: 'Manchester' },
+      }),
+      candidate({
+        type: 'ltd',
+        company_status: 'active',
+        registered_office_address: { locality: 'Manchester' },
+      }),
+      sponsor({ townCity: 'Manchester' }),
+    );
+    expect(result.action).toBe('inconclusive');
+  });
+});
+
 describe('AsiaLink-style regression fixture', () => {
   test('Charity Worker sponsor, existing CIO with no address, proposed ltd elsewhere → keep', () => {
     const result = compareForInlineResolution(

@@ -23,7 +23,9 @@ Tier 4  match_method = 'public_body'                    monthly,   500 rows
 - `companies_house_profiles` — UPSERT when a `no_match` flips to `verified`; read existing profile for the inline scorer
 - `hmrc_skilled_workers` — read for locality + route tiebreak
 
-Earlier versions of this design used an `hmrc_company_mapping_review_queue` table for `same_rank_different_number` cases. That table is being dropped (2026-05-11) — the inline scorer (see "Same-rank inline resolution" below) now decides these cases at sweep time. The other reason classes the queue theoretically held (`manual_conflict`, `public_body_conflict`) never fired in production and are replaced with log-and-bump.
+Earlier versions of this design used an `hmrc_company_mapping_review_queue` table for `same_rank_different_number` cases. The live sweep no longer enqueues — the inline scorer (see "Same-rank inline resolution" below) decides these cases at sweep time. The other reason classes the queue theoretically held (`manual_conflict`, `public_body_conflict`) never fired in production and are replaced with log-and-bump.
+
+The table itself is **kept for now** (2026-05-27) as a passive store of the 64 `drain_scorer_inconclusive` rows the one-shot drain couldn't resolve. These are pending hand-review; the table will be dropped once they're resolved. See "Dropping the table (deferred)" below.
 
 ## Top-level flow
 
@@ -222,9 +224,11 @@ scoreCandidate(candidate, sponsor):
   # HMRC locality match (case-insensitive)
   if candidate.locality == sponsor.town_city:        score += 3
 
-  # Status
-  if candidate.status == 'active':                   score += 1
-  if candidate.status in ('dissolved', 'liquidation'): score -= 2
+  # Status — UK-incorporated entities use 'active' / 'dissolved' / 'liquidation';
+  # uk-establishment (BR) and oversea-company (FC) records use 'open' / 'closed'
+  # for the equivalent operational meaning.
+  if candidate.status in ('active', 'open'):                 score += 1
+  if candidate.status in ('dissolved', 'liquidation', 'closed'): score -= 2
 
   return score
 ```
@@ -242,8 +246,10 @@ truth for the comparison logic — there's no second implementation to
 drift out of sync.
 
 ```pseudo
-STATUS_QUO_BONUS = 1
-SCORE_MARGIN     = 2
+STATUS_QUO_BONUS    = 1
+SCORE_MARGIN        = 2
+UK_PRESENCE_WEIGHT  = 3
+FOREIGN_ENTITY_TYPES = {'oversea-company', 'registered-overseas-entity'}
 
 compareForInlineResolution(existing, proposed, sponsor):
   s_e = scoreCandidate(existing, sponsor) + STATUS_QUO_BONUS
@@ -254,6 +260,15 @@ compareForInlineResolution(existing, proposed, sponsor):
       s_e += 5    # proposed was previously known as existing (rare reverse)
   if canonical(existing.name) in proposed.previous_company_names:
       s_p += 5    # existing was renamed to proposed (the common case)
+
+  # Canonical UK-presence preference — fires only when one side is a
+  # uk-establishment (BR) and the other is a foreign-entity record
+  # (oversea-company / registered-overseas-entity) of the same legal entity.
+  # For HMRC sponsors operating in the UK, the BR is the right mapping.
+  if existing.type == 'uk-establishment' and proposed.type in FOREIGN_ENTITY_TYPES:
+      s_e += UK_PRESENCE_WEIGHT
+  if proposed.type == 'uk-establishment' and existing.type in FOREIGN_ENTITY_TYPES:
+      s_p += UK_PRESENCE_WEIGHT
 
   if s_p > s_e + SCORE_MARGIN: return { s_e, s_p, action: 'promote' }
   if s_e > s_p + SCORE_MARGIN: return { s_e, s_p, action: 'keep' }
@@ -466,44 +481,58 @@ match action:
 `--strategy=scorer --apply --limit=10` → spot-check the 10 resolved
 rows in the audit table → re-run for the rest).
 
-#### Step D — hand-resolve residue, then drop the table
+#### Step D — hand-resolve residue
 
 Only the scorer strategy can produce residue (`drain_scorer_keep` and
 `drain_scorer_inconclusive` rows that an operator may want to revisit).
-Dump those to `docs/phase5-drain-residue.md` and resolve by inspection.
 The trust strategy leaves zero residue.
 
-Once the queue is fully drained, proceed to "Dropping the table" below.
+After the 2026-05-27 drain, the residue is **64 `drain_scorer_inconclusive`
+rows** — genuine ambiguities where the scorer's confidence didn't clear
+`SCORE_MARGIN`. Query them via:
 
-### Dropping the table
+```sql
+SELECT id, organisation_name,
+       existing_company_number, proposed_company_number
+  FROM hmrc_company_mapping_review_queue
+ WHERE resolution = 'drain_scorer_inconclusive'
+ ORDER BY organisation_name;
+```
 
-After the one-shot drain:
+These need eyeball-on-CH review. Once resolved (either by manually setting
+the right mapping or by accepting the incumbent), proceed to "Dropping the
+table" below.
+
+### Dropping the table (deferred)
+
+**Status: deferred until the 64 inconclusive rows are reviewed.**
+
+The live sweep no longer enqueues, so the table doesn't grow. Once the
+inconclusives are resolved, drop it:
 
 ```sql
 DROP TABLE hmrc_company_mapping_review_queue;
 ```
 
-…plus removing its schema definition, the `makeEnqueueReview` factory
-in `sql.ts`, the `enqueueReview` slot from `SweepDeps`, and the `queue`
-action from `decide()`'s return type. The audit table
+…plus removing its schema definition. The `makeEnqueueReview` factory,
+`enqueueReview` slot in `SweepDeps`, and `queue` action in `decide()` were
+all removed as part of the live-sweep refactor (the table is now a
+read-only artefact of the one-shot drain). The audit table
 (`hmrc_company_mapping_audit`) continues to carry the full history of
-mapping changes — nothing is lost.
+mapping changes — nothing is lost when the queue table eventually drops.
 
 ## DDL
 
 ```sql
 CREATE INDEX idx_mapping_method_verified
   ON hmrc_company_mapping (match_method, verified_at NULLS FIRST);
-
--- Drop the review queue table (and its indexes) once the one-shot
--- migration of the existing 140 rows is complete.
-DROP TABLE hmrc_company_mapping_review_queue;
 ```
 
-No new tables. `hmrc_company_mapping`, `hmrc_company_mapping_audit`, and
-`companies_house_profiles` already have everything Phase 5 needs.
-`hmrc_company_mapping_review_queue` was the only addition the previous
-design required, and is now being removed.
+The `idx_mapping_method_verified` index is already in place. No new tables
+needed. `hmrc_company_mapping`, `hmrc_company_mapping_audit`, and
+`companies_house_profiles` have everything Phase 5 needs. The
+`hmrc_company_mapping_review_queue` table will be dropped once its
+remaining inconclusive rows are reviewed (see above).
 
 ## ch-stream coordination
 
@@ -675,8 +704,10 @@ describe('locality match')
 
 describe('status weighting')
   candidate.status == 'active'                          → +1
+  candidate.status == 'open'    (BR equivalent)         → +1
   candidate.status == 'dissolved'                       → -2
   candidate.status == 'liquidation'                     → -2
+  candidate.status == 'closed'  (BR equivalent)         → -2
   unknown / null status                                 → 0
 
 describe('combined max')
@@ -719,6 +750,16 @@ describe('hard gate plumbing through')
     = -Infinity, so any finite s_p wins                → action='promote'
   scoreCandidate returns -Infinity for proposed → s_p = -Infinity,
     so any finite s_e wins                             → action='keep'
+
+describe('UK-presence preference (BR ↔ FC / OE)')
+  60 Decibels-style: FC existing, BR proposed
+    → action='promote' (UK_PRESENCE_WEIGHT pushes BR over the margin)
+  Reverse: BR existing, FC proposed
+    → action='keep' (the 99-row BR↔FC pattern)
+  OE existing (registered-overseas-entity), uk-establishment proposed
+    → action='promote'
+  Neither side is uk-establishment (e.g. two ltd candidates)
+    → no UK-presence boost applied (action='inconclusive' when other features tie)
 
 describe('AsiaLink regression fixture')
   HMRC: Northwich, route=Charity Worker

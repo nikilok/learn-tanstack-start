@@ -66,9 +66,18 @@ export function scoreCandidate(
     score += 3;
   }
 
+  // UK-incorporated entities use 'active' / 'dissolved' / 'liquidation';
+  // uk-establishment (BR) and oversea-company (FC) records use 'open' /
+  // 'closed' for the same operational meaning.
   const status = candidate.company_status;
-  if (status === 'active') score += 1;
-  else if (status === 'dissolved' || status === 'liquidation') score -= 2;
+  if (status === 'active' || status === 'open') score += 1;
+  else if (
+    status === 'dissolved' ||
+    status === 'liquidation' ||
+    status === 'closed'
+  ) {
+    score -= 2;
+  }
 
   return score;
 }

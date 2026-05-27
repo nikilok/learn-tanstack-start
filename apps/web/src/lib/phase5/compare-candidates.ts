@@ -30,6 +30,26 @@ export const SCORE_MARGIN = 2;
  *  `previous_company_names`. Strong evidence of corporate succession. */
 export const SUCCESSION_WEIGHT = 5;
 
+/** Canonical UK-presence preference. When the comparison is between a
+ *  `uk-establishment` (BR) and a foreign-entity CH record (`oversea-company`
+ *  / `registered-overseas-entity`) of the same legal entity, prefer the BR.
+ *  HMRC sponsors operate in the UK; the BR holds the local licence, the FC /
+ *  OE records are CH bookkeeping for the foreign parent. */
+export const UK_PRESENCE_WEIGHT = 3;
+
+const FOREIGN_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'oversea-company',
+  'registered-overseas-entity',
+]);
+
+function isUkEstablishment(type: string | null | undefined): boolean {
+  return type === 'uk-establishment';
+}
+
+function isForeignEntity(type: string | null | undefined): boolean {
+  return type !== null && type !== undefined && FOREIGN_ENTITY_TYPES.has(type);
+}
+
 export type CompareCandidate = ScorerCandidate & {
   company_name: string;
   previous_company_names?: { name: string }[] | null;
@@ -90,6 +110,17 @@ export function compareForInlineResolution(
     previousNamesInclude(proposed.previous_company_names, existingCanon)
   ) {
     s_p += SUCCESSION_WEIGHT;
+  }
+
+  // Canonical UK-presence preference — only fires when one side is the BR
+  // (uk-establishment) and the other is the foreign parent (FC / OE) of what
+  // is in practice the same legal entity. Symmetric: works whether the BR is
+  // existing or proposed.
+  if (isUkEstablishment(existing.type) && isForeignEntity(proposed.type)) {
+    s_e += UK_PRESENCE_WEIGHT;
+  }
+  if (isUkEstablishment(proposed.type) && isForeignEntity(existing.type)) {
+    s_p += UK_PRESENCE_WEIGHT;
   }
 
   if (s_p > s_e + SCORE_MARGIN) return { s_e, s_p, action: 'promote' };

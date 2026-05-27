@@ -147,11 +147,16 @@ export function makeLookupLocality(sql: Sql): SweepDeps['lookupLocality'] {
  *  reserved for material corrections. */
 export function makeBumpVerifiedAt(sql: Sql): SweepDeps['bumpVerifiedAt'] {
   return async (existing) => {
+    // Lock compares at millisecond precision: Postgres stores verified_at with
+    // microseconds, but neon → JS Date truncates to ms on read. Without the
+    // date_trunc, a row whose verified_at has any non-zero microseconds (i.e.
+    // any row touched by a previous SQL `now()`) would silently lock-miss.
     await sql`
       UPDATE hmrc_company_mapping
       SET verified_at = now()
       WHERE organisation_name = ${existing.organisationName}
-        AND verified_at IS NOT DISTINCT FROM ${existing.verifiedAt}
+        AND date_trunc('milliseconds', verified_at)
+            IS NOT DISTINCT FROM ${existing.verifiedAt}
     `;
   };
 }
@@ -295,6 +300,8 @@ export function makeCommitPromotion(
   return async (
     input: CommitPromotionInput,
   ): Promise<CommitPromotionResult> => {
+    // Lock compares at millisecond precision: see comment in
+    // `makeBumpVerifiedAt` — same microsecond-truncation issue.
     const rows = (await sql`
       WITH updated AS (
         UPDATE hmrc_company_mapping
@@ -305,7 +312,8 @@ export function makeCommitPromotion(
             is_public_body = ${input.newIsPublicBody},
             verified_at    = now()
         WHERE organisation_name = ${input.organisationName}
-          AND verified_at IS NOT DISTINCT FROM ${input.originalVerifiedAt}
+          AND date_trunc('milliseconds', verified_at)
+              IS NOT DISTINCT FROM ${input.originalVerifiedAt}
         RETURNING company_number, match_method
       ),
       audit_inserted AS (

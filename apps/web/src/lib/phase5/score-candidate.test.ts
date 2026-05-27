@@ -145,6 +145,28 @@ describe('status weighting', () => {
     expect(result).toBe(-2);
   });
 
+  test("'open' (uk-establishment / oversea-company status) → +1", () => {
+    const result = scoreCandidate(
+      candidate({
+        company_status: 'open',
+        registered_office_address: null,
+      }),
+      sponsor({ townCity: null }),
+    );
+    expect(result).toBe(1);
+  });
+
+  test("'closed' (uk-establishment / oversea-company status) → -2", () => {
+    const result = scoreCandidate(
+      candidate({
+        company_status: 'closed',
+        registered_office_address: null,
+      }),
+      sponsor({ townCity: null }),
+    );
+    expect(result).toBe(-2);
+  });
+
   test('unknown/null status → 0', () => {
     const result = scoreCandidate(
       candidate({ company_status: null, registered_office_address: null }),

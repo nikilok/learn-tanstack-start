@@ -1,21 +1,27 @@
 /**
- * Phase 5 sweep CLI — thin wiring layer on top of the orchestration in
- * `apps/web/src/lib/phase5/`. Pulls a tier slice of `hmrc_company_mapping`,
- * re-runs `resolveOneSponsor` per row, and applies the upgrade-only sweep
- * policy (atomic UPDATE + audit CTE; conditional profile UPSERT for
- * `no_match` → `verified` flips; review-queue rows for ambiguous cases).
+ * Step A of the one-shot review-queue drain. Fetches CH profiles for every
+ * `proposed_company_number` referenced by an unresolved queue row that isn't
+ * already in `companies_house_profiles`, and UPSERTs them. After this script
+ * runs, the drain script in step B/C can decide every queue row from local
+ * data with zero CH calls.
+ *
+ * Idempotent — re-runs are no-ops because the LEFT JOIN already excludes
+ * cached rows. Profiles that 404 are logged and skipped; the corresponding
+ * queue rows surface as `orphan` in the step-B comparison report.
  *
  * Run from monorepo root:
- *   bun apps/web/scripts/phase5-sweep.ts --tier=no_match
- *   bun apps/web/scripts/phase5-sweep.ts --tier=exact --max-rows=500
- *   bun apps/web/scripts/phase5-sweep.ts --tier=non_exact --dry-run
+ *   bun apps/web/scripts/hydrate-queue-proposed-profiles.ts --dry-run
+ *   bun apps/web/scripts/hydrate-queue-proposed-profiles.ts
+ *   bun apps/web/scripts/hydrate-queue-proposed-profiles.ts --limit=20
  *
  * Env (loaded from monorepo root `.env.local` + `apps/web/.env.local`):
  *   POSTGRES_URL                    — required, Neon connection string
- *   COMPANIES_HOUSE_SEED_API_KEY    — CH API key (shared with the seed/Phase 0b)
+ *   COMPANIES_HOUSE_SEED_API_KEY    — CH API key
  *
- * See docs/phase5-sweep-algorithm.md for the per-row decision flow and
- * docs/hmrc-ch-mapping-fix.md "Phase 5" for the design rationale.
+ * Delete this script after `hmrc_company_mapping_review_queue` is dropped.
+ *
+ * See docs/phase5-sweep-algorithm.md §"Step A — hydrate missing proposed
+ * profiles".
  */
 
 import { dirname, resolve } from 'node:path';
@@ -26,32 +32,11 @@ import { companiesHouseProfiles } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
 
-import { resolveOneSponsor } from '../src/lib/hmrc-ch/resolve-sponsor.ts';
-import type {
-  ApplyPromotionDeps,
-  CHFullProfile,
-} from '../src/lib/phase5/apply-promotion.ts';
-import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
+import type { CHFullProfile } from '../src/lib/phase5/apply-promotion.ts';
 import { describeDbHost } from '../src/lib/phase5/db-host.ts';
-import {
-  makeBumpVerifiedAt,
-  makeCommitPromotion,
-  makeGetProfile,
-  makeLookupSponsor,
-  makeResolveSponsor,
-  makeSelectRows,
-  makeSleep,
-} from '../src/lib/phase5/sql.ts';
-import type {
-  SweepConfig,
-  SweepDeps,
-  SweepSummary,
-  Tier,
-} from '../src/lib/phase5/sweep.ts';
-import { sweep } from '../src/lib/phase5/sweep.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Env loading — POSTGRES_URL at monorepo root, CH API key at apps/web level
+// Env loading
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -74,40 +59,13 @@ if (!CH_API_KEY) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
-const tierArg = args.find((a) => a.startsWith('--tier='));
-const maxRowsArg = args.find((a) => a.startsWith('--max-rows='));
+const limitArg = args.find((a) => a.startsWith('--limit='));
 const DRY_RUN = args.includes('--dry-run');
 
-const VALID_TIERS: readonly Tier[] = [
-  'no_match',
-  'non_exact',
-  'exact',
-  'public_body',
-];
+/** ~2 req/sec — well under CH's 600 / 5 min quota. */
+const SLEEP_MS = 550;
 
-const TIER_DEFAULT_MAX_ROWS: Record<Tier, number> = {
-  no_match: 4000,
-  non_exact: 3000,
-  exact: 1500,
-  public_body: 500,
-};
-
-if (!tierArg) {
-  throw new Error(
-    `Missing --tier=<name>. Valid tiers: ${VALID_TIERS.join(', ')}`,
-  );
-}
-
-const tier = tierArg.replace('--tier=', '') as Tier;
-if (!VALID_TIERS.includes(tier)) {
-  throw new Error(
-    `Invalid tier "${tier}". Valid tiers: ${VALID_TIERS.join(', ')}`,
-  );
-}
-
-/** Strict whole-number parse. Rejects partial strings like "100abc",
- *  decimals like "100.5", scientific notation like "1e3", and negative
- *  numbers — `Number.parseInt` silently truncates all of those. */
+/** Strict whole-number parse — same shape as phase5-sweep.ts. */
 function parseStrictInt(raw: string, label: string, min: number): number {
   if (!/^\d+$/.test(raw)) {
     throw new Error(
@@ -121,46 +79,36 @@ function parseStrictInt(raw: string, label: string, min: number): number {
   return n;
 }
 
-const maxRows = maxRowsArg
-  ? parseStrictInt(maxRowsArg.replace('--max-rows=', ''), '--max-rows', 1)
-  : TIER_DEFAULT_MAX_ROWS[tier];
-
-// Per-row sleep override. Read from PHASE5_DELAY_MS env var (set via repo
-// `vars` in the GH Actions workflow) so we can throttle up/down without a
-// redeploy. Falls back to the orchestrator's DEFAULT_DELAY_MS (2200) when
-// unset.
-const delayMsRaw = process.env.PHASE5_DELAY_MS;
-const delayMs =
-  delayMsRaw !== undefined && delayMsRaw !== ''
-    ? parseStrictInt(delayMsRaw, 'PHASE5_DELAY_MS', 0)
-    : undefined;
+const limit = limitArg
+  ? parseStrictInt(limitArg.replace('--limit=', ''), '--limit', 1)
+  : undefined;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CH API client (rate-limit aware)
+// CH API client (rate-limit aware) — mirrors phase5-sweep.ts's fetchApi.
+// Kept inline so the script stays self-contained and deletable.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 const AUTH_HEADER = `Basic ${Buffer.from(`${CH_API_KEY}:`).toString('base64')}`;
+const FETCH_MAX_RETRIES = 3;
+const FETCH_TIMEOUT_MS = 30_000;
 
 function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
-/** Retry budget for 429 backoffs and network errors. With 3 retries × 60s,
- *  a single request can spend up to ~3 minutes recovering before the row
- *  is given up on as errored. */
-const FETCH_MAX_RETRIES = 3;
+type FetchOutcome =
+  | { kind: 'ok'; data: unknown }
+  | { kind: 'not_found' }
+  | { kind: 'error' };
 
-/** Per-request timeout. CH's /search and /company endpoints normally respond
- *  in 200-500ms; anything past 30s is almost certainly a hung connection
- *  (network blip, NAT idle drop, DNS issue) — abort and retry rather than
- *  waste the workflow's 240-min timeout on a single stalled request. */
-const FETCH_TIMEOUT_MS = 30_000;
-
-async function fetchApi(
-  path: string,
+/** Three-way result so the caller can count 404s (orphan candidates) apart
+ *  from exhausted retries on 429/5xx/network errors (real failures). */
+async function fetchCompanyProfile(
+  number: string,
   retriesLeft = FETCH_MAX_RETRIES,
-): Promise<unknown | null> {
+): Promise<FetchOutcome> {
+  const path = `/company/${number}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -172,68 +120,65 @@ async function fetchApi(
     });
   } catch (err) {
     clearTimeout(timeoutId);
-    // AbortError (timeout) and other transient network errors are retryable.
-    // Distinguished from CH-side failures (4xx/5xx) which are handled below.
     if (retriesLeft <= 0) {
       console.error(
         `  Network error/timeout for ${path}, giving up: ${err instanceof Error ? err.message : err}`,
       );
-      return null;
+      return { kind: 'error' };
     }
     console.log(
-      `  Network error/timeout, backing off for 60s… (${retriesLeft} retries left)`,
+      `  Network error/timeout, backing off 60s (${retriesLeft} retries left)`,
     );
     await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
+    return fetchCompanyProfile(number, retriesLeft - 1);
   }
   clearTimeout(timeoutId);
+
+  if (res.status === 404) return { kind: 'not_found' };
 
   if (res.status === 429) {
     if (retriesLeft <= 0) {
       console.error(`  Rate limit retries exhausted for ${path}, giving up`);
-      return null;
+      return { kind: 'error' };
     }
     console.log(
-      `  Rate limited, backing off for 60s… (${retriesLeft} retries left)`,
+      `  Rate limited, backing off 60s (${retriesLeft} retries left)`,
     );
     await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
+    return fetchCompanyProfile(number, retriesLeft - 1);
   }
-  // 5xx — transient CH-side outages (502/503/504 during their deploys etc).
-  // Same retry shape as 429 but distinct log messages so operators can
-  // tell quota-exhaustion apart from server outage.
   if (res.status >= 500 && res.status < 600) {
     if (retriesLeft <= 0) {
       console.error(
         `  Server error ${res.status} retries exhausted for ${path}, giving up`,
       );
-      return null;
+      return { kind: 'error' };
     }
     console.log(
-      `  Server error ${res.status}, backing off for 60s… (${retriesLeft} retries left)`,
+      `  Server error ${res.status}, backing off 60s (${retriesLeft} retries left)`,
     );
     await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
+    return fetchCompanyProfile(number, retriesLeft - 1);
   }
-  if (!res.ok) return null;
-  return res.json();
+  // Auth failures (401/403) are non-retryable with the same credentials —
+  // fail fast rather than burn the rest of the work and only trip on the
+  // tail-end error-rate threshold.
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`CH authentication failed with ${res.status} for ${path}`);
+  }
+  if (!res.ok) {
+    console.error(`  Unexpected status ${res.status} for ${path}`);
+    return { kind: 'error' };
+  }
+  return { kind: 'ok', data: await res.json() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Profile UPSERT — mirrors the helper in apps/web/src/api/companiesHouse.ts
-// (kept inline so the script does not pull in the TanStack Start runtime).
+// Profile UPSERT — mirrors phase5-sweep.ts's helper, kept inline.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const sql = neon(process.env.POSTGRES_URL);
 const db = drizzle({ client: sql });
-
-async function upsertProfile(profile: CHFullProfile): Promise<void> {
-  const row = profileToDbRow(profile);
-  await db.insert(companiesHouseProfiles).values(row).onConflictDoUpdate({
-    target: companiesHouseProfiles.companyNumber,
-    set: row,
-  });
-}
 
 type CHRegisteredAddress = {
   address_line_1?: string;
@@ -289,66 +234,100 @@ function profileToDbRow(profile: CHFullProfile) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Wire up the deps
-// ─────────────────────────────────────────────────────────────────────────────
-
-const applyDeps: ApplyPromotionDeps = {
-  commitPromotion: makeCommitPromotion(sql),
-  upsertProfile,
-};
-
-const dryRunNoOp = async () => {};
-
-const sweepDeps: SweepDeps = {
-  selectRows: makeSelectRows(sql),
-  lookupSponsor: makeLookupSponsor(sql),
-  resolveSponsor: makeResolveSponsor((orgName, locality) =>
-    resolveOneSponsor(orgName, locality, fetchApi),
-  ),
-  getProfile: makeGetProfile(sql),
-  applyPromotion: DRY_RUN
-    ? async () => ({ ok: true })
-    : (existing, proposed, changedBy) =>
-        applyPromotion(existing, proposed, changedBy, applyDeps),
-  bumpVerifiedAt: DRY_RUN ? dryRunNoOp : makeBumpVerifiedAt(sql),
-  sleep: makeSleep(),
-};
+async function upsertProfile(profile: CHFullProfile): Promise<void> {
+  const row = profileToDbRow(profile);
+  await db.insert(companiesHouseProfiles).values(row).onConflictDoUpdate({
+    target: companiesHouseProfiles.companyNumber,
+    set: row,
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-const config: SweepConfig = { tier, maxRows, delayMs };
-const startedAt = Date.now();
-
-const delayLabel = delayMs !== undefined ? ` delay=${delayMs}ms` : '';
 console.log(
-  `Phase 5 sweep — tier=${tier} max_rows=${maxRows}${delayLabel}${DRY_RUN ? ' (DRY RUN — no writes)' : ''}`,
+  `Hydrate queue proposed profiles${DRY_RUN ? ' (DRY RUN — no fetches, no writes)' : ''}${limit !== undefined ? ` limit=${limit}` : ''}`,
 );
 console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
 
-const summary: SweepSummary = await sweep(config, sweepDeps);
+type ToFetchRow = { proposed_company_number: string };
+const allMissing = (await sql`
+  SELECT DISTINCT q.proposed_company_number
+    FROM hmrc_company_mapping_review_queue q
+    LEFT JOIN companies_house_profiles p
+           ON p.company_number = q.proposed_company_number
+   WHERE q.resolved_at IS NULL
+     AND q.proposed_company_number IS NOT NULL
+     AND p.company_number IS NULL
+   ORDER BY q.proposed_company_number
+`) as ToFetchRow[];
+
+const toFetch = limit !== undefined ? allMissing.slice(0, limit) : allMissing;
+
+console.log(`  missing      : ${allMissing.length}`);
+if (limit !== undefined) console.log(`  to fetch     : ${toFetch.length}`);
+
+if (toFetch.length === 0) {
+  console.log(
+    '  nothing to do — every queue row already has its profile cached.',
+  );
+  process.exit(0);
+}
+
+if (DRY_RUN) {
+  for (const row of toFetch.slice(0, 10)) {
+    console.log(`    ${row.proposed_company_number}`);
+  }
+  if (toFetch.length > 10) {
+    console.log(`    … (${toFetch.length - 10} more)`);
+  }
+  console.log('');
+  console.log('  DRY RUN — exiting before fetches.');
+  process.exit(0);
+}
+
+let hydrated = 0;
+let notFound = 0;
+let errored = 0;
+const startedAt = Date.now();
+
+for (let i = 0; i < toFetch.length; i++) {
+  const num = toFetch[i].proposed_company_number;
+  const idx = `[${i + 1}/${toFetch.length}]`;
+
+  const outcome = await fetchCompanyProfile(num);
+
+  if (outcome.kind === 'not_found') {
+    notFound += 1;
+    console.log(`  ${idx} ${num} → 404 (orphan candidate)`);
+  } else if (outcome.kind === 'error') {
+    errored += 1;
+    console.log(`  ${idx} ${num} → error (see logs above)`);
+  } else {
+    await upsertProfile(outcome.data as CHFullProfile);
+    hydrated += 1;
+    if ((i + 1) % 20 === 0 || i + 1 === toFetch.length) {
+      console.log(
+        `  ${idx} ${num} → cached (${hydrated} hydrated, ${notFound} 404, ${errored} errored)`,
+      );
+    }
+  }
+
+  if (i < toFetch.length - 1) await delay(SLEEP_MS);
+}
 
 const durationSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 
 console.log('');
-console.log(`  selected            : ${summary.selected}`);
-console.log(`  updated             : ${summary.updated}`);
-console.log(`  bumped              : ${summary.bumped}`);
-console.log(`  inline_resolved     : ${summary.inlineResolved}`);
-console.log(`  inline_inconclusive : ${summary.inlineInconclusive}`);
-console.log(`  warned              : ${summary.warned}`);
-console.log(`  lock_missed         : ${summary.lockMissed}`);
-console.log(`  errored             : ${summary.errored}`);
-console.log(`  duration            : ${durationSec}s`);
+console.log(`  hydrated     : ${hydrated}`);
+console.log(`  not found    : ${notFound}`);
+console.log(`  errored      : ${errored}`);
+console.log(`  duration     : ${durationSec}s`);
 
-// Fail the workflow run loudly when the error rate is too high — likely a
-// sustained CH 429 / outage / auth failure that no auto-retry can recover.
-// GitHub Actions sends an email to the workflow owner on failed runs.
 const ERROR_RATE_THRESHOLD = 0.1;
-const errorRate = summary.selected > 0 ? summary.errored / summary.selected : 0;
+const errorRate = errored / toFetch.length;
 if (errorRate > ERROR_RATE_THRESHOLD) {
   console.error('');
   console.error(
@@ -357,6 +336,5 @@ if (errorRate > ERROR_RATE_THRESHOLD) {
   console.error(
     '  Likely a sustained CH outage, rate-limit exhaustion, or auth failure.',
   );
-  console.error('  Check the run log for /search and /company error details.');
   process.exit(1);
 }

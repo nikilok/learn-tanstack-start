@@ -201,7 +201,7 @@ deterministic patterns that a small rule-based scorer resolves cleanly:
 - **OE ↔ FC** (Overseas Establishment ↔ Foreign Company): same pattern.
 - **CE ↔ regular Ltd** (Charity ↔ private limited): solved by route-type
   compatibility — if `hmrc_skilled_workers.route = 'Charity Worker'`, a
-  `private-limited-company` candidate is incompatible.
+  `ltd` candidate is incompatible.
 - **Ltd ↔ Ltd** (two unrelated companies sharing a name): solved by HMRC
   locality match.
 
@@ -219,9 +219,8 @@ scoreCandidate(candidate, sponsor):
 
   score = 0
 
-  # HMRC locality match
+  # HMRC locality match (case-insensitive)
   if candidate.locality == sponsor.town_city:        score += 3
-  if candidate.postcode_area == sponsor.postcode_area: score += 2
 
   # Status
   if candidate.status == 'active':                   score += 1
@@ -233,8 +232,7 @@ scoreCandidate(candidate, sponsor):
 Purely about "how well does this CH candidate fit this HMRC sponsor?"
 No I/O, no DB, no fetches, no comparison to a baseline. Unit-testable
 with a single fixture profile + sponsor. Score range: `-Infinity`
-(route-type-incompatible) to `+6` (active + matching locality +
-matching postcode area).
+(route-type-incompatible) to `+4` (active + matching locality).
 
 ### `compareForInlineResolution` — pairwise decision
 
@@ -245,7 +243,7 @@ drift out of sync.
 
 ```pseudo
 STATUS_QUO_BONUS = 1
-SCORE_MARGIN     = 3
+SCORE_MARGIN     = 2
 
 compareForInlineResolution(existing, proposed, sponsor):
   s_e = scoreCandidate(existing, sponsor) + STATUS_QUO_BONUS
@@ -269,7 +267,7 @@ Why split this out from `scoreCandidate`:
   earlier 3-arg design this was buried as a "same `company_type` as
   existing" feature that masqueraded as content scoring; between two
   *different* CH companies, sharing a `company_type` carries almost no
-  signal anyway (most UK firms are `private-limited-company`).
+  signal anyway (most UK firms are `ltd`).
 - Succession is **symmetric**: both "existing renamed to proposed" and
   the rarer reverse are checked. Forces the reader to think about both
   directions instead of hiding the asymmetry inside the scorer.
@@ -295,10 +293,12 @@ on action == 'inline_score':
                    bumpVerifiedAt(row)    # surfaces in sweep summary's `warned`
 ```
 
-`SCORE_MARGIN = 3` is conservative — at least one strong signal of
-difference needed. `STATUS_QUO_BONUS = 1` codifies the bias toward the
-incumbent. Both tunable as the route-type compat table and feature set
-evolve.
+`SCORE_MARGIN = 2` is conservative — a single locality match alone
+(raw diff 3, effective diff 2 after the bonus) stays `inconclusive`,
+but locality + a status advantage (raw diff 4+, effective diff 3+)
+wins. Succession evidence (+5) dominates either side regardless.
+`STATUS_QUO_BONUS = 1` codifies the bias toward the incumbent. Both
+tunable as the route-type compat table and feature set evolve.
 
 ### Route-type compatibility (domain-knowledge artefact)
 
@@ -310,29 +310,55 @@ Maps HMRC sponsorship `route` values to the set of CH `company_type`
 values eligible to hold that route. Encodes Home Office sponsor
 licence rules.
 
+Structured as two named sets shared across the 17 routes — 14 commercial
+routes (Skilled Worker, Creative Worker, all GBM variants, etc.) use
+`COMMERCIAL_FORMS`; the 3 charity / religious routes use
+`NOT_FOR_PROFIT_FORMS`. Two sets rather than 17 hand-maintained lists
+makes the policy easier to audit and to evolve.
+
 ```ts
-export const ROUTE_TYPE_COMPAT: Record<HmrcRoute, Set<CHCompanyType>> = {
-  'Charity Worker': new Set([
-    'charitable-incorporated-organisation',
-    'private-limited-guarant-nsc',       // + charity reg, in practice
-    'registered-society-non-jurisdictional',
-    // …
-  ]),
-  'Skilled Worker': new Set([
-    'private-limited-company',
-    'public-limited-company',
-    'private-limited-guarant-nsc',
-    'oversea-company',
-    'uk-establishment',
-    // virtually all corporate forms
-  ]),
-  // … Religious Worker, Scale-up, Global Business Mobility, etc.
+const COMMERCIAL_FORMS: ReadonlySet<CHCompanyType> = new Set([
+  'ltd', 'plc', 'llp', 'limited-partnership',
+  'private-limited-guarant-nsc', 'private-limited-guarant-nsc-limited-exemption',
+  'oversea-company', 'uk-establishment', 'royal-charter',
+  'registered-society-non-jurisdictional', 'industrial-and-provident-society',
+  // CIOs included — a charity can employ a Skilled Worker visa holder for
+  // non-charitable activities. Locality + status features discriminate.
+  'charitable-incorporated-organisation',
+  'scottish-charitable-incorporated-organisation',
+  // … see route-type-compat.ts for the full list
+]);
+
+const NOT_FOR_PROFIT_FORMS: ReadonlySet<CHCompanyType> = new Set([
+  'charitable-incorporated-organisation',
+  'scottish-charitable-incorporated-organisation',
+  'private-limited-guarant-nsc',
+  'private-limited-guarant-nsc-limited-exemption',
+  'royal-charter',
+  'registered-society-non-jurisdictional',
+  'industrial-and-provident-society',
+]);
+
+export const ROUTE_TYPE_COMPAT: Record<HmrcRoute, ReadonlySet<CHCompanyType>> = {
+  'Skilled Worker': COMMERCIAL_FORMS,
+  'Creative Worker': COMMERCIAL_FORMS,
+  // … all 14 commercial routes
+  'Charity Worker': NOT_FOR_PROFIT_FORMS,
+  'Religious Worker': NOT_FOR_PROFIT_FORMS,
+  'Tier 2 Ministers of Religion': NOT_FOR_PROFIT_FORMS,
 };
 ```
 
 This file is the auditable source of truth for "what company types can
 hold this licence". Reviewable by anyone, regardless of ML / scoring
-knowledge.
+knowledge. **Note**: CH uses `ltd` as the value for private limited
+companies — not `private-limited-company`. Verified against the
+`companies_house_profiles.company_type` distribution (114k of 125k
+profiles are `ltd`).
+
+`routeTypeCompatible(route, companyType)` defaults to `true` when either
+input is null or the route isn't mapped — "no info, no hard fail." The
+scorer's locality and status features then discriminate.
 
 ### Migration of the existing 190 rows
 
@@ -636,21 +662,25 @@ features only. Pairwise comparison logic lives in
 
 ```text
 describe('hard gate: routeTypeCompatible')
-  Charity Worker + private-limited-company candidate    → -Infinity
+  Charity Worker + ltd candidate                        → -Infinity
   Charity Worker + charitable-incorporated-organisation → finite score
-  Skilled Worker + private-limited-company              → finite score
+  Skilled Worker + ltd                                  → finite score
+  null company_type                                     → finite (no info, no fail)
+  unknown route                                         → finite (data-drift safety)
 
 describe('locality match')
   candidate.locality == sponsor.town_city               → +3
-  candidate.postcode_area == sponsor.postcode_area      → +2
+  case-insensitive match                                → +3
+  missing locality on either side                       → 0
 
 describe('status weighting')
   candidate.status == 'active'                          → +1
   candidate.status == 'dissolved'                       → -2
   candidate.status == 'liquidation'                     → -2
+  unknown / null status                                 → 0
 
 describe('combined max')
-  active + matching locality + matching postcode area   → +6
+  active + matching locality                            → +4
 ```
 
 ### What to test (`compare-candidates.test.ts`)
@@ -662,7 +692,7 @@ evidence (both directions), and the `SCORE_MARGIN` threshold.
 ```text
 describe('status-quo bias')
   identical existing & proposed (same sponsor-fit score)
-    → action='inconclusive'  (bias of +1 is below SCORE_MARGIN=3,
+    → action='inconclusive'  (bias of +1 is below SCORE_MARGIN=2,
                               so neither side wins by the threshold;
                               status quo holds via the inconclusive
                               path. Lock the expected behaviour here.)
@@ -676,34 +706,47 @@ describe('succession evidence — reverse (rare)')
     → s_e += 5, expect action='keep'
 
 describe('SCORE_MARGIN threshold')
-  s_p - s_e > SCORE_MARGIN     → action='promote'
-  s_e - s_p > SCORE_MARGIN     → action='keep'
-  |s_p - s_e| ≤ SCORE_MARGIN   → action='inconclusive'
+  locality-only difference (raw diff 3, effective diff 2)
+    → action='inconclusive'  (NOT > SCORE_MARGIN=2 — locality alone
+                              isn't enough to swing)
+  locality + status advantage (raw diff 4, effective diff 3)
+    → action='promote'
+  reverse strong-existing case (active+local vs dissolved+remote)
+    → action='keep'
 
 describe('hard gate plumbing through')
   scoreCandidate returns -Infinity for existing → s_e = -Infinity + bias
     = -Infinity, so any finite s_p wins                → action='promote'
+  scoreCandidate returns -Infinity for proposed → s_p = -Infinity,
+    so any finite s_e wins                             → action='keep'
 
 describe('AsiaLink regression fixture')
   HMRC: Northwich, route=Charity Worker
-  existing: CE006188, CIO, no address                   → s_e finite
-  proposed: 16920968, private Ltd, Manchester           → s_p = -Infinity
+  existing: CIO, no address                             → s_e finite
+  proposed: ltd, Manchester                             → s_p = -Infinity
                                                           (route-type hard gate)
   → action='keep' (existing wins by infinity-margin)
+
+describe('canonical name normalisation')
+  matches across LTD / LIMITED / case differences in previous_company_names
+    → succession evidence fires, action='promote'
 ```
 
-Open test cases (decisions to lock in via the test, not the doc):
+Locked decisions (resolved 2026-05-27 — pinned via explicit tests in
+`decide.test.ts`):
 
-- `existing = no_match` + `proposed = public_body` — promotion or
-  conflict? The current pseudo says rule 3's XOR catches it as
-  `public_body_conflict`. Probably wrong: a `no_match` row has zero
-  signal to defend, and `public_body` is a stronger statement than
-  `no_match`. **Decide via test.**
-- `existing = human_review` (the 196 deliberate skips) +
-  `proposed = verified` — should sweep promote, or always defer? Doc
-  says rule 1 only governs *new* `human_review` verdicts; an
-  *existing* `human_review` row falls through to the rank ladder where
-  rank 1 < rank 2/3/4 → promote. Worth a test that pins this.
+- `existing = no_match` + `proposed = public_body` → **`update`**.
+  A `no_match` row has zero signal to defend; `public_body` is a
+  positive identification. Also: `public_body` rows are essentially
+  ignored downstream, so the choice has near-zero product impact —
+  optimise for cheapest action (no `warned` counter pollution).
+- `existing = human_review` (the deliberate skips) +
+  `proposed = verified` → **`update`**. Rule 1 only governs *new*
+  `human_review` verdicts; an *existing* `human_review` row falls
+  through the rank ladder (rank 1 < rank 2/3/4 → promote). The
+  alternative — always defer — would leave the ~196 flagged rows
+  dead forever. A clean `verified` match is exactly the evidence the
+  human review was waiting for.
 
 ### Integration tests (`sweep.test.ts`)
 

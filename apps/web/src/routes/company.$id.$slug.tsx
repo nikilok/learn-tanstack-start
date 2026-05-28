@@ -14,10 +14,14 @@ import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import GovUkLogo from '../components/GovUkLogo';
+import { NameHistory } from '../components/NameHistory';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, formatLocation, titleCase } from '../utils';
 import { buildCanonical } from '../utils/canonical';
 import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
+
+// Grammatical "A, B and C" joiner for the former-names sentence in the summary.
+const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
 
 export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -193,6 +197,11 @@ function CompanyDetail() {
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
     .join(', ');
+  // Drop any stored former name that equals the current name so the head node
+  // never duplicates (handles rows that embed the current name in the array).
+  const previousNames = (profile?.previousNames ?? []).filter(
+    (n) => n.toUpperCase() !== sponsor.organisationName.toUpperCase(),
+  );
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = ratingPhrase(sponsor.typeRating);
   const intro = `${displayName} is a licensed UK ${displayRoute} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
@@ -205,23 +214,29 @@ function CompanyDetail() {
     background = `The company operates in ${industry}.`;
   }
   const outro = `${displayName} can sponsor international workers for the UK ${displayRoute} visa under its current Home Office licence.`;
-  const summary = [intro, background, outro].filter(Boolean).join(' ');
+  const formerNames = previousNames.map(titleCase);
+  const history = formerNames.length
+    ? `It was previously known as ${listFormatter.format(formerNames)}.`
+    : '';
+  const summary = [intro, background, history, outro].filter(Boolean).join(' ');
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <div className="page-flip-details">
           <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
-            <h1 className="text-xl font-semibold text-(--sea-ink)">
-              {displayName}
-            </h1>
-            <p className="mt-1 text-sm text-(--sea-ink)">
-              Licensed UK {displayRoute} visa sponsor
-              {displayLocation ? ` in ${displayLocation}` : ''}
-            </p>
-            {industry && (
-              <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
-            )}
+            <NameHistory
+              currentName={displayName}
+              previousNames={previousNames}
+            >
+              <p className="mt-1 text-sm text-(--sea-ink)">
+                Licensed UK {displayRoute} visa sponsor
+                {displayLocation ? ` in ${displayLocation}` : ''}
+              </p>
+              {industry && (
+                <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
+              )}
+            </NameHistory>
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div>
                 <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">

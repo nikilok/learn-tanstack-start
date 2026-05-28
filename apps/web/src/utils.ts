@@ -19,7 +19,10 @@ export function titleCase(str: string | null) {
   if (!str) return '';
   return str
     .toLowerCase()
-    .replace(/\b(\d*)([a-z])/g, (_, digits, letter) => digits + letter.toUpperCase())
+    .replace(
+      /\b(\d*)([a-z])/g,
+      (_, digits, letter) => digits + letter.toUpperCase(),
+    )
     .replace(/\b\w+\b/g, (word) =>
       UPPERCASE_WORDS.has(word.toLowerCase()) ? word.toUpperCase() : word,
     );

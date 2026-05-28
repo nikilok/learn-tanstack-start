@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 
 import { titleCase } from '../utils';
+import Tooltip from './Tooltip';
 
 /**
  * Renders the company's current name, plus any previous names as a vertical
@@ -50,11 +51,13 @@ export function NameHistory({
                 />
                 <span className="absolute top-1.5 left-1/2 size-2 -translate-x-1/2 rounded-full border border-(--sea-ink-soft) bg-(--sponsor-card-bg)" />
               </span>
-              <span
-                className={`min-w-0 text-sm text-(--sea-ink-soft) ${isLast ? '' : 'pb-2'}`}
-              >
-                {titleCase(name)}
-              </span>
+              <div className={`min-w-0 ${isLast ? '' : 'pb-2'}`}>
+                <Tooltip text="Previous company name">
+                  <span className="text-sm text-(--sea-ink-soft)">
+                    {titleCase(name)}
+                  </span>
+                </Tooltip>
+              </div>
             </li>
           );
         })}

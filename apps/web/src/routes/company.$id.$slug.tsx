@@ -23,6 +23,16 @@ import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
 // Grammatical "A, B and C" joiner for the former-names sentence in the summary.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
 
+// Canonical key for company-name equality (case, punctuation, LTD/LIMITED).
+function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]/g, '')
+    .replace(/\bLIMITED\b/g, 'LTD')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
     search: ((search.search as string) || '').trim(),
@@ -74,6 +84,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
             route: string;
           };
           profile?: {
+            company_name?: string;
             company_number?: string;
             date_of_creation?: string;
             registered_office_address?: {
@@ -89,9 +100,18 @@ export const Route = createFileRoute('/company/$id/$slug')({
         }
       | undefined;
 
+    // Lead with the Companies House current name; HMRC may hold a stale former name.
     const name = loaderData
-      ? titleCase(loaderData.sponsor.organisationName)
+      ? titleCase(
+          loaderData.profile?.company_name ??
+            loaderData.sponsor.organisationName,
+        )
       : 'Company Details';
+    const registeredAs =
+      loaderData &&
+      normalizeName(loaderData.sponsor.organisationName) !== normalizeName(name)
+        ? titleCase(loaderData.sponsor.organisationName)
+        : '';
     const location = loaderData
       ? formatLocation(loaderData.sponsor.townCity, loaderData.sponsor.county)
       : '';
@@ -104,7 +124,10 @@ export const Route = createFileRoute('/company/$id/$slug')({
       location
         ? `Licensed UK ${route} visa sponsor in ${location}`
         : `Licensed UK ${route} visa sponsor`,
-    ].join('. ');
+      registeredAs ? `Also registered as ${registeredAs}` : '',
+    ]
+      .filter(Boolean)
+      .join('. ');
 
     const pageTitle = `${name} - UK Visa Sponsor | SponsorSearch`;
     const pageDescription = `${description}.`;
@@ -113,7 +136,10 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const jsonLd = loaderData
       ? buildCompanyJsonLd({
           name,
-          legalName: loaderData.sponsor.organisationName,
+          legalName:
+            loaderData.profile?.company_name ??
+            loaderData.sponsor.organisationName,
+          alternateName: registeredAs || undefined,
           route,
           typeRating: loaderData.sponsor.typeRating,
           location,
@@ -191,17 +217,32 @@ function CompanyDetail() {
     return () => observer.disconnect();
   }, []);
 
-  const displayName = titleCase(sponsor.organisationName);
+  const hmrcName = titleCase(sponsor.organisationName);
+  // Lead with the Companies House current name; HMRC may hold a stale former name.
+  const displayName = profile?.company_name
+    ? titleCase(profile.company_name)
+    : hmrcName;
+  const currentKey = normalizeName(
+    profile?.company_name ?? sponsor.organisationName,
+  );
+  const alsoRegisteredAs =
+    normalizeName(sponsor.organisationName) !== currentKey ? hmrcName : null;
   const displayRoute = titleCase(sponsor.route);
   const displayLocation = formatLocation(sponsor.townCity, sponsor.county);
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
     .join(', ');
-  // Drop any stored former name that equals the current name so the head node
-  // never duplicates (handles rows that embed the current name in the array).
-  const previousNames = (profile?.previousNames ?? []).filter(
-    (n) => n.toUpperCase() !== sponsor.organisationName.toUpperCase(),
-  );
+  // Former names from Companies House: drop the current name and blanks, and
+  // dedupe (normalised) so LTD/LIMITED and repeat entries collapse. Title-casing
+  // happens at the display layer (NameHistory / the summary sentence).
+  const seenNames = new Set([currentKey]);
+  const formerNames: string[] = [];
+  for (const raw of profile?.previousNames ?? []) {
+    const key = normalizeName(raw);
+    if (!key || seenNames.has(key)) continue;
+    seenNames.add(key);
+    formerNames.push(raw);
+  }
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = ratingPhrase(sponsor.typeRating);
   const intro = `${displayName} is a licensed UK ${displayRoute} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
@@ -214,25 +255,31 @@ function CompanyDetail() {
     background = `The company operates in ${industry}.`;
   }
   const outro = `${displayName} can sponsor international workers for the UK ${displayRoute} visa under its current Home Office licence.`;
-  const formerNames = previousNames.map(titleCase);
-  const history = formerNames.length
-    ? `It was previously known as ${listFormatter.format(formerNames)}.`
+  const registered = alsoRegisteredAs
+    ? `It appears on the UK Home Office sponsor register as ${alsoRegisteredAs}.`
     : '';
-  const summary = [intro, background, history, outro].filter(Boolean).join(' ');
+  const history = formerNames.length
+    ? `It was previously known as ${listFormatter.format(formerNames.map(titleCase))}.`
+    : '';
+  const summary = [intro, registered, background, history, outro]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <div className="page-flip-details">
           <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
-            <NameHistory
-              currentName={displayName}
-              previousNames={previousNames}
-            >
+            <NameHistory currentName={displayName} previousNames={formerNames}>
               <p className="mt-1 text-sm text-(--sea-ink)">
                 Licensed UK {displayRoute} visa sponsor
                 {displayLocation ? ` in ${displayLocation}` : ''}
               </p>
+              {alsoRegisteredAs && (
+                <p className="mt-1 text-sm text-(--sea-ink-soft)">
+                  Also registered with HMRC as {alsoRegisteredAs}
+                </p>
+              )}
               {industry && (
                 <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
               )}
@@ -345,7 +392,7 @@ function CompanyDetail() {
                           address={formatAddress(
                             profile.registered_office_address,
                           )}
-                          companyName={titleCase(sponsor.organisationName)}
+                          companyName={displayName}
                         />
                       </div>
                     </dd>

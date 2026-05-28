@@ -10,6 +10,7 @@ type Address = {
 export type CompanyJsonLdInput = {
   name: string;
   legalName: string;
+  alternateName?: string;
   route: string;
   typeRating: string;
   location: string;
@@ -59,6 +60,7 @@ function organization(input: CompanyJsonLdInput) {
     legalName: input.legalName,
     url: input.canonicalUrl,
   };
+  if (input.alternateName) org.alternateName = input.alternateName;
   if (input.dateOfCreation) org.foundingDate = input.dateOfCreation;
   if (input.companyNumber) {
     org.identifier = {

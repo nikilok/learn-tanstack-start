@@ -46,10 +46,10 @@ export function NameHistory({
               <span className="relative w-2 shrink-0" aria-hidden>
                 <span
                   className={`absolute left-1/2 w-px -translate-x-1/2 bg-(--sea-ink-soft)/30 ${
-                    isLast ? 'top-0 h-2.5' : 'inset-y-0'
+                    isLast ? 'top-0 h-3' : 'inset-y-0'
                   }`}
                 />
-                <span className="absolute top-1.5 left-1/2 size-2 -translate-x-1/2 rounded-full border border-(--sea-ink-soft) bg-(--sponsor-card-bg)" />
+                <span className="absolute top-2 left-1/2 size-2 -translate-x-1/2 rounded-full border border-(--sea-ink-soft) bg-(--sponsor-card-bg)" />
               </span>
               <div className={`min-w-0 ${isLast ? '' : 'pb-2'}`}>
                 <Tooltip text="Previous company name">

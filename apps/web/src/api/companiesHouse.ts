@@ -333,6 +333,8 @@ const getCompanyProfile = createServerFn()
             },
           }
         : undefined,
+      company_name: profile.company_name,
+      previousNames: profile.previous_company_names?.map((p) => p.name) ?? [],
       sicDescriptions,
     };
   });

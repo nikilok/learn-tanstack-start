@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import IBeam from './IBeam';
 import UnionJackLens from './UnionJackLens';
 
 import styles from './UnionJackCursor.module.css';
@@ -31,34 +32,6 @@ function isTextField(target: EventTarget | null): boolean {
     return !NON_TEXT_INPUT_TYPES.has(field.type);
   }
   return false;
-}
-
-/** Grayscale, outlined I-beam shown in place of the lens over editable fields. */
-function IBeam() {
-  return (
-    <svg
-      viewBox="0 0 14 22"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'block', width: '100%', height: '100%' }}
-      aria-hidden="true"
-    >
-      <path
-        d="M4 3 H10 M7 3 V19 M4 19 H10"
-        stroke="#fff"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M4 3 H10 M7 3 V19 M4 19 H10"
-        stroke="#1f1f1f"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 /**
@@ -173,7 +146,14 @@ export default function UnionJackCursor() {
         }
       >
         {textMode ? (
-          <IBeam />
+          <>
+            <IBeam />
+            <span className={styles.caretFlag}>
+              <UnionJackLens
+                style={{ display: 'block', width: '100%', height: '100%' }}
+              />
+            </span>
+          </>
         ) : (
           <UnionJackLens
             style={{ display: 'block', width: '100%', height: '100%' }}

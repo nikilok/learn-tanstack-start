@@ -30,12 +30,25 @@
 }
 
 /* I-beam shown over editable text fields: centred on the pointer like the lens,
-   but no grayscale filter (already monochrome) and no grow. */
+   but no grayscale filter (already monochrome) and no grow. Positioning context
+   for the Union-Jack badge that sits beside it. */
 .caret {
+  position: relative;
   width: 14px;
   height: 22px;
   transform: translate(-50%, -50%);
   transform-origin: center;
+}
+
+/* Small grayscale Union-Jack badge to the right of the I-beam. */
+.caretFlag {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  filter: grayscale(1);
 }
 
 /* Hide the native pointer everywhere while the custom cursor is active. Stays

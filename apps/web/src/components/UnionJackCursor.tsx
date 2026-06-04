@@ -16,6 +16,7 @@ export default function UnionJackCursor() {
   const posRef = useRef<HTMLDivElement>(null);
   const hoverRef = useRef(false);
   const shownRef = useRef(false);
+  const visibleRef = useRef(false);
   const [enabled, setEnabled] = useState(false);
   const [hovering, setHovering] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -37,14 +38,27 @@ export default function UnionJackCursor() {
       }
     };
 
+    // Toggle follower opacity via a ref so the closures read fresh state.
+    const show = () => {
+      if (!visibleRef.current) {
+        visibleRef.current = true;
+        setVisible(true);
+      }
+    };
+    const hide = () => {
+      if (visibleRef.current) {
+        visibleRef.current = false;
+        setVisible(false);
+      }
+    };
+
     const onMove = (e: PointerEvent) => {
       nextX = e.clientX;
       nextY = e.clientY;
       if (!raf) raf = requestAnimationFrame(flush);
-      if (!shownRef.current) {
-        shownRef.current = true;
-        setVisible(true);
-      }
+      // Reveal on every move (not just the first) so it recovers after a blur.
+      shownRef.current = true;
+      show();
       const over = !!(e.target as Element | null)?.closest?.(
         INTERACTIVE_SELECTOR,
       );
@@ -54,15 +68,18 @@ export default function UnionJackCursor() {
       }
     };
 
-    const onLeave = () => setVisible(false);
+    // Hide on blur/leave, re-show on focus/enter — recovers after Cmd/Alt-Tab,
+    // where Safari fires no mouseenter (pointer already inside on refocus).
+    const onLeave = () => hide();
     const onEnter = () => {
-      if (shownRef.current) setVisible(true);
+      if (shownRef.current) show();
     };
 
     document.addEventListener('pointermove', onMove, { passive: true });
     document.documentElement.addEventListener('mouseleave', onLeave);
     document.documentElement.addEventListener('mouseenter', onEnter);
     window.addEventListener('blur', onLeave);
+    window.addEventListener('focus', onEnter);
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
@@ -70,6 +87,7 @@ export default function UnionJackCursor() {
       document.documentElement.removeEventListener('mouseleave', onLeave);
       document.documentElement.removeEventListener('mouseenter', onEnter);
       window.removeEventListener('blur', onLeave);
+      window.removeEventListener('focus', onEnter);
       document.documentElement.classList.remove('uj-cursor-active');
     };
   }, []);

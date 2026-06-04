@@ -115,6 +115,32 @@ body::after {
   animation: none;
 }
 
+/* Safari strands `cursor: none` across a View Transition: WebKit only repaints
+   the cursor on a real pointer event (bug 14344), so after a flip swaps the
+   element under a stationary pointer the cursor sticks as the native arrow until
+   the next mouse move. A constant, transparent image cursor is invisible AND
+   never changes value between elements, so there's nothing for WebKit to repaint
+   stale — this removes the post-flip lingering. Safari-only; Chrome/Firefox keep
+   `none` from UnionJackCursor.module.css. The fallback keyword covers a rejected
+   url. The data URI must be a fully-transparent RGBA PNG — a grayscale/indexed
+   blob can carry a non-zero sample that Safari renders as a visible dot.
+
+   Scope note: this fixes the LINGER, not the ~300ms flip itself. Safari ignores
+   `cursor` on the ::view-transition overlay pseudos entirely (verified: neither
+   the root nor the leaf snapshots honor it), so the native arrow is briefly
+   visible *during* the animation and self-clears when it ends. That blink is an
+   accepted limitation — removing it would mean not running a view transition on
+   Safari at all. Don't re-attempt an overlay `cursor` rule; it's a no-op here. */
+html[data-browser='safari'] {
+  --uj-blank-cursor: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR42mNgGAWjYBSMAggAAAQQAAGvRYgsAAAAAElFTkSuQmCC')
+    0 0;
+}
+
+html[data-browser='safari'].uj-cursor-active,
+html[data-browser='safari'].uj-cursor-active * {
+  cursor: var(--uj-blank-cursor), none !important;
+}
+
 /* Pin the lens to base scale while a flip is active so a pre-click hover
    enlargement isn't frozen into the snapshot. Without this, clicking a card
    (lens scaled up on hover) captures the big lens, which then hangs on top as

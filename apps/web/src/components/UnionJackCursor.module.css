@@ -29,6 +29,15 @@
   transform: translate(-50%, -50%) scale(1.4);
 }
 
+/* I-beam shown over editable text fields: centred on the pointer like the lens,
+   but no grayscale filter (already monochrome) and no grow. */
+.caret {
+  width: 14px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+}
+
 /* Hide the native pointer everywhere while the custom cursor is active. Stays
    hidden during View Transitions too: the follower is lifted into its own
    `uj-cursor` transition group (see transitions.css) so the lens renders on top

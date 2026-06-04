@@ -20,6 +20,7 @@ import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
+import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
@@ -138,6 +139,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           {children}
           <Footer />
         </QueryClientProvider>
+        <UnionJackCursor />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

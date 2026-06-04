@@ -96,6 +96,37 @@ body::after {
   opacity: 0.25;
 }
 
+/*
+ * Keep the grayscale Union-Jack cursor (`UnionJackCursor`) visible during page
+ * flips. As a plain fixed div it would be buried under the `root` snapshot the
+ * moment the transition starts — and the native pointer is hidden via
+ * `uj-cursor-active`, so the mouse would vanish for the whole flip. Naming the
+ * follower lifts it into its own group that paints above `root`; `animation:
+ * none` holds the lens static (frozen at its capture position) for the ~300ms
+ * flip, then the live follower resumes. Mirrors the `bg-grid` pattern above.
+ */
+[data-uj-cursor] {
+  view-transition-name: uj-cursor;
+}
+
+::view-transition-group(uj-cursor),
+::view-transition-old(uj-cursor),
+::view-transition-new(uj-cursor) {
+  animation: none;
+}
+
+/* Pin the lens to base scale while a flip is active so a pre-click hover
+   enlargement isn't frozen into the snapshot. Without this, clicking a card
+   (lens scaled up on hover) captures the big lens, which then hangs on top as
+   a frozen ring around the resting (base-scale) cursor on the new page.
+   `:active-view-transition` is evaluated at capture time — same mechanism the
+   `.page-flip-details` rule below relies on. `transition: none` makes the
+   reset instant so the captured frame is base scale, not mid-animation. */
+html:active-view-transition [data-uj-cursor] > div {
+  transform: translate(-50%, -50%) scale(1) !important;
+  transition: none !important;
+}
+
 /* Shares the `active-card` name with the clicked card on the listing so
    the browser pairs them as a single shared element — the card morphs
    into the details wrapper on forward. The surrounding listing is

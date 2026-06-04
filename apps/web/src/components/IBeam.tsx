@@ -1,8 +1,11 @@
+import styles from './IBeam.module.css';
+
 /**
- * Grayscale, outlined I-beam cursor shown over editable text fields (paired with
- * the Union-Jack badge in `UnionJackCursor`). Theme-aware: an ink-coloured body
- * over a surface-coloured rim, so the outline stays visible in both light and
- * dark mode. Sized to fill its wrapper; centred on the pointer by the caller.
+ * I-beam cursor shown over editable text fields (paired with the Union-Jack
+ * badge in `UnionJackCursor`). A dark inner body with a fixed light outer rim, so
+ * it reads as a dual layer and stays visible on dark surfaces (incl. dark-by-
+ * default UI shown in light mode). Sized to fill its wrapper; centred on the
+ * pointer by the caller.
  */
 export default function IBeam() {
   return (
@@ -13,19 +16,18 @@ export default function IBeam() {
       style={{ display: 'block', width: '100%', height: '100%' }}
       aria-hidden="true"
     >
-      {/* Rim drawn first (wider, behind); body on top. `stroke` is set via CSS,
-          not the attribute, because only the property accepts var(). */}
+      {/* Outer rim drawn first (wider, behind); dark inner body on top. */}
       <path
         d="M4 3 H10 M7 3 V19 M4 19 H10"
-        style={{ stroke: 'var(--surface)' }}
+        className={styles.rim}
         strokeWidth="3.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
         d="M4 3 H10 M7 3 V19 M4 19 H10"
-        style={{ stroke: 'var(--sea-ink)' }}
-        strokeWidth="2.4"
+        className={styles.core}
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

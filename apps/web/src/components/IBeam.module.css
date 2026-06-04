@@ -1,0 +1,11 @@
+/* Dual-layer I-beam: a dark inner body with a fixed light outer rim (both themes).
+   The light rim is near-invisible on light surfaces — where the dark body carries
+   it — but provides the needed outline on any dark surface, including dark-by-
+   default UI shown in light mode (e.g. the TanStack devtools). */
+.rim {
+  stroke: #ededed;
+}
+
+.core {
+  stroke: #1f1f1f;
+}

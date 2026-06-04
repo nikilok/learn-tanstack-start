@@ -141,15 +141,17 @@ html[data-browser='safari'].uj-cursor-active * {
   cursor: var(--uj-blank-cursor), none !important;
 }
 
-/* Pin the lens to base scale while a flip is active so a pre-click hover
-   enlargement isn't frozen into the snapshot. Without this, clicking a card
-   (lens scaled up on hover) captures the big lens, which then hangs on top as
-   a frozen ring around the resting (base-scale) cursor on the new page.
-   `:active-view-transition` is evaluated at capture time — same mechanism the
-   `.page-flip-details` rule below relies on. `transition: none` makes the
-   reset instant so the captured frame is base scale, not mid-animation. */
+/* Pin the lens to its resting look (base scale + grayscale) while a flip is
+   active so a pre-click hover state isn't frozen into the snapshot. Without
+   this, clicking a card (lens scaled up and full-colour on hover) captures the
+   big colour lens, which then hangs on top as a frozen ring around the resting
+   cursor on the new page. `:active-view-transition` is evaluated at capture
+   time — same mechanism the `.page-flip-details` rule below relies on.
+   `transition: none` makes the reset instant so the captured frame is the
+   resting look, not mid-animation. */
 html:active-view-transition [data-uj-cursor] > div {
   transform: translate(-50%, -50%) scale(1) !important;
+  filter: grayscale(1) !important;
   transition: none !important;
 }
 

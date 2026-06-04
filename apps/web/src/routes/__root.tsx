@@ -131,7 +131,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
         <HeadContent />
       </head>
-      <body className="font-sans wrap-anywhere antialiased selection:bg-[rgba(0,114,245,0.16)]">
+      <body className="font-sans wrap-anywhere antialiased">
         <QueryClientProvider client={queryClient}>
           <McpTools />
           <NavigationProgress />

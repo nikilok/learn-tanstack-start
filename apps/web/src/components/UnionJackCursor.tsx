@@ -36,9 +36,9 @@ function isTextField(target: EventTarget | null): boolean {
 
 /**
  * Replaces the native mouse pointer with a grayscale Union-Jack lens that
- * follows the cursor and grows smoothly when hovering interactive elements.
- * Over editable text fields it swaps to a custom I-beam so the "editable"
- * affordance the native cursor used to give isn't lost.
+ * follows the cursor and, over interactive elements, grows and turns full
+ * colour as a click affordance. Over editable text fields it swaps to a custom
+ * I-beam so the "editable" affordance the native cursor used to give isn't lost.
  * Mouse-only (`pointer: fine`) and client-only — touch devices keep the default.
  */
 export default function UnionJackCursor() {

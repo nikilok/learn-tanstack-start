@@ -20,13 +20,18 @@
   height: 20px;
   transform: translate(-50%, -50%) scale(1);
   transform-origin: center;
-  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
   filter: grayscale(1);
   will-change: transform;
 }
 
+/* Hover: grow and fade from grayscale to full colour — a "you can click this"
+   cue. The resting state stays grayscale. */
 .lensHover {
   transform: translate(-50%, -50%) scale(1.4);
+  filter: grayscale(0);
 }
 
 /* I-beam shown over editable text fields: centred on the pointer like the lens,

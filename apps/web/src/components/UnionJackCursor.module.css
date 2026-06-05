@@ -27,11 +27,9 @@
   will-change: transform;
 }
 
-/* Hover: grow and fade from grayscale to full colour — a "you can click this"
-   cue. The resting state stays grayscale. */
+/* Hover: grow "you can click this" cue. The resting state stays grayscale. */
 .lensHover {
   transform: translate(-50%, -50%) scale(1.4);
-  filter: grayscale(0);
 }
 
 /* I-beam shown over editable text fields: centred on the pointer like the lens,

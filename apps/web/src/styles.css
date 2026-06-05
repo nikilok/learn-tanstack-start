@@ -135,6 +135,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Brand-red text selection, theme-aware via --logo-red. Translucent so the
+   selected text stays readable on the red tint. */
+::selection {
+  background-color: color-mix(in srgb, var(--logo-red) 22%, transparent);
+}
+
 body::before {
   content: '';
   position: fixed;

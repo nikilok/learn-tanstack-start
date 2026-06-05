@@ -96,6 +96,65 @@ body::after {
   opacity: 0.25;
 }
 
+/*
+ * Keep the grayscale Union-Jack cursor (`UnionJackCursor`) visible during page
+ * flips. As a plain fixed div it would be buried under the `root` snapshot the
+ * moment the transition starts — and the native pointer is hidden via
+ * `uj-cursor-active`, so the mouse would vanish for the whole flip. Naming the
+ * follower lifts it into its own group that paints above `root`; `animation:
+ * none` holds the lens static (frozen at its capture position) for the ~300ms
+ * flip, then the live follower resumes. Mirrors the `bg-grid` pattern above.
+ */
+[data-uj-cursor] {
+  view-transition-name: uj-cursor;
+}
+
+::view-transition-group(uj-cursor),
+::view-transition-old(uj-cursor),
+::view-transition-new(uj-cursor) {
+  animation: none;
+}
+
+/* Safari strands `cursor: none` across a View Transition: WebKit only repaints
+   the cursor on a real pointer event (bug 14344), so after a flip swaps the
+   element under a stationary pointer the cursor sticks as the native arrow until
+   the next mouse move. A constant, transparent image cursor is invisible AND
+   never changes value between elements, so there's nothing for WebKit to repaint
+   stale — this removes the post-flip lingering. Safari-only; Chrome/Firefox keep
+   `none` from UnionJackCursor.module.css. The fallback keyword covers a rejected
+   url. The data URI must be a fully-transparent RGBA PNG — a grayscale/indexed
+   blob can carry a non-zero sample that Safari renders as a visible dot.
+
+   Scope note: this fixes the LINGER, not the ~300ms flip itself. Safari ignores
+   `cursor` on the ::view-transition overlay pseudos entirely (verified: neither
+   the root nor the leaf snapshots honor it), so the native arrow is briefly
+   visible *during* the animation and self-clears when it ends. That blink is an
+   accepted limitation — removing it would mean not running a view transition on
+   Safari at all. Don't re-attempt an overlay `cursor` rule; it's a no-op here. */
+html[data-browser='safari'] {
+  --uj-blank-cursor: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR42mNgGAWjYBSMAggAAAQQAAGvRYgsAAAAAElFTkSuQmCC')
+    0 0;
+}
+
+html[data-browser='safari'].uj-cursor-active,
+html[data-browser='safari'].uj-cursor-active * {
+  cursor: var(--uj-blank-cursor), none !important;
+}
+
+/* Pin the lens to its resting look (base scale + grayscale) while a flip is
+   active so a pre-click hover state isn't frozen into the snapshot. Without
+   this, clicking a card (lens scaled up and full-colour on hover) captures the
+   big colour lens, which then hangs on top as a frozen ring around the resting
+   cursor on the new page. `:active-view-transition` is evaluated at capture
+   time — same mechanism the `.page-flip-details` rule below relies on.
+   `transition: none` makes the reset instant so the captured frame is the
+   resting look, not mid-animation. */
+html:active-view-transition [data-uj-cursor] > div {
+  transform: translate(-50%, -50%) scale(1) !important;
+  filter: grayscale(1) !important;
+  transition: none !important;
+}
+
 /* Shares the `active-card` name with the clicked card on the listing so
    the browser pairs them as a single shared element — the card morphs
    into the details wrapper on forward. The surrounding listing is

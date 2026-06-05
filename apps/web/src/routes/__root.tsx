@@ -20,6 +20,7 @@ import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
+import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
@@ -130,7 +131,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
         <HeadContent />
       </head>
-      <body className="font-sans wrap-anywhere antialiased selection:bg-[rgba(0,114,245,0.16)]">
+      <body className="font-sans wrap-anywhere antialiased">
         <QueryClientProvider client={queryClient}>
           <McpTools />
           <NavigationProgress />
@@ -138,6 +139,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           {children}
           <Footer />
         </QueryClientProvider>
+        <UnionJackCursor />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

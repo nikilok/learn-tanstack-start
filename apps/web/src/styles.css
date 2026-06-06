@@ -301,6 +301,25 @@ a {
   box-shadow: var(--shadow-card-full);
 }
 
+/* Brand link logo flip: on hover the pill turns the brand colour, so recolour
+   the company SVG mark (`.brand-mark`) to a contrasting fill so it doesn't blend
+   in. Scoped to `.brand-mark` so the external-link icon is left untouched. */
+.brand-link .brand-mark path,
+.brand-link .brand-mark rect {
+  transition: fill 0.3s ease;
+}
+/* Google "G": flip the multi-colour mark to solid white on the blue hover. */
+.brand-link-google:hover .brand-mark path {
+  fill: #fff;
+}
+/* LinkedIn: swap square/glyph so a white square stays visible on the blue hover. */
+.brand-link-linkedin:hover .brand-mark rect {
+  fill: #fff;
+}
+.brand-link-linkedin:hover .brand-mark path {
+  fill: #0a66c2;
+}
+
 .heading-card {
   letter-spacing: -0.4px;
 }

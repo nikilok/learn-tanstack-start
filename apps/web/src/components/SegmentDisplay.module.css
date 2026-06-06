@@ -15,11 +15,11 @@
   --lcd-glow: transparent;
 }
 
-/* Brighter neon phosphor in dark mode (classic terminal / matrix green). */
+/* Neon violet phosphor in dark mode, echoing the input box's outer glow. */
 :global(.dark) .display {
-  --lcd-on: #1dff66;
-  --lcd-on-bright: #9dffc0;
-  --lcd-glow: rgba(29, 255, 102, 0.4);
+  --lcd-on: #a855f7;
+  --lcd-on-bright: #ddc9ff;
+  --lcd-glow: rgba(168, 85, 247, 0.4);
 }
 
 /* Off-screen holder for the shared <linearGradient> def. */

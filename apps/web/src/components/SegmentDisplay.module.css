@@ -8,9 +8,11 @@
   display: inline-flex;
   align-items: flex-end;
   gap: 0.04em;
-  --lcd-on: #0a9e3f;
-  --lcd-on-bright: #3fd673;
-  --lcd-glow: rgba(16, 185, 92, 0.28);
+  /* Light mode: black lit digits with a charcoal shimmer, faint gray ghost,
+     no glow. */
+  --lcd-on: var(--sea-ink);
+  --lcd-on-bright: color-mix(in srgb, var(--sea-ink), white 34%);
+  --lcd-glow: transparent;
 }
 
 /* Brighter neon phosphor in dark mode (classic terminal / matrix green). */

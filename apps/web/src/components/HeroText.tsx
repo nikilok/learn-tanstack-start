@@ -13,8 +13,9 @@ import styles from './HeroText.module.css';
 export default function HeroText({ count }: { count: number }) {
   // Round down to a clean thousand and append "+": the real count is higher, so
   // the figure reads as an estimate and doesn't jitter on small ingestion deltas.
-  const figure = `${(
-    count >= 1000 ? Math.floor(count / 1000) * 1000 : count
+  const figure = `${(count >= 1000
+    ? Math.floor(count / 1000) * 1000
+    : count
   ).toLocaleString('en-GB')}+`;
   return (
     <h2

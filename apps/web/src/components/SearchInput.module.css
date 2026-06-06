@@ -1,4 +1,7 @@
-.inputWrapper:focus-within {
+/* GPU layer is only needed for iOS Safari cursor positioning while the bar is
+   sticky/pinned. Scoped to a `[data-search-pinned]` ancestor so it is NOT applied
+   on the empty (relative) state, where it garbles the rotating placeholder. */
+:global([data-search-pinned]) .inputWrapper:focus-within {
   transform: translateZ(0);
 }
 

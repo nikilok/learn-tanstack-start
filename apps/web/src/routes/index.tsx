@@ -5,9 +5,10 @@ import {
 } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
-import { Suspense, useRef } from 'react';
+import { Suspense, useRef, useState } from 'react';
 
-import { searchHmrc } from '../api/hmrc';
+import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
+import HeroText from '../components/HeroText';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
@@ -38,8 +39,12 @@ export const Route = createFileRoute('/')({
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     const { search } = deps as { search: string };
-    if (typeof window !== 'undefined') return;
-    if (search.length >= 3) {
+    // Sponsor count for the empty-state hero — small + cached; awaited so it's
+    // baked into the SSR payload and available synchronously on the client.
+    const sponsorCount = await queryClient.ensureQueryData(
+      sponsorCountQueryOptions,
+    );
+    if (typeof window === 'undefined' && search.length >= 3) {
       // Don't await — let the query stream in while the shell renders
       queryClient.prefetchInfiniteQuery({
         queryKey: ['hmrc-search', search],
@@ -47,6 +52,7 @@ export const Route = createFileRoute('/')({
         initialPageParam: 0,
       });
     }
+    return { sponsorCount };
   },
   component: Home,
 });
@@ -59,6 +65,10 @@ export const Route = createFileRoute('/')({
  */
 function Home() {
   const { search } = Route.useSearch();
+  // Live input value (updates on every keystroke); the `search` URL param is
+  // debounced 450ms, so we gate the hero on this to hide it instantly on type.
+  const [liveQuery, setLiveQuery] = useState(search);
+  const { sponsorCount } = Route.useLoaderData();
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,6 +76,10 @@ function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
+
+  // Empty state: the hero is shown and the search bar scrolls away with the
+  // page (not sticky). It only sticks once a query exists.
+  const heroVisible = liveQuery.length === 0 && search.length === 0;
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -90,7 +104,14 @@ function Home() {
         <div ref={sentinelRef} className="pointer-events-none mt-6" />
         <div
           data-sticky-search
-          className={`pointer-events-none z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'search-glow fixed top-[61px] right-0 left-0 mx-auto max-w-2xl pt-2 pb-4 sm:top-[77px]' : 'sticky top-[69px] pb-4 sm:top-[85px]'}`}
+          data-search-pinned={heroVisible ? undefined : ''}
+          className={`pointer-events-none z-40 -mx-4 px-4 ${
+            heroVisible
+              ? 'relative pb-4'
+              : isStuck && pillClicked
+                ? 'search-glow fixed top-[61px] right-0 left-0 mx-auto max-w-2xl pt-2 pb-4 sm:top-[77px]'
+                : 'sticky top-[69px] pb-4 sm:top-[85px]'
+          }`}
         >
           <SearchBar
             search={search}
@@ -101,6 +122,7 @@ function Home() {
             platform={platformInfo.platform}
             isMobile={platformInfo.isMobile}
             onSearch={(value) => {
+              setLiveQuery(value);
               if (navTimerRef.current) clearTimeout(navTimerRef.current);
               navTimerRef.current = setTimeout(() => {
                 navigate({
@@ -114,6 +136,10 @@ function Home() {
             onBlur={onPillDismiss}
           />
         </div>
+
+        {/* Hero shows only when input AND debounced search are both empty, so it
+            appears only after the results grid has fully cleared. */}
+        {heroVisible && <HeroText count={sponsorCount} />}
 
         <div className="page-flip-listing">
           <Suspense fallback={<SkeletonCards />}>

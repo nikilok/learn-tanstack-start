@@ -1,0 +1,237 @@
+/*
+ * Empty-state hero — kinetic number focus. "140+" is oversized and scales /
+ * blurs in with a count-up feel over a slowly drifting, breathing brand
+ * aurora; the surrounding words rise in with a per-word stagger and, at rest,
+ * a gentle gradient sweep drifts across the figure. All colours resolve from
+ * theme tokens so light/dark flip automatically via the .dark ancestor class.
+ * Animates only transform / opacity / filter / background-position — no layout
+ * thrash.
+ */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.06em;
+  margin: 0 auto;
+  max-width: 100%;
+  padding: clamp(2.5rem, 8vw, 4.5rem) 0 clamp(1.5rem, 4vw, 2.5rem);
+  text-align: center;
+  text-wrap: balance;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: clamp(1.625rem, 5.5vw, 3rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--sea-ink-soft);
+}
+
+.line {
+  display: block;
+}
+
+/* Per-word staggered rise-in (fade + lift + de-blur). */
+.word {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(0.5em);
+  filter: blur(4px);
+  animation: hero-word-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(0.06s * var(--i));
+  will-change: transform, opacity, filter;
+}
+
+@keyframes hero-word-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Focal line: the aurora glow layer sits behind the gradient figure. */
+.figureLine {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1em 0;
+  isolation: isolate;
+}
+
+/*
+ * Aurora glow: a soft, blurred, token-based glow field behind the figure that
+ * blooms in on mount, then drifts and breathes forever (translate + scale).
+ * A counter-drifting ::before blob makes the field reshape rather than just
+ * slide. All colour from --glow-* (each token has a .dark override), animated
+ * on transform/opacity only — no layout cost.
+ */
+.aurora {
+  position: absolute;
+  z-index: -1;
+  width: 1.55em;
+  height: 1.05em;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 58% at 30% 40%, var(--glow-a), transparent 70%),
+    radial-gradient(50% 60% at 72% 62%, var(--glow-b), transparent 72%),
+    radial-gradient(54% 64% at 52% 50%, var(--glow-c), transparent 75%);
+  filter: blur(22px);
+  opacity: 0;
+  transform: translate3d(0, 0, 0) scale(0.85);
+  animation:
+    hero-aurora-in 1s 0.25s cubic-bezier(0.22, 1, 0.36, 1) both,
+    hero-aurora-drift 14s 1.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.aurora::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background:
+    radial-gradient(44% 54% at 70% 30%, var(--glow-b), transparent 70%),
+    radial-gradient(48% 56% at 26% 70%, var(--glow-a), transparent 72%);
+  filter: blur(18px);
+  opacity: 0.85;
+  transform: translate3d(0, 0, 0) scale(1);
+  animation: hero-aurora-counter 18s 1.2s ease-in-out infinite;
+}
+
+@keyframes hero-aurora-in {
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Slow, organic drift + breathe of the primary glow field. */
+@keyframes hero-aurora-drift {
+  0% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+    opacity: 0.9;
+  }
+  33% {
+    transform: translate3d(3%, 2%, 0) scale(1.1);
+    opacity: 1;
+  }
+  66% {
+    transform: translate3d(-2%, 3%, 0) scale(1.05);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+    opacity: 0.9;
+  }
+}
+
+/* Counter-drifting secondary blob so the field reshapes, not just slides. */
+@keyframes hero-aurora-counter {
+  0% {
+    transform: translate3d(3%, 2%, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-3%, -3%, 0) scale(0.96);
+  }
+  100% {
+    transform: translate3d(3%, 2%, 0) scale(1.05);
+  }
+}
+
+/*
+ * The oversized grayscale figure — the focal point via size + weight, kept
+ * neutral so colour doesn't pull the eye. Count-up-feel entrance (scale + blur
+ * with a slight overshoot), then a gentle grayscale shimmer drifts across the
+ * digits using the shared --shimmer-base/--shimmer-peak tokens (theme-aware).
+ */
+.figure {
+  display: inline-block;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: clamp(2.75rem, 12vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+
+  background: linear-gradient(
+    100deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-base) 38%,
+    var(--shimmer-peak) 50%,
+    var(--shimmer-base) 62%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 240% 100%;
+  background-position: 0% 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+
+  opacity: 0;
+  transform: scale(0.6);
+  filter: blur(8px);
+  animation:
+    hero-figure-in 0.8s 0.25s cubic-bezier(0.18, 1.2, 0.4, 1) both,
+    hero-figure-shimmer 7s 1.1s ease-in-out infinite;
+  will-change: transform, opacity, filter, background-position;
+}
+
+@keyframes hero-figure-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+/* Ongoing subtle drift of the gradient across the figure. */
+@keyframes hero-figure-shimmer {
+  0% {
+    background-position: 0% 0;
+  }
+  50% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/*
+ * Reduced-motion: no entrance, no drift, no shimmer. Everything is immediately
+ * visible and legible. The gradient figure drops the clip and paints a solid
+ * brand token — animated background-clip:text can render as invisible text in
+ * engines that don't paint the gradient, so the solid fallback guarantees the
+ * number stays readable in both themes with zero motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .word {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    animation: none;
+  }
+
+  .aurora {
+    opacity: 0.85;
+    transform: none;
+    animation: none;
+  }
+
+  .aurora::before {
+    transform: none;
+    animation: none;
+  }
+
+  .figure {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    animation: none;
+    background: none;
+    color: var(--sea-ink);
+    -webkit-text-fill-color: var(--sea-ink);
+  }
+}

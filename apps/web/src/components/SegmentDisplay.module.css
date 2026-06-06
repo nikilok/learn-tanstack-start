@@ -36,15 +36,16 @@
   opacity: 1;
 }
 
-/* Brand gradient stops (theme-aware). --link-blue stays a strong blue in dark. */
+/* Brand-red shimmer: a --logo-red base with a lighter-red highlight band that
+   sweeps across the lit segments. Theme-aware via the token + color-mix. */
 .stopEdge {
-  stop-color: var(--logo-navy);
+  stop-color: var(--logo-red);
 }
 .stopMid {
-  stop-color: var(--link-blue);
+  stop-color: color-mix(in srgb, var(--logo-red), white 22%);
 }
 .stopPeak {
-  stop-color: var(--logo-red);
+  stop-color: color-mix(in srgb, var(--logo-red), white 45%);
 }
 
 /* Thousands separator, on the baseline. */

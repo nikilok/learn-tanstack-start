@@ -15,6 +15,7 @@ import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
+import LinkedInLogo from '../components/LinkedInLogo';
 import { NameHistory } from '../components/NameHistory';
 import { StatusBadge } from '../components/StatusBadge';
 import { formatAddress, formatDate, formatLocation, titleCase } from '../utils';
@@ -442,6 +443,17 @@ function CompanyDetail() {
                 >
                   <GoogleLogo className="h-5 w-auto" />
                   <span>Google</span>
+                  <ExternalLink size={14} aria-hidden="true" />
+                </a>
+                <a
+                  href={`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(displayName)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Search LinkedIn for ${displayName}`}
+                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
+                >
+                  <LinkedInLogo className="h-5 w-auto" />
+                  <span>LinkedIn</span>
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
               </div>

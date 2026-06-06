@@ -40,12 +40,7 @@ export const Route = createFileRoute('/')({
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     const { search } = deps as { search: string };
-    // Client navigations stay a no-op so they never block on a fetch; the count
-    // is read non-blocking via useQuery in the component.
     if (typeof window !== 'undefined') return;
-    // Server-only: bake the sponsor count into the SSR payload. `.catch` so a
-    // count failure degrades to the hero's fallback rather than blanking the page.
-    await queryClient.ensureQueryData(sponsorCountQueryOptions).catch(() => {});
     if (search.length >= 3) {
       // Don't await — let the query stream in while the shell renders
       queryClient.prefetchInfiniteQuery({

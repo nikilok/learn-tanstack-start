@@ -13,6 +13,7 @@ import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
+import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import { NameHistory } from '../components/NameHistory';
 import { StatusBadge } from '../components/StatusBadge';
@@ -418,7 +419,7 @@ function CompanyDetail() {
               <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                 See more on
               </h3>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 <a
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
                   target="_blank"
@@ -430,6 +431,17 @@ function CompanyDetail() {
                   ) : (
                     'GOV.UK'
                   )}
+                  <ExternalLink size={14} aria-hidden="true" />
+                </a>
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(displayName)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Search Google for ${displayName}`}
+                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
+                >
+                  <GoogleLogo className="h-5 w-auto" />
+                  <span>Google</span>
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
               </div>

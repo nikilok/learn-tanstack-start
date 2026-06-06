@@ -1,163 +1,40 @@
 /*
- * Empty-state hero — kinetic number focus. "140+" is oversized and scales /
- * blurs in with a count-up feel over a slowly drifting, breathing brand
- * aurora; the surrounding words rise in with a per-word stagger and, at rest,
- * a gentle gradient sweep drifts across the figure. All colours resolve from
- * theme tokens so light/dark flip automatically via the .dark ancestor class.
- * Animates only transform / opacity / filter / background-position — no layout
- * thrash.
+ * Empty-state hero — a big, confident stat (Grok / Colossus "200K" style): the
+ * live sponsor count abbreviated as "<n>K" in high-contrast type, over a muted
+ * supporting label. The number is the petrol-pump <Odometer>, whose digit wheels
+ * roll up to the live count. Colours resolve from --sea-ink tokens so light/dark
+ * flip automatically via the .dark ancestor class. Animates transform / opacity
+ * only — no layout thrash. Honours reduced-motion.
  */
 
 .hero {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.06em;
+  gap: 0.1rem;
   margin: 0 auto;
   max-width: 100%;
-  padding: clamp(2.5rem, 8vw, 4.5rem) 0 clamp(1.5rem, 4vw, 2.5rem);
+  padding: clamp(2rem, 7vw, 3.5rem) 0 clamp(1.5rem, 4vw, 2.5rem);
   text-align: center;
-  text-wrap: balance;
   font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: clamp(1.625rem, 5.5vw, 3rem);
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--sea-ink-soft);
-}
-
-.line {
-  display: block;
-}
-
-/* Per-word staggered rise-in (fade + lift + de-blur). */
-.word {
-  display: inline-block;
-  opacity: 0;
-  transform: translateY(0.5em);
-  filter: blur(4px);
-  animation: hero-word-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(0.06s * var(--i));
-}
-
-@keyframes hero-word-in {
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-
-/* Focal line: the aurora glow layer sits behind the gradient figure. */
-.figureLine {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.1em 0;
-  isolation: isolate;
 }
 
 /*
- * Aurora glow: a soft, blurred, token-based glow field behind the figure that
- * blooms in on mount, then drifts and breathes forever (translate + scale).
- * A counter-drifting ::before blob makes the field reshape rather than just
- * slide. All colour from --glow-* (each token has a .dark override), animated
- * on transform/opacity only — no layout cost.
- */
-.aurora {
-  position: absolute;
-  z-index: -1;
-  width: 1.55em;
-  height: 1.05em;
-  border-radius: 50%;
-  pointer-events: none;
-  background:
-    radial-gradient(46% 58% at 30% 40%, var(--glow-a), transparent 70%),
-    radial-gradient(50% 60% at 72% 62%, var(--glow-b), transparent 72%),
-    radial-gradient(54% 64% at 52% 50%, var(--glow-c), transparent 75%);
-  filter: blur(22px);
-  opacity: 0;
-  transform: translate3d(0, 0, 0) scale(0.85);
-  animation:
-    hero-aurora-in 1s 0.25s cubic-bezier(0.22, 1, 0.36, 1) both,
-    hero-aurora-drift 14s 1.2s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-.aurora::before {
-  content: '';
-  position: absolute;
-  inset: -12%;
-  border-radius: 50%;
-  background:
-    radial-gradient(44% 54% at 70% 30%, var(--glow-b), transparent 70%),
-    radial-gradient(48% 56% at 26% 70%, var(--glow-a), transparent 72%);
-  filter: blur(18px);
-  opacity: 0.85;
-  transform: translate3d(0, 0, 0) scale(1);
-  animation: hero-aurora-counter 18s 1.2s ease-in-out infinite;
-}
-
-@keyframes hero-aurora-in {
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-/* Slow, organic drift + breathe of the primary glow field. */
-@keyframes hero-aurora-drift {
-  0% {
-    transform: translate3d(-3%, -2%, 0) scale(1);
-    opacity: 0.9;
-  }
-  33% {
-    transform: translate3d(3%, 2%, 0) scale(1.1);
-    opacity: 1;
-  }
-  66% {
-    transform: translate3d(-2%, 3%, 0) scale(1.05);
-    opacity: 0.95;
-  }
-  100% {
-    transform: translate3d(-3%, -2%, 0) scale(1);
-    opacity: 0.9;
-  }
-}
-
-/* Counter-drifting secondary blob so the field reshapes, not just slides. */
-@keyframes hero-aurora-counter {
-  0% {
-    transform: translate3d(3%, 2%, 0) scale(1.05);
-  }
-  50% {
-    transform: translate3d(-3%, -3%, 0) scale(0.96);
-  }
-  100% {
-    transform: translate3d(3%, 2%, 0) scale(1.05);
-  }
-}
-
-/*
- * The oversized grayscale figure — the focal point via size + weight, kept
- * neutral so colour doesn't pull the eye. Houses the petrol-pump <Odometer>,
- * whose digit wheels roll up to the live count; a scale + fade entrance (no
- * blur, so the rolling digits stay crisp) brings it in. Solid colour here is
- * just a fallback — the per-glyph .shimmer paints the actual digits.
+ * The oversized number + "K" suffix — the focal point, high-contrast so it reads
+ * as a confident headline stat. A scale + fade entrance (no blur, so the rolling
+ * digits stay crisp) brings it in.
  */
 .figure {
   display: inline-flex;
-  align-items: flex-end;
-  font-family: var(--font-sans);
-  font-weight: 800;
-  font-size: clamp(2.25rem, 9.5vw, 4.5rem);
+  align-items: baseline;
+  font-weight: 700;
+  font-size: clamp(2.5rem, 8vw, 4rem);
   line-height: 1;
-  letter-spacing: -0.04em;
-  color: var(--sea-ink-soft);
+  letter-spacing: -0.03em;
+  color: var(--sea-ink);
   opacity: 0;
-  transform: scale(0.7);
-  animation: hero-figure-in 0.7s 0.2s cubic-bezier(0.18, 1.1, 0.4, 1) both;
+  transform: scale(0.82);
+  animation: hero-figure-in 0.8s 0.1s cubic-bezier(0.18, 1.1, 0.4, 1) both;
   will-change: transform, opacity;
 }
 
@@ -168,90 +45,35 @@
   }
 }
 
-/*
- * Grayscale shimmer, applied per-glyph (each odometer digit / separator and the
- * trailing "+"). The odometer clips its digits inside overflow:hidden reels, so
- * a single background-clip:text on .figure can't paint through them — every glyph
- * must own its gradient. A lighter band drifts across each glyph; the per-column
- * --col phases neighbours so the highlight travels along the number rather than
- * pulsing in unison, giving the spread of grayscale shades across the figure.
- */
-.shimmer {
-  /* Softened peak (blended back toward base) keeps the band readable, not stark,
-     while leaving enough contrast for the sweep to be perceptible. */
-  --shimmer-soft: color-mix(
-    in srgb,
-    var(--shimmer-peak) 70%,
-    var(--shimmer-base)
-  );
-  background: linear-gradient(
-    100deg,
-    var(--shimmer-base) 0%,
-    var(--shimmer-soft) 38%,
-    var(--shimmer-soft) 62%,
-    var(--shimmer-base) 100%
-  );
-  background-size: 210% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  /* Faster sweep + a larger per-column stagger so a wave visibly rolls across
-     the digits rather than the whole number pulsing as one. */
-  animation: hero-figure-shimmer 3s ease-in-out infinite;
-  animation-delay: calc(var(--col, 0) * -0.25s);
-  will-change: background-position;
+/* "K" suffix tracks the number's size/weight. */
+.suffix {
+  display: inline-block;
 }
 
-/* Drift the lighter band across each glyph. */
-@keyframes hero-figure-shimmer {
-  0% {
-    background-position: 0% 0;
-  }
-  50% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: 0% 0;
+/* Muted supporting label below the stat. */
+.subline {
+  font-size: clamp(0.9rem, 2.3vw, 1.125rem);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  color: var(--sea-ink-soft);
+  opacity: 0;
+  transform: translateY(0.4em);
+  animation: hero-sub-in 0.6s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes hero-sub-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
-/*
- * Reduced-motion: no entrance, no drift, no shimmer. Everything is immediately
- * visible and legible. The per-glyph shimmer drops the clip and paints a solid
- * brand token — animated background-clip:text can render as invisible text in
- * engines that don't paint the gradient, so the solid fallback guarantees the
- * number stays readable in both themes with zero motion.
- */
 @media (prefers-reduced-motion: reduce) {
-  .word {
-    opacity: 1;
-    transform: none;
-    filter: none;
-    animation: none;
-  }
-
-  .aurora {
-    opacity: 0.85;
-    transform: none;
-    animation: none;
-  }
-
-  .aurora::before {
-    transform: none;
-    animation: none;
-  }
-
-  .figure {
+  .figure,
+  .subline {
     opacity: 1;
     transform: none;
     animation: none;
-  }
-
-  .shimmer {
-    animation: none;
-    background: none;
-    color: var(--sea-ink-soft);
-    -webkit-text-fill-color: var(--sea-ink-soft);
   }
 }

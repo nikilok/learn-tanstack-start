@@ -311,6 +311,8 @@ export default function CustomCursor({
           <div
             key={key}
             className={styles.box}
+            // CSS hook so a view-transition snapshot can keep only the active box.
+            data-cursor-box={active ? 'active' : 'inactive'}
             style={{
               // Active box stays in flow so the layer keeps a real size for its
               // view-transition snapshot; inactive boxes overlay it.

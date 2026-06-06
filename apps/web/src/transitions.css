@@ -141,18 +141,24 @@ html[data-browser='safari'].uj-cursor-active * {
   cursor: var(--uj-blank-cursor), none !important;
 }
 
-/* Pin the lens to its resting look (base scale + grayscale) while a flip is
-   active so a pre-click hover state isn't frozen into the snapshot. Without
-   this, clicking a card (lens scaled up and full-colour on hover) captures the
-   big colour lens, which then hangs on top as a frozen ring around the resting
-   cursor on the new page. `:active-view-transition` is evaluated at capture
-   time — same mechanism the `.page-flip-details` rule below relies on.
-   `transition: none` makes the reset instant so the captured frame is the
-   resting look, not mid-animation. */
+/* Pin the snapshot to the active box at its resting look (base scale + grayscale)
+   while a flip is active. Two reasons: a pre-click hover state must not freeze in
+   (clicking a card with the lens scaled up + full-colour would otherwise hang a
+   big lens as a frozen ring on the new page); and the engine renders one
+   persistent box per cursor component (lens, I-beam) that cross-fade on a swap,
+   so a flip captured mid-swap would freeze BOTH boxes superimposed. Forcing the
+   inactive sibling to opacity:0 and the active box to opacity:1 captures exactly
+   the resting cursor. `:active-view-transition` is evaluated at capture time —
+   same mechanism `.page-flip-details` below relies on; `transition: none` makes
+   the reset instant so the frame is the resting look, not mid-animation. */
 html:active-view-transition [data-uj-cursor] > div {
   transform: translate(-50%, -50%) scale(1) !important;
   filter: grayscale(1) !important;
+  opacity: 0 !important;
   transition: none !important;
+}
+html:active-view-transition [data-uj-cursor] > div[data-cursor-box='active'] {
+  opacity: 1 !important;
 }
 
 /* Shares the `active-card` name with the clicked card on the listing so

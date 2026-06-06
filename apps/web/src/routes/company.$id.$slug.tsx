@@ -428,7 +428,7 @@ function CompanyDetail() {
               <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                 See more on
               </h3>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-x-2 gap-y-4">
                 <a
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
                   target="_blank"

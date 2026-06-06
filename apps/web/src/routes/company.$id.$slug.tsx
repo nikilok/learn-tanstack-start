@@ -447,9 +447,9 @@ function CompanyDetail() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Search Google for ${displayName}`}
-                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
+                  className="glass brand-link brand-link-google inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
                 >
-                  <GoogleLogo className="h-5 w-auto" />
+                  <GoogleLogo className="brand-mark h-5 w-auto" />
                   <span>Google</span>
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
@@ -458,9 +458,9 @@ function CompanyDetail() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Search LinkedIn for ${displayName}`}
-                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
+                  className="glass brand-link brand-link-linkedin inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
                 >
-                  <LinkedInLogo className="h-5 w-auto" />
+                  <LinkedInLogo className="brand-mark h-5 w-auto" />
                   <span>LinkedIn</span>
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>

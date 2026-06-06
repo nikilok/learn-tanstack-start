@@ -101,6 +101,24 @@ export const hmrcBySlugIdQueryOptions = (slugId: string) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+/** Server fn returning the count of distinct sponsor organisations. Edge-cached on the /_serverFn/ RPC path (client fetch); only changes on ingestion. */
+export const getSponsorCount = createServerFn().handler(async () => {
+  const [row] = await db
+    .select({
+      count: sql<number>`count(distinct ${hmrcSkilledWorkers.organisationName})::int`,
+    })
+    .from(hmrcSkilledWorkers);
+  setRpcCacheControl(LONG_EDGE_CACHE);
+  return row?.count ?? 0;
+});
+
+/** React Query options for `getSponsorCount`. Rarely changes, so never refetch within a session. */
+export const sponsorCountQueryOptions = queryOptions({
+  queryKey: ['sponsor-count'],
+  queryFn: () => getSponsorCount(),
+  staleTime: Number.POSITIVE_INFINITY,
+});
+
 /**
  * Server fn returning `hmrc_skilled_workers` rows whose `name_slug` matches
  * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash

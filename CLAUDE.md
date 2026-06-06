@@ -45,11 +45,17 @@ When results reload, the page height changes (content → skeletons → new cont
 briefly pull the sentinel back into the viewport. Without debouncing, `isStuck` toggles
 rapidly and the input blinks between visible and pill mode (especially on iOS Safari).
 
-### `transform: translateZ(0)` on SearchInput — focus-within only
+### `transform: translateZ(0)` on SearchInput — focus-within AND pinned only
 
-Needed for iOS Safari cursor positioning in sticky containers, but applying it permanently
-causes iOS Safari's GPU compositor to garble rotating placeholder text. Must only apply
-via `:focus-within` in `SearchInput.module.css`. Do NOT add it as a permanent inline style.
+Needed for iOS Safari cursor positioning in sticky containers, but the GPU layer garbles
+the rotating placeholder text on iOS Safari whenever it's live while the placeholder is
+visible (focused + empty input — e.g. after type-then-clear, or a desktop autofocus).
+So it must apply only via `:focus-within` AND only when the search bar is pinned/sticky:
+the rule in `SearchInput.module.css` is scoped to a `:global([data-search-pinned])`
+ancestor, and `index.tsx` stamps `data-search-pinned` on the search wrapper only when a
+query exists (not on the empty/hero state, where the bar is `relative` and the placeholder
+rotates). On that empty state the cursor-positioning fix isn't needed anyway (not sticky).
+Do NOT widen this back to plain `:focus-within` and do NOT add it as a permanent inline style.
 
 ## Pretext virtual list sizing — keep in sync with CSS
 

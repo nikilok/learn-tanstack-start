@@ -1,0 +1,142 @@
+/*
+ * Empty-state hero — a big, confident stat (Grok / Colossus "200K" style): the
+ * live sponsor count abbreviated as "<n>K" in high-contrast type, over a muted
+ * supporting label. The number is the petrol-pump <Odometer>, whose digit wheels
+ * roll up to the live count. Colours resolve from --sea-ink tokens so light/dark
+ * flip automatically via the .dark ancestor class. Animates transform / opacity
+ * only — no layout thrash. Honours reduced-motion.
+ */
+
+.hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  margin: 0 auto;
+  max-width: 100%;
+  padding: clamp(2rem, 7vw, 3.5rem) 0 clamp(1.5rem, 4vw, 2.5rem);
+  text-align: center;
+  font-family: var(--font-sans);
+}
+
+/*
+ * Rainbow grid streaks: a spectrum gradient painted ONLY onto the page's existing
+ * angled grid lines, by masking with the same pattern body::after uses — same
+ * rotate(26deg), 60px cells, and top-centre vignette — so a few of the real grid
+ * lines light up in colour behind the stat. Mask = vignette ∩ (h-lines ∪ v-lines).
+ * Fixed + behind the hero's text (z-index:-1 inside the hero's isolated context,
+ * which sits above body::after), shown only on the empty state. Honours
+ * reduced-motion (fades in skipped).
+ */
+.streaks {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  transform: rotate(26deg) scale(1.02);
+  background: linear-gradient(
+    90deg,
+    #4f7cff 0%,
+    #9a5cff 26%,
+    #ff6fae 50%,
+    #ffb347 74%,
+    #5fd0a0 100%
+  );
+  mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, #000, transparent 70%),
+    linear-gradient(#000 1.5px, transparent 1.5px),
+    linear-gradient(90deg, #000 1.5px, transparent 1.5px);
+  mask-size:
+    100% 100%,
+    60px 60px,
+    60px 60px;
+  mask-composite: intersect, add, add;
+  -webkit-mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, #000, transparent 70%),
+    linear-gradient(#000 1.5px, transparent 1.5px),
+    linear-gradient(90deg, #000 1.5px, transparent 1.5px);
+  -webkit-mask-size:
+    100% 100%,
+    60px 60px,
+    60px 60px;
+  -webkit-mask-composite: source-in, source-over, source-over;
+  /* Light needs more punch (colour on near-white); dark shows the lines readily. */
+  opacity: 0.4;
+  animation: hero-streaks-in 1.4s 0.2s ease-out both;
+}
+
+:global(.dark) .streaks {
+  opacity: 0.5;
+}
+
+/* `to` is implied as the element's set opacity, so each theme fades to its own. */
+@keyframes hero-streaks-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/*
+ * The oversized number + "K" suffix — the focal point, high-contrast so it reads
+ * as a confident headline stat. A scale + fade entrance (no blur, so the rolling
+ * digits stay crisp) brings it in.
+ */
+.figure {
+  display: inline-flex;
+  align-items: baseline;
+  font-weight: 700;
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--sea-ink);
+  opacity: 0;
+  transform: scale(0.82);
+  animation: hero-figure-in 0.8s 0.1s cubic-bezier(0.18, 1.1, 0.4, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes hero-figure-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* "K" suffix tracks the number's size/weight. */
+.suffix {
+  display: inline-block;
+}
+
+/* Muted supporting label below the stat. */
+.subline {
+  font-size: clamp(0.9rem, 2.3vw, 1.125rem);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+  color: var(--sea-ink-soft);
+  opacity: 0;
+  transform: translateY(0.4em);
+  animation: hero-sub-in 0.6s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes hero-sub-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .figure,
+  .subline {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+
+  .streaks {
+    animation: none;
+  }
+}

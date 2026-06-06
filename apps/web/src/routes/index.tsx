@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import {
   createFileRoute,
   stripSearchParams,
@@ -5,9 +6,10 @@ import {
 } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
-import { Suspense, useRef } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 
-import { searchHmrc } from '../api/hmrc';
+import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
+import HeroText from '../components/HeroText';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
@@ -59,6 +61,18 @@ export const Route = createFileRoute('/')({
  */
 function Home() {
   const { search } = Route.useSearch();
+  // Live input value (updates on every keystroke); the `search` URL param is
+  // debounced 450ms, so we gate the hero on this to hide it instantly on type.
+  const [liveQuery, setLiveQuery] = useState(search);
+  // Re-sync when `search` changes from outside the input (header logo, back/
+  // forward, programmatic nav) so the hero/sticky gate never goes stale. During
+  // typing this is a no-op: the debounce only commits the latest value, which
+  // onSearch already wrote to liveQuery.
+  useEffect(() => {
+    setLiveQuery(search);
+  }, [search]);
+  // Non-blocking: SSR-hydrated, streams in on cold client navs (may be undefined).
+  const { data: sponsorCount } = useQuery(sponsorCountQueryOptions);
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,17 +81,22 @@ function Home() {
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
 
+  // Empty state: the hero is shown and the search bar scrolls away with the
+  // page (not sticky). It only sticks once a query exists.
+  const heroVisible = liveQuery.length === 0 && search.length === 0;
+
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">
-          Search UK skilled worker visa sponsors
+          Search UK companies
           {!platformInfo.isMobile && (
             <span
               style={{
                 opacity: search.length >= 3 ? 1 : 0,
                 transition: 'opacity 250ms ease',
                 pointerEvents: 'none',
+                color: 'var(--kicker)',
               }}
             >
               {' · '}
@@ -90,7 +109,14 @@ function Home() {
         <div ref={sentinelRef} className="pointer-events-none mt-6" />
         <div
           data-sticky-search
-          className={`pointer-events-none z-40 -mx-4 px-4 ${isStuck && pillClicked ? 'search-glow fixed top-[61px] right-0 left-0 mx-auto max-w-2xl pt-2 pb-4 sm:top-[77px]' : 'sticky top-[69px] pb-4 sm:top-[85px]'}`}
+          data-search-pinned={heroVisible ? undefined : ''}
+          className={`pointer-events-none z-40 -mx-4 px-4 ${
+            heroVisible
+              ? 'relative pb-4'
+              : isStuck && pillClicked
+                ? 'search-glow fixed top-[61px] right-0 left-0 mx-auto max-w-2xl pt-2 pb-4 sm:top-[77px]'
+                : 'sticky top-[69px] pb-4 sm:top-[85px]'
+          }`}
         >
           <SearchBar
             search={search}
@@ -101,6 +127,7 @@ function Home() {
             platform={platformInfo.platform}
             isMobile={platformInfo.isMobile}
             onSearch={(value) => {
+              setLiveQuery(value);
               if (navTimerRef.current) clearTimeout(navTimerRef.current);
               navTimerRef.current = setTimeout(() => {
                 navigate({
@@ -114,6 +141,10 @@ function Home() {
             onBlur={onPillDismiss}
           />
         </div>
+
+        {/* Hero shows only when input AND debounced search are both empty, so it
+            appears only after the results grid has fully cleared. */}
+        {heroVisible && <HeroText count={sponsorCount} />}
 
         <div className="page-flip-listing">
           <Suspense fallback={<SkeletonCards />}>

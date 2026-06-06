@@ -18,7 +18,13 @@ import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
 import { NameHistory } from '../components/NameHistory';
 import { StatusBadge } from '../components/StatusBadge';
-import { formatAddress, formatDate, formatLocation, titleCase } from '../utils';
+import {
+  companySearchName,
+  formatAddress,
+  formatDate,
+  formatLocation,
+  titleCase,
+} from '../utils';
 import { buildCanonical } from '../utils/canonical';
 import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
 
@@ -224,6 +230,8 @@ function CompanyDetail() {
   const displayName = profile?.company_name
     ? titleCase(profile.company_name)
     : hmrcName;
+  // Noise-stripped query so external searches land on the right company.
+  const searchQuery = encodeURIComponent(companySearchName(displayName));
   const currentKey = normalizeName(
     profile?.company_name ?? sponsor.organisationName,
   );
@@ -435,7 +443,7 @@ function CompanyDetail() {
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
                 <a
-                  href={`https://www.google.com/search?q=${encodeURIComponent(displayName)}`}
+                  href={`https://www.google.com/search?q=${searchQuery}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Search Google for ${displayName}`}
@@ -446,7 +454,7 @@ function CompanyDetail() {
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
                 <a
-                  href={`https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(displayName)}`}
+                  href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`Search LinkedIn for ${displayName}`}

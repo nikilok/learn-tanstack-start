@@ -282,7 +282,6 @@ export default function CustomCursor({
       : 'none';
 
   const tokens = states?.[cursorState] ?? EMPTY_TOKENS;
-  const sz = normalizeSize(tokens.size);
   const parked = enter ?? DEFAULT_ENTER;
 
   return (
@@ -295,10 +294,16 @@ export default function CustomCursor({
     >
       {uniqueBoxes(cursors).map(({ key, Component }) => {
         const active = cursors[cursorState] === Component;
-        // Inactive boxes park at the `enter` pose so a swap blooms/collapses
-        // instead of plain crossfading; same-component states stay active.
-        const scale = active ? (tokens.scale ?? 1) : (parked.scale ?? 1);
-        const rotate = active ? (tokens.rotate ?? 0) : (parked.rotate ?? 0);
+        // Active boxes wear the destination state's tokens; inactive boxes park
+        // at their own resting look (`states[key]`) with the `enter` pose
+        // overlaid, so a swap bloom/collapses (shrink + fade) without tweening
+        // through the incoming state's size/filter/colour.
+        const boxTokens = active
+          ? tokens
+          : { ...(states?.[key] ?? EMPTY_TOKENS), ...parked };
+        const sz = normalizeSize(boxTokens.size);
+        const scale = boxTokens.scale ?? 1;
+        const rotate = boxTokens.rotate ?? 0;
         const transform = `translate(-50%, -50%) scale(${scale})${
           rotate ? ` rotate(${rotate}deg)` : ''
         }`;
@@ -315,9 +320,13 @@ export default function CustomCursor({
               width: sz.width,
               height: sz.height,
               transform,
-              filter: tokens.filter ?? 'none',
-              borderRadius: tokens.radius,
-              opacity: active ? (tokens.opacity ?? 1) : 0,
+              filter: boxTokens.filter ?? 'none',
+              borderRadius: boxTokens.radius,
+              // Inactive boxes fade out (opacity 0) unless the `enter` pose
+              // sets a parked opacity; a box's own-state opacity must not leak in.
+              opacity: active
+                ? (boxTokens.opacity ?? 1)
+                : (parked.opacity ?? 0),
               transition: boxTransition,
             }}
           >

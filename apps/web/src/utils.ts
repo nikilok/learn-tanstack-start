@@ -101,6 +101,40 @@ export function formatLocation(
   return parts.join(', ');
 }
 
+// Trailing legal-entity suffixes stripped from a company name before searching.
+const SEARCH_SUFFIXES =
+  /[\s,]+(?:limited|ltd|plc|llp|llc|lp|cic|cio|inc|incorporated|corp|corporation|unlimited)\.?\s*$/i;
+
+/**
+ * Reduce a registered company name to a search-friendly query for external
+ * platforms (Google, LinkedIn). Drops parenthetical qualifiers like `(UK)`,
+ * any `t/a` ("trading as") tail, and trailing legal-entity suffixes (Ltd,
+ * Limited, PLC, LLP, …) — all noise that pushes the platform onto the wrong
+ * result. Falls back to the trimmed original if cleaning would empty it.
+ */
+export function companySearchName(name: string): string {
+  const original = name.trim();
+  let s = original
+    .replace(/\([^)]*\)/g, ' ') // "(UK)", "(Holdings)", …
+    .replace(/\b(?:t\/a|trading as)\b.*$/i, ' ') // legal name precedes "t/a …"
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Peel trailing suffixes repeatedly (e.g. "Foo & Co Ltd." -> "Foo & Co").
+  let prev: string;
+  do {
+    prev = s;
+    s = s.replace(SEARCH_SUFFIXES, '').trim();
+  } while (s !== prev);
+
+  s = s
+    .replace(/[\s,]+(?:&|and)\s+co\.?\s*$/i, '') // dangling "& Co"
+    .replace(/[\s,&-]+$/, '') // leftover trailing punctuation
+    .trim();
+
+  return s || original;
+}
+
 /**
  * Format an ISO date string as a UK long-form date (`5 April 2026`). Returns
  * an empty string for missing or unparseable input.

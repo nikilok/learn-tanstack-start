@@ -89,13 +89,14 @@ function Home() {
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
         <p className="island-kicker mb-3">
-          Search UK skilled worker visa sponsors
+          Search UK companies
           {!platformInfo.isMobile && (
             <span
               style={{
                 opacity: search.length >= 3 ? 1 : 0,
                 transition: 'opacity 250ms ease',
                 pointerEvents: 'none',
+                color: 'var(--kicker)',
               }}
             >
               {' · '}

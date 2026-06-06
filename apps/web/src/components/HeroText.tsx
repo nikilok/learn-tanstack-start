@@ -1,5 +1,7 @@
 import type { CSSProperties } from 'react';
 
+import Odometer from './Odometer';
+
 import styles from './HeroText.module.css';
 
 /**
@@ -15,15 +17,14 @@ import styles from './HeroText.module.css';
 const FALLBACK_COUNT = 100_000;
 
 export default function HeroText({ count }: { count?: number }) {
-  // Round down to a clean thousand and append "+": the value is floored (or the
-  // conservative fallback), so the real count is always higher than shown.
-  const rounded =
+  // Round down to a clean thousand (or the conservative fallback), so the real
+  // count is always higher than shown and the trailing "+" stays truthful.
+  const target =
     count && count >= 1000 ? Math.floor(count / 1000) * 1000 : FALLBACK_COUNT;
-  const figure = `${rounded.toLocaleString('en-GB')}+`;
   return (
     <h2
       className={styles.hero}
-      aria-label={`Explore ${figure} licensed UK visa sponsors`}
+      aria-label={`Explore ${target.toLocaleString('en-GB')}+ licensed UK visa sponsors`}
     >
       <span className={styles.line} aria-hidden="true">
         <span className={styles.word} style={{ '--i': 0 } as CSSProperties}>
@@ -33,7 +34,9 @@ export default function HeroText({ count }: { count?: number }) {
 
       <span className={styles.figureLine} aria-hidden="true">
         <span className={styles.aurora} />
-        <span className={styles.figure}>{figure}</span>
+        <span className={styles.figure}>
+          <Odometer value={target} durationMs={1600} delayMs={900} />+
+        </span>
       </span>
 
       <span className={styles.line} aria-hidden="true">

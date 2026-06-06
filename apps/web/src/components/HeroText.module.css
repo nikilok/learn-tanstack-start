@@ -8,6 +8,8 @@
  */
 
 .hero {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -17,6 +19,63 @@
   padding: clamp(2rem, 7vw, 3.5rem) 0 clamp(1.5rem, 4vw, 2.5rem);
   text-align: center;
   font-family: var(--font-sans);
+}
+
+/*
+ * Rainbow grid streaks: a spectrum gradient painted ONLY onto the page's existing
+ * angled grid lines, by masking with the same pattern body::after uses — same
+ * rotate(26deg), 60px cells, and top-centre vignette — so a few of the real grid
+ * lines light up in colour behind the stat. Mask = vignette ∩ (h-lines ∪ v-lines).
+ * Fixed + behind the hero's text (z-index:-1 inside the hero's isolated context,
+ * which sits above body::after), shown only on the empty state. Honours
+ * reduced-motion (fades in skipped).
+ */
+.streaks {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  transform: rotate(26deg) scale(1.02);
+  background: linear-gradient(
+    90deg,
+    #4f7cff 0%,
+    #9a5cff 26%,
+    #ff6fae 50%,
+    #ffb347 74%,
+    #5fd0a0 100%
+  );
+  mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, #000, transparent 70%),
+    linear-gradient(#000 1.5px, transparent 1.5px),
+    linear-gradient(90deg, #000 1.5px, transparent 1.5px);
+  mask-size:
+    100% 100%,
+    60px 60px,
+    60px 60px;
+  mask-composite: intersect, add, add;
+  -webkit-mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, #000, transparent 70%),
+    linear-gradient(#000 1.5px, transparent 1.5px),
+    linear-gradient(90deg, #000 1.5px, transparent 1.5px);
+  -webkit-mask-size:
+    100% 100%,
+    60px 60px,
+    60px 60px;
+  -webkit-mask-composite: source-in, source-over, source-over;
+  /* Light needs more punch (colour on near-white); dark shows the lines readily. */
+  opacity: 0.4;
+  animation: hero-streaks-in 1.4s 0.2s ease-out both;
+}
+
+:global(.dark) .streaks {
+  opacity: 0.5;
+}
+
+/* `to` is implied as the element's set opacity, so each theme fades to its own. */
+@keyframes hero-streaks-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /*
@@ -74,6 +133,10 @@
   .subline {
     opacity: 1;
     transform: none;
+    animation: none;
+  }
+
+  .streaks {
     animation: none;
   }
 }

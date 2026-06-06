@@ -24,6 +24,7 @@ export default function HeroText({ count }: { count?: number }) {
       className={styles.hero}
       aria-label={`${(thousands * 1000).toLocaleString('en-GB')}+ licensed UK visa sponsors`}
     >
+      <span className={styles.streaks} aria-hidden="true" />
       <span className={styles.figure} aria-hidden="true">
         <Odometer value={thousands} durationMs={1600} delayMs={900} />
         <span className={styles.suffix}>K</span>

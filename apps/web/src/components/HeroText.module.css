@@ -150,7 +150,7 @@
   align-items: flex-end;
   font-family: var(--font-sans);
   font-weight: 800;
-  font-size: clamp(2.75rem, 12vw, 5.5rem);
+  font-size: clamp(2.25rem, 9.5vw, 4.5rem);
   line-height: 1;
   letter-spacing: -0.04em;
   color: var(--sea-ink-soft);

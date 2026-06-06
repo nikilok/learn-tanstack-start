@@ -1,12 +1,20 @@
 /*
  * 7-segment / calculator-LCD readout. Every segment is always drawn at a faint
- * opacity (the ghost "8" backdrop); lit segments jump to full opacity. Colour
- * comes from `currentColor`, so it tracks the theme tokens automatically.
+ * opacity (the ghost "8" backdrop); lit segments jump to full opacity and are
+ * filled by a slowly sweeping brand gradient so they stand out against the
+ * ghost. The ghost colour comes from `currentColor`, tracking the theme.
  */
 .display {
   display: inline-flex;
   align-items: flex-end;
   gap: 0.04em;
+}
+
+/* Off-screen holder for the shared <linearGradient> def. */
+.defs {
+  position: absolute;
+  width: 0;
+  height: 0;
 }
 
 .digit {
@@ -16,31 +24,31 @@
   aspect-ratio: 24 / 44;
 }
 
-.seg,
-.on {
-  fill: currentColor;
-  transition: opacity 90ms ease;
-}
-
-/* Ghost segment — the faint "8" that's always visible behind every digit. */
+/* Ghost segment — the faint "8" always visible behind every digit. */
 .seg {
+  fill: currentColor;
   opacity: 0.12;
 }
 
-/* Lit segment. */
+/* Lit segment — full opacity; fill (the gradient) is set inline. Crisp on/off,
+   no transition, so it never reads as half-faded mid-roll. */
 .on {
   opacity: 1;
 }
 
-/* Thousands separator, in the lit colour, sitting on the baseline. */
+/* Brand gradient stops (theme-aware). --link-blue stays a strong blue in dark. */
+.stopEdge {
+  stop-color: var(--logo-navy);
+}
+.stopMid {
+  stop-color: var(--link-blue);
+}
+.stopPeak {
+  stop-color: var(--logo-red);
+}
+
+/* Thousands separator, on the baseline. */
 .sep {
   align-self: flex-end;
   padding-bottom: 0.06em;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .seg,
-  .on {
-    transition: none;
-  }
 }

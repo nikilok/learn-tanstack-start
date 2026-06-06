@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import styles from './SegmentDisplay.module.css';
 
@@ -43,8 +43,11 @@ const DIGIT_ON: Record<string, string> = {
   '9': 'abcdfg',
 };
 
-/** One 7-segment cell: all segments drawn faint (ghost "8"), active ones lit. */
-function Digit({ ch }: { ch: string }) {
+/** Lit fill = the shared animated brand gradient, with currentColor as fallback. */
+const litFill = (gradId: string) => ({ fill: `url(#${gradId}) currentColor` });
+
+/** One 7-segment cell: all segments drawn faint (ghost "8"), lit ones in colour. */
+function Digit({ ch, gradId }: { ch: string; gradId: string }) {
   const on = DIGIT_ON[ch] ?? '';
   return (
     <svg
@@ -53,19 +56,24 @@ function Digit({ ch }: { ch: string }) {
       aria-hidden="true"
       focusable="false"
     >
-      {SEGMENTS.map((s) => (
-        <polygon
-          key={s.id}
-          points={s.points}
-          className={on.includes(s.id) ? styles.on : styles.seg}
-        />
-      ))}
+      {SEGMENTS.map((s) =>
+        on.includes(s.id) ? (
+          <polygon
+            key={s.id}
+            points={s.points}
+            className={styles.on}
+            style={litFill(gradId)}
+          />
+        ) : (
+          <polygon key={s.id} points={s.points} className={styles.seg} />
+        ),
+      )}
     </svg>
   );
 }
 
-/** A "+" drawn in the same segment style (lit middle bar + lit centre column). */
-function Plus() {
+/** A "+" drawn in the same lit segment style (middle bar + centre column). */
+function Plus({ gradId }: { gradId: string }) {
   return (
     <svg
       className={styles.digit}
@@ -73,8 +81,12 @@ function Plus() {
       aria-hidden="true"
       focusable="false"
     >
-      <polygon className={styles.on} points={h(G_Y)} />
-      <polygon className={styles.on} points={v(W / 2, A_Y, D_Y)} />
+      <polygon className={styles.on} style={litFill(gradId)} points={h(G_Y)} />
+      <polygon
+        className={styles.on}
+        style={litFill(gradId)}
+        points={v(W / 2, A_Y, D_Y)}
+      />
     </svg>
   );
 }
@@ -114,9 +126,10 @@ function useCountUp(target: number, durationMs: number, delayMs: number) {
 
 /**
  * Calculator-style 7-segment readout that counts up to `value`. Each digit
- * shows a faint ghost "8" with the lit segments on top; the number rolls up
- * through the segments on the SSR-fallback → live-count change. Trailing "+"
- * is rendered in the same style.
+ * shows a faint ghost "8" with the lit segments filled by a slowly sweeping
+ * brand gradient so they stand out; the number rolls up through the segments on
+ * the SSR-fallback → live-count change. SSR-safe; honours reduced-motion (the
+ * count snaps and the gradient sweep is dropped).
  */
 export default function SegmentDisplay({
   value,
@@ -128,19 +141,54 @@ export default function SegmentDisplay({
   delayMs?: number;
 }) {
   const display = useCountUp(value, durationMs, delayMs);
+  const gradId = `lcd-grad-${useId().replace(/:/g, '')}`;
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    setReduce(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }, []);
   const chars = Math.round(display).toLocaleString('en-GB').split('');
   return (
     <span className={styles.display} aria-hidden="true">
+      <svg className={styles.defs} aria-hidden="true" focusable="false">
+        <title>gradient</title>
+        <defs>
+          <linearGradient
+            id={gradId}
+            gradientUnits="userSpaceOnUse"
+            x1="0"
+            y1="0"
+            x2={W}
+            y2="0"
+            spreadMethod="repeat"
+          >
+            <stop offset="0" className={styles.stopEdge} />
+            <stop offset="0.4" className={styles.stopMid} />
+            <stop offset="0.5" className={styles.stopPeak} />
+            <stop offset="0.6" className={styles.stopMid} />
+            <stop offset="1" className={styles.stopEdge} />
+            {!reduce && (
+              <animateTransform
+                attributeName="gradientTransform"
+                type="translate"
+                from="0 0"
+                to={`${W} 0`}
+                dur="3.5s"
+                repeatCount="indefinite"
+              />
+            )}
+          </linearGradient>
+        </defs>
+      </svg>
       {chars.map((ch, i) =>
         ch >= '0' && ch <= '9' ? (
-          <Digit key={`${i}-${ch}`} ch={ch} />
+          <Digit key={`${i}-${ch}`} ch={ch} gradId={gradId} />
         ) : (
           <span key={`${i}-${ch}`} className={styles.sep}>
             {ch}
           </span>
         ),
       )}
-      <Plus />
+      <Plus gradId={gradId} />
     </span>
   );
 }

@@ -11,11 +11,11 @@ import styles from './HeroText.module.css';
  * custom properties; honours reduced-motion.
  */
 export default function HeroText({ count }: { count: number }) {
-  // Round down to a clean thousand so "over N" stays truthful and the figure
-  // doesn't jitter on small ingestion deltas.
-  const figure = (
+  // Round down to a clean thousand and append "+": the real count is higher, so
+  // the figure reads as an estimate and doesn't jitter on small ingestion deltas.
+  const figure = `${(
     count >= 1000 ? Math.floor(count / 1000) * 1000 : count
-  ).toLocaleString('en-GB');
+  ).toLocaleString('en-GB')}+`;
   return (
     <h2
       className={styles.hero}

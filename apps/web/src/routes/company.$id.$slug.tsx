@@ -434,7 +434,7 @@ function CompanyDetail() {
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#1d70b8]! hover:text-white dark:text-white"
+                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
                 >
                   {flagState.govukBranded ? (
                     <GovUkLogo className="h-5 w-auto" />
@@ -449,7 +449,7 @@ function CompanyDetail() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={`Search Google for ${displayName}`}
-                className="glass brand-link brand-link-google inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
+                className="glass brand-link inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
               >
                 <GoogleLogo className="brand-mark h-5 w-auto" />
                 <span>Google</span>
@@ -460,7 +460,7 @@ function CompanyDetail() {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={`Search LinkedIn for ${displayName}`}
-                className="glass brand-link brand-link-linkedin inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
+                className="glass brand-link inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
               >
                 <LinkedInLogo className="brand-mark h-5 w-auto" />
                 <span>LinkedIn</span>

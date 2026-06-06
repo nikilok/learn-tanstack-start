@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-import SegmentDisplay from './SegmentDisplay';
+import Odometer from './Odometer';
 
 import styles from './HeroText.module.css';
 
@@ -21,6 +21,9 @@ export default function HeroText({ count }: { count?: number }) {
   // count is always higher than shown and the trailing "+" stays truthful.
   const target =
     count && count >= 1000 ? Math.floor(count / 1000) * 1000 : FALLBACK_COUNT;
+  // Column index for the trailing "+", continuing the shimmer phase past the
+  // last digit so the band sweeps cleanly off the end of the number.
+  const plusCol = target.toLocaleString('en-GB').length;
   return (
     <h2
       className={styles.hero}
@@ -35,7 +38,18 @@ export default function HeroText({ count }: { count?: number }) {
       <span className={styles.figureLine} aria-hidden="true">
         <span className={styles.aurora} />
         <span className={styles.figure}>
-          <SegmentDisplay value={target} durationMs={1600} delayMs={900} />
+          <Odometer
+            value={target}
+            durationMs={1600}
+            delayMs={900}
+            glyphClassName={styles.shimmer}
+          />
+          <span
+            className={styles.shimmer}
+            style={{ '--col': plusCol } as CSSProperties}
+          >
+            +
+          </span>
         </span>
       </span>
 

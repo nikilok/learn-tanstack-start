@@ -143,7 +143,8 @@
  * The oversized grayscale figure — the focal point via size + weight, kept
  * neutral so colour doesn't pull the eye. Houses the petrol-pump <Odometer>,
  * whose digit wheels roll up to the live count; a scale + fade entrance (no
- * blur, so the rolling digits stay crisp) brings it in.
+ * blur, so the rolling digits stay crisp) brings it in. Solid colour here is
+ * just a fallback — the per-glyph .shimmer paints the actual digits.
  */
 .figure {
   display: inline-flex;
@@ -154,7 +155,6 @@
   line-height: 1;
   letter-spacing: -0.04em;
   color: var(--sea-ink-soft);
-
   opacity: 0;
   transform: scale(0.7);
   animation: hero-figure-in 0.7s 0.2s cubic-bezier(0.18, 1.1, 0.4, 1) both;
@@ -169,8 +169,56 @@
 }
 
 /*
+ * Grayscale shimmer, applied per-glyph (each odometer digit / separator and the
+ * trailing "+"). The odometer clips its digits inside overflow:hidden reels, so
+ * a single background-clip:text on .figure can't paint through them — every glyph
+ * must own its gradient. A lighter band drifts across each glyph; the per-column
+ * --col phases neighbours so the highlight travels along the number rather than
+ * pulsing in unison, giving the spread of grayscale shades across the figure.
+ */
+.shimmer {
+  /* Softened peak (blended back toward base) keeps the band readable, not stark,
+     while leaving enough contrast for the sweep to be perceptible. */
+  --shimmer-soft: color-mix(
+    in srgb,
+    var(--shimmer-peak) 70%,
+    var(--shimmer-base)
+  );
+  background: linear-gradient(
+    100deg,
+    var(--shimmer-base) 0%,
+    var(--shimmer-soft) 38%,
+    var(--shimmer-soft) 62%,
+    var(--shimmer-base) 100%
+  );
+  background-size: 210% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  /* Faster sweep + a larger per-column stagger so a wave visibly rolls across
+     the digits rather than the whole number pulsing as one. */
+  animation: hero-figure-shimmer 3s ease-in-out infinite;
+  animation-delay: calc(var(--col, 0) * -0.25s);
+  will-change: background-position;
+}
+
+/* Drift the lighter band across each glyph. */
+@keyframes hero-figure-shimmer {
+  0% {
+    background-position: 0% 0;
+  }
+  50% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/*
  * Reduced-motion: no entrance, no drift, no shimmer. Everything is immediately
- * visible and legible. The gradient figure drops the clip and paints a solid
+ * visible and legible. The per-glyph shimmer drops the clip and paints a solid
  * brand token — animated background-clip:text can render as invisible text in
  * engines that don't paint the gradient, so the solid fallback guarantees the
  * number stays readable in both themes with zero motion.
@@ -198,5 +246,12 @@
     opacity: 1;
     transform: none;
     animation: none;
+  }
+
+  .shimmer {
+    animation: none;
+    background: none;
+    color: var(--sea-ink-soft);
+    -webkit-text-fill-color: var(--sea-ink-soft);
   }
 }

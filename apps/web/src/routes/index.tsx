@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import {
   createFileRoute,
   stripSearchParams,
@@ -5,7 +6,7 @@ import {
 } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
-import { Suspense, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
@@ -39,12 +40,13 @@ export const Route = createFileRoute('/')({
   loaderDeps: ({ search: { search } }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     const { search } = deps as { search: string };
-    // Sponsor count for the empty-state hero — small + cached; awaited so it's
-    // baked into the SSR payload and available synchronously on the client.
-    const sponsorCount = await queryClient.ensureQueryData(
-      sponsorCountQueryOptions,
-    );
-    if (typeof window === 'undefined' && search.length >= 3) {
+    // Client navigations stay a no-op so they never block on a fetch; the count
+    // is read non-blocking via useQuery in the component.
+    if (typeof window !== 'undefined') return;
+    // Server-only: bake the sponsor count into the SSR payload. `.catch` so a
+    // count failure degrades to the hero's fallback rather than blanking the page.
+    await queryClient.ensureQueryData(sponsorCountQueryOptions).catch(() => {});
+    if (search.length >= 3) {
       // Don't await — let the query stream in while the shell renders
       queryClient.prefetchInfiniteQuery({
         queryKey: ['hmrc-search', search],
@@ -52,7 +54,6 @@ export const Route = createFileRoute('/')({
         initialPageParam: 0,
       });
     }
-    return { sponsorCount };
   },
   component: Home,
 });
@@ -68,7 +69,15 @@ function Home() {
   // Live input value (updates on every keystroke); the `search` URL param is
   // debounced 450ms, so we gate the hero on this to hide it instantly on type.
   const [liveQuery, setLiveQuery] = useState(search);
-  const { sponsorCount } = Route.useLoaderData();
+  // Re-sync when `search` changes from outside the input (header logo, back/
+  // forward, programmatic nav) so the hero/sticky gate never goes stale. During
+  // typing this is a no-op: the debounce only commits the latest value, which
+  // onSearch already wrote to liveQuery.
+  useEffect(() => {
+    setLiveQuery(search);
+  }, [search]);
+  // Non-blocking: SSR-hydrated, streams in on cold client navs (may be undefined).
+  const { data: sponsorCount } = useQuery(sponsorCountQueryOptions);
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -10,13 +10,16 @@ import styles from './HeroText.module.css';
  * surrounding words rise in with a per-word stagger. Theme-aware via CSS
  * custom properties; honours reduced-motion.
  */
-export default function HeroText({ count }: { count: number }) {
-  // Round down to a clean thousand and append "+": the real count is higher, so
-  // the figure reads as an estimate and doesn't jitter on small ingestion deltas.
-  const figure = `${(count >= 1000
-    ? Math.floor(count / 1000) * 1000
-    : count
-  ).toLocaleString('en-GB')}+`;
+// Conservative floor shown if the live count is unavailable (cold client nav or
+// a failed fetch). The real figure is well above this, so "<floor>+" stays true.
+const FALLBACK_COUNT = 100_000;
+
+export default function HeroText({ count }: { count?: number }) {
+  // Round down to a clean thousand and append "+": the value is floored (or the
+  // conservative fallback), so the real count is always higher than shown.
+  const rounded =
+    count && count >= 1000 ? Math.floor(count / 1000) * 1000 : FALLBACK_COUNT;
+  const figure = `${rounded.toLocaleString('en-GB')}+`;
   return (
     <h2
       className={styles.hero}

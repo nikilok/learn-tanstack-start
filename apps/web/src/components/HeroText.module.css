@@ -38,7 +38,6 @@
   filter: blur(4px);
   animation: hero-word-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(0.06s * var(--i));
-  will-change: transform, opacity, filter;
 }
 
 @keyframes hero-word-in {
@@ -175,7 +174,7 @@
   animation:
     hero-figure-in 0.8s 0.25s cubic-bezier(0.18, 1.2, 0.4, 1) both,
     hero-figure-shimmer 7s 1.1s ease-in-out infinite;
-  will-change: transform, opacity, filter, background-position;
+  will-change: background-position;
 }
 
 @keyframes hero-figure-in {

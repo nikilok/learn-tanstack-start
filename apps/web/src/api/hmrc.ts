@@ -101,15 +101,27 @@ export const hmrcBySlugIdQueryOptions = (slugId: string) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-/** Server fn returning the count of distinct sponsor organisations. Heavily cached; only changes on ingestion. */
+// Per-instance memo so the COUNT(DISTINCT) aggregate doesn't run on every home
+// SSR (the loader calls this in-process, where setRpcCacheControl is a no-op).
+// The count only changes on daily ingestion, so a long TTL is safe.
+const SPONSOR_COUNT_TTL_MS = 6 * 60 * 60 * 1000;
+let sponsorCountMemo: { value: number; expires: number } | null = null;
+
+/** Server fn returning the count of distinct sponsor organisations. Memoised + edge-cached; only changes on ingestion. */
 export const getSponsorCount = createServerFn().handler(async () => {
+  setRpcCacheControl(LONG_EDGE_CACHE);
+  const now = Date.now();
+  if (sponsorCountMemo && sponsorCountMemo.expires > now) {
+    return sponsorCountMemo.value;
+  }
   const [row] = await db
     .select({
       count: sql<number>`count(distinct ${hmrcSkilledWorkers.organisationName})::int`,
     })
     .from(hmrcSkilledWorkers);
-  setRpcCacheControl(LONG_EDGE_CACHE);
-  return row?.count ?? 0;
+  const value = row?.count ?? 0;
+  sponsorCountMemo = { value, expires: now + SPONSOR_COUNT_TTL_MS };
+  return value;
 });
 
 /** React Query options for `getSponsorCount`. Rarely changes, so never refetch within a session. */

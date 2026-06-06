@@ -1,0 +1,46 @@
+/*
+ * 7-segment / calculator-LCD readout. Every segment is always drawn at a faint
+ * opacity (the ghost "8" backdrop); lit segments jump to full opacity. Colour
+ * comes from `currentColor`, so it tracks the theme tokens automatically.
+ */
+.display {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.04em;
+}
+
+.digit {
+  display: block;
+  height: 1em;
+  width: auto;
+  aspect-ratio: 24 / 44;
+}
+
+.seg,
+.on {
+  fill: currentColor;
+  transition: opacity 90ms ease;
+}
+
+/* Ghost segment — the faint "8" that's always visible behind every digit. */
+.seg {
+  opacity: 0.12;
+}
+
+/* Lit segment. */
+.on {
+  opacity: 1;
+}
+
+/* Thousands separator, in the lit colour, sitting on the baseline. */
+.sep {
+  align-self: flex-end;
+  padding-bottom: 0.06em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg,
+  .on {
+    transition: none;
+  }
+}

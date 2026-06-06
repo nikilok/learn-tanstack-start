@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-import Odometer from './Odometer';
+import SegmentDisplay from './SegmentDisplay';
 
 import styles from './HeroText.module.css';
 
@@ -35,7 +35,7 @@ export default function HeroText({ count }: { count?: number }) {
       <span className={styles.figureLine} aria-hidden="true">
         <span className={styles.aurora} />
         <span className={styles.figure}>
-          <Odometer value={target} durationMs={1600} delayMs={900} />+
+          <SegmentDisplay value={target} durationMs={1600} delayMs={900} />
         </span>
       </span>
 

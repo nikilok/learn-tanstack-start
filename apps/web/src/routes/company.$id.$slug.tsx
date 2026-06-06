@@ -423,12 +423,13 @@ function CompanyDetail() {
           <p className="mt-1 text-sm leading-relaxed text-(--sea-ink-soft)">
             {summary}
           </p>
-          {profile?.company_number && (
-            <div className="mt-4">
-              <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                See more on
-              </h3>
-              <div className="flex flex-wrap gap-4 sm:gap-x-2">
+          <div className="mt-4">
+            <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
+              See more on
+            </h3>
+            <div className="flex flex-wrap gap-4 sm:gap-x-2">
+              {/* GOV.UK needs the Companies House record; Google/LinkedIn search by name. */}
+              {profile?.company_number && (
                 <a
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
                   target="_blank"
@@ -442,31 +443,31 @@ function CompanyDetail() {
                   )}
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
-                <a
-                  href={`https://www.google.com/search?q=${searchQuery}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Search Google for ${displayName}`}
-                  className="glass brand-link brand-link-google inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
-                >
-                  <GoogleLogo className="brand-mark h-5 w-auto" />
-                  <span>Google</span>
-                  <ExternalLink size={14} aria-hidden="true" />
-                </a>
-                <a
-                  href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Search LinkedIn for ${displayName}`}
-                  className="glass brand-link brand-link-linkedin inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
-                >
-                  <LinkedInLogo className="brand-mark h-5 w-auto" />
-                  <span>LinkedIn</span>
-                  <ExternalLink size={14} aria-hidden="true" />
-                </a>
-              </div>
+              )}
+              <a
+                href={`https://www.google.com/search?q=${searchQuery}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Search Google for ${displayName}`}
+                className="glass brand-link brand-link-google inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#4285f4]! hover:text-white dark:text-white"
+              >
+                <GoogleLogo className="brand-mark h-5 w-auto" />
+                <span>Google</span>
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
+              <a
+                href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Search LinkedIn for ${displayName}`}
+                className="glass brand-link brand-link-linkedin inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[color,background-color,box-shadow]! duration-300! hover:bg-[#0a66c2]! hover:text-white dark:text-white"
+              >
+                <LinkedInLogo className="brand-mark h-5 w-auto" />
+                <span>LinkedIn</span>
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
             </div>
-          )}
+          </div>
         </section>
 
         <Link

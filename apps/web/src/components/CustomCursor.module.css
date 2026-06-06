@@ -1,0 +1,34 @@
+/* Position layer: translated instantly to the pointer via JS (no transition). */
+.layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+  will-change: transform;
+}
+
+.layerVisible {
+  opacity: 1;
+}
+
+/* One persistent box per unique cursor component, centred via translate.
+   Positioning is set inline: the active box stays in flow so the follower keeps
+   a real size (its view-transition snapshot is empty at 0×0) and anchors any
+   absolutely-positioned children; inactive boxes overlay it. Size/scale/filter/
+   opacity are driven inline from per-state tokens. */
+.box {
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* Respect reduced-motion: grow/bloom/collapse snap instantly. The cursor still
+   follows the pointer; only the decorative morphs are cut. Lives in CSS (and
+   beats the inline transition with !important) so it reacts to preference
+   changes without a reload. */
+@media (prefers-reduced-motion: reduce) {
+  .box {
+    transition: none !important;
+  }
+}

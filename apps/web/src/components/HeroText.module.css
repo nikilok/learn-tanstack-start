@@ -104,9 +104,11 @@
   }
 }
 
-/* "K" suffix tracks the number's size/weight. */
+/* "K+" suffix tracks the number's size/weight. nowrap so Firefox doesn't treat
+   the "+" as a break opportunity and drop it to the next line. */
 .suffix {
   display: inline-block;
+  white-space: nowrap;
 }
 
 /* Muted supporting label below the stat. */

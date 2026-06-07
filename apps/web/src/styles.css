@@ -191,11 +191,10 @@ body::after {
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 60px 60px;
-  /* soft full-viewport vignette that never fully fades (floor), so the grid stays visible through the footer regardless of where it lands in the viewport */
   mask-image: radial-gradient(
-    ellipse 90% 75% at 50% 38%,
+    ellipse 70% 50% at 50% 30%,
     black,
-    rgba(0, 0, 0, 0.55) 90%
+    transparent 70%
   );
 }
 

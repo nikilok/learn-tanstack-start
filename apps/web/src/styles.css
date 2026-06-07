@@ -54,7 +54,7 @@
   --bg-page-edge: #f4f4f8;
   --shimmer-base: var(--sea-ink-faint);
   --shimmer-peak: var(--sea-ink);
-  --bg-wash: rgba(0, 114, 245, 0.05);
+  --bg-wash: rgba(0, 114, 245, 0.1);
 }
 
 .dark {
@@ -104,7 +104,7 @@
   --bg-page-edge: #0a0a0a;
   --shimmer-base: var(--sea-ink-soft);
   --shimmer-peak: var(--sea-ink);
-  --bg-wash: rgba(99, 102, 241, 0.07);
+  --bg-wash: rgba(99, 102, 241, 0.09);
 }
 
 html,
@@ -121,17 +121,20 @@ html {
    * own opaque bg. Uses --bg-page-edge so the gutter colour stays theme-aware. */
   scrollbar-gutter: stable;
   background-color: var(--bg-page-edge);
-  /* Viewport-fixed wash that lifts the bottom edge so the page gradient flows
-   * continuously into the footer instead of collapsing to the flat edge colour.
-   * Lives on the root (behind everything) so it sits under the body glows and
-   * the grid/dots pseudo-elements. */
-  background-image: radial-gradient(
-    ellipse 100% 45% at 50% 100%,
+}
+
+/* Fixed bottom colour wash so the page gradient reaches the footer at short viewport heights; a pseudo-element (vs background-attachment:fixed) avoids a Windows scrollbar-gutter seam + per-frame repaint. */
+html::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse 110% 55% at 50% 100%,
     var(--bg-wash),
     transparent
   );
-  background-attachment: fixed;
-  background-repeat: no-repeat;
 }
 
 body {
@@ -186,11 +189,10 @@ body::after {
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 60px 60px;
-  mask-image: radial-gradient(
-    ellipse 70% 50% at 50% 30%,
-    black,
-    transparent 70%
-  );
+  /* vignette + additive bottom floor (composites by default add) so a faint grid still reaches the footer at short viewport heights; the floor rotates 26deg with the grid */
+  mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, black, transparent 70%),
+    linear-gradient(to bottom, transparent 45%, rgba(0, 0, 0, 0.4) 100%);
 }
 
 a:where(:not([class*='no-underline'])) {

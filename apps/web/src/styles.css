@@ -123,31 +123,25 @@ html {
   background-color: var(--bg-page-edge);
 }
 
-/* Fixed bottom colour wash so the page gradient reaches the footer at short viewport heights; a pseudo-element (vs background-attachment:fixed) avoids a Windows scrollbar-gutter seam + per-frame repaint. */
+/* Decorative glows + a bottom colour wash on a fixed full-viewport layer, so they always cover the viewport (incl. when the page is shorter than the window) without depending on body height — avoids both the clipped-glow block and the iOS 100dvh issues. Sits behind the dots/grid pseudo-elements and body content. */
 html::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  background: radial-gradient(
-    ellipse 110% 55% at 50% 100%,
-    var(--bg-wash),
-    transparent
-  );
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 80%, var(--glow-c), transparent),
+    radial-gradient(ellipse 110% 55% at 50% 100%, var(--bg-wash), transparent);
 }
 
 body {
   margin: 0;
-  /* Fill the viewport even when content is short, so the glow background isn't clipped at the body's bottom edge (which showed as a hard-edged block on short windows). */
-  min-height: 100dvh;
   color: var(--sea-ink);
   font-family: var(--font-sans);
   font-feature-settings: 'liga' 1;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
-    radial-gradient(ellipse 50% 50% at 0% 80%, var(--glow-c), transparent);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

@@ -119,22 +119,13 @@ html {
    * lives here (rather than on body) so that body remains transparent and the
    * `body::after` grid pseudo-element (z-index: -1) isn't hidden behind body's
    * own opaque bg. Uses --bg-page-edge so the gutter colour stays theme-aware. */
+  /* height:100% (with body's min-height:100% below) makes the body fill the
+     viewport when content is short, so its glow background reaches the bottom
+     edge instead of the bare --bg-page-edge showing as a border. Percentage,
+     not vh/dvh — avoids the iOS dynamic-viewport quirks. */
+  height: 100%;
   scrollbar-gutter: stable;
   background-color: var(--bg-page-edge);
-}
-
-/* Decorative glows + a bottom colour wash on a fixed full-viewport layer, so they always cover the viewport (incl. when the page is shorter than the window) without depending on body height — avoids both the clipped-glow block and the iOS 100dvh issues. Sits behind the dots/grid pseudo-elements and body content. */
-html::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  background:
-    radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
-    radial-gradient(ellipse 50% 50% at 0% 80%, var(--glow-c), transparent),
-    radial-gradient(ellipse 110% 55% at 50% 100%, var(--bg-wash), transparent);
 }
 
 body {
@@ -142,6 +133,14 @@ body {
   color: var(--sea-ink);
   font-family: var(--font-sans);
   font-feature-settings: 'liga' 1;
+  /* Glows + bottom colour wash on the body (not a fixed/root layer): the body
+     covers the document including iOS's under-toolbar area, so the footer never
+     drops to the bare black --bg-page-edge there. */
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, var(--glow-a), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, var(--glow-b), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 80%, var(--glow-c), transparent),
+    radial-gradient(ellipse 110% 55% at 50% 100%, var(--bg-wash), transparent);
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

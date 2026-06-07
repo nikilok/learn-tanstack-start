@@ -139,6 +139,8 @@ html::before {
 
 body {
   margin: 0;
+  /* Fill the viewport even when content is short, so the glow background isn't clipped at the body's bottom edge (which showed as a hard-edged block on short windows). */
+  min-height: 100dvh;
   color: var(--sea-ink);
   font-family: var(--font-sans);
   font-feature-settings: 'liga' 1;

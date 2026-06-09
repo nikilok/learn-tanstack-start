@@ -13,6 +13,8 @@ import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
+import BingLogo from '../components/BingLogo';
+import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
@@ -429,7 +431,7 @@ function CompanyDetail() {
               See more on
             </h3>
             <div className="flex flex-wrap gap-4 sm:gap-x-2">
-              {/* GOV.UK needs the Companies House record; Google/LinkedIn search by name. */}
+              {/* GOV.UK needs the Companies House record; the search engines query by name. */}
               {profile?.company_number && (
                 <SeeMoreLink
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
@@ -446,6 +448,18 @@ function CompanyDetail() {
                 logo={<GoogleLogo className="brand-mark h-5 w-auto" />}
                 label="Google"
                 ariaLabel={`Search Google for ${displayName}`}
+              />
+              <SeeMoreLink
+                href={`https://www.bing.com/search?q=${searchQuery}`}
+                logo={<BingLogo className="brand-mark h-5 w-auto" />}
+                label="Bing"
+                ariaLabel={`Search Bing for ${displayName}`}
+              />
+              <SeeMoreLink
+                href={`https://duckduckgo.com/?q=${searchQuery}`}
+                logo={<DuckDuckGoLogo className="brand-mark h-5 w-auto" />}
+                label="DuckDuckGo"
+                ariaLabel={`Search DuckDuckGo for ${displayName}`}
               />
               <SeeMoreLink
                 href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}

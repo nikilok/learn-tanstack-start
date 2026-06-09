@@ -11,7 +11,7 @@
 export const SEARCH_INIT_SCRIPT = `(() => {
   try {
     const y = window.sessionStorage.getItem('hmrc-scroll-y');
-    if ((y && parseInt(y, 10) > 0) || window.scrollY > 0) {
+    if ((y && parseInt(y, 10) >= 1) || window.scrollY >= 1) {
       document.documentElement.dataset.hideSearchInput = '';
     }
   } catch (_e) {}

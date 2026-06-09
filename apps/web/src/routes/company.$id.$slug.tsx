@@ -13,10 +13,13 @@ import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
+import BingLogo from '../components/BingLogo';
+import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
 import { NameHistory } from '../components/NameHistory';
+import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
 import {
   companySearchName,
@@ -428,44 +431,42 @@ function CompanyDetail() {
               See more on
             </h3>
             <div className="flex flex-wrap gap-4 sm:gap-x-2">
-              {/* GOV.UK needs the Companies House record; Google/LinkedIn search by name. */}
+              {/* GOV.UK needs the Companies House record; the search engines query by name. */}
               {profile?.company_number && (
-                <a
+                <SeeMoreLink
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="glass inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
-                >
-                  {flagState.govukBranded ? (
-                    <GovUkLogo className="h-5 w-auto" />
-                  ) : (
-                    'GOV.UK'
-                  )}
-                  <ExternalLink size={14} aria-hidden="true" />
-                </a>
+                  logo={
+                    flagState.govukBranded ? (
+                      <GovUkLogo className="h-5 w-auto" />
+                    ) : undefined
+                  }
+                  label={flagState.govukBranded ? undefined : 'GOV.UK'}
+                />
               )}
-              <a
+              <SeeMoreLink
                 href={`https://www.google.com/search?q=${searchQuery}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`Search Google for ${displayName}`}
-                className="glass brand-link inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
-              >
-                <GoogleLogo className="brand-mark h-5 w-auto" />
-                <span>Google</span>
-                <ExternalLink size={14} aria-hidden="true" />
-              </a>
-              <a
+                logo={<GoogleLogo className="brand-mark h-5 w-auto" />}
+                label="Google"
+                ariaLabel={`Search Google for ${displayName}`}
+              />
+              <SeeMoreLink
+                href={`https://www.bing.com/search?q=${searchQuery}`}
+                logo={<BingLogo className="brand-mark h-5 w-auto" />}
+                label="Bing"
+                ariaLabel={`Search Bing for ${displayName}`}
+              />
+              <SeeMoreLink
+                href={`https://duckduckgo.com/?q=${searchQuery}`}
+                logo={<DuckDuckGoLogo className="brand-mark h-5 w-auto" />}
+                label="DuckDuckGo"
+                ariaLabel={`Search DuckDuckGo for ${displayName}`}
+              />
+              <SeeMoreLink
                 href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={`Search LinkedIn for ${displayName}`}
-                className="glass brand-link inline-flex w-fit items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-black no-underline transition-[box-shadow]! duration-300! dark:text-white"
-              >
-                <LinkedInLogo className="brand-mark h-5 w-auto" />
-                <span>LinkedIn</span>
-                <ExternalLink size={14} aria-hidden="true" />
-              </a>
+                logo={<LinkedInLogo className="brand-mark h-5 w-auto" />}
+                label="LinkedIn"
+                ariaLabel={`Search LinkedIn for ${displayName}`}
+              />
             </div>
           </div>
         </section>

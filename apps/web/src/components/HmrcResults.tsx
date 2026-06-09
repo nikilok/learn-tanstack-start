@@ -146,6 +146,16 @@ export default function HmrcResults({ search }: { search: string }) {
     }
   }, [ready]);
 
+  // Discard a stranded scroll key on any mount that cannot restore (empty/short
+  // query or zero rows) so the next full load's pre-hydration script can't hide
+  // the input with no consumer left to clear it. The guard keeps the key alive
+  // through a genuine pending restore (search>=3 while loading or with rows), so
+  // the restore effect above stays its sole consumer and the back-nav race holds.
+  useEffect(() => {
+    const canRestore = search.length >= 3 && (isLoading || results.length > 0);
+    if (!canRestore) sessionStorage.removeItem('hmrc-scroll-y');
+  }, [search, isLoading, results.length]);
+
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
     if (!lastItem) return;

@@ -47,7 +47,13 @@ export default function HmrcCard({
         ...(isActive ? { viewTransitionName: 'active-card' } : {}),
       }}
       onClick={() => {
-        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+        // Persist scroll only when scrolled — a "0" is truthy and would strand
+        // the pre-hydration hide with no consumer to clear it (see CLAUDE.md).
+        if (window.scrollY > 0) {
+          sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+        } else {
+          sessionStorage.removeItem('hmrc-scroll-y');
+        }
         sessionStorage.setItem('hmrc-active-id', row.slugId);
         sessionStorage.setItem(
           'hmrc-highlight',

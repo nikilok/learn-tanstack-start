@@ -20,6 +20,21 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
 - **Safety-net cleanup must NOT remove `hmrc-scroll-y`**: `HmrcResults` owns key
   consumption, and its `ready` gate (data + fonts + width) can take many frames.
   Clearing the key here races scroll-restore on back-nav.
+- **`hmrc-scroll-y` means "restore to Y > 0", never "0"**: a saved `"0"` is a
+  truthy string, so it stamps the hide attribute (`search-input-init.ts`) AND
+  defeats the safety-net poll's `!getItem(...)` guard — hiding the input forever
+  on a non-restoring full load (empty/short/zero-result home, where `ready` never
+  becomes true so the restore effect never consumes the key). Two guards keep the
+  key meaning a real scroll: the `HmrcCard` click writer only persists when
+  `scrollY > 0` (else `removeItem`), and `search-input-init.ts` stamps only when
+  the saved value `parseInt`s to `> 0`.
+- **`HmrcResults` discards a stranded key on non-restoring mounts**: a `useEffect`
+  keyed on `[search, isLoading, results.length]` `removeItem`s `hmrc-scroll-y`
+  unless `search.length >= 3 && (isLoading || results.length > 0)`. This closes the
+  permanent-hide where *any* truthy stale value lands on the empty/short/zero-result
+  home with no consumer. Its guard is shaped to preserve the key through a genuine
+  pending restore (loading, or rows present), so it never races the restore effect —
+  do NOT widen it to drop the `isLoading ||` disjunct or add `ready` to its deps.
 - **Attribute is cleared on `isStuck=true` via `useLayoutEffect`**: by then React's
   inline `opacity:0` is in place, so dropping the CSS gate is safe.
 

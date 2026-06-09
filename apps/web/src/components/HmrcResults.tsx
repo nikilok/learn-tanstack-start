@@ -151,10 +151,11 @@ export default function HmrcResults({ search }: { search: string }) {
   // the input with no consumer left to clear it. The guard keeps the key alive
   // through a genuine pending restore (search>=3 while loading or with rows), so
   // the restore effect above stays its sole consumer and the back-nav race holds.
+  const hasRows = results.length > 0;
   useEffect(() => {
-    const canRestore = search.length >= 3 && (isLoading || results.length > 0);
+    const canRestore = search.length >= 3 && (isLoading || hasRows);
     if (!canRestore) sessionStorage.removeItem('hmrc-scroll-y');
-  }, [search, isLoading, results.length]);
+  }, [search, isLoading, hasRows]);
 
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
@@ -171,7 +172,8 @@ export default function HmrcResults({ search }: { search: string }) {
   useEffect(() => {
     if (results.length === 0) return;
     const onPageHide = () => {
-      if (window.scrollY > 0) {
+      // Match the reader's `parseInt > 0` gate — sub-pixel scroll floors to 0.
+      if (window.scrollY >= 1) {
         sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
       }
     };

@@ -104,20 +104,26 @@ export function useSearchPill(
     if (isStuck) clearHideAttribute();
   }, [isStuck]);
 
-  // Safety net: if the inline script set the attribute but we end up at the
-  // top of the page with nothing to restore, drop it. Polls every animation
-  // frame and terminates only when one of three conditions is met:
-  //   1. The attribute has been removed by another path (e.g., `isStuck=true`
-  //      via the useLayoutEffect above).
-  //   2. `scrollY === 0` and `hmrc-scroll-y` has been consumed by HmrcResults.
+  // Safety net: drop the attribute once the restore is done UNLESS we've landed
+  // in pill mode. Polls every animation frame and terminates when one of:
+  //   1. The attribute was removed by another path (e.g. `isStuck=true` above).
+  //   2. `hmrc-scroll-y` is consumed AND the sentinel is in view (not pill) — so
+  //      the input is the correct final state and we clear.
   //   3. The component unmounts (cancelled flag stops the next tick).
   //
-  // A naive timeout cutoff isn't safe — HmrcResults' scroll-restore is gated
-  // on the virtualizer's font/width readiness, which can take an indefinite
-  // number of frames on slow loads. Anything shorter than "wait until the
-  // restore actually happens" leaves a race window where the attribute
-  // persists with no remaining clearer. rAF auto-pauses on background tabs,
-  // so an open-ended poll has no idle cost when the user isn't looking.
+  // We can't gate on `scrollY === 0`: a small or clamped restore (the rAF can
+  // race the virtual list's height and settle at a few px) leaves the sentinel
+  // in view — input mode, not pill — where `isStuck` never goes true and the old
+  // `scrollY === 0` guard never matched, stranding the input hidden. Reading the
+  // sentinel only after the key is gone keeps the rect post-restore and accurate
+  // (not the pre-restore lie warned about elsewhere). If the sentinel is scrolled
+  // out we leave the attribute for the `isStuck` useLayoutEffect, so the input
+  // never flashes at a scrolled position.
+  //
+  // A naive timeout cutoff isn't safe — HmrcResults' scroll-restore is gated on
+  // the virtualizer's font/width readiness, which can take an indefinite number
+  // of frames on slow loads. rAF auto-pauses on background tabs, so an open-ended
+  // poll has no idle cost when the user isn't looking.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     if (!document.documentElement.hasAttribute('data-hide-search-input')) {
@@ -129,9 +135,15 @@ export function useSearchPill(
       if (!document.documentElement.hasAttribute('data-hide-search-input')) {
         return;
       }
-      if (window.scrollY === 0 && !sessionStorage.getItem('hmrc-scroll-y')) {
-        clearHideAttribute();
-        return;
+      if (!sessionStorage.getItem('hmrc-scroll-y')) {
+        const sentinel = sentinelRef.current;
+        const stuck = sentinel
+          ? sentinel.getBoundingClientRect().bottom < 0
+          : false;
+        if (!stuck) {
+          clearHideAttribute();
+          return;
+        }
       }
       requestAnimationFrame(tick);
     };
@@ -139,7 +151,7 @@ export function useSearchPill(
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sentinelRef]);
 
   // Only activate pill mode when scrolled past the sentinel
   useSearchShortcut(inputRef, () => {

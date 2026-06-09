@@ -47,7 +47,14 @@ export default function HmrcCard({
         ...(isActive ? { viewTransitionName: 'active-card' } : {}),
       }}
       onClick={() => {
-        sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+        // Persist only a real (>=1px) scroll; a "0"/sub-pixel value is truthy but
+        // floors to 0 on read, so it would strand the pre-hydration hide with no
+        // consumer to clear it. Threshold matches the reader's `parseInt > 0`.
+        if (window.scrollY >= 1) {
+          sessionStorage.setItem('hmrc-scroll-y', String(window.scrollY));
+        } else {
+          sessionStorage.removeItem('hmrc-scroll-y');
+        }
         sessionStorage.setItem('hmrc-active-id', row.slugId);
         sessionStorage.setItem(
           'hmrc-highlight',

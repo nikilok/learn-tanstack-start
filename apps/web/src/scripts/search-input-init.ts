@@ -10,7 +10,7 @@
  */
 export const SEARCH_INIT_SCRIPT = `(() => {
   try {
-    var y = window.sessionStorage.getItem('hmrc-scroll-y');
+    const y = window.sessionStorage.getItem('hmrc-scroll-y');
     if ((y && parseInt(y, 10) > 0) || window.scrollY > 0) {
       document.documentElement.dataset.hideSearchInput = '';
     }

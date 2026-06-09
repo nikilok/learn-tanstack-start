@@ -25,9 +25,12 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   defeats the safety-net poll's `!getItem(...)` guard — hiding the input forever
   on a non-restoring full load (empty/short/zero-result home, where `ready` never
   becomes true so the restore effect never consumes the key). Two guards keep the
-  key meaning a real scroll: the `HmrcCard` click writer only persists when
-  `scrollY > 0` (else `removeItem`), and `search-input-init.ts` stamps only when
-  the saved value `parseInt`s to `> 0`.
+  key meaning a real scroll: the `HmrcCard` click + `HmrcResults` `pagehide`
+  writers only persist when `scrollY >= 1` (click else `removeItem`), and
+  `search-input-init.ts` stamps only when the saved value `parseInt`s to `>= 1`.
+  Use `>= 1`, not `> 0`: writers and reader must agree, and a sub-pixel scroll
+  (e.g. `0.6`, HiDPI/zoom) floors to `0` on read — persisting it would stamp the
+  hide with nothing the reader (or restore) will honor.
 - **`HmrcResults` discards a stranded key on non-restoring mounts**: a `useEffect`
   keyed on `[search, isLoading, results.length]` `removeItem`s `hmrc-scroll-y`
   unless `search.length >= 3 && (isLoading || results.length > 0)`. This closes the
@@ -37,13 +40,26 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   do NOT widen it to drop the `isLoading ||` disjunct or add `ready` to its deps.
 - **Attribute is cleared on `isStuck=true` via `useLayoutEffect`**: by then React's
   inline `opacity:0` is in place, so dropping the CSS gate is safe.
+- **The safety-net poll clears on "restore done AND not pill", NOT `scrollY === 0`**:
+  the restore can settle at a few px — a small saved scroll, or a large one that
+  *clamps* because the `scrollTo` rAF raced the virtual list's height — leaving the
+  sentinel in view (input mode, not pill) where `isStuck` never goes true. The old
+  `scrollY === 0` guard never matched there, stranding the input hidden (visible
+  symptom: results page, no input, no pill, "scroll to recover"). The poll now waits
+  for `hmrc-scroll-y` to be consumed, then reads the sentinel: in view → not pill →
+  clear; scrolled out → leave it for the `isStuck` clearer (so the input never
+  flashes at a scrolled position). Gating the rect read on `!getItem(...)` keeps it
+  post-restore and accurate.
 
 ### Anti-patterns (past bugs)
 
 - **`useLayoutEffect` to set opacity directly**: no-op on server → first SSR paint
   shows the input before JS hides it.
-- **Synchronous `getBoundingClientRect` in `useSearchPill`**: sentinel is briefly
-  in-viewport on back-nav before scroll restores, so the read lies.
+- **Synchronous `getBoundingClientRect` in `useSearchPill` — only safe when gated on
+  `!hmrc-scroll-y`**: sentinel is briefly in-viewport on back-nav *before* scroll
+  restores, so an ungated read lies. The safety-net poll may read it because it only
+  does so once the key is gone (restore complete) — the read is then post-restore and
+  accurate. Do NOT add an ungated rect read elsewhere.
 - **Diverging server/client initial state for `ready`**: hydration mismatch → React
   reconciles to client and overwrites server HTML, producing a worse flash. The
   pre-hydration attribute is the only correct way to encode client-only first-paint

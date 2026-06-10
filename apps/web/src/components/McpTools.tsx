@@ -4,7 +4,7 @@ import '@mcp-b/global';
 
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { searchHmrcQueryOptions } from '../api/hmrc';
-import { titleCase } from '../utils';
+import { formatLocation, titleCase } from '../utils';
 
 /**
  * Registers browser-side MCP tools with `navigator.modelContext` (via
@@ -77,7 +77,7 @@ export function McpTools() {
 
           const formatted = result.rows.map((row) => ({
             name: titleCase(row.organisationName),
-            location: titleCase(row.location),
+            location: formatLocation(row.locality, row.region),
             visaRoute: titleCase(row.route),
             rating: titleCase(row.typeRating),
             sponsorLicenceNumber: row.sponsorLicenceNumber,
@@ -211,7 +211,7 @@ export function McpTools() {
 
           const details = {
             name: titleCase(top.organisationName),
-            location: titleCase(top.location) || null,
+            location: formatLocation(top.locality, top.region) || null,
             sponsorship,
             companiesHouse: profile
               ? {

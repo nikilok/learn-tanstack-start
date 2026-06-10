@@ -45,9 +45,10 @@ export const searchHmrc = createServerFn()
         organisationName: hmrcSkilledWorkers.organisationName,
         nameSlug: hmrcSkilledWorkers.nameSlug,
         sponsorLicenceNumber: hmrcSkilledWorkers.sponsorLicenceNumber,
-        location: sql<
+        locality: sql<
           string | null
         >`COALESCE(${companiesHouseProfiles.locality}, ${companiesHouseProfiles.addressLine2})`,
+        region: companiesHouseProfiles.region,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
         score: scoreExpr,

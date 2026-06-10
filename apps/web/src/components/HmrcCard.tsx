@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import type { HmrcRow } from '../api/hmrc';
-import { titleCase } from '../utils';
+import { formatLocation, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 import UnionJackLens from './UnionJackLens';
 
@@ -86,7 +86,7 @@ export default function HmrcCard({
       </div>
       <div className="mt-0.5">
         <p className="text-sm text-(--sea-ink-soft)">
-          {titleCase(row.location)}
+          {formatLocation(row.locality, row.region)}
         </p>
         <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">
           {titleCase(row.route)}

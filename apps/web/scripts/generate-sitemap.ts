@@ -6,7 +6,7 @@ import {
   hmrcSkilledWorkers,
 } from '@ss/db';
 import { Glob } from 'bun';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../src/db.server';
 
@@ -30,9 +30,13 @@ async function generate() {
   }
 
   // Single pass over all rows; LEFT JOIN keeps HMRC entries without a CH match.
+  // One URL per (org, rating, route) group: multi-licence siblings 301 to the
+  // canonical min(hash) page, so only that hash belongs in the sitemap.
+  // updatedAt is constant per org (mapping PK is organisation_name), so adding
+  // it to GROUP BY never splits a group — it just keeps drizzle's Date mapping.
   const allRows = await db
     .select({
-      hash: hmrcSkilledWorkers.hash,
+      hash: sql<string>`min(${hmrcSkilledWorkers.hash})`,
       nameSlug: hmrcSkilledWorkers.nameSlug,
       updatedAt: companiesHouseProfiles.updatedAt,
     })
@@ -51,7 +55,14 @@ async function generate() {
         hmrcCompanyMapping.companyNumber,
       ),
     )
-    .orderBy(hmrcSkilledWorkers.hash);
+    .groupBy(
+      hmrcSkilledWorkers.organisationName,
+      hmrcSkilledWorkers.nameSlug,
+      hmrcSkilledWorkers.typeRating,
+      hmrcSkilledWorkers.route,
+      companiesHouseProfiles.updatedAt,
+    )
+    .orderBy(sql`min(${hmrcSkilledWorkers.hash})`);
 
   const entries = new Map(
     allRows.map((row) => [

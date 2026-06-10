@@ -56,6 +56,18 @@ export const Route = createFileRoute('/company/$id/$slug')({
       hmrcBySlugIdQueryOptions(params.id),
     );
 
+    if (sponsor && sponsor.canonicalSlugId !== params.id) {
+      // Sibling licence row of a multi-licence org — same name/rating/route,
+      // near-identical page. Search lists only the canonical (min-hash) row;
+      // 301 the rest onto it so duplicates don't accumulate in the index.
+      throw redirect({
+        to: '/company/$id/$slug',
+        params: { id: sponsor.canonicalSlugId, slug: params.slug },
+        search: (prev) => ({ search: prev.search ?? '' }),
+        statusCode: 301,
+      });
+    }
+
     if (!sponsor) {
       const matches = await getHmrcBySlug({ data: { slug: params.slug } });
       if (matches.length === 1) {
@@ -340,14 +352,15 @@ function CompanyDetail() {
                 </dd>
               </div>
               {/* No CH profile → the second card never renders; surface the licence here instead */}
-              {!profile && sponsor.sponsorLicenceNumber && (
+              {!profile && sponsor.sponsorLicenceNumbers.length > 0 && (
                 <div>
                   <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                    Sponsor Licence No.
+                    Sponsor Licence{' '}
+                    {sponsor.sponsorLicenceNumbers.length > 1 ? 'Nos.' : 'No.'}
                   </dt>
                   <dd className="mt-1 text-sm text-(--sea-ink)">
                     <span x-apple-data-detectors="false">
-                      {sponsor.sponsorLicenceNumber}
+                      {sponsor.sponsorLicenceNumbers.join(', ')}
                     </span>
                   </dd>
                 </div>
@@ -404,14 +417,17 @@ function CompanyDetail() {
                   </div>
                 )}
 
-                {sponsor.sponsorLicenceNumber && (
+                {sponsor.sponsorLicenceNumbers.length > 0 && (
                   <div>
                     <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Sponsor Licence No.
+                      Sponsor Licence{' '}
+                      {sponsor.sponsorLicenceNumbers.length > 1
+                        ? 'Nos.'
+                        : 'No.'}
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
                       <span x-apple-data-detectors="false">
-                        {sponsor.sponsorLicenceNumber}
+                        {sponsor.sponsorLicenceNumbers.join(', ')}
                       </span>
                     </dd>
                   </div>

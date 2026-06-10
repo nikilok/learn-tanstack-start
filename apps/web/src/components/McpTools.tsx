@@ -24,7 +24,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence number.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence numbers.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -80,7 +80,7 @@ export function McpTools() {
             location: formatLocation(row.locality, row.region),
             visaRoute: titleCase(row.route),
             rating: titleCase(row.typeRating),
-            sponsorLicenceNumber: row.sponsorLicenceNumber,
+            sponsorLicenceNumbers: row.sponsorLicenceNumbers,
           }));
 
           return {
@@ -205,8 +205,8 @@ export function McpTools() {
             .map((row) => ({
               visaRoute: titleCase(row.route),
               rating: titleCase(row.typeRating),
-              // Per-row, not top-level: same-name orgs can hold multiple licences
-              sponsorLicenceNumber: row.sponsorLicenceNumber,
+              // Per-row, not top-level: licences vary by (rating, route) group
+              sponsorLicenceNumbers: row.sponsorLicenceNumbers,
             }));
 
           const details = {

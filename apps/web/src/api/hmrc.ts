@@ -36,30 +36,70 @@ export const searchHmrc = createServerFn()
           THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
         ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
       END`;
-    // Listing location is CH-sourced (HMRC dropped town/county from the feed).
-    // Pure display joins: PK probes on the returned window only — never in
-    // WHERE/ORDER BY, so ranking and LIMIT pushdown are unaffected.
-    const rows = await db
+    // One row per (org, rating, route): the same org can hold several licences
+    // with otherwise identical feed data (888 groups in the 2026-06 feed), and
+    // the cards show nothing that distinguishes them. min(hash) is the
+    // canonical slugId — the detail loader 301s the siblings to it.
+    // Grouping happens in the subquery, BEFORE the CH joins, so the joins stay
+    // PK probes on the returned window only and ranking/LIMIT are unaffected.
+    const grouped = db
       .select({
-        slugId: hmrcSkilledWorkers.hash,
+        slugId: sql<string>`min(${hmrcSkilledWorkers.hash})`.as('slug_id'),
         organisationName: hmrcSkilledWorkers.organisationName,
         nameSlug: hmrcSkilledWorkers.nameSlug,
-        sponsorLicenceNumber: hmrcSkilledWorkers.sponsorLicenceNumber,
+        sponsorLicenceNumbers: sql<
+          string[]
+        >`coalesce(array_agg(distinct ${hmrcSkilledWorkers.sponsorLicenceNumber}) filter (where ${hmrcSkilledWorkers.sponsorLicenceNumber} is not null), '{}')`.as(
+          'sponsor_licence_numbers',
+        ),
+        typeRating: hmrcSkilledWorkers.typeRating,
+        route: hmrcSkilledWorkers.route,
+        score: scoreExpr.as('score'),
+      })
+      .from(hmrcSkilledWorkers)
+      .where(
+        sql`(
+          ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
+          OR word_similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.6
+          OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
+        )`,
+      )
+      .groupBy(
+        hmrcSkilledWorkers.organisationName,
+        hmrcSkilledWorkers.nameSlug,
+        hmrcSkilledWorkers.typeRating,
+        hmrcSkilledWorkers.route,
+      )
+      .orderBy(
+        desc(scoreExpr),
+        sql`${hmrcSkilledWorkers.organisationName} ASC`,
+        // Unique tiebreak: groups tie on score AND name, and unstable tie
+        // order across page fetches duplicates/drops rows at OFFSET boundaries
+        sql`min(${hmrcSkilledWorkers.hash}) ASC`,
+      )
+      .limit(PAGE_SIZE + 1)
+      .offset(offset)
+      .as('g');
+
+    // Listing location is CH-sourced (HMRC dropped town/county from the feed).
+    const rows = await db
+      .select({
+        slugId: grouped.slugId,
+        organisationName: grouped.organisationName,
+        nameSlug: grouped.nameSlug,
+        sponsorLicenceNumbers: grouped.sponsorLicenceNumbers,
         locality: sql<
           string | null
         >`COALESCE(${companiesHouseProfiles.locality}, ${companiesHouseProfiles.addressLine2})`,
         region: companiesHouseProfiles.region,
-        typeRating: hmrcSkilledWorkers.typeRating,
-        route: hmrcSkilledWorkers.route,
-        score: scoreExpr,
+        typeRating: grouped.typeRating,
+        route: grouped.route,
+        score: grouped.score,
       })
-      .from(hmrcSkilledWorkers)
+      .from(grouped)
       .leftJoin(
         hmrcCompanyMapping,
-        eq(
-          hmrcCompanyMapping.organisationName,
-          hmrcSkilledWorkers.organisationName,
-        ),
+        eq(hmrcCompanyMapping.organisationName, grouped.organisationName),
       )
       .leftJoin(
         companiesHouseProfiles,
@@ -68,22 +108,12 @@ export const searchHmrc = createServerFn()
           hmrcCompanyMapping.companyNumber,
         ),
       )
-      .where(
-        sql`(
-          ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
-          OR word_similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.6
-          OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
-        )`,
-      )
+      // Joins don't guarantee order preservation; re-sort the ≤51-row window
       .orderBy(
-        desc(scoreExpr),
-        sql`${hmrcSkilledWorkers.organisationName} ASC`,
-        // Unique tiebreak: multi-row orgs tie on score AND name, and unstable
-        // tie order across page fetches duplicates/drops rows at OFFSET boundaries
-        asc(hmrcSkilledWorkers.hash),
-      )
-      .limit(PAGE_SIZE + 1)
-      .offset(offset);
+        desc(grouped.score),
+        asc(grouped.organisationName),
+        asc(grouped.slugId),
+      );
 
     const hasMore = rows.length > PAGE_SIZE;
     return {
@@ -94,16 +124,30 @@ export const searchHmrc = createServerFn()
 
 /**
  * Server fn returning a single `hmrc_skilled_workers` row keyed by its stable
- * `hash` slug id. Returns `null` when no matching row exists.
+ * `hash` slug id. Returns `null` when no matching row exists. Also returns the
+ * group canonical: multi-licence orgs have one row per licence with identical
+ * (org, rating, route) — search lists only min(hash), and the loader 301s the
+ * sibling hashes to `canonicalSlugId`. `sponsorLicenceNumbers` carries every
+ * licence in the group so the canonical page shows all of them.
  */
 const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {
+    const groupFilter = sql`
+      h2.organisation_name = ${hmrcSkilledWorkers.organisationName}
+      AND h2.type_rating = ${hmrcSkilledWorkers.typeRating}
+      AND h2.route = ${hmrcSkilledWorkers.route}`;
     const [row] = await db
       .select({
         slugId: hmrcSkilledWorkers.hash,
+        canonicalSlugId: sql<string>`(
+          SELECT min(h2.hash) FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
+        )`,
         organisationName: hmrcSkilledWorkers.organisationName,
-        sponsorLicenceNumber: hmrcSkilledWorkers.sponsorLicenceNumber,
+        sponsorLicenceNumbers: sql<string[]>`(
+          SELECT coalesce(array_agg(distinct h2.sponsor_licence_number) filter (where h2.sponsor_licence_number is not null), '{}')
+          FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
+        )`,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
       })

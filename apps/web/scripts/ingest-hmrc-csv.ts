@@ -137,13 +137,32 @@ type CleanedRow = {
 
 const seen = new Set<string>();
 const dedupedRows: CleanedRow[] = [];
+// Licence is the hash backbone: blank values collide distinct orgs into one
+// hash (silently dropped by dedup), and >20 chars aborts the batched INSERT
+// mid-ingest with no row context. Fail fast naming the rows instead.
+const invalidRows: string[] = [];
 
-for (const r of records) {
+for (const [i, r] of records.entries()) {
+  const rowNum = i + 2; // 1-based, after the header row
   const licence = r['Sponsor Licence Number'].trim();
   const orgName = r['Organisation Name'].trim();
   const typeRating = r.TierRating.trim();
   const route = r['Migrant Classification'].trim();
   const status = clean(r['Sponsor Status']);
+
+  if (!licence || licence.length > 20) {
+    invalidRows.push(
+      `row ${rowNum} ("${orgName || '?'}"): bad Sponsor Licence Number ${JSON.stringify(licence)}`,
+    );
+    continue;
+  }
+  if (status && status.length > 64) {
+    invalidRows.push(
+      `row ${rowNum} ("${orgName}"): Sponsor Status exceeds 64 chars (${status.length})`,
+    );
+    continue;
+  }
+
   const hash = computeHash(licence, typeRating, route);
   const nameSlug = slugify(orgName) || hash;
 
@@ -159,6 +178,15 @@ for (const r of records) {
       route,
     });
   }
+}
+
+if (invalidRows.length > 0) {
+  console.error(`Row validation failed for ${invalidRows.length} row(s):`);
+  for (const line of invalidRows.slice(0, 10)) console.error(`  ${line}`);
+  if (invalidRows.length > 10) {
+    console.error(`  …and ${invalidRows.length - 10} more`);
+  }
+  process.exit(1);
 }
 
 console.log(

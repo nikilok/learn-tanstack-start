@@ -9,10 +9,7 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import {
-  SHORT_EDGE_CACHE,
-  setSsrCacheControl,
-} from '../api/cache-headers';
+import { SHORT_EDGE_CACHE, setSsrCacheControl } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -403,8 +400,7 @@ function CompanyDetail() {
               {!profile && licenceNumbers.length > 0 && (
                 <div>
                   <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                    Sponsor Licence{' '}
-                    {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
+                    Sponsor Licence {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
                   </dt>
                   <dd className="mt-1 text-sm text-(--sea-ink)">
                     <span x-apple-data-detectors="false">

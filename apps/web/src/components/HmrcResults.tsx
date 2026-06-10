@@ -39,8 +39,7 @@ export default function HmrcResults({ search }: { search: string }) {
         letterSpacing: -0.4, // heading-card utility
       },
       {
-        getText: (row) =>
-          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
+        getText: (row) => titleCase(row.location),
         font: '14px Geist', // text-sm
         lineHeight: 20,
       },

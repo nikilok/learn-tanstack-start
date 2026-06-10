@@ -1,7 +1,11 @@
-import { hmrcSkilledWorkers } from '@ss/db';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+} from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { desc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
@@ -32,18 +36,37 @@ export const searchHmrc = createServerFn()
           THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
         ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
       END`;
+    // Listing location is CH-sourced (HMRC dropped town/county from the feed).
+    // Pure display joins: PK probes on the returned window only — never in
+    // WHERE/ORDER BY, so ranking and LIMIT pushdown are unaffected.
     const rows = await db
       .select({
         slugId: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
         nameSlug: hmrcSkilledWorkers.nameSlug,
-        townCity: hmrcSkilledWorkers.townCity,
-        county: hmrcSkilledWorkers.county,
+        sponsorLicenceNumber: hmrcSkilledWorkers.sponsorLicenceNumber,
+        location: sql<
+          string | null
+        >`COALESCE(${companiesHouseProfiles.locality}, ${companiesHouseProfiles.addressLine2})`,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
         score: scoreExpr,
       })
       .from(hmrcSkilledWorkers)
+      .leftJoin(
+        hmrcCompanyMapping,
+        eq(
+          hmrcCompanyMapping.organisationName,
+          hmrcSkilledWorkers.organisationName,
+        ),
+      )
+      .leftJoin(
+        companiesHouseProfiles,
+        eq(
+          companiesHouseProfiles.companyNumber,
+          hmrcCompanyMapping.companyNumber,
+        ),
+      )
       .where(
         sql`(
           ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
@@ -73,8 +96,7 @@ const getHmrcBySlugId = createServerFn()
       .select({
         slugId: hmrcSkilledWorkers.hash,
         organisationName: hmrcSkilledWorkers.organisationName,
-        townCity: hmrcSkilledWorkers.townCity,
-        county: hmrcSkilledWorkers.county,
+        sponsorLicenceNumber: hmrcSkilledWorkers.sponsorLicenceNumber,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
       })
@@ -124,6 +146,7 @@ export const sponsorCountQueryOptions = queryOptions({
  * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
  * lookup 404s, the loader checks whether the name still maps to a current row
  * and 301s to its new hash. Capped at 2 since callers only branch on 0 / 1 / many.
+ * Ordered by hash so the multi-match 301 always picks the same canonical row.
  * Not wrapped in queryOptions — only the loader calls it, and the redirect
  * moves the user off this page so there's no second reader for the result.
  */
@@ -138,6 +161,7 @@ export const getHmrcBySlug = createServerFn()
       })
       .from(hmrcSkilledWorkers)
       .where(eq(hmrcSkilledWorkers.nameSlug, slug))
+      .orderBy(asc(hmrcSkilledWorkers.hash))
       .limit(2);
     return rows;
   });

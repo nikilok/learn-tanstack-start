@@ -67,10 +67,13 @@ export const Route = createFileRoute('/company/$id/$slug')({
         });
       }
       if (matches.length > 1) {
+        // 301 to the canonical (hash-ordered first) row so old multi-route
+        // URLs land on a real page and keep link equity.
         throw redirect({
-          to: '/',
-          search: { search: matches[0].organisationName },
-          statusCode: 302,
+          to: '/company/$id/$slug',
+          params: { id: matches[0].slugId, slug: params.slug },
+          search: (prev) => ({ search: prev.search ?? '' }),
+          statusCode: 301,
         });
       }
       throw notFound();
@@ -89,8 +92,6 @@ export const Route = createFileRoute('/company/$id/$slug')({
       | {
           sponsor: {
             organisationName: string;
-            townCity?: string | null;
-            county?: string | null;
             typeRating: string;
             route: string;
           };
@@ -124,7 +125,10 @@ export const Route = createFileRoute('/company/$id/$slug')({
         ? titleCase(loaderData.sponsor.organisationName)
         : '';
     const location = loaderData
-      ? formatLocation(loaderData.sponsor.townCity, loaderData.sponsor.county)
+      ? formatLocation(
+          loaderData.profile?.registered_office_address?.locality,
+          loaderData.profile?.registered_office_address?.region,
+        )
       : '';
     const industry = loaderData?.profile?.sicDescriptions
       ?.map((sic) => sic.description)
@@ -241,7 +245,10 @@ function CompanyDetail() {
   const alsoRegisteredAs =
     normalizeName(sponsor.organisationName) !== currentKey ? hmrcName : null;
   const displayRoute = titleCase(sponsor.route);
-  const displayLocation = formatLocation(sponsor.townCity, sponsor.county);
+  const displayLocation = formatLocation(
+    profile?.registered_office_address?.locality,
+    profile?.registered_office_address?.region,
+  );
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
     .join(', ');
@@ -332,6 +339,19 @@ function CompanyDetail() {
                   {titleCase(sponsor.typeRating)}
                 </dd>
               </div>
+              {/* No CH profile → the second card never renders; surface the licence here instead */}
+              {!profile && sponsor.sponsorLicenceNumber && (
+                <div>
+                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
+                    Sponsor Licence No.
+                  </dt>
+                  <dd className="mt-1 text-sm text-(--sea-ink)">
+                    <span x-apple-data-detectors="false">
+                      {sponsor.sponsorLicenceNumber}
+                    </span>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 
@@ -379,6 +399,19 @@ function CompanyDetail() {
                     <dd className="mt-1 text-sm text-(--sea-ink)">
                       <span x-apple-data-detectors="false">
                         {profile.company_number}
+                      </span>
+                    </dd>
+                  </div>
+                )}
+
+                {sponsor.sponsorLicenceNumber && (
+                  <div>
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
+                      Sponsor Licence No.
+                    </dt>
+                    <dd className="mt-1 text-sm text-(--sea-ink)">
+                      <span x-apple-data-detectors="false">
+                        {sponsor.sponsorLicenceNumber}
                       </span>
                     </dd>
                   </div>

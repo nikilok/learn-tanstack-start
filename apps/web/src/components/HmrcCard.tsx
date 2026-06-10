@@ -86,7 +86,7 @@ export default function HmrcCard({
       </div>
       <div className="mt-0.5">
         <p className="text-sm text-(--sea-ink-soft)">
-          {[row.townCity, row.county].filter(Boolean).map(titleCase).join(', ')}
+          {titleCase(row.location)}
         </p>
         <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">
           {titleCase(row.route)}

@@ -5,11 +5,11 @@ import { slugify } from '../src/utils';
 import { setGitHubOutput } from './ci-utils';
 
 const EXPECTED_COLUMNS = [
+  'Sponsor Licence Number',
   'Organisation Name',
-  'Town/City',
-  'County',
-  'Type & Rating',
-  'Route',
+  'TierRating',
+  'Migrant Classification',
+  'Sponsor Status',
 ] as const;
 
 const BATCH_SIZE = 500;
@@ -91,8 +91,8 @@ await sql`
     "hash" varchar(11) NOT NULL UNIQUE,
     "organisation_name" varchar(255) NOT NULL,
     "name_slug" varchar(255) NOT NULL,
-    "town_city" varchar(100),
-    "county" varchar(100),
+    "sponsor_licence_number" varchar(20),
+    "sponsor_status" varchar(64),
     "type_rating" varchar(100) NOT NULL,
     "route" varchar(100) NOT NULL
   )
@@ -110,16 +110,15 @@ function clean(val: string | undefined): string | null {
   return trimmed;
 }
 
+/** Mint the stable URL id from the licence-based row identity. Licence is a
+ *  durable per-sponsor key, so hashes survive company renames and future
+ *  ingests — org name is deliberately excluded. */
 function computeHash(
-  orgName: string,
-  townCity: string | null,
-  county: string | null,
+  licence: string,
   typeRating: string,
   route: string,
 ): string {
-  const input = [orgName, townCity ?? '', county ?? '', typeRating, route].join(
-    '|',
-  );
+  const input = [licence, typeRating, route].join('|');
   const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
   // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
   return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);
@@ -130,8 +129,8 @@ type CleanedRow = {
   hash: string;
   orgName: string;
   nameSlug: string;
-  townCity: string | null;
-  county: string | null;
+  licence: string;
+  status: string | null;
   typeRating: string;
   route: string;
 };
@@ -140,12 +139,12 @@ const seen = new Set<string>();
 const dedupedRows: CleanedRow[] = [];
 
 for (const r of records) {
+  const licence = r['Sponsor Licence Number'].trim();
   const orgName = r['Organisation Name'].trim();
-  const townCity = clean(r['Town/City']);
-  const county = clean(r.County);
-  const typeRating = r['Type & Rating'].trim();
-  const route = r.Route.trim();
-  const hash = computeHash(orgName, townCity, county, typeRating, route);
+  const typeRating = r.TierRating.trim();
+  const route = r['Migrant Classification'].trim();
+  const status = clean(r['Sponsor Status']);
+  const hash = computeHash(licence, typeRating, route);
   const nameSlug = slugify(orgName) || hash;
 
   if (!seen.has(hash)) {
@@ -154,8 +153,8 @@ for (const r of records) {
       hash,
       orgName,
       nameSlug,
-      townCity,
-      county,
+      licence,
+      status,
       typeRating,
       route,
     });
@@ -181,15 +180,15 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
       r.hash,
       r.orgName,
       r.nameSlug,
-      r.townCity,
-      r.county,
+      r.licence,
+      r.status,
       r.typeRating,
       r.route,
     );
   }
 
   await sql.query(
-    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "name_slug", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
+    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "name_slug", "sponsor_licence_number", "sponsor_status", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
     values,
   );
 
@@ -203,7 +202,7 @@ console.log('Building indexes on staging table...');
 await Promise.all([
   sql`CREATE INDEX "stg_idx_hmrc_org_name" ON "hmrc_skilled_workers_staging" USING btree ("organisation_name")`,
   sql`CREATE INDEX "stg_idx_hmrc_name_slug" ON "hmrc_skilled_workers_staging" USING btree ("name_slug")`,
-  sql`CREATE INDEX "stg_idx_hmrc_town_city" ON "hmrc_skilled_workers_staging" USING btree ("town_city")`,
+  sql`CREATE INDEX "stg_idx_hmrc_licence" ON "hmrc_skilled_workers_staging" USING btree ("sponsor_licence_number")`,
   sql`CREATE INDEX "stg_idx_hmrc_route" ON "hmrc_skilled_workers_staging" USING btree ("route")`,
   sql`CREATE INDEX "stg_idx_hmrc_org_name_trgm" ON "hmrc_skilled_workers_staging" USING gin ("organisation_name" gin_trgm_ops)`,
 ]);
@@ -217,7 +216,7 @@ await sql.transaction([
   sql`ALTER TABLE "hmrc_skilled_workers_staging" RENAME TO "hmrc_skilled_workers"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name" RENAME TO "idx_hmrc_org_name"`,
   sql`ALTER INDEX "stg_idx_hmrc_name_slug" RENAME TO "idx_hmrc_name_slug"`,
-  sql`ALTER INDEX "stg_idx_hmrc_town_city" RENAME TO "idx_hmrc_town_city"`,
+  sql`ALTER INDEX "stg_idx_hmrc_licence" RENAME TO "idx_hmrc_licence"`,
   sql`ALTER INDEX "stg_idx_hmrc_route" RENAME TO "idx_hmrc_route"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name_trgm" RENAME TO "idx_hmrc_org_name_trgm"`,
   sql`ALTER INDEX "hmrc_skilled_workers_staging_hash_key" RENAME TO "hmrc_skilled_workers_hash_unique"`,

@@ -1,9 +1,4 @@
-import {
-  companiesHouseProfiles,
-  hmrcCompanyMapping,
-  hmrcSkilledWorkers,
-  sicCodes,
-} from '@ss/db';
+import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
@@ -219,24 +214,13 @@ const getCompanyProfile = createServerFn()
       // top-hit logic that was silently mapping new sponsors to wrong CH
       // entities. See docs/hmrc-ch-mapping-fix.md "Phase 3 — on-demand
       // resolver hardening".
-      const [hmrcRow] = await db
-        .select({
-          townCity: hmrcSkilledWorkers.townCity,
-          county: hmrcSkilledWorkers.county,
-        })
-        .from(hmrcSkilledWorkers)
-        .where(eq(hmrcSkilledWorkers.organisationName, companyName))
-        .limit(1);
-
       console.log(
         `[Profile] no mapping, resolving via CH for: "${companyName}"`,
       );
+      // HMRC no longer publishes town/county, so the locality tiebreak is inert.
       const result = await resolveOneSponsor(
         companyName,
-        {
-          townCity: hmrcRow?.townCity ?? null,
-          county: hmrcRow?.county ?? null,
-        },
+        { townCity: null, county: null },
         async (path) => {
           const r = await fetchFromApi(path);
           return r.ok ? r.data : null;

@@ -60,15 +60,13 @@ async function fetchApi(path: string): Promise<unknown | null> {
   return res.json();
 }
 
-// Get only org names that aren't already cached, plus a representative
-// town_city/county per org for the locality tiebreaker in the verification
-// pipeline. selectDistinctOn(orgName) collapses multi-row sponsors (one per
+// Get only org names that aren't already cached. The 2026-06 HMRC feed
+// dropped town/county, so the resolver's locality tiebreak runs inert.
+// selectDistinctOn(orgName) collapses multi-row sponsors (one per
 // route/rating) to a single representative row.
 const uncached = await db
   .selectDistinctOn([hmrcSkilledWorkers.organisationName], {
     organisationName: hmrcSkilledWorkers.organisationName,
-    townCity: hmrcSkilledWorkers.townCity,
-    county: hmrcSkilledWorkers.county,
   })
   .from(hmrcSkilledWorkers)
   .leftJoin(
@@ -137,7 +135,7 @@ for (const row of uncached) {
   // point users at the wrong CH entity. See docs/hmrc-ch-mapping-fix.md.
   const result = await resolveOneSponsor(
     orgName,
-    { townCity: row.townCity, county: row.county },
+    { townCity: null, county: null },
     throttledFetchApi,
   );
 

@@ -143,7 +143,7 @@ type ProfileRow = {
   previous_company_names: string[] | null;
 };
 
-type SponsorRow = { town_city: string | null; route: string };
+type SponsorRow = { route: string };
 
 type StrategyOutcome =
   | { action: 'swap'; reason: string; s_e?: number; s_p?: number }
@@ -180,26 +180,26 @@ async function loadProfiles(
   return new Map(rows.map((r) => [r.company_number, r]));
 }
 
-/** Picks the most common (town_city, route) tuple per organisation_name.
- *  HMRC publishes one row per worker, so an org with mixed routes/locations
- *  picks the dominant pairing — same heuristic the inline scorer will use. */
+/** Picks the most common route per organisation_name. HMRC publishes one
+ *  row per worker, so an org with mixed routes picks the dominant one —
+ *  same heuristic the inline scorer will use. (The 2026-06 feed dropped
+ *  town/county, so the locality tiebreak is inert.) */
 async function loadSponsors(
   orgNames: string[],
 ): Promise<Map<string, SponsorRow>> {
   if (orgNames.length === 0) return new Map();
   const rows = (await sql`
     SELECT DISTINCT ON (organisation_name)
-           organisation_name, town_city, route
+           organisation_name, route
       FROM (
-        SELECT organisation_name, town_city, route, COUNT(*) AS n
+        SELECT organisation_name, route, COUNT(*) AS n
           FROM hmrc_skilled_workers
          WHERE organisation_name = ANY(${orgNames})
-         GROUP BY organisation_name, town_city, route
+         GROUP BY organisation_name, route
       ) ranked
-     ORDER BY organisation_name, n DESC, route, town_city NULLS LAST
+     ORDER BY organisation_name, n DESC, route
   `) as {
     organisation_name: string;
-    town_city: string | null;
     route: string;
   }[];
   return new Map(rows.map((r) => [r.organisation_name, r]));
@@ -285,7 +285,7 @@ function profileRowToFullProfile(row: ProfileRow): CHFullProfile {
 }
 
 function sponsorRowToScorerSponsor(row: SponsorRow): ScorerSponsor {
-  return { route: row.route, townCity: row.town_city };
+  return { route: row.route, townCity: null };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

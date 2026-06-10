@@ -139,7 +139,7 @@ type CleanedRow = {
   route: string;
 };
 
-const seen = new Set<string>();
+const seen = new Map<string, CleanedRow>();
 const dedupedRows: CleanedRow[] = [];
 // Licence is the hash backbone: blank values collide distinct orgs into one
 // hash (silently dropped by dedup), and >20 chars aborts the batched INSERT
@@ -170,9 +170,9 @@ for (const [i, r] of records.entries()) {
   const hash = computeHash(licence, typeRating, route);
   const nameSlug = slugify(orgName) || hash;
 
-  if (!seen.has(hash)) {
-    seen.add(hash);
-    dedupedRows.push({
+  const previous = seen.get(hash);
+  if (!previous) {
+    const row: CleanedRow = {
       hash,
       orgName,
       nameSlug,
@@ -180,7 +180,15 @@ for (const [i, r] of records.entries()) {
       status,
       typeRating,
       route,
-    });
+    };
+    seen.set(hash, row);
+    dedupedRows.push(row);
+  } else if (previous.orgName !== orgName || previous.status !== status) {
+    // Same licence|rating|route with a different identity: keeping either row
+    // picks an arbitrary name (and therefore CH mapping). Upstream anomaly.
+    invalidRows.push(
+      `row ${rowNum} ("${orgName}"): conflicts with earlier "${previous.orgName}" sharing licence|rating|route (${hash})`,
+    );
   }
 }
 

@@ -53,7 +53,7 @@ export const searchHmrc = createServerFn()
         nameSlug: hmrcSkilledWorkers.nameSlug,
         sponsorLicenceNumbers: sql<
           string[]
-        >`coalesce(array_agg(distinct ${hmrcSkilledWorkers.sponsorLicenceNumber}) filter (where ${hmrcSkilledWorkers.sponsorLicenceNumber} is not null), '{}')`.as(
+        >`coalesce(array_agg(distinct ${hmrcSkilledWorkers.sponsorLicenceNumber} order by ${hmrcSkilledWorkers.sponsorLicenceNumber}) filter (where ${hmrcSkilledWorkers.sponsorLicenceNumber} is not null), '{}')`.as(
           'sponsor_licence_numbers',
         ),
         typeRating: hmrcSkilledWorkers.typeRating,
@@ -152,7 +152,7 @@ const getHmrcBySlugId = createServerFn()
         // URLs serving 200 with a self-referential canonical otherwise)
         nameSlug: hmrcSkilledWorkers.nameSlug,
         sponsorLicenceNumbers: sql<string[]>`(
-          SELECT coalesce(array_agg(distinct h2.sponsor_licence_number) filter (where h2.sponsor_licence_number is not null), '{}')
+          SELECT coalesce(array_agg(distinct h2.sponsor_licence_number order by h2.sponsor_licence_number) filter (where h2.sponsor_licence_number is not null), '{}')
           FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
         )`,
         typeRating: hmrcSkilledWorkers.typeRating,
@@ -206,9 +206,10 @@ export const sponsorCountQueryOptions = queryOptions({
  * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
  * lookup 404s, the loader 301s to the slug's first row — and also scans the
  * matches for the requested hash itself, which detects a stale cached null
- * (licence reinstated under the same hash). Capped at 10: a slug maps to at
- * most a handful of (rating, route) groups, and the containment check needs
- * to see them all, not just the first.
+ * (licence reinstated under the same hash). Uncapped: rows are per LICENCE
+ * (not per rating/route group) and namesake slugs pool orgs, so any cap could
+ * hide the requested hash from the containment scan; rows per slug are
+ * naturally tiny (max 8 across 126k slugs).
  * Ordered by hash so the multi-match 301 always picks the same canonical row.
  * Not wrapped in queryOptions — only the loader calls it, and the redirect
  * moves the user off this page so there's no second reader for the result.
@@ -224,8 +225,7 @@ export const getHmrcBySlug = createServerFn()
       })
       .from(hmrcSkilledWorkers)
       .where(eq(hmrcSkilledWorkers.nameSlug, slug))
-      .orderBy(asc(hmrcSkilledWorkers.hash))
-      .limit(10);
+      .orderBy(asc(hmrcSkilledWorkers.hash));
     return rows;
   });
 

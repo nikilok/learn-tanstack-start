@@ -75,7 +75,13 @@ export const searchHmrc = createServerFn()
           OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
         )`,
       )
-      .orderBy(desc(scoreExpr), sql`${hmrcSkilledWorkers.organisationName} ASC`)
+      .orderBy(
+        desc(scoreExpr),
+        sql`${hmrcSkilledWorkers.organisationName} ASC`,
+        // Unique tiebreak: multi-row orgs tie on score AND name, and unstable
+        // tie order across page fetches duplicates/drops rows at OFFSET boundaries
+        asc(hmrcSkilledWorkers.hash),
+      )
       .limit(PAGE_SIZE + 1)
       .offset(offset);
 

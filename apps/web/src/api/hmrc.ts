@@ -8,7 +8,11 @@ import { createServerFn } from '@tanstack/react-start';
 import { asc, desc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
+import {
+  LONG_EDGE_CACHE,
+  SHORT_EDGE_CACHE,
+  setRpcCacheControl,
+} from './cache-headers';
 
 const PAGE_SIZE = 50;
 
@@ -144,6 +148,9 @@ const getHmrcBySlugId = createServerFn()
           SELECT min(h2.hash) FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
         )`,
         organisationName: hmrcSkilledWorkers.organisationName,
+        // The loader 301s slug mismatches onto this (renames leave stale-slug
+        // URLs serving 200 with a self-referential canonical otherwise)
+        nameSlug: hmrcSkilledWorkers.nameSlug,
         sponsorLicenceNumbers: sql<string[]>`(
           SELECT coalesce(array_agg(distinct h2.sponsor_licence_number) filter (where h2.sponsor_licence_number is not null), '{}')
           FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
@@ -155,9 +162,11 @@ const getHmrcBySlugId = createServerFn()
       .where(eq(hmrcSkilledWorkers.hash, slugId))
       .limit(1);
 
-    // slugId is a content hash of the row — (slugId → data) is immutable, so
-    // cache aggressively without tag-based invalidation
-    setRpcCacheControl(LONG_EDGE_CACHE);
+    // Found rows cache long: the hash is licence-based, so data behind it only
+    // changes via ingest, and the post-ingest sitemap deploy purges the edge.
+    // Nulls cache short — a licence can be reinstated under the same hash, and
+    // a 30-day-cached null would 301-loop the revived URL against itself.
+    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
 
     return row ?? null;
   });
@@ -195,8 +204,11 @@ export const sponsorCountQueryOptions = queryOptions({
 /**
  * Server fn returning `hmrc_skilled_workers` rows whose `name_slug` matches
  * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
- * lookup 404s, the loader checks whether the name still maps to a current row
- * and 301s to its new hash. Capped at 2 since callers only branch on 0 / 1 / many.
+ * lookup 404s, the loader 301s to the slug's first row — and also scans the
+ * matches for the requested hash itself, which detects a stale cached null
+ * (licence reinstated under the same hash). Capped at 10: a slug maps to at
+ * most a handful of (rating, route) groups, and the containment check needs
+ * to see them all, not just the first.
  * Ordered by hash so the multi-match 301 always picks the same canonical row.
  * Not wrapped in queryOptions — only the loader calls it, and the redirect
  * moves the user off this page so there's no second reader for the result.
@@ -213,7 +225,7 @@ export const getHmrcBySlug = createServerFn()
       .from(hmrcSkilledWorkers)
       .where(eq(hmrcSkilledWorkers.nameSlug, slug))
       .orderBy(asc(hmrcSkilledWorkers.hash))
-      .limit(2);
+      .limit(10);
     return rows;
   });
 

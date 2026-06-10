@@ -9,6 +9,10 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
+import {
+  SHORT_EDGE_CACHE,
+  setSsrCacheControl,
+} from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -34,6 +38,24 @@ import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
 // Grammatical "A, B and C" joiner for the former-names sentence in the summary.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
 
+/**
+ * Display location for a CH registered-office address. Mirrors searchHmrc's
+ * COALESCE(locality, address_line_2) + region so the detail page agrees with
+ * the listing card on whether a sponsor has a location.
+ */
+function registeredLocation(
+  address?: {
+    address_line_2?: string;
+    locality?: string;
+    region?: string;
+  } | null,
+) {
+  return formatLocation(
+    address?.locality ?? address?.address_line_2,
+    address?.region,
+  );
+}
+
 // Canonical key for company-name equality (case, punctuation, LTD/LIMITED).
 function normalizeName(name: string): string {
   return name
@@ -52,43 +74,70 @@ export const Route = createFileRoute('/company/$id/$slug')({
     middlewares: [stripSearchParams({ search: '' })],
   },
   loader: async ({ params, context: { queryClient } }) => {
-    const sponsor = await queryClient.ensureQueryData(
+    let sponsor = await queryClient.ensureQueryData(
       hmrcBySlugIdQueryOptions(params.id),
     );
 
-    if (sponsor && sponsor.canonicalSlugId !== params.id) {
-      // Sibling licence row of a multi-licence org — same name/rating/route,
-      // near-identical page. Search lists only the canonical (min-hash) row;
-      // 301 the rest onto it so duplicates don't accumulate in the index.
+    if (!sponsor) {
+      const matches = await getHmrcBySlug({ data: { slug: params.slug } });
+      if (matches.some((m) => m.slugId === params.id)) {
+        // The (uncached) slug lookup sees this very hash, so the cached null
+        // is stale — licence reinstated under the same hash by a later
+        // ingest. Drop the entry and refetch: invalidateQueries never
+        // refetches an observer-less query, and ensureQueryData would just
+        // return the cached null again.
+        queryClient.removeQueries({
+          queryKey: hmrcBySlugIdQueryOptions(params.id).queryKey,
+        });
+        sponsor = await queryClient.ensureQueryData(
+          hmrcBySlugIdQueryOptions(params.id),
+        );
+      } else if (matches.length > 0) {
+        // 301 to the slug's canonical (hash-ordered first) row so stale
+        // URLs land on a real page and keep link equity. Safe on client
+        // navs too: getHmrcBySlug reads the DB uncached.
+        throw redirect({
+          to: '/company/$id/$slug',
+          params: { id: matches[0].slugId, slug: params.slug },
+          search: (prev) => ({ search: prev.search ?? '' }),
+          statusCode: 301,
+        });
+      }
+      if (!sponsor) {
+        // Best effort: keep the 404 document short-lived at the edge (a
+        // reinstated licence can revive the URL). The static /company/**
+        // routeRule header may still win at the edge — verify on deploy;
+        // the post-ingest deploy purge bounds the damage either way.
+        setSsrCacheControl(SHORT_EDGE_CACHE);
+        throw notFound();
+      }
+    }
+
+    // Canonicalize on SSR only. Server loaders read the DB in-process, so the
+    // redirect decision is always fresh; client navs read RQ/edge caches whose
+    // canonicalSlugId/nameSlug can be stale (rename, removed sibling) — acting
+    // on those loops redirects or bounces correct URLs onto stale slugs.
+    // Crawlers only ever see SSR, so the SEO-relevant 301s are unaffected;
+    // client navs simply render under the URL they were given.
+    // Truthiness guards: a cached pre-deploy row may predate these fields, and
+    // `undefined !== params.id` would 301 to /company/undefined/undefined.
+    if (
+      import.meta.env.SSR &&
+      ((sponsor.canonicalSlugId && sponsor.canonicalSlugId !== params.id) ||
+        (sponsor.nameSlug && sponsor.nameSlug !== params.slug))
+    ) {
+      // One canonical URL per page: sibling licence hashes 301 onto the
+      // group's min-hash row, and stale slugs (post-rename) onto the current
+      // slug — otherwise near-duplicate 200s accumulate in the index.
       throw redirect({
         to: '/company/$id/$slug',
-        params: { id: sponsor.canonicalSlugId, slug: params.slug },
+        params: {
+          id: sponsor.canonicalSlugId || params.id,
+          slug: sponsor.nameSlug || params.slug,
+        },
         search: (prev) => ({ search: prev.search ?? '' }),
         statusCode: 301,
       });
-    }
-
-    if (!sponsor) {
-      const matches = await getHmrcBySlug({ data: { slug: params.slug } });
-      if (matches.length === 1) {
-        throw redirect({
-          to: '/company/$id/$slug',
-          params: { id: matches[0].slugId, slug: params.slug },
-          search: (prev) => ({ search: prev.search ?? '' }),
-          statusCode: 301,
-        });
-      }
-      if (matches.length > 1) {
-        // 301 to the canonical (hash-ordered first) row so old multi-route
-        // URLs land on a real page and keep link equity.
-        throw redirect({
-          to: '/company/$id/$slug',
-          params: { id: matches[0].slugId, slug: params.slug },
-          search: (prev) => ({ search: prev.search ?? '' }),
-          statusCode: 301,
-        });
-      }
-      throw notFound();
     }
 
     const profile = await queryClient.ensureQueryData(
@@ -137,10 +186,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
         ? titleCase(loaderData.sponsor.organisationName)
         : '';
     const location = loaderData
-      ? formatLocation(
-          loaderData.profile?.registered_office_address?.locality,
-          loaderData.profile?.registered_office_address?.region,
-        )
+      ? registeredLocation(loaderData.profile?.registered_office_address)
       : '';
     const industry = loaderData?.profile?.sicDescriptions
       ?.map((sic) => sic.description)
@@ -244,6 +290,9 @@ function CompanyDetail() {
     return () => observer.disconnect();
   }, []);
 
+  // Router match-cache can replay loaderData from an older bundle (SWR render
+  // on revisit); tolerate the field's absence instead of crashing on .length
+  const licenceNumbers = sponsor.sponsorLicenceNumbers ?? [];
   const hmrcName = titleCase(sponsor.organisationName);
   // Lead with the Companies House current name; HMRC may hold a stale former name.
   const displayName = profile?.company_name
@@ -257,9 +306,8 @@ function CompanyDetail() {
   const alsoRegisteredAs =
     normalizeName(sponsor.organisationName) !== currentKey ? hmrcName : null;
   const displayRoute = titleCase(sponsor.route);
-  const displayLocation = formatLocation(
-    profile?.registered_office_address?.locality,
-    profile?.registered_office_address?.region,
+  const displayLocation = registeredLocation(
+    profile?.registered_office_address,
   );
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
@@ -352,15 +400,15 @@ function CompanyDetail() {
                 </dd>
               </div>
               {/* No CH profile → the second card never renders; surface the licence here instead */}
-              {!profile && sponsor.sponsorLicenceNumbers.length > 0 && (
+              {!profile && licenceNumbers.length > 0 && (
                 <div>
                   <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                     Sponsor Licence{' '}
-                    {sponsor.sponsorLicenceNumbers.length > 1 ? 'Nos.' : 'No.'}
+                    {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
                   </dt>
                   <dd className="mt-1 text-sm text-(--sea-ink)">
                     <span x-apple-data-detectors="false">
-                      {sponsor.sponsorLicenceNumbers.join(', ')}
+                      {licenceNumbers.join(', ')}
                     </span>
                   </dd>
                 </div>
@@ -417,17 +465,15 @@ function CompanyDetail() {
                   </div>
                 )}
 
-                {sponsor.sponsorLicenceNumbers.length > 0 && (
+                {licenceNumbers.length > 0 && (
                   <div>
                     <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
                       Sponsor Licence{' '}
-                      {sponsor.sponsorLicenceNumbers.length > 1
-                        ? 'Nos.'
-                        : 'No.'}
+                      {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
                     </dt>
                     <dd className="mt-1 text-sm text-(--sea-ink)">
                       <span x-apple-data-detectors="false">
-                        {sponsor.sponsorLicenceNumbers.join(', ')}
+                        {licenceNumbers.join(', ')}
                       </span>
                     </dd>
                   </div>

@@ -13,6 +13,8 @@ const EXPECTED_COLUMNS = [
 ] as const;
 
 const BATCH_SIZE = 500;
+// Must agree with sponsor_licence_number varchar(64) in packages/db/src/schema.ts
+const LICENCE_MAX_LEN = 64;
 
 const force = process.argv.includes('--force');
 const url = process.argv.filter((a) => !a.startsWith('--'))[2];
@@ -85,18 +87,20 @@ console.log(`Validated schema: ${records.length} records found`);
 // Step 4: Create staging table
 console.log('Creating staging table...');
 await sql`DROP TABLE IF EXISTS "hmrc_skilled_workers_staging"`;
-await sql`
+// sql.query (not the tagged template): DDL can't take $n params, and the
+// licence width interpolates from LICENCE_MAX_LEN so DDL and guard can't drift
+await sql.query(`
   CREATE TABLE "hmrc_skilled_workers_staging" (
     "id" serial PRIMARY KEY NOT NULL,
     "hash" varchar(11) NOT NULL UNIQUE,
     "organisation_name" varchar(255) NOT NULL,
     "name_slug" varchar(255) NOT NULL,
-    "sponsor_licence_number" varchar(20),
+    "sponsor_licence_number" varchar(${LICENCE_MAX_LEN}),
     "sponsor_status" varchar(64),
     "type_rating" varchar(100) NOT NULL,
     "route" varchar(100) NOT NULL
   )
-`;
+`);
 
 // Step 5: Bulk insert into staging table
 console.log(
@@ -150,7 +154,7 @@ for (const [i, r] of records.entries()) {
   const route = r['Migrant Classification'].trim();
   const status = clean(r['Sponsor Status']);
 
-  if (!licence || licence.length > 20) {
+  if (!licence || licence.length > LICENCE_MAX_LEN) {
     invalidRows.push(
       `row ${rowNum} ("${orgName || '?'}"): bad Sponsor Licence Number ${JSON.stringify(licence)}`,
     );

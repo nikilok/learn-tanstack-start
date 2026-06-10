@@ -21,7 +21,7 @@ export const hmrcSkilledWorkers = pgTable(
     hash: varchar('hash', { length: 11 }).notNull().unique(),
     organisationName: varchar('organisation_name', { length: 255 }).notNull(),
     nameSlug: varchar('name_slug', { length: 255 }).notNull(),
-    sponsorLicenceNumber: varchar('sponsor_licence_number', { length: 20 }),
+    sponsorLicenceNumber: varchar('sponsor_licence_number', { length: 64 }),
     sponsorStatus: varchar('sponsor_status', { length: 64 }),
     typeRating: varchar('type_rating', { length: 100 }).notNull(),
     route: varchar('route', { length: 100 }).notNull(),

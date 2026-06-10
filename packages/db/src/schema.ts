@@ -21,15 +21,15 @@ export const hmrcSkilledWorkers = pgTable(
     hash: varchar('hash', { length: 11 }).notNull().unique(),
     organisationName: varchar('organisation_name', { length: 255 }).notNull(),
     nameSlug: varchar('name_slug', { length: 255 }).notNull(),
-    townCity: varchar('town_city', { length: 100 }),
-    county: varchar('county', { length: 100 }),
+    sponsorLicenceNumber: varchar('sponsor_licence_number', { length: 64 }),
+    sponsorStatus: varchar('sponsor_status', { length: 64 }),
     typeRating: varchar('type_rating', { length: 100 }).notNull(),
     route: varchar('route', { length: 100 }).notNull(),
   },
   (table) => [
     index('idx_hmrc_org_name').on(table.organisationName),
     index('idx_hmrc_name_slug').on(table.nameSlug),
-    index('idx_hmrc_town_city').on(table.townCity),
+    index('idx_hmrc_licence').on(table.sponsorLicenceNumber),
     index('idx_hmrc_route').on(table.route),
     index('idx_hmrc_org_name_trgm').using(
       'gin',

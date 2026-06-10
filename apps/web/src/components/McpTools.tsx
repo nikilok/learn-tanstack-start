@@ -4,7 +4,7 @@ import '@mcp-b/global';
 
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { searchHmrcQueryOptions } from '../api/hmrc';
-import { titleCase } from '../utils';
+import { formatLocation, titleCase } from '../utils';
 
 /**
  * Registers browser-side MCP tools with `navigator.modelContext` (via
@@ -24,7 +24,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, and sponsor rating.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence numbers.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -77,12 +77,10 @@ export function McpTools() {
 
           const formatted = result.rows.map((row) => ({
             name: titleCase(row.organisationName),
-            location: [row.townCity, row.county]
-              .filter(Boolean)
-              .map(titleCase)
-              .join(', '),
+            location: formatLocation(row.locality, row.region),
             visaRoute: titleCase(row.route),
             rating: titleCase(row.typeRating),
+            sponsorLicenceNumbers: row.sponsorLicenceNumbers,
           }));
 
           return {
@@ -120,7 +118,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'get_uk_visa_sponsor_details',
       description:
-        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
+        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings, sponsor licence numbers) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -207,15 +205,13 @@ export function McpTools() {
             .map((row) => ({
               visaRoute: titleCase(row.route),
               rating: titleCase(row.typeRating),
+              // Per-row, not top-level: licences vary by (rating, route) group
+              sponsorLicenceNumbers: row.sponsorLicenceNumbers,
             }));
 
           const details = {
             name: titleCase(top.organisationName),
-            location:
-              [top.townCity, top.county]
-                .filter(Boolean)
-                .map(titleCase)
-                .join(', ') || null,
+            location: formatLocation(top.locality, top.region) || null,
             sponsorship,
             companiesHouse: profile
               ? {

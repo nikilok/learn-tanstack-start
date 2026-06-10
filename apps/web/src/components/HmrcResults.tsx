@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { titleCase } from '../utils';
+import { formatLocation, titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
@@ -39,8 +39,7 @@ export default function HmrcResults({ search }: { search: string }) {
         letterSpacing: -0.4, // heading-card utility
       },
       {
-        getText: (row) =>
-          [row.townCity, row.county].filter(Boolean).map(titleCase).join(', '),
+        getText: (row) => formatLocation(row.locality, row.region),
         font: '14px Geist', // text-sm
         lineHeight: 20,
       },

@@ -1,0 +1,1 @@
+ALTER TABLE "hmrc_skilled_workers" ALTER COLUMN "sponsor_licence_number" SET DATA TYPE varchar(64);

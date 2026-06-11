@@ -21,7 +21,6 @@ type SearchHit = {
   slugId: string;
   organisationName: string;
   nameSlug: string;
-  sponsorLicenceNumbers: string[];
   locality: string | null;
   region: string | null;
   typeRating: string;
@@ -100,11 +99,11 @@ export const searchHmrc = createServerFn()
         GROUP BY m.organisation_name
       ),
       hits AS (
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number, true AS direct
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, true AS direct
         FROM ${hmrcSkilledWorkers} h
         WHERE ${fuzzyMatch(orgName)}
         UNION
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number, false AS direct
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, false AS direct
         FROM ${hmrcSkilledWorkers} h
         JOIN pm ON pm.organisation_name = h.organisation_name
       ),
@@ -112,7 +111,6 @@ export const searchHmrc = createServerFn()
         SELECT min(h.hash) AS slug_id,
                h.organisation_name,
                h.name_slug,
-               coalesce(array_agg(distinct h.sponsor_licence_number order by h.sponsor_licence_number) filter (where h.sponsor_licence_number is not null), '{}') AS licences,
                h.type_rating,
                h.route,
                -- Gate the current-name score on a real direct match (the flag is
@@ -127,7 +125,7 @@ export const searchHmrc = createServerFn()
         GROUP BY h.organisation_name, h.name_slug, h.type_rating, h.route, pm.matched_name, pm.prev_score
       ),
       g AS (
-        SELECT slug_id, organisation_name, name_slug, licences, type_rating, route,
+        SELECT slug_id, organisation_name, name_slug, type_rating, route,
                GREATEST(org_score, coalesce(prev_score, 0)) AS score,
                coalesce(prev_score, 0) > org_score AS prev_won,
                CASE WHEN coalesce(prev_score, 0) > org_score
@@ -144,7 +142,6 @@ export const searchHmrc = createServerFn()
       SELECT g.slug_id AS "slugId",
              g.organisation_name AS "organisationName",
              g.name_slug AS "nameSlug",
-             g.licences AS "sponsorLicenceNumbers",
              COALESCE(c.locality, c.address_line_2) AS "locality",
              c.region AS "region",
              g.type_rating AS "typeRating",
@@ -172,8 +169,7 @@ export const searchHmrc = createServerFn()
  * `hash` slug id. Returns `null` when no matching row exists. Also returns the
  * group canonical: multi-licence orgs have one row per licence with identical
  * (org, rating, route) — search lists only min(hash), and the loader 301s the
- * sibling hashes to `canonicalSlugId`. `sponsorLicenceNumbers` carries every
- * licence in the group so the canonical page shows all of them.
+ * sibling hashes to `canonicalSlugId`.
  */
 const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
@@ -192,10 +188,6 @@ const getHmrcBySlugId = createServerFn()
         // The loader 301s slug mismatches onto this (renames leave stale-slug
         // URLs serving 200 with a self-referential canonical otherwise)
         nameSlug: hmrcSkilledWorkers.nameSlug,
-        sponsorLicenceNumbers: sql<string[]>`(
-          SELECT coalesce(array_agg(distinct h2.sponsor_licence_number order by h2.sponsor_licence_number) filter (where h2.sponsor_licence_number is not null), '{}')
-          FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
-        )`,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
       })

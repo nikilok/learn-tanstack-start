@@ -287,9 +287,6 @@ function CompanyDetail() {
     return () => observer.disconnect();
   }, []);
 
-  // Router match-cache can replay loaderData from an older bundle (SWR render
-  // on revisit); tolerate the field's absence instead of crashing on .length
-  const licenceNumbers = sponsor.sponsorLicenceNumbers ?? [];
   const hmrcName = titleCase(sponsor.organisationName);
   // Lead with the Companies House current name; HMRC may hold a stale former name.
   const displayName = profile?.company_name
@@ -396,19 +393,6 @@ function CompanyDetail() {
                   {titleCase(sponsor.typeRating)}
                 </dd>
               </div>
-              {/* No CH profile → the second card never renders; surface the licence here instead */}
-              {!profile && licenceNumbers.length > 0 && (
-                <div>
-                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                    Sponsor Licence {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
-                  </dt>
-                  <dd className="mt-1 text-sm text-(--sea-ink)">
-                    <span x-apple-data-detectors="false">
-                      {licenceNumbers.join(', ')}
-                    </span>
-                  </dd>
-                </div>
-              )}
             </dl>
           </div>
 
@@ -456,20 +440,6 @@ function CompanyDetail() {
                     <dd className="mt-1 text-sm text-(--sea-ink)">
                       <span x-apple-data-detectors="false">
                         {profile.company_number}
-                      </span>
-                    </dd>
-                  </div>
-                )}
-
-                {licenceNumbers.length > 0 && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Sponsor Licence{' '}
-                      {licenceNumbers.length > 1 ? 'Nos.' : 'No.'}
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      <span x-apple-data-detectors="false">
-                        {licenceNumbers.join(', ')}
                       </span>
                     </dd>
                   </div>

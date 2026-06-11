@@ -136,9 +136,12 @@ The search WHERE pairs each pg_trgm function recheck with its index-served
 OPERATOR: `org ~* pattern`, `query <% org AND word_similarity(...) > 0.6`,
 `org % query AND similarity(...) > 0.5`. The operators let the GIN trigram
 indexes BitmapOr the candidate set (~20x faster); the function rechecks pin the
-exact thresholds independent of the `pg_trgm.*_threshold` GUCs (defaults 0.6 /
-0.3). Do NOT "simplify" either half away: bare functions can never use an
-index (full scan, ~1s), bare operators silently change semantics if a GUC moves.
+exact thresholds against downward drift of the `pg_trgm.*_threshold` GUCs
+(defaults 0.6 / 0.3). The pair is NOT immune upward: a GUC raised above the
+recheck's literal (0.6 / 0.5) makes the operator the binding filter and
+silently shrinks results. Do NOT "simplify" either half away: bare functions
+can never use an index (full scan, ~1s), bare operators silently change
+semantics if a GUC moves.
 
 Previous Companies House names are searched via `ch_previous_names`
 (company_number, name) — a flattened projection of

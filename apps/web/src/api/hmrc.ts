@@ -45,7 +45,9 @@ type SearchHit = {
  * recheck (`<%` + word_similarity, `%` + similarity): the operators let the
  * GIN trigram indexes BitmapOr the candidate set (~20x faster than the bare
  * function calls, which can never use an index), while the rechecks pin the
- * exact thresholds independent of the pg_trgm GUCs. Keep both halves.
+ * exact thresholds against downward GUC drift. NOT immune upward: a pg_trgm
+ * GUC raised above 0.6/0.5 becomes the binding filter and silently shrinks
+ * results. Keep both halves.
  */
 export const searchHmrc = createServerFn()
   .inputValidator(

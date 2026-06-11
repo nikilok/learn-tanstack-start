@@ -33,6 +33,7 @@ export default function HmrcCard({
   lensRotation: { from: number; to: number };
   onActivate: () => void;
 }) {
+  const location = formatLocation(row.locality, row.region);
   return (
     <Link
       to="/company/$id/$slug"
@@ -93,15 +94,13 @@ export default function HmrcCard({
         <RatingIcon rating={row.typeRating} />
       </div>
       <div className="mt-0.5">
-        {formatLocation(row.locality, row.region) && (
+        {location && (
           // Single truncated line: the height estimator in HmrcResults counts
           // this as exactly one line when a location exists, so it must never
           // wrap (the inline icon steals width the estimator can't see)
           <p className="flex items-center gap-1.5 text-sm text-(--sea-ink-soft)">
             <MapPin size={14} className="shrink-0" />
-            <span className="truncate">
-              {formatLocation(row.locality, row.region)}
-            </span>
+            <span className="truncate">{location}</span>
           </p>
         )}
         <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">

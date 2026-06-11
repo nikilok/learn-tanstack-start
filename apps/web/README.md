@@ -69,6 +69,12 @@ bun run db:push              # Push schema directly (no migration)
 bun run db:studio            # Open Drizzle Studio
 ```
 
+> **Don't bootstrap an environment with `db:push`.** Push derives DDL from
+> `schema.ts`, which can't express triggers, functions, or backfills — you'd
+> get `ch_previous_names` as an empty, never-synced table and previous-name
+> search would silently return nothing. Always use `db:migrate` (the journal
+> carries the trigger + backfill in migrations 0028/0029).
+
 ### Data & utilities
 
 ```bash

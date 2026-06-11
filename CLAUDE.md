@@ -147,7 +147,13 @@ Previous Companies House names are searched via `ch_previous_names`
 It is maintained by the DB trigger `trg_sync_ch_previous_names` (AFTER
 INSERT OR UPDATE OF previous_company_names) — never write to it from
 application code, and any environment migration must create the table, index,
-trigger, and backfill together.
+trigger, and backfill together. The function body (hardened in 0029)
+early-returns on no-op assignments (`OLD IS NOT DISTINCT FROM NEW` — upserts
+assign the column on every write, ~29x more often than it changes) and filters
+NULL array elements, which would otherwise violate `name NOT NULL` and abort
+the parent profile write (poison stream event). The OLD comparison must stay
+inside a nested `IF TG_OP = 'UPDATE'` block: plpgsql binds `OLD.x` before
+evaluating, so a combined condition errors on INSERT.
 
 The query keeps prev-name hits in a separate UNION branch (probe
 `idx_hmrc_org_name` by org) rather than `OR`-ing them into the direct WHERE —

@@ -228,7 +228,7 @@ function profileToDbRow(profile: CHFullProfile) {
     hasInsolvencyHistory:
       (profile.has_insolvency_history as boolean | undefined) ?? null,
     hasCharges: (profile.has_charges as boolean | undefined) ?? null,
-    previousCompanyNames: previousNames.map((p) => p.name),
+    previousCompanyNames: previousNames.map((p) => p.name).filter((n) => !!n),
     confirmationStatementLastMadeUpTo: confirmation.last_made_up_to ?? null,
     updatedAt: new Date(),
   };

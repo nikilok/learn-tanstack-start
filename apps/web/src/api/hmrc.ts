@@ -1,11 +1,12 @@
 import {
+  chPreviousNames,
   companiesHouseProfiles,
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { asc, eq, type SQL, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import {
@@ -16,12 +17,33 @@ import {
 
 const PAGE_SIZE = 50;
 
+type SearchHit = {
+  slugId: string;
+  organisationName: string;
+  nameSlug: string;
+  sponsorLicenceNumbers: string[];
+  locality: string | null;
+  region: string | null;
+  typeRating: string;
+  route: string;
+  score: number;
+  matchedPreviousName: string | null;
+};
+
 /**
- * Server fn performing a paginated fuzzy search over `hmrc_skilled_workers`.
- * Combines regex word-boundary matching with pg_trgm similarity, ranking
- * prefix matches > word-boundary matches > trigram similarity. Returns an
+ * Server fn performing a paginated fuzzy search over `hmrc_skilled_workers`
+ * and, via the `ch_previous_names` projection, over previous Companies House
+ * names of mapped orgs. Ranks prefix matches > word-boundary matches >
+ * trigram similarity; an org found under an old name carries that name in
+ * `matchedPreviousName` when it outscores the current-name match. Returns an
  * empty page when the query is under 3 chars. `hasMore` is derived by
  * over-fetching one row past `PAGE_SIZE`.
+ *
+ * Match predicates pair an index-served trigram OPERATOR with a function
+ * recheck (`<%` + word_similarity, `%` + similarity): the operators let the
+ * GIN trigram indexes BitmapOr the candidate set (~20x faster than the bare
+ * function calls, which can never use an index), while the rechecks pin the
+ * exact thresholds independent of the pg_trgm GUCs. Keep both halves.
  */
 export const searchHmrc = createServerFn()
   .inputValidator(
@@ -32,92 +54,88 @@ export const searchHmrc = createServerFn()
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
     const regexEscaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const wordBoundaryPattern = `\\m${regexEscaped}`;
-    const scoreExpr = sql<number>`
-      CASE
-        WHEN ${hmrcSkilledWorkers.organisationName} ~* ${`^${regexEscaped}`}
-          THEN 2.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-        WHEN ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
-          THEN 1.0 + word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-        ELSE word_similarity(${query}, ${hmrcSkilledWorkers.organisationName})
-      END`;
+    const prefixPattern = `^${regexEscaped}`;
+    /** Index-served fuzzy match (operator + threshold recheck) for a name column. */
+    const fuzzyMatch = (col: SQL) => sql`(
+      ${col} ~* ${wordBoundaryPattern}
+      OR (${query} <% ${col} AND word_similarity(${query}, ${col}) > 0.6)
+      OR (${col} % ${query} AND similarity(${query}, ${col}) > 0.5)
+    )`;
+    /** Ranking CASE for a name column: prefix > word-boundary > similarity. */
+    const scoreCase = (col: SQL) => sql`CASE
+      WHEN ${col} ~* ${prefixPattern} THEN 2.0 + word_similarity(${query}, ${col})
+      WHEN ${col} ~* ${wordBoundaryPattern} THEN 1.0 + word_similarity(${query}, ${col})
+      ELSE word_similarity(${query}, ${col})
+    END`;
+    const prevName = sql`pn.name`;
+    const orgName = sql`h.organisation_name`;
+
+    // Raw SQL throughout: the shape (CTEs + UNION) exists so every branch
+    // stays on an index — pm probes idx_ch_prev_names_trgm then
+    // idx_mapping_company_number; the direct branch BitmapOrs
+    // idx_hmrc_org_name_trgm; the pm-driven branch probes idx_hmrc_org_name.
+    // Folding pm into the direct WHERE as an OR would force a seq scan.
     // One row per (org, rating, route): the same org can hold several licences
     // with otherwise identical feed data (888 groups in the 2026-06 feed), and
     // the cards show nothing that distinguishes them. min(hash) is the
     // canonical slugId — the detail loader 301s the siblings to it.
-    // Grouping happens in the subquery, BEFORE the CH joins, so the joins stay
-    // PK probes on the returned window only and ranking/LIMIT are unaffected.
-    const grouped = db
-      .select({
-        slugId: sql<string>`min(${hmrcSkilledWorkers.hash})`.as('slug_id'),
-        organisationName: hmrcSkilledWorkers.organisationName,
-        nameSlug: hmrcSkilledWorkers.nameSlug,
-        sponsorLicenceNumbers: sql<
-          string[]
-        >`coalesce(array_agg(distinct ${hmrcSkilledWorkers.sponsorLicenceNumber} order by ${hmrcSkilledWorkers.sponsorLicenceNumber}) filter (where ${hmrcSkilledWorkers.sponsorLicenceNumber} is not null), '{}')`.as(
-          'sponsor_licence_numbers',
-        ),
-        typeRating: hmrcSkilledWorkers.typeRating,
-        route: hmrcSkilledWorkers.route,
-        score: scoreExpr.as('score'),
-      })
-      .from(hmrcSkilledWorkers)
-      .where(
-        sql`(
-          ${hmrcSkilledWorkers.organisationName} ~* ${wordBoundaryPattern}
-          OR word_similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.6
-          OR similarity(${query}, ${hmrcSkilledWorkers.organisationName}) > 0.5
-        )`,
-      )
-      .groupBy(
-        hmrcSkilledWorkers.organisationName,
-        hmrcSkilledWorkers.nameSlug,
-        hmrcSkilledWorkers.typeRating,
-        hmrcSkilledWorkers.route,
-      )
-      .orderBy(
-        desc(scoreExpr),
-        sql`${hmrcSkilledWorkers.organisationName} ASC`,
-        // Unique tiebreak: groups tie on score AND name, and unstable tie
-        // order across page fetches duplicates/drops rows at OFFSET boundaries
-        sql`min(${hmrcSkilledWorkers.hash}) ASC`,
-      )
-      .limit(PAGE_SIZE + 1)
-      .offset(offset)
-      .as('g');
-
+    // Grouping/LIMIT happen in `g`, BEFORE the CH location joins, so those
+    // stay PK probes on the returned window only.
     // Listing location is CH-sourced (HMRC dropped town/county from the feed).
-    const rows = await db
-      .select({
-        slugId: grouped.slugId,
-        organisationName: grouped.organisationName,
-        nameSlug: grouped.nameSlug,
-        sponsorLicenceNumbers: grouped.sponsorLicenceNumbers,
-        locality: sql<
-          string | null
-        >`COALESCE(${companiesHouseProfiles.locality}, ${companiesHouseProfiles.addressLine2})`,
-        region: companiesHouseProfiles.region,
-        typeRating: grouped.typeRating,
-        route: grouped.route,
-        score: grouped.score,
-      })
-      .from(grouped)
-      .leftJoin(
-        hmrcCompanyMapping,
-        eq(hmrcCompanyMapping.organisationName, grouped.organisationName),
+    const result = await db.execute(sql`
+      WITH pm AS (
+        SELECT m.organisation_name,
+               (array_agg(pn.name ORDER BY ${scoreCase(prevName)} DESC, pn.name ASC))[1] AS matched_name,
+               max(${scoreCase(prevName)}) AS prev_score
+        FROM ${chPreviousNames} pn
+        JOIN ${hmrcCompanyMapping} m ON m.company_number = pn.company_number
+        WHERE ${fuzzyMatch(prevName)}
+        GROUP BY m.organisation_name
+      ),
+      hits AS (
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number
+        FROM ${hmrcSkilledWorkers} h
+        WHERE ${fuzzyMatch(orgName)}
+        UNION
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number
+        FROM ${hmrcSkilledWorkers} h
+        JOIN pm ON pm.organisation_name = h.organisation_name
+      ),
+      g AS (
+        SELECT min(h.hash) AS slug_id,
+               h.organisation_name,
+               h.name_slug,
+               coalesce(array_agg(distinct h.sponsor_licence_number order by h.sponsor_licence_number) filter (where h.sponsor_licence_number is not null), '{}') AS licences,
+               h.type_rating,
+               h.route,
+               GREATEST(${scoreCase(orgName)}, coalesce(pm.prev_score, 0)) AS score,
+               CASE WHEN coalesce(pm.prev_score, 0) > ${scoreCase(orgName)}
+                 THEN pm.matched_name END AS matched_previous_name
+        FROM hits h
+        LEFT JOIN pm ON pm.organisation_name = h.organisation_name
+        GROUP BY h.organisation_name, h.name_slug, h.type_rating, h.route, pm.matched_name, pm.prev_score
+        ORDER BY score DESC, h.organisation_name ASC, min(h.hash) ASC
+        -- min(hash) tiebreak: groups tie on score AND name, and unstable tie
+        -- order across page fetches duplicates/drops rows at OFFSET boundaries
+        LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
       )
-      .leftJoin(
-        companiesHouseProfiles,
-        eq(
-          companiesHouseProfiles.companyNumber,
-          hmrcCompanyMapping.companyNumber,
-        ),
-      )
-      // Joins don't guarantee order preservation; re-sort the ≤51-row window
-      .orderBy(
-        desc(grouped.score),
-        asc(grouped.organisationName),
-        asc(grouped.slugId),
-      );
+      SELECT g.slug_id AS "slugId",
+             g.organisation_name AS "organisationName",
+             g.name_slug AS "nameSlug",
+             g.licences AS "sponsorLicenceNumbers",
+             COALESCE(c.locality, c.address_line_2) AS "locality",
+             c.region AS "region",
+             g.type_rating AS "typeRating",
+             g.route AS "route",
+             g.score AS "score",
+             g.matched_previous_name AS "matchedPreviousName"
+      FROM g
+      LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = g.organisation_name
+      LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
+      -- Joins don't guarantee order preservation; re-sort the ≤51-row window
+      ORDER BY g.score DESC, g.organisation_name ASC, g.slug_id ASC
+    `);
+    const rows = result.rows as SearchHit[];
 
     const hasMore = rows.length > PAGE_SIZE;
     return {

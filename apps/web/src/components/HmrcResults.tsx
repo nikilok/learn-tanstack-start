@@ -39,6 +39,16 @@ export default function HmrcResults({ search }: { search: string }) {
         letterSpacing: -0.4, // heading-card utility
       },
       {
+        // Empty text measures as 0 lines / 0px, so rows without a previous-name
+        // match pay no height; the rendered line is margin-free to match
+        getText: (row) =>
+          row.matchedPreviousName
+            ? `Previously ${titleCase(row.matchedPreviousName)}`
+            : '',
+        font: 'italic 14px Geist', // text-sm italic
+        lineHeight: 20,
+      },
+      {
         getText: (row) => formatLocation(row.locality, row.region),
         font: '14px Geist', // text-sm
         lineHeight: 20,

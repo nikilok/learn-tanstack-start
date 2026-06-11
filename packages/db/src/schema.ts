@@ -7,6 +7,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -85,6 +86,29 @@ export const companiesHouseProfiles = pgTable(
   ],
 );
 
+// Flattened projection of companies_house_profiles.previous_company_names so
+// the search can trigram-match previous names (GIN can't index inside arrays).
+// Kept in sync by the DB trigger trg_sync_ch_previous_names — do not write to
+// this table from application code.
+export const chPreviousNames = pgTable(
+  'ch_previous_names',
+  {
+    companyNumber: varchar('company_number', { length: 20 })
+      .notNull()
+      .references(() => companiesHouseProfiles.companyNumber, {
+        onDelete: 'cascade',
+      }),
+    name: text('name').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.companyNumber, table.name] }),
+    index('idx_ch_prev_names_trgm').using(
+      'gin',
+      sql`${table.name} gin_trgm_ops`,
+    ),
+  ],
+);
+
 export const hmrcCompanyMapping = pgTable(
   'hmrc_company_mapping',
   {
@@ -101,6 +125,7 @@ export const hmrcCompanyMapping = pgTable(
       table.matchMethod,
       table.verifiedAt.asc().nullsFirst(),
     ),
+    index('idx_mapping_company_number').on(table.companyNumber),
   ],
 );
 

@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, titleCase } from '../utils';
+import { formatLocation, previousNameText, titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
@@ -41,10 +41,7 @@ export default function HmrcResults({ search }: { search: string }) {
       {
         // Empty text measures as 0 lines / 0px, so rows without a previous-name
         // match pay no height; the rendered line is margin-free to match
-        getText: (row) =>
-          row.matchedPreviousName
-            ? `Previously ${titleCase(row.matchedPreviousName)}`
-            : '',
+        getText: (row) => previousNameText(row.matchedPreviousName),
         font: 'italic 12px Geist', // text-xs italic
         lineHeight: 16,
       },

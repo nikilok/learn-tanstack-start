@@ -105,7 +105,9 @@ reduction in Layout/Recalculate style).
    - Conditional lines (e.g. the italic "Previously …" previous-name line) work
      because empty text measures as 0 lines / 0px — but the rendered element must
      stay **margin-free**: a margin would apply once per card while the estimator
-     only counts `lineCount * lineHeight`
+     only counts `lineCount * lineHeight`. The previous-name text comes from
+     `previousNameText()` in `utils.ts`, called by BOTH the card and the
+     estimator's `getText` — never inline the template on one side only
    - Single-line `truncate` fields (e.g. the MapPin + location row) measure a
      one-glyph sentinel (`'M'` → exactly 1 line) instead of the real text: an
      inline icon steals width the canvas can't see, so the rendered line must

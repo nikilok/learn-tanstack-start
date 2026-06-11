@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
-import { formatLocation, titleCase } from '../utils';
+import { formatLocation, previousNameText, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 import UnionJackLens from './UnionJackLens';
 
@@ -34,6 +34,7 @@ export default function HmrcCard({
   onActivate: () => void;
 }) {
   const location = formatLocation(row.locality, row.region);
+  const previousName = previousNameText(row.matchedPreviousName);
   return (
     <Link
       to="/company/$id/$slug"
@@ -83,12 +84,10 @@ export default function HmrcCard({
       >
         {titleCase(row.organisationName)}
       </h3>
-      {row.matchedPreviousName && (
+      {previousName && (
         // No vertical margins: the height estimator in HmrcResults measures
         // this line as lineCount * 16px, so any margin here would desync it
-        <p className="text-xs text-(--sea-ink-soft) italic">
-          Previously {titleCase(row.matchedPreviousName)}
-        </p>
+        <p className="text-xs text-(--sea-ink-soft) italic">{previousName}</p>
       )}
       <div className="mt-0.5">
         <RatingIcon rating={row.typeRating} />

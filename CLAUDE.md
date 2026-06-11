@@ -169,7 +169,11 @@ Prev-name wins also sort below equal-score direct matches via the `prev_won`
 key — without it, renamed orgs tie prefix queries at full score and flood
 page 1 alphabetically by their unrelated current names. `prev_won` appears in
 BOTH the `g` ORDER BY and the outer re-sort; keep the two identical or OFFSET
-pages duplicate/drop rows.
+pages duplicate/drop rows. The current-name score is gated on the `direct`
+flag carried out of `hits` (`org_score` in `g0`): for prev-name-only rows,
+ungated `scoreCase` is sub-threshold word_similarity noise that would suppress
+`matchedPreviousName` and leak past the demotion. Do NOT replace the flag with
+a `fuzzyMatch(org)` recheck in `g0` — that re-runs trigram ops per grouped row.
 `public_body`/`no_match` mapping rows have NULL company_number, so they drop
 out of the prev-name join naturally.
 

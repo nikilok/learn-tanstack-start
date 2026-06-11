@@ -37,7 +37,10 @@ type SearchHit = {
  * trigram similarity; an org found under an old name carries that name in
  * `matchedPreviousName` when it outscores the current-name match. Prev-name
  * wins sort below equal-score direct matches (`prev_won`) so renamed orgs
- * can't displace literal matches on common prefix queries. Returns an
+ * can't displace literal matches on common prefix queries. The current-name
+ * score only counts when the org actually passed the direct WHERE (`direct`
+ * flag → `org_score`); prev-name-only rows therefore always rank by their
+ * prev-name score and always carry `matchedPreviousName`. Returns an
  * empty page when the query is under 3 chars. `hasMore` is derived by
  * over-fetching one row past `PAGE_SIZE`.
  *
@@ -97,34 +100,45 @@ export const searchHmrc = createServerFn()
         GROUP BY m.organisation_name
       ),
       hits AS (
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number, true AS direct
         FROM ${hmrcSkilledWorkers} h
         WHERE ${fuzzyMatch(orgName)}
         UNION
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number
+        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, h.sponsor_licence_number, false AS direct
         FROM ${hmrcSkilledWorkers} h
         JOIN pm ON pm.organisation_name = h.organisation_name
       ),
-      g AS (
+      g0 AS (
         SELECT min(h.hash) AS slug_id,
                h.organisation_name,
                h.name_slug,
                coalesce(array_agg(distinct h.sponsor_licence_number order by h.sponsor_licence_number) filter (where h.sponsor_licence_number is not null), '{}') AS licences,
                h.type_rating,
                h.route,
-               GREATEST(${scoreCase(orgName)}, coalesce(pm.prev_score, 0)) AS score,
-               coalesce(pm.prev_score, 0) > ${scoreCase(orgName)} AS prev_won,
-               CASE WHEN coalesce(pm.prev_score, 0) > ${scoreCase(orgName)}
-                 THEN pm.matched_name END AS matched_previous_name
+               -- Gate the current-name score on a real direct match (the flag is
+               -- free at WHERE time): for prev-name-only rows scoreCase is
+               -- sub-threshold word_similarity noise that would suppress the
+               -- "Previously" line and leak past the prev_won demotion
+               CASE WHEN bool_or(h.direct) THEN ${scoreCase(orgName)} ELSE 0 END AS org_score,
+               pm.matched_name,
+               pm.prev_score
         FROM hits h
         LEFT JOIN pm ON pm.organisation_name = h.organisation_name
         GROUP BY h.organisation_name, h.name_slug, h.type_rating, h.route, pm.matched_name, pm.prev_score
-        ORDER BY score DESC, prev_won ASC, h.organisation_name ASC, min(h.hash) ASC
+      ),
+      g AS (
+        SELECT slug_id, organisation_name, name_slug, licences, type_rating, route,
+               GREATEST(org_score, coalesce(prev_score, 0)) AS score,
+               coalesce(prev_score, 0) > org_score AS prev_won,
+               CASE WHEN coalesce(prev_score, 0) > org_score
+                 THEN matched_name END AS matched_previous_name
+        FROM g0
+        ORDER BY score DESC, prev_won ASC, organisation_name ASC, slug_id ASC
         -- prev_won demotes prev-name-only wins below same-score direct hits:
         -- they tie prefix queries at full score but would tie-break by their
         -- unrelated current name, flooding page 1 (e.g. 'london').
-        -- min(hash) tiebreak: groups tie on score AND name, and unstable tie
-        -- order across page fetches duplicates/drops rows at OFFSET boundaries
+        -- slug_id (min hash) tiebreak: groups tie on score AND name, and unstable
+        -- tie order across page fetches duplicates/drops rows at OFFSET boundaries
         LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
       )
       SELECT g.slug_id AS "slugId",

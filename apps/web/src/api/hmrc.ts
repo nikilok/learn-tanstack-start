@@ -35,7 +35,9 @@ type SearchHit = {
  * and, via the `ch_previous_names` projection, over previous Companies House
  * names of mapped orgs. Ranks prefix matches > word-boundary matches >
  * trigram similarity; an org found under an old name carries that name in
- * `matchedPreviousName` when it outscores the current-name match. Returns an
+ * `matchedPreviousName` when it outscores the current-name match. Prev-name
+ * wins sort below equal-score direct matches (`prev_won`) so renamed orgs
+ * can't displace literal matches on common prefix queries. Returns an
  * empty page when the query is under 3 chars. `hasMore` is derived by
  * over-fetching one row past `PAGE_SIZE`.
  *
@@ -109,12 +111,16 @@ export const searchHmrc = createServerFn()
                h.type_rating,
                h.route,
                GREATEST(${scoreCase(orgName)}, coalesce(pm.prev_score, 0)) AS score,
+               coalesce(pm.prev_score, 0) > ${scoreCase(orgName)} AS prev_won,
                CASE WHEN coalesce(pm.prev_score, 0) > ${scoreCase(orgName)}
                  THEN pm.matched_name END AS matched_previous_name
         FROM hits h
         LEFT JOIN pm ON pm.organisation_name = h.organisation_name
         GROUP BY h.organisation_name, h.name_slug, h.type_rating, h.route, pm.matched_name, pm.prev_score
-        ORDER BY score DESC, h.organisation_name ASC, min(h.hash) ASC
+        ORDER BY score DESC, prev_won ASC, h.organisation_name ASC, min(h.hash) ASC
+        -- prev_won demotes prev-name-only wins below same-score direct hits:
+        -- they tie prefix queries at full score but would tie-break by their
+        -- unrelated current name, flooding page 1 (e.g. 'london').
         -- min(hash) tiebreak: groups tie on score AND name, and unstable tie
         -- order across page fetches duplicates/drops rows at OFFSET boundaries
         LIMIT ${PAGE_SIZE + 1} OFFSET ${offset}
@@ -133,7 +139,8 @@ export const searchHmrc = createServerFn()
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = g.organisation_name
       LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
       -- Joins don't guarantee order preservation; re-sort the ≤51-row window
-      ORDER BY g.score DESC, g.organisation_name ASC, g.slug_id ASC
+      -- (must mirror g's ORDER BY exactly or OFFSET pages duplicate/drop rows)
+      ORDER BY g.score DESC, g.prev_won ASC, g.organisation_name ASC, g.slug_id ASC
     `);
     const rows = result.rows as SearchHit[];
 

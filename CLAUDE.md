@@ -154,6 +154,11 @@ The query keeps prev-name hits in a separate UNION branch (probe
 an OR across the join would force a seq scan and lose all index use. A result's
 `matchedPreviousName` is set only when the previous-name score strictly beats
 the current-name score (ties show the current name without the line).
+Prev-name wins also sort below equal-score direct matches via the `prev_won`
+key — without it, renamed orgs tie prefix queries at full score and flood
+page 1 alphabetically by their unrelated current names. `prev_won` appears in
+BOTH the `g` ORDER BY and the outer re-sort; keep the two identical or OFFSET
+pages duplicate/drop rows.
 `public_body`/`no_match` mapping rows have NULL company_number, so they drop
 out of the prev-name join naturally.
 

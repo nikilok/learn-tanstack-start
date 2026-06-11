@@ -24,7 +24,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence numbers. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, and sponsor rating. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -85,7 +85,6 @@ export function McpTools() {
             location: formatLocation(row.locality, row.region),
             visaRoute: titleCase(row.route),
             rating: titleCase(row.typeRating),
-            sponsorLicenceNumbers: row.sponsorLicenceNumbers,
           }));
 
           return {
@@ -123,7 +122,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'get_uk_visa_sponsor_details',
       description:
-        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings, sponsor licence numbers) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
+        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -210,8 +209,6 @@ export function McpTools() {
             .map((row) => ({
               visaRoute: titleCase(row.route),
               rating: titleCase(row.typeRating),
-              // Per-row, not top-level: licences vary by (rating, route) group
-              sponsorLicenceNumbers: row.sponsorLicenceNumbers,
             }));
 
           const details = {

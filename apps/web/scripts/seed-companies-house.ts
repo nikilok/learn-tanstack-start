@@ -199,7 +199,8 @@ for (const row of uncached) {
       hasInsolvencyHistory: profile.has_insolvency_history ?? null,
       hasCharges: profile.has_charges ?? null,
       previousCompanyNames:
-        profile.previous_company_names?.map((p) => p.name) ?? [],
+        profile.previous_company_names?.map((p) => p.name).filter((n) => !!n) ??
+        [],
       confirmationStatementLastMadeUpTo:
         profile.confirmation_statement?.last_made_up_to || null,
       updatedAt: new Date(),
@@ -220,7 +221,9 @@ for (const row of uncached) {
         hasInsolvencyHistory: profile.has_insolvency_history ?? null,
         hasCharges: profile.has_charges ?? null,
         previousCompanyNames:
-          profile.previous_company_names?.map((p) => p.name) ?? [],
+          profile.previous_company_names
+            ?.map((p) => p.name)
+            .filter((n) => !!n) ?? [],
         confirmationStatementLastMadeUpTo:
           profile.confirmation_statement?.last_made_up_to || null,
         updatedAt: new Date(),

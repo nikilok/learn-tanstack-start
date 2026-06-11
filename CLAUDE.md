@@ -102,6 +102,17 @@ reduction in Layout/Recalculate style).
    - `fields[].getText` — must match the text transformation applied before render
    - `fixedHeight` — sum of all fixed-height card elements (padding, margins, rating
      line, route line) plus 4px for sub-pixel rounding
+   - Conditional lines (e.g. the italic "Previously …" previous-name line) work
+     because empty text measures as 0 lines / 0px — but the rendered element must
+     stay **margin-free**: a margin would apply once per card while the estimator
+     only counts `lineCount * lineHeight`. The previous-name text comes from
+     `previousNameText()` in `utils.ts`, called by BOTH the card and the
+     estimator's `getText` — never inline the template on one side only
+   - Single-line `truncate` fields (e.g. the MapPin + location row) measure a
+     one-glyph sentinel (`'M'` → exactly 1 line) instead of the real text: an
+     inline icon steals width the canvas can't see, so the rendered line must
+     never wrap. If a truncated line is ever allowed to wrap again, drop the
+     icon from the text flow AND restore real-text measurement together
 2. **`HmrcResults.tsx` line ~75** — the hidden measurement div's `className="px-4"` must
    match the real container's horizontal padding class (line ~95)
 
@@ -120,6 +131,51 @@ from fallback font measurements or missing width data.
 
 The `hmrc-scroll-y` sessionStorage restore runs in a `useEffect([ready])` — it must wait
 for items to be in the DOM at correct heights before calling `window.scrollTo`.
+
+## Home search (`searchHmrc`) — index-served predicates + previous-name matching
+
+The search WHERE pairs each pg_trgm function recheck with its index-served
+OPERATOR: `org ~* pattern`, `query <% org AND word_similarity(...) > 0.6`,
+`org % query AND similarity(...) > 0.5`. The operators let the GIN trigram
+indexes BitmapOr the candidate set (~20x faster); the function rechecks pin the
+exact thresholds against downward drift of the `pg_trgm.*_threshold` GUCs
+(defaults 0.6 / 0.3). The pair is NOT immune upward: a GUC raised above the
+recheck's literal (0.6 / 0.5) makes the operator the binding filter and
+silently shrinks results. Do NOT "simplify" either half away: bare functions
+can never use an index (full scan, ~1s), bare operators silently change
+semantics if a GUC moves.
+
+Previous Companies House names are searched via `ch_previous_names`
+(company_number, name) — a flattened projection of
+`companies_house_profiles.previous_company_names` with its own
+`gin_trgm_ops` index, because GIN can't trigram-index inside an array column.
+It is maintained by the DB trigger `trg_sync_ch_previous_names` (AFTER
+INSERT OR UPDATE OF previous_company_names) — never write to it from
+application code, and any environment migration must create the table, index,
+trigger, and backfill together. The function body (hardened in 0029)
+early-returns on no-op assignments (`OLD IS NOT DISTINCT FROM NEW` — upserts
+assign the column on every write, ~29x more often than it changes) and filters
+NULL array elements, which would otherwise violate `name NOT NULL` and abort
+the parent profile write (poison stream event). The OLD comparison must stay
+inside a nested `IF TG_OP = 'UPDATE'` block: plpgsql binds `OLD.x` before
+evaluating, so a combined condition errors on INSERT.
+
+The query keeps prev-name hits in a separate UNION branch (probe
+`idx_hmrc_org_name` by org) rather than `OR`-ing them into the direct WHERE —
+an OR across the join would force a seq scan and lose all index use. A result's
+`matchedPreviousName` is set only when the previous-name score strictly beats
+the current-name score (ties show the current name without the line).
+Prev-name wins also sort below equal-score direct matches via the `prev_won`
+key — without it, renamed orgs tie prefix queries at full score and flood
+page 1 alphabetically by their unrelated current names. `prev_won` appears in
+BOTH the `g` ORDER BY and the outer re-sort; keep the two identical or OFFSET
+pages duplicate/drop rows. The current-name score is gated on the `direct`
+flag carried out of `hits` (`org_score` in `g0`): for prev-name-only rows,
+ungated `scoreCase` is sub-threshold word_similarity noise that would suppress
+`matchedPreviousName` and leak past the demotion. Do NOT replace the flag with
+a `fuzzyMatch(org)` recheck in `g0` — that re-runs trigram ops per grouped row.
+`public_body`/`no_match` mapping rows have NULL company_number, so they drop
+out of the prev-name join naturally.
 
 ## Page transitions live in `transitions.css`, not `styles.css`
 

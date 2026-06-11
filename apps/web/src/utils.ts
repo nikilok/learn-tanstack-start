@@ -101,6 +101,16 @@ export function formatLocation(
   return parts.join(', ');
 }
 
+/**
+ * "Previously <name>" line for a previous-company-name match. Returns an
+ * empty string when there is no match. Single source for BOTH the rendered
+ * line in `HmrcCard` and the height estimator's `getText` in `HmrcResults` —
+ * the two must measure/render identical text, so never inline this template.
+ */
+export function previousNameText(name: string | null): string {
+  return name ? `Previously ${titleCase(name)}` : '';
+}
+
 // Trailing legal-entity suffixes stripped from a company name before searching.
 const SEARCH_SUFFIXES =
   /[\s,]+(?:limited|ltd|plc|llp|llc|lp|cic|cio|inc|incorporated|corp|corporation|unlimited)\.?\s*$/i;

@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, titleCase } from '../utils';
+import { formatLocation, previousNameText, titleCase } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 
@@ -39,7 +39,17 @@ export default function HmrcResults({ search }: { search: string }) {
         letterSpacing: -0.4, // heading-card utility
       },
       {
-        getText: (row) => formatLocation(row.locality, row.region),
+        // Empty text measures as 0 lines / 0px, so rows without a previous-name
+        // match pay no height; the rendered line is margin-free to match
+        getText: (row) => previousNameText(row.matchedPreviousName),
+        font: 'italic 12px Geist', // text-xs italic
+        lineHeight: 16,
+      },
+      {
+        // Location renders as ONE truncated line beside a MapPin icon, never
+        // wrapping — so measure a single-glyph sentinel (always 1 line) when a
+        // location exists and '' (0 lines) when not, instead of the real text
+        getText: (row) => (formatLocation(row.locality, row.region) ? 'M' : ''),
         font: '14px Geist', // text-sm
         lineHeight: 20,
       },

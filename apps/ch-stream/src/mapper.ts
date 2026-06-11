@@ -38,7 +38,7 @@ export function mapProfileToRow(data: CHCompanyProfile) {
   if (data.has_charges !== undefined) row.hasCharges = data.has_charges ?? null;
   if (data.previous_company_names !== undefined)
     row.previousCompanyNames =
-      data.previous_company_names?.map((p) => p.name) ?? [];
+      data.previous_company_names?.map((p) => p.name).filter((n) => !!n) ?? [];
 
   if (data.accounts !== undefined) {
     const acc = data.accounts;

@@ -24,7 +24,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence numbers.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, sponsor rating, and sponsor licence numbers. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -77,6 +77,11 @@ export function McpTools() {
 
           const formatted = result.rows.map((row) => ({
             name: titleCase(row.organisationName),
+            // Only present when the row matched via a previous registered
+            // name — explains results whose name doesn't resemble the query
+            ...(row.matchedPreviousName
+              ? { previousName: titleCase(row.matchedPreviousName) }
+              : {}),
             location: formatLocation(row.locality, row.region),
             visaRoute: titleCase(row.route),
             rating: titleCase(row.typeRating),

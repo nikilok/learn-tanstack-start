@@ -85,7 +85,7 @@ export default function HmrcCard({
       {row.matchedPreviousName && (
         // No vertical margins: the height estimator in HmrcResults measures
         // this line as lineCount * 20px, so any margin here would desync it
-        <p className="text-sm text-(--sea-ink)">
+        <p className="text-xs text-(--sea-ink-soft) italic">
           Previously {titleCase(row.matchedPreviousName)}
         </p>
       )}

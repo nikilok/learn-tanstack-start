@@ -45,8 +45,8 @@ export default function HmrcResults({ search }: { search: string }) {
           row.matchedPreviousName
             ? `Previously ${titleCase(row.matchedPreviousName)}`
             : '',
-        font: 'italic 14px Geist', // text-sm italic
-        lineHeight: 20,
+        font: 'italic 12px Geist', // text-xs italic
+        lineHeight: 16,
       },
       {
         // Location renders as ONE truncated line beside a MapPin icon, never

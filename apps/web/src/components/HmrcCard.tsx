@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router';
+import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
 import { formatLocation, titleCase } from '../utils';
@@ -84,7 +85,7 @@ export default function HmrcCard({
       {row.matchedPreviousName && (
         // No vertical margins: the height estimator in HmrcResults measures
         // this line as lineCount * 20px, so any margin here would desync it
-        <p className="text-sm text-(--sea-ink-soft) italic">
+        <p className="text-sm text-(--sea-ink)">
           Previously {titleCase(row.matchedPreviousName)}
         </p>
       )}
@@ -92,9 +93,17 @@ export default function HmrcCard({
         <RatingIcon rating={row.typeRating} />
       </div>
       <div className="mt-0.5">
-        <p className="text-sm text-(--sea-ink-soft)">
-          {formatLocation(row.locality, row.region)}
-        </p>
+        {formatLocation(row.locality, row.region) && (
+          // Single truncated line: the height estimator in HmrcResults counts
+          // this as exactly one line when a location exists, so it must never
+          // wrap (the inline icon steals width the estimator can't see)
+          <p className="flex items-center gap-1.5 text-sm text-(--sea-ink-soft)">
+            <MapPin size={14} className="shrink-0" />
+            <span className="truncate">
+              {formatLocation(row.locality, row.region)}
+            </span>
+          </p>
+        )}
         <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">
           {titleCase(row.route)}
         </p>

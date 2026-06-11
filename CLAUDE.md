@@ -106,6 +106,11 @@ reduction in Layout/Recalculate style).
      because empty text measures as 0 lines / 0px — but the rendered element must
      stay **margin-free**: a margin would apply once per card while the estimator
      only counts `lineCount * lineHeight`
+   - Single-line `truncate` fields (e.g. the MapPin + location row) measure a
+     one-glyph sentinel (`'M'` → exactly 1 line) instead of the real text: an
+     inline icon steals width the canvas can't see, so the rendered line must
+     never wrap. If a truncated line is ever allowed to wrap again, drop the
+     icon from the text flow AND restore real-text measurement together
 2. **`HmrcResults.tsx` line ~75** — the hidden measurement div's `className="px-4"` must
    match the real container's horizontal padding class (line ~95)
 

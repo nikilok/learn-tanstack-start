@@ -49,7 +49,10 @@ export default function HmrcResults({ search }: { search: string }) {
         lineHeight: 20,
       },
       {
-        getText: (row) => formatLocation(row.locality, row.region),
+        // Location renders as ONE truncated line beside a MapPin icon, never
+        // wrapping — so measure a single-glyph sentinel (always 1 line) when a
+        // location exists and '' (0 lines) when not, instead of the real text
+        getText: (row) => (formatLocation(row.locality, row.region) ? 'M' : ''),
         font: '14px Geist', // text-sm
         lineHeight: 20,
       },

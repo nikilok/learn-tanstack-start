@@ -17,7 +17,7 @@ import {
   hmrcSkilledWorkers,
 } from '@ss/db/schema';
 import dotenv from 'dotenv';
-import { eq, isNull, sql } from 'drizzle-orm';
+import { asc, eq, isNull, sql } from 'drizzle-orm';
 
 import { resolveOneSponsor } from '../src/lib/hmrc-ch/resolve-sponsor';
 
@@ -60,13 +60,16 @@ async function fetchApi(path: string): Promise<unknown | null> {
   return res.json();
 }
 
-// Get only org names that aren't already cached. The 2026-06 HMRC feed
-// dropped town/county, so the resolver's locality tiebreak runs inert.
-// selectDistinctOn(orgName) collapses multi-row sponsors (one per
-// route/rating) to a single representative row.
+// Get only org names that aren't already cached, with town/county for the
+// resolver's locality tiebreak. selectDistinctOn(orgName) collapses
+// multi-row sponsors (one per route/rating) to a single representative row;
+// `asc(id)` makes that pick deterministic (one arbitrary site for
+// multi-site orgs, mirroring makeLookupSponsor).
 const uncached = await db
   .selectDistinctOn([hmrcSkilledWorkers.organisationName], {
     organisationName: hmrcSkilledWorkers.organisationName,
+    townCity: hmrcSkilledWorkers.townCity,
+    county: hmrcSkilledWorkers.county,
   })
   .from(hmrcSkilledWorkers)
   .leftJoin(
@@ -74,7 +77,7 @@ const uncached = await db
     sql`UPPER(${hmrcSkilledWorkers.organisationName}) = UPPER(${companiesHouseProfiles.companyName})`,
   )
   .where(isNull(companiesHouseProfiles.companyNumber))
-  .orderBy(hmrcSkilledWorkers.organisationName);
+  .orderBy(hmrcSkilledWorkers.organisationName, asc(hmrcSkilledWorkers.id));
 console.log(`Found ${uncached.length} uncached organisations to fetch`);
 
 let processed = 0;
@@ -135,7 +138,7 @@ for (const row of uncached) {
   // point users at the wrong CH entity. See docs/hmrc-ch-mapping-fix.md.
   const result = await resolveOneSponsor(
     orgName,
-    { townCity: null, county: null },
+    { townCity: row.townCity, county: row.county },
     throttledFetchApi,
   );
 

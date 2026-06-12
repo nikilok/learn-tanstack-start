@@ -211,6 +211,13 @@
       "when": 1781198614018,
       "tag": "0029_harden-prev-names-sync",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781249279546,
+      "tag": "0030_snapshot-licences-restore-town-county",
+      "breakpoints": true
     }
   ]
 }

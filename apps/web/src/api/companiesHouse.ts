@@ -1,9 +1,14 @@
-import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+  sicCodes,
+} from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
-import { eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
@@ -218,10 +223,24 @@ const getCompanyProfile = createServerFn()
       console.log(
         `[Profile] no mapping, resolving via CH for: "${companyName}"`,
       );
-      // HMRC no longer publishes town/county, so the locality tiebreak is inert.
+      // Town/county feed the locality tiebreak; `asc(id)` mirrors
+      // makeLookupSponsor's deterministic first-row pick (one arbitrary
+      // site for multi-site orgs).
+      const [hmrcRow] = await db
+        .select({
+          townCity: hmrcSkilledWorkers.townCity,
+          county: hmrcSkilledWorkers.county,
+        })
+        .from(hmrcSkilledWorkers)
+        .where(eq(hmrcSkilledWorkers.organisationName, companyName))
+        .orderBy(asc(hmrcSkilledWorkers.id))
+        .limit(1);
       const result = await resolveOneSponsor(
         companyName,
-        { townCity: null, county: null },
+        {
+          townCity: hmrcRow?.townCity ?? null,
+          county: hmrcRow?.county ?? null,
+        },
         async (path) => {
           const r = await fetchFromApi(path);
           return r.ok ? r.data : null;

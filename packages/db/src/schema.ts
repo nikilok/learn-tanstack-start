@@ -22,21 +22,39 @@ export const hmrcSkilledWorkers = pgTable(
     hash: varchar('hash', { length: 11 }).notNull().unique(),
     organisationName: varchar('organisation_name', { length: 255 }).notNull(),
     nameSlug: varchar('name_slug', { length: 255 }).notNull(),
-    sponsorLicenceNumber: varchar('sponsor_licence_number', { length: 64 }),
-    sponsorStatus: varchar('sponsor_status', { length: 64 }),
+    townCity: varchar('town_city', { length: 100 }),
+    county: varchar('county', { length: 100 }),
     typeRating: varchar('type_rating', { length: 100 }).notNull(),
     route: varchar('route', { length: 100 }).notNull(),
   },
   (table) => [
     index('idx_hmrc_org_name').on(table.organisationName),
     index('idx_hmrc_name_slug').on(table.nameSlug),
-    index('idx_hmrc_licence').on(table.sponsorLicenceNumber),
     index('idx_hmrc_route').on(table.route),
     index('idx_hmrc_org_name_trgm').using(
       'gin',
       sql`${table.organisationName} gin_trgm_ops`,
     ),
   ],
+);
+
+// Snapshot of the org→licence mapping from the 2026-06-09 feed era, taken by
+// migration 0030 before the post-revert ingest swap destroyed the source
+// columns. Not read by the app yet — preserved for later use.
+export const hmrcSponsorLicences = pgTable(
+  'hmrc_sponsor_licences',
+  {
+    id: serial('id').primaryKey(),
+    organisationName: varchar('organisation_name', { length: 255 }).notNull(),
+    sponsorLicenceNumber: varchar('sponsor_licence_number', {
+      length: 64,
+    }).notNull(),
+    typeRating: varchar('type_rating', { length: 100 }).notNull(),
+    route: varchar('route', { length: 100 }).notNull(),
+    sponsorStatus: varchar('sponsor_status', { length: 64 }),
+    snapshottedAt: timestamp('snapshotted_at').defaultNow().notNull(),
+  },
+  (table) => [index('idx_sponsor_licences_org').on(table.organisationName)],
 );
 
 export const sicCodes = pgTable('sic_codes', {

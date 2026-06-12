@@ -1,5 +1,29 @@
 # Plan: Adapt HMRC ingestion to the new gov.uk CSV format (+ CH-sourced location)
 
+> **Superseded 2026-06-11 — the feed reverted to the old format.** The CSV went back to
+> `Organisation Name, Town/City, County, Type & Rating, Route`: the Sponsor Licence Number
+> and Sponsor Status columns below lasted two days. What changed in response:
+>
+> - **Licence data preserved:** migration 0030 snapshotted the org→licence mapping into
+>   `hmrc_sponsor_licences` (distinct org/licence/rating/route/status rows, unused for now)
+>   *before* the first post-revert ingest swap destroyed the source columns, then dropped
+>   `sponsor_licence_number`/`sponsor_status` from `hmrc_skilled_workers` and restored
+>   `town_city`/`county`. The migration must run before that ingest — ordering is load-bearing.
+> - **Hash basis is now `org|type_rating|route`** (licence is gone from the feed). Town is
+>   deliberately excluded so URLs survive relocations; the ~900 feed rows differing only by
+>   town within an org|rating|route collapse keep-first. Org renames churn the hash —
+>   accepted, slug-only URLs are planned. The "last hash migration" claim below did not
+>   survive contact with HMRC.
+> - **Locality tiebreak re-enabled:** `makeLookupSponsor`, the on-demand resolver in
+>   `companiesHouse.ts`, and `seed-companies-house.ts` feed real town/county to
+>   `pickByLocality` again (one deterministic `ORDER BY id` row per org — an arbitrary site
+>   for multi-site orgs).
+> - **Listing/detail location stays CH-sourced by decision** — the restored HMRC town/county
+>   are used only for the matching tiebreak, not for display.
+>
+> The lockstep invariant below still holds: `schema.ts` ≡ ingest staging DDL ≡ live table.
+> The rest of this document is kept as the design record for the (now reverted) format.
+
 ## Context
 
 The gov.uk "Worker and Temporary Worker" sponsor CSV changed format on 2026-06-09, which

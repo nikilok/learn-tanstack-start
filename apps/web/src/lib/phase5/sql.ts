@@ -117,8 +117,9 @@ function toExistingMapping(row: RawMappingRow): ExistingMapping {
 
 /** Build a `lookupSponsor` matching `SweepDeps['lookupSponsor']`. Pulls
  *  `route` from `hmrc_skilled_workers` for the inline scorer's route-type
- *  hard gate. Locality is always null since the 2026-06 HMRC feed dropped
- *  town/county — the resolver's geographic tiebreak is inert. */
+ *  hard gate, and `town_city`/`county` (restored by the 2026-06-11 feed
+ *  revert) for the resolver's geographic tiebreak. The picked row's town is
+ *  one arbitrary site for multi-site orgs. */
 export function makeLookupSponsor(sql: Sql): SweepDeps['lookupSponsor'] {
   return async (organisationName) => {
     // `ORDER BY id ASC` for deterministic row selection — `hmrc_skilled_workers`
@@ -127,18 +128,20 @@ export function makeLookupSponsor(sql: Sql): SweepDeps['lookupSponsor'] {
     // resolver's tiebreak depends on Postgres's storage order, which can
     // shift between runs. (CodeRabbit PR #85, comment 2.)
     const rows = (await sql`
-      SELECT route
+      SELECT town_city, county, route
       FROM hmrc_skilled_workers
       WHERE organisation_name = ${organisationName}
       ORDER BY id ASC
       LIMIT 1
     `) as {
+      town_city: string | null;
+      county: string | null;
       route: string | null;
     }[];
     const first = rows[0];
     return {
-      townCity: null,
-      county: null,
+      townCity: first?.town_city ?? null,
+      county: first?.county ?? null,
       route: first?.route ?? null,
     } satisfies SweepSponsor;
   };

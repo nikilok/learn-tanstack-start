@@ -5,16 +5,14 @@ import { slugify } from '../src/utils';
 import { setGitHubOutput } from './ci-utils';
 
 const EXPECTED_COLUMNS = [
-  'Sponsor Licence Number',
   'Organisation Name',
-  'TierRating',
-  'Migrant Classification',
-  'Sponsor Status',
+  'Town/City',
+  'County',
+  'Type & Rating',
+  'Route',
 ] as const;
 
 const BATCH_SIZE = 500;
-// Must agree with sponsor_licence_number varchar(64) in packages/db/src/schema.ts
-const LICENCE_MAX_LEN = 64;
 
 const force = process.argv.includes('--force');
 const url = process.argv.filter((a) => !a.startsWith('--'))[2];
@@ -87,20 +85,19 @@ console.log(`Validated schema: ${records.length} records found`);
 // Step 4: Create staging table
 console.log('Creating staging table...');
 await sql`DROP TABLE IF EXISTS "hmrc_skilled_workers_staging"`;
-// sql.query (not the tagged template): DDL can't take $n params, and the
-// licence width interpolates from LICENCE_MAX_LEN so DDL and guard can't drift
-await sql.query(`
+// Must agree with hmrc_skilled_workers in packages/db/src/schema.ts
+await sql`
   CREATE TABLE "hmrc_skilled_workers_staging" (
     "id" serial PRIMARY KEY NOT NULL,
     "hash" varchar(11) NOT NULL UNIQUE,
     "organisation_name" varchar(255) NOT NULL,
     "name_slug" varchar(255) NOT NULL,
-    "sponsor_licence_number" varchar(${LICENCE_MAX_LEN}),
-    "sponsor_status" varchar(64),
+    "town_city" varchar(100),
+    "county" varchar(100),
     "type_rating" varchar(100) NOT NULL,
     "route" varchar(100) NOT NULL
   )
-`);
+`;
 
 // Step 5: Bulk insert into staging table
 console.log(
@@ -114,15 +111,17 @@ function clean(val: string | undefined): string | null {
   return trimmed;
 }
 
-/** Mint the stable URL id from the licence-based row identity. Licence is a
- *  durable per-sponsor key, so hashes survive company renames and future
- *  ingests — org name is deliberately excluded. */
+/** Mint the stable URL id. Town/county are deliberately excluded so URLs
+ *  survive relocations and HMRC town edits; the ~900 feed rows that differ
+ *  only by town within an org|rating|route collapse keep-first. Org renames
+ *  do churn the hash (accepted — slug-only URLs are planned). UNIQUE(hash)
+ *  on the table stays as a collision guard. */
 function computeHash(
-  licence: string,
+  orgName: string,
   typeRating: string,
   route: string,
 ): string {
-  const input = [licence, typeRating, route].join('|');
+  const input = [orgName, typeRating, route].join('|');
   const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
   // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
   return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);
@@ -133,62 +132,62 @@ type CleanedRow = {
   hash: string;
   orgName: string;
   nameSlug: string;
-  licence: string;
-  status: string | null;
+  townCity: string | null;
+  county: string | null;
   typeRating: string;
   route: string;
 };
 
-const seen = new Map<string, CleanedRow>();
+const seen = new Set<string>();
 const dedupedRows: CleanedRow[] = [];
-// Licence is the hash backbone: blank values collide distinct orgs into one
-// hash (silently dropped by dedup), and >20 chars aborts the batched INSERT
-// mid-ingest with no row context. Fail fast naming the rows instead.
+// An empty org name collides distinct rows into one hash, and a value over
+// its varchar width aborts a 500-row INSERT mid-ingest with no row context.
+// Fail fast naming the rows instead.
 const invalidRows: string[] = [];
 
 for (const [i, r] of records.entries()) {
   const rowNum = i + 2; // 1-based, after the header row
-  const licence = r['Sponsor Licence Number'].trim();
   const orgName = r['Organisation Name'].trim();
-  const typeRating = r.TierRating.trim();
-  const route = r['Migrant Classification'].trim();
-  const status = clean(r['Sponsor Status']);
+  const townCity = clean(r['Town/City']);
+  const county = clean(r.County);
+  const typeRating = r['Type & Rating'].trim();
+  const route = r.Route.trim();
 
-  if (!licence || licence.length > LICENCE_MAX_LEN) {
+  if (!orgName || orgName.length > 255) {
     invalidRows.push(
-      `row ${rowNum} ("${orgName || '?'}"): bad Sponsor Licence Number ${JSON.stringify(licence)}`,
+      `row ${rowNum}: bad Organisation Name ${JSON.stringify(orgName)}`,
     );
     continue;
   }
-  if (status && status.length > 64) {
+  const oversized = [
+    ['Town/City', townCity],
+    ['County', county],
+    ['Type & Rating', typeRating],
+    ['Route', route],
+  ].find(([, val]) => val && val.length > 100);
+  if (oversized) {
     invalidRows.push(
-      `row ${rowNum} ("${orgName}"): Sponsor Status exceeds 64 chars (${status.length})`,
+      `row ${rowNum} ("${orgName}"): ${oversized[0]} exceeds 100 chars (${oversized[1]?.length})`,
     );
     continue;
   }
 
-  const hash = computeHash(licence, typeRating, route);
+  const hash = computeHash(orgName, typeRating, route);
   const nameSlug = slugify(orgName) || hash;
 
-  const previous = seen.get(hash);
-  if (!previous) {
-    const row: CleanedRow = {
+  // Org name is inside the hash, so the only intra-hash variance is
+  // town/county (multi-site orgs) — keep-first is the accepted policy.
+  if (!seen.has(hash)) {
+    seen.add(hash);
+    dedupedRows.push({
       hash,
       orgName,
       nameSlug,
-      licence,
-      status,
+      townCity,
+      county,
       typeRating,
       route,
-    };
-    seen.set(hash, row);
-    dedupedRows.push(row);
-  } else if (previous.orgName !== orgName || previous.status !== status) {
-    // Same licence|rating|route with a different identity: keeping either row
-    // picks an arbitrary name (and therefore CH mapping). Upstream anomaly.
-    invalidRows.push(
-      `row ${rowNum} ("${orgName}"): conflicts with earlier "${previous.orgName}" sharing licence|rating|route (${hash})`,
-    );
+    });
   }
 }
 
@@ -220,15 +219,15 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
       r.hash,
       r.orgName,
       r.nameSlug,
-      r.licence,
-      r.status,
+      r.townCity,
+      r.county,
       r.typeRating,
       r.route,
     );
   }
 
   await sql.query(
-    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "name_slug", "sponsor_licence_number", "sponsor_status", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
+    `INSERT INTO "hmrc_skilled_workers_staging" ("hash", "organisation_name", "name_slug", "town_city", "county", "type_rating", "route") VALUES ${placeholders.join(', ')}`,
     values,
   );
 
@@ -242,7 +241,6 @@ console.log('Building indexes on staging table...');
 await Promise.all([
   sql`CREATE INDEX "stg_idx_hmrc_org_name" ON "hmrc_skilled_workers_staging" USING btree ("organisation_name")`,
   sql`CREATE INDEX "stg_idx_hmrc_name_slug" ON "hmrc_skilled_workers_staging" USING btree ("name_slug")`,
-  sql`CREATE INDEX "stg_idx_hmrc_licence" ON "hmrc_skilled_workers_staging" USING btree ("sponsor_licence_number")`,
   sql`CREATE INDEX "stg_idx_hmrc_route" ON "hmrc_skilled_workers_staging" USING btree ("route")`,
   sql`CREATE INDEX "stg_idx_hmrc_org_name_trgm" ON "hmrc_skilled_workers_staging" USING gin ("organisation_name" gin_trgm_ops)`,
 ]);
@@ -256,7 +254,6 @@ await sql.transaction([
   sql`ALTER TABLE "hmrc_skilled_workers_staging" RENAME TO "hmrc_skilled_workers"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name" RENAME TO "idx_hmrc_org_name"`,
   sql`ALTER INDEX "stg_idx_hmrc_name_slug" RENAME TO "idx_hmrc_name_slug"`,
-  sql`ALTER INDEX "stg_idx_hmrc_licence" RENAME TO "idx_hmrc_licence"`,
   sql`ALTER INDEX "stg_idx_hmrc_route" RENAME TO "idx_hmrc_route"`,
   sql`ALTER INDEX "stg_idx_hmrc_org_name_trgm" RENAME TO "idx_hmrc_org_name_trgm"`,
   sql`ALTER INDEX "hmrc_skilled_workers_staging_hash_key" RENAME TO "hmrc_skilled_workers_hash_unique"`,

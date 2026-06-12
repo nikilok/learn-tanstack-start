@@ -81,13 +81,13 @@ export const searchHmrc = createServerFn()
     // idx_mapping_company_number; the direct branch BitmapOrs
     // idx_hmrc_org_name_trgm; the pm-driven branch probes idx_hmrc_org_name.
     // Folding pm into the direct WHERE as an OR would force a seq scan.
-    // One row per (org, rating, route): the same org can hold several licences
-    // with otherwise identical feed data (888 groups in the 2026-06 feed), and
-    // the cards show nothing that distinguishes them. min(hash) is the
-    // canonical slugId — the detail loader 301s the siblings to it.
+    // One row per (org, rating, route). With hash = org|rating|route the
+    // min(hash) grouping is 1:1 — kept for resilience if the hash inputs
+    // ever change again; the detail loader 301s any siblings to it.
     // Grouping/LIMIT happen in `g`, BEFORE the CH location joins, so those
     // stay PK probes on the returned window only.
-    // Listing location is CH-sourced (HMRC dropped town/county from the feed).
+    // Listing location stays CH-sourced by decision, even though the
+    // 2026-06-11 feed revert brought HMRC town/county back.
     const result = await db.execute(sql`
       WITH pm AS (
         SELECT m.organisation_name,
@@ -167,9 +167,9 @@ export const searchHmrc = createServerFn()
 /**
  * Server fn returning a single `hmrc_skilled_workers` row keyed by its stable
  * `hash` slug id. Returns `null` when no matching row exists. Also returns the
- * group canonical: multi-licence orgs have one row per licence with identical
- * (org, rating, route) — search lists only min(hash), and the loader 301s the
- * sibling hashes to `canonicalSlugId`.
+ * group canonical: with hash = org|rating|route the (org, rating, route) group
+ * is 1:1 and `canonicalSlugId` equals `slugId` — kept for resilience if the
+ * hash inputs ever change again; the loader 301s any siblings to it.
  */
 const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
@@ -195,10 +195,11 @@ const getHmrcBySlugId = createServerFn()
       .where(eq(hmrcSkilledWorkers.hash, slugId))
       .limit(1);
 
-    // Found rows cache long: the hash is licence-based, so data behind it only
-    // changes via ingest, and the post-ingest sitemap deploy purges the edge.
-    // Nulls cache short — a licence can be reinstated under the same hash, and
-    // a 30-day-cached null would 301-loop the revived URL against itself.
+    // Found rows cache long: the hash is content-based (org|rating|route), so
+    // data behind it only changes via ingest, and the post-ingest sitemap
+    // deploy purges the edge. Nulls cache short — a sponsor can be reinstated
+    // under the same hash, and a 30-day-cached null would 301-loop the
+    // revived URL against itself.
     setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
 
     return row ?? null;
@@ -239,10 +240,10 @@ export const sponsorCountQueryOptions = queryOptions({
  * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
  * lookup 404s, the loader 301s to the slug's first row — and also scans the
  * matches for the requested hash itself, which detects a stale cached null
- * (licence reinstated under the same hash). Uncapped: rows are per LICENCE
- * (not per rating/route group) and namesake slugs pool orgs, so any cap could
- * hide the requested hash from the containment scan; rows per slug are
- * naturally tiny (max 8 across 126k slugs).
+ * (sponsor reinstated under the same hash). Uncapped: rows are per
+ * (org, rating, route) and namesake slugs pool orgs, so any cap could hide
+ * the requested hash from the containment scan; rows per slug are naturally
+ * tiny (max 8 across 126k slugs).
  * Ordered by hash so the multi-match 301 always picks the same canonical row.
  * Not wrapped in queryOptions — only the loader calls it, and the redirect
  * moves the user off this page so there's no second reader for the result.

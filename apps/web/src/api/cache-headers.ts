@@ -11,7 +11,7 @@ export const LONG_EDGE_CACHE =
 
 /**
  * Short edge TTL for negative lookups (row not found). A missing hash can
- * come back to life (licence reinstated by a later ingest), so a long-cached
+ * come back to life (sponsor reinstated by a later ingest), so a long-cached
  * null would strand the URL — 5 minutes absorbs crawler storms without that.
  */
 export const SHORT_EDGE_CACHE = 's-maxage=300, stale-while-revalidate=60';

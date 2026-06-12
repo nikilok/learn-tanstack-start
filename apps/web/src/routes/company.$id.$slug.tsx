@@ -79,7 +79,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
       const matches = await getHmrcBySlug({ data: { slug: params.slug } });
       if (matches.some((m) => m.slugId === params.id)) {
         // The (uncached) slug lookup sees this very hash, so the cached null
-        // is stale — licence reinstated under the same hash by a later
+        // is stale — sponsor reinstated under the same hash by a later
         // ingest. Drop the entry and refetch: invalidateQueries never
         // refetches an observer-less query, and ensureQueryData would just
         // return the cached null again.
@@ -102,7 +102,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
       }
       if (!sponsor) {
         // Best effort: keep the 404 document short-lived at the edge (a
-        // reinstated licence can revive the URL). The static /company/**
+        // reinstated sponsor can revive the URL). The static /company/**
         // routeRule header may still win at the edge — verify on deploy;
         // the post-ingest deploy purge bounds the damage either way.
         setSsrCacheControl(SHORT_EDGE_CACHE);
@@ -123,9 +123,10 @@ export const Route = createFileRoute('/company/$id/$slug')({
       ((sponsor.canonicalSlugId && sponsor.canonicalSlugId !== params.id) ||
         (sponsor.nameSlug && sponsor.nameSlug !== params.slug))
     ) {
-      // One canonical URL per page: sibling licence hashes 301 onto the
-      // group's min-hash row, and stale slugs (post-rename) onto the current
-      // slug — otherwise near-duplicate 200s accumulate in the index.
+      // One canonical URL per page: stale slugs (post-rename) 301 onto the
+      // current slug — otherwise near-duplicate 200s accumulate in the index.
+      // The canonicalSlugId half is 1:1 today (hash = org|rating|route, no
+      // siblings) — kept for resilience if the hash inputs ever change again.
       throw redirect({
         to: '/company/$id/$slug',
         params: {

@@ -81,9 +81,11 @@ export const searchHmrc = createServerFn()
     // idx_mapping_company_number; the direct branch BitmapOrs
     // idx_hmrc_org_name_trgm; the pm-driven branch probes idx_hmrc_org_name.
     // Folding pm into the direct WHERE as an OR would force a seq scan.
-    // One row per (org, rating, route). With hash = org|rating|route the
-    // min(hash) grouping is 1:1 — kept for resilience if the hash inputs
-    // ever change again; the detail loader 301s any siblings to it.
+    // The g0 GROUP BY is load-bearing: an org matching both directly AND via
+    // a previous name yields two `hits` rows (UNION can't collapse the direct
+    // flag) that merge here, bool_or(direct) gating org_score. Only min(hash)
+    // is vestigial — 1:1 with hash = org|rating|route, kept for resilience if
+    // the hash inputs ever change again; the detail loader 301s any siblings.
     // Grouping/LIMIT happen in `g`, BEFORE the CH location joins, so those
     // stay PK probes on the returned window only.
     // Listing location stays CH-sourced by decision, even though the

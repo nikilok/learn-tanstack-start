@@ -9,5 +9,6 @@ export {
   hmrcCompanyMapping,
   hmrcIngestionMeta,
   hmrcSkilledWorkers,
+  hmrcSponsorLicences,
   sicCodes,
 } from './schema.ts';

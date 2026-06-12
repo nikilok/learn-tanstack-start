@@ -11,6 +11,10 @@ on:
         description: "Force ingestion even if CSV hasn't changed"
         type: boolean
         default: false
+      allow-shrink:
+        description: 'Bypass the volume floor (ingest a feed that shrank >50% since the last run)'
+        type: boolean
+        default: false
 
 jobs:
   discover-csv-url:
@@ -32,12 +36,16 @@ jobs:
 
       - name: Extract CSV URL
         id: extract-url
+        # Discovery output reaches the shell via env, never via ${{ }} in run:
+        # — template expansion happens before bash parses, so spliced text
+        # (here: LLM-script stdout) would execute as code.
+        env:
+          FIND_CSV_STDOUT: ${{ steps.find-csv.outputs.stdout }}
         run: |
-          STDOUT="${{ steps.find-csv.outputs.stdout }}"
-          CSV_URL=$(echo "$STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
+          CSV_URL=$(echo "$FIND_CSV_STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
           if [ -z "$CSV_URL" ]; then
             echo "::error::Could not extract CSV URL from discovery script output"
-            echo "Script output was: $STDOUT"
+            echo "Script output was: $FIND_CSV_STDOUT"
             exit 1
           fi
           echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
@@ -62,9 +70,19 @@ jobs:
 
       - name: Run ingestion
         id: ingest
+        # URL and flags reach the shell via env (not ${{ }} in run:) so a
+        # poisoned discovery output can't inject commands into a step holding
+        # POSTGRES_URL and repo-write credentials.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }}
+          CSV_URL: ${{ needs.discover-csv-url.outputs.csv-url }}
+          FORCE_INGEST: ${{ github.event.inputs.force-ingest }}
+          ALLOW_SHRINK: ${{ github.event.inputs.allow-shrink }}
+        run: |
+          args=()
+          if [ "$FORCE_INGEST" = "true" ]; then args+=(--force); fi
+          if [ "$ALLOW_SHRINK" = "true" ]; then args+=(--allow-shrink); fi
+          bun run db:ingest "$CSV_URL" "${args[@]}"
         working-directory: apps/web
 
       - name: Regenerate sitemaps

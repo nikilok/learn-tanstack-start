@@ -1,9 +1,14 @@
-import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import {
+  companiesHouseProfiles,
+  hmrcCompanyMapping,
+  hmrcSkilledWorkers,
+  sicCodes,
+} from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
-import { eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
@@ -218,12 +223,31 @@ const getCompanyProfile = createServerFn()
       console.log(
         `[Profile] no mapping, resolving via CH for: "${companyName}"`,
       );
-      // HMRC no longer publishes town/county, so the locality tiebreak is inert.
+      // Town/county feed the locality tiebreak; `asc(id)` mirrors
+      // makeLookupSponsor's deterministic first-row pick (one arbitrary
+      // site for multi-site orgs).
+      const [hmrcRow] = await db
+        .select({
+          townCity: hmrcSkilledWorkers.townCity,
+          county: hmrcSkilledWorkers.county,
+        })
+        .from(hmrcSkilledWorkers)
+        .where(eq(hmrcSkilledWorkers.organisationName, companyName))
+        .orderBy(asc(hmrcSkilledWorkers.id))
+        .limit(1);
+      // resolveOneSponsor has no error verdict — a null from the fetch
+      // callback reads as "not found". Track non-404 failures (429/5xx) so a
+      // CH outage isn't cached as a permanent no_match below.
+      let chFetchFailed = false;
       const result = await resolveOneSponsor(
         companyName,
-        { townCity: null, county: null },
+        {
+          townCity: hmrcRow?.townCity ?? null,
+          county: hmrcRow?.county ?? null,
+        },
         async (path) => {
           const r = await fetchFromApi(path);
+          if (!r.ok && r.status !== 404) chFetchFailed = true;
           return r.ok ? r.data : null;
         },
       );
@@ -245,6 +269,15 @@ const getCompanyProfile = createServerFn()
       }
 
       if (result.verdict === 'no_match' || result.verdict === 'human_review') {
+        // Negative verdicts reached through a failed CH call are artifacts of
+        // the outage, not evidence — serve this request null without caching,
+        // so the next visit retries instead of inheriting a poisoned no_match.
+        if (chFetchFailed) {
+          console.log(
+            `[Profile] CH transport failure while resolving "${companyName}" — not caching ${result.verdict}`,
+          );
+          return null;
+        }
         // human_review (multiple tied candidates) is cached as no_match for the
         // on-demand path: re-running the 5-call pipeline on every visit would
         // be expensive and the verdict won't change without ch-stream data

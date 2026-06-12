@@ -30,8 +30,9 @@ async function generate() {
   }
 
   // Single pass over all rows; LEFT JOIN keeps HMRC entries without a CH match.
-  // One URL per (org, rating, route) group: multi-licence siblings 301 to the
-  // canonical min(hash) page, so only that hash belongs in the sitemap.
+  // One URL per (org, rating, route) group. With hash = org|rating|route the
+  // min(hash) grouping is 1:1 — kept for resilience if the hash inputs ever
+  // change again; siblings would 301 to it, so only min(hash) belongs here.
   // updatedAt is constant per org (mapping PK is organisation_name), so adding
   // it to GROUP BY never splits a group — it just keeps drizzle's Date mapping.
   const allRows = await db

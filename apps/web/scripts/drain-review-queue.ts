@@ -182,8 +182,9 @@ async function loadProfiles(
 
 /** Picks the most common route per organisation_name. HMRC publishes one
  *  row per worker, so an org with mixed routes picks the dominant one —
- *  same heuristic the inline scorer will use. (The 2026-06 feed dropped
- *  town/county, so the locality tiebreak is inert.) */
+ *  same heuristic the inline scorer will use. (Town/county are deliberately
+ *  not loaded here: the dominant-route aggregation has no natural row to take
+ *  a town from, so this drain scores without the locality signal.) */
 async function loadSponsors(
   orgNames: string[],
 ): Promise<Map<string, SponsorRow>> {

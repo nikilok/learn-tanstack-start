@@ -235,6 +235,10 @@ const getCompanyProfile = createServerFn()
         .where(eq(hmrcSkilledWorkers.organisationName, companyName))
         .orderBy(asc(hmrcSkilledWorkers.id))
         .limit(1);
+      // resolveOneSponsor has no error verdict — a null from the fetch
+      // callback reads as "not found". Track non-404 failures (429/5xx) so a
+      // CH outage isn't cached as a permanent no_match below.
+      let chFetchFailed = false;
       const result = await resolveOneSponsor(
         companyName,
         {
@@ -243,6 +247,7 @@ const getCompanyProfile = createServerFn()
         },
         async (path) => {
           const r = await fetchFromApi(path);
+          if (!r.ok && r.status !== 404) chFetchFailed = true;
           return r.ok ? r.data : null;
         },
       );
@@ -264,6 +269,15 @@ const getCompanyProfile = createServerFn()
       }
 
       if (result.verdict === 'no_match' || result.verdict === 'human_review') {
+        // Negative verdicts reached through a failed CH call are artifacts of
+        // the outage, not evidence — serve this request null without caching,
+        // so the next visit retries instead of inheriting a poisoned no_match.
+        if (chFetchFailed) {
+          console.log(
+            `[Profile] CH transport failure while resolving "${companyName}" — not caching ${result.verdict}`,
+          );
+          return null;
+        }
         // human_review (multiple tied candidates) is cached as no_match for the
         // on-demand path: re-running the 5-call pipeline on every visit would
         // be expensive and the verdict won't change without ch-stream data

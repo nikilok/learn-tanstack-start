@@ -128,7 +128,7 @@ function clean(val: string | undefined): string | null {
 function computeHash(input: string): string {
   const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
   // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
-  return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);
+  return Buffer.from(bytes.subarray(0, 8)).toString('base64url').slice(0, 11);
 }
 
 // Deduplicate rows with identical content

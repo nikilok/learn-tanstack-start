@@ -11,6 +11,10 @@ on:
         description: "Force ingestion even if CSV hasn't changed"
         type: boolean
         default: false
+      allow-shrink:
+        description: 'Bypass the volume floor (ingest a feed that shrank >50% since the last run)'
+        type: boolean
+        default: false
 
 jobs:
   discover-csv-url:
@@ -64,7 +68,7 @@ jobs:
         id: ingest
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }}
+        run: bun run db:ingest "${{ needs.discover-csv-url.outputs.csv-url }}" ${{ github.event.inputs.force-ingest == 'true' && '--force' || '' }} ${{ github.event.inputs.allow-shrink == 'true' && '--allow-shrink' || '' }}
         working-directory: apps/web
 
       - name: Regenerate sitemaps

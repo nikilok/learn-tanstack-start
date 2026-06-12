@@ -13,11 +13,18 @@ const EXPECTED_COLUMNS = [
 ] as const;
 
 const BATCH_SIZE = 500;
+// Volume floor: abort before the swap when the feed shrinks below this
+// fraction of the last ingest — a truncated upload with a valid header would
+// otherwise atomically gut the live table.
+const MIN_RECORD_RATIO = 0.5;
 
 const force = process.argv.includes('--force');
+const allowShrink = process.argv.includes('--allow-shrink');
 const url = process.argv.filter((a) => !a.startsWith('--'))[2];
 if (!url) {
-  console.error('Usage: bun run db:ingest <csv-url> [--force]');
+  console.error(
+    'Usage: bun run db:ingest <csv-url> [--force] [--allow-shrink]',
+  );
   process.exit(1);
 }
 
@@ -38,7 +45,7 @@ console.log(`Downloaded ${(csvText.length / 1024).toFixed(1)} KB`);
 // Step 2: Checksum comparison
 const checksum = new Bun.CryptoHasher('sha256').update(csvText).digest('hex');
 const [lastIngestion] =
-  await sql`SELECT "checksum" FROM "hmrc_ingestion_meta" ORDER BY "ingested_at" DESC LIMIT 1`;
+  await sql`SELECT "checksum", "record_count" FROM "hmrc_ingestion_meta" ORDER BY "ingested_at" DESC LIMIT 1`;
 if (!force && lastIngestion?.checksum === checksum) {
   console.log('CSV unchanged since last ingestion — skipping.');
   setGitHubOutput('data-changed', 'false');
@@ -203,6 +210,23 @@ if (invalidRows.length > 0) {
 console.log(
   `Deduplicated: ${records.length} → ${dedupedRows.length} unique records`,
 );
+
+// Both sides are deduped counts: record_count stores dedupedRows.length.
+// No baseline on a fresh database (no meta row) — skip.
+const lastCount = lastIngestion?.record_count ?? null;
+if (
+  !allowShrink &&
+  lastCount !== null &&
+  dedupedRows.length < lastCount * MIN_RECORD_RATIO
+) {
+  console.error(
+    `Volume floor: ${dedupedRows.length} records is under ${MIN_RECORD_RATIO * 100}% of the last ingest (${lastCount}) — refusing to swap.`,
+  );
+  console.error(
+    '  Truncated feed? If the shrink is real, re-run with --allow-shrink.',
+  );
+  process.exit(1);
+}
 
 for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
   const batch = dedupedRows.slice(i, i + BATCH_SIZE);

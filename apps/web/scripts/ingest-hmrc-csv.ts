@@ -118,17 +118,14 @@ function clean(val: string | undefined): string | null {
   return trimmed;
 }
 
-/** Mint the stable URL id. Town/county are deliberately excluded so URLs
- *  survive relocations and HMRC town edits; the ~900 feed rows that differ
- *  only by town within an org|rating|route collapse keep-first. Org renames
- *  do churn the hash (accepted — slug-only URLs are planned). UNIQUE(hash)
- *  on the table stays as a collision guard. */
-function computeHash(
-  orgName: string,
-  typeRating: string,
-  route: string,
-): string {
-  const input = [orgName, typeRating, route].join('|');
+/** Mint the stable URL id from the joined org|rating|route input. Town/county
+ *  are deliberately excluded so URLs survive relocations and HMRC town edits;
+ *  the ~900 feed rows that differ only by town within an org|rating|route
+ *  collapse keep-first. Org renames do churn the hash (accepted — slug-only
+ *  URLs are planned). Collisions are caught by the dedup loop's input
+ *  recheck — the table UNIQUE(hash) can never see one, since dedup keeps
+ *  duplicate hashes out of the INSERT entirely. */
+function computeHash(input: string): string {
   const bytes = new Bun.CryptoHasher('sha256').update(input).digest();
   // Take first 8 bytes (64 bits), encode as base64url, trim to 11 chars
   return Buffer.from(bytes.slice(0, 8)).toString('base64url').slice(0, 11);
@@ -145,11 +142,13 @@ type CleanedRow = {
   route: string;
 };
 
-const seen = new Set<string>();
+// hash → its full input string, so a hash hit can distinguish town-variant
+// duplicates (same input, keep-first) from genuine 64-bit collisions.
+const seen = new Map<string, string>();
 const dedupedRows: CleanedRow[] = [];
-// An empty org name collides distinct rows into one hash, and a value over
-// its varchar width aborts a 500-row INSERT mid-ingest with no row context.
-// Fail fast naming the rows instead.
+// Empty identity fields collide distinct rows into one hash, and a value
+// over its varchar width aborts a 500-row INSERT mid-ingest with no row
+// context. Fail fast naming the rows instead.
 const invalidRows: string[] = [];
 
 for (const [i, r] of records.entries()) {
@@ -166,6 +165,12 @@ for (const [i, r] of records.entries()) {
     );
     continue;
   }
+  if (!typeRating || !route) {
+    invalidRows.push(
+      `row ${rowNum} ("${orgName}"): empty ${!typeRating ? 'Type & Rating' : 'Route'}`,
+    );
+    continue;
+  }
   const oversized = [
     ['Town/City', townCity],
     ['County', county],
@@ -179,13 +184,25 @@ for (const [i, r] of records.entries()) {
     continue;
   }
 
-  const hash = computeHash(orgName, typeRating, route);
+  // hashInput doubles as the collision-check key below, so the compared
+  // string is by construction exactly what was hashed.
+  const hashInput = [orgName, typeRating, route].join('|');
+  const hash = computeHash(hashInput);
+  // slugify can expand certain Unicode ('İ' → 'i' + combining mark → extra
+  // dash), so a ≤255 org name can still overflow name_slug varchar(255).
   const nameSlug = slugify(orgName) || hash;
+  if (nameSlug.length > 255) {
+    invalidRows.push(
+      `row ${rowNum} ("${orgName}"): name_slug exceeds 255 chars (${nameSlug.length})`,
+    );
+    continue;
+  }
 
-  // Org name is inside the hash, so the only intra-hash variance is
-  // town/county (multi-site orgs) — keep-first is the accepted policy.
-  if (!seen.has(hash)) {
-    seen.add(hash);
+  // Org name is inside the hash, so the only legitimate intra-hash variance
+  // is town/county (multi-site orgs) — keep-first is the accepted policy.
+  const prevInput = seen.get(hash);
+  if (prevInput === undefined) {
+    seen.set(hash, hashInput);
     dedupedRows.push({
       hash,
       orgName,
@@ -195,6 +212,10 @@ for (const [i, r] of records.entries()) {
       typeRating,
       route,
     });
+  } else if (prevInput !== hashInput) {
+    invalidRows.push(
+      `row ${rowNum} ("${orgName}"): hash ${hash} collides with a different org|rating|route`,
+    );
   }
 }
 

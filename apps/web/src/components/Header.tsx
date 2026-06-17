@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router';
 
+import CursorToggle from './CursorToggle';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
@@ -54,6 +55,7 @@ export default function Header() {
             </svg>
           </a>
 
+          <CursorToggle />
           <ThemeToggle />
         </div>
       </nav>

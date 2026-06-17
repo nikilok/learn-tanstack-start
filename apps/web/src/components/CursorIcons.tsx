@@ -1,0 +1,37 @@
+const iconClass = 'h-[18px] w-[18px]';
+
+const CURSOR_PATH =
+  'M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z';
+
+/** Solid filled mouse-pointer glyph shown by `CursorToggle` when the custom cursor is on. */
+export function CursorIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={iconClass}
+      aria-hidden="true"
+    >
+      <path d={CURSOR_PATH} />
+    </svg>
+  );
+}
+
+/** Dotted, unfilled mouse-pointer outline shown by `CursorToggle` when the custom cursor is off. */
+export function CursorOffIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeDasharray="2 3"
+      className={iconClass}
+      aria-hidden="true"
+    >
+      <path d={CURSOR_PATH} />
+    </svg>
+  );
+}

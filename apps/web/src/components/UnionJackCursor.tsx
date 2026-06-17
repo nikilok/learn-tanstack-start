@@ -1,3 +1,4 @@
+import { useCustomCursorEnabled } from '../hooks/useCustomCursorEnabled';
 import CustomCursor from './CustomCursor';
 import IBeam from './IBeam';
 import UnionJackLens from './UnionJackLens';
@@ -36,8 +37,15 @@ function UJCaret() {
  * interactive elements as a click affordance and swaps to a custom I-beam over
  * editable text fields. Wires the site-specific View-Transition hooks
  * (`data-uj-cursor`, `uj-cursor-active`) so the follower survives page flips.
+ * Self-gates on the persisted `CursorToggle` preference: when disabled it
+ * unmounts {@link CustomCursor}, whose cleanup restores the native cursor.
  */
 export default function UnionJackCursor() {
+  const enabled = useCustomCursorEnabled();
+  if (!enabled) {
+    return null;
+  }
+
   return (
     <CustomCursor
       activeClassName="uj-cursor-active"

@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import { devtools } from '@tanstack/devtools-vite';
+import { redact } from '@tanstack/redact/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { vercelToolbar } from '@vercel/toolbar/plugins/vite';
 import viteReact from '@vitejs/plugin-react';
@@ -12,6 +13,7 @@ dotenv.config({ path: '../../.env.local' });
 
 const config = defineConfig({
   plugins: [
+    redact(),
     devtools(),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),

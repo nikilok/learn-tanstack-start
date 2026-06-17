@@ -2,3 +2,5 @@
 # Refuse to install package versions younger than 3 days. Mitigates supply-chain
 # attacks where compromised releases are typically caught and yanked within hours.
 minimumReleaseAge = 259200
+# Experimental @tanstack/redact ships fast 0.0.x releases; bypass the cooldown to test current versions.
+minimumReleaseAgeExcludes = ["@tanstack/redact"]

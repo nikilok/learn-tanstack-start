@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import { devtools } from '@tanstack/devtools-vite';
-import { redact } from '@tanstack/redact/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
+import { redact } from '@tanstack/redact/vite';
 import { vercelToolbar } from '@vercel/toolbar/plugins/vite';
 import viteReact from '@vitejs/plugin-react';
 import dotenv from 'dotenv';

@@ -446,6 +446,19 @@ function CompanyDetail() {
                   </div>
                 )}
 
+                {sponsor.sponsorLicenceNumber && (
+                  <div>
+                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
+                      Sponsor Licence No.
+                    </dt>
+                    <dd className="mt-1 text-sm text-(--sea-ink)">
+                      <span x-apple-data-detectors="false">
+                        {sponsor.sponsorLicenceNumber}
+                      </span>
+                    </dd>
+                  </div>
+                )}
+
                 {formatAddress(profile.registered_office_address) && (
                   <div className="col-span-2 sm:col-span-4">
                     <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">

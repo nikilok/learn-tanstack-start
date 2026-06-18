@@ -171,7 +171,9 @@ export const searchHmrc = createServerFn()
  * `hash` slug id. Returns `null` when no matching row exists. Also returns the
  * group canonical: with hash = org|rating|route the (org, rating, route) group
  * is 1:1 and `canonicalSlugId` equals `slugId` — kept for resilience if the
- * hash inputs ever change again; the loader 301s any siblings to it.
+ * hash inputs ever change again; the loader 301s any siblings to it. Joins the
+ * 2026-06-09 `hmrc_sponsor_licences` snapshot on the same triple for the org's
+ * sponsor licence number, surfaced only when that match is unambiguous.
  */
 const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
@@ -180,6 +182,11 @@ const getHmrcBySlugId = createServerFn()
       h2.organisation_name = ${hmrcSkilledWorkers.organisationName}
       AND h2.type_rating = ${hmrcSkilledWorkers.typeRating}
       AND h2.route = ${hmrcSkilledWorkers.route}`;
+    // Own fragment, not inlined: inside a projection subquery drizzle renders these refs bare, colliding with l.* (→ always null).
+    const licFilter = sql`
+      l.organisation_name = ${hmrcSkilledWorkers.organisationName}
+      AND l.type_rating = ${hmrcSkilledWorkers.typeRating}
+      AND l.route = ${hmrcSkilledWorkers.route}`;
     const [row] = await db
       .select({
         slugId: hmrcSkilledWorkers.hash,
@@ -192,6 +199,12 @@ const getHmrcBySlugId = createServerFn()
         nameSlug: hmrcSkilledWorkers.nameSlug,
         typeRating: hmrcSkilledWorkers.typeRating,
         route: hmrcSkilledWorkers.route,
+        // Snapshot licence #, index-probed by org; null unless (org,rating,route) maps to exactly one (~0.6% hold two).
+        sponsorLicenceNumber: sql<string | null>`(
+          SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
+                      THEN min(l.sponsor_licence_number) END
+          FROM hmrc_sponsor_licences l WHERE ${licFilter}
+        )`,
       })
       .from(hmrcSkilledWorkers)
       .where(eq(hmrcSkilledWorkers.hash, slugId))

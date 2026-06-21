@@ -394,6 +394,19 @@ function CompanyDetail() {
                   {titleCase(sponsor.typeRating)}
                 </dd>
               </div>
+              {/* No CH mapping → no second section, so surface the licence here instead. */}
+              {!profile && sponsor.sponsorLicenceNumber && (
+                <div>
+                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
+                    Sponsor Licence No.
+                  </dt>
+                  <dd className="mt-1 text-sm text-(--sea-ink)">
+                    <span x-apple-data-detectors="false">
+                      {sponsor.sponsorLicenceNumber}
+                    </span>
+                  </dd>
+                </div>
+              )}
             </dl>
           </div>
 

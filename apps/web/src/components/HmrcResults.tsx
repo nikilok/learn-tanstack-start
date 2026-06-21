@@ -6,9 +6,22 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, previousNameText, titleCase } from '../utils';
+import { formatLocation } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
+import UnionJackLens from './UnionJackLens';
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Vertical centre of a card's name line from its top: py-2(8) + nameLine(24)/2.
+const NAME_LINE_CENTER = 20;
+// Rail/marker horizontal centre, in the content box's coordinate space (x=0 is
+// the card text edge). -16 sits it on the content column's left edge — the card's
+// `-mx-4 px-4` opens a 16px gutter, so -16 lands exactly at the search box / column
+// edge that the rest of the page aligns to.
+const RAIL_X = -16;
 
 /**
  * Virtualized list of HMRC sponsor rows for the given search query. Gates
@@ -30,31 +43,50 @@ export default function HmrcResults({ search }: { search: string }) {
   // pair it with the details wrapper and morph back. Back-nav uses a
   // page-level slide instead (see styles.css).
   const [activeId, setActiveId] = useState<string | null>(null);
+  // The card's metadata stacks below `sm` (640px): one inline line ≥sm, two
+  // lines <sm (rating+location / route chip). HmrcCard switches on the same
+  // `sm:` breakpoint, so fixedHeight must switch with it or row heights desync.
+  const [isNarrow, setIsNarrow] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      !window.matchMedia('(min-width: 640px)').matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const onChange = () => setIsNarrow(!mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
   const { estimateSize, ready, contentWidth } = useVirtualTextLayout(results, {
     fields: [
       {
-        getText: (row) => titleCase(row.organisationName),
-        font: '600 16px Geist', // heading-card h3: text-base + font-semibold
-        lineHeight: 24,
-        letterSpacing: -0.4, // heading-card utility
-      },
-      {
-        // Empty text measures as 0 lines / 0px, so rows without a previous-name
-        // match pay no height; the rendered line is margin-free to match
-        getText: (row) => previousNameText(row.matchedPreviousName),
+        // Previous-name renders as ONE truncated line when a match exists, else
+        // nothing — so measure a single-glyph sentinel (always 1 line) when
+        // present and '' (0 lines) when not, never the real (truncated) text.
+        getText: (row) => (row.matchedPreviousName ? 'M' : ''),
         font: 'italic 12px Geist', // text-xs italic
         lineHeight: 16,
       },
       {
-        // Location renders as ONE truncated line beside a MapPin icon, never
-        // wrapping — so measure a single-glyph sentinel (always 1 line) when a
-        // location exists and '' (0 lines) when not, instead of the real text
-        getText: (row) => (formatLocation(row.locality, row.region) ? 'M' : ''),
+        // Location is inline ≥sm (no extra line) but stacks onto its OWN line
+        // <sm. Count it as one line (sentinel) only when narrow AND present;
+        // '' otherwise so it costs nothing on desktop. lineHeight 24 = the 20px
+        // line + the 4px stack gap that the extra line introduces.
+        getText: (row) =>
+          isNarrow && formatLocation(row.locality, row.region) ? 'M' : '',
         font: '14px Geist', // text-sm
-        lineHeight: 20,
+        lineHeight: 24,
       },
     ],
-    fixedHeight: 62, // py-2(8) + mt-0.5(2) + rating(20) + mt-0.5(2) + mt-0.5(2) + route(16) + py-2(8) + 4 (sub-pixel rounding)
+    // Name is single-line (truncate). Metadata is one inline line ≥sm; <sm it
+    // stacks (rating / location / chip). Rating+chip are always present so they
+    // are fixed; the variable location line is the `fields[]` entry above.
+    //   py-2(8) + name(24) + mt-1(4) + base-meta + py-2(8) + 4 (rounding)
+    //   ≥sm: base-meta = 20               -> 68
+    //   <sm: base-meta = 20 + gap-1(4) + 20 -> 92  (+24 per location line)
+    fixedHeight: isNarrow ? 92 : 68,
     containerRef: listRef,
   });
 
@@ -68,7 +100,7 @@ export default function HmrcResults({ search }: { search: string }) {
 
   useEffect(() => {
     if (contentWidth > 0) virtualizer.measure();
-  }, [contentWidth, virtualizer]);
+  }, [contentWidth, isNarrow, virtualizer]);
 
   const {
     highlightedIndex,
@@ -137,6 +169,20 @@ export default function HmrcResults({ search }: { search: string }) {
   }, [highlightedIndex, results, router, search]);
 
   const virtualItems = virtualizer.getVirtualItems();
+
+  // Vertical offset of the Union Jack marker on the rail — the name-line centre
+  // of the highlighted row, in the content box's coordinate space (same frame
+  // the rows are translated into). Null when that row isn't currently rendered
+  // (scrolled out of the overscan window), in which case the marker is hidden.
+  const highlightedItem = virtualItems.find(
+    (v) => v.index === highlightedIndex,
+  );
+  const markerY =
+    highlightedItem != null
+      ? highlightedItem.start -
+        virtualizer.options.scrollMargin +
+        NAME_LINE_CENTER
+      : null;
 
   useEffect(() => {
     if (!ready) return;
@@ -225,17 +271,49 @@ export default function HmrcResults({ search }: { search: string }) {
   if (results.length === 0) return null;
 
   return (
-    <div
-      ref={listRef}
-      className="mt-6 rounded-lg bg-(--sponsor-card-bg) px-4 py-2 shadow-(--shadow-card)"
-    >
+    <div ref={listRef} className="mt-6 px-4 py-2">
       <div
         style={{
           height: virtualizer.getTotalSize(),
+          // Floor the height so the rail runs down to near the page bottom even
+          // when only a few rows match; tall result sets exceed it and win.
+          minHeight: 'calc(100dvh - 16rem)',
           width: '100%',
           position: 'relative',
         }}
       >
+        {/* Continuous thin rail down the left gutter — the straight line the
+            Union Jack marker rides; spans the full (floored) list height. The
+            `guide-rail` class paints it with the hero "streaks" spectrum gradient
+            (see styles.css) so it reads as part of the empty-state colourful grid. */}
+        <span
+          aria-hidden
+          className="guide-rail pointer-events-none absolute top-0 bottom-0 w-px rounded-full"
+          style={{ left: RAIL_X, transform: 'translateX(-50%)' }}
+        />
+        {/* The marker sits ON the rail at the highlighted row. Its `top` updates
+            with no transition so it tracks the highlight instantly — a slide here
+            visibly lags and jitters under fast key-repeat (held arrow scrolling).
+            Hidden when that row is scrolled out of the rendered window. */}
+        {markerY != null && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute z-10 block h-5 w-5"
+            style={{
+              left: RAIL_X,
+              top: markerY,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <UnionJackLens
+              key={highlightedIndex}
+              className="h-full w-full"
+              fromDeg={lensRotation.from}
+              toDeg={lensRotation.to}
+              durationMs={prefersReducedMotion() ? 0 : 720}
+            />
+          </span>
+        )}
         {virtualItems.map((virtualRow) => (
           <div
             key={virtualRow.index}
@@ -253,7 +331,6 @@ export default function HmrcResults({ search }: { search: string }) {
               search={search}
               isActive={activeId === results[virtualRow.index].slugId}
               isHighlighted={highlightedIndex === virtualRow.index}
-              lensRotation={lensRotation}
               onActivate={() => {
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers

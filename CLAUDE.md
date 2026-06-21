@@ -88,33 +88,48 @@ query exists (not on the empty/hero state, where the bar is `relative` and the p
 rotates). On that empty state the cursor-positioning fix isn't needed anyway (not sticky).
 Do NOT widen this back to plain `:focus-within` and do NOT add it as a permanent inline style.
 
-## Pretext virtual list sizing — keep in sync with CSS
+## Virtual list sizing — keep in sync with CSS
 
-`HmrcResults.tsx` uses `@chenglou/pretext` for canvas-based card height estimation
-instead of DOM `measureElement`. This eliminates layout reflow during scroll (35-43%
-reduction in Layout/Recalculate style).
+`HmrcResults.tsx` uses `virtual-text-layout` (`useVirtualTextLayout`) for canvas-based
+card height estimation instead of DOM `measureElement`. This eliminates layout reflow
+during scroll (35-43% reduction in Layout/Recalculate style).
+
+The compact card has NO wrapping text by design: the org **name** truncates (one line),
+and the **metadata** (rating + location + route chip) never wraps — only the location and
+chip may truncate. So the ONLY height-varying element is the conditional italic
+"Previously …" line; everything else is a constant baked into `fixedHeight`.
+
+The metadata is responsive and so is `fixedHeight`: **≥sm (640px)** it is one inline
+line (rating · location · chip); **<sm** each item stacks onto its own line (rating /
+location / chip). `HmrcCard` switches layout on the `sm:` breakpoint and `HmrcResults`
+tracks the SAME breakpoint via `matchMedia('(min-width: 640px)')` to pick `fixedHeight`
+— they MUST use the same 640px boundary or row heights desync at that width. Because the
+location is optional, it is a `fields[]` entry that only contributes a line **when narrow
+AND present** (inline ≥sm costs nothing); rating and chip are always present and fixed.
 
 ### Two places to update when HmrcCard styling changes
 
-1. **`HmrcResults.tsx` lines ~13-29** — the `useCardMetrics` config:
-   - `fields[].font` — must match the card's CSS font (weight, size, family)
-   - `fields[].lineHeight` — must match the CSS line-height in px
-   - `fields[].getText` — must match the text transformation applied before render
-   - `fixedHeight` — sum of all fixed-height card elements (padding, margins, rating
-     line, route line) plus 4px for sub-pixel rounding
-   - Conditional lines (e.g. the italic "Previously …" previous-name line) work
-     because empty text measures as 0 lines / 0px — but the rendered element must
-     stay **margin-free**: a margin would apply once per card while the estimator
-     only counts `lineCount * lineHeight`. The previous-name text comes from
-     `previousNameText()` in `utils.ts`, called by BOTH the card and the
-     estimator's `getText` — never inline the template on one side only
-   - Single-line `truncate` fields (e.g. the MapPin + location row) measure a
-     one-glyph sentinel (`'M'` → exactly 1 line) instead of the real text: an
-     inline icon steals width the canvas can't see, so the rendered line must
-     never wrap. If a truncated line is ever allowed to wrap again, drop the
-     icon from the text flow AND restore real-text measurement together
-2. **`HmrcResults.tsx` line ~75** — the hidden measurement div's `className="px-4"` must
-   match the real container's horizontal padding class (line ~95)
+1. **`HmrcResults.tsx` `useVirtualTextLayout` config** — `fields` + `fixedHeight`:
+   - `fields[].font` / `lineHeight` — must match the card's CSS font + line-height in px
+   - `fixedHeight` — sum of every always-present constant-height element, switched on
+     the `sm` breakpoint via `isNarrow`: `py-2(8) + name(24) + mt-1(4) + base-meta +
+     py-2(8) + 4` rounding, where `base-meta = 20` (≥sm, one line) → **68**, or
+     `base-meta = 20 + gap-1(4) + 20` (<sm, the always-present rating + chip) → **92**.
+     The optional location adds **+24** (`fields[]`) only when <sm. If you change the
+     name size/line-height, the metadata layout or its gaps, or the link padding, update
+     BOTH numbers, the location field's `lineHeight`, and the breakpoint.
+   - The single remaining `fields[]` entry measures the **previous-name** line as a
+     one-glyph sentinel (`row.matchedPreviousName ? 'M' : ''`) → exactly 1 line when a
+     match exists, 0 when not — NOT the real text, because the rendered line is
+     `truncate` (never wraps) so only its presence affects height. The card still
+     renders the real `previousNameText()` from `utils.ts`; keep that line margin-free
+     so its height stays exactly `lineCount * 16px`.
+   - Invariant: nothing in the card may wrap except that previous-name line (metadata
+     items truncate, never wrap). If you ever let the name or a metadata field wrap, you
+     must convert it back into a measured `fields[]` entry (real text, real font) AND
+     remove its fixed contribution from `fixedHeight` — the two move together.
+2. **`HmrcResults.tsx`** — the hidden measurement div's `className="px-4"` (loading
+   branch) must match the real results container's horizontal padding class.
 
 ### How the readiness gating works
 
@@ -131,6 +146,33 @@ from fallback font measurements or missing width data.
 
 The `hmrc-scroll-y` sessionStorage restore runs in a `useEffect([ready])` — it must wait
 for items to be in the DOM at correct heights before calling `window.scrollTo`.
+
+### Highlight rail + Union Jack marker (NOT a per-card box)
+
+The keyboard-highlighted row is marked by a single continuous thin **rail** (1px, the
+`.guide-rail` class in styles.css — the empty-state hero `.streaks` spectrum gradient run
+vertically, so it reads as part of that colourful grid) down the left gutter plus a Union Jack **marker** that rides
+it — both rendered ONCE in `HmrcResults`
+(inside the `position: relative` content box), not per card. `HmrcCard` only turns the
+highlighted name red; it draws no box/flag, so the highlighted text never shifts right.
+
+Cross-file coupling to keep in sync:
+- **`RAIL_X` (HmrcResults)** places the rail/marker centre in the left gutter that the
+  card's `-mx-4 px-4` opens up (negative = into that gutter, `x=0` is the text edge).
+  `-16` lands it on the **content column's left edge** (the card's 16px gutter), so the
+  rail lines up with the search box and the rest of the page. If you change the card's
+  horizontal padding/margin, re-check it. `SkeletonCards`' static rail mirrors it (`left-0`,
+  i.e. the same column edge).
+- **`NAME_LINE_CENTER` (HmrcResults)** is the marker's vertical offset = the name line's
+  centre from the card top (`py-2(8) + nameLineHeight(24)/2`). It must track the card's
+  top padding and name line-height, or the marker drifts off the title.
+- The marker's `top` is the highlighted row's `start - scrollMargin + NAME_LINE_CENTER`
+  in the content box's frame (same transform the rows use). It's null — marker hidden —
+  when that row isn't in the rendered/overscan window, so it only shows where it can be
+  placed accurately. A CSS `top` transition gives the slide as the highlight moves.
+- The content box has a `minHeight` floor so the rail runs to near the page bottom even
+  for a handful of rows; tall result sets exceed it and set the height from `getTotalSize()`.
+- `SkeletonCards` draws a matching static rail (no marker) so loading→loaded doesn't pop.
 
 ## Home search (`searchHmrc`) — index-served predicates + previous-name matching
 

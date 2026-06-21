@@ -47,6 +47,8 @@
   --grid-line: rgba(62, 147, 244, 0.369);
   --grid-opacity: 0.7;
   --sponsor-card-bg: #f5f6f8;
+  --chip-bg: #eceef1;
+  --chip-line: #dfe1e6;
   --footer-line: var(--gray-200);
   --logo-navy: #001c55;
   --logo-red: #c8102e;
@@ -189,6 +191,32 @@ body::after {
     black,
     transparent 70%
   );
+}
+
+/* Search results guide-rail. Reuses the empty-state hero "streaks" spectrum
+   (HeroText.module.css `.streaks`) so the rail reads as part of that colourful
+   grid rather than a plain accent. The streaks paint it 90deg across the grid;
+   the rail is a single vertical line, so it runs 180deg down its own length.
+   Same stops in both themes (theme-independent hex); only opacity differs. */
+.guide-rail {
+  /* Loops back to the start colour at 100% so the vertical repeat is seamless. */
+  background-image: linear-gradient(
+    180deg,
+    #4f7cff 0%,
+    #9a5cff 20%,
+    #ff6fae 40%,
+    #ffb347 60%,
+    #5fd0a0 80%,
+    #4f7cff 100%
+  );
+  /* One full spectrum per viewport height, repeated down the rail — so the whole
+     sweep stays visible whether the list is two rows or two hundred. */
+  background-size: 100% 100vh;
+  background-repeat: repeat-y;
+  opacity: 0.5;
+}
+.dark .guide-rail {
+  opacity: 0.6;
 }
 
 a:where(:not([class*='no-underline'])) {

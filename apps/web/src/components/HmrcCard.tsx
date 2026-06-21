@@ -4,11 +4,6 @@ import { MapPin } from 'lucide-react';
 import type { HmrcRow } from '../api/hmrc';
 import { formatLocation, previousNameText, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
-import UnionJackLens from './UnionJackLens';
-
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
@@ -16,21 +11,21 @@ const prefersReducedMotion = () =>
  * can restore the list position on back-nav. When `isActive` is true the card
  * is given `view-transition-name: active-card`, which carves it out of the
  * `results-listing` snapshot so it can run its own slide animation while the
- * remaining cards fade.
+ * remaining cards fade. The keyboard-highlighted row only turns its name red —
+ * the Union Jack marker that points at it lives on the rail in `HmrcResults`,
+ * so the highlighted text is never shifted right.
  */
 export default function HmrcCard({
   row,
   search,
   isActive,
   isHighlighted,
-  lensRotation,
   onActivate,
 }: {
   row: HmrcRow;
   search: string;
   isActive: boolean;
   isHighlighted: boolean;
-  lensRotation: { from: number; to: number };
   onActivate: () => void;
 }) {
   const location = formatLocation(row.locality, row.region);
@@ -66,45 +61,38 @@ export default function HmrcCard({
         onActivate();
       }}
     >
-      {isHighlighted && (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute top-3 -left-2 block h-4 w-4"
-        >
-          <UnionJackLens
-            className="h-full w-full"
-            fromDeg={lensRotation.from}
-            toDeg={lensRotation.to}
-            durationMs={prefersReducedMotion() ? 0 : 720}
-          />
-        </span>
-      )}
       <h3
-        className={`heading-card text-base font-semibold ${isHighlighted ? 'text-(--logo-red)' : 'text-(--sea-ink)'}`}
+        className={`heading-card truncate text-base font-semibold ${isHighlighted ? 'text-(--logo-red)' : 'text-(--sea-ink)'}`}
       >
         {titleCase(row.organisationName)}
       </h3>
       {previousName && (
-        // No vertical margins: the height estimator in HmrcResults measures
-        // this line as lineCount * 16px, so any margin here would desync it
-        <p className="text-xs text-(--sea-ink-soft) italic">{previousName}</p>
+        // Single truncated line. The estimator counts this as exactly one
+        // 16px line when a previous-name match exists (sentinel-measured), so
+        // it must never wrap — and stays margin-free to match that count.
+        <p className="truncate text-xs text-(--sea-ink-soft) italic">
+          {previousName}
+        </p>
       )}
-      <div className="mt-0.5">
-        <RatingIcon rating={row.typeRating} />
-      </div>
-      <div className="mt-0.5">
+      {/* Metadata. ≥sm: one inline row (rating · location · chip). <sm: each
+          item stacks onto its own line (rating / location / chip) so nothing
+          clips. The estimator in HmrcResults switches fixedHeight on this SAME
+          `sm` (640px) breakpoint and counts the location as an extra stacked
+          line only when <sm — keep the two in sync. Nothing wraps here; the
+          location and chip truncate. */}
+      <div className="mt-1 flex flex-col items-start gap-y-1 text-sm text-(--sea-ink-soft) sm:flex-row sm:items-center sm:gap-x-3">
+        <span className="shrink-0 whitespace-nowrap">
+          <RatingIcon rating={row.typeRating} />
+        </span>
         {location && (
-          // Single truncated line: the height estimator in HmrcResults counts
-          // this as exactly one line when a location exists, so it must never
-          // wrap (the inline icon steals width the estimator can't see)
-          <p className="flex items-center gap-1.5 text-sm text-(--sea-ink-soft)">
+          <span className="flex max-w-full min-w-0 items-center gap-1.5">
             <MapPin size={14} className="shrink-0" />
             <span className="truncate">{location}</span>
-          </p>
+          </span>
         )}
-        <p className="mt-0.5 truncate text-xs text-(--sea-ink-soft)">
+        <span className="max-w-full shrink-0 truncate rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs whitespace-nowrap text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset">
           {titleCase(row.route)}
-        </p>
+        </span>
       </div>
     </Link>
   );

@@ -197,9 +197,27 @@ body::after {
    (HeroText.module.css `.streaks`) so the rail reads as part of that colourful
    grid rather than a plain accent. The streaks paint it 90deg across the grid;
    the rail is a single vertical line, so it runs 180deg down its own length.
-   Same stops in both themes (theme-independent hex); only opacity differs. */
+   Light mode uses deeper, more saturated stops (the bright stops wash out on the
+   near-white page); dark mode keeps the brighter stops on the #0a0a0a page. */
 .guide-rail {
   /* Loops back to the start colour at 100% so the vertical repeat is seamless. */
+  background-image: linear-gradient(
+    180deg,
+    #2954d6 0%,
+    #7b3fe4 20%,
+    #e23b86 40%,
+    #e2820e 60%,
+    #18a06d 80%,
+    #2954d6 100%
+  );
+  /* One full spectrum per viewport height, repeated down the rail — so the whole
+     sweep stays visible whether the list is two rows or two hundred. */
+  background-size: 100% 100vh;
+  background-repeat: repeat-y;
+  opacity: 0.8;
+}
+.dark .guide-rail {
+  /* Brighter stops pop on the dark page; the deeper light-mode stops would muddy. */
   background-image: linear-gradient(
     180deg,
     #4f7cff 0%,
@@ -209,13 +227,6 @@ body::after {
     #5fd0a0 80%,
     #4f7cff 100%
   );
-  /* One full spectrum per viewport height, repeated down the rail — so the whole
-     sweep stays visible whether the list is two rows or two hundred. */
-  background-size: 100% 100vh;
-  background-repeat: repeat-y;
-  opacity: 0.5;
-}
-.dark .guide-rail {
   opacity: 0.6;
 }
 

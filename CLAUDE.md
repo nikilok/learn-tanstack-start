@@ -115,9 +115,14 @@ AND present** (inline ≥sm costs nothing); rating and chip are always present a
      the `sm` breakpoint via `isNarrow`: `py-2(8) + name(24) + mt-1(4) + base-meta +
      py-2(8) + 4` rounding, where `base-meta = 20` (≥sm, one line) → **68**, or
      `base-meta = 20 + gap-1(4) + 20` (<sm, the always-present rating + chip) → **92**.
-     The optional location adds **+24** (`fields[]`) only when <sm. If you change the
-     name size/line-height, the metadata layout or its gaps, or the link padding, update
-     BOTH numbers, the location field's `lineHeight`, and the breakpoint.
+     The optional location adds **+24** (`fields[]`) only when <sm — and the breakpoint
+     switch lives in the location field's `lineHeight` (`isNarrow ? 24 : 0`), NOT its
+     `getText`: `virtual-text-layout` caches each row's `getText` output once (rebuilt
+     only when results shrink), so an `isNarrow`-dependent `getText` goes stale on a
+     runtime resize across 640px, whereas `lineHeight` is read fresh every estimate. Keep
+     `getText` a pure function of row data. If you change the name size/line-height, the
+     metadata layout or its gaps, or the link padding, update BOTH numbers, the location
+     field's `lineHeight`, and the breakpoint.
    - The single remaining `fields[]` entry measures the **previous-name** line as a
      one-glyph sentinel (`row.matchedPreviousName ? 'M' : ''`) → exactly 1 line when a
      match exists, 0 when not — NOT the real text, because the rendered line is
@@ -169,7 +174,9 @@ Cross-file coupling to keep in sync:
 - The marker's `top` is the highlighted row's `start - scrollMargin + NAME_LINE_CENTER`
   in the content box's frame (same transform the rows use). It's null — marker hidden —
   when that row isn't in the rendered/overscan window, so it only shows where it can be
-  placed accurately. A CSS `top` transition gives the slide as the highlight moves.
+  placed accurately. Its `top` updates with **no** transition so the marker tracks the
+  highlight instantly; a `top` transition visibly lags and jitters under fast key-repeat
+  (held-arrow scrolling), so do not add one.
 - The content box has a `minHeight` floor so the rail runs to near the page bottom even
   for a handful of rows; tall result sets exceed it and set the height from `getTotalSize()`.
 - `SkeletonCards` draws a matching static rail (no marker) so loading→loaded doesn't pop.

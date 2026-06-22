@@ -70,14 +70,16 @@ export default function HmrcResults({ search }: { search: string }) {
         lineHeight: 16,
       },
       {
-        // Location is inline ≥sm (no extra line) but stacks onto its OWN line
-        // <sm. Count it as one line (sentinel) only when narrow AND present;
-        // '' otherwise so it costs nothing on desktop. lineHeight 24 = the 20px
-        // line + the 4px stack gap that the extra line introduces.
-        getText: (row) =>
-          isNarrow && formatLocation(row.locality, row.region) ? 'M' : '',
+        // Location is inline ≥sm (no extra height) but stacks onto its OWN line <sm.
+        // getText MUST stay row-data-only: virtual-text-layout caches each row's
+        // getText output once (rebuilt only when results shrink), so gating it on
+        // isNarrow would freeze the height at the first-measured breakpoint and
+        // desync after a runtime resize across 640px. The breakpoint switch lives in
+        // lineHeight, which the estimator reads fresh every call — <sm 24 (20px line
+        // + 4px stack gap), ≥sm 0 (inline, no extra height).
+        getText: (row) => (formatLocation(row.locality, row.region) ? 'M' : ''),
         font: '14px Geist', // text-sm
-        lineHeight: 24,
+        lineHeight: isNarrow ? 24 : 0,
       },
     ],
     // Name is single-line (truncate). Metadata is one inline line ≥sm; <sm it

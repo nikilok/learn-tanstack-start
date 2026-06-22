@@ -9,7 +9,12 @@ import {
 import { ExternalLink, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { SHORT_EDGE_CACHE, setSsrCacheControl } from '../api/cache-headers';
+import {
+  LONG_EDGE_CACHE,
+  SHORT_EDGE_CACHE,
+  setSsrCacheControl,
+  setSsrCacheTag,
+} from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
@@ -143,6 +148,13 @@ export const Route = createFileRoute('/company/$id/$slug')({
     );
 
     const flagState = await queryClient.ensureQueryData(flagStateQueryOptions);
+
+    // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
+    setSsrCacheControl(LONG_EDGE_CACHE);
+    // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
+    if (profile?.company_number) {
+      setSsrCacheTag(`company-${profile.company_number}`);
+    }
 
     return { sponsor, profile, flagState };
   },

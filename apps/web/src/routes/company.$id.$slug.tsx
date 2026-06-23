@@ -20,6 +20,7 @@ import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
+import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
@@ -372,52 +373,32 @@ function CompanyDetail() {
               )}
             </NameHistory>
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                  Location
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {displayLocation || 'Not specified'}
-                </dd>
-              </div>
+              <DetailField
+                label="Location"
+                value={displayLocation || 'Not specified'}
+              />
               {profile?.company_status && (
-                <div>
-                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                    Status
-                  </dt>
-                  <dd className="mt-1">
-                    <StatusBadge status={profile.company_status} />
-                  </dd>
-                </div>
+                <DetailField
+                  label="Status"
+                  value={<StatusBadge status={profile.company_status} />}
+                  valueClassName="mt-1"
+                />
               )}
-              <div>
-                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                  Visa Route
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {titleCase(sponsor.route)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                  Rating
-                </dt>
-                <dd className="mt-1 text-sm text-(--sea-ink)">
-                  {titleCase(sponsor.typeRating)}
-                </dd>
-              </div>
+              <DetailField
+                label="Visa Route"
+                value={titleCase(sponsor.route)}
+              />
+              <DetailField
+                label="Rating"
+                value={titleCase(sponsor.typeRating)}
+              />
               {/* No CH mapping → no second section, so surface the licence here instead. */}
               {!profile && sponsor.sponsorLicenceNumber && (
-                <div>
-                  <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                    Sponsor Licence No.
-                  </dt>
-                  <dd className="mt-1 text-sm text-(--sea-ink)">
-                    <span x-apple-data-detectors="false">
-                      {sponsor.sponsorLicenceNumber}
-                    </span>
-                  </dd>
-                </div>
+                <DetailField
+                  label="Sponsor Licence No."
+                  value={sponsor.sponsorLicenceNumber}
+                  literal
+                />
               )}
             </dl>
           </div>
@@ -426,90 +407,72 @@ function CompanyDetail() {
             <div className="glass mt-4 rounded-lg p-6">
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 {formatDate(profile.date_of_creation) && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Incorporated
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      {formatDate(profile.date_of_creation)}
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Incorporated"
+                    value={formatDate(profile.date_of_creation)}
+                  />
                 )}
 
                 {profile.type && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Company Type
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      {titleCase(profile.type.replace(/-/g, ' '))}
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Company Type"
+                    value={titleCase(profile.type.replace(/-/g, ' '))}
+                  />
                 )}
 
                 {profile.accounts?.last_accounts?.made_up_to && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Last Accounts Filed
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      {formatDate(profile.accounts.last_accounts.made_up_to)}
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Last Accounts Filed"
+                    value={formatDate(
+                      profile.accounts.last_accounts.made_up_to,
+                    )}
+                  />
                 )}
 
                 {profile.company_number && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Registration No.
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      <span x-apple-data-detectors="false">
-                        {profile.company_number}
-                      </span>
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Registration No."
+                    value={profile.company_number}
+                    literal
+                  />
                 )}
 
                 {sponsor.sponsorLicenceNumber && (
-                  <div>
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Sponsor Licence No.
-                    </dt>
-                    <dd className="mt-1 text-sm text-(--sea-ink)">
-                      <span x-apple-data-detectors="false">
-                        {sponsor.sponsorLicenceNumber}
-                      </span>
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Sponsor Licence No."
+                    value={sponsor.sponsorLicenceNumber}
+                    literal
+                  />
                 )}
 
                 {formatAddress(profile.registered_office_address) && (
-                  <div className="col-span-2 sm:col-span-4">
-                    <dt className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-                      Registered Address
-                    </dt>
-                    <dd className="mt-1 text-sm">
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-(--sea-ink-soft) no-underline hover:text-(--sea-ink)"
-                      >
-                        <MapPin size={14} className="shrink-0" />
-                        {formatAddress(profile.registered_office_address)}
-                        <ExternalLink size={12} className="shrink-0" />
-                      </a>
-                      <div className="-mx-6 mt-3 -mb-6 overflow-hidden rounded-b-lg">
-                        <AddressMap
-                          address={formatAddress(
-                            profile.registered_office_address,
-                          )}
-                          companyName={displayName}
-                        />
-                      </div>
-                    </dd>
-                  </div>
+                  <DetailField
+                    label="Registered Address"
+                    className="col-span-2 sm:col-span-4"
+                    valueClassName="mt-1 text-sm"
+                    value={
+                      <>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddress(profile.registered_office_address))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-(--sea-ink-soft) no-underline hover:text-(--sea-ink)"
+                        >
+                          <MapPin size={14} className="shrink-0" />
+                          {formatAddress(profile.registered_office_address)}
+                          <ExternalLink size={12} className="shrink-0" />
+                        </a>
+                        <div className="-mx-6 mt-3 -mb-6 overflow-hidden rounded-b-lg">
+                          <AddressMap
+                            address={formatAddress(
+                              profile.registered_office_address,
+                            )}
+                            companyName={displayName}
+                          />
+                        </div>
+                      </>
+                    }
+                  />
                 )}
               </dl>
             </div>
@@ -517,19 +480,14 @@ function CompanyDetail() {
         </div>
 
         <section className="mt-6" aria-labelledby="sponsor-about-heading">
-          <h2
-            id="sponsor-about-heading"
-            className="text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase"
-          >
+          <h2 id="sponsor-about-heading" className={LABEL_CLASS}>
             About
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-(--sea-ink-soft)">
             {summary}
           </p>
           <div className="mt-4">
-            <h3 className="mb-2 text-[10px] font-medium tracking-wider text-(--sea-ink-soft) uppercase">
-              See more on
-            </h3>
+            <h3 className={`mb-2 ${LABEL_CLASS}`}>See more on</h3>
             <div className="flex flex-wrap gap-4 sm:gap-x-2">
               {/* GOV.UK needs the Companies House record; the search engines query by name. */}
               {profile?.company_number && (

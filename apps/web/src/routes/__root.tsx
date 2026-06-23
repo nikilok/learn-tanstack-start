@@ -131,12 +131,16 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
         <HeadContent />
       </head>
-      <body className="font-sans wrap-anywhere antialiased">
+      <body className="flex flex-col font-sans wrap-anywhere antialiased">
         <QueryClientProvider client={queryClient}>
           <McpTools />
           <NavigationProgress />
           <Header />
-          {children}
+          {/* flex-1 wrapper makes the footer a sticky footer: on pages shorter
+              than the viewport the content grows to fill, pinning the footer to
+              the bottom edge so its translucent panel never leaves a strip of
+              body glow beneath it. Relies on body's min-height:100% (not vh). */}
+          <div className="flex flex-1 flex-col">{children}</div>
           <Footer />
         </QueryClientProvider>
         <UnionJackCursor />

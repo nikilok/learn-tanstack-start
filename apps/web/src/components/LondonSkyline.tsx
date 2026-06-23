@@ -182,19 +182,19 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       role="img"
       aria-label="London skyline"
     >
-      {/* Sun — light mode only */}
+      {/* Sun — light mode only (filled disc + rays) */}
       <g className="skyline-sun">
-        <circle cx={CELESTIAL.cx} cy={CELESTIAL.cy} r={SUN_R} />
+        <circle cx={CELESTIAL.cx} cy={CELESTIAL.cy} r={SUN_R} fill="#ffffff" />
         {sunRays.map((d) => (
           <path key={d} d={d} />
         ))}
       </g>
 
-      {/* Crescent moon + stars — dark mode only */}
+      {/* Crescent moon + filled stars — dark mode only */}
       <g className="skyline-moon">
-        <path d={moonPath} />
+        <path d={moonPath} fill="#ffffff" />
         {stars.map((d) => (
-          <path key={d} d={d} />
+          <path key={d} d={d} fill="#ffffff" />
         ))}
       </g>
 

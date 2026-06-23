@@ -332,15 +332,14 @@ a {
 }
 
 /* Small London skyline silhouette standing on the footer's top seam, rising
-   into the site background behind the ingestion pill. Light mode draws it in the
-   same blue as the background grid lines (see --grid-line); dark keeps the ink. */
+   into the site background behind the ingestion pill. The buildings' dimming is
+   baked into their stroke colour (not group opacity) so the white-filled sun /
+   moon / stars stay bright. Light draws the buildings soft grey; dark, faint ink. */
 .footer-skyline {
-  color: rgb(62 147 244);
-  opacity: 0.45;
+  color: color-mix(in srgb, var(--sea-ink-faint) 85%, transparent);
 }
 .dark .footer-skyline {
-  color: var(--sea-ink);
-  opacity: 0.28;
+  color: color-mix(in srgb, var(--sea-ink) 28%, transparent);
 }
 
 /* Sun shows in light mode, crescent moon + stars in dark mode. */

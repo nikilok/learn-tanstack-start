@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 import Logo from './Logo';
+import LondonSkyline from './LondonSkyline';
 
 /**
  * Site footer rendered as a solid, theme-aware "chrome" block (white in light,
@@ -15,6 +16,12 @@ export default function Footer() {
 
   return (
     <footer className="site-footer relative mt-20 px-4 pt-10 pb-10">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-full flex justify-center"
+      >
+        <LondonSkyline className="footer-skyline h-auto w-56 sm:w-72" />
+      </div>
       <div className="pointer-events-none absolute inset-x-0 top-0 flex -translate-y-1/2 justify-center">
         <div className="pointer-events-auto">
           <Suspense fallback={<LastUpdatedSkeleton />}>

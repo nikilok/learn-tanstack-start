@@ -331,6 +331,28 @@ a {
   border-top: 1px solid var(--footer-line);
 }
 
+/* Small London skyline silhouette standing on the footer's top seam, rising
+   into the site background behind the ingestion pill. The buildings' dimming is
+   baked into their stroke colour (not group opacity) so the white-filled sun /
+   moon / stars stay bright. Light draws the buildings soft grey; dark, faint ink. */
+.footer-skyline {
+  color: color-mix(in srgb, var(--sea-ink-faint) 85%, transparent);
+}
+.dark .footer-skyline {
+  color: color-mix(in srgb, var(--sea-ink) 28%, transparent);
+}
+
+/* Sun shows in light mode, crescent moon + stars in dark mode. */
+.skyline-moon {
+  display: none;
+}
+.dark .skyline-sun {
+  display: none;
+}
+.dark .skyline-moon {
+  display: inline;
+}
+
 .shadow-ring {
   box-shadow: var(--shadow-ring);
 }

@@ -331,6 +331,29 @@ a {
   border-top: 1px solid var(--footer-line);
 }
 
+/* Small London skyline silhouette standing on the footer's top seam, rising
+   into the site background behind the ingestion pill. Light mode draws it in the
+   same blue as the background grid lines (see --grid-line); dark keeps the ink. */
+.footer-skyline {
+  color: rgb(62 147 244);
+  opacity: 0.45;
+}
+.dark .footer-skyline {
+  color: var(--sea-ink);
+  opacity: 0.28;
+}
+
+/* Sun shows in light mode, crescent moon + stars in dark mode. */
+.skyline-moon {
+  display: none;
+}
+.dark .skyline-sun {
+  display: none;
+}
+.dark .skyline-moon {
+  display: inline;
+}
+
 .shadow-ring {
   box-shadow: var(--shadow-ring);
 }

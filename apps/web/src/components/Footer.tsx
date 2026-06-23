@@ -2,17 +2,19 @@ import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
 
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
+import Logo from './Logo';
 
 /**
- * Site footer with social links, a privacy link, and a copyright line. Renders
- * the `LastUpdated` ingestion indicator in a centered pill anchored to the top
- * edge of the footer, falling back to a skeleton while the query suspends.
+ * Site footer rendered as a solid, theme-aware "chrome" block (white in light,
+ * near-black in dark) that reads as distinct from the glow-lit page above it.
+ * Stacks a muted brand mark, circular social buttons, a legal row, and a faint
+ * copyright line, with the `LastUpdated` ingestion pill straddling the top seam.
  */
 export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="site-footer relative mt-20 px-4 pt-8 pb-10">
+    <footer className="site-footer relative mt-20 px-4 pt-10 pb-10">
       <div className="pointer-events-none absolute inset-x-0 top-0 flex -translate-y-1/2 justify-center">
         <div className="pointer-events-auto">
           <Suspense fallback={<LastUpdatedSkeleton />}>
@@ -21,6 +23,8 @@ export default function Footer() {
         </div>
       </div>
       <div className="page-wrap flex flex-col items-center gap-6 text-center">
+        <Logo className="h-7 opacity-70 grayscale" />
+
         <div className="flex items-center gap-3">
           <a
             href="https://x.com/NikilKuruvilla"
@@ -52,18 +56,24 @@ export default function Footer() {
           </a>
         </div>
 
-        <p className="m-0 text-sm text-(--sea-ink-soft)">Made in London, UK</p>
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-(--sea-ink-soft)">
+            <span>Made in London, UK</span>
+            <span aria-hidden="true" className="text-(--sea-ink-faint)">
+              &middot;
+            </span>
+            <Link
+              to="/privacy"
+              className="no-underline transition hover:text-(--sea-ink)"
+            >
+              Privacy Policy
+            </Link>
+          </div>
 
-        <Link
-          to="/privacy"
-          className="text-sm text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink)"
-        >
-          Privacy Policy
-        </Link>
-
-        <p className="m-0 text-sm text-(--sea-ink-soft)">
-          &copy; {year} Nikil Kuruvilla. All rights reserved.
-        </p>
+          <p className="m-0 text-xs text-(--sea-ink-faint)">
+            &copy; {year} Nikil Kuruvilla. All rights reserved.
+          </p>
+        </div>
       </div>
     </footer>
   );

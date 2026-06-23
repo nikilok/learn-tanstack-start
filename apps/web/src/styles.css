@@ -50,6 +50,9 @@
   --chip-bg: #eceef1;
   --chip-line: #dfe1e6;
   --footer-line: var(--gray-200);
+  /* Translucent footer panel tinted to the header's base colour at 50%, so the
+     page glow/grid reads faintly through it. */
+  --footer-bg: rgba(255, 255, 255, 0.5);
   --logo-navy: #001c55;
   --logo-red: #c8102e;
   --ok: #74a0b8;
@@ -100,6 +103,7 @@
   --grid-opacity: 1;
   --sponsor-card-bg: #1a1a2e;
   --footer-line: var(--line);
+  --footer-bg: rgba(10, 10, 10, 0.5);
   --logo-navy: #e0e7ff;
   --logo-red: #f87171;
   --ok: #4a425a;
@@ -323,6 +327,7 @@ a {
 }
 
 .site-footer {
+  background: var(--footer-bg);
   border-top: 1px solid var(--footer-line);
 }
 

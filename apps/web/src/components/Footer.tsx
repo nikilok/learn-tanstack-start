@@ -20,7 +20,7 @@ export default function Footer() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 bottom-full flex justify-center"
       >
-        <LondonSkyline className="footer-skyline h-auto w-56 sm:w-72" />
+        <LondonSkyline className="h-auto w-56 sm:w-72" />
       </div>
       <div className="pointer-events-none absolute inset-x-0 top-0 flex -translate-y-1/2 justify-center">
         <div className="pointer-events-auto">

@@ -1,0 +1,63 @@
+/* Small London skyline silhouette standing on the footer's top seam, rising
+   into the site background behind the ingestion pill. The buildings' dimming is
+   baked into their stroke colour (not group opacity) so the white-filled sun /
+   moon / stars stay bright. Light draws the buildings soft grey; dark, faint ink. */
+.skyline {
+  color: color-mix(in srgb, var(--sea-ink-faint) 85%, transparent);
+}
+:global(.dark) .skyline {
+  color: color-mix(in srgb, var(--sea-ink) 28%, transparent);
+}
+
+/* Sun shows in light mode, crescent moon + stars in dark mode. */
+.moon {
+  display: none;
+}
+:global(.dark) .sun {
+  display: none;
+}
+:global(.dark) .moon {
+  display: inline;
+}
+
+/* Sky-fill entrance: the sun / moon fill in gradually while the stars blink on
+   (staggered). Re-plays each time the skyline scrolls into view; without motion
+   the shapes simply stay filled (default fill-opacity). */
+@keyframes skyline-fill {
+  from {
+    fill-opacity: 0;
+  }
+  to {
+    fill-opacity: 1;
+  }
+}
+@keyframes skyline-blink {
+  0% {
+    fill-opacity: 0;
+  }
+  55% {
+    fill-opacity: 1;
+  }
+  70% {
+    fill-opacity: 0.25;
+  }
+  100% {
+    fill-opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Once JS is live, the celestial shapes rest empty until animated in, so each
+     re-entry into view starts the fill from scratch (no JS = stays filled). */
+  .js .sunDisc,
+  .js .moonDisc,
+  .js .star {
+    fill-opacity: 0;
+  }
+  .animate .sunDisc,
+  .animate .moonDisc {
+    animation: skyline-fill 1.6s ease-out 0.1s both;
+  }
+  .animate .star {
+    animation: skyline-blink 0.5s ease both;
+  }
+}

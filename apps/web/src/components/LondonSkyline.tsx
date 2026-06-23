@@ -1,3 +1,7 @@
+import { useEffect, useRef, useState } from 'react';
+
+import styles from './LondonSkyline.module.css';
+
 interface LondonSkylineProps {
   className?: string;
 }
@@ -168,9 +172,40 @@ const stars = [
  * text colour and opacity; used as the faint footer watermark.
  */
 export default function LondonSkyline({ className }: LondonSkylineProps) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [inView, setInView] = useState(false);
+
+  // Re-play the sky-fill animation each time the skyline enters the viewport.
+  useEffect(() => {
+    setMounted(true);
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        // Arm at 35% visible; reset (so it re-arms) only once fully out of view.
+        if (entry.intersectionRatio >= 0.35) setInView(true);
+        else if (entry.intersectionRatio <= 0) setInView(false);
+      },
+      { threshold: [0, 0.35] },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <svg
-      className={className}
+      ref={ref}
+      className={[
+        styles.skyline,
+        className,
+        mounted && styles.js,
+        inView && styles.animate,
+      ]
+        .filter(Boolean)
+        .join(' ')}
       viewBox="0 0 1460 600"
       preserveAspectRatio="xMidYMax meet"
       xmlns="http://www.w3.org/2000/svg"
@@ -182,19 +217,31 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       role="img"
       aria-label="London skyline"
     >
-      {/* Sun — light mode only (filled disc + rays) */}
-      <g className="skyline-sun">
-        <circle cx={CELESTIAL.cx} cy={CELESTIAL.cy} r={SUN_R} fill="#ffffff" />
+      {/* Sun — light mode only (disc fills in gradually + rays) */}
+      <g className={styles.sun}>
+        <circle
+          className={styles.sunDisc}
+          cx={CELESTIAL.cx}
+          cy={CELESTIAL.cy}
+          r={SUN_R}
+          fill="#ffffff"
+        />
         {sunRays.map((d) => (
           <path key={d} d={d} />
         ))}
       </g>
 
-      {/* Crescent moon + filled stars — dark mode only */}
-      <g className="skyline-moon">
-        <path d={moonPath} fill="#ffffff" />
-        {stars.map((d) => (
-          <path key={d} d={d} fill="#ffffff" />
+      {/* Crescent moon (gradual fill) + stars (blink in) — dark mode only */}
+      <g className={styles.moon}>
+        <path className={styles.moonDisc} d={moonPath} fill="#ffffff" />
+        {stars.map((d, i) => (
+          <path
+            key={d}
+            className={styles.star}
+            d={d}
+            fill="#ffffff"
+            style={{ animationDelay: `${0.15 + i * 0.12}s` }}
+          />
         ))}
       </g>
 

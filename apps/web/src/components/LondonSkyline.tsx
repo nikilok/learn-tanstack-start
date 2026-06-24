@@ -383,9 +383,6 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
           <path d="M1290,360 L1386,360 M1290,440 L1386,440 M1290,520 L1386,520" />
         </g>
       </g>
-
-      {/* Ground line */}
-      <path d="M30,600 L1440,600" />
     </svg>
   );
 }

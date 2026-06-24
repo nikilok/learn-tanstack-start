@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useIsDark } from '../hooks/useIsDark';
+
 import styles from './LondonSkyline.module.css';
 
 interface LondonSkylineProps {
@@ -164,6 +166,19 @@ const stars = [
   [1260, 132, 14],
 ].map(([x, y, s]) => buildStar(x, y, s));
 
+// Clouds drifting across the light-mode sky — a puffy 3-bump and a wide 4-bump
+// outline, placed and scaled across the upper sky (stroke width undoes the scale
+// so it matches the buildings). delay staggers their drift-in.
+const CLOUD_PUFFY =
+  'M14,40 a16,16 0 0 1 -2,-31 a18,18 0 0 1 34,-6 a20,20 0 0 1 38,5 a15,15 0 0 1 22,32 z';
+const CLOUD_WIDE =
+  'M10,44 a14,14 0 0 1 0,-22 a16,16 0 0 1 26,-10 a18,18 0 0 1 34,2 a16,16 0 0 1 30,6 a14,14 0 0 1 18,24 z';
+const clouds = [
+  { path: CLOUD_PUFFY, x: 235, y: 150, scale: 1.25, delay: 0.1 },
+  { path: CLOUD_WIDE, x: 560, y: 92, scale: 1.25, delay: 0.35 },
+  { path: CLOUD_PUFFY, x: 815, y: 180, scale: 0.95, delay: 0.6 },
+];
+
 /**
  * Clean single-stroke line drawing of the London skyline — Big Ben, the London
  * Eye, St Paul's Cathedral, Tower Bridge, the Shard and the Gherkin — sitting on
@@ -175,6 +190,13 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
   const ref = useRef<SVGSVGElement>(null);
   const [mounted, setMounted] = useState(false);
   const [inView, setInView] = useState(false);
+  // Bumped on each light<->dark flip; keys the celestial groups so they remount
+  // and re-run their fill animation (display:none -> shown alone won't restart it).
+  // A counter (not `isDark` itself) keeps the SSR/first-paint key stable — keying
+  // on isDark directly would hydration-mismatch.
+  const isDark = useIsDark();
+  const [themeFlips, setThemeFlips] = useState(0);
+  const wasDark = useRef(isDark);
 
   // Re-play the sky-fill animation each time the skyline enters the viewport.
   useEffect(() => {
@@ -194,6 +216,14 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // A light<->dark switch replays the sky-fill via the keyed remount below.
+  useEffect(() => {
+    if (wasDark.current !== isDark) {
+      wasDark.current = isDark;
+      setThemeFlips((n) => n + 1);
+    }
+  }, [isDark]);
 
   return (
     <svg
@@ -218,7 +248,7 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       aria-label="London skyline"
     >
       {/* Sun — light mode only (disc fills in gradually + rays) */}
-      <g className={styles.sun}>
+      <g key={`sun-${themeFlips}`} className={styles.sun}>
         <circle
           className={styles.sunDisc}
           cx={CELESTIAL.cx}
@@ -232,7 +262,7 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       </g>
 
       {/* Crescent moon (gradual fill) + stars (blink in) — dark mode only */}
-      <g className={styles.moon}>
+      <g key={`moon-${themeFlips}`} className={styles.moon}>
         <path className={styles.moonDisc} d={moonPath} fill="#ffffff" />
         {stars.map((d, i) => (
           <path
@@ -242,6 +272,23 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
             fill="#ffffff"
             style={{ animationDelay: `${0.15 + i * 0.12}s` }}
           />
+        ))}
+      </g>
+
+      {/* Clouds — light mode only (drift in) */}
+      <g key={`clouds-${themeFlips}`} className={styles.clouds}>
+        {clouds.map((c) => (
+          <g
+            key={`${c.x},${c.y}`}
+            transform={`translate(${c.x},${c.y}) scale(${c.scale})`}
+          >
+            <g
+              className={styles.cloud}
+              style={{ animationDelay: `${c.delay}s` }}
+            >
+              <path d={c.path} fill="#ffffff" strokeWidth={r(2 / c.scale)} />
+            </g>
+          </g>
         ))}
       </g>
 
@@ -366,9 +413,6 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
           <path d="M1290,360 L1386,360 M1290,440 L1386,440 M1290,520 L1386,520" />
         </g>
       </g>
-
-      {/* Ground line */}
-      <path d="M30,600 L1440,600" />
     </svg>
   );
 }

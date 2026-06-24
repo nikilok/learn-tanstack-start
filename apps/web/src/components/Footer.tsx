@@ -65,7 +65,7 @@ export default function Footer() {
 
         <div className="flex flex-col items-center gap-2">
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-(--sea-ink-soft)">
-            <span>Made in London, UK</span>
+            <span>Made in London</span>
             <span aria-hidden="true" className="text-(--sea-ink-faint)">
               &middot;
             </span>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useIsDark } from '../hooks/useIsDark';
+
 import styles from './LondonSkyline.module.css';
 
 interface LondonSkylineProps {
@@ -175,6 +177,13 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
   const ref = useRef<SVGSVGElement>(null);
   const [mounted, setMounted] = useState(false);
   const [inView, setInView] = useState(false);
+  // Bumped on each light<->dark flip; keys the celestial groups so they remount
+  // and re-run their fill animation (display:none -> shown alone won't restart it).
+  // A counter (not `isDark` itself) keeps the SSR/first-paint key stable — keying
+  // on isDark directly would hydration-mismatch.
+  const isDark = useIsDark();
+  const [themeFlips, setThemeFlips] = useState(0);
+  const wasDark = useRef(isDark);
 
   // Re-play the sky-fill animation each time the skyline enters the viewport.
   useEffect(() => {
@@ -194,6 +203,14 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // A light<->dark switch replays the sky-fill via the keyed remount below.
+  useEffect(() => {
+    if (wasDark.current !== isDark) {
+      wasDark.current = isDark;
+      setThemeFlips((n) => n + 1);
+    }
+  }, [isDark]);
 
   return (
     <svg
@@ -218,7 +235,7 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       aria-label="London skyline"
     >
       {/* Sun — light mode only (disc fills in gradually + rays) */}
-      <g className={styles.sun}>
+      <g key={`sun-${themeFlips}`} className={styles.sun}>
         <circle
           className={styles.sunDisc}
           cx={CELESTIAL.cx}
@@ -232,7 +249,7 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       </g>
 
       {/* Crescent moon (gradual fill) + stars (blink in) — dark mode only */}
-      <g className={styles.moon}>
+      <g key={`moon-${themeFlips}`} className={styles.moon}>
         <path className={styles.moonDisc} d={moonPath} fill="#ffffff" />
         {stars.map((d, i) => (
           <path

@@ -8,6 +8,7 @@ const ALLOWED_PREFIXES = [
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy
   '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint
+  '/149e9513-01fa-4fb0-aad4-566afd725d1b/', // Vercel BotID challenge proxy (fixed public path baked into the botid package)
 ];
 
 const STATIC_EXTENSIONS = new Set([

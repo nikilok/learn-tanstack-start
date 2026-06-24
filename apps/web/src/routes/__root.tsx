@@ -13,6 +13,7 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mountVercelToolbar } from '@vercel/toolbar/vite';
+import { initBotId } from 'botid/client/core';
 import { useEffect } from 'react';
 
 import Footer from '../components/Footer';
@@ -161,6 +162,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         />
         {import.meta.env.PROD && (
           <>
+            <BotIdInit />
             <Analytics />
             <SpeedInsights />
           </>
@@ -180,6 +182,14 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function VercelToolbarMount() {
   useEffect(() => {
     mountVercelToolbar();
+  }, []);
+  return null;
+}
+
+/** Initializes Vercel BotID on the client so protected `/_serverFn/*` RPCs carry the bot-detection challenge. Deployed envs only — local dev has no challenge proxy and BotID treats it as human. */
+function BotIdInit() {
+  useEffect(() => {
+    initBotId({ protect: [{ path: '/_serverFn/*', method: '*' }] });
   }, []);
   return null;
 }

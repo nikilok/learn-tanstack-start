@@ -50,6 +50,14 @@ const config = defineConfig({
             'Cache-Control': 's-maxage=31536000, stale-while-revalidate=86400',
           },
         },
+        // Vercel BotID (Kasada) challenge proxy — first-party path so ad-blockers can't strip it; the exact c.js rule precedes the catch-all.
+        '/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js':
+          { proxy: 'https://api.vercel.com/bot-protection/v1/challenge' },
+        '/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/**':
+          {
+            proxy: 'https://api.vercel.com/bot-protection/v1/proxy/**',
+            headers: { 'X-Frame-Options': 'SAMEORIGIN' },
+          },
       },
     }),
     viteReact(),

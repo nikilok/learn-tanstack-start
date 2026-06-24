@@ -6,12 +6,16 @@ import {
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { setResponseHeader } from '@tanstack/react-start/server';
+import {
+  setResponseHeader,
+  setResponseStatus,
+} from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { asc, eq, inArray } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
+import { isBlockedBot } from './botid';
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
@@ -174,6 +178,10 @@ async function upsertProfile(profile: CompanyProfile) {
 const getCompanyProfile = createServerFn()
   .inputValidator((input: unknown) => input as { companyName: string })
   .handler(async ({ data: { companyName } }) => {
+    if (await isBlockedBot()) {
+      setResponseStatus(403);
+      return null;
+    }
     // Look up company number via mapping table
     const [mapping] = await db
       .select()

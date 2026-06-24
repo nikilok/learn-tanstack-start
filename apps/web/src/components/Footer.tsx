@@ -30,7 +30,13 @@ export default function Footer() {
         </div>
       </div>
       <div className="page-wrap flex flex-col items-center gap-6 text-center">
-        <Logo className="h-7 opacity-70 grayscale" />
+        <Link
+          to="/"
+          search={{ search: '' }}
+          className="group rounded-md no-underline transition"
+        >
+          <Logo className="h-7 opacity-70 grayscale transition-opacity group-hover:opacity-100" />
+        </Link>
 
         <div className="flex items-center gap-3">
           <a

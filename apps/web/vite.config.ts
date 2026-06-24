@@ -56,7 +56,12 @@ const config = defineConfig({
         '/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/**':
           {
             proxy: 'https://api.vercel.com/bot-protection/v1/proxy/**',
-            headers: { 'X-Frame-Options': 'SAMEORIGIN' },
+            headers: {
+              'X-Frame-Options': 'SAMEORIGIN',
+              // Nitro replaces CSP per-route as a whole string, so restate it with frame-ancestors relaxed — inheriting 'none' blocks the Kasada interactive-challenge iframe.
+              'Content-Security-Policy':
+                "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
+            },
           },
       },
     }),

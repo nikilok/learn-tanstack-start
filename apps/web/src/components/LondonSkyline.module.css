@@ -20,9 +20,14 @@
   display: inline;
 }
 
-/* Sky-fill entrance: the sun / moon fill in gradually while the stars blink on
-   (staggered). Re-plays each time the skyline scrolls into view; without motion
-   the shapes simply stay filled (default fill-opacity). */
+/* Clouds drift across the light-mode sky only. */
+:global(.dark) .clouds {
+  display: none;
+}
+
+/* Sky-fill entrance: the sun / moon fill in gradually, the stars blink on
+   (staggered), and the light-mode clouds drift in. Re-plays each time the
+   skyline scrolls into view; without motion the shapes simply stay shown. */
 @keyframes skyline-fill {
   from {
     fill-opacity: 0;
@@ -45,13 +50,26 @@
     fill-opacity: 1;
   }
 }
+@keyframes skyline-cloud-drift {
+  from {
+    opacity: 0;
+    transform: translateX(-26px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
   /* Once JS is live, the celestial shapes rest empty until animated in, so each
-     re-entry into view starts the fill from scratch (no JS = stays filled). */
+     re-entry into view starts the fill from scratch (no JS = stays shown). */
   .js .sunDisc,
   .js .moonDisc,
   .js .star {
     fill-opacity: 0;
+  }
+  .js .cloud {
+    opacity: 0;
   }
   .animate .sunDisc,
   .animate .moonDisc {
@@ -59,5 +77,9 @@
   }
   .animate .star {
     animation: skyline-blink 0.5s ease both;
+  }
+  .animate .cloud {
+    transform-box: fill-box;
+    animation: skyline-cloud-drift 1.5s ease-out both;
   }
 }

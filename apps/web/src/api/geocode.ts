@@ -1,8 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { setResponseStatus } from '@tanstack/start-server-core';
 
-import { isBlockedBot } from './botid';
+import { assertNotBot } from './botid';
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 export interface Geocoded {
@@ -27,12 +26,9 @@ function buildQuery(address: string): string {
 const getGeocode = createServerFn()
   .inputValidator((input: unknown) => input as { q: string })
   .handler(async ({ data: { q } }) => {
-    if (await isBlockedBot()) {
-      setResponseStatus(403);
-      return null;
-    }
     const raw = q.trim();
     if (!raw || raw.length > 200) return null;
+    await assertNotBot();
 
     const query = buildQuery(raw);
 

@@ -6,11 +6,10 @@ import {
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { setResponseStatus } from '@tanstack/start-server-core';
 import { asc, eq, type SQL, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { isBlockedBot } from './botid';
+import { assertNotBot } from './botid';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
@@ -58,11 +57,8 @@ export const searchHmrc = createServerFn()
     (input: unknown) => input as { query: string; offset: number },
   )
   .handler(async ({ data: { query, offset } }) => {
-    if (await isBlockedBot()) {
-      setResponseStatus(403);
-      return { rows: [], hasMore: false };
-    }
     if (query.length < 3) return { rows: [], hasMore: false };
+    await assertNotBot();
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
     const regexEscaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const wordBoundaryPattern = `\\m${regexEscaped}`;
@@ -184,10 +180,7 @@ export const searchHmrc = createServerFn()
 const getHmrcBySlugId = createServerFn()
   .inputValidator((input: unknown) => input as { slugId: string })
   .handler(async ({ data: { slugId } }) => {
-    if (await isBlockedBot()) {
-      setResponseStatus(403);
-      return null;
-    }
+    await assertNotBot();
     const groupFilter = sql`
       h2.organisation_name = ${hmrcSkilledWorkers.organisationName}
       AND h2.type_rating = ${hmrcSkilledWorkers.typeRating}

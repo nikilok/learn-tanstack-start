@@ -5,7 +5,9 @@ import type { ActionChoice, RateLimitAction, Rule } from './rules';
 const ACTIONS: ActionChoice[] = ['log', 'challenge', 'deny', 'bypass'];
 
 /** Coerce an arbitrary action string to one of the four switchable choices, else undefined. */
-export function asChoice(a: string | null | undefined): ActionChoice | undefined {
+export function asChoice(
+  a: string | null | undefined,
+): ActionChoice | undefined {
   return ACTIONS.includes(a as ActionChoice) ? (a as ActionChoice) : undefined;
 }
 

@@ -6,7 +6,13 @@ import { actionColor } from './actions';
 import type { Item } from './client';
 import type { ReportData } from './report-data';
 
-export type Phase = 'loading' | 'select' | 'action' | 'applying' | 'done' | 'fatal';
+export type Phase =
+  | 'loading'
+  | 'select'
+  | 'action'
+  | 'applying'
+  | 'done'
+  | 'fatal';
 
 /** Truncate a string to `n` chars with a trailing ellipsis. */
 function truncate(s: string, n: number): string {
@@ -114,12 +120,17 @@ export function ReportView({
             (skipped — {report.byRuleError})
           </Text>
         ) : report.byRule.length ? (
-          report.byRule.slice(0, 8).map((x) => (
-            <Text
-              key={x.label}
-              wrap="truncate"
-            >{`${String(x.count).padStart(8)}  ${x.label}`}</Text>
-          ))
+          <>
+            {report.byRule.slice(0, 12).map((x) => (
+              <Text
+                key={x.label}
+                wrap="truncate"
+              >{`${String(x.count).padStart(8)}  ${x.label}`}</Text>
+            ))}
+            {report.byRule.length > 12 && (
+              <Text dimColor>{`  +${report.byRule.length - 12} more`}</Text>
+            )}
+          </>
         ) : (
           <Text dimColor>(no firewall actions)</Text>
         )}
@@ -134,12 +145,17 @@ export function ReportView({
             (skipped — {report.topPathsError})
           </Text>
         ) : (
-          report.topPaths.slice(0, 8).map((p) => (
-            <Text
-              key={p.path}
-              wrap="truncate"
-            >{`${String(p.count).padStart(8)}  ${p.path}`}</Text>
-          ))
+          <>
+            {report.topPaths.slice(0, 12).map((p) => (
+              <Text
+                key={p.path}
+                wrap="truncate"
+              >{`${String(p.count).padStart(8)}  ${p.path}`}</Text>
+            ))}
+            {report.topPaths.length > 12 && (
+              <Text dimColor>{`  +${report.topPaths.length - 12} more`}</Text>
+            )}
+          </>
         )}
       </Box>
 
@@ -160,20 +176,26 @@ export function ReportView({
                 dimColor
                 wrap="truncate"
               >{`max ${d.max} · p99 ${d.p99} · p95 ${d.p95} · med ${d.median}  (${d.ips}${d.capped ? '+' : ''} IPs)`}</Text>
-              {(d.rows ?? []).slice(0, 5).map((r) => (
+              {(d.rows ?? []).slice(0, 6).map((r) => (
                 <Text
                   key={r.ip}
                   wrap="truncate"
                 >{`  ${r.perMin.toFixed(2)}/min  ${r.ip}`}</Text>
               ))}
+              {(d.rows ?? []).length > 6 && (
+                <Text dimColor>{`  +${(d.rows ?? []).length - 6} more`}</Text>
+              )}
             </>
           )}
         </Box>
       ))}
 
       <Box flexDirection="column" marginTop={1}>
-        <Text dimColor wrap="truncate">{`limits/min — fn ${report.limits.serverfn} · search ${report.limits.search} · tiles ${report.limits.tiles}`}</Text>
-        <Text dimColor>esc rules · r refresh · q quit</Text>
+        <Text
+          dimColor
+          wrap="truncate"
+        >{`limits/min — fn ${report.limits.serverfn} · search ${report.limits.search} · tiles ${report.limits.tiles}`}</Text>
+        <Text dimColor>↑/↓ scroll · esc rules · r refresh · q quit</Text>
       </Box>
     </Box>
   );

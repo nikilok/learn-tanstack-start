@@ -3,6 +3,8 @@
 // Window is the last ~6 days including today so far (the free `observability_chart_free` tier
 // caps startTime at 7).
 
+import { errMsg } from './util';
+
 type Row = Record<string, unknown>;
 type Ctx = {
   projectId: string;
@@ -14,13 +16,12 @@ type Ctx = {
   windowMin: number;
 };
 
-export type DistRow = { ip: string; count: number; perMin: number };
-export type Distribution = {
+type DistRow = { ip: string; perMin: number };
+type Distribution = {
   label: string;
   skipped?: string; // query failed / no usable filter
   empty?: boolean; // no traffic
-  capped?: boolean; // hit the 500-row API cap, so total/IPs are partial
-  total?: number;
+  capped?: boolean; // hit the 500-row API cap, so IPs is partial
   ips?: number;
   max?: number;
   p99?: number;
@@ -31,7 +32,6 @@ export type Distribution = {
 export type ReportData = {
   start: string;
   now: string; // actual coverage end (the query end is ceiled into the future for alignment)
-  windowMin: number;
   byRule: { label: string; count: number }[];
   byRuleError?: string;
   topPaths: { path: string; count: number }[];
@@ -40,11 +40,6 @@ export type ReportData = {
   limits: { serverfn: string; search: string; tiles: string };
 };
 
-/** Normalise an unknown thrown value to a message string. */
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
 /** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason), retrying transient 5xx/429. */
 async function metrics(
   ctx: Ctx,
@@ -52,7 +47,11 @@ async function metrics(
   opts: { event?: string; filter?: string; limit?: number } = {},
 ): Promise<{ summary?: Row[] }> {
   const body = JSON.stringify({
-    scope: { type: 'project', ownerId: ctx.teamId, projectIds: [ctx.projectId] },
+    scope: {
+      type: 'project',
+      ownerId: ctx.teamId,
+      projectIds: [ctx.projectId],
+    },
     reason: 'observability_chart_free',
     event: opts.event ?? 'incomingRequest',
     rollups: { count_sum: { measure: 'count', aggregation: 'sum' } },
@@ -68,7 +67,7 @@ async function metrics(
       `https://vercel.com/api/observability/metrics?${ctx.qs}`,
       { method: 'POST', headers: ctx.headers, body },
     );
-    if (res.ok) return res.json();
+    if (res.ok) return res.json() as Promise<{ summary?: Row[] }>;
     const detail = `metrics ${res.status}: ${(await res.text()).slice(0, 160)}`;
     if ((res.status >= 500 || res.status === 429) && attempt < 3) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
@@ -96,7 +95,8 @@ function cnt(row: Row): number {
     const o = v as { value?: number; sum?: number };
     return o.value ?? o.sum ?? 0;
   }
-  return Number(v ?? 0);
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0; // a non-numeric scalar must not become NaN (poisons sort + display)
 }
 
 /** Sort a response's summary rows by count desc and return the top `n` [key, count] pairs. */
@@ -128,21 +128,20 @@ async function fetchDist(
   } catch (e) {
     return { label, skipped: errMsg(e) };
   }
-  const rows = top(resp, 'clientIp', 500);
-  const counts = rows.map(([, c]) => c).sort((a, b) => a - b);
-  if (!counts.length) return { label, empty: true };
+  const rows = top(resp, 'clientIp', 500); // desc by count
+  if (!rows.length) return { label, empty: true };
+  const counts = rows.map(([, c]) => c).reverse(); // asc for pct() (rows is already desc)
   return {
     label,
-    total: counts.reduce((a, b) => a + b, 0),
     capped: rows.length >= 500, // tail beyond 500 is dropped by the API
     ips: rows.length,
-    max: Math.max(...counts),
+    max: rows[0][1], // rows is desc, so the first is the max
     p99: pct(counts, 0.99),
     p95: pct(counts, 0.95),
     median: pct(counts, 0.5),
     rows: rows
       .slice(0, 8)
-      .map(([ip, c]) => ({ ip, count: c, perMin: c / ctx.windowMin })),
+      .map(([ip, c]) => ({ ip, perMin: c / ctx.windowMin })),
   };
 }
 
@@ -188,9 +187,11 @@ export async function fetchReport(creds: {
   let topPaths: { path: string; count: number }[] = [];
   let topPathsError: string | undefined;
   try {
-    topPaths = top(await metrics(ctx, ['requestPath'], { limit: 60 }), 'requestPath', 60).map(
-      ([path, count]) => ({ path, count }),
-    );
+    topPaths = top(
+      await metrics(ctx, ['requestPath'], { limit: 60 }),
+      'requestPath',
+      60,
+    ).map(([path, count]) => ({ path, count }));
   } catch (e) {
     topPathsError = errMsg(e);
   }
@@ -213,14 +214,21 @@ export async function fetchReport(creds: {
           skipped:
             'no safe /_serverFn/* path in top paths (the top-paths query may have failed)',
         },
-    await fetchDist(ctx, '/api/tiles', "route eq '/api/tiles/[theme]/[z]/[x]/[y]'"),
-    await fetchDist(ctx, '/ home (SSR search upper bound)', "requestPath eq '/'"),
+    await fetchDist(
+      ctx,
+      '/api/tiles',
+      "route eq '/api/tiles/[theme]/[z]/[x]/[y]'",
+    ),
+    await fetchDist(
+      ctx,
+      '/ home (SSR search upper bound)',
+      "requestPath eq '/'",
+    ),
   ];
 
   return {
     start: ctx.startTime,
     now: now.toISOString(),
-    windowMin: ctx.windowMin,
     byRule,
     byRuleError,
     topPaths,

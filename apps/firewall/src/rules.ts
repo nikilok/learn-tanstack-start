@@ -2,7 +2,7 @@
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
 export type ActionChoice = 'log' | 'challenge' | 'deny' | 'bypass'; // a rule's switchable mitigate action
-export type Condition = {
+type Condition = {
   type: 'path' | 'query' | 'header';
   op: 'pre' | 'eq' | 'ex' | 'sub' | 're';
   key?: string;
@@ -82,6 +82,27 @@ function rateLimitRule(opts: {
 
 /** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 export const rules: Rule[] = [
+  // ALLOW (first — allow rules take precedence): ch-stream (Railway) → POST /api/revalidate is a
+  // trusted server-to-server caller (CDN cache invalidation), authed by the x-revalidate-secret
+  // header check in the endpoint. A bypass rule exempts it from the managed Bot Protection ruleset,
+  // which otherwise serves a JS challenge the non-browser caller can't solve and blocks it. Matching
+  // on the header's presence (not value) keeps the secret out of the firewall config — the endpoint's
+  // timing-safe secret check stays the real auth gate.
+  {
+    name: 'allow-ch-stream-revalidate',
+    description:
+      'Bypass bot protection for ch-stream → POST /api/revalidate (trusted server-to-server cache invalidation; endpoint auths via x-revalidate-secret). Skips the managed Bot Protection challenge that blocks non-browser callers.',
+    active: true,
+    conditionGroup: [
+      {
+        conditions: [
+          { type: 'path', op: 'eq', value: '/api/revalidate' },
+          { type: 'header', op: 'ex', key: 'x-revalidate-secret' },
+        ],
+      },
+    ],
+    action: { mitigate: { action: 'bypass' } },
+  },
   rateLimitRule({
     name: 'rl-serverfn-ip',
     description:

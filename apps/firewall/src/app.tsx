@@ -1,19 +1,20 @@
 // The interactive rule-manager TUI: a stateful Ink container wiring the data layer
 // (client.ts) to the presentational components (components.tsx) and the report (report-data.ts).
 
-import { Box, Text, useApp, useInput } from 'ink';
+import {
+  type DOMElement,
+  Box,
+  Text,
+  measureElement,
+  useApp,
+  useInput,
+} from 'ink';
 import { useEffect, useRef, useState } from 'react';
 
-import {
-  actionColor,
-  actionOptions,
-  cycleAction,
-  isLogOnly,
-  withAction,
-} from './actions';
+import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import {
   type Item,
-  applyRule,
+  applyItem,
   fetchLive,
   projectId,
   seedItems,
@@ -23,6 +24,7 @@ import {
 import { type Phase, ReportView, Row, summaryLine } from './components';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
+import { errMsg } from './util';
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
 export function App() {
@@ -40,6 +42,14 @@ export function App() {
   const [focus, setFocus] = useState<'editor' | 'report'>('editor');
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   const loadingReport = useRef(false); // dedupe concurrent report fetches
+  const [reportScroll, setReportScroll] = useState(0);
+  const [reportMaxScroll, setReportMaxScroll] = useState(0);
+  const reportRef = useRef<DOMElement | null>(null);
+
+  // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
+  // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
+  const rows = process.stdout.rows ?? 24;
+  const reportH = Math.max(8, rows - 1);
 
   useEffect(() => {
     fetchLive()
@@ -49,11 +59,23 @@ export function App() {
         setPhase('select');
       })
       .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errMsg(e));
         setPhase('fatal');
         process.exitCode = 1;
       });
   }, []);
+
+  // Measure the report content (post-render) to clamp how far it can scroll: content height minus
+  // the visible area (reportH minus the box's top+bottom border).
+  useEffect(() => {
+    if (!reportOpen || !report || !reportRef.current) return;
+    const max = Math.max(
+      0,
+      measureElement(reportRef.current).height - (reportH - 2),
+    );
+    setReportMaxScroll(max);
+    setReportScroll((s) => Math.min(s, max));
+  }, [report, reportOpen, reportH]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -68,12 +90,8 @@ export function App() {
       setItems((prev) =>
         prev.map((it, j) => (j === i ? { ...it, status: 'applying' } : it)),
       );
-      const rule = withAction(
-        { ...snapshot[i].rule, active: snapshot[i].active },
-        snapshot[i].action,
-      );
       try {
-        const res = await applyRule(rule, ids);
+        const res = await applyItem(snapshot[i], ids);
         setItems((prev) =>
           prev.map((it, j) =>
             j === i ? { ...it, status: res.status, detail: res.detail } : it,
@@ -81,9 +99,11 @@ export function App() {
         );
       } catch (e) {
         anyError = true;
-        const detail = e instanceof Error ? e.message : String(e);
+        const detail = errMsg(e);
         setItems((prev) =>
-          prev.map((it, j) => (j === i ? { ...it, status: 'error', detail } : it)),
+          prev.map((it, j) =>
+            j === i ? { ...it, status: 'error', detail } : it,
+          ),
         );
       }
     }
@@ -97,43 +117,45 @@ export function App() {
     loadingReport.current = true;
     setReportLoading(true);
     setReportError('');
+    setReportScroll(0);
     try {
       setReport(await fetchReport({ projectId, teamId, token }));
     } catch (e) {
-      setReportError(e instanceof Error ? e.message : String(e));
+      setReportError(errMsg(e));
     } finally {
       loadingReport.current = false;
       setReportLoading(false);
     }
   };
 
+  /** Cycle the highlighted rule's action in the given direction. */
+  const cycleCursorAction = (dir: 1 | -1) =>
+    setItems((prev) =>
+      prev.map((it, j) =>
+        j === cursor
+          ? { ...it, action: cycleAction(it.rule, it.action, dir) }
+          : it,
+      ),
+    );
+
   useInput((input, key) => {
     if (focus === 'report') {
       if (input === 'q') exit();
-      else if (input === 'r') void loadReport(); // refresh
+      else if (input === 'r')
+        void loadReport(); // refresh
       else if (key.escape) setFocus('editor');
+      else if (key.upArrow || input === 'k')
+        setReportScroll((s) => Math.max(0, s - 1));
+      else if (key.downArrow || input === 'j')
+        setReportScroll((s) => Math.min(reportMaxScroll, s + 1));
       return;
     }
     if (phase === 'select') {
       if (key.upArrow || input === 'k') setCursor((c) => Math.max(0, c - 1));
       else if (key.downArrow || input === 'j')
         setCursor((c) => Math.min(items.length - 1, c + 1));
-      else if (key.leftArrow || input === 'h')
-        setItems((prev) =>
-          prev.map((it, j) =>
-            j === cursor
-              ? { ...it, action: cycleAction(it.rule, it.action, -1) }
-              : it,
-          ),
-        );
-      else if (key.rightArrow || input === 'l')
-        setItems((prev) =>
-          prev.map((it, j) =>
-            j === cursor
-              ? { ...it, action: cycleAction(it.rule, it.action, 1) }
-              : it,
-          ),
-        );
+      else if (key.leftArrow || input === 'h') cycleCursorAction(-1);
+      else if (key.rightArrow || input === 'l') cycleCursorAction(1);
       else if (key.return) {
         const opts = actionOptions(items[cursor].rule);
         setMenuCursor(Math.max(0, opts.indexOf(items[cursor].action)));
@@ -156,7 +178,8 @@ export function App() {
       } else if (input === 'q' || key.escape) exit();
     } else if (phase === 'action') {
       const opts = actionOptions(items[cursor].rule);
-      if (key.upArrow || input === 'k') setMenuCursor((m) => Math.max(0, m - 1));
+      if (key.upArrow || input === 'k')
+        setMenuCursor((m) => Math.max(0, m - 1));
       else if (key.downArrow || input === 'j')
         setMenuCursor((m) => Math.min(opts.length - 1, m + 1));
       else if (key.return) {
@@ -247,15 +270,24 @@ export function App() {
         <Box
           flexDirection="column"
           width={reportW}
+          height={reportH}
           borderStyle="round"
           borderColor={focus === 'report' ? 'cyan' : 'gray'}
           paddingX={1}
+          overflowY="hidden"
         >
-          <ReportView
-            report={report}
-            error={reportError}
-            loading={reportLoading}
-          />
+          <Box
+            ref={reportRef}
+            flexDirection="column"
+            flexShrink={0}
+            marginTop={-reportScroll}
+          >
+            <ReportView
+              report={report}
+              error={reportError}
+              loading={reportLoading}
+            />
+          </Box>
         </Box>
       )}
     </Box>

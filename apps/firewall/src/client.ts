@@ -11,8 +11,14 @@ import {
 } from './actions';
 import { resolveVercelCredentials } from './credentials';
 import { type ActionChoice, type Rule, dryRun, rules } from './rules';
+import { errMsg } from './util';
 
-export type ApplyStatus = 'idle' | 'applying' | 'inserted' | 'overwrote' | 'error';
+export type ApplyStatus =
+  | 'idle'
+  | 'applying'
+  | 'inserted'
+  | 'overwrote'
+  | 'error';
 export type LiveConfig = {
   idByName: Map<string, string>;
   activeByName: Map<string, boolean>;
@@ -94,20 +100,30 @@ export async function applyRule(
   return { status: 'inserted' };
 }
 
+/** Build the live rule for an item (active + chosen action applied) and upsert it. Shared by the TUI (applyAll) and headless paths so they apply rules identically. */
+export async function applyItem(
+  item: Item,
+  idByName: Map<string, string>,
+): Promise<{ status: ApplyStatus; detail?: string }> {
+  return applyRule(
+    withAction({ ...item.rule, active: item.active }, item.action),
+    idByName,
+  );
+}
+
 /** Non-interactive apply (CI / piped, no TTY): ensure every rule exists, preserving each rule's LIVE active + action (never reverting enforcement). Sets a non-zero exit code if any rule fails. */
 export async function runHeadless() {
   const live = await fetchLive();
   let anyError = false;
   for (const item of seedItems(live)) {
-    const rule = withAction({ ...item.rule, active: item.active }, item.action);
     try {
-      const { status, detail } = await applyRule(rule, live.idByName);
-      console.log(`${status}${detail ? ` (${detail})` : ''}  ${rule.name}`);
+      const { status, detail } = await applyItem(item, live.idByName);
+      console.log(
+        `${status}${detail ? ` (${detail})` : ''}  ${item.rule.name}`,
+      );
     } catch (e) {
       anyError = true;
-      console.log(
-        `error (${e instanceof Error ? e.message : String(e)})  ${rule.name}`,
-      );
+      console.log(`error (${errMsg(e)})  ${item.rule.name}`);
     }
   }
   if (anyError) process.exitCode = 1;

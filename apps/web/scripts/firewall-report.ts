@@ -1,19 +1,29 @@
 import { readFileSync } from 'node:fs';
 
-// Read-only firewall calibration / monitoring report. Pulls Vercel observability
-// data for the last ~6 days including today so far (free tier caps startTime at 7) and prints:
+// Read-only firewall monitoring report. Pulls Vercel observability data for the last
+// ~6 days including today so far (free tier caps startTime at 7) and prints:
 //   1. firewall actions per rule — your rl-* rules appearing here means a rate-limit fired
 //   2. top request paths — overall traffic scale
 //   3. per-IP distribution on the rate-limited paths — to (re)calibrate the limits
 // Run from the repo root so bun auto-loads .env.local for VERCEL_TOKEN:
 //   bun apps/web/scripts/firewall-report.ts
 
-const link = JSON.parse(
-  readFileSync(new URL('../.vercel/project.json', import.meta.url), 'utf8'),
-) as { projectId: string; orgId: string };
+let link: { projectId?: string; orgId?: string } = {};
+try {
+  link = JSON.parse(
+    readFileSync(new URL('../.vercel/project.json', import.meta.url), 'utf8'),
+  );
+} catch {
+  // .vercel/project.json is gitignored / absent on fresh clones & CI — fall back to env.
+}
 const projectId = process.env.VERCEL_PROJECT_ID ?? link.projectId;
 const teamId = process.env.VERCEL_TEAM_ID ?? link.orgId;
 const token = process.env.VERCEL_TOKEN;
+if (!projectId || !teamId) {
+  throw new Error(
+    'projectId/teamId not found — run `vercel link` or set VERCEL_PROJECT_ID + VERCEL_TEAM_ID',
+  );
+}
 if (!token) {
   throw new Error(
     'VERCEL_TOKEN not set — create one at https://vercel.com/account/tokens',
@@ -38,7 +48,7 @@ const qs = `teamId=${teamId}&projectId=${projectId}`;
 
 type Row = Record<string, unknown>;
 
-/** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason). */
+/** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason), retrying transient 5xx/429. */
 async function metrics(
   groupBy: string[],
   opts: { event?: string; filter?: string; limit?: number } = {},
@@ -55,7 +65,6 @@ async function metrics(
     ...(opts.filter ? { filter: opts.filter } : {}),
     limit: opts.limit ?? 500, // hard max
   });
-  // Retry transient 5xx — the observability API 504s on heavier queries.
   for (let attempt = 1; ; attempt++) {
     const res = await fetch(
       `https://vercel.com/api/observability/metrics?${qs}`,
@@ -63,7 +72,7 @@ async function metrics(
     );
     if (res.ok) return res.json();
     const detail = `metrics ${res.status}: ${(await res.text()).slice(0, 160)}`;
-    if (res.status >= 500 && attempt < 3) {
+    if ((res.status >= 500 || res.status === 429) && attempt < 3) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
       continue;
     }
@@ -82,6 +91,7 @@ async function ruleNames(): Promise<Map<string, string>> {
   return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
 }
 
+/** Extract the summed count from an observability summary row (scalar or {value|sum}). */
 function cnt(row: Row): number {
   const v = (row.count_sum ?? row.count) as unknown;
   if (v && typeof v === 'object') {
@@ -91,6 +101,7 @@ function cnt(row: Row): number {
   return Number(v ?? 0);
 }
 
+/** Sort a response's summary rows by count desc and return the top `n` [key, count] pairs. */
 function top(
   resp: { summary?: Row[] },
   key: string,
@@ -102,13 +113,12 @@ function top(
     .slice(0, n);
 }
 
+/** Percentile over an ascending-sorted array (p in [0,1]); indexes over length-1 so p<1 doesn't return the max on small samples. */
 function pct(sorted: number[], p: number): number {
-  return sorted.length
-    ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]
-    : 0;
+  return sorted.length ? sorted[Math.floor(p * (sorted.length - 1))] : 0;
 }
 
-/** Print the per-IP volume distribution for one path/route filter. */
+/** Print the per-IP volume distribution for one path/route filter; skips (doesn't abort) on query error. */
 async function distribution(label: string, filter: string) {
   console.log(`\n— per-IP on ${label}`);
   let resp: { summary?: Row[] };
@@ -126,7 +136,7 @@ async function distribution(label: string, filter: string) {
   }
   const total = counts.reduce((a, b) => a + b, 0);
   console.log(
-    `  total=${total}  IPs=${rows.length}  per-IP 6d: max=${Math.max(...counts)} ` +
+    `  total=${total}  IPs=${rows.length}  per-IP: max=${Math.max(...counts)} ` +
       `p99=${pct(counts, 0.99)} p95=${pct(counts, 0.95)} median=${pct(counts, 0.5)}`,
   );
   for (const [ip, c] of rows.slice(0, 8)) {
@@ -136,31 +146,41 @@ async function distribution(label: string, filter: string) {
   }
 }
 
+/** Fetch + print the three report sections; each degrades to a skip line on error so one transient failure never blanks the whole report. */
 async function main() {
-  console.log(`firewall calibration — ${START} → ${END} (6d)`);
+  console.log(`firewall report — ${START} → ${END}`);
 
   console.log(
-    '\n=== firewall actions by rule (6d) — rl-* here = a rate-limit fired ===',
+    '\n=== firewall actions by rule — rl-* here = a rate-limit fired ===',
   );
-  const names = await ruleNames();
-  const byRule = top(
-    await metrics(['wafRuleId'], { event: 'firewallAction' }),
-    'wafRuleId',
-    25,
-  );
-  if (!byRule.length) console.log('  (no firewall actions)');
-  for (const [id, c] of byRule) {
-    console.log(`  ${String(c).padStart(8)}  ${names.get(id) ?? id}`);
+  try {
+    const names = await ruleNames();
+    const byRule = top(
+      await metrics(['wafRuleId'], { event: 'firewallAction' }),
+      'wafRuleId',
+      25,
+    );
+    if (!byRule.length) console.log('  (no firewall actions)');
+    for (const [id, c] of byRule) {
+      console.log(`  ${String(c).padStart(8)}  ${names.get(id) ?? id}`);
+    }
+  } catch (e) {
+    console.log(`  (skipped — ${e instanceof Error ? e.message : String(e)})`);
   }
 
-  console.log('\n=== top request paths (6d) ===');
-  const paths = top(
-    await metrics(['requestPath'], { limit: 60 }),
-    'requestPath',
-    60,
-  );
-  for (const [p, c] of paths.slice(0, 20)) {
-    console.log(`  ${String(c).padStart(8)}  ${p}`);
+  console.log('\n=== top request paths ===');
+  let paths: [string, number][] = [];
+  try {
+    paths = top(
+      await metrics(['requestPath'], { limit: 60 }),
+      'requestPath',
+      60,
+    );
+    for (const [p, c] of paths.slice(0, 20)) {
+      console.log(`  ${String(c).padStart(8)}  ${p}`);
+    }
+  } catch (e) {
+    console.log(`  (skipped — ${e instanceof Error ? e.message : String(e)})`);
   }
 
   // Per-IP distributions on the rate-limited paths. The `like` filter is rejected by this
@@ -185,6 +205,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('calibration failed:', error);
+  console.error('report failed:', error);
   process.exit(1);
 });

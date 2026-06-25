@@ -19,6 +19,7 @@
     "db:migrate": "turbo run db:migrate --filter @ss/web",
     "db:push": "turbo run db:push --filter @ss/web",
     "db:studio": "turbo run db:studio --filter @ss/web",
+    "firewall:setup": "bun --env-file=.env.local apps/firewall/src/setup.tsx",
     "knip": "knip"
   },
   "dependencies": {},

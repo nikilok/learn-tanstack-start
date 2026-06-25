@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { resolveVercelCredentials } from './vercel-credentials';
 
 // Read-only firewall monitoring report. Pulls Vercel observability data for the last
 // ~6 days including today so far (free tier caps startTime at 7) and prints:
@@ -8,37 +8,20 @@ import { readFileSync } from 'node:fs';
 // Run from the repo root so bun auto-loads .env.local for VERCEL_TOKEN:
 //   bun apps/web/scripts/firewall-report.ts
 
-let link: { projectId?: string; orgId?: string } = {};
-try {
-  link = JSON.parse(
-    readFileSync(new URL('../.vercel/project.json', import.meta.url), 'utf8'),
-  );
-} catch {
-  // .vercel/project.json is gitignored / absent on fresh clones & CI — fall back to env.
-}
-const projectId = process.env.VERCEL_PROJECT_ID ?? link.projectId;
-const teamId = process.env.VERCEL_TEAM_ID ?? link.orgId;
-const token = process.env.VERCEL_TOKEN;
-if (!projectId || !teamId) {
-  throw new Error(
-    'projectId/teamId not found — run `vercel link` or set VERCEL_PROJECT_ID + VERCEL_TEAM_ID',
-  );
-}
-if (!token) {
-  throw new Error(
-    'VERCEL_TOKEN not set — create one at https://vercel.com/account/tokens',
-  );
-}
+const { projectId, teamId, token } = resolveVercelCredentials();
 
 // Hour-aligned rolling window so "today so far" is included; ~6 days stays inside the 7-day cap.
-const end = new Date();
+const now = new Date();
+const end = new Date(now);
 end.setUTCMinutes(0, 0, 0);
-end.setUTCHours(end.getUTCHours() + 1); // ceil to next hour; a future end clamps to now
+end.setUTCHours(end.getUTCHours() + 1); // ceil to next whole hour so the API window is aligned
 const start = new Date(end);
 start.setUTCDate(start.getUTCDate() - 6);
 const START = start.toISOString();
 const END = end.toISOString();
-const WINDOW_MIN = Math.round((end.getTime() - start.getTime()) / 60000);
+const NOW = now.toISOString(); // actual coverage end — END is ceiled into the future only for query alignment
+// Divide rates by the ACTUAL elapsed minutes (start→now), not the future-ceiled END, or /min is understated.
+const WINDOW_MIN = Math.round((now.getTime() - start.getTime()) / 60000);
 
 const headers = {
   Authorization: `Bearer ${token}`,
@@ -135,8 +118,10 @@ async function distribution(label: string, filter: string) {
     return;
   }
   const total = counts.reduce((a, b) => a + b, 0);
+  const capped = rows.length >= 500; // observability API caps grouped rows at 500 — tail beyond is dropped
   console.log(
-    `  total=${total}  IPs=${rows.length}  per-IP: max=${Math.max(...counts)} ` +
+    `  total=${total}${capped ? '+' : ''}  IPs=${rows.length}${capped ? '+ (top 500 only)' : ''}  ` +
+      `per-IP: max=${Math.max(...counts)} ` +
       `p99=${pct(counts, 0.99)} p95=${pct(counts, 0.95)} median=${pct(counts, 0.5)}`,
   );
   for (const [ip, c] of rows.slice(0, 8)) {
@@ -148,7 +133,7 @@ async function distribution(label: string, filter: string) {
 
 /** Fetch + print the three report sections; each degrades to a skip line on error so one transient failure never blanks the whole report. */
 async function main() {
-  console.log(`firewall report — ${START} → ${END}`);
+  console.log(`firewall report — ${START} → ${NOW}`);
 
   console.log(
     '\n=== firewall actions by rule — rl-* here = a rate-limit fired ===',
@@ -185,11 +170,19 @@ async function main() {
 
   // Per-IP distributions on the rate-limited paths. The `like` filter is rejected by this
   // API, so /_serverFn uses the busiest fn hash (discovered) as a proxy, and tiles uses the route.
-  const topServerFn = paths.find(([p]) => p.startsWith('/_serverFn/'))?.[0];
+  // The path is interpolated into the filter DSL, so restrict it to safe chars (no quotes/metachars).
+  const topServerFn = paths.find(
+    ([p]) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p),
+  )?.[0];
   if (topServerFn) {
     await distribution(
       `busiest server fn — ${topServerFn}`,
       `requestPath eq '${topServerFn}'`,
+    );
+  } else {
+    console.log('\n— per-IP on busiest server fn');
+    console.log(
+      '  (skipped — no safe /_serverFn/* path in top paths; the top-paths query above may have failed)',
     );
   }
   await distribution('/api/tiles', "route eq '/api/tiles/[theme]/[z]/[x]/[y]'");

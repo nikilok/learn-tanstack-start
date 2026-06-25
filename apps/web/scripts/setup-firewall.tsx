@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
-
 import { Vercel } from '@vercel/sdk';
 import { Box, Text, render, useApp, useInput } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+import { resolveVercelCredentials } from './vercel-credentials';
 
 type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
 type ActionChoice = 'log' | 'challenge' | 'deny' | 'bypass'; // a rule's switchable mitigate action
@@ -33,7 +33,7 @@ type Rule = {
   };
 };
 
-// Phase 1 = observe: every rule logs only, nothing is blocked. Flip individual rules to challenge/deny/bypass in the TUI (or below) and apply.
+// Phase 1 = observe: every rule logs only, nothing is blocked. Flip individual rules to challenge/deny/bypass in the TUI and apply.
 const OBSERVE: RateLimitAction = 'log';
 const dryRun =
   process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
@@ -84,7 +84,7 @@ function rateLimitRule(opts: {
   };
 }
 
-/** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. */
+/** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 const rules: Rule[] = [
   rateLimitRule({
     name: 'rl-serverfn-ip',
@@ -143,47 +143,17 @@ const rules: Rule[] = [
   rateLimitRule({
     name: 'observe-ja4-serverfn',
     description:
-      'Observe per-JA4 volume on server-fn RPCs — surfaces a distributed scraper using one TLS fingerprint across many IPs that per-IP rules miss. LOG ONLY: browser JA4s are shared by millions of real users, so never flip this to enforce.',
+      'Observe per-JA4 volume on server-fn RPCs — surfaces a distributed scraper using one TLS fingerprint across many IPs that per-IP rules miss. LOG ONLY: browser JA4s are shared by millions of real users, so it is locked to log (see isLogOnly).',
     conditions: [{ type: 'path', op: 'pre', value: '/_serverFn' }],
     limit: JA4_LIMIT,
     keys: ['ja4_digest'],
     actionDuration: '1h',
-    action: 'log', // never deny/challenge — would nuke real browsers sharing a JA4
+    action: 'log',
   }),
 ];
 
-/** Resolve Vercel project credentials from env (preferred) or the linked `.vercel/project.json`; throws if project/team/token are missing. Returns plain `string`s so callers see non-undefined types. */
-function resolveCredentials(): {
-  projectId: string;
-  teamId: string;
-  bearerToken: string;
-} {
-  let link: { projectId?: string; orgId?: string } = {};
-  try {
-    link = JSON.parse(
-      readFileSync(new URL('../.vercel/project.json', import.meta.url), 'utf8'),
-    );
-  } catch {
-    // .vercel/project.json is gitignored / absent on fresh clones & CI — fall back to env.
-  }
-  const projectId = process.env.VERCEL_PROJECT_ID ?? link.projectId;
-  const teamId = process.env.VERCEL_TEAM_ID ?? link.orgId;
-  const bearerToken = process.env.VERCEL_TOKEN;
-  if (!projectId || !teamId) {
-    throw new Error(
-      'projectId/teamId not found — run `vercel link` or set VERCEL_PROJECT_ID + VERCEL_TEAM_ID',
-    );
-  }
-  if (!bearerToken) {
-    throw new Error(
-      'VERCEL_TOKEN not set — create one at https://vercel.com/account/tokens',
-    );
-  }
-  return { projectId, teamId, bearerToken };
-}
-
-const { projectId, teamId, bearerToken } = resolveCredentials();
-const vercel = new Vercel({ bearerToken });
+const { projectId, teamId, token } = resolveVercelCredentials();
+const vercel = new Vercel({ bearerToken: token });
 
 const ACTIONS: ActionChoice[] = ['log', 'challenge', 'deny', 'bypass'];
 
@@ -202,8 +172,14 @@ function effectiveAction(m: {
     : m.action;
 }
 
-/** Switchable actions valid for a rule: rate-limit rules can't bypass (the exceeded-action enum excludes it). */
+/** JA4-keyed rules must never enforce — a browser TLS fingerprint is shared by millions of real users, so blocking on it is a self-inflicted outage. Locked to log in the UI and on apply. */
+function isLogOnly(rule: Rule): boolean {
+  return rule.action.mitigate.rateLimit?.keys.includes('ja4_digest') ?? false;
+}
+
+/** Switchable actions valid for a rule: JA4 rules are locked to log; other rate-limit rules can't bypass (the exceeded-action enum excludes it); plain rules get all four. */
 function actionOptions(rule: Rule): ActionChoice[] {
+  if (isLogOnly(rule)) return ['log'];
   return rule.action.mitigate.action === 'rate_limit'
     ? ['log', 'challenge', 'deny']
     : ['log', 'challenge', 'deny', 'bypass'];
@@ -244,6 +220,13 @@ type LiveConfig = {
   activeByName: Map<string, boolean>;
   actionByName: Map<string, ActionChoice>;
 };
+type Item = {
+  rule: Rule;
+  active: boolean;
+  action: ActionChoice;
+  status: ApplyStatus;
+  detail?: string;
+};
 
 /** Fetch the active firewall config and index our rules' current id + active state + governing action by name. */
 async function fetchLive(): Promise<LiveConfig> {
@@ -263,6 +246,27 @@ async function fetchLive(): Promise<LiveConfig> {
     if (c) actionByName.set(r.name, c);
   }
   return { idByName, activeByName, actionByName };
+}
+
+/** Seed each code rule's desired active + action, preferring the LIVE config so a run never silently downgrades operator-tuned enforcement; the action is clamped to the rule's valid options (so drift like a bypass on a rate-limit rule can't be re-applied as an invalid value). New rules fall back to code defaults. */
+function seedItems(live: LiveConfig): Item[] {
+  return rules.map((rule) => {
+    const opts = actionOptions(rule);
+    const liveAction = live.actionByName.get(rule.name);
+    const codeAction = asChoice(effectiveAction(rule.action.mitigate)) ?? 'log';
+    const action =
+      liveAction && opts.includes(liveAction)
+        ? liveAction
+        : opts.includes(codeAction)
+          ? codeAction
+          : opts[0];
+    return {
+      rule,
+      active: live.activeByName.get(rule.name) ?? rule.active,
+      action,
+      status: 'idle',
+    };
+  });
 }
 
 /** Upsert one rule (insert if new, overwrite if it already exists), honouring dry-run. Returns the outcome for display. */
@@ -289,26 +293,29 @@ async function applyRule(
   return { status: 'inserted' };
 }
 
-/** Non-interactive apply (CI / piped, no TTY): upsert every rule with its code-defined active + action. Mirrors the old script. */
+/** Non-interactive apply (CI / piped, no TTY): ensure every rule exists, preserving each rule's LIVE active + action (never reverting enforcement). Sets a non-zero exit code if any rule fails. */
 async function runHeadless() {
-  const { idByName } = await fetchLive();
-  for (const rule of rules) {
-    const { status, detail } = await applyRule(rule, idByName);
-    console.log(`${status}${detail ? ` (${detail})` : ''}  ${rule.name}`);
+  const live = await fetchLive();
+  let anyError = false;
+  for (const item of seedItems(live)) {
+    const rule = withAction({ ...item.rule, active: item.active }, item.action);
+    try {
+      const { status, detail } = await applyRule(rule, live.idByName);
+      console.log(`${status}${detail ? ` (${detail})` : ''}  ${rule.name}`);
+    } catch (e) {
+      anyError = true;
+      console.log(
+        `error (${e instanceof Error ? e.message : String(e)})  ${rule.name}`,
+      );
+    }
   }
+  if (anyError) process.exitCode = 1;
   console.log(
-    '\nApplied. Watch Firewall → Traffic, then set Phase 2 actions and re-run.',
+    '\nApplied. Live enforcement preserved; new rules inserted with code defaults. Tune actions in the TUI.',
   );
 }
 
 type Phase = 'loading' | 'select' | 'action' | 'applying' | 'done' | 'fatal';
-type Item = {
-  rule: Rule;
-  active: boolean;
-  action: ActionChoice;
-  status: ApplyStatus;
-  detail?: string;
-};
 
 /** Truncate a string to `n` chars with a trailing ellipsis. */
 function truncate(s: string, n: number): string {
@@ -387,57 +394,57 @@ function App() {
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState('');
+  const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
 
   useEffect(() => {
     fetchLive()
       .then((live) => {
         setIdByName(live.idByName);
-        setItems(
-          rules.map((rule) => ({
-            rule,
-            active: live.activeByName.get(rule.name) ?? rule.active,
-            action:
-              live.actionByName.get(rule.name) ??
-              asChoice(effectiveAction(rule.action.mitigate)) ??
-              'log',
-            status: 'idle',
-          })),
-        );
+        setItems(seedItems(live));
         setPhase('select');
       })
       .catch((e: unknown) => {
         setError(e instanceof Error ? e.message : String(e));
         setPhase('fatal');
+        process.exitCode = 1;
       });
   }, []);
 
-  /** Sequentially upsert each rule with its chosen active + action, updating per-row status as it goes. */
-  const applyAll = async (snapshot: Item[], ids: Map<string, string>) => {
+  /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
+  const applyAll = async (snapshot: Item[]) => {
+    let ids = idByName;
+    try {
+      ids = (await fetchLive()).idByName;
+    } catch {
+      // keep the mount snapshot if the refresh fails — better than aborting the apply.
+    }
+    let anyError = false;
     for (let i = 0; i < snapshot.length; i++) {
-      const idx = i;
       setItems((prev) =>
-        prev.map((it, j) => (j === idx ? { ...it, status: 'applying' } : it)),
+        prev.map((it, j) => (j === i ? { ...it, status: 'applying' } : it)),
       );
       const rule = withAction(
-        { ...snapshot[idx].rule, active: snapshot[idx].active },
-        snapshot[idx].action,
+        { ...snapshot[i].rule, active: snapshot[i].active },
+        snapshot[i].action,
       );
       try {
         const res = await applyRule(rule, ids);
         setItems((prev) =>
           prev.map((it, j) =>
-            j === idx ? { ...it, status: res.status, detail: res.detail } : it,
+            j === i ? { ...it, status: res.status, detail: res.detail } : it,
           ),
         );
       } catch (e) {
+        anyError = true;
         const detail = e instanceof Error ? e.message : String(e);
         setItems((prev) =>
           prev.map((it, j) =>
-            j === idx ? { ...it, status: 'error', detail } : it,
+            j === i ? { ...it, status: 'error', detail } : it,
           ),
         );
       }
     }
+    if (anyError) process.exitCode = 1;
     setPhase('done');
   };
 
@@ -469,8 +476,10 @@ function App() {
           ),
         );
       else if (input === 'a') {
+        if (applying.current) return;
+        applying.current = true;
         setPhase('applying');
-        void applyAll(items, idByName);
+        void applyAll(items);
       } else if (input === 'q' || key.escape) exit();
     } else if (phase === 'action') {
       const opts = actionOptions(items[cursor].rule);
@@ -485,6 +494,7 @@ function App() {
         );
         setPhase('select');
       } else if (key.escape || key.leftArrow) setPhase('select');
+      else if (input === 'q') exit();
     } else if (phase === 'done' || phase === 'fatal') {
       if (input === 'q' || key.return || key.escape) exit();
     }
@@ -541,7 +551,12 @@ function App() {
               <Text color="green">{opt === target.action ? '✔' : ' '}</Text>
             </Box>
           ))}
-          <Text dimColor>↑/↓ choose · enter set · esc cancel</Text>
+          {isLogOnly(target.rule) && (
+            <Text dimColor>
+              locked to log — JA4 is shared by many real users
+            </Text>
+          )}
+          <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
         </Box>
       )}
       {phase === 'applying' && <Text color="yellow">applying…</Text>}

@@ -11,6 +11,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 dotenv.config({ path: '../../.env.local' });
 
 const config = defineConfig({
+  experimental: {
+    bundledDev: true,
+  },
   plugins: [
     devtools(),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),

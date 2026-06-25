@@ -21,7 +21,10 @@
     "db:studio": "turbo run db:studio --filter @ss/web",
     "knip": "knip"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.13.25",
+    "@tanstack/start-server-core": "^1.169.2"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "@types/node": "^25.9.1",

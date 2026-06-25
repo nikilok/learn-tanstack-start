@@ -25,7 +25,7 @@ import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 
-import appCss from '../styles.css?url';
+import appCss from '../styles.css?inline';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -101,10 +101,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           type: 'image/svg+xml',
           href: '/favicon.svg',
         },
-        {
-          rel: 'stylesheet',
-          href: appCss,
-        },
       ],
     }),
     shellComponent: RootDocument,
@@ -123,6 +119,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#ffffff" />
+        {/* oxlint-disable-next-line react/no-danger -- inlined CSS bundle, no user input. Inlined to work around Vite bundledDev not exposing /assets/*.css through Nitro's dev server. */}
+        <style dangerouslySetInnerHTML={{ __html: appCss }} />
         {/* oxlint-disable-next-line react/no-danger -- static theme init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static search input init script, no user input */}

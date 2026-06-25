@@ -25,7 +25,9 @@
     "seed:companies-house": "bun scripts/seed-companies-house.ts",
     "sitemap:generate": "bun scripts/generate-sitemap.ts",
     "sic:fetch": "bun scripts/fetch-sic-codes.ts",
-    "db:seed-sic": "bun scripts/seed-sic-codes.ts"
+    "db:seed-sic": "bun scripts/seed-sic-codes.ts",
+    "firewall:setup": "bun scripts/setup-firewall.ts",
+    "firewall:report": "bun scripts/firewall-report.ts"
   },
   "dependencies": {
     "@flags-sdk/vercel": "1.3.0",

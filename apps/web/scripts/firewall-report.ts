@@ -1,0 +1,190 @@
+import { readFileSync } from 'node:fs';
+
+// Read-only firewall calibration / monitoring report. Pulls Vercel observability
+// data for the last ~6 days including today so far (free tier caps startTime at 7) and prints:
+//   1. firewall actions per rule — your rl-* rules appearing here means a rate-limit fired
+//   2. top request paths — overall traffic scale
+//   3. per-IP distribution on the rate-limited paths — to (re)calibrate the limits
+// Run from the repo root so bun auto-loads .env.local for VERCEL_TOKEN:
+//   bun apps/web/scripts/firewall-report.ts
+
+const link = JSON.parse(
+  readFileSync(new URL('../.vercel/project.json', import.meta.url), 'utf8'),
+) as { projectId: string; orgId: string };
+const projectId = process.env.VERCEL_PROJECT_ID ?? link.projectId;
+const teamId = process.env.VERCEL_TEAM_ID ?? link.orgId;
+const token = process.env.VERCEL_TOKEN;
+if (!token) {
+  throw new Error(
+    'VERCEL_TOKEN not set — create one at https://vercel.com/account/tokens',
+  );
+}
+
+// Hour-aligned rolling window so "today so far" is included; ~6 days stays inside the 7-day cap.
+const end = new Date();
+end.setUTCMinutes(0, 0, 0);
+end.setUTCHours(end.getUTCHours() + 1); // ceil to next hour; a future end clamps to now
+const start = new Date(end);
+start.setUTCDate(start.getUTCDate() - 6);
+const START = start.toISOString();
+const END = end.toISOString();
+const WINDOW_MIN = Math.round((end.getTime() - start.getTime()) / 60000);
+
+const headers = {
+  Authorization: `Bearer ${token}`,
+  'Content-Type': 'application/json',
+};
+const qs = `teamId=${teamId}&projectId=${projectId}`;
+
+type Row = Record<string, unknown>;
+
+/** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason). */
+async function metrics(
+  groupBy: string[],
+  opts: { event?: string; filter?: string; limit?: number } = {},
+): Promise<{ summary?: Row[] }> {
+  const body = JSON.stringify({
+    scope: { type: 'project', ownerId: teamId, projectIds: [projectId] },
+    reason: 'observability_chart_free',
+    event: opts.event ?? 'incomingRequest',
+    rollups: { count_sum: { measure: 'count', aggregation: 'sum' } },
+    startTime: START,
+    endTime: END,
+    granularity: { hours: 1 },
+    groupBy,
+    ...(opts.filter ? { filter: opts.filter } : {}),
+    limit: opts.limit ?? 500, // hard max
+  });
+  // Retry transient 5xx — the observability API 504s on heavier queries.
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(
+      `https://vercel.com/api/observability/metrics?${qs}`,
+      { method: 'POST', headers, body },
+    );
+    if (res.ok) return res.json();
+    const detail = `metrics ${res.status}: ${(await res.text()).slice(0, 160)}`;
+    if (res.status >= 500 && attempt < 3) {
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+      continue;
+    }
+    throw new Error(detail);
+  }
+}
+
+/** Map custom firewall rule ids to names via the active firewall config (for the per-rule report). */
+async function ruleNames(): Promise<Map<string, string>> {
+  const res = await fetch(
+    `https://api.vercel.com/v1/security/firewall/config/active?${qs}`,
+    { headers },
+  );
+  if (!res.ok) return new Map();
+  const cfg = (await res.json()) as { rules?: { id: string; name: string }[] };
+  return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
+}
+
+function cnt(row: Row): number {
+  const v = (row.count_sum ?? row.count) as unknown;
+  if (v && typeof v === 'object') {
+    const o = v as { value?: number; sum?: number };
+    return o.value ?? o.sum ?? 0;
+  }
+  return Number(v ?? 0);
+}
+
+function top(
+  resp: { summary?: Row[] },
+  key: string,
+  n = 30,
+): [string, number][] {
+  return (resp.summary ?? [])
+    .map((r) => [String(r[key] ?? '?'), cnt(r)] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n);
+}
+
+function pct(sorted: number[], p: number): number {
+  return sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]
+    : 0;
+}
+
+/** Print the per-IP volume distribution for one path/route filter. */
+async function distribution(label: string, filter: string) {
+  console.log(`\n— per-IP on ${label}`);
+  let resp: { summary?: Row[] };
+  try {
+    resp = await metrics(['clientIp'], { filter, limit: 500 });
+  } catch (e) {
+    console.log(`  (skipped — ${e instanceof Error ? e.message : String(e)})`);
+    return;
+  }
+  const rows = top(resp, 'clientIp', 500);
+  const counts = rows.map(([, c]) => c).sort((a, b) => a - b);
+  if (!counts.length) {
+    console.log('  (no traffic)');
+    return;
+  }
+  const total = counts.reduce((a, b) => a + b, 0);
+  console.log(
+    `  total=${total}  IPs=${rows.length}  per-IP 6d: max=${Math.max(...counts)} ` +
+      `p99=${pct(counts, 0.99)} p95=${pct(counts, 0.95)} median=${pct(counts, 0.5)}`,
+  );
+  for (const [ip, c] of rows.slice(0, 8)) {
+    console.log(
+      `    ${String(c).padStart(7)}  ${(c / WINDOW_MIN).toFixed(2)}/min  ${ip}`,
+    );
+  }
+}
+
+async function main() {
+  console.log(`firewall calibration — ${START} → ${END} (6d)`);
+
+  console.log(
+    '\n=== firewall actions by rule (6d) — rl-* here = a rate-limit fired ===',
+  );
+  const names = await ruleNames();
+  const byRule = top(
+    await metrics(['wafRuleId'], { event: 'firewallAction' }),
+    'wafRuleId',
+    25,
+  );
+  if (!byRule.length) console.log('  (no firewall actions)');
+  for (const [id, c] of byRule) {
+    console.log(`  ${String(c).padStart(8)}  ${names.get(id) ?? id}`);
+  }
+
+  console.log('\n=== top request paths (6d) ===');
+  const paths = top(
+    await metrics(['requestPath'], { limit: 60 }),
+    'requestPath',
+    60,
+  );
+  for (const [p, c] of paths.slice(0, 20)) {
+    console.log(`  ${String(c).padStart(8)}  ${p}`);
+  }
+
+  // Per-IP distributions on the rate-limited paths. The `like` filter is rejected by this
+  // API, so /_serverFn uses the busiest fn hash (discovered) as a proxy, and tiles uses the route.
+  const topServerFn = paths.find(([p]) => p.startsWith('/_serverFn/'))?.[0];
+  if (topServerFn) {
+    await distribution(
+      `busiest server fn — ${topServerFn}`,
+      `requestPath eq '${topServerFn}'`,
+    );
+  }
+  await distribution('/api/tiles', "route eq '/api/tiles/[theme]/[z]/[x]/[y]'");
+  await distribution('/ home (SSR search upper bound)', "requestPath eq '/'");
+
+  const limits = `serverfn ${process.env.FW_SERVERFN_LIMIT ?? '?'}, search ${process.env.FW_SEARCH_LIMIT ?? '?'}, tiles ${process.env.FW_TILES_LIMIT ?? '?'}`;
+  console.log(
+    `\nCompare top per-IP /min above to your configured limits (${limits}).`,
+  );
+  console.log(
+    'Heaviest legit IP is usually Googlebot (66.249.x) — keep it well under any limit.',
+  );
+}
+
+main().catch((error) => {
+  console.error('calibration failed:', error);
+  process.exit(1);
+});

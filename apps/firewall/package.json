@@ -1,0 +1,18 @@
+{
+  "name": "@ss/firewall",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "bun --env-file=../../.env.local src/setup.tsx",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "dependencies": {
+    "@vercel/sdk": "^1.21.5",
+    "ink": "^7.1.0",
+    "react": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0"
+  }
+}

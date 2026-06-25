@@ -21,6 +21,17 @@
         "drizzle-orm": "^0.45.2",
       },
     },
+    "apps/firewall": {
+      "name": "@ss/firewall",
+      "dependencies": {
+        "@vercel/sdk": "^1.21.5",
+        "ink": "^7.1.0",
+        "react": "^19.2.6",
+      },
+      "devDependencies": {
+        "@types/react": "^19.2.0",
+      },
+    },
     "apps/web": {
       "name": "@ss/web",
       "dependencies": {
@@ -65,7 +76,6 @@
         "@vitejs/plugin-react": "^6.0.2",
         "drizzle-kit": "^0.31.10",
         "h3": "^2.0.1-rc.20",
-        "ink": "^7.1.0",
         "playwright": "^1.60.0",
         "portless": "^0.13.0",
         "sharp": "^0.34.5",
@@ -549,6 +559,8 @@
     "@ss/ch-stream": ["@ss/ch-stream@workspace:apps/ch-stream"],
 
     "@ss/db": ["@ss/db@workspace:packages/db"],
+
+    "@ss/firewall": ["@ss/firewall@workspace:apps/firewall"],
 
     "@ss/web": ["@ss/web@workspace:apps/web"],
 

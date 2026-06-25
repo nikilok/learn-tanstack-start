@@ -18,6 +18,11 @@ const dryRun =
 const apply = process.argv.includes('--apply');
 
 async function main() {
+  if (apply && dryRun) {
+    console.error('--apply and --dry-run are mutually exclusive.');
+    process.exitCode = 1;
+    return;
+  }
   if (interactive) {
     const { App } = await import('./app');
     render(<App />);

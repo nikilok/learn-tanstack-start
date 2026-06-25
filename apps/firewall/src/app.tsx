@@ -92,6 +92,7 @@ export function App() {
       );
       try {
         const res = await applyItem(snapshot[i], ids);
+        if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
         setItems((prev) =>
           prev.map((it, j) =>
             j === i ? { ...it, status: res.status, detail: res.detail } : it,
@@ -208,7 +209,7 @@ export function App() {
   const onCount = items.filter((it) => it.active).length;
   const target = phase === 'action' ? items[cursor] : null;
   const cols = process.stdout.columns ?? 120;
-  const reportW = Math.max(46, Math.min(62, Math.floor(cols * 0.42)));
+  const reportW = Math.max(46, Math.floor(cols * 0.5)); // ≥50% on wide terminals; 46-col floor keeps it readable when narrow
   return (
     <Box flexDirection="row">
       <Box flexDirection="column" flexGrow={1} marginRight={reportOpen ? 2 : 0}>

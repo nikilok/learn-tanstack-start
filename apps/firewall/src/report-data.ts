@@ -19,14 +19,12 @@ type Ctx = {
 type DistRow = { ip: string; perMin: number };
 type Distribution = {
   label: string;
+  limit?: number; // per-minute rate-limit ceiling for this path (FW_*_LIMIT), if configured — bars render against it
   skipped?: string; // query failed / no usable filter
   empty?: boolean; // no traffic
   capped?: boolean; // hit the 500-row API cap, so IPs is partial
   ips?: number;
-  max?: number;
-  p99?: number;
-  p95?: number;
-  median?: number;
+  max?: number; // busiest IP's rate, /min
   rows?: DistRow[]; // top IPs, busiest first
 };
 export type ReportData = {
@@ -37,8 +35,22 @@ export type ReportData = {
   topPaths: { path: string; count: number }[];
   topPathsError?: string;
   distributions: Distribution[];
-  limits: { serverfn: string; search: string; tiles: string };
 };
+
+/** `fetch` bounded by an abort timeout so a stalled connection surfaces as an error instead of hanging the report pane on "Loading…" forever. */
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs = 15000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason), retrying transient 5xx/429. */
 async function metrics(
@@ -63,7 +75,7 @@ async function metrics(
     limit: opts.limit ?? 500, // hard max
   });
   for (let attempt = 1; ; attempt++) {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://vercel.com/api/observability/metrics?${ctx.qs}`,
       { method: 'POST', headers: ctx.headers, body },
     );
@@ -79,7 +91,7 @@ async function metrics(
 
 /** Map custom firewall rule ids to names via the active firewall config (for the per-rule report). */
 async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.vercel.com/v1/security/firewall/config/active?${ctx.qs}`,
     { headers: ctx.headers },
   );
@@ -111,37 +123,30 @@ function top(
     .slice(0, n);
 }
 
-/** Percentile over an ascending-sorted array (p in [0,1]); indexes over length-1 so p<1 doesn't return the max on small samples. */
-function pct(sorted: number[], p: number): number {
-  return sorted.length ? sorted[Math.floor(p * (sorted.length - 1))] : 0;
-}
-
-/** Fetch the per-IP volume distribution for one path/route filter; returns a skipped/empty marker instead of throwing. */
+/** Fetch the per-IP volume distribution for one path/route filter; `limit` is that path's per-minute ceiling. Returns a skipped/empty marker instead of throwing. */
 async function fetchDist(
   ctx: Ctx,
   label: string,
   filter: string,
+  limit?: number,
 ): Promise<Distribution> {
   let resp: { summary?: Row[] };
   try {
     resp = await metrics(ctx, ['clientIp'], { filter, limit: 500 });
   } catch (e) {
-    return { label, skipped: errMsg(e) };
+    return { label, limit, skipped: errMsg(e) };
   }
   const rows = top(resp, 'clientIp', 500); // desc by count
-  if (!rows.length) return { label, empty: true };
-  const counts = rows.map(([, c]) => c).reverse(); // asc for pct() (rows is already desc)
+  if (!rows.length) return { label, limit, empty: true };
+  // Per-minute rates — the same unit as the rate-limit ceiling the bars compare against.
+  const perMin = (v: number) => v / ctx.windowMin;
   return {
     label,
+    limit,
     capped: rows.length >= 500, // tail beyond 500 is dropped by the API
     ips: rows.length,
-    max: rows[0][1], // rows is desc, so the first is the max
-    p99: pct(counts, 0.99),
-    p95: pct(counts, 0.95),
-    median: pct(counts, 0.5),
-    rows: rows
-      .slice(0, 8)
-      .map(([ip, c]) => ({ ip, perMin: c / ctx.windowMin })),
+    max: perMin(rows[0][1]), // rows is desc, so the first is the busiest
+    rows: rows.slice(0, 8).map(([ip, c]) => ({ ip, perMin: perMin(c) })),
   };
 }
 
@@ -196,6 +201,15 @@ export async function fetchReport(creds: {
     topPathsError = errMsg(e);
   }
 
+  // Each rate-limited path's per-minute ceiling (FW_*_LIMIT) — the bars in the report compare against these.
+  const ceiling = (v: string | undefined): number | undefined => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const serverfnLimit = ceiling(process.env.FW_SERVERFN_LIMIT);
+  const tilesLimit = ceiling(process.env.FW_TILES_LIMIT);
+  const searchLimit = ceiling(process.env.FW_SEARCH_LIMIT);
+
   // The `like` filter is rejected by this API, so /_serverFn uses the busiest fn hash (discovered)
   // as a proxy, and tiles uses the route. The path is interpolated into the filter DSL, so restrict
   // it to safe chars (no quotes/metachars).
@@ -208,9 +222,11 @@ export async function fetchReport(creds: {
           ctx,
           `busiest server fn — ${topServerFn}`,
           `requestPath eq '${topServerFn}'`,
+          serverfnLimit,
         )
       : {
           label: 'busiest server fn',
+          limit: serverfnLimit,
           skipped:
             'no safe /_serverFn/* path in top paths (the top-paths query may have failed)',
         },
@@ -218,11 +234,13 @@ export async function fetchReport(creds: {
       ctx,
       '/api/tiles',
       "route eq '/api/tiles/[theme]/[z]/[x]/[y]'",
+      tilesLimit,
     ),
     await fetchDist(
       ctx,
       '/ home (SSR search upper bound)',
       "requestPath eq '/'",
+      searchLimit,
     ),
   ];
 
@@ -234,10 +252,5 @@ export async function fetchReport(creds: {
     topPaths,
     topPathsError,
     distributions,
-    limits: {
-      serverfn: process.env.FW_SERVERFN_LIMIT ?? '?',
-      search: process.env.FW_SEARCH_LIMIT ?? '?',
-      tiles: process.env.FW_TILES_LIMIT ?? '?',
-    },
   };
 }

@@ -19,6 +19,32 @@ function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
+const BAR_W = 10;
+
+/** A bar whose fill is `value` relative to `peak` (the busiest IP in the list), so the heaviest IP reads as full and lighter IPs scale down — making the distribution visible even when everyone is far under the limit. */
+function usageBar(value: number, peak: number): string {
+  const filled =
+    peak > 0
+      ? Math.max(0, Math.min(BAR_W, Math.round((value / peak) * BAR_W)))
+      : 0;
+  return `[${'█'.repeat(filled)}${'░'.repeat(BAR_W - filled)}]`;
+}
+
+/** Bar colour by proximity to the rate limit: green safe · yellow watch · red near/over; neutral cyan when no limit is configured. */
+function barColor(value: number, limit?: number): string {
+  if (!limit || limit <= 0) return 'cyan';
+  const r = value / limit;
+  return r >= 0.8 ? 'red' : r >= 0.5 ? 'yellow' : 'green';
+}
+
+/** Header for a distribution: the rate-limit ceiling, IP count, and the busiest IP as a % of the limit. */
+function distHeader(d: ReportData['distributions'][number]): string {
+  const ips = `${d.ips}${d.capped ? '+' : ''} IP${d.ips === 1 ? '' : 's'}`;
+  if (!d.limit) return `${ips} · max ${(d.max ?? 0).toFixed(2)}/min`;
+  const peak = (((d.max ?? 0) / d.limit) * 100).toFixed(1);
+  return `limit ${d.limit}/min · ${ips} · peak ${peak}%`;
+}
+
 /** One-line tally of apply outcomes for the done screen. */
 export function summaryLine(items: Item[]): string {
   const n = (s: Item['status']) => items.filter((it) => it.status === s).length;
@@ -172,15 +198,16 @@ export function ReportView({
             <Text dimColor>(no traffic)</Text>
           ) : (
             <>
-              <Text
-                dimColor
-                wrap="truncate"
-              >{`max ${d.max} · p99 ${d.p99} · p95 ${d.p95} · med ${d.median}  (${d.ips}${d.capped ? '+' : ''} IPs)`}</Text>
+              <Text dimColor wrap="truncate">
+                {distHeader(d)}
+              </Text>
               {(d.rows ?? []).slice(0, 6).map((r) => (
-                <Text
-                  key={r.ip}
-                  wrap="truncate"
-                >{`  ${r.perMin.toFixed(2)}/min  ${r.ip}`}</Text>
+                <Box key={r.ip}>
+                  <Text color={barColor(r.perMin, d.limit)}>
+                    {`${usageBar(r.perMin, d.max ?? 0)} `}
+                  </Text>
+                  <Text wrap="truncate">{`${r.perMin.toFixed(2)}/min  ${r.ip}`}</Text>
+                </Box>
               ))}
               {(d.rows ?? []).length > 6 && (
                 <Text dimColor>{`  +${(d.rows ?? []).length - 6} more`}</Text>
@@ -191,10 +218,6 @@ export function ReportView({
       ))}
 
       <Box flexDirection="column" marginTop={1}>
-        <Text
-          dimColor
-          wrap="truncate"
-        >{`limits/min — fn ${report.limits.serverfn} · search ${report.limits.search} · tiles ${report.limits.tiles}`}</Text>
         <Text dimColor>↑/↓ scroll · esc rules · r refresh · q quit</Text>
       </Box>
     </Box>

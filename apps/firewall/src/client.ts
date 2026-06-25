@@ -77,7 +77,7 @@ export function seedItems(live: LiveConfig): Item[] {
 }
 
 /** Upsert one rule (insert if new, overwrite if it already exists), honouring dry-run. Returns the outcome for display. */
-export async function applyRule(
+async function applyRule(
   rule: Rule,
   idByName: Map<string, string>,
 ): Promise<{ status: ApplyStatus; detail?: string }> {
@@ -118,6 +118,7 @@ export async function runHeadless() {
   for (const item of seedItems(live)) {
     try {
       const { status, detail } = await applyItem(item, live.idByName);
+      if (status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
       console.log(
         `${status}${detail ? ` (${detail})` : ''}  ${item.rule.name}`,
       );

@@ -32,10 +32,11 @@ fn pcg2d(p: vec2u) -> vec2u {
 
 // Animated accent dots: concentric rings expanding from the centre that recolour
 // a moving subset of dots (see the fs body for the colour). Tunable.
-const RING_SPACING = 120.0; // ring period in cells (larger = fewer, more spaced-out rings)
-const RING_SPEED = 10.0; // outward pulse speed across the transition (lower = calmer)
-const RING_THRESHOLD = 0.99; // higher = thinner rings / fewer accent dots
+const RING_SPACING = 180.0; // ring period in cells (larger = fewer, more spaced-out rings)
+const RING_SPEED = 2.0; // outward pulse speed across the transition (lower = calmer)
+const RING_THRESHOLD = 0.89; // higher = thinner rings / fewer accent dots
 const RING_OFFSET = -0.6; // morph offset for ring dots: negative trails old colours, positive previews new
+const ACCENT_ALPHA = 0.8; // accent (ripple) dot opacity; lower = more see-through
 
 @fragment
 fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
@@ -70,8 +71,11 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let accent = clamp(select(s, t, (morphFrac + RING_OFFSET) > hColor) + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
   let distPx = length(frag.xy - u.origin);
   let ring = sin(distPx / (u.cell * RING_SPACING) - u.progress * RING_SPEED);
-  let col = select(pageColor, accent, ring > RING_THRESHOLD && u.ripple > 0.5);
+  let isAccent = ring > RING_THRESHOLD && u.ripple > 0.5;
+  let col = select(pageColor, accent, isAccent);
 
-  let a = select(0.0, 1.0, on);
+  // Accent (ripple) dots render at reduced alpha so the page tints through them;
+  // the field dots stay fully opaque to keep the class-swap hidden.
+  let a = select(0.0, 1.0, on) * select(1.0, ACCENT_ALPHA, isAccent);
   return vec4f(col * a, a);
 }

@@ -246,6 +246,7 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       strokeLinejoin="round"
       role="img"
       aria-label="London skyline"
+      data-london-skyline
     >
       {/* Sun — light mode only (disc fills in gradually + rays) */}
       <g key={`sun-${themeFlips}`} className={styles.sun}>

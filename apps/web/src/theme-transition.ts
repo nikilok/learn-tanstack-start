@@ -70,14 +70,14 @@ function cellSizeCss(): number {
     : CELL_CSS_DESKTOP;
 }
 
-/** Viewport point (CSS px) the rings emanate from: just below the theme toggle, else screen centre. */
+/** Viewport point (CSS px) the rings emanate from: the centre of the footer's London skyline, else bottom-centre. */
 function rippleOrigin(): [number, number] {
-  const el = document.querySelector('[data-theme-toggle]');
+  const el = document.querySelector('[data-london-skyline]');
   if (el) {
     const r = el.getBoundingClientRect();
-    return [r.left + r.width / 2, r.bottom];
+    return [r.left + r.width / 2, r.top + r.height / 2];
   }
-  return [window.innerWidth / 2, window.innerHeight / 2];
+  return [window.innerWidth / 2, window.innerHeight];
 }
 
 // Per-theme colour matrices sampled from screenshots of the real pages,
@@ -338,10 +338,13 @@ async function startWebGPU(
 
   document.body.appendChild(canvas);
 
-  const [ox, oy] = rippleOrigin();
   const reducedMotion = window.matchMedia(
     '(prefers-reduced-motion: reduce)',
   ).matches;
+  // Skip the layout read for reduced-motion runs — the shader ignores the origin (ripple=0).
+  const [ox, oy] = reducedMotion
+    ? [window.innerWidth / 2, window.innerHeight / 2]
+    : rippleOrigin();
   const data = new Float32Array(8);
   data[0] = canvas.width;
   data[1] = canvas.height;
@@ -513,6 +516,15 @@ function startCanvas2D(
     raf = window.requestAnimationFrame(step);
   };
   raf = window.requestAnimationFrame(step);
+}
+
+/** Cancel any in-flight transition and remove its overlay without starting a new one — call before a non-animated swap so a superseded run's deferred class-flip can't fire late. */
+export function cancelThemeTransition(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  teardown();
+  runToken++;
 }
 
 /** Run the noise dissolve, applying `swap` (the light/dark flip) under full cover. Dots morph from the current theme's matrix to the other's. */

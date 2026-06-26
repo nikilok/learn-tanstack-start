@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { THEME_COLORS } from '../theme';
-import { runThemeTransition } from '../theme-transition';
+import { cancelThemeTransition, runThemeTransition } from '../theme-transition';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
@@ -59,6 +59,9 @@ function applyThemeMode(mode: ThemeMode, animate = false) {
   if (animate && resolved !== current) {
     runThemeTransition(swap);
   } else {
+    // Cancel any in-flight transition first so its deferred swap can't fire late
+    // and clobber this (newer) theme — otherwise a rapid re-toggle desyncs <html>.
+    cancelThemeTransition();
     swap();
   }
 }
@@ -112,7 +115,6 @@ export default function ThemeToggle() {
   return (
     <button
       type="button"
-      data-theme-toggle
       onClick={toggleMode}
       aria-label={label}
       title={label}

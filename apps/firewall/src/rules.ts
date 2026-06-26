@@ -147,9 +147,9 @@ export const rules: Rule[] = [
             type: 'header',
             op: 're',
             key: 'referer',
-            // Host-anchored: sponsorsearch.co.uk + subdomains pass; sponsorsearch.co.uk.evil.com does NOT (substring match would let it through).
+            // Host-anchored allowlist mirroring the tile route's isAllowedReferer ([y].get.ts): prod sponsorsearch.co.uk (+ subdomains) AND this team's Vercel preview hosts (learn-tanstack-start-*-nikil-kuruvillas-projects.vercel.app — only this team deploys under that suffix). *.evil.com suffixes still fail. Keep the two in sync.
             value:
-              '^https?://([a-z0-9-]+\\.)*sponsorsearch\\.co\\.uk([/:?#].*)?$',
+              '^https?://(([a-z0-9-]+\\.)*sponsorsearch\\.co\\.uk|learn-tanstack-start-[a-z0-9-]+-nikil-kuruvillas-projects\\.vercel\\.app)([/:?#].*)?$',
             neg: true,
           },
         ],

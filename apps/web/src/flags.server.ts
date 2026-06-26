@@ -9,19 +9,11 @@ export type FlagSpec<T> = {
   options: { value: T; label: string }[];
 };
 
-/** GOV.UK branded logo on outbound Companies House links. Off by default pending Cabinet Office permission. Value is read from the Vercel Flags dashboard (per-environment toggle); per-user overrides come from the Flags Explorer cookie. */
-export const govukBranded: FlagSpec<boolean> = {
-  key: 'govuk-branded',
-  description:
-    'Show the official GOV.UK SVG logo on the outbound Companies House link',
-  defaultValue: false,
-  options: [
-    { value: false, label: 'Off — plain "gov.uk" text' },
-    { value: true, label: 'On — branded GOV.UK logo' },
-  ],
-};
+/** Serializable value a flag resolves to. Flag state crosses the server→client boundary via a server function, so values are limited to JSON primitives. */
+export type FlagValue = boolean | string | number;
 
-export const flags = { govukBranded } as const;
+/** Active flag registry — empty until the next experiment. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
+export const flags: Record<string, FlagSpec<FlagValue>> = {};
 
 /** Resolves a flag server-side: a signed Flags Explorer override cookie value wins; otherwise the Vercel Flags adapter looks up the dashboard-managed value for this environment. Cookie signatures are verified against FLAGS_SECRET so client tampering invalidates the override. */
 export async function evaluateFlag<T>(

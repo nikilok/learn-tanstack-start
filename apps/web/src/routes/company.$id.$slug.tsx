@@ -16,7 +16,6 @@ import {
   setSsrCacheTag,
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
-import { flagStateQueryOptions } from '../api/flags';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
@@ -148,8 +147,6 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
-    const flagState = await queryClient.ensureQueryData(flagStateQueryOptions);
-
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
     setSsrCacheControl(LONG_EDGE_CACHE);
     // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
@@ -157,7 +154,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
       setSsrCacheTag(`company-${profile.company_number}`);
     }
 
-    return { sponsor, profile, flagState };
+    return { sponsor, profile };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -270,7 +267,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, flagState } = Route.useLoaderData();
+  const { sponsor, profile } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -493,12 +490,7 @@ function CompanyDetail() {
               {profile?.company_number && (
                 <SeeMoreLink
                   href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
-                  logo={
-                    flagState.govukBranded ? (
-                      <GovUkLogo className="h-5 w-auto" />
-                    ) : undefined
-                  }
-                  label={flagState.govukBranded ? undefined : 'GOV.UK'}
+                  logo={<GovUkLogo className="h-5 w-auto" />}
                 />
               )}
               <SeeMoreLink

@@ -1,13 +1,14 @@
 struct U {
   resolution: vec2f,
-  origin: vec2f,
   progress: f32,
   cell: f32,
-  ripple: f32,
+  sweep: f32,
+  motion: f32,
+  origin: vec2f,
 };
 @group(0) @binding(0) var<uniform> u: U;
-@group(0) @binding(1) var srcTex: texture_2d<f32>;
-@group(0) @binding(2) var tgtTex: texture_2d<f32>;
+@group(0) @binding(1) var lightTex: texture_2d<f32>;
+@group(0) @binding(2) var darkTex: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
 
 @vertex
@@ -30,13 +31,10 @@ fn pcg2d(p: vec2u) -> vec2u {
   return v;
 }
 
-// Animated accent dots: concentric rings expanding from the centre that recolour
-// a moving subset of dots (see the fs body for the colour). Tunable.
-const RING_SPACING = 90.0; // ring period in cells (larger = fewer, more spaced-out rings)
-const RING_SPEED = 2.0; // outward pulse speed across the transition (lower = calmer)
-const RING_THRESHOLD = 0.899; // higher = thinner rings / fewer accent dots
-const RING_OFFSET = -0.6; // morph offset for ring dots: negative trails old colours, positive previews new
-const ACCENT_ALPHA = 0.8; // accent (ripple) dot opacity; lower = more see-through
+// Sunlight spread: light blooms out from the sun to go light, and recedes back into
+// it to go dark. The sun's screen position comes from the footer skyline's sun/moon
+// SVG (u.origin); this tunes only the softness of the dithered light front.
+const EDGE_SOFT = 0.14; // width of the dithered light front, as a fraction of the screen span
 
 @fragment
 fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
@@ -49,38 +47,51 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   // (fast + divergence-friendly on every backend, unlike a dynamically-indexed
   // uniform array, which is a slow constant-buffer path on D3D12/Windows).
   let uv = (vec2f(ci) * u.cell + vec2f(u.cell * 0.5)) / u.resolution;
-  let s = textureSampleLevel(srcTex, samp, uv, 0.0).rgb;
-  let t = textureSampleLevel(tgtTex, samp, uv, 0.0).rgb;
+  let light = textureSampleLevel(lightTex, samp, uv, 0.0).rgb;
+  let dark = textureSampleLevel(darkTex, samp, uv, 0.0).rgb;
 
-  // Three dither windows: fill in, morph source→target, clear out.
+  // Cover envelope: dots fill in (0–0.3), hold full cover while the class-swap hides
+  // at 0.5, then clear out (0.7–1). hCover gives each cell its own fill/clear moment.
   let p = u.progress;
   let fillFrac = clamp(p / 0.3, 0.0, 1.0);
   let clearFrac = clamp((p - 0.7) / 0.3, 0.0, 1.0);
   let morphFrac = clamp((p - 0.3) / 0.4, 0.0, 1.0);
   let on = hCover < fillFrac && hCover >= clearFrac;
-  let base = select(s, t, morphFrac > hColor);
 
-  // Existing dots: static grid, recolouring source→target, with fixed grain.
+  // Per-cell static grain so a cell keeps its tone as it recolours.
   let r2 = pcg2d(ci + vec2u(101u, 53u));
   let g = (f32(r2.x) / 4294967296.0 - 0.5) * 0.13;
-  let pageColor = clamp(base + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
+  let lightColor = clamp(light + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
+  let darkColor = clamp(dark + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
 
-  // Accent dots run the SAME source-to-target progression as the field, just
-  // offset in the morph by RING_OFFSET — so each ring is a wavefront of that same
-  // colour progression (trailing old colours, or leading the new) rather than a flip.
-  // Gated on u.ripple (a uniform): reduced-motion runs (ripple=0) skip the ring math
-  // entirely via non-divergent control flow rather than computing then discarding it.
-  var col = pageColor;
-  var coverAlpha = select(0.0, 1.0, on);
-  if (u.ripple > 0.5) {
-    let distPx = length(frag.xy - u.origin);
-    let ring = sin(distPx / (u.cell * RING_SPACING) - u.progress * RING_SPEED);
-    if (ring > RING_THRESHOLD) {
-      // Reduced alpha so the page tints through the ripple; field dots stay opaque.
-      let accent = clamp(select(s, t, (morphFrac + RING_OFFSET) > hColor) + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
-      col = accent;
-      coverAlpha = coverAlpha * ACCENT_ALPHA;
-    }
+  let toLight = u.sweep > 0.0;
+  var col = darkColor;
+  if (u.motion > 0.5) {
+    // Sunlight blooms from the sun/moon in the footer skyline (u.origin): a dithered
+    // disc of light grows out of it for sunrise (→ light) and shrinks back into it for
+    // sunset (→ dark). The radius sweeps the nearest→farthest visible point, so the
+    // bloom spans the screen over the whole transition even when the sun is off-screen.
+    let sun = u.origin;
+    let d = distance(frag.xy, sun);
+    let dMin = distance(sun, clamp(sun, vec2f(0.0, 0.0), u.resolution));
+    let c0 = distance(sun, vec2f(0.0, 0.0));
+    let c1 = distance(sun, vec2f(u.resolution.x, 0.0));
+    let c2 = distance(sun, vec2f(0.0, u.resolution.y));
+    let c3 = distance(sun, vec2f(u.resolution.x, u.resolution.y));
+    let dMax = max(max(c0, c1), max(c2, c3));
+    let soft = (dMax - dMin) * EDGE_SOFT;
+    let lr = select(1.0 - p, p, toLight); // radius grows for sunrise, shrinks for sunset
+    let frontR = mix(dMin - soft, dMax + soft, lr);
+    // Dithered front: lit well inside the radius, dark well outside, grainy between.
+    let pLight = clamp((frontR - d) / soft + 0.5, 0.0, 1.0);
+    col = select(darkColor, lightColor, hColor < pLight);
+  } else {
+    // Reduced motion: a plain non-directional dither, source theme → target theme.
+    let srcColor = select(lightColor, darkColor, toLight);
+    let tgtColor = select(darkColor, lightColor, toLight);
+    col = select(srcColor, tgtColor, morphFrac > hColor);
   }
+
+  let coverAlpha = select(0.0, 1.0, on);
   return vec4f(col * coverAlpha, coverAlpha);
 }

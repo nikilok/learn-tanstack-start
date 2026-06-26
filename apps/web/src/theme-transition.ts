@@ -70,14 +70,26 @@ function cellSizeCss(): number {
     : CELL_CSS_DESKTOP;
 }
 
-/** Viewport point (CSS px) the rings emanate from: the centre of the footer's London skyline, else bottom-centre. */
-function rippleOrigin(): [number, number] {
+// The sunlight blooms from the sun/moon SVG in the footer skyline. These mirror
+// LondonSkyline.tsx's viewBox (1460×600) and CELESTIAL centre (1010, 142) — keep them
+// in sync if the skyline's celestial body moves.
+const SKYLINE_VB_W = 1460;
+const SKYLINE_VB_H = 600;
+const SKYLINE_SUN_X = 1010;
+const SKYLINE_SUN_Y = 142;
+
+/** Viewport point (CSS px) the light blooms from: the skyline's sun/moon, else top-centre. */
+function sunOrigin(): [number, number] {
   const el = document.querySelector('[data-london-skyline]');
   if (el) {
     const r = el.getBoundingClientRect();
-    return [r.left + r.width / 2, r.top + r.height / 2];
+    // The viewBox fills the rect (h-auto matches its aspect ratio), so map linearly.
+    return [
+      r.left + (SKYLINE_SUN_X / SKYLINE_VB_W) * r.width,
+      r.top + (SKYLINE_SUN_Y / SKYLINE_VB_H) * r.height,
+    ];
   }
-  return [window.innerWidth / 2, window.innerHeight];
+  return [window.innerWidth / 2, 0];
 }
 
 // Per-theme colour matrices sampled from screenshots of the real pages,
@@ -219,8 +231,8 @@ function teardown(): void {
   }
 }
 
-// Uniform Float32 layout: resolution vec2 | origin vec2 | progress | cell | ripple.
-const PROGRESS_IDX = 4;
+// Uniform Float32 layout: resolution vec2 | progress | cell | sweep | motion | origin vec2.
+const PROGRESS_IDX = 2;
 
 /** Upload a colour matrix (MAP_COLS×MAP_ROWS) as an RGBA8 texture so the sampler can bilinear-filter it in hardware. */
 function makeMatrixTexture(device: GPUDevice, map: number[][]): GPUTexture {
@@ -248,10 +260,11 @@ function makeMatrixTexture(device: GPUDevice, map: number[][]): GPUTexture {
 
 /** Run the dissolve on the GPU. Resolves true if it took ownership (ran or was superseded), false to signal the caller to fall back. */
 async function startWebGPU(
-  srcMap: number[][],
-  tgtMap: number[][],
+  lightMap: number[][],
+  darkMap: number[][],
   swap: () => void,
   token: number,
+  toLight: boolean,
 ): Promise<boolean> {
   const gpu = navigator.gpu;
   if (!gpu) {
@@ -304,8 +317,8 @@ async function startWebGPU(
       size: 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    const srcTexture = makeMatrixTexture(device, srcMap);
-    const tgtTexture = makeMatrixTexture(device, tgtMap);
+    const lightTexture = makeMatrixTexture(device, lightMap);
+    const darkTexture = makeMatrixTexture(device, darkMap);
     const sampler = device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
@@ -316,8 +329,8 @@ async function startWebGPU(
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: uniform } },
-        { binding: 1, resource: srcTexture.createView() },
-        { binding: 2, resource: tgtTexture.createView() },
+        { binding: 1, resource: lightTexture.createView() },
+        { binding: 2, resource: darkTexture.createView() },
         { binding: 3, resource: sampler },
       ],
     });
@@ -341,17 +354,20 @@ async function startWebGPU(
   const reducedMotion = window.matchMedia(
     '(prefers-reduced-motion: reduce)',
   ).matches;
-  // Skip the layout read for reduced-motion runs — the shader ignores the origin (ripple=0).
-  const [ox, oy] = reducedMotion
-    ? [window.innerWidth / 2, window.innerHeight / 2]
-    : rippleOrigin();
   const data = new Float32Array(8);
   data[0] = canvas.width;
   data[1] = canvas.height;
-  data[2] = ox * dpr;
-  data[3] = oy * dpr;
-  data[5] = cellSizeCss() * dpr;
-  data[6] = reducedMotion ? 0 : 1; // disable the ripple rings for reduced-motion users
+  // data[2] = progress, written per frame in the loop.
+  data[3] = cellSizeCss() * dpr;
+  data[4] = toLight ? 1 : -1; // sweep direction: sunrise (+) to light, sunset (−) to dark
+  data[5] = reducedMotion ? 0 : 1; // 0 = reduced-motion plain dither, 1 = sunlight spread
+  if (!reducedMotion) {
+    // Bloom origin = the footer skyline's sun/moon. Skipped for reduced motion, whose
+    // plain dither ignores u.origin — so its layout read is avoided too.
+    const [ox, oy] = sunOrigin();
+    data[6] = ox * dpr;
+    data[7] = oy * dpr;
+  }
 
   let raf = 0;
   let alive = true;
@@ -558,9 +574,11 @@ export function runThemeTransition(swap: () => void): void {
   const sourceIsDark = document.documentElement.classList.contains('dark');
   const srcMap = sourceIsDark ? darkMap : lightMap;
   const tgtMap = sourceIsDark ? lightMap : darkMap;
+  // Going dark→light is a sunrise (band rises); light→dark is a sunset (band falls).
+  const toLight = sourceIsDark;
 
   if (navigator.gpu) {
-    startWebGPU(srcMap, tgtMap, swap, token)
+    startWebGPU(lightMap, darkMap, swap, token, toLight)
       .then((handled) => {
         if (!handled && token === runToken) {
           startCanvas2D(srcMap, tgtMap, swap, token);

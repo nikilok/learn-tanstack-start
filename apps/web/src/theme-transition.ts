@@ -66,6 +66,16 @@ function cellSizeCss(): number {
     : CELL_CSS_DESKTOP;
 }
 
+/** Viewport point (CSS px) the rings emanate from: just below the theme toggle, else screen centre. */
+function rippleOrigin(): [number, number] {
+  const el = document.querySelector('[data-theme-toggle]');
+  if (el) {
+    const r = el.getBoundingClientRect();
+    return [r.left + r.width / 2, r.bottom];
+  }
+  return [window.innerWidth / 2, window.innerHeight / 2];
+}
+
 // Per-theme colour matrices sampled from screenshots of the real pages,
 // downsampled to MAP_COLS×MAP_ROWS and packed as `rrggbb` hex (row-major,
 // top→bottom) — so the dots start in the page's actual colours. One set for the
@@ -208,6 +218,7 @@ function teardown(): void {
 const WGSL = /* wgsl */ `
 struct U {
   resolution: vec2f,
+  origin: vec2f,
   progress: f32,
   cell: f32,
 };
@@ -274,7 +285,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   // offset in the morph by RING_OFFSET — so each ring is a wavefront of that same
   // colour progression (trailing old colours, or leading the new) rather than a flip.
   let accent = clamp(select(s, t, (morphFrac + RING_OFFSET) > hColor) + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
-  let distPx = length(frag.xy - u.resolution * 0.5);
+  let distPx = length(frag.xy - u.origin);
   let ring = sin(distPx / (u.cell * RING_SPACING) - u.progress * RING_SPEED);
   let col = select(pageColor, accent, ring > RING_THRESHOLD);
 
@@ -283,8 +294,8 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 }
 `;
 
-// Uniform Float32 layout: resolution vec2 | progress | cell. Progress at index 2.
-const PROGRESS_IDX = 2;
+// Uniform Float32 layout: resolution vec2 | origin vec2 | progress | cell.
+const PROGRESS_IDX = 4;
 
 /** Upload a colour matrix (MAP_COLS×MAP_ROWS) as an RGBA8 texture so the sampler can bilinear-filter it in hardware. */
 function makeMatrixTexture(device: GPUDevice, map: number[][]): GPUTexture {
@@ -365,7 +376,7 @@ async function startWebGPU(
       primitive: { topology: 'triangle-list' },
     });
     uniform = device.createBuffer({
-      size: 16,
+      size: 24,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     const srcTexture = makeMatrixTexture(device, srcMap);
@@ -402,10 +413,13 @@ async function startWebGPU(
 
   document.body.appendChild(canvas);
 
-  const data = new Float32Array(4);
+  const [ox, oy] = rippleOrigin();
+  const data = new Float32Array(6);
   data[0] = canvas.width;
   data[1] = canvas.height;
-  data[3] = cellSizeCss() * dpr;
+  data[2] = ox * dpr;
+  data[3] = oy * dpr;
+  data[5] = cellSizeCss() * dpr;
 
   let raf = 0;
   let alive = true;

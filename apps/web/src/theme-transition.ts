@@ -19,7 +19,9 @@
  *
  * Primary path is a WebGPU fragment shader; it falls back to a canvas-2D plot of
  * the same dissolve where WebGPU is unavailable, and to an instant swap if
- * neither canvas works. Deliberately NOT gated on `prefers-reduced-motion`.
+ * neither canvas works. The dissolve runs regardless of `prefers-reduced-motion`,
+ * but the ripple rings (coherent radial motion) are gated off for users who
+ * prefer reduced motion.
  */
 
 // This TS lib.dom ships the WebGPU interfaces but not the GPUBufferUsage flag
@@ -34,7 +36,7 @@ declare const GPUTextureUsage: {
 };
 
 // Single progress timeline; the three windows + the hidden swap point within it.
-const TOTAL_MS = 700;
+const TOTAL_MS = 1000;
 const COVER_END = 0.3; // dots finished scattering in
 const REVEAL_START = 0.7; // dots start scattering out
 const SWAP_AT = 0.5; // theme class flip, mid-morph under full cover
@@ -221,6 +223,7 @@ struct U {
   origin: vec2f,
   progress: f32,
   cell: f32,
+  ripple: f32,
 };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var srcTex: texture_2d<f32>;
@@ -249,8 +252,8 @@ fn pcg2d(p: vec2u) -> vec2u {
 
 // Animated accent dots: concentric rings expanding from the centre that recolour
 // a moving subset of dots (see the fs body for the colour). Tunable.
-const RING_SPACING = 7.0; // ring period in cells
-const RING_SPEED = 42.0; // outward pulse speed across the transition
+const RING_SPACING = 30.0; // ring period in cells (larger = fewer, more spaced-out rings)
+const RING_SPEED = 8.0; // outward pulse speed across the transition (lower = calmer)
 const RING_THRESHOLD = 0.78; // higher = thinner rings / fewer accent dots
 const RING_OFFSET = -0.6; // morph offset for ring dots: negative trails old colours, positive previews new
 
@@ -287,14 +290,14 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let accent = clamp(select(s, t, (morphFrac + RING_OFFSET) > hColor) + vec3f(g, g, g), vec3f(0.0), vec3f(1.0));
   let distPx = length(frag.xy - u.origin);
   let ring = sin(distPx / (u.cell * RING_SPACING) - u.progress * RING_SPEED);
-  let col = select(pageColor, accent, ring > RING_THRESHOLD);
+  let col = select(pageColor, accent, ring > RING_THRESHOLD && u.ripple > 0.5);
 
   let a = select(0.0, 1.0, on);
   return vec4f(col * a, a);
 }
 `;
 
-// Uniform Float32 layout: resolution vec2 | origin vec2 | progress | cell.
+// Uniform Float32 layout: resolution vec2 | origin vec2 | progress | cell | ripple.
 const PROGRESS_IDX = 4;
 
 /** Upload a colour matrix (MAP_COLS×MAP_ROWS) as an RGBA8 texture so the sampler can bilinear-filter it in hardware. */
@@ -376,7 +379,7 @@ async function startWebGPU(
       primitive: { topology: 'triangle-list' },
     });
     uniform = device.createBuffer({
-      size: 24,
+      size: 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     const srcTexture = makeMatrixTexture(device, srcMap);
@@ -414,12 +417,16 @@ async function startWebGPU(
   document.body.appendChild(canvas);
 
   const [ox, oy] = rippleOrigin();
-  const data = new Float32Array(6);
+  const reducedMotion = window.matchMedia(
+    '(prefers-reduced-motion: reduce)',
+  ).matches;
+  const data = new Float32Array(8);
   data[0] = canvas.width;
   data[1] = canvas.height;
   data[2] = ox * dpr;
   data[3] = oy * dpr;
   data[5] = cellSizeCss() * dpr;
+  data[6] = reducedMotion ? 0 : 1; // disable the ripple rings for reduced-motion users
 
   let raf = 0;
   let alive = true;

@@ -55,7 +55,7 @@ const EASING: (t: number) => number = EASINGS.easeOut;
 // Dot edge in CSS px — chunkier on desktop, finer on the narrow mobile layout
 // (see cellSizeCss). The canvas-2D grid is capped to ~MAX_CELLS dots so
 // large/HiDPI viewports don't overload CPU.
-const CELL_CSS_DESKTOP = 0.2;
+const CELL_CSS_DESKTOP = 0.65;
 const CELL_CSS_MOBILE = 1;
 const MAX_CELLS = 360000;
 // Per-dot brightness jitter (±, 0–255 scale) so the fill reads as grain.

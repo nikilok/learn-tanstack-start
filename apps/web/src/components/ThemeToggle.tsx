@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { THEME_COLORS } from '../theme';
+import { runThemeTransition } from '../theme-transition';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
@@ -22,26 +23,43 @@ function getInitialMode(): ThemeMode {
   return 'auto';
 }
 
+/** Resolve a mode to a concrete `light`/`dark` theme, reading the OS preference for `'auto'`. */
+function resolveMode(mode: ThemeMode): 'light' | 'dark' {
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return mode === 'auto' ? (prefersDark ? 'dark' : 'light') : mode;
+}
+
 /**
  * Apply a theme mode to the document: toggles the `light`/`dark` class and
  * `color-scheme` on `<html>`, and updates the `theme-color` meta so mobile
  * browser chrome matches the app background. `'auto'` resolves via
- * `prefers-color-scheme`.
+ * `prefers-color-scheme`. When `animate` is true and the resolved theme
+ * actually changes, the swap is hidden inside a day<->night sky timelapse.
  */
-function applyThemeMode(mode: ThemeMode) {
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const resolved = mode === 'auto' ? (prefersDark ? 'dark' : 'light') : mode;
+function applyThemeMode(mode: ThemeMode, animate = false) {
+  const resolved = resolveMode(mode);
+  const root = document.documentElement;
+  const current = root.classList.contains('dark') ? 'dark' : 'light';
 
-  document.documentElement.classList.remove('light', 'dark');
-  document.documentElement.classList.add(resolved);
-  document.documentElement.style.colorScheme = resolved;
+  const swap = () => {
+    root.classList.remove('light', 'dark');
+    root.classList.add(resolved);
+    root.style.colorScheme = resolved;
 
-  // Update mobile browser chrome to match the app background
-  const meta = document.querySelector<HTMLMetaElement>(
-    'meta[name="theme-color"]',
-  );
-  if (meta) {
-    meta.content = resolved === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light;
+    // Update mobile browser chrome to match the app background
+    const meta = document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"]',
+    );
+    if (meta) {
+      meta.content =
+        resolved === 'dark' ? THEME_COLORS.dark : THEME_COLORS.light;
+    }
+  };
+
+  if (animate && resolved !== current) {
+    runThemeTransition(swap);
+  } else {
+    swap();
   }
 }
 
@@ -66,7 +84,7 @@ export default function ThemeToggle() {
     }
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = () => applyThemeMode('auto');
+    const onChange = () => applyThemeMode('auto', true);
 
     media.addEventListener('change', onChange);
     return () => {
@@ -82,7 +100,7 @@ export default function ThemeToggle() {
     const nextMode: ThemeMode =
       mode === 'light' ? 'dark' : mode === 'dark' ? 'auto' : 'light';
     setMode(nextMode);
-    applyThemeMode(nextMode);
+    applyThemeMode(nextMode, true);
     window.localStorage.setItem('theme', nextMode);
   }
 

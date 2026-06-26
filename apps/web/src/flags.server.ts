@@ -9,7 +9,7 @@ export type FlagSpec<T> = {
   options: { value: T; label: string }[];
 };
 
-/** Serializable value a flag resolves to. Flag state crosses the server→client boundary via a server function, so values are limited to JSON primitives. */
+/** Serializable value a flag resolves to — limited to JSON primitives because the discovery endpoint exposes flag definitions as JSON (and any future client-side flag bridge must serialize them too). */
 export type FlagValue = boolean | string | number;
 
 /** Active flag registry — empty until the next experiment. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */

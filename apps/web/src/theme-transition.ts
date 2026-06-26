@@ -1,30 +1,30 @@
 /**
- * Noise-dissolve theme transition between two colour matrices. A full-screen
+ * "Patronus bloom" theme transition between two colour matrices. A full-screen
  * overlay runs a granular dither in three windows over one progress timeline:
  *
- *   1. fill   (0   – 0.3): dots scatter in, coloured from the SOURCE matrix —
- *                          the page dissolves into a grainy field of its own
- *                          (current-theme) colours.
- *   2. morph  (0.3 – 0.7): fully covered; each dot flips from its SOURCE colour
- *                          to its TARGET colour in random dither order. The
- *                          light/dark class swap happens here (hidden), at 0.5.
- *   3. clear  (0.7 – 1  ): dots scatter away, revealing the new (target) page.
+ *   1. fill  (0   – 0.3): dots scatter in.
+ *   2. cover (0.3 – 0.7): fully covered; the light/dark class swap happens here
+ *                         (hidden), at 0.5.
+ *   3. clear (0.7 – 1  ): dots scatter away, revealing the new (target) page.
  *
- * The SOURCE/TARGET colours come from per-theme matrices sampled from
- * screenshots of the real pages (downsampled to MAP_COLS×MAP_ROWS), sampled
- * bilinearly per dot — so the noise starts off in the page's actual colours.
- * Sets for the home page (desktop + mobile layouts), the home page with an
- * active search (results), and company details — chosen by route, search param,
- * and viewport width at toggle time.
+ * Under that envelope the WebGPU path recolours the dots as a radial bloom of
+ * silvery-blue light — spreading out of the footer skyline's sun to go light, and
+ * receding into its moon to go dark — with a wispy turbulent front and sparkles.
+ * The dot colours come from per-theme matrices sampled from screenshots of the
+ * real pages (downsampled to MAP_COLS×MAP_ROWS, sampled bilinearly per dot), so
+ * the field starts off in the page's actual colours. Sets for the home page
+ * (desktop + mobile layouts), the home with an active search (results), and
+ * company details — chosen by route, search param, and viewport width at toggle.
  *
- * Primary path is a WebGPU fragment shader; it falls back to a canvas-2D plot of
- * the same dissolve where WebGPU is unavailable, and to an instant swap if
- * neither canvas works. The dissolve runs regardless of `prefers-reduced-motion`,
- * but the ripple rings (coherent radial motion) are gated off for users who
- * prefer reduced motion.
+ * The bloom is WebGPU-only. Where WebGPU is unavailable it falls back to a plain
+ * non-directional canvas-2D dither (no bloom), and to an instant swap if neither
+ * canvas works. The transition runs regardless of `prefers-reduced-motion`, but
+ * the bloom's coherent radial motion is gated off for those users — they get the
+ * same plain dither as the fallback.
  */
 
 import WGSL from './theme-transition.wgsl?raw';
+import { prefersReducedMotion } from './utils';
 
 // This TS lib.dom ships the WebGPU interfaces but not the GPUBufferUsage flag
 // constant — declare the bits we use; the browser provides them at runtime.
@@ -70,23 +70,20 @@ function cellSizeCss(): number {
     : CELL_CSS_DESKTOP;
 }
 
-// The sunlight blooms from the sun/moon SVG in the footer skyline. These mirror
-// LondonSkyline.tsx's viewBox (1460×600) and CELESTIAL centre (1010, 142) — keep them
-// in sync if the skyline's celestial body moves.
-const SKYLINE_VB_W = 1460;
-const SKYLINE_VB_H = 600;
-const SKYLINE_SUN_X = 1010;
-const SKYLINE_SUN_Y = 142;
-
-/** Viewport point (CSS px) the light blooms from: the skyline's sun/moon, else top-centre. */
+/** Viewport point (CSS px) the light blooms from: the footer skyline's sun/moon, else top-centre. */
 function sunOrigin(): [number, number] {
-  const el = document.querySelector('[data-london-skyline]');
-  if (el) {
-    const r = el.getBoundingClientRect();
-    // The viewBox fills the rect (h-auto matches its aspect ratio), so map linearly.
+  const el = document.querySelector<SVGSVGElement>('[data-london-skyline]');
+  const r = el?.getBoundingClientRect();
+  if (el && r && r.width > 0) {
+    // LondonSkyline owns the geometry: read its own viewBox and the sun/moon centre
+    // it stamps as data-sun-x/y, then map linearly (h-auto makes the rect match the
+    // viewBox aspect, so there's no preserveAspectRatio letterboxing to correct for).
+    const vb = el.viewBox.baseVal;
+    const sunX = Number(el.dataset.sunX);
+    const sunY = Number(el.dataset.sunY);
     return [
-      r.left + (SKYLINE_SUN_X / SKYLINE_VB_W) * r.width,
-      r.top + (SKYLINE_SUN_Y / SKYLINE_VB_H) * r.height,
+      r.left + (sunX / vb.width) * r.width,
+      r.top + (sunY / vb.height) * r.height,
     ];
   }
   return [window.innerWidth / 2, 0];
@@ -151,7 +148,7 @@ const SEARCH_DARK_MAP = parseHexMap(SEARCH_DARK_HEX, BRIGHTNESS_SHIFT);
 const MOBILE_LIGHT_MAP = parseHexMap(MOBILE_LIGHT_HEX, -BRIGHTNESS_SHIFT);
 const MOBILE_DARK_MAP = parseHexMap(MOBILE_DARK_HEX, BRIGHTNESS_SHIFT);
 
-type Run = { token: number; cancel: () => void };
+type Run = { token: number; cancel: () => void; hasSwapped: () => boolean };
 let current: Run | null = null;
 let runToken = 0;
 
@@ -351,9 +348,7 @@ async function startWebGPU(
 
   document.body.appendChild(canvas);
 
-  const reducedMotion = window.matchMedia(
-    '(prefers-reduced-motion: reduce)',
-  ).matches;
+  const reducedMotion = prefersReducedMotion();
   const data = new Float32Array(8);
   data[0] = canvas.width;
   data[1] = canvas.height;
@@ -380,7 +375,7 @@ async function startWebGPU(
     canvas.remove();
     device.destroy();
   };
-  current = { token, cancel };
+  current = { token, cancel, hasSwapped: () => swapped };
 
   const start = performance.now();
   const frame = (now: number) => {
@@ -445,9 +440,11 @@ function startCanvas2D(
   }
   document.body.appendChild(canvas);
 
+  // ceil (not round) so the cap term always keeps total cells <= MAX_CELLS, even
+  // when cellSizeCss() is below 1 (it no longer dominates the max() as a floor).
   const cell = Math.max(
     cellSizeCss(),
-    Math.round(Math.sqrt((w * h) / MAX_CELLS)),
+    Math.ceil(Math.sqrt((w * h) / MAX_CELLS)),
   );
   const cols = Math.ceil(w / cell);
   const rows = Math.ceil(h / cell);
@@ -472,7 +469,7 @@ function startCanvas2D(
     }
     canvas.remove();
   };
-  current = { token, cancel };
+  current = { token, cancel, hasSwapped: () => swapped };
 
   const paint = (idx: number, map: number[][]) => {
     const col = idx % cols;
@@ -537,6 +534,12 @@ function startCanvas2D(
 /** Cancel any in-flight transition and remove its overlay without starting a new one — call before a non-animated swap so a superseded run's deferred class-flip can't fire late. */
 export function cancelThemeTransition(): void {
   if (typeof window === 'undefined') {
+    return;
+  }
+  // If the in-flight run has already applied its swap, it's just finishing its
+  // reveal — let it play out (no stale deferred swap to clobber). Only supersede a
+  // run whose swap is still pending — the rapid-toggle desync this guards against.
+  if (current?.hasSwapped()) {
     return;
   }
   teardown();

@@ -98,6 +98,10 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let clearFrac = clamp((p - 0.7) / 0.3, 0.0, 1.0);
   let morphFrac = clamp((p - 0.3) / 0.4, 0.0, 1.0);
   let on = hCover < fillFrac && hCover >= clearFrac;
+  // Off cells contribute nothing (coverAlpha would be 0) — skip the bloom/mist/sparkle.
+  if (!on) {
+    return vec4f(0.0, 0.0, 0.0, 0.0);
+  }
 
   // Per-cell static grain so a cell keeps its tone as it recolours.
   let r2 = pcg2d(ci + vec2u(101u, 53u));

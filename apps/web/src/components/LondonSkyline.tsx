@@ -247,6 +247,8 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       role="img"
       aria-label="London skyline"
       data-london-skyline
+      data-sun-x={CELESTIAL.cx}
+      data-sun-y={CELESTIAL.cy}
     >
       {/* Sun — light mode only (disc fills in gradually + rays) */}
       <g key={`sun-${themeFlips}`} className={styles.sun}>

@@ -28,14 +28,14 @@ declare const GPUBufferUsage: {
 };
 
 // Single progress timeline; the three windows + the hidden swap point within it.
-const TOTAL_MS = 900;
+const TOTAL_MS = 1000;
 const COVER_END = 0.3; // dots finished scattering in
 const REVEAL_START = 0.7; // dots start scattering out
 const SWAP_AT = 0.5; // theme class flip, mid-morph under full cover
-// Dot edge in CSS px (small = fine grain). The canvas-2D grid is capped to
-// ~MAX_CELLS dots so large/HiDPI viewports don't overload the CPU path.
-const CELL_CSS = 3;
-const MAX_CELLS = 90000;
+// Dot edge in CSS px (small = fine grain / more dots). The canvas-2D grid is
+// capped to ~MAX_CELLS dots so large/HiDPI viewports don't overload the CPU path.
+const CELL_CSS = 1.5;
+const MAX_CELLS = 360000;
 // Per-dot brightness jitter (±, 0–255 scale) so the fill reads as grain.
 const JITTER = 16;
 
@@ -75,7 +75,7 @@ const DETAILS_DARK_HEX =
 
 // Lift dark maps / drop light maps by this much so the starting noise contrasts
 // with the page it dissolves over (else the dots blend into the matching theme).
-const BRIGHTNESS_SHIFT = 28;
+const BRIGHTNESS_SHIFT = 25;
 
 const HOME_LIGHT_MAP = parseHexMap(HOME_LIGHT_HEX, -BRIGHTNESS_SHIFT);
 const HOME_DARK_MAP = parseHexMap(HOME_DARK_HEX, BRIGHTNESS_SHIFT);

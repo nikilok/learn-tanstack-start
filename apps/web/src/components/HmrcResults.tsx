@@ -6,14 +6,10 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation } from '../utils';
+import { formatLocation, prefersReducedMotion } from '../utils';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 import UnionJackLens from './UnionJackLens';
-
-const prefersReducedMotion = () =>
-  typeof window !== 'undefined' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // Vertical centre of a card's name line from its top: py-2(8) + nameLine(24)/2.
 const NAME_LINE_CENTER = 20;

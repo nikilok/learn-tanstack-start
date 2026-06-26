@@ -159,3 +159,14 @@ export function formatDate(dateStr?: string | null) {
     year: 'numeric',
   });
 }
+
+/**
+ * Whether the user has requested reduced motion via the OS. Returns `false` on
+ * the server (no `window`).
+ */
+export function prefersReducedMotion() {
+  return (
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}

@@ -2,16 +2,12 @@ import L from 'leaflet';
 
 import 'leaflet/dist/leaflet.css';
 import { renderToStaticMarkup } from 'react-dom/server';
-import {
-  AttributionControl,
-  MapContainer,
-  Marker,
-  TileLayer,
-} from 'react-leaflet';
+import { AttributionControl, MapContainer, Marker } from 'react-leaflet';
 
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
 import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '../utils/tileBounds';
+import { CachedTileLayer } from './CachedTileLayer';
 
 import './LeafletMap.css';
 import UnionJackLens from './UnionJackLens';
@@ -71,7 +67,7 @@ export default function LeafletMap({
       className="absolute inset-0 isolate h-full w-full"
     >
       <AttributionControl prefix={false} />
-      <TileLayer
+      <CachedTileLayer
         attribution={TILE_ATTRIBUTION}
         url={isDark ? DARK_TILES : LIGHT_TILES}
       />

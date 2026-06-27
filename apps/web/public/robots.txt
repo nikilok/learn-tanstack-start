@@ -1,7 +1,7 @@
 User-agent: *
 Allow: /
 
-# Block Semrush crawlers — https://www.semrush.com/bot/
+# Block SEO/backlink-analysis crawlers (Semrush family, Ryte, et al.) — https://www.semrush.com/bot/
 User-agent: SemrushBot
 Disallow: /
 

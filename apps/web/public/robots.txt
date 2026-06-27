@@ -1,4 +1,35 @@
 User-agent: *
 Allow: /
 
+# Block SEO/backlink-analysis crawlers (Semrush family, Ryte, et al.) — https://www.semrush.com/bot/
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: SiteAuditBot
+Disallow: /
+
+User-agent: SemrushBot-BA
+Disallow: /
+
+User-agent: SemrushBot-SI
+Disallow: /
+
+User-agent: SemrushBot-SWA
+Disallow: /
+
+User-agent: SemrushBot-OCOB
+Disallow: /
+
+User-agent: SemrushBot-FT
+Disallow: /
+
+User-agent: SemrushBot-ESI
+Disallow: /
+
+User-agent: SplitSignalBot
+Disallow: /
+
+User-agent: RyteBot
+Disallow: /
+
 Sitemap: https://sponsorsearch.co.uk/sitemap.xml

@@ -72,10 +72,19 @@ class CachedLeafletTileLayer extends L.TileLayer {
         }
         const objectUrl = URL.createObjectURL(blob);
         tile._objectUrl = objectUrl;
-        tile.onload = () => done(undefined, tile);
+        tile.onload = () => {
+          if (tile._discarded) return;
+          done(undefined, tile);
+        };
         tile.onerror = () => {
-          // Undecodable body (e.g. a truncated 200): evict so the tile can recover
-          // on a later view instead of being pinned as a permanent failure.
+          // A discard mid-load revokes the object URL, which itself trips onerror —
+          // that's not a bad blob, so don't evict a healthy cache entry.
+          if (tile._discarded) return;
+          // Genuine undecodable body (e.g. a truncated 200): free the dead URL and
+          // evict so the tile can recover on a later view instead of being pinned
+          // as a permanent failure.
+          URL.revokeObjectURL(objectUrl);
+          tile._objectUrl = undefined;
           this.queryClient.removeQueries({ queryKey: ['map-tile', url] });
           done(new Error('tile decode failed'), tile);
         };

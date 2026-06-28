@@ -1,4 +1,4 @@
-const iconClass = 'h-[18px] w-[18px]';
+const iconClass = 'size-5 sm:size-[18px]';
 
 /**
  * Custom "share" glyph — three nodes joined by two links, the universal share

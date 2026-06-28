@@ -26,7 +26,7 @@ export default function CursorToggle() {
       onClick={() => setCustomCursorEnabled(!enabled)}
       aria-label={label}
       title={label}
-      className="shadow-ring hidden rounded-md p-2 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) pointer-fine:inline-flex"
+      className="shadow-ring hidden rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) pointer-fine:inline-flex sm:p-2"
     >
       {enabled ? <CursorIcon /> : <CursorOffIcon />}
     </button>

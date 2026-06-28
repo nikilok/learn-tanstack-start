@@ -118,7 +118,7 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="shadow-ring rounded-md p-2 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
+      className="shadow-ring rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:p-2"
     >
       {mode === 'light' && <SunIcon />}
       {mode === 'dark' && <MoonIcon />}

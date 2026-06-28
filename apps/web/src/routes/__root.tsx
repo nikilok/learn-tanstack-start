@@ -38,7 +38,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     errorComponent: RouteError,
     notFoundComponent: () => {
       return (
-        <div className="page-wrap flex flex-col items-center justify-center py-20 text-center">
+        <div className="page-wrap flex flex-col items-center justify-center px-4 py-20 text-center">
           <h1 className="text-4xl font-bold text-(--sea-ink)">404</h1>
           <p className="mt-2 text-(--sea-ink-soft)">
             This page does not exist.

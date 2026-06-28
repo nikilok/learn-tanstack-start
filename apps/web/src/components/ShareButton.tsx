@@ -60,7 +60,7 @@ export default function ShareButton() {
         onClick={handleShare}
         aria-label="Share this page"
         title="Share this page"
-        className="shadow-ring rounded-md p-2 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
+        className="shadow-ring rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:p-2"
       >
         <ShareIcon />
       </button>

@@ -1,3 +1,4 @@
+import { useLocation } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
 import { buildCanonical } from '../utils/canonical';
@@ -14,6 +15,14 @@ export default function ShareButton() {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // The router is the source of truth for the current URL. Selecting the
+  // canonical (prod-origin) share URL keeps the query string the app actually
+  // validated — not whatever raw params sit in the address bar — and re-renders
+  // only when that URL changes.
+  const shareUrl = useLocation({
+    select: (l) => buildCanonical(l.pathname, l.search as Record<string, string>),
+  });
+
   useEffect(
     () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -23,16 +32,9 @@ export default function ShareButton() {
 
   /** Native share sheet when available, else copy the URL and flash the tooltip. */
   async function handleShare() {
-    // Share the canonical (prod-origin) URL for this page, preserving the
-    // current query string so a shared search lands pre-filled for the recipient.
-    const url = buildCanonical(
-      window.location.pathname,
-      Object.fromEntries(new URLSearchParams(window.location.search)),
-    );
-
     if (navigator.share) {
       try {
-        await navigator.share({ title: document.title, url });
+        await navigator.share({ title: document.title, url: shareUrl });
         return;
       } catch (err) {
         // Sheet dismissed by the user is not a failure — only fall through to
@@ -42,7 +44,7 @@ export default function ShareButton() {
     }
 
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1800);

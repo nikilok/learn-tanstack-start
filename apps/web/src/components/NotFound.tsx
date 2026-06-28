@@ -11,8 +11,14 @@ declare const GPUBufferUsage: {
   readonly COPY_DST: number;
 };
 
-/** Static two-tone black hole — the no-WebGPU / reduced-motion fallback for the shader canvas. */
-function BlackHoleSvg({
+/**
+ * The "0" in 404 shown before the shader loads (and the no-WebGPU / reduced-motion
+ * fallback): a plain ring at the event-horizon radius, so the page always reads
+ * "4 O 4" and the circle morphs straight into the black hole's photon ring. The
+ * radius is HORIZON (0.22) × the 300 viewBox = 66, matching the shader's horizon, so
+ * the diameters line up. `currentColor` keeps it visible in both themes.
+ */
+function PlaceholderRing({
   className,
   style,
 }: {
@@ -26,89 +32,30 @@ function BlackHoleSvg({
       style={style}
       aria-hidden="true"
     >
-      <defs>
-        <radialGradient id="bh-bloom" cx="50%" cy="50%" r="50%">
-          <stop offset="32%" stopColor="rgba(0,0,0,0)" />
-          <stop offset="46%" stopColor="rgba(90,130,255,.20)" />
-          <stop offset="58%" stopColor="rgba(255,70,50,.16)" />
-          <stop offset="76%" stopColor="rgba(110,90,225,.08)" />
-          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-        </radialGradient>
-        <linearGradient id="bh-disk" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#11338f" />
-          <stop offset="13%" stopColor="#2f6bf0" />
-          <stop offset="30%" stopColor="#8fbaff" />
-          <stop offset="50%" stopColor="#ffffff" />
-          <stop offset="71%" stopColor="#ff6a33" />
-          <stop offset="86%" stopColor="#e22b22" />
-          <stop offset="100%" stopColor="#8e0f1e" />
-        </linearGradient>
-        <filter id="bh-swirl" x="-50%" y="-50%" width="200%" height="200%">
-          <feTurbulence
-            type="fractalNoise"
-            baseFrequency="0.007 0.012"
-            numOctaves="2"
-            seed="14"
-            result="n"
-          />
-          <feDisplacementMap
-            in="SourceGraphic"
-            in2="n"
-            scale="28"
-            xChannelSelector="R"
-            yChannelSelector="G"
-          />
-          <feGaussianBlur stdDeviation="0.8" />
-        </filter>
-        <filter id="bh-soft" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur stdDeviation="2.2" />
-        </filter>
-      </defs>
-      <circle cx="150" cy="150" r="150" fill="url(#bh-bloom)" />
-      <g filter="url(#bh-swirl)">
-        <circle
-          cx="150"
-          cy="150"
-          r="90"
-          fill="none"
-          stroke="url(#bh-disk)"
-          strokeWidth="40"
-        />
-      </g>
-      <path
-        d="M64,152 A86,86 0 0 1 236,152"
-        fill="none"
-        stroke="url(#bh-disk)"
-        strokeWidth="9"
-        opacity="0.95"
-        filter="url(#bh-soft)"
-      />
-      <circle cx="150" cy="150" r="64" fill="#000" />
       <circle
         cx="150"
         cy="150"
-        r="63"
+        r="66"
         fill="none"
-        stroke="#fff"
-        strokeWidth="2"
-        opacity="0.9"
-        filter="url(#bh-soft)"
+        stroke="currentColor"
+        strokeWidth="4"
+        opacity="0.5"
       />
     </svg>
   );
 }
 
 /**
- * 404 page: the error code reads "4 ● 4" with a black hole as the zero. The hole
- * is a WGSL accretion-disk shader driven by the same WebGPU setup as the theme
- * transition; where WebGPU is unavailable or motion is reduced, a static SVG
- * black hole renders in its place.
+ * 404 page: the error code reads "4 ● 4" with a black hole as the zero. The hole is
+ * a WGSL accretion-disk shader on the same WebGPU setup as the theme transition. A
+ * plain ring (PlaceholderRing) holds the "0" first — so it reads "4 O 4" — then the
+ * shader fades in over it; that same ring is the no-WebGPU / reduced-motion fallback.
  */
 export default function NotFound() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Start blank, not on the SVG: the WGSL shader is the primary, and the SVG is only
-  // revealed if WebGPU is unavailable or fails — never as a transitional flash.
-  const [mode, setMode] = useState<'pending' | 'gpu' | 'svg'>('pending');
+  // Show the placeholder ring first (so it reads "4 O 4"), then swap to the shader on
+  // success. The ring stays if WebGPU is unavailable or fails — it's the fallback.
+  const [mode, setMode] = useState<'gpu' | 'svg'>('svg');
 
   useEffect(() => {
     if (prefersReducedMotion() || !navigator.gpu) {
@@ -258,8 +205,8 @@ export default function NotFound() {
             margin: '0 -0.04em',
           }}
         >
-          <BlackHoleSvg
-            className="absolute inset-0 h-full w-full transition-opacity duration-500"
+          <PlaceholderRing
+            className="absolute inset-0 h-full w-full text-(--sea-ink) transition-opacity duration-500"
             style={{ opacity: mode === 'svg' ? 1 : 0 }}
           />
           <canvas

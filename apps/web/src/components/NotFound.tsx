@@ -106,10 +106,15 @@ function BlackHoleSvg({
  */
 export default function NotFound() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [gpuActive, setGpuActive] = useState(false);
+  // Start blank, not on the SVG: the WGSL shader is the primary, and the SVG is only
+  // revealed if WebGPU is unavailable or fails — never as a transitional flash.
+  const [mode, setMode] = useState<'pending' | 'gpu' | 'svg'>('pending');
 
   useEffect(() => {
-    if (prefersReducedMotion() || !navigator.gpu) return;
+    if (prefersReducedMotion() || !navigator.gpu) {
+      setMode('svg');
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     let device: GPUDevice | undefined;
@@ -128,9 +133,13 @@ export default function NotFound() {
     (async () => {
       try {
         const adapter = await navigator.gpu.requestAdapter();
-        if (!adapter) return;
+        if (!adapter) {
+          setMode('svg');
+          return;
+        }
         device = await adapter.requestDevice();
       } catch {
+        setMode('svg');
         return;
       }
       if (!alive) {
@@ -139,6 +148,7 @@ export default function NotFound() {
       }
       const ctx = canvas.getContext('webgpu') as GPUCanvasContext | null;
       if (!ctx) {
+        setMode('svg');
         device.destroy();
         return;
       }
@@ -169,6 +179,7 @@ export default function NotFound() {
           entries: [{ binding: 0, resource: { buffer: uniform } }],
         });
       } catch {
+        setMode('svg');
         await device.popErrorScope().catch(() => null);
         device.destroy();
         return;
@@ -180,11 +191,12 @@ export default function NotFound() {
         if (setupError && import.meta.env.DEV) {
           console.warn('[404 black-hole shader]', setupError.message);
         }
+        if (setupError) setMode('svg');
         device.destroy();
         return;
       }
 
-      setGpuActive(true);
+      setMode('gpu');
       resize = new ResizeObserver(sizeCanvas);
       resize.observe(canvas);
 
@@ -247,14 +259,14 @@ export default function NotFound() {
           }}
         >
           <BlackHoleSvg
-            className="absolute inset-0 h-full w-full transition-opacity duration-700"
-            style={{ opacity: gpuActive ? 0 : 1 }}
+            className="absolute inset-0 h-full w-full transition-opacity duration-500"
+            style={{ opacity: mode === 'svg' ? 1 : 0 }}
           />
           <canvas
             ref={canvasRef}
             aria-hidden="true"
-            className="absolute inset-0 h-full w-full transition-opacity duration-700"
-            style={{ opacity: gpuActive ? 1 : 0 }}
+            className="absolute inset-0 h-full w-full transition-opacity duration-500"
+            style={{ opacity: mode === 'gpu' ? 1 : 0 }}
           />
         </span>
         <span className={digit}>4</span>

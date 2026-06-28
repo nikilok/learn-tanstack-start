@@ -49,7 +49,7 @@ const SQUASH = 0.78;      // disk foreshorten (minor/major) — smaller = more e
 const HORIZON = 0.22;     // event-horizon radius (uv units; whole artwork fits r < ~0.46)
 const DISK_INNER = 0.235;
 const DISK_OUTER = 0.42;
-const SPIN = 0.16;        // accretion rotation speed
+const SPIN = 0.25;        // accretion rotation speed (rigid — see twist below)
 const WINDINGS = 2.6;     // spiral-arm tightness
 
 // A high-fidelity tilted accretion disk: domain-warped plasma filaments swirling
@@ -77,7 +77,11 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   // Cartesian coords — NOT atan2 — means there is no ±π branch-cut seam (the artifact
   // that showed only on the blue side, where that cut falls under the tilt).
   let roll = t * SPIN;
-  let twist = log(re + 0.02) * WINDINGS - roll / max(re, 0.12);
+  // Rigid rotation (uniform −roll), NOT differential (−roll/re): a differential term
+  // shears the noise a little more every frame, so the filaments wind up tighter over
+  // time into an over-compressed ring. Rigid keeps the spiral shape fixed — the open,
+  // gappy initial look — and just spins it.
+  let twist = log(re + 0.02) * WINDINGS - roll;
   let cw = cos(twist);
   let sw = sin(twist);
   let pe = vec2f(p.x, ey);

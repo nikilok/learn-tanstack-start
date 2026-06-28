@@ -6,7 +6,6 @@ import {
   ClientOnly,
   createRootRouteWithContext,
   HeadContent,
-  Link,
   Scripts,
 } from '@tanstack/react-router';
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
@@ -19,6 +18,7 @@ import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
+import NotFound from '../components/NotFound';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
@@ -36,23 +36,7 @@ const APP_DESCRIPTION =
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
     errorComponent: RouteError,
-    notFoundComponent: () => {
-      return (
-        <div className="page-wrap flex flex-col items-center justify-center px-4 py-20 text-center">
-          <h1 className="text-4xl font-bold text-(--sea-ink)">404</h1>
-          <p className="mt-2 text-(--sea-ink-soft)">
-            This page does not exist.
-          </p>
-          <Link
-            to="/"
-            search={{ search: '' }}
-            className="mt-4 text-(--link-blue) underline"
-          >
-            Go to home
-          </Link>
-        </div>
-      );
-    },
+    notFoundComponent: NotFound,
     head: () => ({
       meta: [
         {

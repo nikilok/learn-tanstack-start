@@ -32,14 +32,16 @@ function isStandalone() {
 }
 
 /**
- * Header "Install app" pill. Not dismissible — it simply appears when desktop
- * Chrome has offered an install (deferred prompt captured pre-hydration) and
- * disappears once the app is installed. Clicking opens the native dialog.
+ * Header "Install app" pill. Not dismissible — it simply appears when a desktop
+ * browser has offered an install (deferred prompt captured pre-hydration) and
+ * disappears once the app is installed. Clicking opens the native dialog. Shows
+ * on any Chromium browser (Chrome, Edge, Brave, Opera, …); Firefox/Safari don't
+ * fire the install event, so it never appears there.
  */
 export default function InstallAppHint() {
   const [show, setShow] = useState(false);
 
-  /** Open Chrome's native install dialog (the prompt is one-shot). */
+  /** Open the browser's native install dialog (the prompt is one-shot). */
   const install = useCallback(async () => {
     const prompt = getInstallPrompt();
     if (!prompt) return;
@@ -64,13 +66,15 @@ export default function InstallAppHint() {
   useEffect(() => {
     if (isStandalone()) return;
 
-    // Desktop Chrome only.
-    const isChrome = document.documentElement.dataset.browser === 'chrome';
+    // Desktop only. We don't gate on browser name: the deferred-prompt gate below
+    // already limits this to browsers that fire `beforeinstallprompt` — i.e. any
+    // Chromium (Chrome, Edge, Brave, Opera, Vivaldi, …). Firefox/Safari never
+    // fire it, so the pill simply never appears there.
     const isMobile =
       (navigator as Navigator & { userAgentData?: { mobile?: boolean } })
         .userAgentData?.mobile ??
       /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    if (!isChrome || isMobile) return;
+    if (isMobile) return;
 
     const reveal = () => {
       if (getInstallPrompt()) setShow(true);

@@ -94,12 +94,30 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           content: 'https://sponsorsearch.co.uk/og-twitter.png',
         },
         { name: 'twitter:url', content: 'https://sponsorsearch.co.uk' },
+        // PWA / installability — iOS still only honours the apple-prefixed
+        // capable + title meta when added to the home screen.
+        { name: 'application-name', content: 'SponsorSearch' },
+        { name: 'mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-title', content: 'SponsorSearch' },
+        {
+          name: 'apple-mobile-web-app-status-bar-style',
+          content: 'default',
+        },
       ],
       links: [
         {
           rel: 'icon',
           type: 'image/svg+xml',
           href: '/favicon.svg',
+        },
+        {
+          rel: 'manifest',
+          href: '/manifest.json',
+        },
+        {
+          rel: 'apple-touch-icon',
+          href: '/apple-touch-icon.png',
         },
         {
           rel: 'stylesheet',

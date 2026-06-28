@@ -1,25 +1,48 @@
 {
-  "short_name": "TanStack App",
-  "name": "Create TanStack App Sample",
+  "name": "Skilled Worker Sponsor Search",
+  "short_name": "SponsorSearch",
+  "description": "Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "lang": "en-GB",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "utilities"],
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
   "icons": [
     {
-      "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
-    },
-    {
-      "src": "logo192.png",
+      "src": "/icon-192.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "logo512.png",
+      "src": "/icon-512.png",
       "type": "image/png",
       "sizes": "512x512"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "screenshots": [
+    {
+      "src": "/screenshot-desktop-home.webp",
+      "type": "image/webp",
+      "sizes": "1280x800",
+      "form_factor": "wide",
+      "label": "Search 126,000+ licensed UK visa sponsors"
+    },
+    {
+      "src": "/screenshot-desktop-results.webp",
+      "type": "image/webp",
+      "sizes": "1280x800",
+      "form_factor": "wide",
+      "label": "Filter sponsors by rating, location and visa route"
+    }
+  ]
 }

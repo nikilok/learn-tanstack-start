@@ -22,10 +22,16 @@ import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
+import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 
 import appCss from '../styles.css?url';
+
+const APP_NAME = 'Skilled Worker Sponsor Search';
+const APP_SHORT_NAME = 'SponsorSearch';
+const APP_DESCRIPTION =
+  'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.';
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
@@ -57,19 +63,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           content: 'width=device-width, initial-scale=1, viewport-fit=cover',
         },
         {
-          title: 'Skilled Worker Sponsor Search',
+          title: APP_NAME,
         },
         {
           name: 'description',
-          content:
-            'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+          content: APP_DESCRIPTION,
         },
         { property: 'og:type', content: 'website' },
-        { property: 'og:title', content: 'Skilled Worker Sponsor Search' },
+        { property: 'og:title', content: APP_NAME },
         {
           property: 'og:description',
-          content:
-            'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+          content: APP_DESCRIPTION,
         },
         { property: 'og:image', content: 'https://sponsorsearch.co.uk/og.png' },
         { property: 'og:image:width', content: '1200' },
@@ -81,25 +85,44 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { property: 'og:image:width', content: '1200' },
         { property: 'og:image:height', content: '1200' },
         { property: 'og:url', content: 'https://sponsorsearch.co.uk' },
-        { property: 'og:site_name', content: 'SponsorSearch' },
+        { property: 'og:site_name', content: APP_SHORT_NAME },
         { name: 'twitter:card', content: 'summary_large_image' },
-        { name: 'twitter:title', content: 'Skilled Worker Sponsor Search' },
+        { name: 'twitter:title', content: APP_NAME },
         {
           name: 'twitter:description',
-          content:
-            'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.',
+          content: APP_DESCRIPTION,
         },
         {
           name: 'twitter:image',
           content: 'https://sponsorsearch.co.uk/og-twitter.png',
         },
         { name: 'twitter:url', content: 'https://sponsorsearch.co.uk' },
+        // PWA / installability — iOS only honours the apple-prefixed capable + title meta.
+        { name: 'application-name', content: APP_SHORT_NAME },
+        { name: 'mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-title', content: APP_SHORT_NAME },
+        {
+          name: 'apple-mobile-web-app-status-bar-style',
+          content: 'default',
+        },
       ],
       links: [
         {
           rel: 'icon',
           type: 'image/svg+xml',
           href: '/favicon.svg',
+        },
+        {
+          rel: 'manifest',
+          href: '/manifest.json',
+          // Send credentials so the manifest fetch carries Vercel's
+          // deployment-protection cookie on preview (else it 307s to SSO → CORS).
+          crossOrigin: 'use-credentials',
+        },
+        {
+          rel: 'apple-touch-icon',
+          href: '/apple-touch-icon.png',
         },
         {
           rel: 'stylesheet',
@@ -120,7 +143,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootDocument({ children }: { children: React.ReactNode }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-GB" suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#ffffff" />
         {/* oxlint-disable-next-line react/no-danger -- static theme init script, no user input */}
@@ -129,6 +152,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
+        {/* oxlint-disable-next-line react/no-danger -- static install-prompt capture, no user input */}
+        <script
+          dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
+        />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">

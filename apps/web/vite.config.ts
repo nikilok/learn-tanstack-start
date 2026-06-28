@@ -50,6 +50,12 @@ const config = defineConfig({
             'Cache-Control': 's-maxage=31536000, stale-while-revalidate=86400',
           },
         },
+        '/sw.js': {
+          headers: {
+            // Always revalidate so clients pick up a new service worker promptly.
+            'Cache-Control': 'public, max-age=0, must-revalidate',
+          },
+        },
       },
     }),
     viteReact(),

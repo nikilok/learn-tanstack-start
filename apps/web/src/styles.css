@@ -422,6 +422,80 @@ a {
   }
 }
 
+/* One-time rainbow flourish around the install pill: a conic-gradient ring (the
+   "border") plus a blurred copy behind it (the "shadow") that spin once. The
+   spin is an animated @property angle; the delay lets the home-page entrance
+   animations finish first. Desktop-Chrome only, so modern CSS is safe. */
+@property --install-rainbow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes install-rainbow-spin {
+  0% {
+    --install-rainbow-angle: 0deg;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    --install-rainbow-angle: 360deg;
+    opacity: 0;
+  }
+}
+.install-rainbow {
+  position: relative;
+  isolation: isolate;
+}
+.install-rainbow::before,
+.install-rainbow::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  padding: 2px;
+  border-radius: 0.5rem;
+  background: conic-gradient(
+    from var(--install-rainbow-angle),
+    #ff0040,
+    #ff8c00,
+    #ffd000,
+    #00d26a,
+    #00bcd4,
+    #2979ff,
+    #7c4dff,
+    #e040fb,
+    #ff0040
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  animation: install-rainbow-spin 1.4s ease-in-out 2s 1 both;
+}
+.install-rainbow::before {
+  z-index: -1;
+}
+.install-rainbow::after {
+  z-index: -2;
+  filter: blur(6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-rainbow::before,
+  .install-rainbow::after {
+    animation: none;
+  }
+}
+
 /*
  * Pre-hydration gate for the search input.
  *

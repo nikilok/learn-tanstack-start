@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const INSTALLED_MODES = [
-  'standalone',
-  'minimal-ui',
-  'fullscreen',
-  'window-controls-overlay',
-];
+import { parsePlatform } from '../hooks/usePlatform';
 
 /** Chrome's deferred install prompt — not in the standard DOM lib types. */
 interface BeforeInstallPromptEvent extends Event {
@@ -22,21 +17,12 @@ function getInstallPrompt(): BeforeInstallPromptEvent | null {
   return (window as InstallPromptWindow).__ssInstallPrompt ?? null;
 }
 
-/** True when running inside the installed app (standalone display modes). */
-function isStandalone() {
-  return (
-    INSTALLED_MODES.some(
-      (mode) => window.matchMedia(`(display-mode: ${mode})`).matches,
-    ) || (navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
-}
-
 /**
- * Header "Install app" pill. Not dismissible — it simply appears when a desktop
- * browser has offered an install (deferred prompt captured pre-hydration) and
- * disappears once the app is installed. Clicking opens the native dialog. Shows
- * on any Chromium browser (Chrome, Edge, Brave, Opera, …); Firefox/Safari don't
- * fire the install event, so it never appears there.
+ * Header "Install app" pill. Not dismissible — it appears once a desktop browser
+ * has offered an install (deferred prompt captured pre-hydration by the Chromium-
+ * gated INSTALL_PROMPT_INIT_SCRIPT) and disappears once installed. The captured
+ * prompt is the sufficient gate: it's only set on Chromium and never for an
+ * already-installed app. Clicking opens the browser's native install dialog.
  */
 export default function InstallAppHint() {
   const [show, setShow] = useState(false);
@@ -46,34 +32,26 @@ export default function InstallAppHint() {
     const prompt = getInstallPrompt();
     if (!prompt) return;
     (window as InstallPromptWindow).__ssInstallPrompt = null;
-    setShow(false);
     try {
       await prompt.prompt();
+      await prompt.userChoice;
     } catch {
       /* prompt can only be called once; ignore re-invocation errors */
-    }
-  }, []);
-
-  // Register the service worker (enables the install prompt + offline fallback).
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {
-        /* registration is best-effort; the page works fine without it */
-      });
+    } finally {
+      // The prompt is one-shot and now consumed; hide. On accept the app installs
+      // (ss:installed also hides); on dismiss the pill returns if Chrome re-offers
+      // (ss:installable). Hiding in `finally`, after the dialog, keeps the pill
+      // visible while the dialog is open instead of vanishing on click.
+      setShow(false);
     }
   }, []);
 
   useEffect(() => {
-    if (isStandalone()) return;
-
-    // Desktop only. We don't gate on browser name: the deferred-prompt gate below
-    // already limits this to browsers that fire `beforeinstallprompt` — i.e. any
-    // Chromium (Chrome, Edge, Brave, Opera, Vivaldi, …). Firefox/Safari never
-    // fire it, so the pill simply never appears there.
+    // Desktop only — mobile gets the browser's own native install UI. The captured
+    // prompt already limits this to Chromium that can actually install.
     const isMobile =
       (navigator as Navigator & { userAgentData?: { mobile?: boolean } })
-        .userAgentData?.mobile ??
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        .userAgentData?.mobile ?? parsePlatform(navigator.userAgent).isMobile;
     if (isMobile) return;
 
     const reveal = () => {

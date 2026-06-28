@@ -1,14 +1,22 @@
 /**
- * Pre-hydration capture of Chrome's `beforeinstallprompt`. The event fires once,
- * early — often before the app bundle mounts and can attach a listener, especially
- * on a reload with the service worker already active. Stashing it from an inline
- * `<head>` script (and re-broadcasting via a custom event) guarantees the install
- * chip can find the deferred prompt instead of losing it to that race.
+ * Pre-hydration install setup, for Chromium browsers only (Chrome/Edge/Brave/…;
+ * `data-browser` is stamped by the earlier BROWSER_INIT_SCRIPT). It registers the
+ * service worker — which is what lets Chromium fire `beforeinstallprompt` — and
+ * captures the deferred prompt the instant it fires, early enough that a fast
+ * reload with the SW already active can't lose it to a race with the app bundle.
+ * On mobile it leaves the event alone so the browser shows its own install UI
+ * (we only render the desktop pill). Non-Chromium browsers get nothing here.
  */
 export const INSTALL_PROMPT_INIT_SCRIPT = `(() => {
   try {
+    var browser = document.documentElement.dataset.browser;
+    if (browser !== 'chrome' && browser !== 'edge') return;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(function () {});
+    }
     window.__ssInstallPrompt = null;
     window.addEventListener('beforeinstallprompt', function (e) {
+      if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) return;
       e.preventDefault();
       window.__ssInstallPrompt = e;
       window.dispatchEvent(new Event('ss:installable'));

@@ -245,8 +245,7 @@ a:where(:not([class*='no-underline'])):hover {
 }
 
 .page-wrap {
-  width: 100%;
-  max-width: 1200px;
+  width: min(1200px, 100%);
   margin-inline: auto;
 }
 

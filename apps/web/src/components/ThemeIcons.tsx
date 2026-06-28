@@ -1,4 +1,4 @@
-const iconClass = 'size-5 sm:size-[18px]';
+import { HEADER_ICON_CLASS as iconClass } from './headerControls';
 
 /** Sun glyph used by `ThemeToggle` to indicate light mode. */
 export function SunIcon() {

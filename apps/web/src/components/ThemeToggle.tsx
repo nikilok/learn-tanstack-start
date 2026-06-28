@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { THEME_COLORS } from '../theme';
 import { cancelThemeTransition, runThemeTransition } from '../theme-transition';
+import { HEADER_CONTROL_CLASS } from './headerControls';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 type ThemeMode = 'light' | 'dark' | 'auto';
@@ -118,7 +119,7 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="shadow-ring rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:p-2"
+      className={HEADER_CONTROL_CLASS}
     >
       {mode === 'light' && <SunIcon />}
       {mode === 'dark' && <MoonIcon />}

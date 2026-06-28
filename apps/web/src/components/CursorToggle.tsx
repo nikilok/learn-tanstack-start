@@ -3,6 +3,7 @@ import {
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
 import { CursorIcon, CursorOffIcon } from './CursorIcons';
+import { HEADER_CONTROL_CLASS } from './headerControls';
 
 /**
  * On/off toggle for the custom Union-Jack cursor, shown only on pointer-fine
@@ -26,7 +27,7 @@ export default function CursorToggle() {
       onClick={() => setCustomCursorEnabled(!enabled)}
       aria-label={label}
       title={label}
-      className="shadow-ring hidden rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) pointer-fine:inline-flex sm:p-2"
+      className={`${HEADER_CONTROL_CLASS} hidden pointer-fine:inline-flex`}
     >
       {enabled ? <CursorIcon /> : <CursorOffIcon />}
     </button>

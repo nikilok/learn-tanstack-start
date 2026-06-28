@@ -70,16 +70,21 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   // Elliptical (foreshortened) disk coordinates.
   let ey = p.y / SQUASH;
   let re = length(vec2f(p.x, ey));
-  let ea = atan2(ey, p.x);
 
-  // Differential rotation (inner streaks faster) + spiral arms, then domain-warp the
-  // noise so the plasma reads as flowing filaments instead of a smooth ring.
+  // Swirl the disk-plane sample coordinate by a radius-dependent twist (logarithmic
+  // spiral) plus differential rotation over time, then domain-warp it. Rotating
+  // Cartesian coords — NOT atan2 — means there is no ±π branch-cut seam (the artifact
+  // that showed only on the blue side, where that cut falls under the tilt).
   let roll = t * SPIN;
-  let swirl = ea * (WINDINGS / PI) - roll / max(re, 0.10) + log(re + 0.02) * 1.4;
-  let baseC = vec2f(swirl, re * 6.0 - roll);
-  let warp = vec2f(fbm(baseC * 0.8), fbm(baseC * 0.8 + vec2f(7.1, 2.3)));
-  var dens = fbm(baseC * 1.5 + warp * 1.6);
-  dens = dens * 0.62 + fbm(baseC * 3.4 + warp * 2.2) * 0.38;
+  let twist = log(re + 0.02) * WINDINGS - roll / max(re, 0.12);
+  let cw = cos(twist);
+  let sw = sin(twist);
+  let pe = vec2f(p.x, ey);
+  let q = vec2f(pe.x * cw - pe.y * sw, pe.x * sw + pe.y * cw);
+  let baseC = q * 13.0;
+  let warp = vec2f(fbm(baseC * 0.7), fbm(baseC * 0.7 + vec2f(7.1, 2.3)));
+  var dens = fbm(baseC * 1.4 + warp * 1.6);
+  dens = dens * 0.62 + fbm(baseC * 3.0 + warp * 2.2) * 0.38;
 
   // Furious accretion disk: a full annulus with a low gas threshold so lots of
   // plasma shows, plus bright turbulent flares.
@@ -97,7 +102,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let jetSpan = 1.0 - smoothstep(0.16, 0.42, abs(p.x)); // taper fully inside the canvas (no edge clip)
   let jetTex = 0.35 + 0.85 * fbm(vec2f(p.x * 7.0 - roll * 2.0, p.y * 26.0));
   let jet = jetCore * jetSpan * jetTex;
-  disk = max(disk, jet * 0.85);
+  disk = disk + jet * 0.6; // additive, not max() — max leaves a hard crease where jet meets disk
 
   // Two-tone Doppler colour: cool blue (left) → hot crimson (right).
   let side = clamp(uv.x / max(r, 0.0001) * 0.5 + 0.5, 0.0, 1.0);
@@ -114,13 +119,12 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let hs = exp(-hd * hd) * smoothstep(0.05, 0.6, p.x) * smoothstep(0.45, 0.9, dens);
   col = col + hotw * hs * 0.7;
 
-  // Photon ring + the far side of the disk lensed over the top / under the bottom.
+  // Photon ring + a single unified lensed inner rim (no p.y split → no seam),
+  // coloured from the disk's own left/right tone for consistency.
   let ring = 1.0 - smoothstep(0.0, 0.012, abs(r - HORIZON));
   col = col + hotw * ring;
-  let arcBand = 1.0 - smoothstep(0.0, 0.05, abs(re - HORIZON * 1.18));
-  let arcTop = arcBand * smoothstep(0.0, 0.16, p.y);
-  let arcBot = arcBand * smoothstep(0.0, 0.16, -p.y);
-  col = col + mix(blue, hotw, 0.6) * arcTop * 0.55 + mix(red, hotw, 0.5) * arcBot * 0.5;
+  let arc = 1.0 - smoothstep(0.0, 0.05, abs(re - HORIZON * 1.18));
+  col = col + mix(tone, hotw, 0.6) * arc * 0.5;
 
   // Carve the event horizon to black (the disk passes behind it at top/bottom).
   let horizonMask = smoothstep(HORIZON * 0.92, HORIZON, r);
@@ -140,7 +144,7 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 
   // Coverage alpha + a circular vignette so the artwork fades out before the square edge.
   let horizonFill = 1.0 - horizonMask;
-  let glowA = bloom * 0.5 + ring + arcTop + arcBot + jet * jetCore;
+  let glowA = bloom * 0.5 + ring + arc + jet * jetCore;
   let vign = 1.0 - smoothstep(0.42, 0.5, r);
   let alpha = clamp(max(max(horizonFill, disk), glowA), 0.0, 1.0) * vign;
 

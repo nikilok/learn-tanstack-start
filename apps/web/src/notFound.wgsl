@@ -1,6 +1,7 @@
 struct U {
   resolution: vec2f,
   time: f32,
+  dark: f32, // 1 = dark theme, 0 = light
 };
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -136,21 +137,26 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let bloom = exp(-bd * bd);
   col = col + tone * bloom * 0.32;
 
-  // Sparse field stars.
+  // Sparse field stars — white emission in dark mode (light mode is handled at the
+  // alpha step, where they become opaque-black dots).
   let scell = floor(frag.xy / 3.0);
   let star = step(0.9965, hash21(scell)) * smoothstep(DISK_OUTER * 0.95, DISK_OUTER + 0.04, re);
-  col = col + vec3f(0.82, 0.88, 1.0) * star * 0.9;
+  col = col + vec3f(0.82, 0.88, 1.0) * star * u.dark;
 
   col = clamp(col, vec3f(0.0), vec3f(1.0));
 
+  // Light-mode stars: punch the pixel to opaque black so it reads as a dark dot on the
+  // light page (dark-mode stars are the white emission added above).
+  let starDark = star * (1.0 - u.dark);
+  col = col * (1.0 - starDark);
+
   // Alpha follows emission brightness, so dim regions stay transparent — no dark-grey
-  // veil over a light background. The event horizon is the one opaque-black exception
-  // (horizonFill), since a black hole reads black on any background. Vignette fades the
-  // artwork out before the square edge.
+  // veil over a light background. The event horizon (horizonFill) and the light-mode
+  // stars (starDark) are the opaque-black exceptions. Vignette fades out before the edge.
   let horizonFill = 1.0 - horizonMask;
   let lum = max(col.r, max(col.g, col.b));
   let vign = 1.0 - smoothstep(0.42, 0.5, r);
-  let alpha = clamp(max(horizonFill, lum), 0.0, 1.0) * vign;
+  let alpha = clamp(max(max(horizonFill, lum), starDark), 0.0, 1.0) * vign;
 
   return vec4f(col * alpha, alpha);
 }

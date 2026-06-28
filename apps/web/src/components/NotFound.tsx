@@ -195,6 +195,8 @@ export default function NotFound() {
         data[0] = canvas.width;
         data[1] = canvas.height;
         data[2] = (now - start) / 1000;
+        // Read the live theme each frame so the stars flip on a theme toggle.
+        data[3] = document.documentElement.classList.contains('dark') ? 1 : 0;
         device.queue.writeBuffer(uniform, 0, data);
 
         const encoder = device.createCommandEncoder();

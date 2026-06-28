@@ -17,6 +17,7 @@ import { useEffect } from 'react';
 
 import Footer from '../components/Footer';
 import Header from '../components/Header';
+import InstallAppHint from '../components/InstallAppHint';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
@@ -166,6 +167,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Footer />
         </QueryClientProvider>
         <UnionJackCursor />
+        <InstallAppHint />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

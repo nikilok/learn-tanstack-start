@@ -28,5 +28,21 @@
       "sizes": "512x512",
       "purpose": "maskable"
     }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-desktop-home.png",
+      "type": "image/png",
+      "sizes": "1280x800",
+      "form_factor": "wide",
+      "label": "Search 126,000+ licensed UK visa sponsors"
+    },
+    {
+      "src": "/screenshot-desktop-results.png",
+      "type": "image/png",
+      "sizes": "1280x800",
+      "form_factor": "wide",
+      "label": "Filter sponsors by rating, location and visa route"
+    }
   ]
 }

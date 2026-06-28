@@ -456,7 +456,7 @@ a {
   content: '';
   position: absolute;
   inset: -2px;
-  padding: 2px;
+  padding: 1px;
   border-radius: 0.5rem;
   background: conic-gradient(
     from var(--install-rainbow-angle),

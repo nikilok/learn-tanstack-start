@@ -175,6 +175,11 @@ export default function NotFound() {
       }
       const setupError = await device.popErrorScope();
       if (setupError || !alive) {
+        // Authored blind — surface a WGSL compile failure in dev so it can be fixed
+        // (otherwise it just silently falls back to the SVG).
+        if (setupError && import.meta.env.DEV) {
+          console.warn('[404 black-hole shader]', setupError.message);
+        }
         device.destroy();
         return;
       }
@@ -221,7 +226,7 @@ export default function NotFound() {
     };
   }, []);
 
-  const digit = 'text-[clamp(84px,21vw,190px)] font-extrabold leading-none';
+  const digit = 'text-[clamp(72px,17vw,165px)] font-extrabold leading-none';
 
   return (
     <main className="page-wrap flex flex-1 flex-col items-center justify-center px-4 py-16 text-center">
@@ -234,8 +239,8 @@ export default function NotFound() {
         <span
           className="relative shrink-0"
           style={{
-            width: 'clamp(110px,25vw,230px)',
-            height: 'clamp(110px,25vw,230px)',
+            width: 'clamp(150px,32vw,300px)',
+            height: 'clamp(150px,32vw,300px)',
             margin: '0 -0.04em',
           }}
         >

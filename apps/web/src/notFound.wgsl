@@ -10,7 +10,7 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   return vec4f(pts[vi], 0.0, 1.0);
 }
 
-// hash21 / valueNoise / fbm — same sin-free, backend-stable helpers as theme-transition.wgsl.
+// hash21 / valueNoise / fbm — the sin-free, backend-stable helpers from theme-transition.wgsl.
 fn hash21(p: vec2f) -> f32 {
   var p3 = fract(vec3f(p.x, p.y, p.x) * 0.1031);
   p3 = p3 + dot(p3, vec3f(p3.y, p3.z, p3.x) + 33.33);
@@ -32,7 +32,7 @@ fn fbm(p: vec2f) -> f32 {
   var sum = 0.0;
   var amp = 0.5;
   var freq = p;
-  for (var k = 0; k < 5; k = k + 1) {
+  for (var k = 0; k < 6; k = k + 1) {
     sum = sum + amp * valueNoise(freq);
     freq = freq * 2.0;
     amp = amp * 0.5;
@@ -42,61 +42,107 @@ fn fbm(p: vec2f) -> f32 {
 
 const PI = 3.14159265;
 
-// A two-tone accretion disk (cool blue sweeping one side, hot crimson the other)
-// swirling around a dark event horizon, with a photon ring and a lensed arc bent
-// over the top. Output is premultiplied alpha so the disk's glow fades into the
-// page and the corners stay transparent.
+// ---- look dials ----
+const TILT = -0.62;       // disk / jet axis angle (diagonal, lower-left → upper-right)
+const SQUASH = 0.78;      // disk foreshorten (minor/major) — smaller = more edge-on
+const HORIZON = 0.22;     // event-horizon radius (uv units; whole artwork fits r < ~0.46)
+const DISK_INNER = 0.235;
+const DISK_OUTER = 0.42;
+const SPIN = 0.16;        // accretion rotation speed
+const WINDINGS = 2.6;     // spiral-arm tightness
+
+// A high-fidelity tilted accretion disk: domain-warped plasma filaments swirling
+// (differential rotation) around a dark event horizon, a relativistic jet along the
+// tilted axis, two-tone Doppler colour (cool blue / hot crimson) with a beamed
+// hotspot, a photon ring, and the far side lensed over the top. Premultiplied alpha,
+// vignetted to a circle so it never clips the square canvas.
 @fragment
 fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let uv = (frag.xy - 0.5 * u.resolution) / u.resolution.y;
   let t = u.time;
   let r = length(uv);
-  let ang = atan2(uv.y, uv.x);
-  let side = clamp(uv.x / max(r, 0.0001) * 0.5 + 0.5, 0.0, 1.0); // 0 = blue (left), 1 = crimson (right)
 
-  let horizon = 0.30;
-  let inner = horizon * 1.03;
-  let outer = 0.66;
+  // Tilt the whole hole so the disk + jet run on a diagonal axis.
+  let ct = cos(TILT);
+  let st = sin(TILT);
+  let p = vec2f(uv.x * ct - uv.y * st, uv.x * st + uv.y * ct);
 
-  // Spiral swirl coordinate (angle + log-radius), drifting over time.
-  let lr = log(r + 0.001);
-  let sp = vec2f(ang * 1.5 / PI + lr * 0.9, lr * 1.5 - t * 0.04);
-  var dens = fbm(sp * 4.0 + vec2f(t * 0.05, 0.0));
-  dens = mix(dens, fbm(sp * 9.0 - vec2f(0.0, t * 0.09)), 0.45);
+  // Elliptical (foreshortened) disk coordinates.
+  let ey = p.y / SQUASH;
+  let re = length(vec2f(p.x, ey));
+  let ea = atan2(ey, p.x);
 
-  let band = 1.0 - smoothstep(inner, outer, r);
-  let hot = pow(band, 1.6);
-  let gas = smoothstep(0.34, 0.86, dens);
-  let disk = band * gas * (0.42 + 0.95 * hot);
+  // Differential rotation (inner streaks faster) + spiral arms, then domain-warp the
+  // noise so the plasma reads as flowing filaments instead of a smooth ring.
+  let roll = t * SPIN;
+  let swirl = ea * (WINDINGS / PI) - roll / max(re, 0.10) + log(re + 0.02) * 1.4;
+  let baseC = vec2f(swirl, re * 6.0 - roll);
+  let warp = vec2f(fbm(baseC * 0.8), fbm(baseC * 0.8 + vec2f(7.1, 2.3)));
+  var dens = fbm(baseC * 1.5 + warp * 1.6);
+  dens = dens * 0.62 + fbm(baseC * 3.4 + warp * 2.2) * 0.38;
 
-  let blue = vec3f(0.22, 0.46, 1.0);
-  let red = vec3f(1.0, 0.21, 0.12);
-  let hotw = vec3f(1.0, 0.93, 0.82);
+  // Furious accretion disk: a full annulus with a low gas threshold so lots of
+  // plasma shows, plus bright turbulent flares.
+  let inEdge = smoothstep(DISK_INNER - 0.015, DISK_INNER + 0.03, re);
+  let outEdge = 1.0 - smoothstep(0.35, 0.47, re);
+  let radial = inEdge * outEdge;
+  let hot = 1.0 - smoothstep(DISK_INNER, DISK_OUTER, re);
+  let gas = smoothstep(0.16, 0.70, dens);
+  let flare = smoothstep(0.60, 0.96, dens);
+  var disk = radial * (gas * (0.5 + 1.4 * hot * hot) + flare * 0.8);
+
+  // Relativistic jet / extended disk plane along the major (p.x) axis.
+  let jy = p.y / 0.045;
+  let jetCore = exp(-jy * jy);
+  let jetSpan = 1.0 - smoothstep(0.16, 0.42, abs(p.x)); // taper fully inside the canvas (no edge clip)
+  let jetTex = 0.35 + 0.85 * fbm(vec2f(p.x * 7.0 - roll * 2.0, p.y * 26.0));
+  let jet = jetCore * jetSpan * jetTex;
+  disk = max(disk, jet * 0.85);
+
+  // Two-tone Doppler colour: cool blue (left) → hot crimson (right).
+  let side = clamp(uv.x / max(r, 0.0001) * 0.5 + 0.5, 0.0, 1.0);
+  let blue = vec3f(0.30, 0.55, 1.0);
+  let red = vec3f(1.0, 0.24, 0.13);
+  let hotw = vec3f(1.0, 0.95, 0.88);
   let tone = mix(blue, red, side);
-  let whiteMix = clamp(smoothstep(0.58, 0.95, dens) * (0.4 + 0.7 * hot), 0.0, 1.0);
-  var col = mix(tone, hotw, whiteMix) * disk * 1.5;
+  let beam = 0.55 + 0.9 * smoothstep(-0.55, 0.65, p.x); // beamed brighter on the approaching side
+  let whiteMix = clamp(smoothstep(0.55, 0.95, dens) * (0.3 + 0.85 * hot), 0.0, 1.0);
+  var col = mix(tone, hotw, whiteMix) * disk * beam * 2.1;
 
-  // Photon ring hugging the horizon.
-  let ring = 1.0 - smoothstep(0.0, 0.016, abs(r - horizon));
-  col = col + hotw * ring * 1.1;
+  // Bright beamed hotspot knot.
+  let hd = (re - 0.30) * 6.0;
+  let hs = exp(-hd * hd) * smoothstep(0.05, 0.6, p.x) * smoothstep(0.45, 0.9, dens);
+  col = col + hotw * hs * 0.7;
 
-  // Gravitational-lens arc bent over the top.
-  let top = smoothstep(0.0, 0.14, uv.y);
-  let arc = (1.0 - smoothstep(0.0, 0.05, abs(r - horizon * 1.16))) * top;
-  col = col + mix(blue, hotw, 0.5) * arc * 0.8;
+  // Photon ring + the far side of the disk lensed over the top / under the bottom.
+  let ring = 1.0 - smoothstep(0.0, 0.012, abs(r - HORIZON));
+  col = col + hotw * ring;
+  let arcBand = 1.0 - smoothstep(0.0, 0.05, abs(re - HORIZON * 1.18));
+  let arcTop = arcBand * smoothstep(0.0, 0.16, p.y);
+  let arcBot = arcBand * smoothstep(0.0, 0.16, -p.y);
+  col = col + mix(blue, hotw, 0.6) * arcTop * 0.55 + mix(red, hotw, 0.5) * arcBot * 0.5;
 
-  // Carve the event horizon to black.
-  let horizonMask = smoothstep(horizon * 0.9, horizon, r);
+  // Carve the event horizon to black (the disk passes behind it at top/bottom).
+  let horizonMask = smoothstep(HORIZON * 0.92, HORIZON, r);
   col = col * horizonMask;
 
-  // Outer warm bloom.
-  let bloom = exp(-pow(max(r - horizon, 0.0) * 4.0, 2.0));
-  col = col + tone * bloom * 0.10;
+  // Outer warm bloom — wider and stronger so the fury glows around the hole.
+  let bd = max(r - HORIZON, 0.0) * 3.8;
+  let bloom = exp(-bd * bd);
+  col = col + tone * bloom * 0.14;
+
+  // Sparse field stars.
+  let scell = floor(frag.xy / 3.0);
+  let star = step(0.9965, hash21(scell)) * smoothstep(DISK_OUTER * 0.95, DISK_OUTER + 0.04, re);
+  col = col + vec3f(0.82, 0.88, 1.0) * star * 0.9;
+
   col = clamp(col, vec3f(0.0), vec3f(1.0));
 
+  // Coverage alpha + a circular vignette so the artwork fades out before the square edge.
   let horizonFill = 1.0 - horizonMask;
-  let glowA = bloom * 0.55 + ring + arc;
-  let alpha = clamp(max(horizonFill, max(disk, glowA)), 0.0, 1.0);
+  let glowA = bloom * 0.5 + ring + arcTop + arcBot + jet * jetCore;
+  let vign = 1.0 - smoothstep(0.42, 0.5, r);
+  let alpha = clamp(max(max(horizonFill, disk), glowA), 0.0, 1.0) * vign;
 
   return vec4f(col * alpha, alpha);
 }

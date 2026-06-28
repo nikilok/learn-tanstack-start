@@ -130,10 +130,11 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let horizonMask = smoothstep(HORIZON * 0.92, HORIZON, r);
   col = col * horizonMask;
 
-  // Outer warm bloom — wider and stronger so the fury glows around the hole.
+  // Outer bloom — a coloured glow. Brightened so it still reads now that alpha
+  // tracks brightness, which also stops it going dark-grey over a light background.
   let bd = max(r - HORIZON, 0.0) * 3.8;
   let bloom = exp(-bd * bd);
-  col = col + tone * bloom * 0.14;
+  col = col + tone * bloom * 0.32;
 
   // Sparse field stars.
   let scell = floor(frag.xy / 3.0);
@@ -142,11 +143,14 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
 
   col = clamp(col, vec3f(0.0), vec3f(1.0));
 
-  // Coverage alpha + a circular vignette so the artwork fades out before the square edge.
+  // Alpha follows emission brightness, so dim regions stay transparent — no dark-grey
+  // veil over a light background. The event horizon is the one opaque-black exception
+  // (horizonFill), since a black hole reads black on any background. Vignette fades the
+  // artwork out before the square edge.
   let horizonFill = 1.0 - horizonMask;
-  let glowA = bloom * 0.5 + ring + arc + jet * jetCore;
+  let lum = max(col.r, max(col.g, col.b));
   let vign = 1.0 - smoothstep(0.42, 0.5, r);
-  let alpha = clamp(max(max(horizonFill, disk), glowA), 0.0, 1.0) * vign;
+  let alpha = clamp(max(horizonFill, lum), 0.0, 1.0) * vign;
 
   return vec4f(col * alpha, alpha);
 }

@@ -115,6 +115,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         {
           rel: 'manifest',
           href: '/manifest.json',
+          // Send credentials so the manifest fetch carries Vercel's
+          // deployment-protection cookie on preview (else it 307s to SSO → CORS).
+          crossOrigin: 'use-credentials',
         },
         {
           rel: 'apple-touch-icon',

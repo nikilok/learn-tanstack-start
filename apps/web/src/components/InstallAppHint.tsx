@@ -93,7 +93,7 @@ export default function InstallAppHint() {
       onClick={install}
       aria-label="Install SponsorSearch as an app"
       title="Install SponsorSearch as an app"
-      className="shadow-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
+      className="install-pill-in shadow-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
     >
       <svg
         viewBox="0 0 24 24"

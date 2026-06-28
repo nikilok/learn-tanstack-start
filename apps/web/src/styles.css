@@ -404,6 +404,24 @@ a {
   }
 }
 
+/* Install pill entrance: a slow, movement-free fade-in so it eases in rather than popping. */
+@keyframes install-pill-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.install-pill-in {
+  animation: install-pill-in 0.7s ease-in-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-pill-in {
+    animation: none;
+  }
+}
+
 /*
  * Pre-hydration gate for the search input.
  *

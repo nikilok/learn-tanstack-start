@@ -17,12 +17,12 @@ import { useEffect } from 'react';
 
 import Footer from '../components/Footer';
 import Header from '../components/Header';
-import InstallAppHint from '../components/InstallAppHint';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
+import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 
@@ -152,6 +152,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
+        {/* oxlint-disable-next-line react/no-danger -- static install-prompt capture, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">
@@ -167,7 +169,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Footer />
         </QueryClientProvider>
         <UnionJackCursor />
-        <InstallAppHint />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

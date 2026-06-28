@@ -153,7 +153,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static install-prompt capture, no user input */}
-        <script dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }} />
+        <script
+          dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
+        />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">

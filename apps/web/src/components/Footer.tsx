@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
 
-import InstallAppHint from './InstallAppHint';
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 import Logo from './Logo';
 import LondonSkyline from './LondonSkyline';
@@ -30,7 +29,7 @@ export default function Footer() {
           </Suspense>
         </div>
       </div>
-      <div className="page-wrap relative flex flex-col items-center gap-6 text-center">
+      <div className="page-wrap flex flex-col items-center gap-6 text-center">
         <Link
           to="/"
           search={{ search: '' }}
@@ -88,8 +87,6 @@ export default function Footer() {
             &copy; {year} Nikil Kuruvilla. All rights reserved.
           </p>
         </div>
-
-        <InstallAppHint />
       </div>
     </footer>
   );

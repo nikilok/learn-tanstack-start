@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import CursorToggle from './CursorToggle';
 import InstallAppHint from './InstallAppHint';
 import Logo from './Logo';
+import ShareButton from './ShareButton';
 import ThemeToggle from './ThemeToggle';
 
 /**
@@ -28,6 +29,7 @@ export default function Header() {
 
         <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
           <InstallAppHint />
+          <ShareButton />
           <CursorToggle />
           <ThemeToggle />
         </div>

@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
-import WGSL from '../notFound.wgsl?raw';
 import { prefersReducedMotion } from '../utils';
 
 // lib.dom ships the WebGPU interfaces but not this flag constant — declare the
@@ -101,6 +100,17 @@ export default function NotFound() {
       }
       sizeCanvas();
       const format = navigator.gpu.getPreferredCanvasFormat();
+
+      // Load the shader lazily so its ~7 KB stays out of the always-loaded root chunk
+      // (only fetched when a 404 actually renders on a WebGPU client).
+      let WGSL: string;
+      try {
+        WGSL = (await import('../notFound.wgsl?raw')).default;
+      } catch {
+        setMode('svg');
+        device.destroy();
+        return;
+      }
 
       let pipeline: GPURenderPipeline;
       let uniform: GPUBuffer;

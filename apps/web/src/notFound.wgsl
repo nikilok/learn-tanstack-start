@@ -1,7 +1,9 @@
 struct U {
   resolution: vec2f,
   time: f32,
-  dark: f32, // 1 = dark theme, 0 = light
+  dark: f32,     // 1 = dark theme, 0 = light
+  center: vec2f, // hole centre in screen-uv units (0 = viewport centre)
+  zoom: f32,     // camera zoom; >1 magnifies (dolly in)
 };
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -59,7 +61,8 @@ const WINDINGS = 2.6;     // spiral-arm tightness
 // vignetted to a circle so it never clips the square canvas.
 @fragment
 fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-  let uv = (frag.xy - 0.5 * u.resolution) / u.resolution.y;
+  // Offset to the hole centre + scale by zoom; center 0 / zoom 1 = centred 404 framing.
+  let uv = ((frag.xy - 0.5 * u.resolution) / u.resolution.y - u.center) / u.zoom;
   let t = u.time;
   let r = length(uv);
 

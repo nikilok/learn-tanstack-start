@@ -235,6 +235,23 @@ export default function HmrcResults({ search }: { search: string }) {
     return () => window.removeEventListener('pagehide', onPageHide);
   }, [results.length]);
 
+  // The full-bleed black-hole "no organisations found" scene. It must persist across
+  // the brief isLoading flips that happen while refining a search that stays empty —
+  // otherwise the fullscreen hole would unmount → remount (replaying its zoom + GPU
+  // setup) on every committed term. `wasEmptyRef` remembers that the prior settled
+  // state was empty, so a refine FROM empty keeps the scene up instead of flashing
+  // skeletons; it resets once results arrive or the query drops below 3 chars.
+  const confirmedEmpty =
+    !isLoading && search.length >= 3 && results.length === 0;
+  const wasEmptyRef = useRef(false);
+  useEffect(() => {
+    if (confirmedEmpty) wasEmptyRef.current = true;
+    else if (results.length > 0 || search.length < 3)
+      wasEmptyRef.current = false;
+  }, [confirmedEmpty, results.length, search]);
+  const showScene =
+    confirmedEmpty || (isLoading && search.length >= 3 && wasEmptyRef.current);
+
   if (search.length === 0) return null;
 
   if (search.length < 3) {
@@ -242,6 +259,20 @@ export default function HmrcResults({ search }: { search: string }) {
       <p className="mt-4 text-sm text-(--sea-ink-soft)">
         Type at least 3 characters to search...
       </p>
+    );
+  }
+
+  // No matches: the full-bleed black hole anchored off the right edge, with the
+  // message over it. Rendered before the skeleton branch so it stays mounted through
+  // refine-loads (see `showScene`) — the zoom plays once, no remount.
+  if (showScene) {
+    return (
+      <>
+        <BlackHole fullscreen className="z-0" />
+        <p className="relative z-10 mt-12 text-center text-sm text-(--sea-ink-soft) sm:mt-16">
+          No organisations found matching &ldquo;{search}&rdquo;
+        </p>
+      </>
     );
   }
 
@@ -256,22 +287,6 @@ export default function HmrcResults({ search }: { search: string }) {
           style={{ height: 0, overflow: 'hidden' }}
         />
       </>
-    );
-  }
-
-  if (results.length === 0 && search.length >= 3) {
-    return (
-      <div className="mt-12 flex flex-col items-center text-center sm:mt-16">
-        <BlackHole
-          style={{
-            width: 'clamp(180px,55vw,300px)',
-            height: 'clamp(180px,55vw,300px)',
-          }}
-        />
-        <p className="mt-4 text-sm text-(--sea-ink-soft)">
-          No organisations found matching &ldquo;{search}&rdquo;
-        </p>
-      </div>
     );
   }
 

@@ -1,0 +1,72 @@
+diff --git a/node_modules/@tanstack/redact/.bun-tag-6839ff590e70dfd8 b/.bun-tag-6839ff590e70dfd8
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/dom/features/context/full.js b/dist/dom/features/context/full.js
+index 0abbb4316ae265c4068aaf7ef79f1ffd7bab0915..425e2e3745a00aaa53682dbcfad205d8322be750 100644
+--- a/dist/dom/features/context/full.js
++++ b/dist/dom/features/context/full.js
+@@ -1,6 +1,6 @@
+ // packages/redact/src/dom/features/context/full.ts
+ import { FiberTag } from "../../../core";
+-import { REACT_PROVIDER_TYPE, REACT_CONSUMER_TYPE } from "../../../react";
++import { REACT_PROVIDER_TYPE, REACT_CONSUMER_TYPE, REACT_CONTEXT_TYPE } from "../../../react";
+ import {
+   registerRenderer,
+   registerTypeMatcher,
+@@ -11,7 +11,7 @@ import {
+ function realReadContext(fiber, ctx) {
+   let p = fiber.parent;
+   while (p) {
+-    if (p.tag === FiberTag.Provider && p.type._context === ctx) {
++    if (p.tag === FiberTag.Provider && (p.type._context ?? p.type) === ctx) {
+       return (p.pp ?? p.mp)?.value;
+     }
+     p = p.parent;
+@@ -19,7 +19,8 @@ function realReadContext(fiber, ctx) {
+   return ctx._currentValue;
+ }
+ function renderProvider(fiber, domParent, anchor) {
+-  const ctx = fiber.type._context;
++  // PATCH: React 19 renders <Context value> directly; type IS the context (no _context wrapper).
++  const ctx = fiber.type._context ?? fiber.type;
+   const props = fiber.pp ?? {};
+   const prevValue = ctx._currentValue;
+   ctx._currentValue = props.value;
+@@ -41,7 +42,7 @@ function renderConsumer(fiber, domParent, anchor) {
+   fiber.mp = props;
+ }
+ registerTypeMatcher(
+-  (_type, marker) => marker === REACT_PROVIDER_TYPE ? FiberTag.Provider : marker === REACT_CONSUMER_TYPE ? FiberTag.Consumer : null
++  (_type, marker) => marker === REACT_PROVIDER_TYPE || marker === REACT_CONTEXT_TYPE ? FiberTag.Provider : marker === REACT_CONSUMER_TYPE ? FiberTag.Consumer : null
+ );
+ registerRenderer(FiberTag.Provider, renderProvider);
+ registerRenderer(FiberTag.Consumer, renderConsumer);
+diff --git a/dist/dom/features/hydration/full.js b/dist/dom/features/hydration/full.js
+index f9499260dd8ba58607eb880f623065098684e5a6..7f767bacd61f571f7db3b05a2c31fccfc6bbcef2 100644
+--- a/dist/dom/features/hydration/full.js
++++ b/dist/dom/features/hydration/full.js
+@@ -275,7 +275,7 @@ function adoptHostDom(fiber, parent) {
+   fiber.dom = candidate;
+   const props = fiber.pp ?? {};
+   const isSvg = tag === "svg" || candidate.namespaceURI === "http://www.w3.org/2000/svg" && tag !== "foreignobject";
+-  validateHydrationProps(fiber, candidate, props, tag, isSvg);
++  // PATCH (fork behavior): trust server HTML, do not strict-validate attrs during hydration.
+   for (const k in props) {
+     if (k === "children") continue;
+     if (k[0] === "o" && k[1] === "n" && typeof props[k] == "function") {
+@@ -292,13 +292,8 @@ function adoptTextDom(fiber, parent, text) {
+   if (!candidate) onMismatch(fiber, null);
+   if (candidate.nodeType === 3) {
+     if (candidate.data !== text) {
+-      if (true) {
+-        failHydration(
+-          fiber,
+-          new Error(`Hydration text mismatch: expected "${text}" but found "${candidate.data}".`)
+-        );
+-      }
+-      failHydration(fiber);
++      // PATCH (fork behavior): repair text instead of aborting hydration.
++      candidate.data = text;
+     }
+     fiber.dom = candidate;
+     return true;

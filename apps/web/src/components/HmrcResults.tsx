@@ -269,9 +269,20 @@ export default function HmrcResults({ search }: { search: string }) {
     return (
       <>
         <BlackHole fullscreen className="z-0" />
-        <p className="relative z-10 mt-12 text-center text-sm text-(--sea-ink-soft) sm:mt-16">
-          No organisations found matching &ldquo;{search}&rdquo;
-        </p>
+        <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
+          {/* Frosted surface scrim so the message stays readable over the bright
+              disk — on mobile the hole fills the screen, so the text always sits on
+              it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
+          <p
+            className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink) shadow-md backdrop-blur-md"
+            style={{
+              backgroundColor:
+                'color-mix(in srgb, var(--surface) 85%, transparent)',
+            }}
+          >
+            No organisations found matching &ldquo;{search}&rdquo;
+          </p>
+        </div>
       </>
     );
   }

@@ -1,0 +1,49 @@
+appId: uk.co.sponsorsearch.desktop
+productName: SponsorSearch
+copyright: © SponsorSearch
+
+directories:
+  buildResources: build
+  output: dist
+
+# The main process bundle (out/) is self-contained — electron-updater is bundled
+# in by Vite — so no node_modules need to be packed.
+files:
+  - out/**
+  - package.json
+
+mac:
+  category: public.app-category.business
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip # required by electron-updater for macOS
+      arch: universal
+  artifactName: ${productName}-mac-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true # uses APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID (or APPLE_API_KEY*)
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  artifactName: ${productName}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  category: Office
+  target:
+    - AppImage
+  artifactName: ${productName}-linux-${arch}.${ext}
+
+publish:
+  provider: github
+  owner: nikilok
+  repo: learn-tanstack-start

@@ -4,6 +4,7 @@ const ALLOWED_PREFIXES = [
   '/', // home
   '/company/', // detail pages
   '/privacy', // privacy policy
+  '/download', // desktop app download page
   '/_server', // TanStack server functions
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy

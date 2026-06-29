@@ -170,3 +170,11 @@ export function prefersReducedMotion() {
     window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
 }
+
+/**
+ * Whether the browser exposes the WebGPU API. Does not guarantee a working adapter or that
+ * a shader compiles — just that `navigator.gpu` is present. `false` on the server.
+ */
+export function hasWebGpu() {
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
+}

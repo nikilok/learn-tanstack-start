@@ -1,7 +1,9 @@
 struct U {
   resolution: vec2f,
   time: f32,
-  dark: f32, // 1 = dark theme, 0 = light
+  dark: f32,     // 1 = dark theme, 0 = light
+  center: vec2f, // hole centre in screen-uv units (0 = viewport centre)
+  zoom: f32,     // camera zoom; >1 magnifies (dolly in)
 };
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -59,9 +61,13 @@ const WINDINGS = 2.6;     // spiral-arm tightness
 // vignetted to a circle so it never clips the square canvas.
 @fragment
 fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-  let uv = (frag.xy - 0.5 * u.resolution) / u.resolution.y;
+  // Offset to the hole centre + scale by zoom; center 0 / zoom 1 = centred 404 framing.
+  let uv = ((frag.xy - 0.5 * u.resolution) / u.resolution.y - u.center) / u.zoom;
   let t = u.time;
   let r = length(uv);
+  // Past the vignette (r >= 0.5) every pixel resolves to alpha 0 — skip the whole fbm
+  // pipeline there, which is most fragments in the full-bleed no-results scene.
+  if (r > 0.5) { return vec4f(0.0); }
 
   // Tilt the whole hole so the disk + jet run on a diagonal axis.
   let ct = cos(TILT);

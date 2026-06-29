@@ -13,6 +13,13 @@ declare const GPUBufferUsage: {
 // Picked for a well-formed disk; purely cosmetic, safe to tune.
 const STATIC_FRAME_TIME = 6;
 
+// Fullscreen "fall in" dolly: the camera zooms from→to over ZOOM_MS, anchored so the
+// hole sits half-off the right edge. Bigger ZOOM_TO = the disk fills more of the
+// screen. All three are cosmetic, safe to tune.
+const ZOOM_FROM = 0.75;
+const ZOOM_TO = 1.25;
+const ZOOM_MS = 2000;
+
 /**
  * A plain ring at the event-horizon radius — shown before the shader loads, and the
  * fallback when WebGPU is unavailable or fails. r = HORIZON (0.22) × the 300 viewBox = 66,
@@ -47,17 +54,22 @@ function PlaceholderRing({
 
 /**
  * The WGSL accretion-disk black hole, on the same WebGPU setup as the theme transition.
- * A plain ring shows first and stays as the no-WebGPU / failure fallback; otherwise the
- * shader fades in over it — animated normally, or as a single static frame under reduced
- * motion. Size the square box via `className` / `style`. Used for the 404 "0" and the
- * empty-search state.
+ * Inline (default) it's a centred square sized by `className`/`style` with a ring that is
+ * both the placeholder and the no-WebGPU / failure fallback (the shader fades in over it
+ * once ready) — used for the 404 "0". With `fullscreen` it's a full-bleed fixed canvas
+ * anchored half-off the right edge that dollies the camera in (static end-frame under
+ * reduced motion) — the no-results search scene. Fullscreen has NO ring (a viewport-scale
+ * one reads worse than nothing): on the no-WebGPU / failure path it stays transparent and
+ * the consumer's own copy (the "no organisations found" message) is the fallback.
  */
 export default function BlackHole({
   className,
   style,
+  fullscreen = false,
 }: {
   className?: string;
   style?: CSSProperties;
+  fullscreen?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Show the placeholder ring first, then swap to the shader on success. The ring stays
@@ -85,7 +97,9 @@ export default function BlackHole({
     /** Resize the drawing buffer to the canvas box. Idempotent — only touches the canvas
      * when the size actually changed, so it can't needlessly clear the static frame. */
     const sizeCanvas = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Cap the fullscreen (viewport-sized) canvas lower — the disk is a soft organic
+      // blur, so 1.5x is plenty and saves a lot of fill-rate vs the inline 404 box.
+      const dpr = Math.min(window.devicePixelRatio || 1, fullscreen ? 1.5 : 2);
       const rect = canvas.getBoundingClientRect();
       const w = Math.max(2, Math.ceil(rect.width * dpr));
       const h = Math.max(2, Math.ceil(rect.height * dpr));
@@ -153,7 +167,7 @@ export default function BlackHole({
           primitive: { topology: 'triangle-list' },
         });
         uniform = device.createBuffer({
-          size: 16,
+          size: 32, // vec2 resolution, time, dark, vec2 center, zoom, pad
           usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         bindGroup = device.createBindGroup({
@@ -193,15 +207,33 @@ export default function BlackHole({
         setMode('svg');
       });
 
-      const data = new Float32Array(4);
-      /** Render exactly one frame at time `t` (seconds). Shared by the animation loop and
-       * the reduced-motion static render. */
-      const drawFrame = (dev: GPUDevice, t: number) => {
+      /** Camera framing for the current canvas aspect + elapsed time. Inline (404) is
+       * always centred at zoom 1; fullscreen anchors the hole off the right edge and
+       * dollies the zoom in (or sits at the settled frame under reduced motion). */
+      const framing = (elapsedMs: number) => {
+        if (!fullscreen) return { cx: 0, cy: 0, zoom: 1 };
+        // Centre at the right edge. 0.5 * aspect mirrors notFound.wgsl normalising uv by
+        // resolution.y — keep the two in sync if that denominator ever changes.
+        const cx = 0.5 * (canvas.width / canvas.height);
+        if (reduce) return { cx, cy: 0, zoom: ZOOM_TO };
+        const p = Math.min(elapsedMs / ZOOM_MS, 1);
+        const eased = 1 - (1 - p) ** 3; // easeOutCubic
+        return { cx, cy: 0, zoom: ZOOM_FROM + (ZOOM_TO - ZOOM_FROM) * eased };
+      };
+
+      const data = new Float32Array(8);
+      /** Render one frame at shader time `t` (seconds) and dolly progress `elapsedMs`.
+       * Shared by the animation loop and the reduced-motion static render. */
+      const drawFrame = (dev: GPUDevice, t: number, elapsedMs: number) => {
+        const { cx, cy, zoom } = framing(elapsedMs);
         data[0] = canvas.width;
         data[1] = canvas.height;
         data[2] = t;
         // Read the live theme each draw so the stars match dark/light.
         data[3] = document.documentElement.classList.contains('dark') ? 1 : 0;
+        data[4] = cx;
+        data[5] = cy;
+        data[6] = zoom;
         dev.queue.writeBuffer(uniform, 0, data);
 
         const encoder = dev.createCommandEncoder();
@@ -222,12 +254,12 @@ export default function BlackHole({
         dev.queue.submit([encoder.finish()]);
       };
 
-      // Reduced motion: draw one static frame, then redraw only when something that
-      // changes its pixels happens — a resize (canvas clears) or a theme toggle (star
-      // colour). No rAF loop, no offscreen pausing needed.
+      // Reduced motion: draw one static frame (the settled framing), then redraw only
+      // when something that changes its pixels happens — a resize (canvas clears) or a
+      // theme toggle (star colour). No rAF loop, no offscreen pausing needed.
       if (reduce) {
         const renderStatic = () => {
-          if (alive && device) drawFrame(device, STATIC_FRAME_TIME);
+          if (alive && device) drawFrame(device, STATIC_FRAME_TIME, ZOOM_MS);
         };
         renderStatic();
         resize = new ResizeObserver(() => {
@@ -249,7 +281,8 @@ export default function BlackHole({
           raf = 0;
           return;
         }
-        drawFrame(device, (now - start) / 1000);
+        const elapsed = now - start;
+        drawFrame(device, elapsed / 1000, elapsed);
         raf = window.requestAnimationFrame(animate);
       };
 
@@ -276,14 +309,23 @@ export default function BlackHole({
       themeObserver?.disconnect();
       device?.destroy();
     };
-  }, []);
+  }, [fullscreen]);
 
   return (
-    <div className={`relative ${className ?? ''}`} style={style}>
-      <PlaceholderRing
-        className="absolute inset-0 h-full w-full text-(--sea-ink) transition-opacity duration-500"
-        style={{ opacity: mode === 'svg' ? 1 : 0 }}
-      />
+    <div
+      className={
+        fullscreen
+          ? `pointer-events-none fixed inset-0 ${className ?? ''}`
+          : `relative ${className ?? ''}`
+      }
+      style={style}
+    >
+      {!fullscreen && (
+        <PlaceholderRing
+          className="absolute inset-0 h-full w-full text-(--sea-ink) transition-opacity duration-500"
+          style={{ opacity: mode === 'svg' ? 1 : 0 }}
+        />
+      )}
       <canvas
         ref={canvasRef}
         aria-hidden="true"

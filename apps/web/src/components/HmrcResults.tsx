@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, prefersReducedMotion } from '../utils';
+import { formatLocation, hasWebGpu, prefersReducedMotion } from '../utils';
 import BlackHole from './BlackHole';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
@@ -235,6 +235,27 @@ export default function HmrcResults({ search }: { search: string }) {
     return () => window.removeEventListener('pagehide', onPageHide);
   }, [results.length]);
 
+  // The full-bleed black-hole "no organisations found" scene. It must persist across
+  // the brief isLoading flips that happen while refining a search that stays empty —
+  // otherwise the fullscreen hole would unmount → remount (replaying its zoom + GPU
+  // setup) on every committed term. `wasEmptyRef` remembers that the prior settled
+  // state was empty, so a refine FROM empty keeps the scene up instead of flashing
+  // skeletons; it resets once results arrive or the query drops below 3 chars.
+  const confirmedEmpty =
+    !isLoading && search.length >= 3 && results.length === 0;
+  const wasEmptyRef = useRef(false);
+  useEffect(() => {
+    if (confirmedEmpty) wasEmptyRef.current = true;
+    else if (results.length > 0 || search.length < 3)
+      wasEmptyRef.current = false;
+  }, [confirmedEmpty, results.length, search]);
+  // The loading disjunct keeps the WebGPU hole mounted across refine-loads (no zoom
+  // replay). It's gated on hasWebGpu() because without a hole there's nothing to preserve
+  // — keeping the (message-gated-off) scene up would just show a blank layer, so a
+  // no-WebGPU client falls through to skeletons instead. (search>=3 holds at the use site.)
+  const showScene =
+    confirmedEmpty || (isLoading && wasEmptyRef.current && hasWebGpu());
+
   if (search.length === 0) return null;
 
   if (search.length < 3) {
@@ -242,6 +263,41 @@ export default function HmrcResults({ search }: { search: string }) {
       <p className="mt-4 text-sm text-(--sea-ink-soft)">
         Type at least 3 characters to search...
       </p>
+    );
+  }
+
+  // No matches: the full-bleed black hole anchored off the right edge. Rendered before
+  // the skeleton branch so it stays mounted through refine-loads (see `showScene`) — the
+  // zoom plays once, no remount. The message is gated on `confirmedEmpty` (NOT the loading
+  // hold) so we never assert "not found" for a refined term that may still return matches.
+  if (showScene) {
+    return (
+      <>
+        <BlackHole fullscreen className="z-0" />
+        {confirmedEmpty && (
+          <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
+            {/* Frosted surface scrim so the message stays readable over the bright
+                disk — on mobile the hole fills the screen, so the text always sits on
+                it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
+            <p
+              className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink) shadow-md backdrop-blur-md"
+              style={{
+                backgroundColor:
+                  'color-mix(in srgb, var(--surface) 85%, transparent)',
+              }}
+            >
+              No organisations found matching &ldquo;{search}&rdquo;
+            </p>
+          </div>
+        )}
+        {/* Hidden width-measurement div (same px-4 as the list) so `ready` is set during
+            the scene — else a later cached refine flashes skeletons just to measure width. */}
+        <div
+          ref={listRef}
+          className="px-4"
+          style={{ height: 0, overflow: 'hidden' }}
+        />
+      </>
     );
   }
 
@@ -258,24 +314,6 @@ export default function HmrcResults({ search }: { search: string }) {
       </>
     );
   }
-
-  if (results.length === 0 && search.length >= 3) {
-    return (
-      <div className="mt-12 flex flex-col items-center text-center sm:mt-16">
-        <BlackHole
-          style={{
-            width: 'clamp(180px,55vw,300px)',
-            height: 'clamp(180px,55vw,300px)',
-          }}
-        />
-        <p className="mt-4 text-sm text-(--sea-ink-soft)">
-          No organisations found matching &ldquo;{search}&rdquo;
-        </p>
-      </div>
-    );
-  }
-
-  if (results.length === 0) return null;
 
   return (
     <div ref={listRef} className="mt-6 px-4 py-2">

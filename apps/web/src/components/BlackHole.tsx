@@ -95,7 +95,9 @@ export default function BlackHole({
     /** Resize the drawing buffer to the canvas box. Idempotent — only touches the canvas
      * when the size actually changed, so it can't needlessly clear the static frame. */
     const sizeCanvas = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      // Cap the fullscreen (viewport-sized) canvas lower — the disk is a soft organic
+      // blur, so 1.5x is plenty and saves a lot of fill-rate vs the inline 404 box.
+      const dpr = Math.min(window.devicePixelRatio || 1, fullscreen ? 1.5 : 2);
       const rect = canvas.getBoundingClientRect();
       const w = Math.max(2, Math.ceil(rect.width * dpr));
       const h = Math.max(2, Math.ceil(rect.height * dpr));
@@ -208,7 +210,9 @@ export default function BlackHole({
        * dollies the zoom in (or sits at the settled frame under reduced motion). */
       const framing = (elapsedMs: number) => {
         if (!fullscreen) return { cx: 0, cy: 0, zoom: 1 };
-        const cx = 0.5 * (canvas.width / canvas.height); // centre at the right edge
+        // Centre at the right edge. 0.5 * aspect mirrors notFound.wgsl normalising uv by
+        // resolution.y — keep the two in sync if that denominator ever changes.
+        const cx = 0.5 * (canvas.width / canvas.height);
         if (reduce) return { cx, cy: 0, zoom: ZOOM_TO };
         const p = Math.min(elapsedMs / ZOOM_MS, 1);
         const eased = 1 - (1 - p) ** 3; // easeOutCubic
@@ -312,7 +316,7 @@ export default function BlackHole({
           ? `pointer-events-none fixed inset-0 ${className ?? ''}`
           : `relative ${className ?? ''}`
       }
-      style={fullscreen ? undefined : style}
+      style={style}
     >
       {!fullscreen && (
         <PlaceholderRing

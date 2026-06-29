@@ -249,8 +249,8 @@ export default function HmrcResults({ search }: { search: string }) {
     else if (results.length > 0 || search.length < 3)
       wasEmptyRef.current = false;
   }, [confirmedEmpty, results.length, search]);
-  const showScene =
-    confirmedEmpty || (isLoading && search.length >= 3 && wasEmptyRef.current);
+  // (`search.length >= 3` is already guaranteed at the use site, below the <3 guard.)
+  const showScene = confirmedEmpty || (isLoading && wasEmptyRef.current);
 
   if (search.length === 0) return null;
 
@@ -262,27 +262,37 @@ export default function HmrcResults({ search }: { search: string }) {
     );
   }
 
-  // No matches: the full-bleed black hole anchored off the right edge, with the
-  // message over it. Rendered before the skeleton branch so it stays mounted through
-  // refine-loads (see `showScene`) — the zoom plays once, no remount.
+  // No matches: the full-bleed black hole anchored off the right edge. Rendered before
+  // the skeleton branch so it stays mounted through refine-loads (see `showScene`) — the
+  // zoom plays once, no remount. The message is gated on `confirmedEmpty` (NOT the loading
+  // hold) so we never assert "not found" for a refined term that may still return matches.
   if (showScene) {
     return (
       <>
         <BlackHole fullscreen className="z-0" />
-        <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
-          {/* Frosted surface scrim so the message stays readable over the bright
-              disk — on mobile the hole fills the screen, so the text always sits on
-              it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
-          <p
-            className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink) shadow-md backdrop-blur-md"
-            style={{
-              backgroundColor:
-                'color-mix(in srgb, var(--surface) 85%, transparent)',
-            }}
-          >
-            No organisations found matching &ldquo;{search}&rdquo;
-          </p>
-        </div>
+        {confirmedEmpty && (
+          <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
+            {/* Frosted surface scrim so the message stays readable over the bright
+                disk — on mobile the hole fills the screen, so the text always sits on
+                it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
+            <p
+              className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink) shadow-md backdrop-blur-md"
+              style={{
+                backgroundColor:
+                  'color-mix(in srgb, var(--surface) 85%, transparent)',
+              }}
+            >
+              No organisations found matching &ldquo;{search}&rdquo;
+            </p>
+          </div>
+        )}
+        {/* Hidden width-measurement div (same px-4 as the list) so `ready` is set during
+            the scene — else a later cached refine flashes skeletons just to measure width. */}
+        <div
+          ref={listRef}
+          className="px-4"
+          style={{ height: 0, overflow: 'hidden' }}
+        />
       </>
     );
   }
@@ -300,8 +310,6 @@ export default function HmrcResults({ search }: { search: string }) {
       </>
     );
   }
-
-  if (results.length === 0) return null;
 
   return (
     <div ref={listRef} className="mt-6 px-4 py-2">

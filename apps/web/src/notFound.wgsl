@@ -65,6 +65,9 @@ fn fs(@builtin(position) frag: vec4f) -> @location(0) vec4f {
   let uv = ((frag.xy - 0.5 * u.resolution) / u.resolution.y - u.center) / u.zoom;
   let t = u.time;
   let r = length(uv);
+  // Past the vignette (r >= 0.5) every pixel resolves to alpha 0 — skip the whole fbm
+  // pipeline there, which is most fragments in the full-bleed no-results scene.
+  if (r > 0.5) { return vec4f(0.0); }
 
   // Tilt the whole hole so the disk + jet run on a diagonal axis.
   let ct = cos(TILT);

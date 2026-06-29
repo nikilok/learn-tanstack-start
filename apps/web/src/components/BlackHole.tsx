@@ -69,7 +69,9 @@ export default function BlackHole({
     let device: GPUDevice | undefined;
     let raf = 0;
     let alive = true;
+    let visible = true;
     let resize: ResizeObserver | undefined;
+    let io: IntersectionObserver | undefined;
 
     /** Resize the drawing buffer to the canvas box; the frame loop reads it into u.resolution. */
     const sizeCanvas = () => {
@@ -78,6 +80,11 @@ export default function BlackHole({
       canvas.width = Math.max(2, Math.ceil(rect.width * dpr));
       canvas.height = Math.max(2, Math.ceil(rect.height * dpr));
     };
+
+    // Fetch the shader in parallel with GPU acquisition — independent latencies, so the
+    // ~7 KB chunk download overlaps adapter/device setup instead of running after it. It
+    // stays out of the route chunk until a black hole actually renders on a WebGPU client.
+    const wgslPromise = import('../notFound.wgsl?raw').catch(() => null);
 
     (async () => {
       try {
@@ -104,16 +111,17 @@ export default function BlackHole({
       sizeCanvas();
       const format = navigator.gpu.getPreferredCanvasFormat();
 
-      // Load the shader lazily so its ~7 KB stays out of the route chunk until a black
-      // hole actually renders on a WebGPU client.
-      let WGSL: string;
-      try {
-        WGSL = (await import('../notFound.wgsl?raw')).default;
-      } catch {
+      const wgsl = await wgslPromise;
+      if (!alive) {
+        device.destroy();
+        return;
+      }
+      if (!wgsl) {
         setMode('svg');
         device.destroy();
         return;
       }
+      const WGSL = wgsl.default;
 
       let pipeline: GPURenderPipeline;
       let uniform: GPUBuffer;
@@ -144,24 +152,41 @@ export default function BlackHole({
         device.destroy();
         return;
       }
-      const setupError = await device.popErrorScope();
-      if (setupError || !alive) {
-        if (setupError && import.meta.env.DEV) {
+      // .catch guards against the device being destroyed mid-setup (an unmount between
+      // awaits) so popErrorScope can't reject on a dead device.
+      const setupError = await device.popErrorScope().catch(() => null);
+      if (!alive) {
+        device.destroy();
+        return;
+      }
+      if (setupError) {
+        if (import.meta.env.DEV) {
           console.warn('[black-hole shader]', setupError.message);
         }
-        if (setupError) setMode('svg');
+        setMode('svg');
         device.destroy();
         return;
       }
 
       setMode('gpu');
-      resize = new ResizeObserver(sizeCanvas);
-      resize.observe(canvas);
+
+      // If the GPU device is lost (driver reset, GPU-process crash, tab discard), stop
+      // and fall back to the ring rather than hammering a dead device forever.
+      void device.lost.then(() => {
+        if (!alive) return; // our own destroy() on unmount — already torn down
+        alive = false;
+        if (raf) window.cancelAnimationFrame(raf);
+        setMode('svg');
+      });
 
       const data = new Float32Array(4);
       const start = performance.now();
       const frame = (now: number) => {
-        if (!alive || !device) return;
+        // Stop the loop while unmounted, device-lost, or scrolled offscreen.
+        if (!alive || !device || !visible) {
+          raf = 0;
+          return;
+        }
         data[0] = canvas.width;
         data[1] = canvas.height;
         data[2] = (now - start) / 1000;
@@ -187,6 +212,19 @@ export default function BlackHole({
         device.queue.submit([encoder.finish()]);
         raf = window.requestAnimationFrame(frame);
       };
+
+      resize = new ResizeObserver(sizeCanvas);
+      resize.observe(canvas);
+      // Pause the draw loop while the hole is scrolled out of view (tab-hidden is already
+      // covered — browsers don't fire rAF for hidden tabs).
+      io = new IntersectionObserver(([entry]) => {
+        visible = entry?.isIntersecting ?? true;
+        if (visible && !raf && alive && device) {
+          raf = window.requestAnimationFrame(frame);
+        }
+      });
+      io.observe(canvas);
+
       raf = window.requestAnimationFrame(frame);
     })();
 
@@ -194,6 +232,7 @@ export default function BlackHole({
       alive = false;
       if (raf) window.cancelAnimationFrame(raf);
       resize?.disconnect();
+      io?.disconnect();
       device?.destroy();
     };
   }, []);

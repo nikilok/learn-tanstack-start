@@ -7,6 +7,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { formatLocation, prefersReducedMotion } from '../utils';
+import BlackHole from './BlackHole';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
 import UnionJackLens from './UnionJackLens';
@@ -260,9 +261,17 @@ export default function HmrcResults({ search }: { search: string }) {
 
   if (results.length === 0 && search.length >= 3) {
     return (
-      <p className="mt-6 text-sm text-(--sea-ink-soft)">
-        No organisations found matching &ldquo;{search}&rdquo;
-      </p>
+      <div className="mt-12 flex flex-col items-center text-center sm:mt-16">
+        <BlackHole
+          style={{
+            width: 'clamp(180px,55vw,300px)',
+            height: 'clamp(180px,55vw,300px)',
+          }}
+        />
+        <p className="mt-4 text-sm text-(--sea-ink-soft)">
+          No organisations found matching &ldquo;{search}&rdquo;
+        </p>
+      </div>
     );
   }
 

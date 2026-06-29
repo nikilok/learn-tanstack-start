@@ -14,6 +14,7 @@ import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mountVercelToolbar } from '@vercel/toolbar/vite';
 import { useEffect } from 'react';
 
+import AppSplash from '../components/AppSplash';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
@@ -24,6 +25,7 @@ import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
+import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 
 import appCss from '../styles.css?url';
@@ -93,6 +95,16 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       ],
       links: [
         {
+          // High-priority, parallel-with-CSS so the wordmark (and all body text)
+          // paints in Geist at first paint instead of a fallback-then-swap. The
+          // SW caches it for instant repeat launches. Stable, unhashed path.
+          rel: 'preload',
+          href: '/fonts/geist-latin.woff2',
+          as: 'font',
+          type: 'font/woff2',
+          crossOrigin: 'anonymous',
+        },
+        {
           rel: 'icon',
           type: 'image/svg+xml',
           href: '/favicon.svg',
@@ -136,6 +148,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: BROWSER_INIT_SCRIPT }} />
+        {/* oxlint-disable-next-line react/no-danger -- static standalone-PWA detection, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: STANDALONE_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static install-prompt capture, no user input */}
         <script
           dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
@@ -155,6 +169,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Footer />
         </QueryClientProvider>
         <UnionJackCursor />
+        {/* Rendered after the cursor so it wins the shared max z-index tie. */}
+        <AppSplash />
         <TanStackDevtools
           config={{
             position: 'bottom-right',

@@ -54,11 +54,13 @@ function PlaceholderRing({
 
 /**
  * The WGSL accretion-disk black hole, on the same WebGPU setup as the theme transition.
- * Inline (default) it's a centred square sized by `className`/`style`, with a ring
- * placeholder/fallback — used for the 404 "0". With `fullscreen` it's a full-bleed fixed
- * canvas anchored half-off the right edge that dollies the camera in (static end-frame
- * under reduced motion) — the no-results search scene. The shader fades in over the
- * ring once ready.
+ * Inline (default) it's a centred square sized by `className`/`style` with a ring that is
+ * both the placeholder and the no-WebGPU / failure fallback (the shader fades in over it
+ * once ready) — used for the 404 "0". With `fullscreen` it's a full-bleed fixed canvas
+ * anchored half-off the right edge that dollies the camera in (static end-frame under
+ * reduced motion) — the no-results search scene. Fullscreen has NO ring (a viewport-scale
+ * one reads worse than nothing): on the no-WebGPU / failure path it stays transparent and
+ * the consumer's own copy (the "no organisations found" message) is the fallback.
  */
 export default function BlackHole({
   className,

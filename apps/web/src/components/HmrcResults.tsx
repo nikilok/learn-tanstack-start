@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, prefersReducedMotion } from '../utils';
+import { formatLocation, hasWebGpu, prefersReducedMotion } from '../utils';
 import BlackHole from './BlackHole';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
@@ -249,8 +249,12 @@ export default function HmrcResults({ search }: { search: string }) {
     else if (results.length > 0 || search.length < 3)
       wasEmptyRef.current = false;
   }, [confirmedEmpty, results.length, search]);
-  // (`search.length >= 3` is already guaranteed at the use site, below the <3 guard.)
-  const showScene = confirmedEmpty || (isLoading && wasEmptyRef.current);
+  // The loading disjunct keeps the WebGPU hole mounted across refine-loads (no zoom
+  // replay). It's gated on hasWebGpu() because without a hole there's nothing to preserve
+  // — keeping the (message-gated-off) scene up would just show a blank layer, so a
+  // no-WebGPU client falls through to skeletons instead. (search>=3 holds at the use site.)
+  const showScene =
+    confirmedEmpty || (isLoading && wasEmptyRef.current && hasWebGpu());
 
   if (search.length === 0) return null;
 

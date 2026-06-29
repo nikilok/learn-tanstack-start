@@ -47,6 +47,14 @@ export default function middleware(request: Request) {
     if (STATIC_EXTENSIONS.has(ext)) return next();
   }
 
+  // Let document navigations (any browser requesting HTML) reach the app's 404 page.
+  // Keyed on Accept, not Sec-Fetch-Mode: iOS Safari doesn't reliably send the latter,
+  // so it was still hitting the empty edge 404. Asset/API/bot probes (no text/html in
+  // Accept) still get a cheap edge 404 with no function invocation; the Vercel firewall
+  // remains the primary bot defense.
+  const accept = request.headers.get('accept') || '';
+  if (accept.includes('text/html')) return next();
+
   // Block everything else at the edge — no function invocation
   return new Response('', { status: 404 });
 }

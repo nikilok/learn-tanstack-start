@@ -1,4 +1,4 @@
-const iconClass = 'h-[18px] w-[18px]';
+import { HEADER_ICON_CLASS as iconClass } from './headerControls';
 
 const CURSOR_PATH =
   'M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z';

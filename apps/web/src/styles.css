@@ -245,8 +245,16 @@ a:where(:not([class*='no-underline'])):hover {
 }
 
 .page-wrap {
-  width: min(1200px, calc(100% - 2rem));
+  width: min(1200px, 100%);
   margin-inline: auto;
+}
+
+/* On mobile the inner px-4 is the gutter; add the wider side margin only once
+   there's room, so small screens use their full width. */
+@media (min-width: 640px) {
+  .page-wrap {
+    width: min(1200px, calc(100% - 2rem));
+  }
 }
 
 button,

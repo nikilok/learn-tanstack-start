@@ -1,4 +1,4 @@
-const iconClass = 'h-[18px] w-[18px]';
+import { HEADER_ICON_CLASS as iconClass } from './headerControls';
 
 /** Sun glyph used by `ThemeToggle` to indicate light mode. */
 export function SunIcon() {

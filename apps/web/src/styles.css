@@ -527,3 +527,31 @@ html[data-hide-search-input] .search-input-wrapper {
  * this file). Keep view-transition keyframes, named-region rules, and
  * browser-specific overrides there — not here.
  */
+
+/* App-shell splash shown only as an installed PWA and hidden at first paint —
+   see standalone-init.ts for the mechanism. Brand ink #120817 matches
+   manifest.json `background_color`; render-blocking sheet so it styles at first paint. */
+.app-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: none;
+  place-items: center;
+  padding: 0 1.5rem;
+  background: #120817;
+}
+
+html[data-standalone] .app-splash {
+  display: grid;
+}
+
+/* Hidden one frame after first paint (see standalone-init.ts), revealing the
+   already-painted app without waiting for React to hydrate. */
+html[data-standalone][data-splash-done] .app-splash {
+  display: none;
+}
+
+.app-splash__logo {
+  width: min(80vw, 420px);
+  height: auto;
+}

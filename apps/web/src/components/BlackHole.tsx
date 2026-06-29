@@ -9,10 +9,14 @@ declare const GPUBufferUsage: {
   readonly COPY_DST: number;
 };
 
+// The single frame shown to reduced-motion users (seconds into the animation).
+// Picked for a well-formed disk; purely cosmetic, safe to tune.
+const STATIC_FRAME_TIME = 6;
+
 /**
  * A plain ring at the event-horizon radius — shown before the shader loads, and the
- * no-WebGPU / reduced-motion fallback. r = HORIZON (0.22) × the 300 viewBox = 66, so it
- * lines up with the shader's photon ring. `currentColor` keeps it visible in both themes.
+ * fallback when WebGPU is unavailable or fails. r = HORIZON (0.22) × the 300 viewBox = 66,
+ * so it lines up with the shader's photon ring. `currentColor` keeps it visible in both themes.
  */
 function PlaceholderRing({
   className,
@@ -43,9 +47,10 @@ function PlaceholderRing({
 
 /**
  * The WGSL accretion-disk black hole, on the same WebGPU setup as the theme transition.
- * A plain ring shows first (and is the no-WebGPU / reduced-motion fallback); the shader
- * fades in over it once ready. Size the square box via `className` / `style`. Used for
- * the 404 "0" and the empty-search state.
+ * A plain ring shows first and stays as the no-WebGPU / failure fallback; otherwise the
+ * shader fades in over it — animated normally, or as a single static frame under reduced
+ * motion. Size the square box via `className` / `style`. Used for the 404 "0" and the
+ * empty-search state.
  */
 export default function BlackHole({
   className,
@@ -60,10 +65,13 @@ export default function BlackHole({
   const [mode, setMode] = useState<'gpu' | 'svg'>('svg');
 
   useEffect(() => {
-    if (prefersReducedMotion() || !navigator.gpu) {
+    // No WebGPU at all → the ring is the only option. Reduced motion still gets the
+    // shader, just frozen on one frame (handled below), so it's not gated here.
+    if (!navigator.gpu) {
       setMode('svg');
       return;
     }
+    const reduce = prefersReducedMotion();
     const canvas = canvasRef.current;
     if (!canvas) return;
     let device: GPUDevice | undefined;
@@ -72,13 +80,19 @@ export default function BlackHole({
     let visible = true;
     let resize: ResizeObserver | undefined;
     let io: IntersectionObserver | undefined;
+    let themeObserver: MutationObserver | undefined;
 
-    /** Resize the drawing buffer to the canvas box; the frame loop reads it into u.resolution. */
+    /** Resize the drawing buffer to the canvas box. Idempotent — only touches the canvas
+     * when the size actually changed, so it can't needlessly clear the static frame. */
     const sizeCanvas = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const rect = canvas.getBoundingClientRect();
-      canvas.width = Math.max(2, Math.ceil(rect.width * dpr));
-      canvas.height = Math.max(2, Math.ceil(rect.height * dpr));
+      const w = Math.max(2, Math.ceil(rect.width * dpr));
+      const h = Math.max(2, Math.ceil(rect.height * dpr));
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
     };
 
     // Fetch the shader in parallel with GPU acquisition — independent latencies, so the
@@ -180,21 +194,17 @@ export default function BlackHole({
       });
 
       const data = new Float32Array(4);
-      const start = performance.now();
-      const frame = (now: number) => {
-        // Stop the loop while unmounted, device-lost, or scrolled offscreen.
-        if (!alive || !device || !visible) {
-          raf = 0;
-          return;
-        }
+      /** Render exactly one frame at time `t` (seconds). Shared by the animation loop and
+       * the reduced-motion static render. */
+      const drawFrame = (dev: GPUDevice, t: number) => {
         data[0] = canvas.width;
         data[1] = canvas.height;
-        data[2] = (now - start) / 1000;
-        // Read the live theme each frame so the stars flip on a theme toggle.
+        data[2] = t;
+        // Read the live theme each draw so the stars match dark/light.
         data[3] = document.documentElement.classList.contains('dark') ? 1 : 0;
-        device.queue.writeBuffer(uniform, 0, data);
+        dev.queue.writeBuffer(uniform, 0, data);
 
-        const encoder = device.createCommandEncoder();
+        const encoder = dev.createCommandEncoder();
         const pass = encoder.beginRenderPass({
           colorAttachments: [
             {
@@ -209,8 +219,38 @@ export default function BlackHole({
         pass.setBindGroup(0, bindGroup);
         pass.draw(3);
         pass.end();
-        device.queue.submit([encoder.finish()]);
-        raf = window.requestAnimationFrame(frame);
+        dev.queue.submit([encoder.finish()]);
+      };
+
+      // Reduced motion: draw one static frame, then redraw only when something that
+      // changes its pixels happens — a resize (canvas clears) or a theme toggle (star
+      // colour). No rAF loop, no offscreen pausing needed.
+      if (reduce) {
+        const renderStatic = () => {
+          if (alive && device) drawFrame(device, STATIC_FRAME_TIME);
+        };
+        renderStatic();
+        resize = new ResizeObserver(() => {
+          sizeCanvas();
+          renderStatic();
+        });
+        resize.observe(canvas);
+        themeObserver = new MutationObserver(renderStatic);
+        themeObserver.observe(document.documentElement, {
+          attributeFilter: ['class'],
+        });
+        return;
+      }
+
+      const start = performance.now();
+      const animate = (now: number) => {
+        // Stop the loop while unmounted, device-lost, or scrolled offscreen.
+        if (!alive || !device || !visible) {
+          raf = 0;
+          return;
+        }
+        drawFrame(device, (now - start) / 1000);
+        raf = window.requestAnimationFrame(animate);
       };
 
       resize = new ResizeObserver(sizeCanvas);
@@ -220,12 +260,12 @@ export default function BlackHole({
       io = new IntersectionObserver(([entry]) => {
         visible = entry?.isIntersecting ?? true;
         if (visible && !raf && alive && device) {
-          raf = window.requestAnimationFrame(frame);
+          raf = window.requestAnimationFrame(animate);
         }
       });
       io.observe(canvas);
 
-      raf = window.requestAnimationFrame(frame);
+      raf = window.requestAnimationFrame(animate);
     })();
 
     return () => {
@@ -233,6 +273,7 @@ export default function BlackHole({
       if (raf) window.cancelAnimationFrame(raf);
       resize?.disconnect();
       io?.disconnect();
+      themeObserver?.disconnect();
       device?.destroy();
     };
   }, []);

@@ -47,6 +47,10 @@ export default function middleware(request: Request) {
     if (STATIC_EXTENSIONS.has(ext)) return next();
   }
 
+  // Let real browser navigations reach the app's 404 page; bots and asset/API
+  // probes (no navigate intent) still get a cheap edge 404, no function invocation.
+  if (request.headers.get('sec-fetch-mode') === 'navigate') return next();
+
   // Block everything else at the edge — no function invocation
   return new Response('', { status: 404 });
 }

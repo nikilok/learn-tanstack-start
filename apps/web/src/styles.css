@@ -528,23 +528,16 @@ html[data-hide-search-input] .search-input-wrapper {
  * browser-specific overrides there — not here.
  */
 
-/*
- * App-shell splash. Server-rendered (AppSplash.tsx), shown ONLY as an installed
- * PWA (html[data-standalone], stamped by standalone-init.ts before first paint).
- * It paints navy + the white wordmark to bridge the native manifest splash,
- * then standalone-init.ts hides it at first paint (html[data-splash-done]) —
- * decoupled from React hydration, so the app is revealed at FIRST PAINT, not
- * after hydration. No transitions or animations: the goal is the fastest reveal
- * physics allows, not a fade. Background is the brand ink (#120817) matching
- * manifest.json `background_color`. Lives in this (render-blocking) global sheet
- * so it is styled at first paint.
- */
+/* App-shell splash shown only as an installed PWA and hidden at first paint —
+   see standalone-init.ts for the mechanism. Brand ink #120817 matches
+   manifest.json `background_color`; render-blocking sheet so it styles at first paint. */
 .app-splash {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
   display: none;
   place-items: center;
+  padding: 0 1.5rem;
   background: #120817;
 }
 
@@ -556,13 +549,6 @@ html[data-standalone] .app-splash {
    already-painted app without waiting for React to hydrate. */
 html[data-standalone][data-splash-done] .app-splash {
   display: none;
-}
-
-.app-splash__inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0 1.5rem;
 }
 
 .app-splash__logo {

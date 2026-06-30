@@ -1,6 +1,7 @@
 import { builtinModules } from 'node:module';
 
 import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'electron-vite';
 
 // `electron` and node builtins MUST stay external for both main and preload.
@@ -34,8 +35,8 @@ export default defineConfig({
       },
     },
   },
-  // The custom title bar is a Tailwind renderer (src/renderer/index.html).
+  // The custom title bar is a React + Tailwind renderer (src/renderer/index.html).
   renderer: {
-    plugins: [tailwindcss()],
+    plugins: [react(), tailwindcss()],
   },
 });

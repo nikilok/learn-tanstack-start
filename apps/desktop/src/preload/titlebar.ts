@@ -1,4 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { IpcRendererEvent } from 'electron';
+
+// Subscribes to a channel and returns an unsubscribe fn (so React effects clean up).
+function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
+  const listener = (_e: IpcRendererEvent, payload: T) => cb(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
 
 // Bridges the title-bar renderer to the main process: nav actions out, state in.
 contextBridge.exposeInMainWorld('titlebar', {
@@ -7,9 +15,8 @@ contextBridge.exposeInMainWorld('titlebar', {
   ready: () => ipcRenderer.send('titlebar:ready'),
   onNavState: (
     cb: (s: { canGoBack: boolean; canGoForward: boolean }) => void,
-  ) => ipcRenderer.on('titlebar:navstate', (_e, s) => cb(s)),
-  onTitle: (cb: (t: string) => void) =>
-    ipcRenderer.on('titlebar:title', (_e, t) => cb(t)),
+  ) => subscribe('titlebar:navstate', cb),
+  onTitle: (cb: (t: string) => void) => subscribe('titlebar:title', cb),
   onTheme: (cb: (t: { dark: boolean }) => void) =>
-    ipcRenderer.on('titlebar:theme', (_e, t) => cb(t)),
+    subscribe('titlebar:theme', cb),
 });

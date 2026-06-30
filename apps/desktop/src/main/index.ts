@@ -151,9 +151,15 @@ function createWindow(): void {
   wc.on('did-navigate-in-page', pushNavState);
   wc.on('page-title-updated', (_e, title) => pushTitle(title));
 
-  const show = (): void => win.show();
+  // Hand keyboard focus to the site view (not the title bar) so typing reaches the
+  // page right away — the web app's type-to-search needs the document focused.
+  const show = (): void => {
+    win.show();
+    wc.focus();
+  };
   wc.once('did-finish-load', show);
   setTimeout(show, 4000); // fallback if the initial load stalls
+  win.on('focus', () => wc.focus());
 
   void wc.loadURL(APP_URL);
 }
@@ -188,6 +194,7 @@ function registerIpc(): void {
     if (!h) return;
     if (dir === 'back' && h.canGoBack()) h.goBack();
     if (dir === 'forward' && h.canGoForward()) h.goForward();
+    siteView?.webContents.focus(); // return keyboard focus to the page after navigating
   });
 
   // Title bar finished loading -> hand it the current state.

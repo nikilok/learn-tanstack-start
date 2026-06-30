@@ -4,8 +4,9 @@ import { Controls } from './Controls';
 import { Logo } from './Logo';
 import { NavControls } from './NavControls';
 import { TitlePill } from './TitlePill';
+import { WindowControls } from './WindowControls';
 
-/** The desktop title bar: brand mark + nav controls, a centered title pill, and utility controls. */
+/** The desktop title bar. macOS uses native traffic lights (left); Windows/Linux draw their own window buttons (right). */
 export function TitleBar() {
   const {
     canGoBack,
@@ -14,16 +15,34 @@ export function TitleBar() {
     themeMode,
     cursorOn,
     copied,
+    platform,
+    maximized,
     back,
     forward,
     command,
+    windowControl,
   } = useTitleBar();
+  const isMac = platform === 'darwin';
+
+  const controls = (
+    <Controls
+      themeMode={themeMode}
+      cursorOn={cursorOn}
+      copied={copied}
+      onCommand={command}
+    />
+  );
+
   return (
     <>
-      {/* Left: native traffic lights + logo share a frosted pill (its left padding clears
-          the lights) so the logo stays legible over scrolling page content; nav pill beside. */}
+      {/* Left cluster: logo pill + nav pill. macOS reserves the pill's left padding for the
+          native traffic lights; Windows/Linux have no lights there so it's padded normally. */}
       <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
-        <div className="flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) pr-3.5 pl-[102px] backdrop-blur-md">
+        <div
+          className={`flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md ${
+            isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
+          }`}
+        >
           <Logo className="hidden h-5 w-auto sm:block" />
           <BrandMark className="size-5 sm:hidden" />
         </div>
@@ -34,13 +53,20 @@ export function TitleBar() {
           onForward={forward}
         />
       </div>
+
       <TitlePill title={title} />
-      <Controls
-        themeMode={themeMode}
-        cursorOn={cursorOn}
-        copied={copied}
-        onCommand={command}
-      />
+
+      {/* Right: utility controls. On Windows/Linux the custom window buttons sit at the corner. */}
+      {isMac ? (
+        <div className="absolute top-1/2 right-5 -translate-y-1/2">
+          {controls}
+        </div>
+      ) : (
+        <div className="absolute top-0 right-0 flex h-full">
+          <div className="flex items-center px-2">{controls}</div>
+          <WindowControls maximized={maximized} onAction={windowControl} />
+        </div>
+      )}
     </>
   );
 }

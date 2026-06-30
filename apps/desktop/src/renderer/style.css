@@ -17,6 +17,8 @@
   /* subtle grey fill so the pill stands out on white */
   --tb-box-bg: rgba(0, 0, 0, 0.05);
   --tb-box-bd: #ebebeb;
+  /* min/max button hover (Windows/Linux) */
+  --tb-ctrl-hover: rgba(0, 0, 0, 0.08);
   --tb-pill-w: min(460px, calc(100vw - 490px)); /* < sm: compact brand mark */
   --tb-mark: #001c55; /* mirrors --logo-navy */
   --tb-mark-red: #c8102e; /* mirrors --logo-red */
@@ -27,6 +29,7 @@
   /* lighter fill so the pill lifts off the dark strip */
   --tb-box-bg: rgba(255, 255, 255, 0.07);
   --tb-box-bd: #2a2a2a;
+  --tb-ctrl-hover: rgba(255, 255, 255, 0.1);
   --tb-mark: #e0e7ff;
   --tb-mark-red: #f87171;
 }

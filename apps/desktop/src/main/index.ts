@@ -95,6 +95,7 @@ function pushTitle(title: string): void {
 
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
 function createWindow(): void {
+  const isMac = process.platform === 'darwin';
   const win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -102,8 +103,10 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     backgroundColor: INITIAL_BG,
-    titleBarStyle: 'hiddenInset', // keep the traffic lights, drop the native bar
-    trafficLightPosition: { x: 34, y: 16 }, // inset into the logo pill's left padding
+    // macOS keeps the native traffic lights (inset into the logo pill); Windows/Linux are
+    // frameless and draw their own min/max/close in the title bar (see WindowControls).
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    trafficLightPosition: { x: 34, y: 16 }, // macOS only; ignored elsewhere
   });
   mainWindow = win;
   win.on('closed', () => {
@@ -113,6 +116,12 @@ function createWindow(): void {
       siteView = null;
     }
   });
+  // Keep the custom maximise/restore icon (Windows/Linux) in sync with the window state.
+  const sendMaximized = (): void => {
+    titleBarView?.webContents.send('titlebar:maximized', win.isMaximized());
+  };
+  win.on('maximize', sendMaximized);
+  win.on('unmaximize', sendMaximized);
 
   // The hosted site fills the whole window; the transparent title bar floats over its top
   // so the page's own background (grid + glow) shows through as one seamless surface.
@@ -245,6 +254,17 @@ function registerIpc(): void {
     siteView?.webContents.focus(); // return keyboard focus to the page after navigating
   });
 
+  // Custom window buttons (Windows/Linux) -> drive the native window.
+  ipcMain.on('titlebar:window-control', (_event, action: string) => {
+    const win = mainWindow;
+    if (!win) return;
+    if (action === 'minimize') win.minimize();
+    else if (action === 'maximize') {
+      if (win.isMaximized()) win.unmaximize();
+      else win.maximize();
+    } else if (action === 'close') win.close();
+  });
+
   // Title bar finished loading -> hand it the current state.
   ipcMain.on('titlebar:ready', () => {
     titleBarView?.webContents.send('titlebar:theme', {
@@ -252,6 +272,10 @@ function registerIpc(): void {
       mode: lastMode,
     });
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
+    titleBarView?.webContents.send(
+      'titlebar:maximized',
+      mainWindow?.isMaximized() ?? false,
+    );
     pushTitle(siteView?.webContents.getTitle() ?? '');
     pushNavState();
   });

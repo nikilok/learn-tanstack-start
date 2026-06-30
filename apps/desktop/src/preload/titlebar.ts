@@ -22,4 +22,10 @@ contextBridge.exposeInMainWorld('titlebar', {
   onCursor: (cb: (on: boolean) => void) => subscribe('titlebar:cursor', cb),
   onCopied: (cb: () => void) => subscribe('titlebar:copied', () => cb()),
   command: (cmd: string) => ipcRenderer.send('titlebar:command', cmd),
+  // Window chrome: which OS we're on, the custom min/max/close actions, and maximise state.
+  platform: process.platform,
+  windowControl: (action: string) =>
+    ipcRenderer.send('titlebar:window-control', action),
+  onMaximized: (cb: (max: boolean) => void) =>
+    subscribe('titlebar:maximized', cb),
 });

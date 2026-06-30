@@ -9,6 +9,7 @@
     "start": "electron-vite preview",
     "package": "electron-vite build && electron-builder --publish never",
     "package:dir": "electron-vite build && electron-builder --dir",
+    "package:win-zip": "electron-vite build && electron-builder --win zip --x64 --publish never",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"
   },

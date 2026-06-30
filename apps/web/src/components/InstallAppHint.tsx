@@ -74,12 +74,11 @@ export default function InstallAppHint() {
     <button
       type="button"
       onClick={install}
-      aria-label="Install SponsorSearch as an app"
-      title="Install SponsorSearch as an app"
-      className="group install-pill-in install-rainbow shadow-ring hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:inline-flex"
+      aria-label="Install as Chrome-based app"
+      title="Install as Chrome-based app"
+      className="group install-pill-in install-rainbow shadow-ring hidden items-center rounded-md p-2.5 text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:inline-flex sm:p-2"
     >
-      <ChromeIcon className="size-4 grayscale transition group-hover:grayscale-0" />
-      Install app
+      <ChromeIcon className="size-5 grayscale transition group-hover:grayscale-0 sm:size-[18px]" />
     </button>
   );
 }

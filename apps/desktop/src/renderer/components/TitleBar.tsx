@@ -1,4 +1,5 @@
 import { useTitleBar } from '../hooks/useTitleBar';
+import { BrandMark } from './BrandMark';
 import { Controls } from './Controls';
 import { Logo } from './Logo';
 import { NavControls } from './NavControls';
@@ -19,9 +20,10 @@ export function TitleBar() {
   } = useTitleBar();
   return (
     <>
-      {/* Left cluster: theme-aware wordmark logo (draggable) + back/forward pill. */}
+      {/* Left cluster: theme-aware logo (full wordmark >= sm, brand mark < sm) + nav pill. */}
       <div className="absolute top-1/2 left-25 flex -translate-y-1/2 items-center gap-2.5">
-        <Logo className="h-6 w-auto" />
+        <Logo className="hidden h-6 w-auto sm:block" />
+        <BrandMark className="size-6 sm:hidden" />
         <NavControls
           canGoBack={canGoBack}
           canGoForward={canGoForward}

@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 interface LogoProps {
   className?: string;
   navyColor?: string;
@@ -21,6 +23,9 @@ export default function Logo({
 }: LogoProps) {
   const resolvedDomain = domainColor ?? navyColor;
   const resolvedStroke = strokeColor ?? navyColor;
+  // Unique per instance: two logos (header + footer) share the DOM, and a hardcoded id
+  // makes the second reference the first — which breaks when one is `display:none`.
+  const clipId = `logo-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   return (
     <svg
@@ -77,11 +82,11 @@ export default function Logo({
         <circle cx="60" cy="60" r="38" fill={navyColor} />
 
         {/* Union Jack inside Circle */}
-        <clipPath id="logoCircleClip">
+        <clipPath id={clipId}>
           <circle cx="60" cy="60" r="29" />
         </clipPath>
 
-        <g clipPath="url(#logoCircleClip)">
+        <g clipPath={`url(#${clipId})`}>
           {/* UK Flag Background (Blue) */}
           <rect x="18" y="18" width="84" height="84" fill="#012169" />
           {/* White Saltire */}

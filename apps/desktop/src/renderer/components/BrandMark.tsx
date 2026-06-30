@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 interface BrandMarkProps {
   className?: string;
   navyColor?: string;
@@ -14,6 +16,8 @@ export function BrandMark({
   navyColor = 'var(--tb-mark)',
   redColor = 'var(--tb-mark-red)',
 }: BrandMarkProps) {
+  // Unique per instance — the mark can appear twice (left cluster + title pill).
+  const clipId = `mark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <svg
       viewBox="0 0 130 130"
@@ -59,10 +63,10 @@ export function BrandMark({
       />
       <circle cx={60} cy={60} r={38} fill={navyColor} />
       {/* Union Jack — fixed blue/white, themeable red */}
-      <clipPath id="ss-mark-clip">
+      <clipPath id={clipId}>
         <circle cx={60} cy={60} r={29} />
       </clipPath>
-      <g clipPath="url(#ss-mark-clip)">
+      <g clipPath={`url(#${clipId})`}>
         <rect x={18} y={18} width={84} height={84} fill="#012169" />
         <path
           d="M18,18 L102,102 M102,18 L18,102"

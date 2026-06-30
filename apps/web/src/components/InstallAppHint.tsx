@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { parsePlatform } from '../hooks/usePlatform';
+import ChromeIcon from './ChromeIcon';
 
 /** Chrome's deferred install prompt — not in the standard DOM lib types. */
 interface BeforeInstallPromptEvent extends Event {
@@ -75,22 +76,9 @@ export default function InstallAppHint() {
       onClick={install}
       aria-label="Install SponsorSearch as an app"
       title="Install SponsorSearch as an app"
-      className="install-pill-in install-rainbow shadow-ring hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:inline-flex"
+      className="group install-pill-in install-rainbow shadow-ring hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:inline-flex"
     >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        className="size-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M12 3v12" />
-        <path d="M7 11 12 16 17 11" />
-        <path d="M5 20h14" />
-      </svg>
+      <ChromeIcon className="size-4 grayscale transition group-hover:grayscale-0" />
       Install app
     </button>
   );

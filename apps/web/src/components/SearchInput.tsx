@@ -130,10 +130,10 @@ export default memo(function SearchInput({
         type="button"
         style={{ display: defaultValue ? 'none' : '' }}
         onClick={() => inputRef.current?.focus()}
-        className="absolute top-[8px] right-[8px] bottom-[8px] inline-flex items-center gap-1 rounded-md bg-(--sea-ink) px-3 text-sm font-medium text-(--surface) transition hover:opacity-85"
+        aria-label="Search"
+        className="absolute top-[8px] right-[8px] bottom-[8px] inline-flex items-center rounded-md px-3 text-sm text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
       >
         <SearchIcon className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">search</span>
       </button>
     </div>
   );

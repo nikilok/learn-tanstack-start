@@ -339,6 +339,11 @@ html[data-desktop] .site-header {
   display: none;
 }
 
+/* The "Desktop app" footer link is web-only — you're already in the native app. */
+html[data-desktop] .footer-desktop-link {
+  display: none;
+}
+
 .site-footer {
   background: var(--footer-bg);
   border-top: 1px solid var(--footer-line);

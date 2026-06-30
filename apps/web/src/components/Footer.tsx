@@ -81,15 +81,17 @@ export default function Footer() {
             >
               Privacy Policy
             </Link>
-            <span aria-hidden="true" className="text-(--sea-ink-faint)">
-              &middot;
+            <span className="footer-desktop-link contents">
+              <span aria-hidden="true" className="text-(--sea-ink-faint)">
+                &middot;
+              </span>
+              <Link
+                to="/download"
+                className="no-underline transition hover:text-(--sea-ink)"
+              >
+                Desktop app
+              </Link>
             </span>
-            <Link
-              to="/download"
-              className="no-underline transition hover:text-(--sea-ink)"
-            >
-              Desktop app
-            </Link>
           </div>
 
           <p className="m-0 text-xs text-(--sea-ink-faint)">

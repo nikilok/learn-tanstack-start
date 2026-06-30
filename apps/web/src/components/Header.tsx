@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import CursorToggle from './CursorToggle';
+import DownloadButton from './DownloadButton';
 import InstallAppHint from './InstallAppHint';
 import Logo from './Logo';
 import ShareButton from './ShareButton';
@@ -28,6 +29,7 @@ export default function Header() {
         <div id="header-pill-portal" className="ml-auto min-w-0 sm:ml-0" />
 
         <div className="flex shrink-0 items-center gap-2.5 sm:ml-auto sm:gap-2">
+          <DownloadButton />
           <InstallAppHint />
           <ShareButton />
           <CursorToggle />

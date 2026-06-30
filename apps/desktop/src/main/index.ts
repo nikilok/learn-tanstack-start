@@ -103,7 +103,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: INITIAL_BG,
     titleBarStyle: 'hiddenInset', // keep the traffic lights, drop the native bar
-    trafficLightPosition: { x: 20, y: 16 },
+    trafficLightPosition: { x: 34, y: 16 }, // inset into the logo pill's left padding
   });
   mainWindow = win;
   win.on('closed', () => {

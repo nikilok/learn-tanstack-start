@@ -17,7 +17,7 @@
   /* subtle grey fill so the pill stands out on white */
   --tb-box-bg: rgba(0, 0, 0, 0.05);
   --tb-box-bd: #ebebeb;
-  --tb-pill-w: min(460px, calc(100vw - 470px)); /* < sm: compact brand mark */
+  --tb-pill-w: min(460px, calc(100vw - 490px)); /* < sm: compact brand mark */
   --tb-mark: #001c55; /* mirrors --logo-navy */
   --tb-mark-red: #c8102e; /* mirrors --logo-red */
 }
@@ -35,7 +35,7 @@
    it can overlap the wider left cluster. Keep in sync with the cluster + controls widths. */
 @media (min-width: 640px) {
   :root {
-    --tb-pill-w: min(460px, calc(100vw - 660px));
+    --tb-pill-w: min(460px, calc(100vw - 640px));
   }
 }
 

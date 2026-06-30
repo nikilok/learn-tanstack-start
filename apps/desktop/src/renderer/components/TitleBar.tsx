@@ -20,10 +20,13 @@ export function TitleBar() {
   } = useTitleBar();
   return (
     <>
-      {/* Left cluster: theme-aware logo (full wordmark >= sm, brand mark < sm) + nav pill. */}
-      <div className="absolute top-1/2 left-25 flex -translate-y-1/2 items-center gap-2.5">
-        <Logo className="hidden h-6 w-auto sm:block" />
-        <BrandMark className="size-6 sm:hidden" />
+      {/* Left: native traffic lights + logo share a frosted pill (its left padding clears
+          the lights) so the logo stays legible over scrolling page content; nav pill beside. */}
+      <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
+        <div className="flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) pr-3.5 pl-[102px] backdrop-blur-md">
+          <Logo className="hidden h-5 w-auto sm:block" />
+          <BrandMark className="size-5 sm:hidden" />
+        </div>
         <NavControls
           canGoBack={canGoBack}
           canGoForward={canGoForward}

@@ -9,6 +9,9 @@ import {
 import { buildCanonical } from '../utils/canonical';
 import { cycleTheme, refreshTheme } from './ThemeToggle';
 
+// Let the OS appearance repaint settle before the GPU transition, else they compete and it stutters.
+const SYSTEM_FOLLOW_DELAY_MS = 250;
+
 /**
  * In desktop (Electron) mode the native title bar owns the header's utility
  * buttons. This bridges the title bar's commands to the web app's existing
@@ -49,20 +52,25 @@ export default function DesktopBridge() {
     window.ssDesktop?.reportCursor(cursorOn);
   }, [cursorOn]);
 
-  // In `auto` mode the desktop must follow OS appearance changes itself — the hidden
-  // web ThemeToggle's listener is unreliable once the mode was set from the title bar.
+  // In `auto` mode the desktop follows OS appearance itself (the hidden web ThemeToggle is stale).
   useEffect(() => {
     if (!window.ssDesktop) return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
+    let timer = 0;
     const onChange = () => {
       const mode = window.localStorage.getItem('theme');
-      if (mode !== 'light' && mode !== 'dark') {
+      if (mode === 'light' || mode === 'dark') return; // explicit mode: ignore OS
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
         refreshTheme();
         window.ssDesktop?.pokeTheme();
-      }
+      }, SYSTEM_FOLLOW_DELAY_MS);
     };
     media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
+    return () => {
+      window.clearTimeout(timer);
+      media.removeEventListener('change', onChange);
+    };
   }, []);
 
   return null;

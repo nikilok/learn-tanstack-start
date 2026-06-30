@@ -98,7 +98,8 @@ export default function ThemeToggle() {
   }, []);
 
   useEffect(() => {
-    if (mode !== 'auto') {
+    // Desktop: DesktopBridge owns auto-follow; this hidden toggle's stale state would race a 2nd transition.
+    if (mode !== 'auto' || window.isSponsorSearchDesktop) {
       return;
     }
 

@@ -18,9 +18,6 @@ const APP_ORIGIN = new URL(APP_URL).origin;
 // view BELOW it, so its viewport simply starts here — the hosted page is untouched.
 const TITLEBAR_HEIGHT = 46;
 const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
-const TITLEBAR_URL = `data:text/html;charset=utf-8,${encodeURIComponent(
-  `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"></head><body></body></html>`,
-)}`;
 
 let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
@@ -102,7 +99,11 @@ function createWindow(): void {
     },
   });
   bar.setBackgroundColor(INITIAL_BG);
-  void bar.webContents.loadURL(TITLEBAR_URL);
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    void bar.webContents.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  } else {
+    void bar.webContents.loadFile(join(__dirname, '../renderer/index.html'));
+  }
   titleBarView = bar;
   win.contentView.addChildView(bar);
 

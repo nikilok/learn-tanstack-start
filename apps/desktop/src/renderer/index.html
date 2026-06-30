@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SponsorSearch</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body
+    class="drag relative m-0 h-screen overflow-hidden bg-transparent text-(--tb-fg) select-none"
+  >
+    <!-- Back / forward pill: pinned left so it never moves when the title resizes. -->
+    <div
+      class="no-drag absolute top-1/2 left-[100px] flex h-8 -translate-y-1/2 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm"
+    >
+      <button
+        id="tb-back"
+        type="button"
+        aria-label="Back"
+        title="Back"
+        class="grid h-6 w-[30px] cursor-pointer place-items-center bg-transparent text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-25"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M19 12H5" />
+          <path d="M12 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <span class="mx-[3px] h-4 w-px shrink-0 bg-(--tb-box-bd)"></span>
+      <button
+        id="tb-fwd"
+        type="button"
+        aria-label="Forward"
+        title="Forward"
+        class="grid h-6 w-[30px] cursor-pointer place-items-center bg-transparent text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-25"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M5 12h14" />
+          <path d="M12 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Title pill: fixed width, dead-centered. -->
+    <div
+      class="absolute top-1/2 left-1/2 flex h-8 w-(--tb-pill-w) -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-4 backdrop-blur-sm"
+    >
+      <img id="tb-icon" alt="" class="size-4 shrink-0" />
+      <span
+        id="tb-title"
+        class="min-w-0 truncate text-[13px] font-normal text-(--tb-faint)"
+        >SponsorSearch</span
+      >
+    </div>
+
+    <script type="module" src="./titlebar.ts"></script>
+  </body>
+</html>

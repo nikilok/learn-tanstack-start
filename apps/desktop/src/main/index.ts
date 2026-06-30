@@ -12,8 +12,29 @@ import {
 import { setupMenu } from './menu';
 import { initAutoUpdates } from './updater';
 
-const APP_URL = process.env.DESKTOP_APP_URL ?? 'https://sponsorsearch.co.uk';
+const isDev = !app.isPackaged;
+// Dev points at the local web server so web-app changes show live; packaged builds use
+// production. DESKTOP_APP_URL overrides either.
+const APP_URL =
+  process.env.DESKTOP_APP_URL ??
+  (isDev ? 'https://web.local' : 'https://sponsorsearch.co.uk');
 const APP_ORIGIN = new URL(APP_URL).origin;
+
+// web.local serves a self-signed (portless) cert Chromium won't trust — accept it for
+// the dev origin only, and only when unpackaged. Never relax certs in a packaged build.
+if (isDev) {
+  app.on(
+    'certificate-error',
+    (event, _webContents, url, _error, _cert, callback) => {
+      if (new URL(url).origin === APP_ORIGIN) {
+        event.preventDefault();
+        callback(true);
+      } else {
+        callback(false);
+      }
+    },
+  );
+}
 // The custom title bar lives in its own view above the site; the site renders in a
 // view BELOW it, so its viewport simply starts here — the hosted page is untouched.
 const TITLEBAR_HEIGHT = 46;

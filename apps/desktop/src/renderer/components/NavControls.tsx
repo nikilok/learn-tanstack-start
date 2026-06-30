@@ -10,7 +10,7 @@ interface NavControlsProps {
 const button =
   'grid h-6 w-[30px] cursor-pointer place-items-center bg-transparent text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-25';
 
-/** Pinned-left back/forward pill — its own `no-drag` region. */
+/** Back/forward pill — its own `no-drag` region; positioned by the left cluster in TitleBar. */
 export function NavControls({
   canGoBack,
   canGoForward,
@@ -18,7 +18,7 @@ export function NavControls({
   onForward,
 }: NavControlsProps) {
   return (
-    <div className="no-drag absolute top-1/2 left-25 flex h-8 -translate-y-1/2 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
+    <div className="no-drag flex h-8 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
       <button
         type="button"
         aria-label="Back"

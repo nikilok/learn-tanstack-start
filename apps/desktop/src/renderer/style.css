@@ -1,5 +1,14 @@
 @import 'tailwindcss';
 
+/* Self-hosted Geist (latin) so the wordmark logo's text matches the web app's metrics. */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./geist-latin.woff2') format('woff2');
+}
+
 /* Title-bar tokens — mirror apps/web/src/styles.css (--bg-base/80, --line, --sea-ink-faint).
    Default is light; `.dark` (toggled from the page theme) overrides, matching the web app. */
 :root {

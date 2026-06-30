@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowRightIcon } from './icons';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface NavControlsProps {
   canGoBack: boolean;
@@ -18,7 +18,7 @@ export function NavControls({
   onForward,
 }: NavControlsProps) {
   return (
-    <div className="no-drag absolute top-1/2 left-[100px] flex h-8 -translate-y-1/2 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
+    <div className="no-drag absolute top-1/2 left-25 flex h-8 -translate-y-1/2 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
       <button
         type="button"
         aria-label="Back"
@@ -27,7 +27,7 @@ export function NavControls({
         disabled={!canGoBack}
         onClick={onBack}
       >
-        <ArrowLeftIcon />
+        <ArrowLeft size={18} />
       </button>
       <span className="mx-[3px] h-4 w-px shrink-0 bg-(--tb-box-bd)" />
       <button
@@ -38,7 +38,7 @@ export function NavControls({
         disabled={!canGoForward}
         onClick={onForward}
       >
-        <ArrowRightIcon />
+        <ArrowRight size={18} />
       </button>
     </div>
   );

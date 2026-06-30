@@ -4,7 +4,7 @@ import { TitlePill } from './TitlePill';
 
 /** The desktop title bar: pinned nav controls + a centered title pill, fed by the IPC bridge. */
 export function TitleBar() {
-  const { canGoBack, canGoForward, title, dark, back, forward } = useTitleBar();
+  const { canGoBack, canGoForward, title, back, forward } = useTitleBar();
   return (
     <>
       <NavControls
@@ -13,7 +13,7 @@ export function TitleBar() {
         onBack={back}
         onForward={forward}
       />
-      <TitlePill title={title} dark={dark} />
+      <TitlePill title={title} />
     </>
   );
 }

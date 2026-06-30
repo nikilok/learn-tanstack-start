@@ -12,7 +12,9 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"
   },
-  "dependencies": {},
+  "dependencies": {
+    "lucide-react": "^1.21.0"
+  },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "^19.2.17",

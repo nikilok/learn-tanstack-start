@@ -4,7 +4,6 @@ export interface TitleBarModel {
   canGoBack: boolean;
   canGoForward: boolean;
   title: string;
-  dark: boolean;
   back: () => void;
   forward: () => void;
 }
@@ -38,7 +37,6 @@ export function useTitleBar(): TitleBarModel {
     canGoBack: nav.canGoBack,
     canGoForward: nav.canGoForward,
     title,
-    dark,
     back: () => window.titlebar.back(),
     forward: () => window.titlebar.forward(),
   };

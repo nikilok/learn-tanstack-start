@@ -16,7 +16,7 @@ const APP_URL = process.env.DESKTOP_APP_URL ?? 'https://sponsorsearch.co.uk';
 const APP_ORIGIN = new URL(APP_URL).origin;
 // The custom title bar lives in its own view above the site; the site renders in a
 // view BELOW it, so its viewport simply starts here — the hosted page is untouched.
-const TITLEBAR_HEIGHT = 38;
+const TITLEBAR_HEIGHT = 46;
 const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
 const TITLEBAR_URL = `data:text/html;charset=utf-8,${encodeURIComponent(
   `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"></head><body></body></html>`,
@@ -57,6 +57,19 @@ function pushNavState(): void {
   });
 }
 
+/** Strips the SEO site-name suffix so the pill shows just the meaningful title. */
+function cleanTitle(title: string): string {
+  return title
+    .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
+    .replace(/\s*-\s*UK Visa Sponsor\s*$/i, '')
+    .trim();
+}
+
+/** Sends the current page title (cleaned) to the title bar pill. */
+function pushTitle(title: string): void {
+  titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
+}
+
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
 function createWindow(): void {
   const win = new BaseWindow({
@@ -67,7 +80,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: INITIAL_BG,
     titleBarStyle: 'hiddenInset', // keep the traffic lights, drop the native bar
-    trafficLightPosition: { x: 19, y: 13 },
+    trafficLightPosition: { x: 20, y: 16 },
   });
   mainWindow = win;
   win.on('closed', () => {
@@ -135,9 +148,7 @@ function createWindow(): void {
   });
   wc.on('did-navigate', pushNavState);
   wc.on('did-navigate-in-page', pushNavState);
-  wc.on('page-title-updated', (_e, title) =>
-    titleBarView?.webContents.send('titlebar:title', title),
-  );
+  wc.on('page-title-updated', (_e, title) => pushTitle(title));
 
   const show = (): void => win.show();
   wc.once('did-finish-load', show);
@@ -181,10 +192,7 @@ function registerIpc(): void {
   // Title bar finished loading -> hand it the current state.
   ipcMain.on('titlebar:ready', () => {
     titleBarView?.webContents.send('titlebar:theme', { dark: lastDark });
-    titleBarView?.webContents.send(
-      'titlebar:title',
-      siteView?.webContents.getTitle() ?? '',
-    );
+    pushTitle(siteView?.webContents.getTitle() ?? '');
     pushNavState();
   });
 }

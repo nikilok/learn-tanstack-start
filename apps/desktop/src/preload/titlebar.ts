@@ -27,20 +27,27 @@ const STYLE = `
     font:600 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     -webkit-app-region:drag; -webkit-user-select:none; user-select:none; overflow:hidden;
   }
-  /* Pinned left so it never moves when the centered title changes width. */
-  .nav { position:absolute; left:100px; top:50%; transform:translateY(-50%); display:flex; gap:4px; -webkit-app-region:no-drag; }
-  .nav button {
-    width:30px; height:26px; border:0; padding:0; background:transparent; color:var(--tb-fg);
-    border-radius:6px; cursor:pointer; display:grid; place-items:center; opacity:.6;
-    transition:opacity .12s, background .12s;
+  /* Pinned left, in its own pill with a divider — never moves when the title resizes. */
+  .nav {
+    position:absolute; left:100px; top:50%; transform:translateY(-50%);
+    display:flex; align-items:center; height:32px; padding:0 5px;
+    border-radius:9999px; background:var(--tb-box-bg); border:1px solid var(--tb-box-bd);
+    backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); -webkit-app-region:no-drag;
   }
-  .nav button:hover:not(:disabled){ background:var(--tb-btn); opacity:.95; }
+  .nav button {
+    width:30px; height:24px; border:0; padding:0; background:transparent; color:var(--tb-fg);
+    cursor:pointer; display:grid; place-items:center; opacity:.55;
+    transition:opacity .12s;
+  }
+  .nav button:hover:not(:disabled){ opacity:1; }
   .nav button:disabled{ opacity:.25; cursor:default; }
+  .nav .div { width:1px; height:16px; margin:0 3px; background:var(--tb-box-bd); flex:none; }
+  /* Fixed-width pill; the title stays dead-centered inside it. */
   .titlebox {
     position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    display:flex; align-items:center; gap:8px; min-width:0;
-    max-width:calc(100vw - 360px); /* stays centered, clear of the fixed left arrows */
-    padding:4px 16px; border-radius:9999px;
+    width:min(460px, calc(100vw - 400px)); height:32px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    padding:0 16px; border-radius:9999px;
     background:var(--tb-box-bg); border:1px solid var(--tb-box-bd);
     backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
   }
@@ -60,6 +67,7 @@ function build(): void {
   document.body.innerHTML =
     `<div class="nav">` +
     `<button id="tb-back" aria-label="Back" title="Back">${BACK_ICON}</button>` +
+    `<span class="div"></span>` +
     `<button id="tb-fwd" aria-label="Forward" title="Forward">${FWD_ICON}</button>` +
     `</div>` +
     `<div class="titlebox"><img id="tb-icon" src="${ICON_LIGHT}" alt=""><span id="tb-title">SponsorSearch</span></div>`;

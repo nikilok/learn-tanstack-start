@@ -44,6 +44,7 @@ let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
 let lastDark = true;
+let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -209,6 +210,16 @@ function registerIpc(): void {
     },
   );
 
+  // Title-bar utility buttons -> the web app's existing handlers (via its preload).
+  ipcMain.on('titlebar:command', (_event, cmd: string) =>
+    siteView?.webContents.send('ss:command', cmd),
+  );
+  // The web app reports its cursor on/off so the title-bar icon can mirror it.
+  ipcMain.on('ss:cursor', (_event, on: boolean) => {
+    lastCursorOn = Boolean(on);
+    titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
+  });
+
   // Back/forward from the title bar -> drive the site view's history.
   ipcMain.on('titlebar:nav', (_event, dir: 'back' | 'forward') => {
     const h = siteView?.webContents.navigationHistory;
@@ -221,6 +232,7 @@ function registerIpc(): void {
   // Title bar finished loading -> hand it the current state.
   ipcMain.on('titlebar:ready', () => {
     titleBarView?.webContents.send('titlebar:theme', { dark: lastDark });
+    titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     pushTitle(siteView?.webContents.getTitle() ?? '');
     pushNavState();
   });

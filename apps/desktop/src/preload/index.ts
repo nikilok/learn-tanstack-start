@@ -1,7 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { IpcRendererEvent } from 'electron';
 
 // A safe marker so the web app can detect the desktop shell.
 contextBridge.exposeInMainWorld('isSponsorSearchDesktop', true);
+
+// Command bridge: the web app receives title-bar actions and reports state back.
+contextBridge.exposeInMainWorld('ssDesktop', {
+  onCommand: (cb: (cmd: string) => void) => {
+    const listener = (_e: IpcRendererEvent, cmd: string) => cb(cmd);
+    ipcRenderer.on('ss:command', listener);
+    return () => ipcRenderer.removeListener('ss:command', listener);
+  },
+  reportCursor: (on: boolean) => ipcRenderer.send('ss:cursor', on),
+});
 
 /** Forwards the page's resolved theme (exact colour + explicit light/dark vs auto) to main. */
 function reportTheme(): void {

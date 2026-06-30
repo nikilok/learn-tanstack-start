@@ -41,3 +41,8 @@ export function setCustomCursorEnabled(enabled: boolean): void {
 export function useCustomCursorEnabled(): boolean {
   return useSyncExternalStore(subscribe, readStorage, getServerSnapshot);
 }
+
+/** Imperative read of the persisted on/off choice (for the desktop command bridge). */
+export function getCustomCursorEnabled(): boolean {
+  return readStorage();
+}

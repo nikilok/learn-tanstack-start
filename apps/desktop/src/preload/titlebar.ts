@@ -19,4 +19,6 @@ contextBridge.exposeInMainWorld('titlebar', {
   onTitle: (cb: (t: string) => void) => subscribe('titlebar:title', cb),
   onTheme: (cb: (t: { dark: boolean }) => void) =>
     subscribe('titlebar:theme', cb),
+  onCursor: (cb: (on: boolean) => void) => subscribe('titlebar:cursor', cb),
+  command: (cmd: string) => ipcRenderer.send('titlebar:command', cmd),
 });

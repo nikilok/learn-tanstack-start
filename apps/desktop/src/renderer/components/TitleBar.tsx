@@ -1,10 +1,20 @@
 import { useTitleBar } from '../hooks/useTitleBar';
+import { Controls } from './Controls';
 import { NavControls } from './NavControls';
 import { TitlePill } from './TitlePill';
 
-/** The desktop title bar: pinned nav controls + a centered title pill, fed by the IPC bridge. */
+/** The desktop title bar: pinned nav controls, a centered title pill, and utility controls. */
 export function TitleBar() {
-  const { canGoBack, canGoForward, title, back, forward } = useTitleBar();
+  const {
+    canGoBack,
+    canGoForward,
+    title,
+    dark,
+    cursorOn,
+    back,
+    forward,
+    command,
+  } = useTitleBar();
   return (
     <>
       <NavControls
@@ -14,6 +24,7 @@ export function TitleBar() {
         onForward={forward}
       />
       <TitlePill title={title} />
+      <Controls dark={dark} cursorOn={cursorOn} onCommand={command} />
     </>
   );
 }

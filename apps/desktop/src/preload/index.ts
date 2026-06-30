@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('ssDesktop', {
     return () => ipcRenderer.removeListener('ss:command', listener);
   },
   reportCursor: (on: boolean) => ipcRenderer.send('ss:cursor', on),
+  pokeTheme: () => reportTheme(), // re-report after a mode change that didn't flip the class
+  copy: (text: string) => ipcRenderer.send('ss:clipboard', text),
 });
 
 /** Forwards the page's resolved theme (exact colour + explicit light/dark vs auto) to main. */
@@ -20,13 +22,17 @@ function reportTheme(): void {
   // 'auto'/unset -> 'system' so the native chrome keeps tracking the OS appearance.
   const themeSource =
     stored === 'light' || stored === 'dark' ? stored : 'system';
+  const mode =
+    stored === 'light' || stored === 'dark' || stored === 'auto'
+      ? stored
+      : 'auto';
   const color =
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
       ?.content ??
     (document.documentElement.classList.contains('dark')
       ? '#0a0a0a'
       : '#ffffff');
-  ipcRenderer.send('ss:theme', { themeSource, color });
+  ipcRenderer.send('ss:theme', { themeSource, color, mode });
 }
 
 // The site swaps the light/dark class on <html> (and the theme-color meta) on every

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   app,
   BaseWindow,
+  clipboard,
   ipcMain,
   nativeTheme,
   shell,
@@ -45,6 +46,7 @@ let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
+let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -191,7 +193,10 @@ function registerIpc(): void {
   // Theme reported by the site preload -> tint the strip + native chrome.
   ipcMain.on(
     'ss:theme',
-    (_event, payload: { themeSource?: string; color?: string }) => {
+    (
+      _event,
+      payload: { themeSource?: string; color?: string; mode?: string },
+    ) => {
       const themeSource = payload?.themeSource;
       if (
         themeSource === 'light' ||
@@ -200,13 +205,18 @@ function registerIpc(): void {
       ) {
         nativeTheme.themeSource = themeSource; // traffic-light + text contrast
       }
+      if (payload?.mode) lastMode = payload.mode;
       const color = payload?.color;
       if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
         lastDark = isDarkColor(color);
         mainWindow?.setBackgroundColor(color);
         titleBarView?.setBackgroundColor(color);
-        titleBarView?.webContents.send('titlebar:theme', { dark: lastDark });
       }
+      // Always push: the mode can change without the colour changing (e.g. dark -> auto).
+      titleBarView?.webContents.send('titlebar:theme', {
+        dark: lastDark,
+        mode: lastMode,
+      });
     },
   );
 
@@ -218,6 +228,13 @@ function registerIpc(): void {
   ipcMain.on('ss:cursor', (_event, on: boolean) => {
     lastCursorOn = Boolean(on);
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
+  });
+  // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
+  ipcMain.on('ss:clipboard', (_event, text: string) => {
+    if (typeof text === 'string' && text) {
+      clipboard.writeText(text);
+      titleBarView?.webContents.send('titlebar:copied');
+    }
   });
 
   // Back/forward from the title bar -> drive the site view's history.
@@ -231,7 +248,10 @@ function registerIpc(): void {
 
   // Title bar finished loading -> hand it the current state.
   ipcMain.on('titlebar:ready', () => {
-    titleBarView?.webContents.send('titlebar:theme', { dark: lastDark });
+    titleBarView?.webContents.send('titlebar:theme', {
+      dark: lastDark,
+      mode: lastMode,
+    });
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     pushTitle(siteView?.webContents.getTitle() ?? '');
     pushNavState();

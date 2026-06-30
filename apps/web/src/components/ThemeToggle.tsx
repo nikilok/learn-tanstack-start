@@ -77,6 +77,11 @@ export function cycleTheme(): ThemeMode {
   return next;
 }
 
+/** Re-apply the currently stored mode — used to follow the OS appearance in `auto`. */
+export function refreshTheme(): void {
+  applyThemeMode(getInitialMode(), true);
+}
+
 /**
  * Three-state theme toggle button cycling light -> dark -> auto -> light.
  * Hydrates from `localStorage` after mount (the initial paint is handled by a

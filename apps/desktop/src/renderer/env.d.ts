@@ -8,8 +8,9 @@ interface TitlebarApi {
     cb: (s: { canGoBack: boolean; canGoForward: boolean }) => void,
   ): Unsubscribe;
   onTitle(cb: (t: string) => void): Unsubscribe;
-  onTheme(cb: (t: { dark: boolean }) => void): Unsubscribe;
+  onTheme(cb: (t: { dark: boolean; mode: string }) => void): Unsubscribe;
   onCursor(cb: (on: boolean) => void): Unsubscribe;
+  onCopied(cb: () => void): Unsubscribe;
   command(cmd: 'toggle-theme' | 'toggle-cursor' | 'share'): void;
 }
 

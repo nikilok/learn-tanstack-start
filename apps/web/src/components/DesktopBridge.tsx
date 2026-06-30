@@ -7,7 +7,7 @@ import {
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
 import { buildCanonical } from '../utils/canonical';
-import { cycleTheme } from './ThemeToggle';
+import { cycleTheme, refreshTheme } from './ThemeToggle';
 
 /**
  * In desktop (Electron) mode the native title bar owns the header's utility
@@ -23,29 +23,24 @@ export default function DesktopBridge() {
     const api = window.ssDesktop;
     if (!api) return; // web mode
 
-    async function share() {
+    // The click happens in the title-bar document, so there's no user gesture here —
+    // copy via the main-process clipboard (the web app's canonical URL).
+    function share() {
       const { pathname, search } = router.state.location;
-      const url = buildCanonical(pathname, search as Record<string, string>);
-      if (navigator.share) {
-        try {
-          await navigator.share({ title: document.title, url });
-        } catch {
-          /* share sheet cancelled */
-        }
-        return;
-      }
-      try {
-        await navigator.clipboard?.writeText(url);
-      } catch {
-        /* clipboard unavailable */
-      }
+      window.ssDesktop?.copy(
+        buildCanonical(pathname, search as Record<string, string>),
+      );
     }
 
     return api.onCommand((cmd) => {
-      if (cmd === 'toggle-theme') cycleTheme();
-      else if (cmd === 'toggle-cursor')
+      if (cmd === 'toggle-theme') {
+        cycleTheme();
+        window.ssDesktop?.pokeTheme(); // re-report mode even if the resolved theme is unchanged
+      } else if (cmd === 'toggle-cursor') {
         setCustomCursorEnabled(!getCustomCursorEnabled());
-      else if (cmd === 'share') void share();
+      } else if (cmd === 'share') {
+        share();
+      }
     });
   }, [router]);
 
@@ -53,6 +48,22 @@ export default function DesktopBridge() {
   useEffect(() => {
     window.ssDesktop?.reportCursor(cursorOn);
   }, [cursorOn]);
+
+  // In `auto` mode the desktop must follow OS appearance changes itself — the hidden
+  // web ThemeToggle's listener is unreliable once the mode was set from the title bar.
+  useEffect(() => {
+    if (!window.ssDesktop) return;
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => {
+      const mode = window.localStorage.getItem('theme');
+      if (mode !== 'light' && mode !== 'dark') {
+        refreshTheme();
+        window.ssDesktop?.pokeTheme();
+      }
+    };
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
 
   return null;
 }

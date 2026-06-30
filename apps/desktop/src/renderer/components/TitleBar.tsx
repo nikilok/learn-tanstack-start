@@ -9,8 +9,9 @@ export function TitleBar() {
     canGoBack,
     canGoForward,
     title,
-    dark,
+    themeMode,
     cursorOn,
+    copied,
     back,
     forward,
     command,
@@ -24,7 +25,12 @@ export function TitleBar() {
         onForward={forward}
       />
       <TitlePill title={title} />
-      <Controls dark={dark} cursorOn={cursorOn} onCommand={command} />
+      <Controls
+        themeMode={themeMode}
+        cursorOn={cursorOn}
+        copied={copied}
+        onCommand={command}
+      />
     </>
   );
 }

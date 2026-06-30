@@ -17,8 +17,9 @@ contextBridge.exposeInMainWorld('titlebar', {
     cb: (s: { canGoBack: boolean; canGoForward: boolean }) => void,
   ) => subscribe('titlebar:navstate', cb),
   onTitle: (cb: (t: string) => void) => subscribe('titlebar:title', cb),
-  onTheme: (cb: (t: { dark: boolean }) => void) =>
+  onTheme: (cb: (t: { dark: boolean; mode: string }) => void) =>
     subscribe('titlebar:theme', cb),
   onCursor: (cb: (on: boolean) => void) => subscribe('titlebar:cursor', cb),
+  onCopied: (cb: () => void) => subscribe('titlebar:copied', () => cb()),
   command: (cmd: string) => ipcRenderer.send('titlebar:command', cmd),
 });

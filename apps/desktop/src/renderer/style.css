@@ -5,7 +5,8 @@
 :root {
   --tb-fg: #1f2430;
   --tb-faint: #7a7a7a;
-  --tb-box-bg: rgba(255, 255, 255, 0.8);
+  /* subtle grey fill so the pill stands out on white */
+  --tb-box-bg: rgba(0, 0, 0, 0.05);
   --tb-box-bd: #ebebeb;
   --tb-pill-w: min(460px, calc(100vw - 400px));
   --tb-mark: #001c55; /* mirrors --logo-navy */
@@ -14,7 +15,8 @@
 
 .dark {
   --tb-fg: #e7e9ee;
-  --tb-box-bg: rgba(10, 10, 10, 0.8);
+  /* lighter fill so the pill lifts off the dark strip */
+  --tb-box-bg: rgba(255, 255, 255, 0.07);
   --tb-box-bd: #2a2a2a;
   --tb-mark: #e0e7ff;
   --tb-mark-red: #f87171;

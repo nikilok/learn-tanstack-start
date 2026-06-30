@@ -36,8 +36,10 @@ if (isDev) {
     },
   );
 }
-// The custom title bar lives in its own view above the site; the site renders in a
-// view BELOW it, so its viewport simply starts here — the hosted page is untouched.
+// The custom title bar floats as a transparent overlay over the top of the full-height
+// site view, so the page's own background shows through and it reads as one surface. The
+// web app reserves this much top space (html[data-desktop]) so content clears the bar —
+// keep the two in sync.
 const TITLEBAR_HEIGHT = 46;
 const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
 
@@ -112,26 +114,8 @@ function createWindow(): void {
     }
   });
 
-  // Title bar (custom chrome). Its colour is the view background (set on theme);
-  // the page body is transparent and just hosts the buttons + centered title.
-  const bar = new WebContentsView({
-    webPreferences: {
-      preload: join(__dirname, '../preload/titlebar.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  bar.setBackgroundColor(INITIAL_BG);
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void bar.webContents.loadURL(process.env['ELECTRON_RENDERER_URL']);
-  } else {
-    void bar.webContents.loadFile(join(__dirname, '../renderer/index.html'));
-  }
-  titleBarView = bar;
-  win.contentView.addChildView(bar);
-
-  // The hosted site, rendered below the title bar.
+  // The hosted site fills the whole window; the transparent title bar floats over its top
+  // so the page's own background (grid + glow) shows through as one seamless surface.
   const view = new WebContentsView({
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -142,17 +126,32 @@ function createWindow(): void {
   });
   view.setBackgroundColor(INITIAL_BG);
   siteView = view;
-  win.contentView.addChildView(view);
+
+  // Title bar (custom chrome): a transparent overlay. Its page body and view background
+  // are both clear, so only the buttons + centered title paint and the site shows behind.
+  const bar = new WebContentsView({
+    webPreferences: {
+      preload: join(__dirname, '../preload/titlebar.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  bar.setBackgroundColor('#00000000');
+  if (process.env['ELECTRON_RENDERER_URL']) {
+    void bar.webContents.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  } else {
+    void bar.webContents.loadFile(join(__dirname, '../renderer/index.html'));
+  }
+  titleBarView = bar;
+
+  win.contentView.addChildView(view); // site fills the window, behind…
+  win.contentView.addChildView(bar); // …the transparent title bar on top
 
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
+    view.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
-    view.setBounds({
-      x: 0,
-      y: TITLEBAR_HEIGHT,
-      width,
-      height: Math.max(0, height - TITLEBAR_HEIGHT),
-    });
   };
   layout();
   win.on('resize', layout);
@@ -210,7 +209,7 @@ function registerIpc(): void {
       if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
         lastDark = isDarkColor(color);
         mainWindow?.setBackgroundColor(color);
-        titleBarView?.setBackgroundColor(color);
+        siteView?.setBackgroundColor(color); // load placeholder; the title bar stays transparent
       }
       // Always push: the mode can change without the colour changing (e.g. dark -> auto).
       titleBarView?.webContents.send('titlebar:theme', {

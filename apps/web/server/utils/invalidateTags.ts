@@ -11,8 +11,15 @@ export const TAG_BATCH_SIZE = 16;
  */
 export async function invalidateTags(tags: string[]): Promise<void> {
   if (tags.length === 0) return;
-  const vercel = new Vercel({ bearerToken: process.env.VERCEL_API_TOKEN });
-  const projectIdOrName = process.env.VERCEL_PROJECT_ID as string;
+  const token = process.env.VERCEL_API_TOKEN;
+  const projectIdOrName = process.env.VERCEL_PROJECT_ID;
+  if (!token || !projectIdOrName) {
+    console.error(
+      '[invalidateTags] VERCEL_API_TOKEN / VERCEL_PROJECT_ID missing — skipping purge',
+    );
+    return;
+  }
+  const vercel = new Vercel({ bearerToken: token });
   for (let i = 0; i < tags.length; i += TAG_BATCH_SIZE) {
     await vercel.edgeCache.invalidateByTags({
       projectIdOrName,

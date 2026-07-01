@@ -46,6 +46,10 @@ export const Route = createFileRoute('/download')({
 
 /** Best-effort OS from a UA string, to surface the most likely build first. */
 function osFromUA(ua: string): DesktopPlatform | null {
+  // Mobile/tablet UAs carry desktop-looking tokens (Android → "Linux", older
+  // iPadOS → "iPad"), so exclude them first to avoid a wrong desktop CTA. (Newest
+  // iPadOS masquerades fully as "Macintosh" and can't be caught by UA alone.)
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return null;
   if (/Mac/i.test(ua)) return 'mac';
   if (/Win/i.test(ua)) return 'win';
   if (/Linux|X11/i.test(ua)) return 'linux';

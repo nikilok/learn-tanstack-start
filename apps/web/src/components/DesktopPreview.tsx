@@ -1,4 +1,5 @@
 import type { DesktopPlatform } from '../api/releases';
+import { PLATFORM_LABEL } from './downloadMeta';
 
 /**
  * Desktop preview screenshots per platform + theme, referenced entirely
@@ -29,16 +30,17 @@ export default function DesktopPreview({
   platform: DesktopPlatform;
 }) {
   const shots = DESKTOP_SHOTS[platform];
+  const alt = `SponsorSearch desktop app on ${PLATFORM_LABEL[platform]}`;
   return (
     <>
       <img
         src={shots.light}
-        alt=""
+        alt={alt}
         className="block h-full w-full object-cover dark:hidden"
       />
       <img
         src={shots.dark}
-        alt=""
+        alt={alt}
         className="hidden h-full w-full object-cover dark:block"
       />
     </>

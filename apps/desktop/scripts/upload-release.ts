@@ -116,6 +116,14 @@ async function main() {
     );
   }
 
+  // Bail BEFORE mirroring the update feed — a build with no recognized installer
+  // (naming drift / partial failure) must not overwrite the live downloads/latest/
+  // feed with a broken/mismatched one.
+  if (assets.length === 0) {
+    console.error('[upload-release] no page installers found in dist/');
+    process.exit(1);
+  }
+
   for (const file of files) {
     if (!isFeedArtifact(file)) continue;
     const body = await readFile(join(DIST, file));
@@ -126,11 +134,6 @@ async function main() {
       token: TOKEN,
     });
     console.log(`[upload-release] feed: ${file}`);
-  }
-
-  if (assets.length === 0) {
-    console.error('[upload-release] no page installers found in dist/');
-    process.exit(1);
   }
 
   const res = await fetch(`${SITE}/api/releases`, {

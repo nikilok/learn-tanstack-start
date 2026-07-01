@@ -17,7 +17,11 @@
  *  - POSTGRES_URL     — shared Neon URL
  */
 import { createClient } from '@ss/db/client';
-import { desktopDownloads, desktopReleaseAssets } from '@ss/db/schema';
+import {
+  desktopDownloads,
+  desktopReleaseAssets,
+  desktopReleases,
+} from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
 import { eq } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
@@ -46,8 +50,8 @@ export default defineEventHandler((event) => {
 
   // Log genuine installer downloads by resolving the asset via its guid (the
   // authoritative key already in the URL): spoofed / latest-feed / unknown paths
-  // never insert, and the recorded arch/format/scope match desktop_release_assets
-  // exactly instead of a heuristic filename re-parse. Runs off the redirect
+  // never insert, and every recorded field — incl. version, from the joined
+  // release — comes from the DB, not the (spoofable) URL. Off the redirect
   // critical path via waitUntil.
   if (
     platform &&
@@ -61,18 +65,28 @@ export default defineEventHandler((event) => {
     const country = event.req.headers.get('x-vercel-ip-country');
     waitUntil(
       (async () => {
-        const [asset] = await db
-          .select()
+        const [row] = await db
+          .select({
+            platform: desktopReleaseAssets.platform,
+            arch: desktopReleaseAssets.arch,
+            format: desktopReleaseAssets.format,
+            installScope: desktopReleaseAssets.installScope,
+            version: desktopReleases.version,
+          })
           .from(desktopReleaseAssets)
+          .innerJoin(
+            desktopReleases,
+            eq(desktopReleaseAssets.releaseId, desktopReleases.id),
+          )
           .where(eq(desktopReleaseAssets.guid, guid))
           .limit(1);
-        if (!asset) return; // unknown guid — spoofed or stale path, don't log
+        if (!row) return; // unknown guid — spoofed or stale path, don't log
         await db.insert(desktopDownloads).values({
-          version,
-          platform: asset.platform,
-          arch: asset.arch,
-          format: asset.format,
-          installScope: asset.installScope,
+          version: row.version,
+          platform: row.platform,
+          arch: row.arch,
+          format: row.format,
+          installScope: row.installScope,
           country,
         });
       })().catch((err) => {

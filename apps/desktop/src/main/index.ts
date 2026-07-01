@@ -197,6 +197,15 @@ function createWindow(): void {
     clearTimeout(showTimer);
     show();
   });
+  // Retry a failed load (offline / DNS / prod outage) rather than stranding a blank
+  // window — ignore -3 (ABORTED), which fires on normal in-page navigations.
+  wc.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) {
+      setTimeout(() => {
+        if (!wc.isDestroyed()) void wc.loadURL(APP_URL);
+      }, 2000);
+    }
+  });
   win.on('focus', () => wc.focus());
 
   void wc.loadURL(APP_URL);

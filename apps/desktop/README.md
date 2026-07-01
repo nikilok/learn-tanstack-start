@@ -16,8 +16,9 @@ Override the target with `DESKTOP_APP_URL` (e.g. `DESKTOP_APP_URL=https://web.lo
 
 - `src/main/` — main process: window, hardened `webPreferences`, external-link
   handling, native menu, auto-update.
-- `src/preload/` — exposes only `window.isSponsorSearchDesktop` (CommonJS — required
-  for a sandboxed preload).
+- `src/preload/` — exposes `window.isSponsorSearchDesktop` (shell marker) + the
+  `window.ssDesktop` command bridge (`onCommand`/`reportCursor`/`pokeTheme`/`copy`)
+  (CommonJS — required for a sandboxed preload).
 - The renderer is the remote site; there is no local renderer bundle.
 
 ## Package locally

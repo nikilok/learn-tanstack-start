@@ -38,13 +38,16 @@ export function useTitleBar(): TitleBarModel {
       setThemeMode(t.mode);
     });
     const offCursor = window.titlebar.onCursor(setCursorOn);
+    let copiedTimer: ReturnType<typeof setTimeout> | undefined;
     const offCopied = window.titlebar.onCopied(() => {
+      clearTimeout(copiedTimer);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      copiedTimer = setTimeout(() => setCopied(false), 1500);
     });
     const offMax = window.titlebar.onMaximized(setMaximized);
     window.titlebar.ready();
     return () => {
+      clearTimeout(copiedTimer);
       offNav();
       offTitle();
       offTheme();

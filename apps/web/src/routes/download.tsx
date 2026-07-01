@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
+import { createIsomorphicFn } from '@tanstack/react-start';
+import { getRequestHeader } from '@tanstack/start-server-core';
 import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -37,23 +39,26 @@ export const Route = createFileRoute('/download')({
   component: Download,
 });
 
-/** Best-effort OS guess from the UA, to surface the most likely build first. */
-function detectOS(): DesktopPlatform | null {
-  const ua = navigator.userAgent;
+/** Best-effort OS from a UA string, to surface the most likely build first. */
+function osFromUA(ua: string): DesktopPlatform | null {
   if (/Mac/i.test(ua)) return 'mac';
   if (/Win/i.test(ua)) return 'win';
   if (/Linux|X11/i.test(ua)) return 'linux';
   return null;
 }
 
+/** Isomorphic OS detect — server reads the request UA header, client reads navigator — so the native hero button renders on SSR with no post-hydration flash. */
+const detectOS = createIsomorphicFn()
+  .server(() => osFromUA(getRequestHeader('user-agent') ?? ''))
+  .client(() => osFromUA(navigator.userAgent));
+
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
   const { data: releases = [] } = useQuery(desktopReleasesQueryOptions);
-  const [os, setOS] = useState<DesktopPlatform | null>(null);
+  const os = detectOS();
   const [inApp, setInApp] = useState(false);
 
   useEffect(() => {
-    setOS(detectOS());
     setInApp(
       Boolean(
         (window as { isSponsorSearchDesktop?: boolean }).isSponsorSearchDesktop,

@@ -19,8 +19,8 @@ export default function DownloadCard({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col rounded-2xl border border-(--line) bg-(--sponsor-card-bg) p-4">
-      <div className="aspect-video w-full overflow-hidden rounded-xl border border-(--line) bg-(--bg-base)">
+    <div className="flex flex-col rounded-lg border border-(--line) bg-(--sponsor-card-bg) p-4">
+      <div className="aspect-video w-full overflow-hidden rounded-md border border-(--line) bg-(--bg-base)">
         {src ? (
           <img src={src} alt="" className="h-full w-full object-cover" />
         ) : (

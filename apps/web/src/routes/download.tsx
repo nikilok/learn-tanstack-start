@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { getDownloadsFlag } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
@@ -11,6 +12,14 @@ import { PLATFORM_LABEL, recommendedAsset } from '../components/downloadMeta';
 import { DownloadVersion } from '../components/DownloadVersion';
 
 export const Route = createFileRoute('/download')({
+  // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
+  // redirecting, so a visitor can't tell it's flag-restricted vs nonexistent.
+  // Entry points are hidden too, so this only catches direct-URL / crawler hits.
+  beforeLoad: async () => {
+    if (!(await getDownloadsFlag())) {
+      throw notFound();
+    }
+  },
   head: () => ({
     meta: [
       { title: 'Download the desktop app — SponsorSearch.co.uk' },

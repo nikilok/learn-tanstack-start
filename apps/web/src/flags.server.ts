@@ -12,8 +12,22 @@ export type FlagSpec<T> = {
 /** Serializable value a flag resolves to — limited to JSON primitives because the discovery endpoint exposes flag definitions as JSON (and any future client-side flag bridge must serialize them too). */
 export type FlagValue = boolean | string | number;
 
-/** Active flag registry — empty until the next experiment. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
-export const flags: Record<string, FlagSpec<FlagValue>> = {};
+/** Gates the desktop-app download UI (header button, footer link, /download page) so the branch can ship dark until the release pipeline is ready. Default hidden; flip in the Vercel dashboard (or Flags Explorer) when ready. */
+export const downloadsFlag: FlagSpec<boolean> = {
+  key: 'downloads',
+  description:
+    'Show the desktop-app download entry points and the /download page.',
+  defaultValue: false,
+  options: [
+    { value: false, label: 'Hidden' },
+    { value: true, label: 'Visible' },
+  ],
+};
+
+/** Active flag registry. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
+export const flags: Record<string, FlagSpec<FlagValue>> = {
+  [downloadsFlag.key]: downloadsFlag,
+};
 
 /** Resolves a flag server-side: a signed Flags Explorer override cookie value wins; otherwise the Vercel Flags adapter looks up the dashboard-managed value for this environment. Cookie signatures are verified against FLAGS_SECRET so client tampering invalidates the override. */
 export async function evaluateFlag<T>(

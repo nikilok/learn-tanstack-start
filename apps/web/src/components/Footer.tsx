@@ -1,6 +1,8 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
 
+import { downloadsFlagQueryOptions } from '../api/flags';
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 import Logo from './Logo';
 import LondonSkyline from './LondonSkyline';
@@ -13,6 +15,7 @@ import LondonSkyline from './LondonSkyline';
  */
 export default function Footer() {
   const year = new Date().getFullYear();
+  const { data: downloadsEnabled } = useQuery(downloadsFlagQueryOptions);
 
   return (
     <footer className="site-footer relative mt-20 px-4 pt-10 pb-10">
@@ -81,17 +84,19 @@ export default function Footer() {
             >
               Privacy Policy
             </Link>
-            <span className="footer-desktop-link contents">
-              <span aria-hidden="true" className="text-(--sea-ink-faint)">
-                &middot;
+            {downloadsEnabled ? (
+              <span className="footer-desktop-link contents">
+                <span aria-hidden="true" className="text-(--sea-ink-faint)">
+                  &middot;
+                </span>
+                <Link
+                  to="/download"
+                  className="no-underline transition hover:text-(--sea-ink)"
+                >
+                  Desktop app
+                </Link>
               </span>
-              <Link
-                to="/download"
-                className="no-underline transition hover:text-(--sea-ink)"
-              >
-                Desktop app
-              </Link>
-            </span>
+            ) : null}
           </div>
 
           <p className="m-0 text-xs text-(--sea-ink-faint)">

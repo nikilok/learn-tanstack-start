@@ -14,6 +14,7 @@ import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mountVercelToolbar } from '@vercel/toolbar/vite';
 import { useEffect } from 'react';
 
+import { downloadsFlagQueryOptions } from '../api/flags';
 import AppSplash from '../components/AppSplash';
 import DesktopBridge from '../components/DesktopBridge';
 import Footer from '../components/Footer';
@@ -41,6 +42,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
     errorComponent: RouteError,
     notFoundComponent: NotFound,
+    // Resolve the downloads flag once (SSR) so the header button, footer link,
+    // and /download gate all read a cached value with no first-paint flash.
+    loader: async ({ context: { queryClient } }) => {
+      await queryClient.ensureQueryData(downloadsFlagQueryOptions);
+    },
     head: () => ({
       meta: [
         {

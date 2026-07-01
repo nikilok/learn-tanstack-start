@@ -1,8 +1,13 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 
-/** Primary header CTA → desktop-app download page; sm+ only (no native mobile app yet). Inverted fill. */
+import { downloadsFlagQueryOptions } from '../api/flags';
+
+/** Primary header CTA → desktop-app download page; gated by the `downloads` flag, sm+ only. Inverted fill. */
 export default function DownloadButton() {
+  const { data: enabled } = useQuery(downloadsFlagQueryOptions);
+  if (!enabled) return null;
   return (
     <Link
       to="/download"

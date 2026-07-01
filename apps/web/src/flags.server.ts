@@ -17,7 +17,7 @@ export const downloadsFlag: FlagSpec<boolean> = {
   key: 'downloads',
   description:
     'Show the desktop-app download entry points and the /download page.',
-  defaultValue: false,
+  defaultValue: true,
   options: [
     { value: false, label: 'Hidden' },
     { value: true, label: 'Visible' },

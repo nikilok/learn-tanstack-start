@@ -93,7 +93,7 @@ export default function Footer() {
                   to="/download"
                   className="no-underline transition hover:text-(--sea-ink)"
                 >
-                  Desktop app
+                  Download
                 </Link>
               </span>
             ) : null}

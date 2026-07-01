@@ -16,8 +16,8 @@ mac:
   category: public.app-category.business
   target:
     - target: dmg
-      arch: universal
-    - target: zip # required by electron-updater for macOS
+      arch: [arm64, x64, universal]
+    - target: zip # universal zip drives electron-updater on macOS (updates any arch)
       arch: universal
   artifactName: ${productName}-mac-${arch}.${ext}
   hardenedRuntime: true
@@ -29,8 +29,11 @@ mac:
 win:
   target:
     - target: nsis
-      arch: x64
-  artifactName: ${productName}-win-${arch}.${ext}
+      arch: [x64, arm64]
+  # This (default) build is the per-user installer; the release workflow runs a
+  # second pass with -c.nsis.perMachine=true + a '-system' artifactName override
+  # for the System installers. '-user' keeps filenames unique + parseable.
+  artifactName: ${productName}-win-${arch}-user.${ext}
 
 nsis:
   oneClick: false
@@ -40,10 +43,17 @@ nsis:
 linux:
   category: Office
   target:
-    - AppImage
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64, arm64]
   artifactName: ${productName}-linux-${arch}.${ext}
 
+# Self-hosted feed: electron-updater fetches latest*.yml (+ the installer) from
+# this stable base, which the Nitro /downloads/latest/ route redirects to Blob.
+# Build with --publish never; the workflow uploads dist/* to Blob itself.
 publish:
-  provider: github
-  owner: nikilok
-  repo: learn-tanstack-start
+  provider: generic
+  url: https://sponsorsearch.co.uk/downloads/latest/

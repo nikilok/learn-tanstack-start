@@ -237,3 +237,67 @@ export const chStreamState = pgTable('ch_stream_state', {
   lastTimepoint: integer('last_timepoint'),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+// Desktop app release registry — one row per published version. Written by the
+// release workflow via POST /api/releases; read by the /download page.
+export const desktopReleases = pgTable('desktop_releases', {
+  id: serial('id').primaryKey(),
+  version: varchar('version', { length: 32 }).notNull().unique(),
+  channel: varchar('channel', { length: 16 }).notNull().default('stable'),
+  notes: text('notes'),
+  publishedAt: timestamp('published_at').defaultNow().notNull(),
+});
+
+// One downloadable installer variant per row (platform × arch × format × install
+// scope). Updater-only zip/yml/blockmap artifacts are NOT stored here — only
+// user-facing downloads. The page derives its label from these columns.
+export const desktopReleaseAssets = pgTable(
+  'desktop_release_assets',
+  {
+    id: serial('id').primaryKey(),
+    releaseId: integer('release_id')
+      .notNull()
+      .references(() => desktopReleases.id, { onDelete: 'cascade' }),
+    platform: varchar('platform', { length: 16 }).notNull(),
+    arch: varchar('arch', { length: 16 }).notNull(),
+    format: varchar('format', { length: 16 }).notNull(),
+    installScope: varchar('install_scope', { length: 16 })
+      .notNull()
+      .default(''),
+    guid: varchar('guid', { length: 32 }).notNull(),
+    fileName: varchar('file_name', { length: 255 }).notNull(),
+    url: text('url').notNull(),
+    size: integer('size'),
+    sha512: varchar('sha512', { length: 128 }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_desktop_asset_variant').on(
+      table.releaseId,
+      table.platform,
+      table.arch,
+      table.format,
+      table.installScope,
+    ),
+    index('idx_desktop_asset_guid').on(table.guid),
+  ],
+);
+
+// Per-download analytics — one row per hit on a versioned installer URL. Counts
+// link *initiations*, not completed downloads.
+export const desktopDownloads = pgTable(
+  'desktop_downloads',
+  {
+    id: serial('id').primaryKey(),
+    version: varchar('version', { length: 32 }).notNull(),
+    platform: varchar('platform', { length: 16 }).notNull(),
+    arch: varchar('arch', { length: 16 }),
+    format: varchar('format', { length: 16 }),
+    installScope: varchar('install_scope', { length: 16 }),
+    country: varchar('country', { length: 2 }),
+    downloadedAt: timestamp('downloaded_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_desktop_downloads_ver_plat').on(table.version, table.platform),
+  ],
+);

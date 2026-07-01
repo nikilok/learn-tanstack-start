@@ -31,25 +31,35 @@ Output lands in `apps/desktop/dist/`.
 
 ## Release (CI)
 
-Push a tag `vX.Y.Z` (matching `package.json` `version`, bumped via `bun pm version`).
-`.github/workflows/desktop-release.yml` builds the macOS / Windows / Linux installers,
-signs + notarizes them, and uploads them to a GitHub Release. electron-builder creates
-a **draft** release — review it and click *Publish* to make the `/download` links and
-auto-update go live.
+Releases are **manually triggered**: GitHub → Actions → **Desktop App** → **Run
+workflow** → pick a semver bump (`patch` / `minor` / `major`).
+`.github/workflows/desktop-release.yml` then:
 
-Stable, version-less artifact names (`SponsorSearch-mac-universal.dmg`,
-`SponsorSearch-win-x64.exe`, `SponsorSearch-linux-x64.AppImage`) keep the
-`releases/latest/download/<file>` links on the site's `/download` page stable.
+1. **version** — `bun pm version <bump>` on `apps/desktop`, commits + tags `vX.Y.Z`,
+   pushes to the branch.
+2. **build** (matrix mac / win / linux) — builds every variant (mac dmg
+   arm64·x64·universal + universal zip; Windows nsis x64·arm64 in User + System;
+   Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and records the
+   release + per-variant URLs in the DB via `POST /api/releases`.
+
+Downloads are served from `sponsorsearch.co.uk/downloads/...` (a Nitro route that
+redirects to Blob) and listed on `/download` straight from the DB — no GitHub
+Releases. Auto-update reads a **generic** electron-updater feed at `/downloads/latest/`
+(the universal-zip mac / user-nsis / AppImage subset). Artifact names encode arch +
+install-scope (`SponsorSearch-mac-arm64.dmg`, `SponsorSearch-win-x64-user.exe`,
+`SponsorSearch-linux-arm64.deb`, …) so `scripts/upload-release.ts` can parse each.
 
 ### Required repository secrets
 
 | Secret | Purpose |
 | --- | --- |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob upload token (also set as a Vercel project env) |
+| `DESKTOP_RELEASE_SECRET` | shared secret for `POST /api/releases` (also a Vercel env) |
 | `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD` | base64 Developer ID Application `.p12` + password |
 | `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` | notarization |
-| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows code-signing `.pfx` + password (optional for v1) |
+| `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows code-signing `.pfx` + password (optional) |
 
-`GITHUB_TOKEN` is provided automatically. Without the Apple secrets a tagged macOS
-build fails at the signing step (notarization needs a signed app) — set them before
-tagging, or use **Run workflow** (manual dispatch) for an unsigned cross-platform
-smoke build.
+Signing + notarization are skipped when those secrets are absent (the build still
+succeeds, unsigned). The **version** job pushes a commit + tag, so the branch it runs
+on must permit that push (a protected `main` needs a PAT/app token). Also set
+`BLOB_PUBLIC_BASE` in the Vercel project env so the `/downloads/...` route resolves to Blob.

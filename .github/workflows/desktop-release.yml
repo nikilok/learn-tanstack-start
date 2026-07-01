@@ -1,17 +1,23 @@
 name: Desktop App
 
 on:
-  push:
-    tags: ['v*'] # vX.Y.Z -> signed, notarized release published to GitHub Releases
   pull_request:
     paths:
       - 'apps/desktop/**'
       - '.github/workflows/desktop-release.yml'
-  workflow_dispatch: # manual unsigned matrix smoke build (no publish)
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Semver bump for this release'
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
 
 concurrency:
+  # Never cancel a release mid-publish; PR smokes are cheap to let finish too.
   group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   smoke:
@@ -31,11 +37,40 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
-  release:
-    # Tagged push (vX.Y.Z) -> sign + notarize + publish. Manual dispatch -> unsigned matrix smoke.
-    if: github.event_name != 'pull_request'
+  version:
+    # Bump apps/desktop version once, commit + tag + push, expose the new version.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
     permissions:
-      contents: write # create the GitHub Release and upload installers
+      contents: write # push the version-bump commit + tag
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - name: Bump version
+        id: bump
+        working-directory: apps/desktop
+        run: |
+          bun pm version ${{ inputs.release_type }} --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Bumped @ss/desktop to $VERSION"
+      - name: Commit, tag & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/desktop/package.json
+          git commit -m "chore(desktop): release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin HEAD --follow-tags
+
+  build:
+    # Build every variant per OS, upload to Vercel Blob, record in the DB.
+    needs: version
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -49,29 +84,67 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.version.outputs.version }} # the tag the version job pushed
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build
 
-      - name: Build, sign & publish (tagged release)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # macOS (dmg arm64/x64/universal + universal zip) and Linux (AppImage/deb/rpm × arch).
+      - name: Build installers (mac / linux)
+        if: matrix.platform != 'win'
         working-directory: apps/desktop
-        run: bunx electron-builder --${{ matrix.platform }} --publish always
+        # Notarize only when Apple creds exist (notarize: true would otherwise hard-fail).
+        run: bunx electron-builder --${{ matrix.platform }} --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code-signing cert per platform (Developer ID .p12 on mac, .pfx on win).
-          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || (matrix.platform == 'win' && secrets.WIN_CSC_LINK || '') }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || (matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '') }}
-          # macOS notarization (ignored on other runners).
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Build (manual dispatch — unsigned, no publish)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      # Windows System installers FIRST (perMachine) so the per-user build below
+      # writes the final latest.yml — electron-updater targets per-user installs.
+      - name: Build Windows System installers
+        if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: bunx electron-builder --${{ matrix.platform }} --dir --publish never
+        run: bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${arch}-system.${ext}'
         env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Build Windows User installers
+        if: matrix.platform == 'win'
+        working-directory: apps/desktop
+        run: bunx electron-builder --win nsis --x64 --arm64 --publish never
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload to Blob + record release
+        working-directory: apps/desktop
+        run: bun scripts/upload-release.ts
+        env:
+          RELEASE_PLATFORM: ${{ matrix.platform }}
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
+
+      # Debug copy on the Actions run (installers only), handy for the first releases.
+      - name: Upload installers as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SponsorSearch-${{ matrix.platform }}-v${{ needs.version.outputs.version }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.rpm
+          if-no-files-found: ignore
+          retention-days: 14

@@ -2,18 +2,16 @@ import type { ReactNode } from 'react';
 
 /**
  * A download surface card (Cursor-style): a preview image on top, then a title,
- * description, and a call-to-action. The image is a placeholder icon for now —
- * pass `src` later to drop in a platform-specific screenshot.
+ * description, and a call-to-action. `image` fills the aspect-video preview box —
+ * pass a screenshot node (e.g. DesktopPreview) or a centred placeholder icon.
  */
 export default function DownloadCard({
-  icon,
-  src,
+  image,
   title,
   description,
   children,
 }: {
-  icon: ReactNode;
-  src?: string;
+  image: ReactNode;
   title: string;
   description: string;
   children: ReactNode;
@@ -21,13 +19,7 @@ export default function DownloadCard({
   return (
     <div className="flex flex-col rounded-lg border border-(--line) bg-(--sponsor-card-bg) p-4">
       <div className="aspect-video w-full overflow-hidden rounded-md border border-(--line) bg-(--bg-base)">
-        {src ? (
-          <img src={src} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            {icon}
-          </div>
-        )}
+        {image}
       </div>
       <h2 className="mt-5 px-1 text-xl font-semibold text-(--sea-ink)">
         {title}

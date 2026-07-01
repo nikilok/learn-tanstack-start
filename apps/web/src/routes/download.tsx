@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
-import { Download as DownloadIcon, Monitor } from 'lucide-react';
+import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { getDownloadsFlag } from '../api/flags';
@@ -10,6 +10,7 @@ import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
 } from '../api/releases';
+import DesktopPreview from '../components/DesktopPreview';
 import DownloadCard from '../components/DownloadCard';
 import { PLATFORM_LABEL, recommendedAsset } from '../components/downloadMeta';
 import { DownloadVersion } from '../components/DownloadVersion';
@@ -84,7 +85,7 @@ function Download() {
       >
         {hasDesktop ? (
           <DownloadCard
-            icon={<Monitor className="size-16 text-(--sea-ink-faint)" />}
+            image={<DesktopPreview platform={heroOS} />}
             title="Desktop"
             description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
           >

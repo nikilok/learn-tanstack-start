@@ -14,7 +14,11 @@ export default function WebAppCard() {
   const { installable, install } = useInstallPrompt();
   return (
     <DownloadCard
-      icon={<ChromeIcon className="size-20" />}
+      image={
+        <div className="flex h-full w-full items-center justify-center">
+          <ChromeIcon className="size-20" />
+        </div>
+      }
       title="Web"
       description="The web version installed locally for faster access. Runs in its own window, no download required."
     >

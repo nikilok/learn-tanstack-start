@@ -15,6 +15,7 @@ import DownloadCard from '../components/DownloadCard';
 import { PLATFORM_LABEL, recommendedAsset } from '../components/downloadMeta';
 import { DownloadVersion } from '../components/DownloadVersion';
 import WebAppCard from '../components/WebAppCard';
+import { useInstallPrompt } from '../hooks/useInstallPrompt';
 
 export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
@@ -58,6 +59,7 @@ const detectOS = createIsomorphicFn()
 function Download() {
   const { data: releases = [] } = useQuery(desktopReleasesQueryOptions);
   const os = detectOS();
+  const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);
 
   useEffect(() => {
@@ -72,6 +74,7 @@ function Download() {
   const hasDesktop = releases.length > 0;
   const heroOS = os ?? 'mac';
   const hero = latest ? recommendedAsset(heroOS, latest.assets[heroOS]) : null;
+  const cardCount = (hasDesktop ? 1 : 0) + (webInstallable ? 1 : 0);
 
   return (
     <main className="page-wrap mx-auto max-w-5xl px-4 py-12 text-(--sea-ink)">
@@ -80,33 +83,40 @@ function Download() {
         Available for macOS, Windows, and Linux.
       </p>
 
-      <div
-        className={`mt-8 grid gap-6 ${hasDesktop ? 'md:grid-cols-2' : 'sm:max-w-md'}`}
-      >
-        {hasDesktop ? (
-          <DownloadCard
-            image={<DesktopPreview platform={heroOS} />}
-            title="Desktop"
-            description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
-          >
-            {inApp ? (
-              <p className="text-sm text-(--sea-ink-soft)">
-                You're already running the desktop app — it keeps itself up to
-                date automatically.
-              </p>
-            ) : hero ? (
-              <a
-                href={hero.url}
-                className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) no-underline transition hover:opacity-90"
-              >
-                <DownloadIcon className="size-4" aria-hidden="true" />
-                Download for {PLATFORM_LABEL[heroOS]}
-              </a>
-            ) : null}
-          </DownloadCard>
-        ) : null}
-        <WebAppCard />
-      </div>
+      {cardCount > 0 ? (
+        <div
+          className={`mt-8 grid gap-6 ${cardCount === 2 ? 'md:grid-cols-2' : 'sm:max-w-md'}`}
+        >
+          {hasDesktop ? (
+            <DownloadCard
+              image={<DesktopPreview platform={heroOS} />}
+              title="Desktop"
+              description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
+            >
+              {inApp ? (
+                <p className="text-sm text-(--sea-ink-soft)">
+                  You're already running the desktop app — it keeps itself up to
+                  date automatically.
+                </p>
+              ) : hero ? (
+                <a
+                  href={hero.url}
+                  className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) no-underline transition hover:opacity-90"
+                >
+                  <DownloadIcon className="size-4" aria-hidden="true" />
+                  Download for {PLATFORM_LABEL[heroOS]}
+                </a>
+              ) : null}
+            </DownloadCard>
+          ) : null}
+          {webInstallable ? <WebAppCard onInstall={install} /> : null}
+        </div>
+      ) : (
+        <p className="mt-8 text-sm text-(--sea-ink-soft)">
+          Desktop apps are coming soon — the web app installs in Chrome, Edge,
+          or Brave.
+        </p>
+      )}
 
       {hasDesktop ? (
         <div className="mt-12">

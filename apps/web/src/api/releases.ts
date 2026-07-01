@@ -10,8 +10,9 @@ import {
   setRpcCacheControl,
   setSsrCacheTag,
 } from './cache-headers';
+import type { DesktopPlatform } from './desktopPlatforms';
 
-export type DesktopPlatform = 'mac' | 'win' | 'linux';
+export type { DesktopPlatform };
 
 export type DesktopAsset = {
   platform: DesktopPlatform;

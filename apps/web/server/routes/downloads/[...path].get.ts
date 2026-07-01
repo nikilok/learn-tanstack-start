@@ -22,9 +22,11 @@ import { waitUntil } from '@vercel/functions';
 import { eq } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
 
+import { DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
+
 const db = createClient(process.env.POSTGRES_URL as string);
 
-const PLATFORMS = new Set(['mac', 'win', 'linux']);
+const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
 const INSTALLER_EXT = /\.(dmg|exe|deb|rpm|AppImage)$/i;
 
 export default defineEventHandler((event) => {

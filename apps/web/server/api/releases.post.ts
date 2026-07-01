@@ -19,15 +19,17 @@
 import { createClient } from '@ss/db/client';
 import { desktopReleaseAssets, desktopReleases } from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
-import { Vercel } from '@vercel/sdk';
 import { sql } from 'drizzle-orm';
 import { readBody } from 'h3';
 
+import { DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
+
+import { invalidateTags } from '../utils/invalidateTags';
 import { json, withSecret } from '../utils/withSecret';
 
 const db = createClient(process.env.POSTGRES_URL as string);
 
-const PLATFORMS = new Set(['mac', 'win', 'linux']);
+const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
 
 type AssetInput = {
   platform: string;
@@ -59,11 +61,7 @@ function validAsset(a: unknown): a is AssetInput {
 /** Purges the /download page's edge cache tag once a release is recorded. */
 async function purgeDownloadCache(): Promise<void> {
   if (process.env.VERCEL_CACHE_INVALIDATION !== 'true') return;
-  const vercel = new Vercel({ bearerToken: process.env.VERCEL_API_TOKEN });
-  await vercel.edgeCache.invalidateByTags({
-    projectIdOrName: process.env.VERCEL_PROJECT_ID as string,
-    requestBody: { tags: ['desktop-releases'] },
-  });
+  await invalidateTags(['desktop-releases']);
 }
 
 export default withSecret(

@@ -1,6 +1,7 @@
+import { DESKTOP_PLATFORMS } from '../api/desktopPlatforms';
 import type { DesktopAsset, DesktopPlatform } from '../api/releases';
 
-export const PLATFORM_ORDER: DesktopPlatform[] = ['mac', 'win', 'linux'];
+export const PLATFORM_ORDER: readonly DesktopPlatform[] = DESKTOP_PLATFORMS;
 
 export const PLATFORM_LABEL: Record<DesktopPlatform, string> = {
   mac: 'macOS',

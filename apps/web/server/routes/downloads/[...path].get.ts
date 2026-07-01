@@ -17,37 +17,15 @@
  *  - POSTGRES_URL     — shared Neon URL
  */
 import { createClient } from '@ss/db/client';
-import { desktopDownloads } from '@ss/db/schema';
+import { desktopDownloads, desktopReleaseAssets } from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
+import { eq } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
 
 const db = createClient(process.env.POSTGRES_URL as string);
 
 const PLATFORMS = new Set(['mac', 'win', 'linux']);
 const INSTALLER_EXT = /\.(dmg|exe|deb|rpm|AppImage)$/i;
-
-/** Best-effort {arch, format, installScope} from an installer filename, for analytics only. */
-function parseFilename(file: string): {
-  arch: string | null;
-  format: string | null;
-  installScope: string | null;
-} {
-  const lower = file.toLowerCase();
-  const format = lower.match(/\.(dmg|exe|deb|rpm|appimage)$/)?.[1] ?? null;
-  const arch = /arm64|aarch64/.test(lower)
-    ? 'arm64'
-    : /universal/.test(lower)
-      ? 'universal'
-      : /x64|x86_64|amd64/.test(lower)
-        ? 'x64'
-        : null;
-  const installScope = /system/.test(lower)
-    ? 'system'
-    : /user/.test(lower)
-      ? 'user'
-      : null;
-  return { arch, format, installScope };
-}
 
 export default defineEventHandler((event) => {
   const base = process.env.BLOB_PUBLIC_BASE;
@@ -62,33 +40,42 @@ export default defineEventHandler((event) => {
   }
 
   const segments = path.split('/');
-  const [platform, , version, file] = segments;
+  const [platform, guid, version, file] = segments;
 
-  // Log genuine installer downloads (the 4-segment versioned path), never the
-  // `latest/` updater feed (platform would be 'latest', not a real OS).
+  // Log genuine installer downloads by resolving the asset via its guid (the
+  // authoritative key already in the URL): spoofed / latest-feed / unknown paths
+  // never insert, and the recorded arch/format/scope match desktop_release_assets
+  // exactly instead of a heuristic filename re-parse. Runs off the redirect
+  // critical path via waitUntil.
   if (
     platform &&
-    PLATFORMS.has(platform) &&
-    segments.length === 4 &&
+    guid &&
     version &&
     file &&
+    segments.length === 4 &&
+    PLATFORMS.has(platform) &&
     INSTALLER_EXT.test(file)
   ) {
-    const { arch, format, installScope } = parseFilename(file);
+    const country = event.req.headers.get('x-vercel-ip-country');
     waitUntil(
-      db
-        .insert(desktopDownloads)
-        .values({
+      (async () => {
+        const [asset] = await db
+          .select()
+          .from(desktopReleaseAssets)
+          .where(eq(desktopReleaseAssets.guid, guid))
+          .limit(1);
+        if (!asset) return; // unknown guid — spoofed or stale path, don't log
+        await db.insert(desktopDownloads).values({
           version,
-          platform,
-          arch,
-          format,
-          installScope,
-          country: event.req.headers.get('x-vercel-ip-country'),
-        })
-        .catch((err) => {
-          console.error('[downloads] log failed:', err);
-        }),
+          platform: asset.platform,
+          arch: asset.arch,
+          format: asset.format,
+          installScope: asset.installScope,
+          country,
+        });
+      })().catch((err) => {
+        console.error('[downloads] log failed:', err);
+      }),
     );
   }
 

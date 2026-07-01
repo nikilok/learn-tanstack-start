@@ -5,7 +5,7 @@ import { getRequestHeader } from '@tanstack/start-server-core';
 import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { getDownloadsFlag } from '../api/flags';
+import { downloadsFlagQueryOptions } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
@@ -21,8 +21,10 @@ export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
   // redirecting, so a visitor can't tell it's flag-restricted vs nonexistent.
   // Entry points are hidden too, so this only catches direct-URL / crawler hits.
-  beforeLoad: async () => {
-    if (!(await getDownloadsFlag())) {
+  beforeLoad: async ({ context: { queryClient } }) => {
+    // ensureQueryData (not a bare getDownloadsFlag call) so this single SSR eval
+    // also warms the header/footer flag query for the /download render.
+    if (!(await queryClient.ensureQueryData(downloadsFlagQueryOptions))) {
       throw notFound();
     }
   },

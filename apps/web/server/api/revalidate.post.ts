@@ -29,7 +29,7 @@ import { waitUntil } from '@vercel/functions';
 import { Vercel } from '@vercel/sdk';
 import { eq, gt, max } from 'drizzle-orm';
 
-import { withSecret } from '../utils/withSecret.ts';
+import { json, withSecret } from '../utils/withSecret.ts';
 
 const db = createClient(process.env.POSTGRES_URL as string);
 
@@ -103,10 +103,15 @@ async function processRevalidation() {
   );
 }
 
-export default withSecret(() => {
-  waitUntil(
-    processRevalidation().catch((err) => {
-      console.error('[revalidate] Failed:', err);
-    }),
-  );
-});
+export default withSecret(
+  'x-revalidate-secret',
+  process.env.REVALIDATE_SECRET,
+  () => {
+    waitUntil(
+      processRevalidation().catch((err) => {
+        console.error('[revalidate] Failed:', err);
+      }),
+    );
+    return json({ accepted: true }, 202);
+  },
+);

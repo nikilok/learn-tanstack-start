@@ -14,7 +14,11 @@ function readCookie(
     const eq = part.indexOf('=');
     if (eq === -1) continue;
     if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim());
+      try {
+        return decodeURIComponent(part.slice(eq + 1).trim());
+      } catch {
+        return undefined; // malformed percent-escape — ignore the override
+      }
     }
   }
   return undefined;
@@ -26,11 +30,16 @@ function readCookie(
  * (hidden). Evaluated server-side; the query below caches it for the session.
  */
 export const getDownloadsFlag = createServerFn().handler(async () => {
-  const override = readCookie(
-    getRequestHeader('cookie') ?? undefined,
-    'vercel-flag-overrides',
-  );
-  return evaluateFlag(downloadsFlag, override);
+  try {
+    const override = readCookie(
+      getRequestHeader('cookie') ?? undefined,
+      'vercel-flag-overrides',
+    );
+    return await evaluateFlag(downloadsFlag, override);
+  } catch {
+    // Flag resolution must never break page render — fall back to hidden.
+    return downloadsFlag.defaultValue;
+  }
 });
 
 /**

@@ -6,6 +6,7 @@ import { asc, desc, inArray } from 'drizzle-orm';
 import { db } from '../db.server';
 import {
   LONG_EDGE_CACHE,
+  SHORT_EDGE_CACHE,
   setRpcCacheControl,
   setSsrCacheTag,
 } from './cache-headers';
@@ -96,11 +97,18 @@ async function loadReleases(): Promise<DesktopRelease[]> {
  */
 export const getDesktopReleases = createServerFn().handler(async () => {
   setSsrCacheTag('desktop-releases');
-  setRpcCacheControl(LONG_EDGE_CACHE);
   try {
-    return await loadReleases();
+    const releases = await loadReleases();
+    // Long-cache a populated list (purged on publish); short-cache an empty one
+    // so a pre-first-release visit or a no-op purge can't strand "no builds" for
+    // 30 days with no time-based recovery.
+    setRpcCacheControl(
+      releases.length > 0 ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE,
+    );
+    return releases;
   } catch (err) {
     console.error('[getDesktopReleases] failed', err);
+    setRpcCacheControl(SHORT_EDGE_CACHE);
     return [] as DesktopRelease[];
   }
 });

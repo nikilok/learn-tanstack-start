@@ -186,11 +186,17 @@ function createWindow(): void {
   // Hand keyboard focus to the site view (not the title bar) so typing reaches the
   // page right away — the web app's type-to-search needs the document focused.
   const show = (): void => {
+    if (win.isDestroyed()) return; // timer/load may fire after a fast window close
     win.show();
     wc.focus();
   };
-  wc.once('did-finish-load', show);
-  setTimeout(show, 4000); // fallback if the initial load stalls
+  // Fallback if the initial load stalls; cleared once the load finishes so it
+  // can't fire show() against a destroyed window.
+  const showTimer = setTimeout(show, 4000);
+  wc.once('did-finish-load', () => {
+    clearTimeout(showTimer);
+    show();
+  });
   win.on('focus', () => wc.focus());
 
   void wc.loadURL(APP_URL);

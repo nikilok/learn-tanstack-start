@@ -11,7 +11,11 @@ import {
 } from 'electron';
 
 import { setupMenu } from './menu';
-import { initAutoUpdates, installPendingUpdate } from './updater';
+import {
+  getPendingUpdateVersion,
+  initAutoUpdates,
+  installPendingUpdate,
+} from './updater';
 
 const isDev = !app.isPackaged;
 // Dev points at the local web server so web-app changes show live; packaged builds use
@@ -50,7 +54,6 @@ let siteView: WebContentsView | null = null;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
-let pendingUpdateVersion: string | null = null; // downloaded update, shown as a toast by the site
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -278,8 +281,8 @@ function registerIpc(): void {
   // The toast subscribed (post-hydration, any document) -> offer a pending update.
   // Pushing on load events instead would race hydration and lose the message.
   ipcMain.on('ss:update-subscribe', (event) => {
-    if (pendingUpdateVersion)
-      event.sender.send('ss:update-ready', pendingUpdateVersion);
+    const version = getPendingUpdateVersion();
+    if (version) event.sender.send('ss:update-ready', version);
   });
 
   // Custom window buttons (Windows/Linux) -> drive the native window.
@@ -314,7 +317,6 @@ void app.whenReady().then(() => {
   registerIpc();
   createWindow();
   initAutoUpdates((version) => {
-    pendingUpdateVersion = version;
     siteView?.webContents.send('ss:update-ready', version);
   });
 

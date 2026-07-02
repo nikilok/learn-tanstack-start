@@ -16,18 +16,16 @@
  *  - VERCEL_CACHE_INVALIDATION  — 'true' to purge the /download page cache tag
  *  - VERCEL_API_TOKEN / VERCEL_PROJECT_ID — Vercel SDK auth for the purge
  */
-import { createClient } from '@ss/db/client';
 import { desktopReleaseAssets, desktopReleases } from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
 import { sql } from 'drizzle-orm';
 import { readBody } from 'h3';
 
 import { DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
+import { db } from '#/db.server';
 
 import { invalidateTags } from '../utils/invalidateTags';
 import { json, withSecret } from '../utils/withSecret';
-
-const db = createClient(process.env.POSTGRES_URL as string);
 
 const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
 

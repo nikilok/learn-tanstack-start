@@ -12,6 +12,10 @@ files:
   - out/**
   - package.json
 
+# ${version} in every artifactName is REQUIRED for electron-updater differential
+# updates: the old-blockmap URL is derived by substituting the previous version
+# into the new file's URL — a no-op on version-less names, which silently breaks
+# diffing and forces full downloads.
 mac:
   category: public.app-category.business
   target:
@@ -19,7 +23,7 @@ mac:
       arch: [arm64, x64, universal]
     - target: zip # universal zip drives electron-updater on macOS (updates any arch)
       arch: universal
-  artifactName: ${productName}-mac-${arch}.${ext}
+  artifactName: ${productName}-mac-${version}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -33,7 +37,7 @@ win:
   # This (default) build is the per-user installer; the release workflow runs a
   # second pass with -c.nsis.perMachine=true + a '-system' artifactName override
   # for the System installers. '-user' keeps filenames unique + parseable.
-  artifactName: ${productName}-win-${arch}-user.${ext}
+  artifactName: ${productName}-win-${version}-${arch}-user.${ext}
 
 nsis:
   oneClick: false
@@ -49,7 +53,7 @@ linux:
       arch: [x64, arm64]
     - target: rpm
       arch: [x64, arm64]
-  artifactName: ${productName}-linux-${arch}.${ext}
+  artifactName: ${productName}-linux-${version}-${arch}.${ext}
 
 # Self-hosted feed: electron-updater fetches latest*.yml (+ the installer) from
 # this stable base, which the Nitro /downloads/latest/ route redirects to Blob.

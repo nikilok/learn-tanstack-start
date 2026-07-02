@@ -9,17 +9,18 @@ web app is tuned for), keeping the WebKit/Safari workarounds dormant.
 ## Develop
 
 ```bash
-bun --filter @ss/desktop dev      # launches the app pointed at production
+bun --filter @ss/desktop dev      # launches the app pointed at https://web.local (start the web dev server first)
 ```
 
-Override the target with `DESKTOP_APP_URL` (e.g. `DESKTOP_APP_URL=https://web.local bun --filter @ss/desktop dev`).
+Override the target with `DESKTOP_APP_URL` (e.g. `DESKTOP_APP_URL=https://sponsorsearch.co.uk bun --filter @ss/desktop dev` to point dev at production). Packaged builds default to production.
 
 - `src/main/` — main process: window, hardened `webPreferences`, external-link
   handling, native menu, auto-update.
 - `src/preload/` — exposes `window.isSponsorSearchDesktop` (shell marker) + the
   `window.ssDesktop` command bridge (`onCommand`/`reportCursor`/`pokeTheme`/`copy`)
   (CommonJS — required for a sandboxed preload).
-- The renderer is the remote site; there is no local renderer bundle.
+- `src/renderer/` — the custom title bar's small local React bundle; the main
+  site view itself is the remote site (no local site bundle).
 
 ## Package locally
 

@@ -71,7 +71,9 @@ jobs:
           git add apps/desktop/package.json
           git commit -m "chore(desktop): release v${{ steps.bump.outputs.version }}"
           git tag "v${{ steps.bump.outputs.version }}"
-          git push origin HEAD --follow-tags
+          # Push the tag explicitly: --follow-tags only pushes ANNOTATED tags, and this
+          # one is lightweight — without this the build jobs' checkout of the tag fails.
+          git push origin HEAD "refs/tags/v${{ steps.bump.outputs.version }}"
 
   build:
     # Build every variant per OS, upload to Vercel Blob, record in the DB.
@@ -118,7 +120,7 @@ jobs:
       - name: Build Windows System installers
         if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${arch}-system.${ext}'
+        run: bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${version}-${arch}-system.${ext}'
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}

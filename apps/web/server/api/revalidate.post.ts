@@ -20,7 +20,6 @@
  *  - VERCEL_API_TOKEN           — Vercel API token for SDK auth
  *  - VERCEL_PROJECT_ID          — Vercel project to purge cache for
  */
-import { createClient } from '@ss/db/client';
 import {
   companiesHouseProfileCache,
   companiesHouseProfileTrails,
@@ -28,10 +27,10 @@ import {
 import { waitUntil } from '@vercel/functions';
 import { eq, gt, max } from 'drizzle-orm';
 
+import { db } from '#/db.server';
+
 import { invalidateTags, TAG_BATCH_SIZE } from '../utils/invalidateTags.ts';
 import { json, withSecret } from '../utils/withSecret.ts';
-
-const db = createClient(process.env.POSTGRES_URL as string);
 
 async function processRevalidation() {
   const [cursor] = await db

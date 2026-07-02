@@ -16,7 +16,6 @@
  *  - BLOB_PUBLIC_BASE — Blob store public host (https://<id>.public.blob.vercel-storage.com)
  *  - POSTGRES_URL     — shared Neon URL
  */
-import { createClient } from '@ss/db/client';
 import {
   desktopDownloads,
   desktopReleaseAssets,
@@ -26,12 +25,11 @@ import { waitUntil } from '@vercel/functions';
 import { eq } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
 
-import { DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
-
-const db = createClient(process.env.POSTGRES_URL as string);
+import { DESKTOP_FORMATS, DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
+import { db } from '#/db.server';
 
 const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
-const INSTALLER_EXT = /\.(dmg|exe|deb|rpm|AppImage)$/i;
+const INSTALLER_EXT = new RegExp(`\\.(${DESKTOP_FORMATS.join('|')})$`, 'i');
 
 export default defineEventHandler((event) => {
   const base = process.env.BLOB_PUBLIC_BASE;

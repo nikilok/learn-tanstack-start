@@ -334,9 +334,28 @@ a {
   transform: translateZ(0);
 }
 
-/* In the Electron desktop shell the native title bar owns this chrome. */
+/* In the Electron desktop shell the native title bar owns the logo + controls, but
+   the header must stay rendered: it hosts #header-pill-portal, the collapsed search
+   pill's mount point (display:none here would leave no search affordance while
+   scrolled). Pin it just below the 46px native title bar (TITLEBAR_HEIGHT in
+   apps/desktop/src/main/index.ts — keep in sync; the bar is a drag region, so the
+   pill must sit under it) as a transparent click-through overlay: only the pill,
+   when present, is visible and interactive. */
 html[data-desktop] .site-header {
+  position: fixed;
+  top: 46px;
+  right: 0;
+  left: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+html[data-desktop] .site-header nav > :not(#header-pill-portal) {
   display: none;
+}
+html[data-desktop] #header-pill-portal {
+  pointer-events: auto;
 }
 
 /* The "Desktop app" footer link is web-only — you're already in the native app. */

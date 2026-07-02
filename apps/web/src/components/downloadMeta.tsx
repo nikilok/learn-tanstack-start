@@ -1,4 +1,4 @@
-import { DESKTOP_PLATFORMS } from '../api/desktopPlatforms';
+import { DESKTOP_PLATFORMS, type DesktopFormat } from '../api/desktopPlatforms';
 import type { DesktopAsset, DesktopPlatform } from '../api/releases';
 
 export const PLATFORM_ORDER: readonly DesktopPlatform[] = DESKTOP_PLATFORMS;
@@ -33,7 +33,8 @@ export function assetLabel(a: DesktopAsset): string {
   return `Linux ${fmtLabel} (${archLabel(a.arch)})`;
 }
 
-const FORMAT_RANK: Record<string, number> = {
+// Typed on DesktopFormat so adding a format to DESKTOP_FORMATS forces a rank here.
+const FORMAT_RANK: Record<DesktopFormat, number> = {
   dmg: 0,
   exe: 0,
   deb: 0,
@@ -49,7 +50,7 @@ const SCOPE_RANK: Record<string, number> = { system: 0, user: 1, '': 0 };
 /** Composite display-order key (format → arch → scope). */
 function orderKey(a: DesktopAsset, archRank: Record<string, number>): number {
   return (
-    (FORMAT_RANK[a.format.toLowerCase()] ?? 9) * 100 +
+    (FORMAT_RANK[a.format.toLowerCase() as DesktopFormat] ?? 9) * 100 +
     (archRank[a.arch] ?? 9) * 10 +
     (SCOPE_RANK[a.installScope] ?? 9)
   );

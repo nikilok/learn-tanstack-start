@@ -37,9 +37,10 @@ if (isDev) {
   );
 }
 // The custom title bar floats as a transparent overlay over the top of the full-height
-// site view, so the page's own background shows through and it reads as one surface. The
-// web app reserves this much top space (html[data-desktop]) so content clears the bar —
-// keep the two in sync.
+// site view, so the page's own background shows through and it reads as one surface.
+// The page reserves NO top space — content scrolls under the (drag-region) bar; static
+// top content clears it via its own padding, and styles.css pins the desktop search
+// pill at this same offset (html[data-desktop] .site-header) — keep the two in sync.
 const TITLEBAR_HEIGHT = 46;
 const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
 
@@ -198,11 +199,13 @@ function createWindow(): void {
     show();
   });
   // Retry a failed load (offline / DNS / prod outage) rather than stranding a blank
-  // window — ignore -3 (ABORTED), which fires on normal in-page navigations.
-  wc.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+  // window — retry the URL that failed, not home, so the user's page survives the
+  // hiccup; ignore -3 (ABORTED), which fires on normal in-page navigations.
+  wc.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
     if (isMainFrame && code !== -3) {
+      const target = url || APP_URL;
       setTimeout(() => {
-        if (!wc.isDestroyed()) void wc.loadURL(APP_URL);
+        if (!wc.isDestroyed()) void wc.loadURL(target);
       }, 2000);
     }
   });

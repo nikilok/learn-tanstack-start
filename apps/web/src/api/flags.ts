@@ -1,43 +1,22 @@
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { getRequestHeader } from '@tanstack/start-server-core';
+import { getCookie } from '@tanstack/start-server-core';
 
 import { downloadsFlag, evaluateFlag } from '../flags.server';
-
-/** Reads a single cookie value out of a Cookie header. */
-function readCookie(
-  header: string | undefined,
-  name: string,
-): string | undefined {
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=');
-    if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) {
-      try {
-        return decodeURIComponent(part.slice(eq + 1).trim());
-      } catch {
-        return undefined; // malformed percent-escape — ignore the override
-      }
-    }
-  }
-  return undefined;
-}
 
 /**
  * Server fn resolving the `downloads` feature flag: a signed Flags-Explorer
  * override cookie wins, else the Vercel dashboard value, else the default
  * (hidden). Evaluated server-side; the query below caches it for the session.
+ * Never throws — flag resolution must not break page render.
  */
 export const getDownloadsFlag = createServerFn().handler(async () => {
   try {
-    const override = readCookie(
-      getRequestHeader('cookie') ?? undefined,
-      'vercel-flag-overrides',
+    return await evaluateFlag(
+      downloadsFlag,
+      getCookie('vercel-flag-overrides'),
     );
-    return await evaluateFlag(downloadsFlag, override);
   } catch {
-    // Flag resolution must never break page render — fall back to hidden.
     return downloadsFlag.defaultValue;
   }
 });

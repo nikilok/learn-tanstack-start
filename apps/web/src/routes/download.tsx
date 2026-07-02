@@ -16,6 +16,7 @@ import { PLATFORM_LABEL, recommendedAsset } from '../components/downloadMeta';
 import { DownloadVersion } from '../components/DownloadVersion';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
+import { parsePlatform } from '../hooks/usePlatform';
 
 export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
@@ -44,16 +45,16 @@ export const Route = createFileRoute('/download')({
   component: Download,
 });
 
-/** Best-effort OS from a UA string, to surface the most likely build first. */
+/**
+ * Best-effort desktop OS via the shared parsePlatform (one UA heuristic for the
+ * whole app) — null for mobile/ChromeOS/unknown so we never show a wrong desktop
+ * CTA. (Newest iPadOS masquerades fully as "Macintosh" and evades any UA check.)
+ */
 function osFromUA(ua: string): DesktopPlatform | null {
-  // Mobile/tablet UAs carry desktop-looking tokens (Android → "Linux", older
-  // iPadOS → "iPad"), so exclude them first to avoid a wrong desktop CTA. (Newest
-  // iPadOS masquerades fully as "Macintosh" and can't be caught by UA alone.)
-  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return null;
-  if (/Mac/i.test(ua)) return 'mac';
-  if (/Win/i.test(ua)) return 'win';
-  if (/Linux|X11/i.test(ua)) return 'linux';
-  return null;
+  const { platform, isMobile } = parsePlatform(ua);
+  if (isMobile || platform === 'chromeos' || platform === 'unknown')
+    return null;
+  return platform === 'windows' ? 'win' : platform;
 }
 
 /** Isomorphic OS detect — server reads the request UA header, client reads navigator — so the native hero button renders on SSR with no post-hydration flash. */
@@ -78,8 +79,10 @@ function Download() {
 
   const latest = releases[0] ?? null;
   const hasDesktop = releases.length > 0;
+  // The preview just needs *a* platform; the CTA needs the *user's* platform —
+  // mobile/unknown (os = null) gets the mac preview but never a wrong download button.
   const heroOS = os ?? 'mac';
-  const hero = latest ? recommendedAsset(heroOS, latest.assets[heroOS]) : null;
+  const hero = os && latest ? recommendedAsset(os, latest.assets[os]) : null;
   const cardCount = (hasDesktop ? 1 : 0) + (webInstallable ? 1 : 0);
 
   return (
@@ -112,7 +115,12 @@ function Download() {
                   <DownloadIcon className="size-4" aria-hidden="true" />
                   Download for {PLATFORM_LABEL[heroOS]}
                 </a>
-              ) : null}
+              ) : (
+                <p className="text-sm text-(--sea-ink-soft)">
+                  Available for macOS, Windows &amp; Linux — grab any build from
+                  the version list below.
+                </p>
+              )}
             </DownloadCard>
           ) : null}
           {webInstallable ? <WebAppCard onInstall={install} /> : null}

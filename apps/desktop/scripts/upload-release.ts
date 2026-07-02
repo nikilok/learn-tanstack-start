@@ -35,6 +35,8 @@ const SECRET = requireEnv('DESKTOP_RELEASE_SECRET');
 const SITE = process.env.SITE_URL ?? 'https://sponsorsearch.co.uk';
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 
+// Mirrors DESKTOP_FORMATS in apps/web/src/api/desktopPlatforms.ts (a cross-package
+// import from this standalone CI script isn't worth the coupling) — keep in sync.
 const FORMAT_BY_EXT: Record<string, string> = {
   dmg: 'dmg',
   exe: 'exe',
@@ -79,7 +81,11 @@ function parse(file: string): {
 /** True for artifacts electron-updater needs in the stable latest/ feed. */
 function isFeedArtifact(file: string): boolean {
   const l = file.toLowerCase();
-  if (l.endsWith('.yml') || l.endsWith('.blockmap')) return true;
+  // Only the updater's own channel files — NOT every .yml: electron-builder drops
+  // builder-debug.yml (runner paths, build config) into dist/, which must never
+  // reach the public feed.
+  if (l.endsWith('.yml')) return /^latest.*\.yml$/.test(l);
+  if (l.endsWith('.blockmap')) return true;
   if (PLATFORM === 'mac' && l.endsWith('.zip')) return true;
   if (PLATFORM === 'win' && l.endsWith('-user.exe')) return true;
   if (PLATFORM === 'linux' && l.endsWith('.appimage')) return true;
@@ -144,14 +150,24 @@ async function main() {
     },
     body: JSON.stringify({ version: VERSION, assets }),
   });
-  if (!res.ok) {
+  // withSecret answers a neutral 202 to a bad secret (deliberately no auth signal),
+  // so res.ok is NOT success — only an authenticated 200 { ok, releaseId } is.
+  const body = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    releaseId?: number;
+  } | null;
+  if (res.status !== 200 || !body?.ok) {
+    const hint =
+      res.status === 202
+        ? ' (neutral auth response — DESKTOP_RELEASE_SECRET likely mismatched between GitHub and Vercel)'
+        : '';
     console.error(
-      `[upload-release] record failed: ${res.status} ${await res.text()}`,
+      `[upload-release] record failed: ${res.status} ${JSON.stringify(body)}${hint}`,
     );
     process.exit(1);
   }
   console.log(
-    `[upload-release] recorded ${assets.length} ${PLATFORM} asset(s) for ${VERSION}`,
+    `[upload-release] recorded ${assets.length} ${PLATFORM} asset(s) for ${VERSION} (release ${body.releaseId})`,
   );
 }
 

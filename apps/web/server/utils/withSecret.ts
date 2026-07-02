@@ -29,10 +29,13 @@ export function secretMatches(
 /**
  * Wraps a handler behind a timing-safe shared-secret check on `header` vs
  * `secret`. Runs `handler` (returning its Response) only on a match; on a
- * mismatch it returns the SAME neutral 202 an accepted request gets —
- * deliberately no 401/403, so an attacker probing secrets can't tell a wrong one
- * from a right one (the timing-safe compare blocks guessing; this hides the
- * outcome too). Each caller passes its own header name + secret.
+ * mismatch it returns a neutral 202 {accepted:true} — deliberately not a
+ * 401/403, so probing gets no explicit auth signal. The neutrality is only as
+ * strong as the wrapped handler's own responses: revalidate answers 202 either
+ * way (fully indistinguishable), while /api/releases returns 200/400/500 when
+ * authenticated — a deliberate trade so its CI caller can verify success (the
+ * timing-safe compare is what actually stops secret guessing). Each caller
+ * passes its own header name + secret.
  */
 export function withSecret(
   header: string,

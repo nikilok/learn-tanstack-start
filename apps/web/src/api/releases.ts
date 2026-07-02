@@ -125,23 +125,23 @@ export const getDesktopReleases = createServerFn().handler(async () => {
 /**
  * Server fn for the owner's view: `owner` says whether this request proved
  * team membership (durable cookie or toolbar bootstrap — see owner.server.ts),
- * and `releases` holds the private ones to fold into the page. Anonymous
- * viewers get `{ owner: false, releases: [] }` without touching the DB. Never
- * cached: the response is viewer-specific ( /download documents are rendered
- * per-request, so SSR-ing this is safe).
+ * and `releases` is the FULL registry (public + private) as ONE consistent
+ * snapshot — the page renders it INSTEAD of merging the cached public list
+ * with a private-only list, which would transiently duplicate or drop a
+ * release while the two queries refetch at different speeds after a
+ * publish/unpublish flip. Anonymous viewers get `{ owner: false, releases: [] }`
+ * without touching the DB. Never cached: the response is viewer-specific
+ * ( /download documents are rendered per-request, so SSR-ing this is safe).
  */
-export const getPrivateDesktopReleases = createServerFn().handler(async () => {
+export const getOwnerDesktopReleases = createServerFn().handler(async () => {
   setRpcCacheControl('private, no-store');
   try {
     if (!(await isOwnerRequest())) {
       return { owner: false, releases: [] as DesktopRelease[] };
     }
-    const releases = (await loadReleases()).filter(
-      (r) => r.visibility === 'private',
-    );
-    return { owner: true, releases };
+    return { owner: true, releases: await loadReleases() };
   } catch (err) {
-    console.error('[getPrivateDesktopReleases] failed', err);
+    console.error('[getOwnerDesktopReleases] failed', err);
     return { owner: false, releases: [] as DesktopRelease[] };
   }
 });
@@ -187,8 +187,8 @@ export const desktopReleasesQueryOptions = queryOptions({
  * React Query options for the owner view. staleTime 0 so every /download visit
  * re-checks the cookies — cheap for anonymous viewers (no DB touch).
  */
-export const privateDesktopReleasesQueryOptions = queryOptions({
-  queryKey: ['desktop-releases-private'],
-  queryFn: () => getPrivateDesktopReleases(),
+export const ownerDesktopReleasesQueryOptions = queryOptions({
+  queryKey: ['desktop-releases-owner'],
+  queryFn: () => getOwnerDesktopReleases(),
   staleTime: 0,
 });

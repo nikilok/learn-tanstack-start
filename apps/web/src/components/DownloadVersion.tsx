@@ -81,7 +81,7 @@ function VisibilityButton({ release }: { release: DesktopRelease }) {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['desktop-releases'] }),
         queryClient.invalidateQueries({
-          queryKey: ['desktop-releases-private'],
+          queryKey: ['desktop-releases-owner'],
         }),
       ]),
   });

@@ -9,7 +9,7 @@ import { downloadsFlagQueryOptions } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
-  privateDesktopReleasesQueryOptions,
+  ownerDesktopReleasesQueryOptions,
 } from '../api/releases';
 import DesktopPreview from '../components/DesktopPreview';
 import DownloadCard from '../components/DownloadCard';
@@ -46,7 +46,7 @@ export const Route = createFileRoute('/download')({
     // never be served to anyone else.
     await Promise.all([
       queryClient.ensureQueryData(desktopReleasesQueryOptions),
-      queryClient.ensureQueryData(privateDesktopReleasesQueryOptions),
+      queryClient.ensureQueryData(ownerDesktopReleasesQueryOptions),
     ]);
   },
   component: Download,
@@ -72,13 +72,13 @@ const detectOS = createIsomorphicFn()
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
   const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
-  const { data: ownerView } = useQuery(privateDesktopReleasesQueryOptions);
+  const { data: ownerView } = useQuery(ownerDesktopReleasesQueryOptions);
   const owner = ownerView?.owner ?? false;
-  // Owner sees private releases folded in, newest first — the page behaves
-  // exactly as it will once they're published.
-  const releases = [...publicReleases, ...(ownerView?.releases ?? [])].sort(
-    (a, b) => b.publishedAt.localeCompare(a.publishedAt),
-  );
+  // Owner renders the server's single consistent snapshot (public + private).
+  // Do NOT merge the two lists: they refetch independently after a
+  // publish/unpublish flip, and the stale/fresh overlap transiently duplicates
+  // (or drops) the flipped release.
+  const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);

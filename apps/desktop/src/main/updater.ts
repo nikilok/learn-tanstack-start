@@ -114,9 +114,13 @@ export async function checkForUpdatesFromMenu(): Promise<void> {
   }
 }
 
-/** Quits and restarts into the downloaded update (silent install, relaunch after). No-op until one is ready (incl. simulate mode). */
+/** Quits and restarts into the downloaded update (silent install, relaunch after). No-op until one is ready; simulate mode just logs. */
 export function installPendingUpdate(): void {
-  if (!app.isPackaged || !downloadedVersion) return;
+  if (!downloadedVersion) return;
+  if (!app.isPackaged) {
+    console.log('[updater] simulated install requested for', downloadedVersion);
+    return;
+  }
   installRequested = true;
   // Off the IPC stack so the sender's window can close cleanly first.
   setImmediate(() => autoUpdater.quitAndInstall(true, true));

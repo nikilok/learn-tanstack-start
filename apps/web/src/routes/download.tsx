@@ -9,6 +9,7 @@ import { downloadsFlagQueryOptions } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
+  ownerDesktopReleasesQueryOptions,
 } from '../api/releases';
 import DesktopPreview from '../components/DesktopPreview';
 import DownloadCard from '../components/DownloadCard';
@@ -22,10 +23,16 @@ export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
   // redirecting, so a visitor can't tell it's flag-restricted vs nonexistent.
   // Entry points are hidden too, so this only catches direct-URL / crawler hits.
+  // Owners bypass the dark-launch flag: the durable ss-owner credential must
+  // keep the publish workflow reachable without a live toolbar override cookie.
   beforeLoad: async ({ context: { queryClient } }) => {
-    // ensureQueryData (not a bare getDownloadsFlag call) so this single SSR eval
-    // also warms the header/footer flag query for the /download render.
-    if (!(await queryClient.ensureQueryData(downloadsFlagQueryOptions))) {
+    // ensureQueryData (not bare fn calls) so these SSR evals also warm the
+    // header/footer flag query and the owner view for the /download render.
+    const [enabled, ownerView] = await Promise.all([
+      queryClient.ensureQueryData(downloadsFlagQueryOptions),
+      queryClient.ensureQueryData(ownerDesktopReleasesQueryOptions),
+    ]);
+    if (!enabled && !ownerView.owner) {
       throw notFound();
     }
   },
@@ -40,6 +47,9 @@ export const Route = createFileRoute('/download')({
     ],
   }),
   loader: async ({ context: { queryClient } }) => {
+    // The owner view (already warmed in beforeLoad) is safe to resolve during
+    // SSR: /download documents are rendered per-request (no cache routeRule),
+    // so an owner's variant can never be served to anyone else.
     await queryClient.ensureQueryData(desktopReleasesQueryOptions);
   },
   component: Download,
@@ -64,7 +74,14 @@ const detectOS = createIsomorphicFn()
 
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
-  const { data: releases = [] } = useQuery(desktopReleasesQueryOptions);
+  const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
+  const { data: ownerView } = useQuery(ownerDesktopReleasesQueryOptions);
+  const owner = ownerView?.owner ?? false;
+  // Owner renders the server's single consistent snapshot (public + private).
+  // Do NOT merge the two lists: they refetch independently after a
+  // publish/unpublish flip, and the stale/fresh overlap transiently duplicates
+  // (or drops) the flipped release.
+  const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);
@@ -140,6 +157,7 @@ function Download() {
               release={r}
               latest={i === 0}
               defaultOpen={i === 0}
+              owner={owner}
             />
           ))}
         </div>

@@ -252,3 +252,29 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   `HmrcCard`; back navigation passes `['back']` on the back link in `company.$id.$slug.tsx`.
   Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`
   so they don't trigger animations.
+
+## /download owner gating — cross-file invariants
+
+Release visibility (`desktop_releases.visibility`, default `'private'` = fail closed)
+is owner-gated via `src/owner.server.ts`: a valid `vercel-flag-overrides` cookie
+(sealed by Vercel with `FLAGS_SECRET`, team members only) bootstraps a durable
+httpOnly `ss-owner` cookie. Rotating `FLAGS_SECRET` revokes ALL owner credentials —
+that is the kill-switch (also for ex-team-members, whose cookies outlive membership).
+
+- **`/download` must NEVER get a cache routeRule** (vite.config.ts): the loader
+  SSR-renders owner-specific content (private releases + Publish buttons from
+  `getOwnerDesktopReleases`), which is only safe because documents render
+  per-request. Caching the document would serve an owner's HTML to everyone.
+- **`getDesktopReleases` must stay cookie-BLIND**: its RPC response is edge-cached
+  (LONG + `desktop-releases` tag) and shared by all viewers. Per-viewer data belongs
+  only in `getOwnerDesktopReleases`, which sets `private, no-store` and must never
+  gain an s-maxage.
+- **Owners render `getOwnerDesktopReleases`' full snapshot INSTEAD of a merge**: the
+  owner fn returns public+private together because merging the cached public list
+  with a private-only list duplicates/drops the flipped release while the two
+  queries refetch at different speeds after publish/unpublish.
+- Visibility flips propagate via the tag purge in `setReleaseVisibility` (gated on
+  `VERCEL_CACHE_INVALIDATION`, like the release POST endpoint's). If you change the
+  tag name or caching, keep mutation-purge and cache-tag in lockstep.
+- The release workflow never sets visibility — new releases are born private via the
+  column default; only the owner-only Publish/Unpublish buttons on /download flip it.

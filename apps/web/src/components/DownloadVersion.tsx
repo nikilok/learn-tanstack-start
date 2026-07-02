@@ -1,4 +1,12 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Fragment, useState } from 'react';
+
 import type { DesktopPlatform, DesktopRelease } from '../api/releases';
+import {
+  desktopReleasesQueryOptions,
+  ownerDesktopReleasesQueryOptions,
+  setReleaseVisibility,
+} from '../api/releases';
 import {
   assetLabel,
   OsIcon,
@@ -64,15 +72,85 @@ function PlatformColumn({
   );
 }
 
-/** A version disclosure — a summary (version + Latest badge) over three platform columns. */
+/** Owner-only publish/unpublish control riding the version summary row. */
+function VisibilityButton({ release }: { release: DesktopRelease }) {
+  const queryClient = useQueryClient();
+  const [failed, setFailed] = useState(false);
+  const next = release.visibility === 'private' ? 'public' : 'private';
+  const { mutate, isPending } = useMutation({
+    mutationFn: () =>
+      setReleaseVisibility({
+        data: { version: release.version, visibility: next },
+      }),
+    onSuccess: (result) => {
+      // ok:false = expired/revoked owner credential (row untouched) — show it,
+      // and skip the refetch so the page doesn't silently melt to anonymous.
+      if (!result.ok) {
+        setFailed(true);
+        return;
+      }
+      if (result.purgeFailed)
+        console.error(
+          '[publish] edge purge failed — cached public list may lag for client-side navs',
+        );
+      setFailed(false);
+      // Both lists change shape on a flip — refetch them together.
+      return Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: desktopReleasesQueryOptions.queryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ownerDesktopReleasesQueryOptions.queryKey,
+        }),
+      ]);
+    },
+    onError: () => setFailed(true),
+  });
+  const label = isPending
+    ? 'Saving…'
+    : failed
+      ? 'Failed — retry'
+      : next === 'public'
+        ? 'Publish'
+        : 'Unpublish';
+  return (
+    // Keyed by label: Safari ghosts in-place text mutations inside the flexed
+    // <summary> (old glyphs painted under the new ones), so every state change
+    // mounts a fresh node. min-width keeps the row geometry stable across
+    // labels. No `transition` for the same reason — no mid-swap ghost frames.
+    <button
+      key={label}
+      type="button"
+      disabled={isPending}
+      className={`min-w-20 cursor-pointer rounded-full px-2.5 py-0.5 text-center text-xs disabled:opacity-50 ${
+        failed
+          ? 'border border-(--logo-red) text-(--logo-red)'
+          : next === 'public'
+            ? 'bg-(--sea-ink) text-(--bg-base) hover:opacity-90'
+            : 'border border-(--line) text-(--sea-ink-soft) hover:text-(--sea-ink)'
+      }`}
+      onClick={(e) => {
+        e.preventDefault(); // keep the summary from toggling the disclosure
+        e.stopPropagation();
+        mutate();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** A version disclosure — a summary (version + badges) over three platform columns. */
 export function DownloadVersion({
   release,
   latest,
   defaultOpen,
+  owner,
 }: {
   release: DesktopRelease;
   latest: boolean;
   defaultOpen: boolean;
+  owner: boolean;
 }) {
   return (
     <details open={defaultOpen} className="group border-t border-(--line)">
@@ -85,6 +163,18 @@ export function DownloadVersion({
             Latest
           </span>
         ) : null}
+        {/* Keyed by visibility so a flip REPLACES these nodes instead of
+            patching them in place — Safari under-invalidates the flex row when
+            the chip is inserted/removed and paints the old button's pixels
+            where the chip belongs. Fresh nodes force a clean repaint. */}
+        <Fragment key={release.visibility}>
+          {release.visibility === 'private' ? (
+            <span className="rounded-full border border-dashed border-(--logo-red) px-2 py-0.5 text-xs text-(--logo-red)">
+              Private
+            </span>
+          ) : null}
+          {owner ? <VisibilityButton release={release} /> : null}
+        </Fragment>
         <svg
           viewBox="0 0 24 24"
           fill="none"

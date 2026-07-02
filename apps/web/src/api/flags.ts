@@ -2,7 +2,11 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { getCookie } from '@tanstack/react-start/server';
 
-import { downloadsFlag, evaluateFlag } from '../flags.server';
+import {
+  downloadsFlag,
+  evaluateFlag,
+  FLAG_OVERRIDES_COOKIE,
+} from '../flags.server';
 
 /**
  * Server fn resolving the `downloads` feature flag: a signed Flags-Explorer
@@ -12,10 +16,7 @@ import { downloadsFlag, evaluateFlag } from '../flags.server';
  */
 export const getDownloadsFlag = createServerFn().handler(async () => {
   try {
-    return await evaluateFlag(
-      downloadsFlag,
-      getCookie('vercel-flag-overrides'),
-    );
+    return await evaluateFlag(downloadsFlag, getCookie(FLAG_OVERRIDES_COOKIE));
   } catch {
     return downloadsFlag.defaultValue;
   }

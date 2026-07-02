@@ -16,6 +16,7 @@ import { useEffect } from 'react';
 
 import AppSplash from '../components/AppSplash';
 import DesktopBridge from '../components/DesktopBridge';
+import DesktopUpdateToast from '../components/DesktopUpdateToast';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
@@ -166,6 +167,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <NavigationProgress />
           <Header />
           <DesktopBridge />
+          <DesktopUpdateToast />
           {/* flex-1 wrapper makes the footer a sticky footer: on pages shorter
               than the viewport the content grows to fill, pinning the footer to
               the bottom edge so its translucent panel never leaves a strip of

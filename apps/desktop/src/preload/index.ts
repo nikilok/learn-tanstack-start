@@ -14,6 +14,15 @@ contextBridge.exposeInMainWorld('ssDesktop', {
   reportCursor: (on: boolean) => ipcRenderer.send('ss:cursor', on),
   pokeTheme: () => reportTheme(), // re-report after a mode change that didn't flip the class
   copy: (text: string) => ipcRenderer.send('ss:clipboard', text),
+  onUpdateReady: (cb: (version: string) => void) => {
+    const listener = (_e: IpcRendererEvent, version: string) => cb(version);
+    ipcRenderer.on('ss:update-ready', listener);
+    // Announce the subscription: main re-offers a pending update to the sender,
+    // so an update that landed before hydration isn't lost.
+    ipcRenderer.send('ss:update-subscribe');
+    return () => ipcRenderer.removeListener('ss:update-ready', listener);
+  },
+  installUpdate: () => ipcRenderer.send('ss:install-update'),
 });
 
 /** Forwards the page's resolved theme (exact colour + explicit light/dark vs auto) to main. */

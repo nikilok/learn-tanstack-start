@@ -1,6 +1,8 @@
 import { app, Menu, shell } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 
+import { checkForUpdatesFromMenu } from './updater';
+
 /** Builds and installs the native application menu. */
 export function setupMenu(appUrl: string): void {
   const isMac = process.platform === 'darwin';
@@ -27,6 +29,11 @@ export function setupMenu(appUrl: string): void {
     {
       role: 'help',
       submenu: [
+        {
+          label: 'Check for Updates…',
+          click: () => void checkForUpdatesFromMenu(),
+        },
+        { type: 'separator' },
         {
           label: 'Open SponsorSearch in Browser',
           click: () => void shell.openExternal(appUrl),

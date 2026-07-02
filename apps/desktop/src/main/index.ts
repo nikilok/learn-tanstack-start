@@ -11,7 +11,11 @@ import {
 } from 'electron';
 
 import { setupMenu } from './menu';
-import { initAutoUpdates } from './updater';
+import {
+  getPendingUpdateVersion,
+  initAutoUpdates,
+  installPendingUpdate,
+} from './updater';
 
 const isDev = !app.isPackaged;
 // Dev points at the local web server so web-app changes show live; packaged builds use
@@ -272,6 +276,15 @@ function registerIpc(): void {
     siteView?.webContents.focus(); // return keyboard focus to the page after navigating
   });
 
+  // The site's update toast -> restart into the downloaded version.
+  ipcMain.on('ss:install-update', () => installPendingUpdate());
+  // The toast subscribed (post-hydration, any document) -> offer a pending update.
+  // Pushing on load events instead would race hydration and lose the message.
+  ipcMain.on('ss:update-subscribe', (event) => {
+    const version = getPendingUpdateVersion();
+    if (version) event.sender.send('ss:update-ready', version);
+  });
+
   // Custom window buttons (Windows/Linux) -> drive the native window.
   ipcMain.on('titlebar:window-control', (_event, action: string) => {
     const win = mainWindow;
@@ -303,7 +316,9 @@ void app.whenReady().then(() => {
   setupMenu(APP_URL);
   registerIpc();
   createWindow();
-  initAutoUpdates();
+  initAutoUpdates((version) => {
+    siteView?.webContents.send('ss:update-ready', version);
+  });
 
   app.on('activate', () => {
     if (BaseWindow.getAllWindows().length === 0) createWindow();

@@ -8,6 +8,10 @@ interface SsDesktop {
   pokeTheme(): void;
   /** Copy text via the main-process clipboard (works without a user gesture). */
   copy(text: string): void;
+  /** Subscribe to "update downloaded & ready" (fires with the new version); returns an unsubscribe fn. Optional: older shells predate it. */
+  onUpdateReady?(cb: (version: string) => void): () => void;
+  /** Quit and restart into the downloaded update. Optional: older shells predate it. */
+  installUpdate?(): void;
 }
 
 interface Window {

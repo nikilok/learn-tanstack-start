@@ -407,6 +407,14 @@ html[data-desktop] .footer-desktop-link {
   letter-spacing: -0.4px;
 }
 
+/* Desktop update toast: slide-up entrance for the bottom-left corner. */
+@keyframes update-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 /* iOS-lockscreen-style shimmer: a bright stripe sweeps across the text periodically with a pause between sweeps. Used on the sticky "Back to search" pill when it floats over the map for extra readability. */
 @keyframes shimmer-sweep {
   0% {

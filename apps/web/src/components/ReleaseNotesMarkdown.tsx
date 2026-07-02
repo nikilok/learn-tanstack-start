@@ -8,17 +8,37 @@ import type { ReactNode } from 'react';
 type Block =
   | { kind: 'heading'; level: number; text: string }
   | { kind: 'ul'; items: string[] }
-  | { kind: 'ol'; items: string[] }
+  | { kind: 'ol'; start: number; items: string[] }
   | { kind: 'code'; lines: string[] }
   | { kind: 'p'; lines: string[] };
 
-const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+// Flanked emphasis content: no space just inside either delimiter, so
+// '2 * 3 * 4' and glob patterns like '*.ts' stay literal.
+const EMPH_SRC = String.raw`[^\s*](?:[^*]*[^\s*])?`;
+// URL with one level of balanced parens (Wikipedia-style paths).
+const URL_SRC = String.raw`[^()\s]*(?:\([^()\s]*\)[^()\s]*)*`;
+const INLINE = new RegExp(
+  `(\\*\\*\\*${EMPH_SRC}\\*\\*\\*` +
+    `|\\*\\*${EMPH_SRC}\\*\\*` +
+    `|\\*${EMPH_SRC}\\*` +
+    '|`[^`]+`' +
+    `|\\[[^\\]]+\\]\\(${URL_SRC}\\))`,
+  'g',
+);
+const LINK_TOKEN = new RegExp(`^\\[([^\\]]+)\\]\\((${URL_SRC})\\)$`);
 
-/** Renders one matched inline token (bold, italic, code, or link). */
+/** Renders one matched inline token (bold/italic, code, or link), recursing into its content. */
 function inlineToken(token: string, key: number): ReactNode {
+  if (token.startsWith('***'))
+    return (
+      <strong key={key}>
+        <em>{renderInline(token.slice(3, -3))}</em>
+      </strong>
+    );
   if (token.startsWith('**'))
-    return <strong key={key}>{token.slice(2, -2)}</strong>;
-  if (token.startsWith('*')) return <em key={key}>{token.slice(1, -1)}</em>;
+    return <strong key={key}>{renderInline(token.slice(2, -2))}</strong>;
+  if (token.startsWith('*'))
+    return <em key={key}>{renderInline(token.slice(1, -1))}</em>;
   if (token.startsWith('`'))
     return (
       <code
@@ -28,8 +48,8 @@ function inlineToken(token: string, key: number): ReactNode {
         {token.slice(1, -1)}
       </code>
     );
-  const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
-  if (link && /^https?:\/\//.test(link[2]))
+  const link = LINK_TOKEN.exec(token);
+  if (link && /^https?:\/\//i.test(link[2]))
     return (
       <a
         key={key}
@@ -38,7 +58,7 @@ function inlineToken(token: string, key: number): ReactNode {
         rel="noreferrer"
         className="text-(--link-blue) underline"
       >
-        {link[1]}
+        {renderInline(link[1])}
       </a>
     );
   return token;
@@ -56,14 +76,19 @@ function renderInline(text: string): ReactNode[] {
 function parseBlocks(source: string): Block[] {
   const blocks: Block[] = [];
   let current: Block | null = null;
+  let fenceLen = 0;
   for (const raw of source.replace(/\r\n/g, '\n').split('\n')) {
     const line = raw.trimEnd();
     if (current?.kind === 'code') {
-      if (line.trim() === '```') current = null;
+      // Close only on a bare fence at least as long as the opener (CommonMark).
+      const close = /^(`{3,})$/.exec(line.trim());
+      if (close && close[1].length >= fenceLen) current = null;
       else current.lines.push(raw);
       continue;
     }
-    if (line.trim().startsWith('```')) {
+    const fence = /^(`{3,})/.exec(line.trim());
+    if (fence) {
+      fenceLen = fence[1].length;
       current = { kind: 'code', lines: [] };
       blocks.push(current);
       continue;
@@ -77,27 +102,32 @@ function parseBlocks(source: string): Block[] {
       blocks.push({
         kind: 'heading',
         level: heading[1].length,
-        text: heading[2],
+        // Strip a closed-ATX trailing hash run ('## Improvements ##').
+        text: heading[2].replace(/\s+#+$/, ''),
       });
       current = null;
       continue;
     }
-    const ul = /^[-*]\s+(.*)$/.exec(line);
-    if (ul) {
-      if (current?.kind !== 'ul') {
-        current = { kind: 'ul', items: [] };
+    // One rule for both list kinds; leading indent flattens nested items into
+    // the open list instead of splitting it around a raw-text paragraph.
+    const list = /^\s*(?:[-*]|(\d+)[.)])\s+(.*)$/.exec(line);
+    if (list) {
+      const kind = list[1] === undefined ? 'ul' : 'ol';
+      const num = list[1] ? parseInt(list[1], 10) : 1;
+      // CommonMark: only a 1-numbered item may interrupt a paragraph — keeps
+      // hard-wrapped prose like '…in\n2024. It was…' out of a bogus <ol>.
+      if (kind === 'ol' && current?.kind === 'p' && num !== 1) {
+        current.lines.push(line);
+        continue;
+      }
+      // Written as !current || … : `current?.kind !== kind` trips a TS CFA
+      // quirk (optional chain vs union-typed comparand) that infers `never`.
+      if (!current || current.kind !== kind) {
+        current =
+          kind === 'ul' ? { kind, items: [] } : { kind, start: num, items: [] };
         blocks.push(current);
       }
-      current.items.push(ul[1]);
-      continue;
-    }
-    const ol = /^\d+[.)]\s+(.*)$/.exec(line);
-    if (ol) {
-      if (current?.kind !== 'ol') {
-        current = { kind: 'ol', items: [] };
-        blocks.push(current);
-      }
-      current.items.push(ol[1]);
+      current.items.push(list[2]);
       continue;
     }
     if (current?.kind !== 'p') {
@@ -119,22 +149,30 @@ const HEADING_CLASS: Record<number, string> = {
 function renderBlock(block: Block, key: number): ReactNode {
   switch (block.kind) {
     case 'heading':
-      // h4 regardless of markdown level — the page's own hierarchy ends at h3.
+      // h3 regardless of markdown level — the page's own outline ends at the
+      // DownloadCard h2, so anything deeper would skip a level.
       return (
-        <h4 key={key} className={HEADING_CLASS[block.level]}>
+        <h3 key={key} className={HEADING_CLASS[block.level]}>
           {renderInline(block.text)}
-        </h4>
+        </h3>
       );
     case 'ul':
     case 'ol': {
-      const Tag = block.kind;
-      const style = block.kind === 'ul' ? 'list-disc' : 'list-decimal';
-      return (
-        <Tag key={key} className={`${style} flex flex-col gap-1 pl-5`}>
-          {block.items.map((item, i) => (
-            <li key={i}>{renderInline(item)}</li>
-          ))}
-        </Tag>
+      const items = block.items.map((item, i) => (
+        <li key={i}>{renderInline(item)}</li>
+      ));
+      return block.kind === 'ul' ? (
+        <ul key={key} className="flex list-disc flex-col gap-1 pl-5">
+          {items}
+        </ul>
+      ) : (
+        <ol
+          key={key}
+          start={block.start === 1 ? undefined : block.start}
+          className="flex list-decimal flex-col gap-1 pl-5"
+        >
+          {items}
+        </ol>
       );
     }
     case 'code':

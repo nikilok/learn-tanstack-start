@@ -153,8 +153,9 @@ async function main() {
     body: JSON.stringify({
       version: VERSION,
       assets,
-      // Same notes from every matrix job, so the release upsert converges.
-      ...(NOTES && { notes: NOTES }),
+      // The version upsert overwrites notes on EVERY registration (absent
+      // field -> null) — same value from all matrix jobs, so they converge.
+      notes: NOTES || null,
     }),
   });
   // withSecret answers a neutral 202 to a bad secret (deliberately no auth signal),

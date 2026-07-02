@@ -106,13 +106,23 @@ function VisibilityButton({ release }: { release: DesktopRelease }) {
     },
     onError: () => setFailed(true),
   });
+  const label = isPending
+    ? 'Saving…'
+    : failed
+      ? 'Failed — retry'
+      : next === 'public'
+        ? 'Publish'
+        : 'Unpublish';
   return (
+    // Keyed by label: Safari ghosts in-place text mutations inside the flexed
+    // <summary> (old glyphs painted under the new ones), so every state change
+    // mounts a fresh node. min-width keeps the row geometry stable across
+    // labels. No `transition` for the same reason — no mid-swap ghost frames.
     <button
+      key={label}
       type="button"
       disabled={isPending}
-      // No `transition` here: the style variants swap wholesale on a flip, and
-      // WebKit can paint a half-transitioned ghost of the old variant.
-      className={`cursor-pointer rounded-full px-2.5 py-0.5 text-xs disabled:opacity-50 ${
+      className={`min-w-20 cursor-pointer rounded-full px-2.5 py-0.5 text-center text-xs disabled:opacity-50 ${
         failed
           ? 'border border-(--logo-red) text-(--logo-red)'
           : next === 'public'
@@ -125,13 +135,7 @@ function VisibilityButton({ release }: { release: DesktopRelease }) {
         mutate();
       }}
     >
-      {isPending
-        ? 'Saving…'
-        : failed
-          ? 'Failed — retry'
-          : next === 'public'
-            ? 'Publish'
-            : 'Unpublish'}
+      {label}
     </button>
   );
 }

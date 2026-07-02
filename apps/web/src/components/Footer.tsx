@@ -85,7 +85,9 @@ export default function Footer() {
               Privacy Policy
             </Link>
             {downloadsEnabled ? (
-              <span className="footer-desktop-link contents">
+              // hidden sm:contents — desktop installers are useless on a phone, so
+              // suppress below sm, matching the header DownloadButton's gating.
+              <span className="footer-desktop-link hidden sm:contents">
                 <span aria-hidden="true" className="text-(--sea-ink-faint)">
                   &middot;
                 </span>

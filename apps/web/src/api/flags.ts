@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { getCookie } from '@tanstack/start-server-core';
+import { getCookie } from '@tanstack/react-start/server';
 
 import { downloadsFlag, evaluateFlag } from '../flags.server';
 

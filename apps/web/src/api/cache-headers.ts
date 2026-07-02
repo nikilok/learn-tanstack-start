@@ -1,5 +1,5 @@
 import { createIsomorphicFn } from '@tanstack/react-start';
-import { getRequestUrl, setResponseHeader } from '@tanstack/start-server-core';
+import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
 
 /**
  * Shared `Cache-Control` value for server-fn RPC responses — 30-day edge

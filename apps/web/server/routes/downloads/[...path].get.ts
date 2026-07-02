@@ -22,7 +22,7 @@ import {
   desktopReleases,
 } from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
 
 import { DESKTOP_FORMATS, DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
@@ -46,10 +46,10 @@ export default defineEventHandler((event) => {
   const segments = path.split('/');
   const [platform, guid, version, file] = segments;
 
-  // Log genuine installer downloads by resolving the asset via its guid (the
-  // authoritative key already in the URL): spoofed / latest-feed / unknown paths
-  // never insert, and every recorded field — incl. version, from the joined
-  // release — comes from the DB, not the (spoofable) URL. Off the redirect
+  // Log genuine installer downloads by resolving the asset via its guid AND
+  // requiring the path's platform/version/file to match the resolved row — a
+  // valid guid under a spoofed path (which Blob would 404 anyway) never inserts,
+  // and every recorded field comes from the DB, not the URL. Off the redirect
   // critical path via waitUntil.
   if (
     platform &&
@@ -60,7 +60,12 @@ export default defineEventHandler((event) => {
     PLATFORMS.has(platform) &&
     INSTALLER_EXT.test(file)
   ) {
-    const country = event.req.headers.get('x-vercel-ip-country');
+    const rawCountry = event.req.headers.get('x-vercel-ip-country');
+    // country is varchar(2) — an oversized/malformed header must not abort the insert.
+    const country =
+      rawCountry && /^[A-Za-z]{2}$/.test(rawCountry)
+        ? rawCountry.toUpperCase()
+        : null;
     waitUntil(
       (async () => {
         const [row] = await db
@@ -76,9 +81,16 @@ export default defineEventHandler((event) => {
             desktopReleases,
             eq(desktopReleaseAssets.releaseId, desktopReleases.id),
           )
-          .where(eq(desktopReleaseAssets.guid, guid))
+          .where(
+            and(
+              eq(desktopReleaseAssets.guid, guid),
+              eq(desktopReleaseAssets.platform, platform),
+              eq(desktopReleaseAssets.fileName, file),
+              eq(desktopReleases.version, version),
+            ),
+          )
           .limit(1);
-        if (!row) return; // unknown guid — spoofed or stale path, don't log
+        if (!row) return; // unknown guid or path ≠ asset — spoofed/stale, don't log
         await db.insert(desktopDownloads).values({
           version: row.version,
           platform: row.platform,

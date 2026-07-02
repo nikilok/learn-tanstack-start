@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
-import { getRequestHeader } from '@tanstack/start-server-core';
+import { getRequestHeader } from '@tanstack/react-start/server';
 import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 

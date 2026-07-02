@@ -12,6 +12,26 @@ export type FlagSpec<T> = {
 /** Serializable value a flag resolves to — limited to JSON primitives because the discovery endpoint exposes flag definitions as JSON (and any future client-side flag bridge must serialize them too). */
 export type FlagValue = boolean | string | number;
 
+/** Cookie the Vercel toolbar's Flags Explorer writes signed overrides into. */
+export const FLAG_OVERRIDES_COOKIE = 'vercel-flag-overrides';
+
+/** Decrypts the signed Flags Explorer override cookie; null when absent, tampered, or expired. */
+export async function decryptFlagOverrides(
+  cookieValue: string | undefined,
+): Promise<Record<string, unknown> | null> {
+  if (!cookieValue) return null;
+  try {
+    return (
+      ((await decryptOverrides(
+        cookieValue,
+        process.env.FLAGS_SECRET,
+      )) as Record<string, unknown>) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Gates the desktop-app download UI (header button, footer link, /download page) so the branch can ship dark until the release pipeline is ready. Default hidden; flip in the Vercel dashboard (or Flags Explorer) when ready. */
 export const downloadsFlag: FlagSpec<boolean> = {
   key: 'downloads',
@@ -34,18 +54,9 @@ export async function evaluateFlag<T>(
   spec: FlagSpec<T>,
   overrideCookieValue: string | undefined,
 ): Promise<T> {
-  if (overrideCookieValue) {
-    try {
-      const overrides = await decryptOverrides(
-        overrideCookieValue,
-        process.env.FLAGS_SECRET,
-      );
-      if (overrides && spec.key in overrides) {
-        return overrides[spec.key] as T;
-      }
-    } catch {
-      // Tampered/expired cookie — fall through to dashboard value.
-    }
+  const overrides = await decryptFlagOverrides(overrideCookieValue);
+  if (overrides && spec.key in overrides) {
+    return overrides[spec.key] as T;
   }
   try {
     const adapter = vercelAdapter<T, unknown>();

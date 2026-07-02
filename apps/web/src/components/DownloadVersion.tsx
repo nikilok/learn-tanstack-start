@@ -1,7 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import type { DesktopPlatform, DesktopRelease } from '../api/releases';
-import { setReleaseVisibility } from '../api/releases';
+import {
+  desktopReleasesQueryOptions,
+  ownerDesktopReleasesQueryOptions,
+  setReleaseVisibility,
+} from '../api/releases';
 import {
   assetLabel,
   OsIcon,
@@ -70,29 +75,47 @@ function PlatformColumn({
 /** Owner-only publish/unpublish control riding the version summary row. */
 function VisibilityButton({ release }: { release: DesktopRelease }) {
   const queryClient = useQueryClient();
+  const [failed, setFailed] = useState(false);
   const next = release.visibility === 'private' ? 'public' : 'private';
   const { mutate, isPending } = useMutation({
     mutationFn: () =>
       setReleaseVisibility({
         data: { version: release.version, visibility: next },
       }),
-    // Both lists change shape on a flip — refetch them together.
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['desktop-releases'] }),
+    onSuccess: (result) => {
+      // ok:false = expired/revoked owner credential (row untouched) — show it,
+      // and skip the refetch so the page doesn't silently melt to anonymous.
+      if (!result.ok) {
+        setFailed(true);
+        return;
+      }
+      if (result.purgeFailed)
+        console.error(
+          '[publish] edge purge failed — cached public list may lag for client-side navs',
+        );
+      setFailed(false);
+      // Both lists change shape on a flip — refetch them together.
+      return Promise.all([
         queryClient.invalidateQueries({
-          queryKey: ['desktop-releases-owner'],
+          queryKey: desktopReleasesQueryOptions.queryKey,
         }),
-      ]),
+        queryClient.invalidateQueries({
+          queryKey: ownerDesktopReleasesQueryOptions.queryKey,
+        }),
+      ]);
+    },
+    onError: () => setFailed(true),
   });
   return (
     <button
       type="button"
       disabled={isPending}
       className={`cursor-pointer rounded-full px-2.5 py-0.5 text-xs transition disabled:opacity-50 ${
-        next === 'public'
-          ? 'bg-(--sea-ink) text-(--bg-base) hover:opacity-90'
-          : 'border border-(--line) text-(--sea-ink-soft) hover:text-(--sea-ink)'
+        failed
+          ? 'border border-(--logo-red) text-(--logo-red)'
+          : next === 'public'
+            ? 'bg-(--sea-ink) text-(--bg-base) hover:opacity-90'
+            : 'border border-(--line) text-(--sea-ink-soft) hover:text-(--sea-ink)'
       }`}
       onClick={(e) => {
         e.preventDefault(); // keep the summary from toggling the disclosure
@@ -100,7 +123,13 @@ function VisibilityButton({ release }: { release: DesktopRelease }) {
         mutate();
       }}
     >
-      {isPending ? 'Saving…' : next === 'public' ? 'Publish' : 'Unpublish'}
+      {isPending
+        ? 'Saving…'
+        : failed
+          ? 'Failed — retry'
+          : next === 'public'
+            ? 'Publish'
+            : 'Unpublish'}
     </button>
   );
 }

@@ -3,13 +3,17 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { asc, desc, eq, inArray } from 'drizzle-orm';
 
-import { invalidateTags } from '../../server/utils/invalidateTags';
+import {
+  DESKTOP_RELEASES_TAG,
+  purgeDesktopReleases,
+} from '../../server/utils/purgeDesktopReleases';
 import { db } from '../db.server';
 import { isOwnerRequest } from '../owner.server';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
   setRpcCacheControl,
+  setSsrCacheControl,
   setSsrCacheTag,
 } from './cache-headers';
 import type { DesktopPlatform } from './desktopPlatforms';
@@ -41,11 +45,16 @@ function emptyGroups(): Record<DesktopPlatform, DesktopAsset[]> {
   return { mac: [], win: [], linux: [] };
 }
 
-/** Loads releases + their assets grouped per platform (throws on DB error). */
-async function loadReleases(): Promise<DesktopRelease[]> {
+/**
+ * Loads releases + their assets grouped per platform (throws on DB error).
+ * The visibility filter must be SQL-side: filtering after limit(50) would let
+ * private rows evict older public releases from the public window.
+ */
+async function loadReleases(onlyPublic = false): Promise<DesktopRelease[]> {
   const releases = await db
     .select()
     .from(desktopReleases)
+    .where(onlyPublic ? eq(desktopReleases.visibility, 'public') : undefined)
     .orderBy(desc(desktopReleases.publishedAt))
     .limit(50);
 
@@ -103,11 +112,9 @@ async function loadReleases(): Promise<DesktopRelease[]> {
  * public releases exist yet or the query fails.
  */
 export const getDesktopReleases = createServerFn().handler(async () => {
-  setSsrCacheTag('desktop-releases');
+  setSsrCacheTag(DESKTOP_RELEASES_TAG);
   try {
-    const releases = (await loadReleases()).filter(
-      (r) => r.visibility === 'public',
-    );
+    const releases = await loadReleases(true);
     // Long-cache a populated list (purged on publish); short-cache an empty one
     // so a pre-first-release visit or a no-op purge can't strand "no builds" for
     // 30 days with no time-based recovery.
@@ -132,25 +139,27 @@ export const getDesktopReleases = createServerFn().handler(async () => {
  * publish/unpublish flip. Anonymous viewers get `{ owner: false, releases: [] }`
  * without touching the DB. Never cached: the response is viewer-specific
  * ( /download documents are rendered per-request, so SSR-ing this is safe).
+ * Auth fails closed (isOwnerRequest never throws), but a DB error for a proven
+ * owner deliberately propagates — silently downgrading to the anonymous view
+ * would misreport private releases as gone.
  */
 export const getOwnerDesktopReleases = createServerFn().handler(async () => {
   setRpcCacheControl('private, no-store');
-  try {
-    if (!(await isOwnerRequest())) {
-      return { owner: false, releases: [] as DesktopRelease[] };
-    }
-    return { owner: true, releases: await loadReleases() };
-  } catch (err) {
-    console.error('[getOwnerDesktopReleases] failed', err);
+  if (!(await isOwnerRequest())) {
     return { owner: false, releases: [] as DesktopRelease[] };
   }
+  // Belt-and-braces for the never-cache invariant: stamp the owner-variant
+  // document too, so a future routeRule or heuristic proxy can't store it.
+  setSsrCacheControl('private, no-store');
+  return { owner: true, releases: await loadReleases() };
 });
 
 /**
  * Owner-only mutation flipping one release between private and public, then
  * purging the `desktop-releases` edge tag so the public list updates
- * immediately (purge is env-gated like the release endpoint's; a failure is
- * logged, not fatal — the long cache would then lag until the next purge).
+ * immediately. A purge failure is reported (`purgeFailed`) rather than fatal:
+ * the row IS flipped, but the edge-cached public RPC may lag for client-side
+ * navs until the next successful purge (fresh document loads are unaffected).
  */
 export const setReleaseVisibility = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -165,12 +174,14 @@ export const setReleaseVisibility = createServerFn({ method: 'POST' })
       .where(eq(desktopReleases.version, data.version))
       .returning({ id: desktopReleases.id });
     if (updated.length === 0) return { ok: false as const };
-    if (process.env.VERCEL_CACHE_INVALIDATION === 'true') {
-      await invalidateTags(['desktop-releases']).catch((err) =>
-        console.error('[setReleaseVisibility] purge failed', err),
-      );
+    let purgeFailed = false;
+    try {
+      await purgeDesktopReleases();
+    } catch (err) {
+      purgeFailed = true;
+      console.error('[setReleaseVisibility] purge failed', err);
     }
-    return { ok: true as const };
+    return { ok: true as const, purgeFailed };
   });
 
 /**
@@ -184,11 +195,13 @@ export const desktopReleasesQueryOptions = queryOptions({
 });
 
 /**
- * React Query options for the owner view. staleTime 0 so every /download visit
- * re-checks the cookies — cheap for anonymous viewers (no DB touch).
+ * React Query options for the owner view. Short staleTime so each navigation
+ * re-checks the cookies (cheap for anonymous viewers — no DB touch) WITHOUT
+ * the staleTime-0 pathology of refetching immediately after hydrating the
+ * SSR-fetched result on every single pageview.
  */
 export const ownerDesktopReleasesQueryOptions = queryOptions({
   queryKey: ['desktop-releases-owner'],
   queryFn: () => getOwnerDesktopReleases(),
-  staleTime: 0,
+  staleTime: 30_000,
 });

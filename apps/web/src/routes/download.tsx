@@ -23,10 +23,16 @@ export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
   // redirecting, so a visitor can't tell it's flag-restricted vs nonexistent.
   // Entry points are hidden too, so this only catches direct-URL / crawler hits.
+  // Owners bypass the dark-launch flag: the durable ss-owner credential must
+  // keep the publish workflow reachable without a live toolbar override cookie.
   beforeLoad: async ({ context: { queryClient } }) => {
-    // ensureQueryData (not a bare getDownloadsFlag call) so this single SSR eval
-    // also warms the header/footer flag query for the /download render.
-    if (!(await queryClient.ensureQueryData(downloadsFlagQueryOptions))) {
+    // ensureQueryData (not bare fn calls) so these SSR evals also warm the
+    // header/footer flag query and the owner view for the /download render.
+    const [enabled, ownerView] = await Promise.all([
+      queryClient.ensureQueryData(downloadsFlagQueryOptions),
+      queryClient.ensureQueryData(ownerDesktopReleasesQueryOptions),
+    ]);
+    if (!enabled && !ownerView.owner) {
       throw notFound();
     }
   },
@@ -41,13 +47,10 @@ export const Route = createFileRoute('/download')({
     ],
   }),
   loader: async ({ context: { queryClient } }) => {
-    // The owner view is safe to resolve during SSR: /download documents are
-    // rendered per-request (no cache routeRule), so an owner's variant can
-    // never be served to anyone else.
-    await Promise.all([
-      queryClient.ensureQueryData(desktopReleasesQueryOptions),
-      queryClient.ensureQueryData(ownerDesktopReleasesQueryOptions),
-    ]);
+    // The owner view (already warmed in beforeLoad) is safe to resolve during
+    // SSR: /download documents are rendered per-request (no cache routeRule),
+    // so an owner's variant can never be served to anyone else.
+    await queryClient.ensureQueryData(desktopReleasesQueryOptions);
   },
   component: Download,
 });

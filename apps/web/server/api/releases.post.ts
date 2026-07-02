@@ -24,7 +24,7 @@ import { readBody } from 'h3';
 import { DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
 import { db } from '#/db.server';
 
-import { invalidateTags } from '../utils/invalidateTags';
+import { purgeDesktopReleases } from '../utils/purgeDesktopReleases';
 import { json, withSecret } from '../utils/withSecret';
 
 const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
@@ -54,12 +54,6 @@ function validAsset(a: unknown): a is AssetInput {
     typeof o.fileName === 'string' &&
     typeof o.url === 'string'
   );
-}
-
-/** Purges the /download page's edge cache tag once a release is recorded. */
-async function purgeDownloadCache(): Promise<void> {
-  if (process.env.VERCEL_CACHE_INVALIDATION !== 'true') return;
-  await invalidateTags(['desktop-releases']);
 }
 
 export default withSecret(
@@ -147,7 +141,7 @@ export default withSecret(
       // Best-effort: a cache-purge failure must not 500 the already-committed
       // write (that would fail the CI release job). Run it after the response.
       waitUntil(
-        purgeDownloadCache().catch((err) =>
+        purgeDesktopReleases().catch((err) =>
           console.error('[releases] cache purge failed:', err),
         ),
       );

@@ -163,14 +163,24 @@ export const getOwnerDesktopReleases = createServerFn().handler(async () => {
  */
 export const setReleaseVisibility = createServerFn({ method: 'POST' })
   .inputValidator(
-    (input: { version: string; visibility: 'private' | 'public' }) => input,
+    (input: { version: string; visibility: 'private' | 'public' }) => {
+      // Real runtime checks — the type annotation alone validates nothing.
+      if (
+        typeof input?.version !== 'string' ||
+        input.version.length === 0 ||
+        input.version.length > 32 || // varchar(32) column
+        (input.visibility !== 'private' && input.visibility !== 'public')
+      ) {
+        throw new Error('invalid payload');
+      }
+      return { version: input.version, visibility: input.visibility };
+    },
   )
   .handler(async ({ data }) => {
     if (!(await isOwnerRequest())) return { ok: false as const };
-    const visibility = data.visibility === 'public' ? 'public' : 'private';
     const updated = await db
       .update(desktopReleases)
-      .set({ visibility })
+      .set({ visibility: data.visibility })
       .where(eq(desktopReleases.version, data.version))
       .returning({ id: desktopReleases.id });
     if (updated.length === 0) return { ok: false as const };

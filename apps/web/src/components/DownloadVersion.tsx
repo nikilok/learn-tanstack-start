@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import type { DesktopPlatform, DesktopRelease } from '../api/releases';
 import {
@@ -110,7 +110,9 @@ function VisibilityButton({ release }: { release: DesktopRelease }) {
     <button
       type="button"
       disabled={isPending}
-      className={`cursor-pointer rounded-full px-2.5 py-0.5 text-xs transition disabled:opacity-50 ${
+      // No `transition` here: the style variants swap wholesale on a flip, and
+      // WebKit can paint a half-transitioned ghost of the old variant.
+      className={`cursor-pointer rounded-full px-2.5 py-0.5 text-xs disabled:opacity-50 ${
         failed
           ? 'border border-(--logo-red) text-(--logo-red)'
           : next === 'public'
@@ -157,12 +159,18 @@ export function DownloadVersion({
             Latest
           </span>
         ) : null}
-        {release.visibility === 'private' ? (
-          <span className="rounded-full border border-dashed border-(--logo-red) px-2 py-0.5 text-xs text-(--logo-red)">
-            Private
-          </span>
-        ) : null}
-        {owner ? <VisibilityButton release={release} /> : null}
+        {/* Keyed by visibility so a flip REPLACES these nodes instead of
+            patching them in place — Safari under-invalidates the flex row when
+            the chip is inserted/removed and paints the old button's pixels
+            where the chip belongs. Fresh nodes force a clean repaint. */}
+        <Fragment key={release.visibility}>
+          {release.visibility === 'private' ? (
+            <span className="rounded-full border border-dashed border-(--logo-red) px-2 py-0.5 text-xs text-(--logo-red)">
+              Private
+            </span>
+          ) : null}
+          {owner ? <VisibilityButton release={release} /> : null}
+        </Fragment>
         <svg
           viewBox="0 0 24 24"
           fill="none"

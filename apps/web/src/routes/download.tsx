@@ -9,6 +9,7 @@ import { downloadsFlagQueryOptions } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
+  privateDesktopReleasesQueryOptions,
 } from '../api/releases';
 import DesktopPreview from '../components/DesktopPreview';
 import DownloadCard from '../components/DownloadCard';
@@ -40,7 +41,13 @@ export const Route = createFileRoute('/download')({
     ],
   }),
   loader: async ({ context: { queryClient } }) => {
-    await queryClient.ensureQueryData(desktopReleasesQueryOptions);
+    // The owner view is safe to resolve during SSR: /download documents are
+    // rendered per-request (no cache routeRule), so an owner's variant can
+    // never be served to anyone else.
+    await Promise.all([
+      queryClient.ensureQueryData(desktopReleasesQueryOptions),
+      queryClient.ensureQueryData(privateDesktopReleasesQueryOptions),
+    ]);
   },
   component: Download,
 });
@@ -64,7 +71,14 @@ const detectOS = createIsomorphicFn()
 
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
-  const { data: releases = [] } = useQuery(desktopReleasesQueryOptions);
+  const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
+  const { data: ownerView } = useQuery(privateDesktopReleasesQueryOptions);
+  const owner = ownerView?.owner ?? false;
+  // Owner sees private releases folded in, newest first — the page behaves
+  // exactly as it will once they're published.
+  const releases = [...publicReleases, ...(ownerView?.releases ?? [])].sort(
+    (a, b) => b.publishedAt.localeCompare(a.publishedAt),
+  );
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);
@@ -140,6 +154,7 @@ function Download() {
               release={r}
               latest={i === 0}
               defaultOpen={i === 0}
+              owner={owner}
             />
           ))}
         </div>

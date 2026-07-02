@@ -245,6 +245,11 @@ export const desktopReleases = pgTable('desktop_releases', {
   version: varchar('version', { length: 32 }).notNull().unique(),
   channel: varchar('channel', { length: 16 }).notNull().default('stable'),
   notes: text('notes'),
+  // 'private' (default — fail closed: new dispatches are born hidden) | 'public'.
+  // Flipped by the owner-only publish action on /download, never by the workflow.
+  visibility: varchar('visibility', { length: 16 })
+    .notNull()
+    .default('private'),
   publishedAt: timestamp('published_at').defaultNow().notNull(),
 });
 

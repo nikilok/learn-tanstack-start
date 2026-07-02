@@ -225,6 +225,13 @@
       "when": 1782908264112,
       "tag": "0031_good_husk",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783016939819,
+      "tag": "0032_chemical_fabian_cortez",
+      "breakpoints": true
     }
   ]
 }

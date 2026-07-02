@@ -1,4 +1,7 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
 import type { DesktopPlatform, DesktopRelease } from '../api/releases';
+import { setReleaseVisibility } from '../api/releases';
 import {
   assetLabel,
   OsIcon,
@@ -64,15 +67,55 @@ function PlatformColumn({
   );
 }
 
-/** A version disclosure — a summary (version + Latest badge) over three platform columns. */
+/** Owner-only publish/unpublish control riding the version summary row. */
+function VisibilityButton({ release }: { release: DesktopRelease }) {
+  const queryClient = useQueryClient();
+  const next = release.visibility === 'private' ? 'public' : 'private';
+  const { mutate, isPending } = useMutation({
+    mutationFn: () =>
+      setReleaseVisibility({
+        data: { version: release.version, visibility: next },
+      }),
+    // Both lists change shape on a flip — refetch them together.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['desktop-releases'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['desktop-releases-private'],
+        }),
+      ]),
+  });
+  return (
+    <button
+      type="button"
+      disabled={isPending}
+      className={`cursor-pointer rounded-full px-2.5 py-0.5 text-xs transition disabled:opacity-50 ${
+        next === 'public'
+          ? 'bg-(--sea-ink) text-(--bg-base) hover:opacity-90'
+          : 'border border-(--line) text-(--sea-ink-soft) hover:text-(--sea-ink)'
+      }`}
+      onClick={(e) => {
+        e.preventDefault(); // keep the summary from toggling the disclosure
+        e.stopPropagation();
+        mutate();
+      }}
+    >
+      {isPending ? 'Saving…' : next === 'public' ? 'Publish' : 'Unpublish'}
+    </button>
+  );
+}
+
+/** A version disclosure — a summary (version + badges) over three platform columns. */
 export function DownloadVersion({
   release,
   latest,
   defaultOpen,
+  owner,
 }: {
   release: DesktopRelease;
   latest: boolean;
   defaultOpen: boolean;
+  owner: boolean;
 }) {
   return (
     <details open={defaultOpen} className="group border-t border-(--line)">
@@ -85,6 +128,12 @@ export function DownloadVersion({
             Latest
           </span>
         ) : null}
+        {release.visibility === 'private' ? (
+          <span className="rounded-full border border-dashed border-(--logo-red) px-2 py-0.5 text-xs text-(--logo-red)">
+            Private
+          </span>
+        ) : null}
+        {owner ? <VisibilityButton release={release} /> : null}
         <svg
           viewBox="0 0 24 24"
           fill="none"

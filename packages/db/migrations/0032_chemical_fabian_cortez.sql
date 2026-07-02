@@ -1,0 +1,1 @@
+ALTER TABLE "desktop_releases" ADD COLUMN "visibility" varchar(16) DEFAULT 'private' NOT NULL;

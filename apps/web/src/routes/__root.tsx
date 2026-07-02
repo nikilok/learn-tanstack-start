@@ -15,6 +15,7 @@ import { mountVercelToolbar } from '@vercel/toolbar/vite';
 import { useEffect } from 'react';
 
 import AppSplash from '../components/AppSplash';
+import DesktopBridge from '../components/DesktopBridge';
 import Footer from '../components/Footer';
 import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
@@ -23,6 +24,7 @@ import NotFound from '../components/NotFound';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
+import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
 import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
@@ -154,6 +156,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script
           dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
         />
+        {/* oxlint-disable-next-line react/no-danger -- static desktop-mode detection, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: DESKTOP_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">
@@ -161,6 +165,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <McpTools />
           <NavigationProgress />
           <Header />
+          <DesktopBridge />
           {/* flex-1 wrapper makes the footer a sticky footer: on pages shorter
               than the viewport the content grows to fill, pinning the footer to
               the bottom edge so its translucent panel never leaves a strip of

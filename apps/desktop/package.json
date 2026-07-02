@@ -1,0 +1,35 @@
+{
+  "name": "@ss/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SponsorSearch native desktop client — Electron thin-wrapper over the hosted site.",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "package": "electron-vite build && electron-builder --publish never",
+    "package:dir": "electron-vite build && electron-builder --dir",
+    "package:win-zip": "electron-vite build && electron-builder --win zip --x64 --publish never",
+    "package:mac-dmg": "electron-vite build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 --publish never -c.mac.notarize=false",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "dependencies": {
+    "lucide-react": "^1.21.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vercel/blob": "^2.5.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.9",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.1"
+  },
+  "productName": "SponsorSearch"
+}

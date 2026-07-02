@@ -4,7 +4,9 @@ const ALLOWED_PREFIXES = [
   '/', // home
   '/company/', // detail pages
   '/privacy', // privacy policy
+  '/download', // download page + /downloads/* installer redirects (startsWith covers both)
   '/_server', // TanStack server functions
+  '/api/releases', // Nitro desktop-release write endpoint
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy
   '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint

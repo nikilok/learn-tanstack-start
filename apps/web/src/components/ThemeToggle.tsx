@@ -67,6 +67,21 @@ function applyThemeMode(mode: ThemeMode, animate = false) {
   }
 }
 
+/** Advance light -> dark -> auto -> light from the persisted choice, applying + persisting. */
+export function cycleTheme(): ThemeMode {
+  const current = getInitialMode();
+  const next: ThemeMode =
+    current === 'light' ? 'dark' : current === 'dark' ? 'auto' : 'light';
+  applyThemeMode(next, true);
+  window.localStorage.setItem('theme', next);
+  return next;
+}
+
+/** Re-apply the currently stored mode — used to follow the OS appearance in `auto`. */
+export function refreshTheme(): void {
+  applyThemeMode(getInitialMode(), true);
+}
+
 /**
  * Three-state theme toggle button cycling light -> dark -> auto -> light.
  * Hydrates from `localStorage` after mount (the initial paint is handled by a
@@ -83,7 +98,8 @@ export default function ThemeToggle() {
   }, []);
 
   useEffect(() => {
-    if (mode !== 'auto') {
+    // Desktop: DesktopBridge owns auto-follow; this hidden toggle's stale state would race a 2nd transition.
+    if (mode !== 'auto' || window.isSponsorSearchDesktop) {
       return;
     }
 
@@ -101,11 +117,7 @@ export default function ThemeToggle() {
    * the DOM, and persist the choice to `localStorage`.
    */
   function toggleMode() {
-    const nextMode: ThemeMode =
-      mode === 'light' ? 'dark' : mode === 'dark' ? 'auto' : 'light';
-    setMode(nextMode);
-    applyThemeMode(nextMode, true);
-    window.localStorage.setItem('theme', nextMode);
+    setMode(cycleTheme());
   }
 
   const label =

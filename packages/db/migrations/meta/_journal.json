@@ -218,6 +218,13 @@
       "when": 1781249279546,
       "tag": "0030_snapshot-licences-restore-town-county",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782908264112,
+      "tag": "0031_good_husk",
+      "breakpoints": true
     }
   ]
 }

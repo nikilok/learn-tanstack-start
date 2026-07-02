@@ -9,7 +9,8 @@
  * mirrored to the overwritten downloads/latest/ path.
  *
  * Env: RELEASE_PLATFORM, RELEASE_VERSION, BLOB_READ_WRITE_TOKEN,
- *      DESKTOP_RELEASE_SECRET, SITE_URL (optional; default the prod domain).
+ *      DESKTOP_RELEASE_SECRET, SITE_URL (optional; default the prod domain),
+ *      RELEASE_NOTES (optional markdown, rendered on /download).
  */
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
@@ -33,6 +34,7 @@ const VERSION = requireEnv('RELEASE_VERSION');
 const TOKEN = requireEnv('BLOB_READ_WRITE_TOKEN');
 const SECRET = requireEnv('DESKTOP_RELEASE_SECRET');
 const SITE = process.env.SITE_URL ?? 'https://sponsorsearch.co.uk';
+const NOTES = (process.env.RELEASE_NOTES ?? '').trim();
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
 
 // Mirrors DESKTOP_FORMATS in apps/web/src/api/desktopPlatforms.ts (a cross-package
@@ -148,7 +150,13 @@ async function main() {
       'content-type': 'application/json',
       'x-desktop-release-secret': SECRET,
     },
-    body: JSON.stringify({ version: VERSION, assets }),
+    body: JSON.stringify({
+      version: VERSION,
+      assets,
+      // The version upsert overwrites notes on EVERY registration (absent
+      // field -> null) — same value from all matrix jobs, so they converge.
+      notes: NOTES || null,
+    }),
   });
   // withSecret answers a neutral 202 to a bad secret (deliberately no auth signal),
   // so res.ok is NOT success — only an authenticated 200 { ok, releaseId } is.

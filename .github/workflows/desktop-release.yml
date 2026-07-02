@@ -13,6 +13,12 @@ on:
         required: true
         default: patch
         options: [patch, minor, major]
+      release_notes:
+        # The UI field is single-line; for multiline notes dispatch via
+        # `gh workflow run desktop-release.yml -f release_type=patch -f release_notes="$(cat notes.md)"`.
+        description: 'Release notes (markdown, optional) — shown on /download'
+        type: string
+        required: false
 
 concurrency:
   # Never cancel a release mid-publish; PR smokes are cheap to let finish too.
@@ -141,6 +147,7 @@ jobs:
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
 

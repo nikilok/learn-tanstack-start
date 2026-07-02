@@ -6,6 +6,7 @@ import {
   PLATFORM_ORDER,
   sortAssets,
 } from './downloadMeta';
+import { ReleaseNotesMarkdown } from './ReleaseNotesMarkdown';
 
 /** Down-arrow affordance for a download row. */
 function DownloadArrow({ className }: { className?: string }) {
@@ -107,9 +108,7 @@ export function DownloadVersion({
           <summary className="cursor-pointer text-sm text-(--link-blue)">
             View release notes
           </summary>
-          <p className="mt-2 text-sm whitespace-pre-line text-(--sea-ink-soft)">
-            {release.notes}
-          </p>
+          <ReleaseNotesMarkdown source={release.notes} />
         </details>
       ) : null}
     </details>

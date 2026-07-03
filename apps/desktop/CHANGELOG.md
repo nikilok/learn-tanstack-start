@@ -14,6 +14,6 @@ Everything from [sponsorsearch.co.uk](https://sponsorsearch.co.uk) in its own na
 
 - **Native experience** — custom title bar, native menus and shortcuts, and external links open in your default browser.
 - **Auto-updates** — future releases download in the background and apply when you relaunch, so this is the last version you'll ever need to install by hand.
-- **Every platform** — macOS (Apple Silicon + Intel), Windows x64 and ARM64 (per-user or system-wide installers), Linux (AppImage, deb, rpm).
+- **Mac and Windows** — macOS (Apple Silicon + Intel) and Windows x64/ARM64 (per-user or system-wide installers). Linux is on the way.
 
 This is release one — fixes and improvements will arrive automatically from here on.

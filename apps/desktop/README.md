@@ -55,6 +55,15 @@ overrides need `gh workflow run`. `.github/workflows/desktop-release.yml` then:
    Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and records the
    release + per-variant URLs in the DB via `POST /api/releases`.
 
+If the **version** job fails, its rollback deletes the pushed branch + tag — fix the
+cause and re-dispatch. If **build** jobs fail *after* the bump merged, use **Re-run
+failed jobs** on the same run (version, tag, and resolved notes are all preserved,
+and uploads upsert idempotently); a fresh dispatch would mint a new version from a
+`main` whose `Unreleased` was already archived and ship noteless — if you must
+re-dispatch, move the archived section body back under `## Unreleased` first. Notes
+merged to `main` mid-release are flagged by a run warning (they'd otherwise vanish
+into the just-archived section).
+
 Downloads are served from `sponsorsearch.co.uk/downloads/...` (a Nitro route that
 redirects to Blob) and listed on `/download` straight from the DB — no GitHub
 Releases. Auto-update reads a **generic** electron-updater feed at `/downloads/latest/`

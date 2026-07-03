@@ -1,12 +1,10 @@
 # Changelog
 
-Notable changes to the SponsorSearch desktop app, loosely following
-[Keep a Changelog](https://keepachangelog.com). Write the next release's notes
-under `## Unreleased` (ideally in the same PR as the change); the release
-workflow ships that section as the notes on
-[/download](https://sponsorsearch.co.uk/download) and archives it here under
-the released version's header. Only edit `Unreleased` by hand — version
-sections below it are written by the workflow.
+Write the next release's notes under `## Unreleased` (ideally in the same PR
+as the change; `### Subheadings` are fine). The release workflow ships that
+section to [/download](https://sponsorsearch.co.uk/download) and archives it
+here under the version's header — only edit `Unreleased` by hand. Full flow:
+[README.md](./README.md).
 
 ## Unreleased
 

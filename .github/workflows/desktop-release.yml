@@ -15,11 +15,12 @@ on:
         options: [patch, minor, major]
       release_notes:
         # GitHub renders string inputs as a single-line field (no textarea type
-        # exists), so multiline notes live in apps/desktop/RELEASE_NOTES.md — leave
-        # this EMPTY to ship that file. A non-empty value here overrides it; for a
-        # multiline override dispatch via
+        # exists), so multiline notes live in apps/desktop/CHANGELOG.md — leave this
+        # EMPTY to ship its "## Unreleased" section (which the run then archives
+        # under the new version's header). A non-empty value here overrides the
+        # changelog and leaves it untouched; for a multiline override dispatch via
         # `gh workflow run desktop-release.yml -f release_type=patch -f release_notes="$(cat notes.md)"`.
-        description: 'Release notes override (markdown, optional) — empty ships apps/desktop/RELEASE_NOTES.md'
+        description: 'Release notes override (markdown, optional) — empty ships CHANGELOG.md "Unreleased"'
         type: string
         required: false
 
@@ -75,19 +76,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Resolve release notes (input overrides RELEASE_NOTES.md)
-        id: notes
-        env:
-          INPUT_NOTES: ${{ inputs.release_notes }}
-        run: |
-          NOTES="$INPUT_NOTES"
-          if [ -z "$NOTES" ] && [ -f apps/desktop/RELEASE_NOTES.md ]; then
-            NOTES="$(cat apps/desktop/RELEASE_NOTES.md)"
-          fi
-          DELIM="NOTES_$RANDOM$RANDOM"
-          { echo "notes<<$DELIM"; printf '%s\n' "$NOTES"; echo "$DELIM"; } >> "$GITHUB_OUTPUT"
-          # Surface exactly what ships on the run summary so a stale file is caught.
-          { echo "## Release notes shipping with this build"; echo; printf '%s\n' "${NOTES:-_none_}"; } >> "$GITHUB_STEP_SUMMARY"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Bump version
         id: bump
@@ -97,6 +85,32 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped @ss/desktop to $VERSION"
+      - name: Resolve release notes (input overrides CHANGELOG.md Unreleased)
+        id: notes
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          CHANGELOG=apps/desktop/CHANGELOG.md
+          if [ -n "$INPUT_NOTES" ]; then
+            NOTES="$INPUT_NOTES" # override ships verbatim; changelog left untouched
+          else
+            NOTES="$(awk '/^## Unreleased[[:space:]]*$/{f=1; next} /^## /{f=0} f' "$CHANGELOG")"
+          fi
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES=""
+            echo "::warning::CHANGELOG.md 'Unreleased' is empty and no override was given — v${VERSION} ships without release notes."
+          elif [ -z "$INPUT_NOTES" ]; then
+            # Archive: slide the version header in under '## Unreleased' so the body
+            # now belongs to this release and Unreleased is left empty for the next.
+            awk -v hdr="## v${VERSION} — $(date -u +%Y-%m-%d)" \
+              '/^## Unreleased[[:space:]]*$/{print; print ""; print hdr; next} {print}' \
+              "$CHANGELOG" > "$CHANGELOG.tmp" && mv "$CHANGELOG.tmp" "$CHANGELOG"
+          fi
+          DELIM="NOTES_$RANDOM$RANDOM"
+          { echo "notes<<$DELIM"; printf '%s\n' "$NOTES"; echo "$DELIM"; } >> "$GITHUB_OUTPUT"
+          # Surface exactly what ships on the run summary so a stale file is caught.
+          { echo "## Release notes shipping with this build"; echo; printf '%s\n' "${NOTES:-_none_}"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Commit + tag on release branch, PR bump back to main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,7 +120,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           BRANCH="release/desktop-v${VERSION}"
           git checkout -b "$BRANCH"
-          git add apps/desktop/package.json
+          # CHANGELOG.md rides along when the notes step archived Unreleased.
+          git add apps/desktop/package.json apps/desktop/CHANGELOG.md
           git commit -m "chore(desktop): release v${VERSION}"
           # Tag the BRANCH commit so the build jobs can check it out without waiting
           # on the PR's required checks. Squash-merge rewrites the SHA, so the tag

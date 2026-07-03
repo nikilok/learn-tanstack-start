@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+## v0.1.2 — 2026-07-03
+
 The first public build of the SponsorSearch desktop app.
 
 Everything from [sponsorsearch.co.uk](https://sponsorsearch.co.uk) in its own native window — search the full HMRC register of licensed UK visa sponsors, enriched with Companies House data — plus the desktop touches:

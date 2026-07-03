@@ -80,47 +80,46 @@ function rateLimitRule(opts: {
   };
 }
 
+/** Build a header-gated path bypass — a trusted non-browser server-to-server caller exempted from the managed Bot Protection challenge it can't solve. Matching on header PRESENCE (not value) keeps the secret out of firewall config; the endpoint's timing-safe secret check stays the real auth gate. */
+function bypassRule(opts: {
+  name: string;
+  description: string;
+  path: string;
+  headerKey: string;
+}): Rule {
+  return {
+    name: opts.name,
+    description: opts.description,
+    active: true,
+    conditionGroup: [
+      {
+        conditions: [
+          { type: 'path', op: 'eq', value: opts.path },
+          { type: 'header', op: 'ex', key: opts.headerKey },
+        ],
+      },
+    ],
+    action: { mitigate: { action: 'bypass' } },
+  };
+}
+
 /** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 export const rules: Rule[] = [
-  // ALLOW (first — allow rules take precedence): ch-stream (Railway) → POST /api/revalidate is a
-  // trusted server-to-server caller (CDN cache invalidation), authed by the x-revalidate-secret
-  // header check in the endpoint. A bypass rule exempts it from the managed Bot Protection ruleset,
-  // which otherwise serves a JS challenge the non-browser caller can't solve and blocks it. Matching
-  // on the header's presence (not value) keeps the secret out of the firewall config — the endpoint's
-  // timing-safe secret check stays the real auth gate.
-  {
+  // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
+  bypassRule({
     name: 'allow-ch-stream-revalidate',
     description:
       'Bypass bot protection for ch-stream → POST /api/revalidate (trusted server-to-server cache invalidation; endpoint auths via x-revalidate-secret). Skips the managed Bot Protection challenge that blocks non-browser callers.',
-    active: true,
-    conditionGroup: [
-      {
-        conditions: [
-          { type: 'path', op: 'eq', value: '/api/revalidate' },
-          { type: 'header', op: 'ex', key: 'x-revalidate-secret' },
-        ],
-      },
-    ],
-    action: { mitigate: { action: 'bypass' } },
-  },
-  // ALLOW: desktop release workflow (GitHub runner) → POST /api/releases records a release.
-  // Same shape as allow-ch-stream-revalidate: non-browser caller that Bot Protection 429-challenges;
-  // header PRESENCE gates the bypass, the endpoint's timing-safe secret check stays the real auth.
-  {
+    path: '/api/revalidate',
+    headerKey: 'x-revalidate-secret',
+  }),
+  bypassRule({
     name: 'allow-desktop-release-record',
     description:
       'Bypass bot protection for the desktop release workflow → POST /api/releases (CI records a release; endpoint auths via x-desktop-release-secret). Skips the managed challenge that 429s non-browser callers.',
-    active: true,
-    conditionGroup: [
-      {
-        conditions: [
-          { type: 'path', op: 'eq', value: '/api/releases' },
-          { type: 'header', op: 'ex', key: 'x-desktop-release-secret' },
-        ],
-      },
-    ],
-    action: { mitigate: { action: 'bypass' } },
-  },
+    path: '/api/releases',
+    headerKey: 'x-desktop-release-secret',
+  }),
   rateLimitRule({
     name: 'rl-serverfn-ip',
     description:

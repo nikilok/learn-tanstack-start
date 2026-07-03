@@ -58,9 +58,9 @@ type Asset = {
   size: number;
 };
 
-/** {arch, format, installScope} parsed from an artifact filename. */
+/** {arch, format, installScope} parsed from an artifact filename (arch null when no marker — never guessed). */
 function parse(file: string): {
-  arch: string;
+  arch: string | null;
   format: string | null;
   installScope: string;
 } {
@@ -71,7 +71,9 @@ function parse(file: string): {
     ? 'arm64'
     : /universal/.test(lower)
       ? 'universal'
-      : 'x64';
+      : /x64|x86_64|amd64/.test(lower)
+        ? 'x64'
+        : null;
   const installScope = /-system/.test(lower)
     ? 'system'
     : /-user/.test(lower)
@@ -101,6 +103,12 @@ async function main() {
   for (const file of files) {
     const { arch, format, installScope } = parse(file);
     if (!format) continue; // not a page installer
+    if (!arch) {
+      // A guessed arch mislabels installers on /download (the universal-exe
+      // collision class) — naming drift must fail the leg loudly instead.
+      console.error(`[upload-release] cannot parse arch from: ${file}`);
+      process.exit(1);
+    }
     const guid = randomBytes(8).toString('hex');
     const body = await readFile(join(DIST, file));
     const path = `downloads/${PLATFORM}/${guid}/${VERSION}/${file}`;
@@ -132,22 +140,21 @@ async function main() {
     process.exit(1);
   }
 
-  for (const file of files) {
-    if (!isFeedArtifact(file)) continue;
-    const body = await readFile(join(DIST, file));
-    await put(`downloads/latest/${file}`, body, {
-      access: 'public',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-      token: TOKEN,
-    });
-    console.log(`[upload-release] feed: ${file}`);
-  }
-
-  // Retry transient record failures (429/5xx/network) — dying here after every
+  // Record BEFORE mirroring the update feed: if the registry never accepts this
+  // release, live updaters must keep the old feed — never a phantom update to a
+  // build with no desktop_releases row.
+  const payload = JSON.stringify({
+    version: VERSION,
+    assets,
+    // The version upsert overwrites notes on EVERY registration (absent
+    // field -> null) — same value from all matrix jobs, so they converge.
+    notes: NOTES || null,
+  });
+  // Retry transient failures (429/5xx/network/hang) — dying here after every
   // blob already uploaded burns the whole leg.
-  let res!: Response;
-  for (let attempt = 1; ; attempt++) {
+  const MAX_ATTEMPTS = 3;
+  let res: Response | null = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       res = await fetch(`${SITE}/api/releases`, {
         method: 'POST',
@@ -155,24 +162,25 @@ async function main() {
           'content-type': 'application/json',
           'x-desktop-release-secret': SECRET,
         },
-        body: JSON.stringify({
-          version: VERSION,
-          assets,
-          // The version upsert overwrites notes on EVERY registration (absent
-          // field -> null) — same value from all matrix jobs, so they converge.
-          notes: NOTES || null,
-        }),
+        body: payload,
+        // A hung socket becomes a retriable failure instead of a stalled leg.
+        signal: AbortSignal.timeout(30_000),
       });
       if (res.status < 500 && res.status !== 429) break;
       console.error(
         `[upload-release] record attempt ${attempt}: ${res.status}`,
       );
     } catch (err) {
+      res = null;
       console.error(`[upload-release] record attempt ${attempt} threw`, err);
-      if (attempt === 3) throw err;
     }
-    if (attempt === 3) break;
-    await new Promise((r) => setTimeout(r, attempt * 5000));
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, attempt * 5000));
+    }
+  }
+  if (!res) {
+    console.error('[upload-release] record failed: every attempt threw');
+    process.exit(1);
   }
   // withSecret answers a neutral 202 to a bad secret (deliberately no auth signal),
   // so res.ok is NOT success — only an authenticated 200 { ok, releaseId } is.
@@ -193,6 +201,18 @@ async function main() {
   console.log(
     `[upload-release] recorded ${assets.length} ${PLATFORM} asset(s) for ${VERSION} (release ${body.releaseId})`,
   );
+
+  for (const file of files) {
+    if (!isFeedArtifact(file)) continue;
+    const feedBody = await readFile(join(DIST, file));
+    await put(`downloads/latest/${file}`, feedBody, {
+      access: 'public',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      token: TOKEN,
+    });
+    console.log(`[upload-release] feed: ${file}`);
+  }
 }
 
 main().catch((err) => {

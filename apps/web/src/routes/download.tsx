@@ -42,7 +42,7 @@ export const Route = createFileRoute('/download')({
       {
         name: 'description',
         content:
-          'Download the SponsorSearch desktop app for macOS, Windows and Linux. Same data, native window, auto-updating.',
+          'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.',
       },
     ],
   }),
@@ -106,7 +106,7 @@ function Download() {
     <main className="page-wrap mx-auto max-w-5xl px-4 py-12 text-(--sea-ink)">
       <h1 className="text-3xl font-bold">Download SponsorSearch</h1>
       <p className="mt-2 text-(--sea-ink-soft)">
-        Available for macOS, Windows, and Linux.
+        Available for macOS and Windows. Linux is on the way.
       </p>
 
       {cardCount > 0 ? (
@@ -134,8 +134,8 @@ function Download() {
                 </a>
               ) : (
                 <p className="text-sm text-(--sea-ink-soft)">
-                  Available for macOS, Windows &amp; Linux — grab any build from
-                  the version list below.
+                  Available for macOS &amp; Windows — grab any build from the
+                  version list below.
                 </p>
               )}
             </DownloadCard>

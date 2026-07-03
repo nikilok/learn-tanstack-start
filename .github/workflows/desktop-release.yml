@@ -50,11 +50,13 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
   version:
-    # Bump apps/desktop version once, commit + tag + push, expose the new version.
+    # Bump apps/desktop version once on a release branch, tag that commit (the build
+    # jobs check the tag out immediately), and PR the bump back to protected main.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # push the version-bump commit + tag
+      contents: write # push the release branch + tag
+      pull-requests: write # open + auto-merge the version-bump PR
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
@@ -70,16 +72,31 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped @ss/desktop to $VERSION"
-      - name: Commit, tag & push
+      - name: Commit + tag on release branch, PR bump back to main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="release/desktop-v${VERSION}"
+          git checkout -b "$BRANCH"
           git add apps/desktop/package.json
-          git commit -m "chore(desktop): release v${{ steps.bump.outputs.version }}"
-          git tag "v${{ steps.bump.outputs.version }}"
-          # Push the tag explicitly: --follow-tags only pushes ANNOTATED tags, and this
-          # one is lightweight — without this the build jobs' checkout of the tag fails.
-          git push origin HEAD "refs/tags/v${{ steps.bump.outputs.version }}"
+          git commit -m "chore(desktop): release v${VERSION}"
+          # Tag the BRANCH commit so the build jobs can check it out without waiting
+          # on the PR's required checks. Squash-merge rewrites the SHA, so the tag
+          # ends up dangling off main — still permanently reachable, still the exact
+          # tree the binaries were built from. Tag pushed explicitly: --follow-tags
+          # only pushes ANNOTATED tags and this one is lightweight.
+          git tag "v${VERSION}"
+          git push -u origin "$BRANCH" "refs/tags/v${VERSION}"
+          PR_URL=$(gh pr create --title "chore(desktop): release v${VERSION}" \
+            --body "Automated version bump from the desktop release workflow. Must land on main or the next release dies on a duplicate tag." \
+            --base main)
+          # Try auto-merge (queues behind required checks); fall back to direct
+          # merge when the PR is already clean and GitHub refuses to enable auto.
+          gh pr merge "$PR_URL" --squash --delete-branch --auto \
+            || gh pr merge "$PR_URL" --squash --delete-branch
 
   build:
     # Build every variant per OS, upload to Vercel Blob, record in the DB.

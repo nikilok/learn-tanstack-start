@@ -36,7 +36,11 @@ Output lands in `apps/desktop/dist/`.
 Releases are **manually triggered**: GitHub → Actions → **Desktop App** → **Run
 workflow** → pick a semver bump (`patch` / `minor` / `major`). Dispatch from `main`
 only — the version job refuses any other ref (its bump PR would squash-merge that
-entire ref into `main`). `.github/workflows/desktop-release.yml` then:
+entire ref into `main`). Release notes ship from `apps/desktop/RELEASE_NOTES.md`
+(update + merge it before dispatching; the run summary shows exactly what was picked
+up). A non-empty notes input overrides the file — but GitHub's dispatch field is
+single-line, so multiline overrides need `gh workflow run`.
+`.github/workflows/desktop-release.yml` then:
 
 1. **version** — `bun pm version <bump>` on `apps/desktop`, commits + tags `vX.Y.Z`
    on a `release/desktop-vX.Y.Z` branch, then opens a PR and merges the bump back

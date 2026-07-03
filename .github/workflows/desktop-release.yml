@@ -14,9 +14,12 @@ on:
         default: patch
         options: [patch, minor, major]
       release_notes:
-        # The UI field is single-line; for multiline notes dispatch via
+        # GitHub renders string inputs as a single-line field (no textarea type
+        # exists), so multiline notes live in apps/desktop/RELEASE_NOTES.md — leave
+        # this EMPTY to ship that file. A non-empty value here overrides it; for a
+        # multiline override dispatch via
         # `gh workflow run desktop-release.yml -f release_type=patch -f release_notes="$(cat notes.md)"`.
-        description: 'Release notes (markdown, optional) — shown on /download'
+        description: 'Release notes override (markdown, optional) — empty ships apps/desktop/RELEASE_NOTES.md'
         type: string
         required: false
 
@@ -60,6 +63,7 @@ jobs:
       pull-requests: write # open + auto-merge the version-bump PR
     outputs:
       version: ${{ steps.bump.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - name: Refuse non-main dispatches
         if: github.ref != 'refs/heads/main'
@@ -71,6 +75,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Resolve release notes (input overrides RELEASE_NOTES.md)
+        id: notes
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
+        run: |
+          NOTES="$INPUT_NOTES"
+          if [ -z "$NOTES" ] && [ -f apps/desktop/RELEASE_NOTES.md ]; then
+            NOTES="$(cat apps/desktop/RELEASE_NOTES.md)"
+          fi
+          DELIM="NOTES_$RANDOM$RANDOM"
+          { echo "notes<<$DELIM"; printf '%s\n' "$NOTES"; echo "$DELIM"; } >> "$GITHUB_OUTPUT"
+          # Surface exactly what ships on the run summary so a stale file is caught.
+          { echo "## Release notes shipping with this build"; echo; printf '%s\n' "${NOTES:-_none_}"; } >> "$GITHUB_STEP_SUMMARY"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Bump version
         id: bump
@@ -195,7 +212,7 @@ jobs:
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_NOTES: ${{ needs.version.outputs.notes }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
 

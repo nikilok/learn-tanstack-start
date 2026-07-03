@@ -46,6 +46,9 @@ nsis:
 
 linux:
   category: Office
+  # Linux derives the binary name from package.json "name" (NOT productName);
+  # "@ss/desktop" sanitizes to "@ssdesktop", which AppImage rejects.
+  executableName: sponsorsearch
   target:
     - target: AppImage
       arch: [x64, arm64]

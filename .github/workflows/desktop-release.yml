@@ -51,7 +51,9 @@ jobs:
         run: bunx electron-vite build
       - name: Package (unsigned, no publish)
         working-directory: apps/desktop
-        run: bunx electron-builder --linux --dir --publish never
+        # Real AppImage target (not --dir): --dir skips target packaging, which
+        # hid the '@ssdesktop' executableName failure until the first release.
+        run: bunx electron-builder --linux AppImage --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
@@ -230,7 +232,11 @@ jobs:
         if: matrix.platform != 'win'
         working-directory: apps/desktop
         # Notarize only when Apple creds exist (notarize: true would otherwise hard-fail).
-        run: bunx electron-builder --${{ matrix.platform }} --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
+        run: |
+          # electron-builder 26 treats a set-but-empty CSC_LINK as a certificate
+          # to load ("not a file") — drop empties so absent secrets skip signing.
+          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          bunx electron-builder --${{ matrix.platform }} --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
         env:
           CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
@@ -244,7 +250,12 @@ jobs:
       - name: Build Windows System installers
         if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${version}-${arch}-system.${ext}'
+        # bash, not pwsh: PowerShell splits -c.win.artifactName='...' into a bare
+        # -c + path, which electron-builder then opens as a config file (ENOENT).
+        shell: bash
+        run: |
+          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${version}-${arch}-system.${ext}'
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
@@ -253,7 +264,10 @@ jobs:
       - name: Build Windows User installers
         if: matrix.platform == 'win'
         working-directory: apps/desktop
-        run: bunx electron-builder --win nsis --x64 --arm64 --publish never
+        shell: bash
+        run: |
+          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          bunx electron-builder --win nsis --x64 --arm64 --publish never
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}

@@ -36,17 +36,33 @@ Output lands in `apps/desktop/dist/`.
 Releases are **manually triggered**: GitHub → Actions → **Desktop App** → **Run
 workflow** → pick a semver bump (`patch` / `minor` / `major`). Dispatch from `main`
 only — the version job refuses any other ref (its bump PR would squash-merge that
-entire ref into `main`). `.github/workflows/desktop-release.yml` then:
+entire ref into `main`). Release notes ship from the `## Unreleased` section of
+`apps/desktop/CHANGELOG.md` — write them there (ideally in the PR that makes the
+change) and the release archives the section under the new version's header in the
+same bump commit, leaving `Unreleased` empty for the next cycle. Empty `Unreleased`
+⇒ the release ships without notes (with a run warning); the run summary always shows
+exactly what was picked up. A non-empty notes input overrides the changelog and
+leaves it untouched — but GitHub's dispatch field is single-line, so multiline
+overrides need `gh workflow run`. `.github/workflows/desktop-release.yml` then:
 
-1. **version** — `bun pm version <bump>` on `apps/desktop`, commits + tags `vX.Y.Z`
-   on a `release/desktop-vX.Y.Z` branch, then opens a PR and merges the bump back
-   into `main` (auto-merge when checks gate it, direct merge otherwise). If the PR
-   can't merge, the job deletes the pushed branch + tag and fails, so a re-dispatch
-   starts clean.
+1. **version** — `bun pm version <bump>` on `apps/desktop`, commits the bump + the
+   archived changelog and tags `vX.Y.Z` on a `release/desktop-vX.Y.Z` branch, then
+   opens a PR and merges it back into `main` (auto-merge when checks gate it, direct
+   merge otherwise). If the PR can't merge, the job deletes the pushed branch + tag
+   and fails, so a re-dispatch starts clean.
 2. **build** (matrix mac / win / linux) — builds every variant (mac dmg
    arm64·x64·universal + universal zip; Windows nsis x64·arm64 in User + System;
    Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and records the
    release + per-variant URLs in the DB via `POST /api/releases`.
+
+If the **version** job fails, its rollback deletes the pushed branch + tag — fix the
+cause and re-dispatch. If **build** jobs fail *after* the bump merged, use **Re-run
+failed jobs** on the same run (version, tag, and resolved notes are all preserved,
+and uploads upsert idempotently); a fresh dispatch would mint a new version from a
+`main` whose `Unreleased` was already archived and ship noteless — if you must
+re-dispatch, move the archived section body back under `## Unreleased` first. Notes
+merged to `main` mid-release are flagged by a run warning (they'd otherwise vanish
+into the just-archived section).
 
 Downloads are served from `sponsorsearch.co.uk/downloads/...` (a Nitro route that
 redirects to Blob) and listed on `/download` straight from the DB — no GitHub

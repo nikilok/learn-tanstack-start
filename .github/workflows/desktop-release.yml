@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'apps/desktop/**'
+      # Docs-only edits (routine now that release notes live in CHANGELOG.md)
+      # don't need the packaging smoke.
+      - '!apps/desktop/CHANGELOG.md'
+      - '!apps/desktop/README.md'
       - '.github/workflows/desktop-release.yml'
   workflow_dispatch:
     inputs:
@@ -14,9 +18,11 @@ on:
         default: patch
         options: [patch, minor, major]
       release_notes:
-        # The UI field is single-line; for multiline notes dispatch via
+        # Single-line field (GitHub has no textarea input type). Empty ⇒ ship +
+        # archive CHANGELOG.md's Unreleased section; non-empty ⇒ override verbatim.
+        # Full flow: apps/desktop/README.md. Multiline override:
         # `gh workflow run desktop-release.yml -f release_type=patch -f release_notes="$(cat notes.md)"`.
-        description: 'Release notes (markdown, optional) — shown on /download'
+        description: 'Release notes override (markdown, optional) — empty ships CHANGELOG.md "Unreleased"'
         type: string
         required: false
 
@@ -58,8 +64,14 @@ jobs:
     permissions:
       contents: write # push the release branch + tag
       pull-requests: write # open + auto-merge the version-bump PR
+    env:
+      # CHANGELOG.md section headers the workflow owns (ERE, read by every awk
+      # via ENVIRON so the extract/archive/verify passes can't drift apart).
+      HDR_RE: '^## \[?Unreleased\]?[[:space:]]*$'
+      VER_RE: '^## v[0-9]'
     outputs:
       version: ${{ steps.bump.outputs.version }}
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - name: Refuse non-main dispatches
         if: github.ref != 'refs/heads/main'
@@ -80,16 +92,57 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Bumped @ss/desktop to $VERSION"
+      - name: Resolve release notes (input overrides CHANGELOG.md Unreleased)
+        id: notes
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          CHANGELOG=apps/desktop/CHANGELOG.md
+          # Body of Unreleased up to the next WORKFLOW-OWNED header (## vX…), so
+          # authors may use "## Fixed"-style subheadings without truncating notes.
+          extract() { awk '$0 ~ ENVIRON["HDR_RE"] {f=1; next} $0 ~ ENVIRON["VER_RE"] || $0 ~ ENVIRON["HDR_RE"] {f=0} f' "$CHANGELOG"; }
+          INPUT_TRIMMED="$(printf '%s' "$INPUT_NOTES" | tr -d '[:space:]')"
+          ARCHIVED=false
+          if [ -n "$INPUT_TRIMMED" ]; then
+            NOTES="$INPUT_NOTES" # override ships verbatim; changelog left untouched
+            if [ -f "$CHANGELOG" ] && [ -n "$(extract | tr -d '[:space:]')" ]; then
+              echo "::warning::Override used while 'Unreleased' is populated — that section stays queued and will ship + archive with the NEXT release."
+            fi
+          else
+            NOTES=""
+            if [ -f "$CHANGELOG" ]; then NOTES="$(extract)"; fi
+          fi
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES=""
+            echo "::warning::No release notes — 'Unreleased' is empty or missing and no usable override was given; v${VERSION} ships without notes."
+          elif [ -z "$INPUT_TRIMMED" ]; then
+            # Archive: slide the version header in under '## Unreleased' so the body
+            # now belongs to this release and Unreleased is left empty for the next.
+            awk -v hdr="## v${VERSION} — $(date -u +%Y-%m-%d)" \
+              '$0 ~ ENVIRON["HDR_RE"] {print; print ""; print hdr; next} {print}' \
+              "$CHANGELOG" > "$CHANGELOG.tmp" && mv "$CHANGELOG.tmp" "$CHANGELOG"
+            ARCHIVED=true
+          fi
+          DELIM="NOTES_$RANDOM$RANDOM"
+          { echo "notes<<$DELIM"; printf '%s\n' "$NOTES"; echo "$DELIM"; } >> "$GITHUB_OUTPUT"
+          echo "archived=$ARCHIVED" >> "$GITHUB_OUTPUT"
+          # Surface exactly what ships on the run summary so a stale file is caught.
+          { echo "## Release notes shipping with this build"; echo; printf '%s\n' "${NOTES:-_none_}"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Commit + tag on release branch, PR bump back to main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.bump.outputs.version }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+          ARCHIVED: ${{ steps.notes.outputs.archived }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           BRANCH="release/desktop-v${VERSION}"
           git checkout -b "$BRANCH"
+          # CHANGELOG.md rides along when the notes step archived Unreleased.
           git add apps/desktop/package.json
+          if [ -f apps/desktop/CHANGELOG.md ]; then git add apps/desktop/CHANGELOG.md; fi
           git commit -m "chore(desktop): release v${VERSION}"
           # Tag the BRANCH commit so the build jobs can check it out without waiting
           # on the PR's required checks. Squash-merge rewrites the SHA, so the tag
@@ -119,15 +172,32 @@ jobs:
           # repo's delete_branch_on_merge, not --delete-branch.
           is_merged() { [ "$(gh pr view "$PR_URL" --json state --jq .state)" = "MERGED" ]; }
           gh pr merge "$PR_URL" --squash --auto || true
+          MERGED=false
           for _ in $(seq 1 36); do
             gh pr merge "$PR_URL" --squash || true
-            if is_merged; then exit 0; fi
+            if is_merged; then MERGED=true; break; fi
             sleep 5
           done
-          if is_merged; then exit 0; fi
-          echo "::error::Bump PR $PR_URL never merged — rolling back release branch + tag"
-          rollback
-          exit 1
+          if [ "$MERGED" != "true" ] && ! is_merged; then
+            echo "::error::Bump PR $PR_URL never merged — rolling back release branch + tag"
+            rollback
+            exit 1
+          fi
+          # A concurrent Unreleased edit merges cleanly INTO the archived version
+          # section (shipping in no release) — compare main's section to what
+          # shipped and warn loudly instead of losing notes silently. Best-effort:
+          # never fail the job after the merge has landed.
+          if [ "$ARCHIVED" = "true" ]; then
+            sleep 3
+            if git fetch --quiet origin main; then
+              MAIN_SECTION="$(git show origin/main:apps/desktop/CHANGELOG.md 2>/dev/null | awk -v ver="## v${VERSION} " 'index($0, ver) == 1 {f=1; next} $0 ~ ENVIRON["VER_RE"] || $0 ~ ENVIRON["HDR_RE"] {f=0} f')"
+              if [ "$(printf '%s' "$MAIN_SECTION" | tr -d '[:space:]')" != "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+                echo "::warning::CHANGELOG section for v${VERSION} on main differs from the shipped notes — a concurrent edit likely landed mid-release; move those lines back under '## Unreleased' so they ship with the next release."
+              fi
+            else
+              echo "::warning::Could not re-fetch main to verify the archived changelog section."
+            fi
+          fi
 
   build:
     # Build every variant per OS, upload to Vercel Blob, record in the DB.
@@ -195,7 +265,7 @@ jobs:
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
-          RELEASE_NOTES: ${{ inputs.release_notes }}
+          RELEASE_NOTES: ${{ needs.version.outputs.notes }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
 

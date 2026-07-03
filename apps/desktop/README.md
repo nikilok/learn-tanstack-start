@@ -50,10 +50,11 @@ overrides need `gh workflow run`. `.github/workflows/desktop-release.yml` then:
    opens a PR and merges it back into `main` (auto-merge when checks gate it, direct
    merge otherwise). If the PR can't merge, the job deletes the pushed branch + tag
    and fails, so a re-dispatch starts clean.
-2. **build** (matrix mac / win / linux) — builds every variant (mac dmg
+2. **build** (matrix mac / win; the linux leg is commented out in the workflow
+   until the pipeline is proven) — builds every variant (mac dmg
    arm64·x64·universal + universal zip; Windows nsis x64·arm64 in User + System;
-   Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and records the
-   release + per-variant URLs in the DB via `POST /api/releases`.
+   parked: Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and
+   records the release + per-variant URLs in the DB via `POST /api/releases`.
 
 If the **version** job fails, its rollback deletes the pushed branch + tag — fix the
 cause and re-dispatch. If **build** jobs fail *after* the bump merged, use **Re-run

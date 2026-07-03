@@ -3,6 +3,7 @@
   "version": "0.1.2",
   "private": true,
   "description": "SponsorSearch native desktop client — Electron thin-wrapper over the hosted site.",
+  "homepage": "https://sponsorsearch.co.uk",
   "author": {
     "name": "SponsorSearch",
     "email": "nikilok@gmail.com"

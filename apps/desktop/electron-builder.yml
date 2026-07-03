@@ -43,6 +43,10 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  # Default true builds an EXTRA arch-less "universal" exe per scope, which the
+  # upload parser reads as x64 — colliding with the real x64 row on the variant
+  # unique index. Per-arch installers only.
+  buildUniversalInstaller: false
 
 linux:
   category: Office

@@ -235,14 +235,21 @@ jobs:
         working-directory: apps/desktop
         # Notarize only when Apple creds exist (notarize: true would otherwise hard-fail).
         run: |
-          # electron-builder 26 treats a set-but-empty CSC_LINK as a certificate
-          # to load ("not a file") — drop empties so absent secrets skip signing.
-          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          # CSC_IDENTITY_AUTO_DISCOVERY=false DISABLES signing outright —
+          # electron-builder ignores CSC_LINK and ad-hoc signs (which then also
+          # silently skips notarization). So it must be TRUE when a cert is present
+          # and false only to skip cleanly when absent. A set-but-empty CSC_LINK is
+          # also a bad cert path, so gate on it being non-empty.
+          if [ -n "${CSC_LINK:-}" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           bunx electron-builder --${{ matrix.platform }} --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
         env:
           CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -256,24 +263,32 @@ jobs:
         # -c + path, which electron-builder then opens as a config file (ENOENT).
         shell: bash
         run: |
-          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          if [ -n "${CSC_LINK:-}" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           bunx electron-builder --win nsis --x64 --arm64 --publish never -c.nsis.perMachine=true -c.win.artifactName='${productName}-win-${version}-${arch}-system.${ext}'
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Build Windows User installers
         if: matrix.platform == 'win'
         working-directory: apps/desktop
         shell: bash
         run: |
-          [ -n "${CSC_LINK:-}" ] || unset CSC_LINK CSC_KEY_PASSWORD
+          if [ -n "${CSC_LINK:-}" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
           bunx electron-builder --win nsis --x64 --arm64 --publish never
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - name: Upload to Blob + record release
         working-directory: apps/desktop

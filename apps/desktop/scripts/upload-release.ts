@@ -164,7 +164,9 @@ async function main() {
         }),
       });
       if (res.status < 500 && res.status !== 429) break;
-      console.error(`[upload-release] record attempt ${attempt}: ${res.status}`);
+      console.error(
+        `[upload-release] record attempt ${attempt}: ${res.status}`,
+      );
     } catch (err) {
       console.error(`[upload-release] record attempt ${attempt} threw`, err);
       if (attempt === 3) throw err;

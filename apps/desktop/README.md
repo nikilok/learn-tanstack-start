@@ -34,11 +34,15 @@ Output lands in `apps/desktop/dist/`.
 ## Release (CI)
 
 Releases are **manually triggered**: GitHub → Actions → **Desktop App** → **Run
-workflow** → pick a semver bump (`patch` / `minor` / `major`).
-`.github/workflows/desktop-release.yml` then:
+workflow** → pick a semver bump (`patch` / `minor` / `major`). Dispatch from `main`
+only — the version job refuses any other ref (its bump PR would squash-merge that
+entire ref into `main`). `.github/workflows/desktop-release.yml` then:
 
-1. **version** — `bun pm version <bump>` on `apps/desktop`, commits + tags `vX.Y.Z`,
-   pushes to the branch.
+1. **version** — `bun pm version <bump>` on `apps/desktop`, commits + tags `vX.Y.Z`
+   on a `release/desktop-vX.Y.Z` branch, then opens a PR and merges the bump back
+   into `main` (auto-merge when checks gate it, direct merge otherwise). If the PR
+   can't merge, the job deletes the pushed branch + tag and fails, so a re-dispatch
+   starts clean.
 2. **build** (matrix mac / win / linux) — builds every variant (mac dmg
    arm64·x64·universal + universal zip; Windows nsis x64·arm64 in User + System;
    Linux AppImage·deb·rpm × arch), uploads them to **Vercel Blob**, and records the
@@ -62,6 +66,9 @@ install-scope (`SponsorSearch-mac-arm64.dmg`, `SponsorSearch-win-x64-user.exe`,
 | `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` | Windows code-signing `.pfx` + password (optional) |
 
 Signing + notarization are skipped when those secrets are absent (the build still
-succeeds, unsigned). The **version** job pushes a commit + tag, so the branch it runs
-on must permit that push (a protected `main` needs a PAT/app token). Also set
-`BLOB_PUBLIC_BASE` in the Vercel project env so the `/downloads/...` route resolves to Blob.
+succeeds, unsigned). The **version** job never pushes `main` directly: it pushes a
+release branch + tag and merges a bump PR, which the default `GITHUB_TOKEN` can do on
+a protected `main` — unless the ruleset requires status checks (`GITHUB_TOKEN` PRs
+never trigger Actions runs, so the merge poll would time out, roll back, and fail;
+that setup needs a PAT/app token instead). Also set `BLOB_PUBLIC_BASE` in the Vercel
+project env so the `/downloads/...` route resolves to Blob.

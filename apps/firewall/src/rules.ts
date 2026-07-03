@@ -103,6 +103,24 @@ export const rules: Rule[] = [
     ],
     action: { mitigate: { action: 'bypass' } },
   },
+  // ALLOW: desktop release workflow (GitHub runner) → POST /api/releases records a release.
+  // Same shape as allow-ch-stream-revalidate: non-browser caller that Bot Protection 429-challenges;
+  // header PRESENCE gates the bypass, the endpoint's timing-safe secret check stays the real auth.
+  {
+    name: 'allow-desktop-release-record',
+    description:
+      'Bypass bot protection for the desktop release workflow → POST /api/releases (CI records a release; endpoint auths via x-desktop-release-secret). Skips the managed challenge that 429s non-browser callers.',
+    active: true,
+    conditionGroup: [
+      {
+        conditions: [
+          { type: 'path', op: 'eq', value: '/api/releases' },
+          { type: 'header', op: 'ex', key: 'x-desktop-release-secret' },
+        ],
+      },
+    ],
+    action: { mitigate: { action: 'bypass' } },
+  },
   rateLimitRule({
     name: 'rl-serverfn-ip',
     description:

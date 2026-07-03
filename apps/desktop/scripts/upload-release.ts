@@ -144,20 +144,34 @@ async function main() {
     console.log(`[upload-release] feed: ${file}`);
   }
 
-  const res = await fetch(`${SITE}/api/releases`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-desktop-release-secret': SECRET,
-    },
-    body: JSON.stringify({
-      version: VERSION,
-      assets,
-      // The version upsert overwrites notes on EVERY registration (absent
-      // field -> null) — same value from all matrix jobs, so they converge.
-      notes: NOTES || null,
-    }),
-  });
+  // Retry transient record failures (429/5xx/network) — dying here after every
+  // blob already uploaded burns the whole leg.
+  let res!: Response;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      res = await fetch(`${SITE}/api/releases`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-desktop-release-secret': SECRET,
+        },
+        body: JSON.stringify({
+          version: VERSION,
+          assets,
+          // The version upsert overwrites notes on EVERY registration (absent
+          // field -> null) — same value from all matrix jobs, so they converge.
+          notes: NOTES || null,
+        }),
+      });
+      if (res.status < 500 && res.status !== 429) break;
+      console.error(`[upload-release] record attempt ${attempt}: ${res.status}`);
+    } catch (err) {
+      console.error(`[upload-release] record attempt ${attempt} threw`, err);
+      if (attempt === 3) throw err;
+    }
+    if (attempt === 3) break;
+    await new Promise((r) => setTimeout(r, attempt * 5000));
+  }
   // withSecret answers a neutral 202 to a bad secret (deliberately no auth signal),
   // so res.ok is NOT success — only an authenticated 200 { ok, releaseId } is.
   const body = (await res.json().catch(() => null)) as {

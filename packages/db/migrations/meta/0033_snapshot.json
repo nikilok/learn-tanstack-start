@@ -43,12 +43,8 @@
           "name": "ch_previous_names_company_number_companies_house_profiles_company_number_fk",
           "tableFrom": "ch_previous_names",
           "tableTo": "companies_house_profiles",
-          "columnsFrom": [
-            "company_number"
-          ],
-          "columnsTo": [
-            "company_number"
-          ],
+          "columnsFrom": ["company_number"],
+          "columnsTo": ["company_number"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -56,10 +52,7 @@
       "compositePrimaryKeys": {
         "ch_previous_names_company_number_name_pk": {
           "name": "ch_previous_names_company_number_name_pk",
-          "columns": [
-            "company_number",
-            "name"
-          ]
+          "columns": ["company_number", "name"]
         }
       },
       "uniqueConstraints": {},
@@ -670,12 +663,8 @@
           "name": "desktop_release_assets_release_id_desktop_releases_id_fk",
           "tableFrom": "desktop_release_assets",
           "tableTo": "desktop_releases",
-          "columnsFrom": [
-            "release_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["release_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -737,9 +726,7 @@
         "desktop_releases_version_unique": {
           "name": "desktop_releases_version_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "version"
-          ]
+          "columns": ["version"]
         }
       },
       "policies": {},
@@ -1230,9 +1217,7 @@
         "hmrc_skilled_workers_hash_unique": {
           "name": "hmrc_skilled_workers_hash_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "hash"
-          ]
+          "columns": ["hash"]
         }
       },
       "policies": {},

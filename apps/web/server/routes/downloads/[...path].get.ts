@@ -22,7 +22,7 @@ import {
   desktopReleases,
 } from '@ss/db/schema';
 import { waitUntil } from '@vercel/functions';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { defineEventHandler } from 'h3';
 
 import { DESKTOP_FORMATS, DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
@@ -91,14 +91,32 @@ export default defineEventHandler((event) => {
           )
           .limit(1);
         if (!row) return; // unknown guid or path ≠ asset — spoofed/stale, don't log
-        await db.insert(desktopDownloads).values({
-          version: row.version,
-          platform: row.platform,
-          arch: row.arch,
-          format: row.format,
-          installScope: row.installScope,
-          country,
-        });
+        // UPSERT the per-day bucket counter (not an append) so a curl-loop on a
+        // public installer URL inflates `count`, never the row count.
+        await db
+          .insert(desktopDownloads)
+          .values({
+            version: row.version,
+            platform: row.platform,
+            arch: row.arch,
+            format: row.format,
+            installScope: row.installScope,
+            country: country ?? '',
+            day: new Date().toISOString().slice(0, 10), // UTC calendar day
+            count: 1,
+          })
+          .onConflictDoUpdate({
+            target: [
+              desktopDownloads.version,
+              desktopDownloads.platform,
+              desktopDownloads.arch,
+              desktopDownloads.format,
+              desktopDownloads.installScope,
+              desktopDownloads.country,
+              desktopDownloads.day,
+            ],
+            set: { count: sql`${desktopDownloads.count} + 1` },
+          });
       })().catch((err) => {
         console.error('[downloads] log failed:', err);
       }),

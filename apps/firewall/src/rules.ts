@@ -48,6 +48,16 @@ const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
+// Opt-in: the downloads rule syncs only once FW_DOWNLOADS_LIMIT is provisioned.
+// Unlike the other ceilings this must NOT throw when unset — a missing var would
+// crash the whole apply (taking down every rule), not just omit this one rule.
+const rawDownloadsLimit = Number(process.env.FW_DOWNLOADS_LIMIT);
+const DOWNLOADS_LIMIT: number | null =
+  Number.isInteger(rawDownloadsLimit) && rawDownloadsLimit > 0
+    ? rawDownloadsLimit
+    : dryRun
+      ? 0
+      : null;
 
 /** Build a per-key fixed-window (60s) rate-limit rule, observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
@@ -103,6 +113,58 @@ function bypassRule(opts: {
   };
 }
 
+// Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
+// missing var drops just this rule instead of throwing the whole apply at import.
+const downloadsRules: Rule[] =
+  DOWNLOADS_LIMIT === null
+    ? []
+    : [
+        {
+          name: 'rl-downloads-ip',
+          // Keep <= 256 chars (Vercel's rule-description cap; over-length 400s
+          // with a cryptic "action should be equal to constant"). The Range-
+          // request rationale for excluding latest/ lives in the code comment below.
+          description:
+            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/) — curbs curl-loop amplification of the desktop_downloads counter; /downloads/latest/ (the updater feed) is intentionally NOT matched. Phase 1: log.',
+          active: true,
+          // Positive per-platform prefixes as OR-ed condition groups — NOT a
+          // negated "/downloads/ AND NOT /downloads/latest/", which Vercel's API
+          // rejects (400 "action should be equal to constant": neg is only valid
+          // on some ops, not `pre`). Same versioned surface, latest/ untouched.
+          // Platforms = DESKTOP_PLATFORMS; add a group if a new one ships.
+          conditionGroup: [
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/mac/' },
+              ],
+            },
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/win/' },
+              ],
+            },
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/linux/' },
+              ],
+            },
+          ],
+          action: {
+            mitigate: {
+              action: 'rate_limit',
+              rateLimit: {
+                algo: 'fixed_window',
+                window: 60,
+                limit: DOWNLOADS_LIMIT,
+                keys: ['ip'],
+                action: OBSERVE,
+              },
+              actionDuration: '1h',
+            },
+          },
+        },
+      ];
+
 /** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
@@ -150,6 +212,7 @@ export const rules: Rule[] = [
     keys: ['ip'],
     actionDuration: '15m',
   }),
+  ...downloadsRules,
   {
     name: 'tile-hotlink',
     description:
@@ -185,3 +248,14 @@ export const rules: Rule[] = [
     action: 'log',
   }),
 ];
+
+// Vercel caps a rule's description at 256 chars; over-length ones fail the apply
+// with a cryptic 400 "Invalid request: `action` should be equal to constant."
+// (an hour of misdirection). Fail fast with a clear message instead.
+for (const r of rules) {
+  const len = r.description?.length ?? 0;
+  if (len > 256)
+    throw new Error(
+      `Firewall rule "${r.name}" description is ${len} chars — Vercel's limit is 256. Shorten it.`,
+    );
+}

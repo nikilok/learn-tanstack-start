@@ -321,7 +321,11 @@ export const desktopDownloads = pgTable(
   // amplification even though the row count stays bounded. The PK doubles as the
   // ON CONFLICT target.
   (table) => [
+    // Explicit short name: the auto-generated one is 75 bytes and Postgres
+    // silently truncates identifiers to 63, drifting the live constraint name
+    // from the schema/snapshot.
     primaryKey({
+      name: 'desktop_downloads_pk',
       columns: [
         table.version,
         table.platform,

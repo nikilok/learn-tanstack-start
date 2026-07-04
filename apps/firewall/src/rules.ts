@@ -119,18 +119,47 @@ const downloadsRules: Rule[] =
   DOWNLOADS_LIMIT === null
     ? []
     : [
-        rateLimitRule({
+        {
           name: 'rl-downloads-ip',
           description:
-            'Per-IP rate limit on versioned desktop installer downloads (/downloads/<platform>/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. EXCLUDES /downloads/latest/ (the electron-updater feed, whose differential Range-requests must not be throttled). Phase 1: log.',
-          conditions: [
-            { type: 'path', op: 'pre', value: '/downloads/' },
-            { type: 'path', op: 'pre', value: '/downloads/latest/', neg: true },
+            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. The /downloads/latest/ updater feed is intentionally NOT matched (its differential Range-requests must not be throttled). Phase 1: log.',
+          active: true,
+          // Positive per-platform prefixes as OR-ed condition groups — NOT a
+          // negated "/downloads/ AND NOT /downloads/latest/", which Vercel's API
+          // rejects (400 "action should be equal to constant": neg is only valid
+          // on some ops, not `pre`). Same versioned surface, latest/ untouched.
+          // Platforms = DESKTOP_PLATFORMS; add a group if a new one ships.
+          conditionGroup: [
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/mac/' },
+              ],
+            },
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/win/' },
+              ],
+            },
+            {
+              conditions: [
+                { type: 'path', op: 'pre', value: '/downloads/linux/' },
+              ],
+            },
           ],
-          limit: DOWNLOADS_LIMIT,
-          keys: ['ip'],
-          actionDuration: '1h',
-        }),
+          action: {
+            mitigate: {
+              action: 'rate_limit',
+              rateLimit: {
+                algo: 'fixed_window',
+                window: 60,
+                limit: DOWNLOADS_LIMIT,
+                keys: ['ip'],
+                action: OBSERVE,
+              },
+              actionDuration: '1h',
+            },
+          },
+        },
       ];
 
 /** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */

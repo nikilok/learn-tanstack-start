@@ -121,8 +121,11 @@ const downloadsRules: Rule[] =
     : [
         {
           name: 'rl-downloads-ip',
+          // Keep <= 256 chars (Vercel's rule-description cap; over-length 400s
+          // with a cryptic "action should be equal to constant"). The Range-
+          // request rationale for excluding latest/ lives in the code comment below.
           description:
-            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. The /downloads/latest/ updater feed is intentionally NOT matched (its differential Range-requests must not be throttled). Phase 1: log.',
+            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/) — curbs curl-loop amplification of the desktop_downloads counter; /downloads/latest/ (the updater feed) is intentionally NOT matched. Phase 1: log.',
           active: true,
           // Positive per-platform prefixes as OR-ed condition groups — NOT a
           // negated "/downloads/ AND NOT /downloads/latest/", which Vercel's API
@@ -245,3 +248,14 @@ export const rules: Rule[] = [
     action: 'log',
   }),
 ];
+
+// Vercel caps a rule's description at 256 chars; over-length ones fail the apply
+// with a cryptic 400 "Invalid request: `action` should be equal to constant."
+// (an hour of misdirection). Fail fast with a clear message instead.
+for (const r of rules) {
+  const len = r.description?.length ?? 0;
+  if (len > 256)
+    throw new Error(
+      `Firewall rule "${r.name}" description is ${len} chars — Vercel's limit is 256. Shorten it.`,
+    );
+}

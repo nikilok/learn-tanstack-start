@@ -48,6 +48,7 @@ const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
+const DOWNLOADS_LIMIT = envLimit('FW_DOWNLOADS_LIMIT');
 
 /** Build a per-key fixed-window (60s) rate-limit rule, observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
@@ -149,6 +150,18 @@ export const rules: Rule[] = [
     limit: TILES_LIMIT,
     keys: ['ip'],
     actionDuration: '15m',
+  }),
+  rateLimitRule({
+    name: 'rl-downloads-ip',
+    description:
+      'Per-IP rate limit on versioned desktop installer downloads (/downloads/<platform>/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. EXCLUDES /downloads/latest/ (the electron-updater feed, whose differential Range-requests must not be throttled). Phase 1: log.',
+    conditions: [
+      { type: 'path', op: 'pre', value: '/downloads/' },
+      { type: 'path', op: 'pre', value: '/downloads/latest/', neg: true },
+    ],
+    limit: DOWNLOADS_LIMIT,
+    keys: ['ip'],
+    actionDuration: '1h',
   }),
   {
     name: 'tile-hotlink',

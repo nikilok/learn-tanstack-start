@@ -288,21 +288,41 @@ export const desktopReleaseAssets = pgTable(
   ],
 );
 
-// Per-download analytics — one row per hit on a versioned installer URL. Counts
-// link *initiations*, not completed downloads.
+// Per-download analytics — AGGREGATED counters, one row per
+// (version, platform, arch, format, install_scope, country, day) bucket. The
+// download route UPSERTs and increments `count` (fire-and-forget), so a
+// curl-loop on a public installer URL inflates a counter, not the row count:
+// the table is bounded to the finite bucket space regardless of request volume
+// (defends the unauthenticated insert-amplification vector). Counts link
+// *initiations*, not completed downloads. Updater-feed hits (latest/) are not
+// logged. Day is the UTC calendar day.
 export const desktopDownloads = pgTable(
   'desktop_downloads',
   {
     id: serial('id').primaryKey(),
     version: varchar('version', { length: 32 }).notNull(),
     platform: varchar('platform', { length: 16 }).notNull(),
-    arch: varchar('arch', { length: 16 }),
-    format: varchar('format', { length: 16 }),
-    installScope: varchar('install_scope', { length: 16 }),
-    country: varchar('country', { length: 2 }),
-    downloadedAt: timestamp('downloaded_at').defaultNow().notNull(),
+    // Dimension columns are NOT NULL (default '') so a missing value keys the
+    // unique index as one bucket — a NULL would read as distinct and defeat the
+    // UPSERT dedup, reopening unbounded row growth.
+    arch: varchar('arch', { length: 16 }).notNull().default(''),
+    format: varchar('format', { length: 16 }).notNull().default(''),
+    installScope: varchar('install_scope', { length: 16 })
+      .notNull()
+      .default(''),
+    country: varchar('country', { length: 2 }).notNull().default(''),
+    day: date('day').notNull(),
+    count: integer('count').notNull().default(0),
   },
   (table) => [
-    index('idx_desktop_downloads_ver_plat').on(table.version, table.platform),
+    uniqueIndex('ux_desktop_downloads_bucket').on(
+      table.version,
+      table.platform,
+      table.arch,
+      table.format,
+      table.installScope,
+      table.country,
+      table.day,
+    ),
   ],
 );

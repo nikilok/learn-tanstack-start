@@ -30,11 +30,16 @@ import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
+import { APP_NAME } from '../utils/app-meta';
+import { isDesktopPreview } from '../utils/desktop-preview';
 
 import appCss from '../styles.css?url';
 
-const APP_NAME = 'Skilled Worker Sponsor Search';
 const APP_SHORT_NAME = 'SponsorSearch';
+
+/** Drops analytics/vitals events fired inside the /download live-preview iframes so demo runs don't pollute stats. */
+const dropPreviewEvents = <E,>(event: E): E | null =>
+  isDesktopPreview() ? null : event;
 const APP_DESCRIPTION =
   'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.';
 
@@ -147,6 +152,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#ffffff" />
         {/* oxlint-disable-next-line react/no-danger -- static theme init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Desktop init MUST precede search init: in preview iframes it shadows
+            sessionStorage, which search-input-init reads. */}
+        {/* oxlint-disable-next-line react/no-danger -- static desktop-mode detection, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: DESKTOP_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static search input init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
@@ -157,8 +166,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script
           dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
         />
-        {/* oxlint-disable-next-line react/no-danger -- static desktop-mode detection, no user input */}
-        <script dangerouslySetInnerHTML={{ __html: DESKTOP_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">
@@ -178,6 +185,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <UnionJackCursor />
         {/* Rendered after the cursor so it wins the shared max z-index tie. */}
         <AppSplash />
+        {/* Must stay an unconditional top-level element: the devtools-vite prod
+            strip can't parse it wrapped in `cond && (...)` (build SyntaxError). */}
         <TanStackDevtools
           config={{
             position: 'bottom-right',
@@ -195,8 +204,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         />
         {import.meta.env.PROD && (
           <>
-            <Analytics />
-            <SpeedInsights />
+            <Analytics beforeSend={dropPreviewEvents} />
+            <SpeedInsights beforeSend={dropPreviewEvents} />
           </>
         )}
         {import.meta.env.DEV && (
@@ -213,6 +222,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 /** Mounts the Vercel Toolbar in local dev so the Flags Explorer is available here. Preview deploys get the toolbar auto-injected by Vercel; production stays unmounted. */
 function VercelToolbarMount() {
   useEffect(() => {
+    // The /download preview iframes are decorative — no toolbar inside the mini window.
+    if (isDesktopPreview()) return;
     mountVercelToolbar();
   }, []);
   return null;

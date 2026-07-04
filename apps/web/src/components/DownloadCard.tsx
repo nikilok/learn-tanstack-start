@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 /**
  * A download surface card (Cursor-style): a preview image on top, then a title,
  * description, and a call-to-action. `image` fills the aspect-video preview box —
- * pass a screenshot node (e.g. DesktopPreview) or a centred placeholder icon.
+ * pass a preview node (e.g. the live `Preview` window) or a centred placeholder icon.
  */
 export default function DownloadCard({
   image,

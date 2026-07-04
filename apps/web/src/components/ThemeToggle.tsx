@@ -5,13 +5,13 @@ import { cancelThemeTransition, runThemeTransition } from '../theme-transition';
 import { HEADER_CONTROL_CLASS } from './headerControls';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
-type ThemeMode = 'light' | 'dark' | 'auto';
+export type ThemeMode = 'light' | 'dark' | 'auto';
 
 /**
  * Read the persisted theme choice from `localStorage`. Returns `'auto'` on the
  * server (no `window`) and when the stored value is missing or unrecognized.
  */
-function getInitialMode(): ThemeMode {
+export function getInitialMode(): ThemeMode {
   if (typeof window === 'undefined') {
     return 'auto';
   }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
+import { isDesktopPreview } from '../utils/desktop-preview';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
 
@@ -86,7 +87,8 @@ export default function SearchBar({
       >
         <SearchInput
           inputRef={inputRef}
-          autoFocus={!isStuck && search.length < 3}
+          // Never autofocus inside the /download preview iframe — it would steal the parent page's focus.
+          autoFocus={!isStuck && search.length < 3 && !isDesktopPreview()}
           focus={pillClicked}
           defaultValue={search}
           onChange={onSearch}

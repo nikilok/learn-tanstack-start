@@ -278,3 +278,68 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   tag name or caching, keep mutation-purge and cache-tag in lockstep.
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
+
+## /download live Preview — the app iframing itself
+
+`<Preview company platform wallpaper?>` (components/Preview.tsx) renders the real
+app in a same-origin iframe at the shell's 1280×860, scaled into a fake desktop
+window (PreviewTitleBar chrome replica) over a wallpaper, then drives it like a
+user (usePreviewScenario: hydrate → type → real search → click → details page).
+
+- **The iframe's `name` must stay `DESKTOP_PREVIEW_WINDOW_NAME`**
+  (`utils/desktop-preview.ts`): `window.name` is the only parent-settable channel
+  readable before inline head scripts run. Preview mode = name match AND
+  `self !== top` (both in desktop-init and isDesktopPreview) — window.name is
+  forgeable by any site via `window.open(url, name)`, so the framed-only check
+  keeps a hostile opener from flipping a real top-level tab into headerless
+  preview behaviour. `desktop-init.ts` keys THREE behaviours on it pre-paint:
+  stamping `data-desktop` (hides the web header, same as the Electron shell),
+  patching `history.pushState` → `replaceState` (iframe SPA pushes join the
+  tab's joint session history — without the patch the parent's Back button
+  steps the demo backwards instead of leaving), and shadowing `sessionStorage`
+  with an in-memory store (same-origin iframes share the tab's real
+  sessionStorage; unshimmed, the embedded app consumes the parent's
+  `hmrc-scroll-y`/`hmrc-highlight` back-nav keys and its router clobbers the
+  shared `tsr-scroll-restoration` blob on unload). The shim also means
+  DESKTOP_INIT_SCRIPT must stay ordered BEFORE SEARCH_INIT_SCRIPT in
+  __root.tsx's head — search-input-init reads sessionStorage.
+- **Framing headers must stay same-origin, not DENY** (vite.config.ts `/**`
+  routeRule): `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Reverting
+  to DENY/'none' blanks the preview; cross-site embedding is still blocked.
+- **Focus-stealing needs BOTH guards**: the iframe is `inert` AND SearchBar gates
+  `autoFocus` on `!isDesktopPreview()`. Don't drop either — `inert` propagation
+  into iframes has browser variance, and an ungated autofocus yanks focus (and
+  scroll) from /download on load.
+- **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
+  (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
+  46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in
+  apps/desktop must be hand-mirrored here — including `cleanTitle` in
+  usePreviewScenario.ts, a copy of the shell's (apps/desktop/src/main/index.ts);
+  keep the regexes identical. Responsive (`sm:`) variants are
+  deliberately baked to the ≥sm rendering: parent-page media queries would
+  otherwise restyle the chrome, while the iframe's own queries correctly use its
+  1280px viewport.
+- **Preview iframes must stay out of telemetry**: `beforeSend={dropPreviewEvents}`
+  on Analytics + SpeedInsights in __root.tsx, and VercelToolbarMount early-returns
+  via `isDesktopPreview()`.
+- **`<TanStackDevtools>` must stay an unconditional top-level element** in
+  __root.tsx: the devtools-vite prod strip removes the element but not a wrapping
+  `cond && (...)`, leaving `cond && ()` — a build-time SyntaxError from the router
+  code-splitter's re-parse.
+- **Theme is mirrored live, not re-derived**: a Preview effect watches the parent
+  `<html>` class and applies class + `color-scheme` to the iframe document
+  (matching applyThemeMode); the app's own `useIsDark` observers (map tiles,
+  skyline) react to that class. Initial load agrees via shared localStorage — the
+  observer exists for post-load toggles on /download.
+- The scenario detects hydration via React's `__reactProps$*` expando on the
+  input and types through the iframe realm's native value setter + `input`
+  events; `prefers-reduced-motion` skips the tour via `/?search=` instead.
+- **Camera choreography zooms the SCENE, not the iframe content**: the hook
+  emits a `PreviewShot` (a live `getBoundingClientRect()` rect in iframe-
+  viewport coords, or `rect: null` for the wide shot); Preview's `shotTransform`
+  maps it into pane coords (INSET_X/INSET_TOP + base scale — keep those
+  constants and the anchor's inline % placement in lockstep) and transforms the
+  wallpaper+window layer within the fixed pane, so moving in grows the whole
+  window past the card edges like a camera approaching the app. The transitioned
+  scene layer must stay separate from the untransitioned base-scale layer, and
+  reduced-motion never moves the camera.

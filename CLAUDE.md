@@ -288,11 +288,21 @@ user (usePreviewScenario: hydrate → type → real search → click → details
 
 - **The iframe's `name` must stay `DESKTOP_PREVIEW_WINDOW_NAME`**
   (`utils/desktop-preview.ts`): `window.name` is the only parent-settable channel
-  readable before inline head scripts run. `desktop-init.ts` keys TWO behaviours
-  on it pre-paint: stamping `data-desktop` (hides the web header, same as the
-  Electron shell) and patching `history.pushState` → `replaceState`. The patch is
-  load-bearing: iframe SPA pushes join the tab's joint session history, so without
-  it the parent page's Back button steps the demo backwards instead of leaving.
+  readable before inline head scripts run. Preview mode = name match AND
+  `self !== top` (both in desktop-init and isDesktopPreview) — window.name is
+  forgeable by any site via `window.open(url, name)`, so the framed-only check
+  keeps a hostile opener from flipping a real top-level tab into headerless
+  preview behaviour. `desktop-init.ts` keys THREE behaviours on it pre-paint:
+  stamping `data-desktop` (hides the web header, same as the Electron shell),
+  patching `history.pushState` → `replaceState` (iframe SPA pushes join the
+  tab's joint session history — without the patch the parent's Back button
+  steps the demo backwards instead of leaving), and shadowing `sessionStorage`
+  with an in-memory store (same-origin iframes share the tab's real
+  sessionStorage; unshimmed, the embedded app consumes the parent's
+  `hmrc-scroll-y`/`hmrc-highlight` back-nav keys and its router clobbers the
+  shared `tsr-scroll-restoration` blob on unload). The shim also means
+  DESKTOP_INIT_SCRIPT must stay ordered BEFORE SEARCH_INIT_SCRIPT in
+  __root.tsx's head — search-input-init reads sessionStorage.
 - **Framing headers must stay same-origin, not DENY** (vite.config.ts `/**`
   routeRule): `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Reverting
   to DENY/'none' blanks the preview; cross-site embedding is still blocked.
@@ -303,7 +313,9 @@ user (usePreviewScenario: hydrate → type → real search → click → details
 - **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
   46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in
-  apps/desktop must be hand-mirrored here. Responsive (`sm:`) variants are
+  apps/desktop must be hand-mirrored here — including `cleanTitle` in
+  usePreviewScenario.ts, a copy of the shell's (apps/desktop/src/main/index.ts);
+  keep the regexes identical. Responsive (`sm:`) variants are
   deliberately baked to the ≥sm rendering: parent-page media queries would
   otherwise restyle the chrome, while the iframe's own queries correctly use its
   1280px viewport.

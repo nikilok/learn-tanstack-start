@@ -7,10 +7,12 @@ import {
   Share2,
   Sun,
 } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
-import Logo from './Logo';
+import { useIsDark } from '../hooks/useIsDark';
+import Logo, { LogoMark } from './Logo';
+import { getInitialMode, type ThemeMode } from './ThemeToggle';
 
 import styles from './Preview.module.css';
 
@@ -42,69 +44,14 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
   );
 }
 
-/** SponsorSearch round mark (Union-Jack lens) — mirrors the shell's BrandMark for the title pill. */
+/** SponsorSearch round mark (Union-Jack lens) — the shared LogoMark themed like the shell's BrandMark. */
 function BrandMark({ className }: { className?: string }) {
-  // Unique per instance so a second mark never references a hidden clipPath.
-  const clipId = `pv-mark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   return (
     <svg viewBox="0 0 130 130" aria-hidden="true" className={className}>
-      <path
-        d="M75,10 H20 A10,10 0 0 0 10,20 V100 A10,10 0 0 0 20,110 H85"
-        fill="none"
-        stroke="var(--tb-mark)"
-        strokeWidth={6}
-        strokeLinecap="round"
+      <LogoMark
+        navyColor="var(--tb-mark)"
+        flagRedColor="var(--tb-mark-red)"
       />
-      <path
-        d="M100,35 V20 A10,10 0 0 0 90,10 H85"
-        fill="none"
-        stroke="var(--tb-mark)"
-        strokeWidth={6}
-        strokeLinecap="round"
-      />
-      <rect
-        x={95}
-        y={100}
-        width={14}
-        height={30}
-        rx={6}
-        ry={6}
-        fill="var(--tb-mark)"
-        transform="rotate(-45 95 100)"
-      />
-      <rect
-        x={98}
-        y={80}
-        width={7}
-        height={30}
-        rx={6}
-        ry={6}
-        fill="var(--tb-mark)"
-        transform="rotate(-45 95 100)"
-      />
-      <circle cx={60} cy={60} r={38} fill="var(--tb-mark)" />
-      <clipPath id={clipId}>
-        <circle cx={60} cy={60} r={29} />
-      </clipPath>
-      <g clipPath={`url(#${clipId})`}>
-        <rect x={18} y={18} width={84} height={84} fill="#012169" />
-        <path
-          d="M18,18 L102,102 M102,18 L18,102"
-          stroke="#fff"
-          strokeWidth={12}
-        />
-        <path
-          d="M18,18 L102,102 M102,18 L18,102"
-          stroke="var(--tb-mark-red)"
-          strokeWidth={4}
-        />
-        <path d="M60,18 V102 M18,60 H102" stroke="#fff" strokeWidth={20} />
-        <path
-          d="M60,18 V102 M18,60 H102"
-          stroke="var(--tb-mark-red)"
-          strokeWidth={12}
-        />
-      </g>
     </svg>
   );
 }
@@ -122,21 +69,12 @@ function TitlePill({ title }: { title: string }) {
 }
 
 /** The site's stored theme mode, read post-hydration (SSR renders the 'auto' icon) and re-read on theme flips. */
-function useThemeMode(): string {
-  const [mode, setMode] = useState('auto');
+function useThemeMode(): ThemeMode {
+  const isDark = useIsDark();
+  const [mode, setMode] = useState<ThemeMode>('auto');
   useEffect(() => {
-    const read = () => {
-      const stored = window.localStorage.getItem('theme');
-      setMode(stored === 'light' || stored === 'dark' ? stored : 'auto');
-    };
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
-    return () => observer.disconnect();
-  }, []);
+    setMode(getInitialMode());
+  }, [isDark]);
   return mode;
 }
 

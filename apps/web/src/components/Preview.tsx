@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
+import { useIsDark } from '../hooks/useIsDark';
 import {
   type PreviewShot,
   usePreviewScenario,
@@ -75,6 +76,18 @@ export default function Preview({
   );
   const scale = (pane.w * (1 - INSET_X * 2)) / WINDOW_W;
 
+  // Animate the camera only for shot changes: a pane resize also changes
+  // shotTransform's output, and easing that correction while the inner layers
+  // snap would rubber-band the scene against its own window chrome.
+  const lastShotRef = useRef(shot);
+  const lastPaneRef = useRef(pane);
+  const suppressTransition =
+    lastShotRef.current === shot && lastPaneRef.current !== pane;
+  useEffect(() => {
+    lastShotRef.current = shot;
+    lastPaneRef.current = pane;
+  });
+
   // Track the pane's rendered size → base window scale + camera mapping.
   useLayoutEffect(() => {
     const el = paneRef.current;
@@ -90,13 +103,12 @@ export default function Preview({
   // color-scheme, matching applyThemeMode). The app resolves its theme once at
   // load, so a /download theme toggle would otherwise strand the window on the
   // stale scheme until a reload; its own useIsDark consumers react to the class.
+  const isDark = useIsDark();
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
+    const resolved = isDark ? 'dark' : 'light';
     const sync = () => {
-      const resolved = document.documentElement.classList.contains('dark')
-        ? 'dark'
-        : 'light';
       try {
         const root = frame.contentDocument?.documentElement;
         if (!root || root.classList.contains(resolved)) return;
@@ -107,19 +119,11 @@ export default function Preview({
         // teardown/cross-origin: nothing to sync
       }
     };
-    const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
     // Covers a toggle that lands while the iframe document is still loading.
     frame.addEventListener('load', sync);
     sync();
-    return () => {
-      observer.disconnect();
-      frame.removeEventListener('load', sync);
-    };
-  }, []);
+    return () => frame.removeEventListener('load', sync);
+  }, [isDark]);
 
   return (
     <div
@@ -136,7 +140,7 @@ export default function Preview({
           transform: shotTransform(shot, pane.w, pane.h, scale),
           transformOrigin: 'top left',
           transition:
-            shot.ms > 0
+            shot.ms > 0 && !suppressTransition
               ? `transform ${shot.ms}ms cubic-bezier(0.45, 0.05, 0.25, 1)`
               : undefined,
         }}
@@ -159,12 +163,12 @@ export default function Preview({
             top: `${INSET_TOP * 100}%`,
           }}
         >
+          {/* CSS aspect-ratio (not a JS height) so the empty window frame paints
+              with the SSR HTML — no-JS visitors and crawlers see wallpaper +
+              window instead of a blank pane; only the live content waits on JS. */}
           <div
             className="overflow-hidden rounded-lg bg-(--bg-base) shadow-[0_24px_60px_-12px_rgba(0,0,0,0.5)] ring-1 ring-black/20 dark:ring-white/10"
-            style={{
-              height: WINDOW_H * scale,
-              visibility: scale > 0 ? 'visible' : 'hidden',
-            }}
+            style={{ aspectRatio: `${WINDOW_W} / ${WINDOW_H}` }}
           >
             {/* Unscaled 1280×860 coordinate space: the app lays out at desktop size, then shrinks. */}
             <div
@@ -174,6 +178,7 @@ export default function Preview({
                 height: WINDOW_H,
                 transform: `scale(${scale})`,
                 transformOrigin: 'top left',
+                visibility: scale > 0 ? 'visible' : 'hidden',
               }}
             >
               <iframe

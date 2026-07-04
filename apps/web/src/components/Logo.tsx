@@ -9,6 +9,99 @@ interface LogoProps {
 }
 
 /**
+ * The Union-Jack lens mark alone (frame + magnifying glass + flag), sized for a
+ * 130×130 viewBox — shared by the wordmark below and the /download preview's
+ * title-bar chrome. The flag red is fixed in the wordmark but themeable in the
+ * desktop chrome, hence the separate `flagRedColor`.
+ */
+export function LogoMark({
+  navyColor = 'var(--logo-navy)',
+  strokeColor,
+  flagRedColor = '#C8102E',
+}: {
+  navyColor?: string;
+  strokeColor?: string;
+  flagRedColor?: string;
+}) {
+  const resolvedStroke = strokeColor ?? navyColor;
+  // Unique per instance: multiple marks can share the DOM, and a hardcoded id
+  // makes later ones reference the first — which breaks when it's display:none.
+  const clipId = `mark-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  return (
+    <>
+      {/* Outer Frame (Stylized) */}
+      <path
+        d="M75,10 H20 A10,10 0 0 0 10,20 V100 A10,10 0 0 0 20,110 H85"
+        fill="none"
+        stroke={resolvedStroke}
+        strokeWidth="6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M100,35 V20 A10,10 0 0 0 90,10 H85"
+        fill="none"
+        stroke={resolvedStroke}
+        strokeWidth="6"
+        strokeLinecap="round"
+      />
+
+      {/* Magnifying Glass Handle */}
+      <rect
+        x="95"
+        y="100"
+        width="14"
+        height="30"
+        rx="6"
+        ry="6"
+        fill={navyColor}
+        transform="rotate(-45 95 100)"
+      />
+
+      {/* Magnifying Glass thin handle */}
+      <rect
+        x="98"
+        y="80"
+        width="7"
+        height="30"
+        rx="6"
+        ry="6"
+        fill={navyColor}
+        transform="rotate(-45 95 100)"
+      />
+
+      {/* Magnifying Glass Circle */}
+      <circle cx="60" cy="60" r="38" fill={navyColor} />
+
+      {/* Union Jack inside Circle */}
+      <clipPath id={clipId}>
+        <circle cx="60" cy="60" r="29" />
+      </clipPath>
+
+      <g clipPath={`url(#${clipId})`}>
+        {/* UK Flag Background (Blue) */}
+        <rect x="18" y="18" width="84" height="84" fill="#012169" />
+        {/* White Saltire */}
+        <path
+          d="M18,18 L102,102 M102,18 L18,102"
+          stroke="white"
+          strokeWidth="12"
+        />
+        {/* Red Saltire */}
+        <path
+          d="M18,18 L102,102 M102,18 L18,102"
+          stroke={flagRedColor}
+          strokeWidth="4"
+        />
+        {/* White Cross */}
+        <path d="M60,18 V102 M18,60 H102" stroke="white" strokeWidth="20" />
+        {/* Red Cross */}
+        <path d="M60,18 V102 M18,60 H102" stroke={flagRedColor} strokeWidth="12" />
+      </g>
+    </>
+  );
+}
+
+/**
  * SponsorSearch.co.uk wordmark SVG with a Union-Jack-filled magnifying glass.
  * All four color props are themeable and default to CSS variables so the logo
  * responds to light/dark mode; `domainColor`/`strokeColor` fall back to
@@ -22,10 +115,6 @@ export default function Logo({
   strokeColor,
 }: LogoProps) {
   const resolvedDomain = domainColor ?? navyColor;
-  const resolvedStroke = strokeColor ?? navyColor;
-  // Unique per instance: two logos (header + footer) share the DOM, and a hardcoded id
-  // makes the second reference the first — which breaks when one is `display:none`.
-  const clipId = `logo-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
   return (
     <svg
@@ -38,74 +127,7 @@ export default function Logo({
     >
       {/* Left Icon: Frame and Magnifying Glass */}
       <g transform="translate(30, 10)">
-        {/* Outer Frame (Stylized) */}
-        <path
-          d="M75,10 H20 A10,10 0 0 0 10,20 V100 A10,10 0 0 0 20,110 H85"
-          fill="none"
-          stroke={resolvedStroke}
-          strokeWidth="6"
-          strokeLinecap="round"
-        />
-        <path
-          d="M100,35 V20 A10,10 0 0 0 90,10 H85"
-          fill="none"
-          stroke={resolvedStroke}
-          strokeWidth="6"
-          strokeLinecap="round"
-        />
-
-        {/* Magnifying Glass Handle */}
-        <rect
-          x="95"
-          y="100"
-          width="14"
-          height="30"
-          rx="6"
-          ry="6"
-          fill={navyColor}
-          transform="rotate(-45 95 100)"
-        />
-
-        {/* Magnifying Glass thin handle */}
-        <rect
-          x="98"
-          y="80"
-          width="7"
-          height="30"
-          rx="6"
-          ry="6"
-          fill={navyColor}
-          transform="rotate(-45 95 100)"
-        />
-
-        {/* Magnifying Glass Circle */}
-        <circle cx="60" cy="60" r="38" fill={navyColor} />
-
-        {/* Union Jack inside Circle */}
-        <clipPath id={clipId}>
-          <circle cx="60" cy="60" r="29" />
-        </clipPath>
-
-        <g clipPath={`url(#${clipId})`}>
-          {/* UK Flag Background (Blue) */}
-          <rect x="18" y="18" width="84" height="84" fill="#012169" />
-          {/* White Saltire */}
-          <path
-            d="M18,18 L102,102 M102,18 L18,102"
-            stroke="white"
-            strokeWidth="12"
-          />
-          {/* Red Saltire */}
-          <path
-            d="M18,18 L102,102 M102,18 L18,102"
-            stroke="#C8102E"
-            strokeWidth="4"
-          />
-          {/* White Cross */}
-          <path d="M60,18 V102 M18,60 H102" stroke="white" strokeWidth="20" />
-          {/* Red Cross */}
-          <path d="M60,18 V102 M18,60 H102" stroke="#C8102E" strokeWidth="12" />
-        </g>
+        <LogoMark navyColor={navyColor} strokeColor={strokeColor} />
       </g>
 
       {/* Logo Text */}

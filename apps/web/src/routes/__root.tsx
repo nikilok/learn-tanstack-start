@@ -30,11 +30,11 @@ import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
+import { APP_NAME } from '../utils/app-meta';
 import { isDesktopPreview } from '../utils/desktop-preview';
 
 import appCss from '../styles.css?url';
 
-const APP_NAME = 'Skilled Worker Sponsor Search';
 const APP_SHORT_NAME = 'SponsorSearch';
 
 /** Drops analytics/vitals events fired inside the /download live-preview iframes so demo runs don't pollute stats. */
@@ -152,6 +152,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <meta name="theme-color" content="#ffffff" />
         {/* oxlint-disable-next-line react/no-danger -- static theme init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Desktop init MUST precede search init: in preview iframes it shadows
+            sessionStorage, which search-input-init reads. */}
+        {/* oxlint-disable-next-line react/no-danger -- static desktop-mode detection, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: DESKTOP_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static search input init script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: SEARCH_INIT_SCRIPT }} />
         {/* oxlint-disable-next-line react/no-danger -- static browser detection script, no user input */}
@@ -162,8 +166,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script
           dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
         />
-        {/* oxlint-disable-next-line react/no-danger -- static desktop-mode detection, no user input */}
-        <script dangerouslySetInnerHTML={{ __html: DESKTOP_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">

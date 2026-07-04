@@ -1,14 +1,7 @@
 import { type RefObject, useEffect, useState } from 'react';
 
-// Title of the home document; also the pill's resting label (mirrors APP_NAME).
-const HOME_TITLE = 'Skilled Worker Sponsor Search';
-
-export type PreviewStage =
-  | 'loading'
-  | 'home'
-  | 'typing'
-  | 'results'
-  | 'details';
+import { prefersReducedMotion } from '../utils';
+import { APP_NAME } from '../utils/app-meta';
 
 /** What the scene camera should look at: an app-content rect (iframe-viewport coords) or the whole scene (`rect: null`). */
 export interface PreviewShot {
@@ -30,7 +23,7 @@ const toRect = (r: DOMRect) => ({
   height: r.height,
 });
 
-/** Strips the SEO site-name suffixes so the pill shows just the page name (mirrors the shell's cleanTitle). */
+/** Strips the SEO site-name suffixes so the pill shows just the page name — mirrors the shell's cleanTitle (apps/desktop/src/main/index.ts); keep the regexes identical. */
 function cleanTitle(title: string): string {
   return title
     .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
@@ -106,15 +99,15 @@ function clickLink(el: HTMLElement): void {
  * Drives the /download live preview like a user: waits for the iframed app to
  * hydrate, types the company name into the search box, lets the real results
  * stream in, then clicks the matching card through to its details page.
- * Returns the stage plus the title/back state the fake title bar mirrors.
+ * Returns the camera shot plus the title/back state the fake title bar mirrors.
  */
 export function usePreviewScenario(
   frameRef: RefObject<HTMLIFrameElement | null>,
   paneRef: RefObject<HTMLElement | null>,
   company: string,
 ) {
-  const [stage, setStage] = useState<PreviewStage>('loading');
-  const [title, setTitle] = useState(HOME_TITLE);
+  const [detailsReached, setDetailsReached] = useState(false);
+  const [title, setTitle] = useState(APP_NAME);
   const [shot, setShot] = useState<PreviewShot>({ rect: null, ms: 0 });
 
   useEffect(() => {
@@ -182,11 +175,10 @@ export function usePreviewScenario(
       if (signal.aborted) return;
 
       // Reduced motion: skip the animated tour, land on the results view directly.
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      if (prefersReducedMotion()) {
         frame.contentWindow?.location.replace(
           `/?search=${encodeURIComponent(company)}`,
         );
-        setStage('results');
         return;
       }
 
@@ -206,7 +198,6 @@ export function usePreviewScenario(
       );
       if (!input) return;
 
-      setStage('home');
       await sleep(900, signal);
 
       // Camera: move in close on the search field so the typing reads clearly.
@@ -219,7 +210,6 @@ export function usePreviewScenario(
       });
       await sleep(950, signal);
 
-      setStage('typing');
       for (let i = 1; i <= company.length; i++) {
         setInputValue(input, company.slice(0, i));
         await sleep(70 + Math.random() * 90, signal);
@@ -243,9 +233,13 @@ export function usePreviewScenario(
           });
         }
       }
-      if (!card) return; // genuinely no results — leave the real empty state showing
+      if (!card) {
+        // Genuinely no results — show the real empty state from the wide shot,
+        // never stranded close-up on the search box.
+        setShot({ rect: null, ms: 1200 });
+        return;
+      }
 
-      setStage('results');
       // Beat on the streamed-in rows, then pull back to the full scene for the click.
       await sleep(500, signal);
       setShot({ rect: null, ms: 1500 });
@@ -253,7 +247,29 @@ export function usePreviewScenario(
 
       const cardName = card.querySelector('h3')?.textContent?.trim();
       clickLink(card);
-      setStage('details');
+      // Confirm the router actually navigated before flipping the chrome to the
+      // details state — the anchor can go stale during the pre-click pause.
+      const onDetails = () =>
+        doc()?.location.pathname.startsWith('/company/') ? true : null;
+      let navigated = await poll(onDetails, {
+        intervalMs: 150,
+        timeoutMs: 2_500,
+        signal,
+      });
+      if (!navigated) {
+        const retry = findCard();
+        if (retry) clickLink(retry);
+        navigated = await poll(onDetails, {
+          intervalMs: 150,
+          timeoutMs: 2_500,
+          signal,
+        });
+      }
+      if (!navigated) {
+        setShot({ rect: null, ms: 800 });
+        return;
+      }
+      setDetailsReached(true);
       if (cardName) setTitle(cardName);
 
       // Prefer the real document title once the details route commits it.
@@ -261,7 +277,7 @@ export function usePreviewScenario(
         () => {
           const t = doc()?.title;
           const cleaned = t ? cleanTitle(t) : '';
-          return cleaned && cleaned !== HOME_TITLE ? cleaned : null;
+          return cleaned && cleaned !== APP_NAME ? cleaned : null;
         },
         { intervalMs: 300, timeoutMs: 5_000, signal },
       );
@@ -285,11 +301,14 @@ export function usePreviewScenario(
       setShot({ rect: null, ms: 1800 });
     }
 
-    // Rejections are aborts/stalls — the preview just stays on its last stage.
-    run().catch(() => {});
+    // Rejections are aborts or stalls; on a live stall, at least bring the
+    // camera home rather than leaving it stranded close-up.
+    run().catch(() => {
+      if (!signal.aborted) setShot({ rect: null, ms: 800 });
+    });
 
     return () => controller.abort();
   }, [frameRef, paneRef, company]);
 
-  return { stage, title, canGoBack: stage === 'details', shot };
+  return { title, canGoBack: detailsReached, shot };
 }

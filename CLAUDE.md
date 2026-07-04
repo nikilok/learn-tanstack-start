@@ -322,3 +322,12 @@ user (usePreviewScenario: hydrate → type → real search → click → details
 - The scenario detects hydration via React's `__reactProps$*` expando on the
   input and types through the iframe realm's native value setter + `input`
   events; `prefers-reduced-motion` skips the tour via `/?search=` instead.
+- **Camera choreography zooms the SCENE, not the iframe content**: the hook
+  emits a `PreviewShot` (a live `getBoundingClientRect()` rect in iframe-
+  viewport coords, or `rect: null` for the wide shot); Preview's `shotTransform`
+  maps it into pane coords (INSET_X/INSET_TOP + base scale — keep those
+  constants and the anchor's inline % placement in lockstep) and transforms the
+  wallpaper+window layer within the fixed pane, so moving in grows the whole
+  window past the card edges like a camera approaching the app. The transitioned
+  scene layer must stay separate from the untransitioned base-scale layer, and
+  reduced-motion never moves the camera.

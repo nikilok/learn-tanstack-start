@@ -10,6 +10,26 @@ export type PreviewStage =
   | 'results'
   | 'details';
 
+/** What the scene camera should look at: an app-content rect (iframe-viewport coords) or the whole scene (`rect: null`). */
+export interface PreviewShot {
+  rect: { left: number; top: number; width: number; height: number } | null;
+  /** Breathing room around the rect, in iframe px. */
+  padX?: number;
+  padY?: number;
+  /** Cap on the scene zoom multiple. */
+  maxZ?: number;
+  /** Transition length of this camera move. */
+  ms: number;
+}
+
+/** Plain-object copy of a DOMRect (keeps the shot serialisable across the iframe realm). */
+const toRect = (r: DOMRect) => ({
+  left: r.left,
+  top: r.top,
+  width: r.width,
+  height: r.height,
+});
+
 /** Strips the SEO site-name suffixes so the pill shows just the page name (mirrors the shell's cleanTitle). */
 function cleanTitle(title: string): string {
   return title
@@ -95,6 +115,7 @@ export function usePreviewScenario(
 ) {
   const [stage, setStage] = useState<PreviewStage>('loading');
   const [title, setTitle] = useState(HOME_TITLE);
+  const [shot, setShot] = useState<PreviewShot>({ rect: null, ms: 0 });
 
   useEffect(() => {
     const maybeFrame = frameRef.current;
@@ -180,6 +201,16 @@ export function usePreviewScenario(
       setStage('home');
       await sleep(900, signal);
 
+      // Camera: move in close on the search field so the typing reads clearly.
+      setShot({
+        rect: toRect(input.getBoundingClientRect()),
+        padX: 48,
+        padY: 90,
+        maxZ: 2.2,
+        ms: 900,
+      });
+      await sleep(950, signal);
+
       setStage('typing');
       for (let i = 1; i <= company.length; i++) {
         setInputValue(input, company.slice(0, i));
@@ -207,7 +238,10 @@ export function usePreviewScenario(
       if (!card) return; // genuinely no results — leave the real empty state showing
 
       setStage('results');
-      await sleep(1200, signal);
+      // Beat on the streamed-in rows, then pull back to the full scene for the click.
+      await sleep(500, signal);
+      setShot({ rect: null, ms: 1500 });
+      await sleep(1700, signal);
 
       const cardName = card.querySelector('h3')?.textContent?.trim();
       clickLink(card);
@@ -224,6 +258,23 @@ export function usePreviewScenario(
         { intervalMs: 300, timeoutMs: 5_000, signal },
       );
       if (detailsTitle) setTitle(detailsTitle);
+
+      // Camera: move in on the details header, hold, then pull away to the whole scene.
+      const heading = await poll(
+        () => doc()?.querySelector<HTMLElement>('main h1') ?? null,
+        { intervalMs: 200, timeoutMs: 4_000, signal },
+      );
+      if (heading) {
+        setShot({
+          rect: toRect(heading.getBoundingClientRect()),
+          padX: 160,
+          padY: 130,
+          maxZ: 1.9,
+          ms: 1000,
+        });
+        await sleep(2200, signal);
+      }
+      setShot({ rect: null, ms: 1800 });
     }
 
     // Rejections are aborts/stalls — the preview just stays on its last stage.
@@ -232,5 +283,5 @@ export function usePreviewScenario(
     return () => controller.abort();
   }, [frameRef, paneRef, company]);
 
-  return { stage, title, canGoBack: stage === 'details' };
+  return { stage, title, canGoBack: stage === 'details', shot };
 }

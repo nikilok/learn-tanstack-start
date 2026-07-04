@@ -1,13 +1,50 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
-import { usePreviewScenario } from '../hooks/usePreviewScenario';
+import {
+  type PreviewShot,
+  usePreviewScenario,
+} from '../hooks/usePreviewScenario';
 import { DESKTOP_PREVIEW_WINDOW_NAME } from '../utils/desktop-preview';
 import PreviewTitleBar from './PreviewTitleBar';
 
 // Mirrors the shell's default BaseWindow size (apps/desktop/src/main/index.ts).
 const WINDOW_W = 1280;
 const WINDOW_H = 860;
+// Window placement inside the pane: wallpaper margin on the sides and top.
+const INSET_X = 0.07;
+const INSET_TOP = 0.09;
+
+/** Clamps `v` into [lo, hi]. */
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(hi, Math.max(lo, v));
+
+/**
+ * Scene-camera transform for a shot: maps the shot's app rect (iframe coords)
+ * into pane coords via the window inset + base scale, then zooms the WHOLE
+ * scene — wallpaper, window frame and chrome — about it, clamped so the pane
+ * stays covered. `rect: null` (or an unmeasured pane) is the resting wide shot.
+ */
+function shotTransform(
+  shot: PreviewShot,
+  paneW: number,
+  paneH: number,
+  scale: number,
+): string {
+  if (!shot.rect || paneW === 0 || paneH === 0) {
+    return 'scale(1) translate(0px, 0px)';
+  }
+  const left = paneW * INSET_X + (shot.rect.left - (shot.padX ?? 0)) * scale;
+  const top = paneH * INSET_TOP + (shot.rect.top - (shot.padY ?? 0)) * scale;
+  const width = (shot.rect.width + (shot.padX ?? 0) * 2) * scale;
+  const height = (shot.rect.height + (shot.padY ?? 0) * 2) * scale;
+  const z = clamp(Math.min(paneW / width, paneH / height), 1, shot.maxZ ?? 2.2);
+  const vw = paneW / z;
+  const vh = paneH / z;
+  const x = clamp(left + width / 2 - vw / 2, 0, paneW - vw);
+  const y = clamp(top + height / 2 - vh / 2, 0, paneH - vh);
+  return `scale(${z}) translate(${-x}px, ${-y}px)`;
+}
 
 /**
  * Live desktop-app preview for /download: the real app in a same-origin iframe
@@ -15,7 +52,9 @@ const WINDOW_H = 860;
  * shell), dressed in a replica of the shell's title bar and scaled into a
  * window floating over a wallpaper. Once on screen it's driven like a user —
  * type the company, let real results stream in, click through to its details
- * page. Decorative only: the iframe is inert and mouse-transparent.
+ * page — while a scene camera moves closer for the typing and details beats
+ * and pulls away between them. Decorative only: the iframe is inert and
+ * mouse-transparent.
  */
 export default function Preview({
   company,
@@ -27,19 +66,23 @@ export default function Preview({
   wallpaper?: string;
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const [scale, setScale] = useState(0);
-  const { title, canGoBack } = usePreviewScenario(frameRef, paneRef, company);
+  const [pane, setPane] = useState({ w: 0, h: 0 });
+  const { title, canGoBack, shot } = usePreviewScenario(
+    frameRef,
+    paneRef,
+    company,
+  );
+  const scale = (pane.w * (1 - INSET_X * 2)) / WINDOW_W;
 
-  // Track the anchor's rendered width → the transform that fits 1280px into it.
+  // Track the pane's rendered size → base window scale + camera mapping.
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    if (!anchor) return;
+    const el = paneRef.current;
+    if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
-      setScale(entry.contentRect.width / WINDOW_W);
+      setPane({ w: entry.contentRect.width, h: entry.contentRect.height });
     });
-    observer.observe(anchor);
+    observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
@@ -84,47 +127,69 @@ export default function Preview({
       aria-hidden="true"
       className="pointer-events-none relative h-full w-full overflow-hidden select-none"
     >
-      {wallpaper ? (
-        <img
-          src={wallpaper}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-        />
-      ) : (
-        <div className="absolute inset-0 bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]" />
-      )}
-      {/* The window floats over the wallpaper: sky on top and sides, bottom bleeding off the pane. */}
-      <div ref={anchorRef} className="absolute inset-x-[7%] top-[9%]">
+      {/* Scene layer = wallpaper + floating window. The camera zooms this whole
+          layer within the fixed pane, like physically moving closer to the app;
+          the pane's overflow-hidden crops whatever grows past its edges. */}
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: shotTransform(shot, pane.w, pane.h, scale),
+          transformOrigin: 'top left',
+          transition:
+            shot.ms > 0
+              ? `transform ${shot.ms}ms cubic-bezier(0.45, 0.05, 0.25, 1)`
+              : undefined,
+        }}
+      >
+        {wallpaper ? (
+          <img
+            src={wallpaper}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]" />
+        )}
+        {/* The window floats over the wallpaper: sky on top and sides, bottom bleeding off the pane. */}
         <div
-          className="overflow-hidden rounded-lg bg-(--bg-base) shadow-[0_24px_60px_-12px_rgba(0,0,0,0.5)] ring-1 ring-black/20 dark:ring-white/10"
           style={{
-            height: WINDOW_H * scale,
-            visibility: scale > 0 ? 'visible' : 'hidden',
+            position: 'absolute',
+            left: `${INSET_X * 100}%`,
+            right: `${INSET_X * 100}%`,
+            top: `${INSET_TOP * 100}%`,
           }}
         >
-          {/* Unscaled 1280×860 coordinate space: the app lays out at desktop size, then shrinks. */}
           <div
-            className="relative"
+            className="overflow-hidden rounded-lg bg-(--bg-base) shadow-[0_24px_60px_-12px_rgba(0,0,0,0.5)] ring-1 ring-black/20 dark:ring-white/10"
             style={{
-              width: WINDOW_W,
-              height: WINDOW_H,
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
+              height: WINDOW_H * scale,
+              visibility: scale > 0 ? 'visible' : 'hidden',
             }}
           >
-            <iframe
-              ref={frameRef}
-              src="/"
-              name={DESKTOP_PREVIEW_WINDOW_NAME}
-              title={`SponsorSearch desktop preview (${platform})`}
-              inert
-              className="h-full w-full border-0"
-            />
-            <PreviewTitleBar
-              platform={platform}
-              title={title}
-              canGoBack={canGoBack}
-            />
+            {/* Unscaled 1280×860 coordinate space: the app lays out at desktop size, then shrinks. */}
+            <div
+              className="relative"
+              style={{
+                width: WINDOW_W,
+                height: WINDOW_H,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+              }}
+            >
+              <iframe
+                ref={frameRef}
+                src="/"
+                name={DESKTOP_PREVIEW_WINDOW_NAME}
+                title={`SponsorSearch desktop preview (${platform})`}
+                inert
+                className="h-full w-full border-0"
+              />
+              <PreviewTitleBar
+                platform={platform}
+                title={title}
+                canGoBack={canGoBack}
+              />
+            </div>
           </div>
         </div>
       </div>

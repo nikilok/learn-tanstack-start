@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -299,11 +300,10 @@ export const desktopReleaseAssets = pgTable(
 export const desktopDownloads = pgTable(
   'desktop_downloads',
   {
-    id: serial('id').primaryKey(),
     version: varchar('version', { length: 32 }).notNull(),
     platform: varchar('platform', { length: 16 }).notNull(),
     // Dimension columns are NOT NULL (default '') so a missing value keys the
-    // unique index as one bucket — a NULL would read as distinct and defeat the
+    // composite PK as one bucket — a NULL would read as distinct and defeat the
     // UPSERT dedup, reopening unbounded row growth.
     arch: varchar('arch', { length: 16 }).notNull().default(''),
     format: varchar('format', { length: 16 }).notNull().default(''),
@@ -312,17 +312,25 @@ export const desktopDownloads = pgTable(
       .default(''),
     country: varchar('country', { length: 2 }).notNull().default(''),
     day: date('day').notNull(),
-    count: integer('count').notNull().default(0),
+    // bigint (not int4): one day's bucket can absorb the full request volume the
+    // amplification vector throws at it; int4 count would overflow at ~2.1e9.
+    count: bigint('count', { mode: 'number' }).notNull().default(0),
   },
+  // The natural bucket tuple IS the primary key — no surrogate `id serial`, whose
+  // sequence advances one-per-UPSERT-attempt and would overflow int4 under
+  // amplification even though the row count stays bounded. The PK doubles as the
+  // ON CONFLICT target.
   (table) => [
-    uniqueIndex('ux_desktop_downloads_bucket').on(
-      table.version,
-      table.platform,
-      table.arch,
-      table.format,
-      table.installScope,
-      table.country,
-      table.day,
-    ),
+    primaryKey({
+      columns: [
+        table.version,
+        table.platform,
+        table.arch,
+        table.format,
+        table.installScope,
+        table.country,
+        table.day,
+      ],
+    }),
   ],
 );

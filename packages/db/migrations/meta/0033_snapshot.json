@@ -1,5 +1,5 @@
 {
-  "id": "9a70cc96-fde2-4e8b-bc1c-fccbb72408d3",
+  "id": "c99d7879-a29a-4002-bfea-958b71c386fb",
   "prevId": "550c5169-9696-4144-b559-dc6e7f5b6cb1",
   "version": "7",
   "dialect": "postgresql",
@@ -455,12 +455,6 @@
       "name": "desktop_downloads",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
         "version": {
           "name": "version",
           "type": "varchar(32)",
@@ -509,67 +503,28 @@
         },
         "count": {
           "name": "count",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true,
           "default": 0
         }
       },
-      "indexes": {
-        "ux_desktop_downloads_bucket": {
-          "name": "ux_desktop_downloads_bucket",
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "desktop_downloads_version_platform_arch_format_install_scope_country_day_pk": {
+          "name": "desktop_downloads_version_platform_arch_format_install_scope_country_day_pk",
           "columns": [
-            {
-              "expression": "version",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "platform",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "arch",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "format",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "install_scope",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "country",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "day",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+            "version",
+            "platform",
+            "arch",
+            "format",
+            "install_scope",
+            "country",
+            "day"
+          ]
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

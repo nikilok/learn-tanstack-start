@@ -48,7 +48,16 @@ const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
-const DOWNLOADS_LIMIT = envLimit('FW_DOWNLOADS_LIMIT');
+// Opt-in: the downloads rule syncs only once FW_DOWNLOADS_LIMIT is provisioned.
+// Unlike the other ceilings this must NOT throw when unset — a missing var would
+// crash the whole apply (taking down every rule), not just omit this one rule.
+const rawDownloadsLimit = Number(process.env.FW_DOWNLOADS_LIMIT);
+const DOWNLOADS_LIMIT: number | null =
+  Number.isInteger(rawDownloadsLimit) && rawDownloadsLimit > 0
+    ? rawDownloadsLimit
+    : dryRun
+      ? 0
+      : null;
 
 /** Build a per-key fixed-window (60s) rate-limit rule, observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
@@ -104,6 +113,26 @@ function bypassRule(opts: {
   };
 }
 
+// Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
+// missing var drops just this rule instead of throwing the whole apply at import.
+const downloadsRules: Rule[] =
+  DOWNLOADS_LIMIT === null
+    ? []
+    : [
+        rateLimitRule({
+          name: 'rl-downloads-ip',
+          description:
+            'Per-IP rate limit on versioned desktop installer downloads (/downloads/<platform>/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. EXCLUDES /downloads/latest/ (the electron-updater feed, whose differential Range-requests must not be throttled). Phase 1: log.',
+          conditions: [
+            { type: 'path', op: 'pre', value: '/downloads/' },
+            { type: 'path', op: 'pre', value: '/downloads/latest/', neg: true },
+          ],
+          limit: DOWNLOADS_LIMIT,
+          keys: ['ip'],
+          actionDuration: '1h',
+        }),
+      ];
+
 /** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
@@ -151,18 +180,7 @@ export const rules: Rule[] = [
     keys: ['ip'],
     actionDuration: '15m',
   }),
-  rateLimitRule({
-    name: 'rl-downloads-ip',
-    description:
-      'Per-IP rate limit on versioned desktop installer downloads (/downloads/<platform>/<guid>/<version>/) — caps curl-loop amplification of the desktop_downloads counter. EXCLUDES /downloads/latest/ (the electron-updater feed, whose differential Range-requests must not be throttled). Phase 1: log.',
-    conditions: [
-      { type: 'path', op: 'pre', value: '/downloads/' },
-      { type: 'path', op: 'pre', value: '/downloads/latest/', neg: true },
-    ],
-    limit: DOWNLOADS_LIMIT,
-    keys: ['ip'],
-    actionDuration: '1h',
-  }),
+  ...downloadsRules,
   {
     name: 'tile-hotlink',
     description:

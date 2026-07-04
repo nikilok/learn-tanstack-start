@@ -209,6 +209,7 @@ export async function fetchReport(creds: {
   const serverfnLimit = ceiling(process.env.FW_SERVERFN_LIMIT);
   const tilesLimit = ceiling(process.env.FW_TILES_LIMIT);
   const searchLimit = ceiling(process.env.FW_SEARCH_LIMIT);
+  const downloadsLimit = ceiling(process.env.FW_DOWNLOADS_LIMIT);
 
   // The `like` filter is rejected by this API, so /_serverFn uses the busiest fn hash (discovered)
   // as a proxy, and tiles uses the route. The path is interpolated into the filter DSL, so restrict
@@ -241,6 +242,15 @@ export async function fetchReport(creds: {
       '/ home (SSR search upper bound)',
       "requestPath eq '/'",
       searchLimit,
+    ),
+    // rl-downloads-ip calibration bar. Catch-all Nitro route; if this shows no
+    // data once real installer traffic exists, adjust to how Vercel reports the
+    // /downloads/[...path] catch-all.
+    await fetchDist(
+      ctx,
+      '/downloads (versioned installers)',
+      "route eq '/downloads/[...path]'",
+      downloadsLimit,
     ),
   ];
 

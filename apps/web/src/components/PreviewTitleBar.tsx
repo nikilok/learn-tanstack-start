@@ -48,10 +48,7 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
 function BrandMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 130 130" aria-hidden="true" className={className}>
-      <LogoMark
-        navyColor="var(--tb-mark)"
-        flagRedColor="var(--tb-mark-red)"
-      />
+      <LogoMark navyColor="var(--tb-mark)" flagRedColor="var(--tb-mark-red)" />
     </svg>
   );
 }

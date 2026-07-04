@@ -95,7 +95,11 @@ export function LogoMark({
         {/* White Cross */}
         <path d="M60,18 V102 M18,60 H102" stroke="white" strokeWidth="20" />
         {/* Red Cross */}
-        <path d="M60,18 V102 M18,60 H102" stroke={flagRedColor} strokeWidth="12" />
+        <path
+          d="M60,18 V102 M18,60 H102"
+          stroke={flagRedColor}
+          strokeWidth="12"
+        />
       </g>
     </>
   );

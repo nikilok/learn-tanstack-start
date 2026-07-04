@@ -136,7 +136,7 @@ export function usePreviewScenario(
       }
     };
 
-    /** Best result card for `company`: exact name match, then substring, then the top hit. */
+    /** Best result card for `company`: exact name, then prefix, then substring, then the top hit. */
     const findCard = () => {
       const d = doc();
       if (!d) return null;
@@ -147,9 +147,17 @@ export function usePreviewScenario(
       const name = (a: HTMLAnchorElement) =>
         a.querySelector('h3')?.textContent?.trim().toLowerCase() ?? '';
       const wanted = company.trim().toLowerCase();
+      // Shortest match ≈ the bare brand ("Checkout Ltd", not "Checkout
+      // (Wimbledon) Limited"); sort is stable so ties keep result rank.
+      const shortest = (matches: HTMLAnchorElement[]) =>
+        matches
+          .slice()
+          .sort((a, b) => name(a).length - name(b).length)
+          .at(0);
       return (
         anchors.find((a) => name(a) === wanted) ??
-        anchors.find((a) => name(a).includes(wanted)) ??
+        shortest(anchors.filter((a) => name(a).startsWith(wanted))) ??
+        shortest(anchors.filter((a) => name(a).includes(wanted))) ??
         anchors[0]
       );
     };

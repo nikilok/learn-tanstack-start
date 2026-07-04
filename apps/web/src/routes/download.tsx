@@ -72,6 +72,12 @@ const detectOS = createIsomorphicFn()
   .server(() => osFromUA(getRequestHeader('user-agent') ?? ''))
   .client(() => osFromUA(navigator.userAgent));
 
+// Live-preview demo companies — one is picked at random per visit. Keep names
+// resolving against real sponsor rows: "JP Morgan Chase" needs the "Chase" word
+// (bare "JP Morgan" trigram-matches unrelated Morgans; the row is "JPMorgan
+// Chase Bank, National Association", so the top-hit fallback clicks it).
+const PREVIEW_COMPANIES = ['Checkout', 'PhysicsX', 'JP Morgan Chase', 'Boeing'];
+
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
   const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
@@ -85,6 +91,11 @@ function Download() {
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);
+  // Stable per-mount pick; never SSR-rendered, so server/client differing is fine.
+  const [previewCompany] = useState(
+    () =>
+      PREVIEW_COMPANIES[Math.floor(Math.random() * PREVIEW_COMPANIES.length)],
+  );
 
   useEffect(() => {
     setInApp(
@@ -115,9 +126,7 @@ function Download() {
         >
           {hasDesktop ? (
             <DownloadCard
-              image={
-                <Preview company="University of Oxford" platform={heroOS} />
-              }
+              image={<Preview company={previewCompany} platform={heroOS} />}
               title="Desktop"
               description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
             >

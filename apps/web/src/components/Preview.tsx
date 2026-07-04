@@ -64,7 +64,8 @@ export default function Preview({
 }: {
   company: string;
   platform: DesktopPlatform;
-  wallpaper?: string;
+  /** Per-theme wallpaper URLs; both ship and CSS shows one, so the theme swap needs no JS (no flash). */
+  wallpaper?: { light: string; dark: string };
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -146,11 +147,18 @@ export default function Preview({
         }}
       >
         {wallpaper ? (
-          <img
-            src={wallpaper}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover"
-          />
+          <>
+            <img
+              src={wallpaper.light}
+              alt=""
+              className="absolute inset-0 block h-full w-full object-cover dark:hidden"
+            />
+            <img
+              src={wallpaper.dark}
+              alt=""
+              className="absolute inset-0 hidden h-full w-full object-cover dark:block"
+            />
+          </>
         ) : (
           <div className="absolute inset-0 bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]" />
         )}

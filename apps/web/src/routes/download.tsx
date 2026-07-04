@@ -78,6 +78,12 @@ const detectOS = createIsomorphicFn()
 // Chase Bank, National Association", so the top-hit fallback clicks it).
 const PREVIEW_COMPANIES = ['Checkout', 'PhysicsX', 'JP Morgan Chase', 'Boeing'];
 
+// Rolling-hills wallpapers behind the preview window (public/download/, WebP).
+const PREVIEW_WALLPAPER = {
+  light: '/download/wallpaper-light.webp',
+  dark: '/download/wallpaper-dark.webp',
+};
+
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
   const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
@@ -126,7 +132,13 @@ function Download() {
         >
           {hasDesktop ? (
             <DownloadCard
-              image={<Preview company={previewCompany} platform={heroOS} />}
+              image={
+                <Preview
+                  company={previewCompany}
+                  platform={heroOS}
+                  wallpaper={PREVIEW_WALLPAPER}
+                />
+              }
               title="Desktop"
               description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
             >

@@ -278,3 +278,47 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   tag name or caching, keep mutation-purge and cache-tag in lockstep.
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
+
+## /download live Preview — the app iframing itself
+
+`<Preview company platform wallpaper?>` (components/Preview.tsx) renders the real
+app in a same-origin iframe at the shell's 1280×860, scaled into a fake desktop
+window (PreviewTitleBar chrome replica) over a wallpaper, then drives it like a
+user (usePreviewScenario: hydrate → type → real search → click → details page).
+
+- **The iframe's `name` must stay `DESKTOP_PREVIEW_WINDOW_NAME`**
+  (`utils/desktop-preview.ts`): `window.name` is the only parent-settable channel
+  readable before inline head scripts run. `desktop-init.ts` keys TWO behaviours
+  on it pre-paint: stamping `data-desktop` (hides the web header, same as the
+  Electron shell) and patching `history.pushState` → `replaceState`. The patch is
+  load-bearing: iframe SPA pushes join the tab's joint session history, so without
+  it the parent page's Back button steps the demo backwards instead of leaving.
+- **Framing headers must stay same-origin, not DENY** (vite.config.ts `/**`
+  routeRule): `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Reverting
+  to DENY/'none' blanks the preview; cross-site embedding is still blocked.
+- **Focus-stealing needs BOTH guards**: the iframe is `inert` AND SearchBar gates
+  `autoFocus` on `!isDesktopPreview()`. Don't drop either — `inert` propagation
+  into iframes has browser variance, and an ungated autofocus yanks focus (and
+  scroll) from /download on load.
+- **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
+  (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
+  46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in
+  apps/desktop must be hand-mirrored here. Responsive (`sm:`) variants are
+  deliberately baked to the ≥sm rendering: parent-page media queries would
+  otherwise restyle the chrome, while the iframe's own queries correctly use its
+  1280px viewport.
+- **Preview iframes must stay out of telemetry**: `beforeSend={dropPreviewEvents}`
+  on Analytics + SpeedInsights in __root.tsx, and VercelToolbarMount early-returns
+  via `isDesktopPreview()`.
+- **`<TanStackDevtools>` must stay an unconditional top-level element** in
+  __root.tsx: the devtools-vite prod strip removes the element but not a wrapping
+  `cond && (...)`, leaving `cond && ()` — a build-time SyntaxError from the router
+  code-splitter's re-parse.
+- **Theme is mirrored live, not re-derived**: a Preview effect watches the parent
+  `<html>` class and applies class + `color-scheme` to the iframe document
+  (matching applyThemeMode); the app's own `useIsDark` observers (map tiles,
+  skyline) react to that class. Initial load agrees via shared localStorage — the
+  observer exists for post-load toggles on /download.
+- The scenario detects hydration via React's `__reactProps$*` expando on the
+  input and types through the iframe realm's native value setter + `input`
+  events; `prefers-reduced-motion` skips the tour via `/?search=` instead.

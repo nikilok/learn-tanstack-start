@@ -30,11 +30,16 @@ import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
+import { isDesktopPreview } from '../utils/desktop-preview';
 
 import appCss from '../styles.css?url';
 
 const APP_NAME = 'Skilled Worker Sponsor Search';
 const APP_SHORT_NAME = 'SponsorSearch';
+
+/** Drops analytics/vitals events fired inside the /download live-preview iframes so demo runs don't pollute stats. */
+const dropPreviewEvents = <E,>(event: E): E | null =>
+  isDesktopPreview() ? null : event;
 const APP_DESCRIPTION =
   'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.';
 
@@ -178,6 +183,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <UnionJackCursor />
         {/* Rendered after the cursor so it wins the shared max z-index tie. */}
         <AppSplash />
+        {/* Must stay an unconditional top-level element: the devtools-vite prod
+            strip can't parse it wrapped in `cond && (...)` (build SyntaxError). */}
         <TanStackDevtools
           config={{
             position: 'bottom-right',
@@ -195,8 +202,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         />
         {import.meta.env.PROD && (
           <>
-            <Analytics />
-            <SpeedInsights />
+            <Analytics beforeSend={dropPreviewEvents} />
+            <SpeedInsights beforeSend={dropPreviewEvents} />
           </>
         )}
         {import.meta.env.DEV && (
@@ -213,6 +220,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 /** Mounts the Vercel Toolbar in local dev so the Flags Explorer is available here. Preview deploys get the toolbar auto-injected by Vercel; production stays unmounted. */
 function VercelToolbarMount() {
   useEffect(() => {
+    // The /download preview iframes are decorative — no toolbar inside the mini window.
+    if (isDesktopPreview()) return;
     mountVercelToolbar();
   }, []);
   return null;

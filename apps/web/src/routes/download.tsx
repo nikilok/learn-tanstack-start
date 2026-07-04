@@ -11,10 +11,10 @@ import {
   desktopReleasesQueryOptions,
   ownerDesktopReleasesQueryOptions,
 } from '../api/releases';
-import DesktopPreview from '../components/DesktopPreview';
 import DownloadCard from '../components/DownloadCard';
 import { PLATFORM_LABEL, recommendedAsset } from '../components/downloadMeta';
 import { DownloadVersion } from '../components/DownloadVersion';
+import Preview from '../components/Preview';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { parsePlatform } from '../hooks/usePlatform';
@@ -115,7 +115,9 @@ function Download() {
         >
           {hasDesktop ? (
             <DownloadCard
-              image={<DesktopPreview platform={heroOS} />}
+              image={
+                <Preview company="University of Oxford" platform={heroOS} />
+              }
               title="Desktop"
               description="A native window with the same up-to-the-day data — installs and auto-updates like any app."
             >

@@ -27,8 +27,9 @@ const config = defineConfig({
             'X-Content-Type-Options': 'nosniff',
             // Full URL same-origin; origin only cross-origin; nothing on HTTPS→HTTP.
             'Referrer-Policy': 'strict-origin-when-cross-origin',
-            // Prevent any site from embedding us in an iframe (clickjacking defense).
-            'X-Frame-Options': 'DENY',
+            // Same-origin framing only: /download's live preview iframes the app
+            // into a fake desktop window; cross-site embedding stays blocked.
+            'X-Frame-Options': 'SAMEORIGIN',
             // Block legacy Flash/Acrobat cross-domain policy files.
             'X-Permitted-Cross-Domain-Policies': 'none',
             // Isolate browsing context from cross-origin openers (Spectre-era hardening). 'allow-popups' lets popups we open (e.g. the Vercel Toolbar auth flow) postMessage back via window.opener.
@@ -37,7 +38,7 @@ const config = defineConfig({
             'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
             // CSP subset: clickjacking + base-URL/plugin/form-hijack defense + HTTP→HTTPS upgrade. Script/style lockdown deferred.
             'Content-Security-Policy':
-              "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
+              "frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests",
           },
         },
         '/company/**': {

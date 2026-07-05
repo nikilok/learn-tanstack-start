@@ -153,7 +153,12 @@ export default function Preview({
     lastShotRef.current = shot;
     lastPaneRef.current = pane;
   });
-  const animateCamera = shot.ms > 0 && !suppressTransition;
+  // One shared timing fragment: the transform and filter transitions must run
+  // under the same duration + curve, so build it once for both.
+  const cameraTransition =
+    shot.ms > 0 && !suppressTransition
+      ? `${shot.ms}ms ${CAMERA_EASE}`
+      : undefined;
   // Lens blur target ∝ (zoom − 1): with endpoints proportional and the same
   // duration + easing as the transform, blur stays locked to zoom mid-flight —
   // even when a new shot interrupts one still easing.
@@ -211,9 +216,7 @@ export default function Preview({
         style={{
           transform: camera.transform,
           transformOrigin: 'top left',
-          transition: animateCamera
-            ? `transform ${shot.ms}ms ${CAMERA_EASE}`
-            : undefined,
+          transition: cameraTransition && `transform ${cameraTransition}`,
         }}
       >
         {/* Lens layer: the wallpaper defocuses as the camera moves in, like
@@ -223,9 +226,7 @@ export default function Preview({
           className="absolute -inset-6"
           style={{
             filter: `blur(${lensBlur}px)`,
-            transition: animateCamera
-              ? `filter ${shot.ms}ms ${CAMERA_EASE}`
-              : undefined,
+            transition: cameraTransition && `filter ${cameraTransition}`,
             willChange: 'filter',
           }}
         >

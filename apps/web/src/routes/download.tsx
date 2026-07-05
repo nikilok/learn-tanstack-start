@@ -18,6 +18,8 @@ import Preview from '../components/Preview';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { parsePlatform } from '../hooks/usePlatform';
+import { buildCanonical } from '../utils/canonical';
+import { buildDownloadJsonLd } from '../utils/jsonld';
 
 export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
@@ -40,16 +42,34 @@ export const Route = createFileRoute('/download')({
     if (!enabled) throw notFound();
     return { owner: false };
   },
-  head: () => ({
-    meta: [
-      { title: 'Download the desktop app — SponsorSearch.co.uk' },
-      {
-        name: 'description',
-        content:
-          'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.',
-      },
-    ],
-  }),
+  head: ({ match }) => {
+    const pageTitle = 'Download the desktop app — SponsorSearch.co.uk';
+    const pageDescription =
+      'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.';
+    const canonicalUrl = buildCanonical(match.pathname);
+    const jsonLd = buildDownloadJsonLd({
+      description: pageDescription,
+      canonicalUrl,
+    });
+    return {
+      meta: [
+        { title: pageTitle },
+        { name: 'description', content: pageDescription },
+        { property: 'og:title', content: pageTitle },
+        { property: 'og:description', content: pageDescription },
+        { property: 'og:url', content: canonicalUrl },
+        { name: 'twitter:title', content: pageTitle },
+        { name: 'twitter:description', content: pageDescription },
+        { name: 'twitter:url', content: canonicalUrl },
+        // 'script:ld+json' is supported at runtime but not exposed in the framework's meta types.
+        ...jsonLd.map(
+          (schema) =>
+            ({ 'script:ld+json': schema }) as unknown as { name: string },
+        ),
+      ],
+      links: [{ rel: 'canonical', href: canonicalUrl }],
+    };
+  },
   loader: async ({ context: { queryClient, owner } }) => {
     // The owner view (already warmed in beforeLoad) is safe to resolve during
     // SSR: /download documents are rendered per-request (no cache routeRule),

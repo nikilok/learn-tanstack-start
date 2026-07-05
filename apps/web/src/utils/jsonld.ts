@@ -146,3 +146,26 @@ function faqPage(input: CompanyJsonLdInput) {
 export function buildCompanyJsonLd(input: CompanyJsonLdInput) {
   return [organization(input), breadcrumbList(input), faqPage(input)];
 }
+
+/** Build a SoftwareApplication schema for the /download page — a free macOS & Windows desktop app. Static (no per-release version data), so it's safe to emit on every render. */
+export function buildDownloadJsonLd(input: {
+  description: string;
+  canonicalUrl: string;
+}) {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'SponsorSearch',
+      description: input.description,
+      url: input.canonicalUrl,
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'macOS, Windows',
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'GBP',
+      },
+    },
+  ];
+}

@@ -36,6 +36,7 @@ import {
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
 import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
+import { buildSeoHead } from '../utils/seo';
 
 // Grammatical "A, B and C" joiner for the former-names sentence in the summary.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
@@ -233,29 +234,12 @@ export const Route = createFileRoute('/company/$id/$slug')({
         })
       : [];
 
-    return {
-      meta: [
-        { title: pageTitle },
-        { name: 'description', content: pageDescription },
-        { property: 'og:title', content: pageTitle },
-        { property: 'og:description', content: pageDescription },
-        { property: 'og:url', content: canonicalUrl },
-        { name: 'twitter:title', content: pageTitle },
-        { name: 'twitter:description', content: pageDescription },
-        { name: 'twitter:url', content: canonicalUrl },
-        // 'script:ld+json' is supported at runtime but not exposed in the framework's meta types.
-        ...jsonLd.map(
-          (schema) =>
-            ({ 'script:ld+json': schema }) as unknown as { name: string },
-        ),
-      ],
-      links: [
-        {
-          rel: 'canonical',
-          href: canonicalUrl,
-        },
-      ],
-    };
+    return buildSeoHead({
+      title: pageTitle,
+      description: pageDescription,
+      canonicalUrl,
+      jsonLd,
+    });
   },
   component: CompanyDetail,
 });

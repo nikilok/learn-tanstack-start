@@ -1,3 +1,5 @@
+import { APP_SHORT_NAME } from './app-meta';
+
 type Address = {
   address_line_1?: string;
   address_line_2?: string;
@@ -156,7 +158,7 @@ export function buildDownloadJsonLd(input: {
     {
       '@context': 'https://schema.org',
       '@type': 'SoftwareApplication',
-      name: 'SponsorSearch',
+      name: APP_SHORT_NAME,
       description: input.description,
       url: input.canonicalUrl,
       applicationCategory: 'BusinessApplication',

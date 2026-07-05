@@ -52,7 +52,7 @@ function PlatformColumn({
         {PLATFORM_LABEL[platform]}
       </div>
       {sorted.length === 0 ? (
-        <p className="py-2 text-sm text-(--sea-ink-faint)">Not available</p>
+        <p className="py-2 text-sm text-(--sea-ink-faint)">Coming soon</p>
       ) : (
         <ul className="flex flex-col">
           {sorted.map((a) => (

@@ -134,7 +134,7 @@ function Download() {
     <main className="page-wrap mx-auto max-w-5xl px-4 py-12 text-(--sea-ink)">
       <h1 className="text-3xl font-bold">Download SponsorSearch</h1>
       <p className="mt-2 text-(--sea-ink-soft)">
-        Available for macOS and Windows. Linux is on the way.
+        Available for macOS and Windows.
       </p>
 
       {cardCount > 0 ? (

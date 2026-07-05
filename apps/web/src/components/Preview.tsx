@@ -16,6 +16,12 @@ const WINDOW_H = 860;
 // Window placement inside the pane: wallpaper margin on the sides and top.
 const INSET_X = 0.07;
 const INSET_TOP = 0.09;
+// One timing curve for every camera move — the scene transform and the lens
+// blur must share it (plus the shot's duration) so their progress stays locked.
+const CAMERA_EASE = 'cubic-bezier(0.45, 0.05, 0.25, 1)';
+// Wallpaper defocus per unit of zoom beyond 1, in pre-transform px (the scene
+// scale magnifies it, so the felt blur deepens slightly faster than the zoom).
+const LENS_BLUR_PER_ZOOM = 6;
 
 /** Clamps `v` into [lo, hi]. */
 const clamp = (v: number, lo: number, hi: number) =>
@@ -26,15 +32,16 @@ const clamp = (v: number, lo: number, hi: number) =>
  * into pane coords via the window inset + base scale, then zooms the WHOLE
  * scene — wallpaper, window frame and chrome — about it, clamped so the pane
  * stays covered. `rect: null` (or an unmeasured pane) is the resting wide shot.
+ * Returns the zoom multiple alongside so the lens blur can key off it.
  */
 function shotTransform(
   shot: PreviewShot,
   paneW: number,
   paneH: number,
   scale: number,
-): string {
+): { transform: string; zoom: number } {
   if (!shot.rect || paneW === 0 || paneH === 0) {
-    return 'scale(1) translate(0px, 0px)';
+    return { transform: 'scale(1) translate(0px, 0px)', zoom: 1 };
   }
   const left = paneW * INSET_X + (shot.rect.left - (shot.padX ?? 0)) * scale;
   const top = paneH * INSET_TOP + (shot.rect.top - (shot.padY ?? 0)) * scale;
@@ -45,7 +52,7 @@ function shotTransform(
   const vh = paneH / z;
   const x = clamp(left + width / 2 - vw / 2, 0, paneW - vw);
   const y = clamp(top + height / 2 - vh / 2, 0, paneH - vh);
-  return `scale(${z}) translate(${-x}px, ${-y}px)`;
+  return { transform: `scale(${z}) translate(${-x}px, ${-y}px)`, zoom: z };
 }
 
 /**
@@ -133,6 +140,7 @@ export default function Preview({
     frameReady,
   );
   const scale = (pane.w * (1 - INSET_X * 2)) / WINDOW_W;
+  const camera = shotTransform(shot, pane.w, pane.h, scale);
 
   // Animate the camera only for shot changes: a pane resize also changes
   // shotTransform's output, and easing that correction while the inner layers
@@ -145,6 +153,16 @@ export default function Preview({
     lastShotRef.current = shot;
     lastPaneRef.current = pane;
   });
+  // One shared timing fragment: the transform and filter transitions must run
+  // under the same duration + curve, so build it once for both.
+  const cameraTransition =
+    shot.ms > 0 && !suppressTransition
+      ? `${shot.ms}ms ${CAMERA_EASE}`
+      : undefined;
+  // Lens blur target ∝ (zoom − 1): with endpoints proportional and the same
+  // duration + easing as the transform, blur stays locked to zoom mid-flight —
+  // even when a new shot interrupts one still easing.
+  const lensBlur = (camera.zoom - 1) * LENS_BLUR_PER_ZOOM;
 
   // Track the pane's rendered size → base window scale + camera mapping.
   useLayoutEffect(() => {
@@ -196,30 +214,39 @@ export default function Preview({
       <div
         className="absolute inset-0"
         style={{
-          transform: shotTransform(shot, pane.w, pane.h, scale),
+          transform: camera.transform,
           transformOrigin: 'top left',
-          transition:
-            shot.ms > 0 && !suppressTransition
-              ? `transform ${shot.ms}ms cubic-bezier(0.45, 0.05, 0.25, 1)`
-              : undefined,
+          transition: cameraTransition && `transform ${cameraTransition}`,
         }}
       >
-        {wallpaper ? (
-          <>
-            <img
-              src={wallpaper.light}
-              alt=""
-              className="absolute inset-0 block h-full w-full object-cover dark:hidden"
-            />
-            <img
-              src={wallpaper.dark}
-              alt=""
-              className="absolute inset-0 hidden h-full w-full object-cover dark:block"
-            />
-          </>
-        ) : (
-          <div className="absolute inset-0 bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]" />
-        )}
+        {/* Lens layer: the wallpaper defocuses as the camera moves in, like
+            focus racking onto the app; oversized so the blur's faded edge
+            stays outside the pane. The window above it stays sharp. */}
+        <div
+          className="absolute -inset-6"
+          style={{
+            filter: `blur(${lensBlur}px)`,
+            transition: cameraTransition && `filter ${cameraTransition}`,
+            willChange: 'filter',
+          }}
+        >
+          {wallpaper ? (
+            <>
+              <img
+                src={wallpaper.light}
+                alt=""
+                className="absolute inset-0 block h-full w-full object-cover dark:hidden"
+              />
+              <img
+                src={wallpaper.dark}
+                alt=""
+                className="absolute inset-0 hidden h-full w-full object-cover dark:block"
+              />
+            </>
+          ) : (
+            <div className="absolute inset-0 bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]" />
+          )}
+        </div>
         {/* The window floats over the wallpaper: sky on top and sides, bottom bleeding off the pane. */}
         <div
           style={{

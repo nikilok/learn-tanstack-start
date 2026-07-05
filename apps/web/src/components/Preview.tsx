@@ -7,6 +7,7 @@ import {
   usePreviewScenario,
 } from '../hooks/usePreviewScenario';
 import { DESKTOP_PREVIEW_WINDOW_NAME } from '../utils/desktop-preview';
+import Logo from './Logo';
 import PreviewTitleBar from './PreviewTitleBar';
 
 // Mirrors the shell's default BaseWindow size (apps/desktop/src/main/index.ts).
@@ -106,6 +107,25 @@ export default function Preview({
       if (timerId !== undefined) window.clearTimeout(timerId);
     };
   }, []);
+  // Splash → app handoff: the window shows a launch splash (base bg + mark,
+  // like the PWA/native splash) from first SSR paint, and reveals the live app
+  // only once the iframed document has painted — never a bare dark pane.
+  const [appVisible, setAppVisible] = useState(false);
+  useEffect(() => {
+    if (!frameReady) return;
+    const frame = frameRef.current;
+    if (!frame) return;
+    const reveal = () => requestAnimationFrame(() => setAppVisible(true));
+    // Covers a load that finished before this effect attached (the initial
+    // about:blank document also reports 'complete' — don't count it).
+    const doc = frame.contentDocument;
+    if (doc && doc.readyState === 'complete' && doc.URL !== 'about:blank') {
+      reveal();
+      return;
+    }
+    frame.addEventListener('load', reveal);
+    return () => frame.removeEventListener('load', reveal);
+  }, [frameReady]);
   const { title, canGoBack, shot } = usePreviewScenario(
     frameRef,
     paneRef,
@@ -237,6 +257,21 @@ export default function Preview({
                   className="h-full w-full border-0"
                 />
               ) : null}
+              {/* Launch splash — replica of the shell/PWA splash (.app-splash
+                  in styles.css + INITIAL_BG in apps/desktop main: #120817 +
+                  white wordmark at min(80vw, 420px) → 420px at this window
+                  width); keep them in lockstep. Fades out over the loaded app. */}
+              <div
+                className={`absolute inset-0 flex items-center justify-center bg-[#120817] transition-opacity duration-500 ${
+                  appVisible ? 'opacity-0' : 'opacity-100'
+                }`}
+              >
+                <Logo
+                  className="w-105"
+                  navyColor="#ffffff"
+                  redColor="#ffffff"
+                />
+              </div>
               <PreviewTitleBar
                 platform={platform}
                 title={title}

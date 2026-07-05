@@ -327,10 +327,16 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   scroll) from /download on load.
 - **The iframe mounts deferred** (`frameReady` in Preview.tsx: window `load`
   event — with a 4s safety net — then `requestIdleCallback`, setTimeout on
-  Safari) so the second app copy doesn't compete with /download's own boot;
-  SSR/no-JS renders window chrome only. `usePreviewScenario` takes `ready` and
-  gates its effect on it — refs changing alone never re-run effects, so
-  dropping the param strands the demo unstarted.
+  Safari) so the second app copy doesn't compete with /download's own boot.
+  A launch splash — a replica of the shell/PWA splash (#120817 + white wordmark;
+  mirrors `.app-splash` in styles.css and `INITIAL_BG` in apps/desktop, keep in
+  lockstep) — fills the window from the first measured frame and fades out only
+  when the iframe fires `load` (guarded against the initial about:blank
+  'complete'), so the window never sits as a bare dark pane. (True no-JS still
+  shows just the empty frame: the 1280×860 box is visibility-gated on the
+  JS-measured pane scale.) `usePreviewScenario` takes `ready` and gates its
+  effect on it — refs changing alone never re-run effects, so dropping the
+  param strands the demo unstarted.
 - **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
   46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in

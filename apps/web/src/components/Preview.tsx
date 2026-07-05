@@ -70,10 +70,27 @@ export default function Preview({
   const paneRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [pane, setPane] = useState({ w: 0, h: 0 });
+  // Mount the iframe only after the parent page has hydrated and gone idle:
+  // it boots a full second copy of the app, which would otherwise compete with
+  // /download's own document, hydration and fonts. SSR/no-JS renders just the
+  // window chrome over the wallpaper.
+  const [frameReady, setFrameReady] = useState(false);
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(() => setFrameReady(true), {
+        timeout: 1500,
+      });
+      return () => window.cancelIdleCallback(id);
+    }
+    // Safari has no requestIdleCallback.
+    const timer = window.setTimeout(() => setFrameReady(true), 300);
+    return () => window.clearTimeout(timer);
+  }, []);
   const { title, canGoBack, shot } = usePreviewScenario(
     frameRef,
     paneRef,
     company,
+    frameReady,
   );
   const scale = (pane.w * (1 - INSET_X * 2)) / WINDOW_W;
 
@@ -124,7 +141,8 @@ export default function Preview({
     frame.addEventListener('load', sync);
     sync();
     return () => frame.removeEventListener('load', sync);
-  }, [isDark]);
+    // frameReady re-runs this once the deferred iframe actually exists.
+  }, [isDark, frameReady]);
 
   return (
     <div
@@ -189,14 +207,16 @@ export default function Preview({
                 visibility: scale > 0 ? 'visible' : 'hidden',
               }}
             >
-              <iframe
-                ref={frameRef}
-                src="/"
-                name={DESKTOP_PREVIEW_WINDOW_NAME}
-                title={`SponsorSearch desktop preview (${platform})`}
-                inert
-                className="h-full w-full border-0"
-              />
+              {frameReady ? (
+                <iframe
+                  ref={frameRef}
+                  src="/"
+                  name={DESKTOP_PREVIEW_WINDOW_NAME}
+                  title={`SponsorSearch desktop preview (${platform})`}
+                  inert
+                  className="h-full w-full border-0"
+                />
+              ) : null}
               <PreviewTitleBar
                 platform={platform}
                 title={title}

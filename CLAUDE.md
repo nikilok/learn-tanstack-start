@@ -276,6 +276,16 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
 - Visibility flips propagate via the tag purge in `setReleaseVisibility` (gated on
   `VERCEL_CACHE_INVALIDATION`, like the release POST endpoint's). If you change the
   tag name or caching, keep mutation-purge and cache-tag in lockstep.
+- **`beforeLoad` is owner-first and the flags client is polling-mode**: the owner
+  check (local cookie crypto) short-circuits before any flag evaluation, so owner
+  loads never block on the flags backend; `flags.server.ts` builds the adapter with
+  `createClient(FLAGS, { stream: false })` because SSE stream init from a serverless
+  function stalled the first evaluation per instance ~2.5s of TTFB. The loader skips
+  the public-releases fetch for owners (`context.owner`), and the component disables
+  that query via `enabled: !owner` — owners must never fetch the public list.
+- **`loadReleases` runs its two queries in parallel** (assets scoped by an
+  IN-subquery on the same LIMIT 50 release window). Keep the subquery's
+  where/order/limit identical to the releases query or the asset set drifts.
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
 
@@ -310,6 +320,11 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   `autoFocus` on `!isDesktopPreview()`. Don't drop either — `inert` propagation
   into iframes has browser variance, and an ungated autofocus yanks focus (and
   scroll) from /download on load.
+- **The iframe mounts deferred** (`frameReady` in Preview.tsx: post-hydration
+  `requestIdleCallback`, setTimeout on Safari) so the second app copy doesn't
+  compete with /download's own boot; SSR/no-JS renders window chrome only.
+  `usePreviewScenario` takes `ready` and gates its effect on it — refs changing
+  alone never re-run effects, so dropping the param strands the demo unstarted.
 - **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
   46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in

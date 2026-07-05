@@ -51,29 +51,37 @@ function emptyGroups(): Record<DesktopPlatform, DesktopAsset[]> {
  * private rows evict older public releases from the public window.
  */
 async function loadReleases(onlyPublic = false): Promise<DesktopRelease[]> {
-  const releases = await db
-    .select()
+  const visibility = onlyPublic
+    ? eq(desktopReleases.visibility, 'public')
+    : undefined;
+  // The assets query scopes itself to the same release window via an
+  // IN-subquery instead of waiting for the releases result, so both queries
+  // run in parallel — one neon-http round-trip of latency instead of two.
+  const releaseWindow = db
+    .select({ id: desktopReleases.id })
     .from(desktopReleases)
-    .where(onlyPublic ? eq(desktopReleases.visibility, 'public') : undefined)
+    .where(visibility)
     .orderBy(desc(desktopReleases.publishedAt))
     .limit(50);
+  const [releases, assets] = await Promise.all([
+    db
+      .select()
+      .from(desktopReleases)
+      .where(visibility)
+      .orderBy(desc(desktopReleases.publishedAt))
+      .limit(50),
+    db
+      .select()
+      .from(desktopReleaseAssets)
+      .where(inArray(desktopReleaseAssets.releaseId, releaseWindow))
+      .orderBy(
+        asc(desktopReleaseAssets.arch),
+        asc(desktopReleaseAssets.format),
+        asc(desktopReleaseAssets.installScope),
+      ),
+  ]);
 
   if (releases.length === 0) return [];
-
-  const assets = await db
-    .select()
-    .from(desktopReleaseAssets)
-    .where(
-      inArray(
-        desktopReleaseAssets.releaseId,
-        releases.map((r) => r.id),
-      ),
-    )
-    .orderBy(
-      asc(desktopReleaseAssets.arch),
-      asc(desktopReleaseAssets.format),
-      asc(desktopReleaseAssets.installScope),
-    );
 
   const byRelease = new Map<number, Record<DesktopPlatform, DesktopAsset[]>>();
   for (const r of releases) byRelease.set(r.id, emptyGroups());

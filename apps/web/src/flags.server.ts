@@ -1,4 +1,5 @@
-import { vercelAdapter } from '@flags-sdk/vercel';
+import { createVercelAdapter } from '@flags-sdk/vercel';
+import { createClient } from '@vercel/flags-core';
 import { decryptOverrides } from 'flags';
 
 /** Minimal flag spec — kept framework-agnostic so the same declaration is consumed by the discovery endpoint metadata and the server-side evaluator. */
@@ -49,6 +50,19 @@ export const flags: Record<string, FlagSpec<FlagValue>> = {
   [downloadsFlag.key]: downloadsFlag,
 };
 
+/** Memoized adapter factory; null when FLAGS is unset (e.g. local dev without Vercel Flags). */
+let adapterFactory: ReturnType<typeof createVercelAdapter> | null | undefined;
+
+/** Returns the Vercel Flags adapter on a polling-mode client (`stream: false`): SSE stream init from a serverless function stalls the first evaluation per instance ~2.5s; a one-shot datafile poll is bounded and cached in module scope. */
+function getAdapterFactory() {
+  if (adapterFactory === undefined) {
+    adapterFactory = process.env.FLAGS
+      ? createVercelAdapter(createClient(process.env.FLAGS, { stream: false }))
+      : null;
+  }
+  return adapterFactory;
+}
+
 /** Resolves a flag server-side: a signed Flags Explorer override cookie value wins; otherwise the Vercel Flags adapter looks up the dashboard-managed value for this environment. Cookie signatures are verified against FLAGS_SECRET so client tampering invalidates the override. */
 export async function evaluateFlag<T>(
   spec: FlagSpec<T>,
@@ -59,25 +73,26 @@ export async function evaluateFlag<T>(
     return overrides[spec.key] as T;
   }
   try {
-    const adapter = vercelAdapter<T, unknown>();
-    return await adapter.decide({
+    const factory = getAdapterFactory();
+    if (!factory) return spec.defaultValue;
+    return await factory<T, unknown>().decide({
       key: spec.key,
       headers: EMPTY_HEADERS,
       cookies: EMPTY_COOKIES,
       defaultValue: spec.defaultValue,
     });
   } catch {
-    // FLAGS env var missing or Vercel Flags unreachable — fall back to default.
+    // Vercel Flags unreachable — fall back to default.
     return spec.defaultValue;
   }
 }
 
+type VercelFlagAdapter = ReturnType<ReturnType<typeof createVercelAdapter>>;
+
 const EMPTY_HEADERS = new Headers() as unknown as Parameters<
-  ReturnType<typeof vercelAdapter>['decide']
+  VercelFlagAdapter['decide']
 >[0]['headers'];
 
 const EMPTY_COOKIES = {
   get: () => undefined,
-} as unknown as Parameters<
-  ReturnType<typeof vercelAdapter>['decide']
->[0]['cookies'];
+} as unknown as Parameters<VercelFlagAdapter['decide']>[0]['cookies'];

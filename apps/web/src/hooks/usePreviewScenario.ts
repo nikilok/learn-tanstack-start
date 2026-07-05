@@ -98,7 +98,8 @@ function clickLink(el: HTMLElement): void {
 /**
  * Drives the /download live preview like a user: waits for the iframed app to
  * hydrate, types the company name into the search box, lets the real results
- * stream in, then clicks the matching card through to its details page.
+ * stream in, clicks the matching card through to its details page, then
+ * scrolls that page to the bottom so the demo ends on the full map + footer.
  * Returns the camera shot plus the title/back state the fake title bar mirrors.
  * `ready` gates the whole scenario — the iframe mounts deferred, and refs
  * changing alone would never re-run the effect.
@@ -132,6 +133,35 @@ export function usePreviewScenario(
         return null;
       }
     };
+
+    /** Eased scroll of the iframed page to its bottom — reads like a user scrolling; stops on abort. */
+    const scrollDetailsToBottom = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const win = frame.contentWindow;
+        const scroller = doc()?.scrollingElement;
+        if (!win || !scroller) {
+          resolve();
+          return;
+        }
+        const from = scroller.scrollTop;
+        const start = performance.now();
+        const ease = (t: number) =>
+          t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+        const step = (now: number) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          // Re-read the target each frame: late map tiles / footer can still
+          // be growing the page while we scroll.
+          const to = scroller.scrollHeight - win.innerHeight;
+          const t = Math.min(1, (now - start) / ms);
+          scroller.scrollTop = from + (to - from) * ease(t);
+          if (t < 1) requestAnimationFrame(step);
+          else resolve();
+        };
+        requestAnimationFrame(step);
+      });
 
     /** Best result card for `company`: exact name, then prefix, then substring, then the top hit. */
     const findCard = () => {
@@ -303,6 +333,11 @@ export function usePreviewScenario(
         await sleep(2200, signal);
       }
       setShot({ rect: null, ms: 1800 });
+
+      // Once the pull-back settles, read down to the bottom of the page so the
+      // demo ends on the full map and footer, not a half-cropped map.
+      await sleep(2000, signal);
+      await scrollDetailsToBottom(2000);
     }
 
     // Rejections are aborts or stalls; on a live stall, at least bring the

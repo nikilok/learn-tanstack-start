@@ -30,12 +30,10 @@ import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
-import { APP_NAME } from '../utils/app-meta';
+import { APP_NAME, APP_SHORT_NAME } from '../utils/app-meta';
 import { isDesktopPreview } from '../utils/desktop-preview';
 
 import appCss from '../styles.css?url';
-
-const APP_SHORT_NAME = 'SponsorSearch';
 
 /** Drops analytics/vitals events fired inside the /download live-preview iframes so demo runs don't pollute stats. */
 const dropPreviewEvents = <E,>(event: E): E | null =>

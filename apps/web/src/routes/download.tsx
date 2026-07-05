@@ -18,6 +18,9 @@ import Preview from '../components/Preview';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { parsePlatform } from '../hooks/usePlatform';
+import { buildCanonical } from '../utils/canonical';
+import { buildDownloadJsonLd } from '../utils/jsonld';
+import { buildSeoHead } from '../utils/seo';
 
 export const Route = createFileRoute('/download')({
   // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
@@ -40,16 +43,21 @@ export const Route = createFileRoute('/download')({
     if (!enabled) throw notFound();
     return { owner: false };
   },
-  head: () => ({
-    meta: [
-      { title: 'Download the desktop app — SponsorSearch.co.uk' },
-      {
-        name: 'description',
-        content:
-          'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.',
-      },
-    ],
-  }),
+  head: ({ match }) => {
+    const pageTitle = 'Download the desktop app — SponsorSearch.co.uk';
+    const pageDescription =
+      'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.';
+    const canonicalUrl = buildCanonical(match.pathname);
+    return buildSeoHead({
+      title: pageTitle,
+      description: pageDescription,
+      canonicalUrl,
+      jsonLd: buildDownloadJsonLd({
+        description: pageDescription,
+        canonicalUrl,
+      }),
+    });
+  },
   loader: async ({ context: { queryClient, owner } }) => {
     // The owner view (already warmed in beforeLoad) is safe to resolve during
     // SSR: /download documents are rendered per-request (no cache routeRule),

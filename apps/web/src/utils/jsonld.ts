@@ -1,3 +1,5 @@
+import { APP_SHORT_NAME } from './app-meta';
+
 type Address = {
   address_line_1?: string;
   address_line_2?: string;
@@ -145,4 +147,27 @@ function faqPage(input: CompanyJsonLdInput) {
 /** Compose the three JSON-LD blocks (Organization, BreadcrumbList, FAQPage) for a company detail page. Each block is independently emitted as its own <script type="application/ld+json"> tag. */
 export function buildCompanyJsonLd(input: CompanyJsonLdInput) {
   return [organization(input), breadcrumbList(input), faqPage(input)];
+}
+
+/** Build a SoftwareApplication schema for the /download page — a free macOS & Windows desktop app. Static (no per-release version data), so it's safe to emit on every render. */
+export function buildDownloadJsonLd(input: {
+  description: string;
+  canonicalUrl: string;
+}) {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: APP_SHORT_NAME,
+      description: input.description,
+      url: input.canonicalUrl,
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'macOS, Windows',
+      offers: {
+        '@type': 'Offer',
+        price: '0',
+        priceCurrency: 'GBP',
+      },
+    },
+  ];
 }

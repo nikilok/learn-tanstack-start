@@ -13,7 +13,9 @@ export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
   return (
     <DownloadCard
       image={
-        <div className="flex h-full w-full items-center justify-center">
+        // Same sky gradient as Preview's no-wallpaper fallback — keeps the two
+        // /download tiles reading as one set.
+        <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]">
           <ChromeIcon className="size-20" />
         </div>
       }

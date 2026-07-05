@@ -100,17 +100,21 @@ function clickLink(el: HTMLElement): void {
  * hydrate, types the company name into the search box, lets the real results
  * stream in, then clicks the matching card through to its details page.
  * Returns the camera shot plus the title/back state the fake title bar mirrors.
+ * `ready` gates the whole scenario — the iframe mounts deferred, and refs
+ * changing alone would never re-run the effect.
  */
 export function usePreviewScenario(
   frameRef: RefObject<HTMLIFrameElement | null>,
   paneRef: RefObject<HTMLElement | null>,
   company: string,
+  ready: boolean,
 ) {
   const [detailsReached, setDetailsReached] = useState(false);
   const [title, setTitle] = useState(APP_NAME);
   const [shot, setShot] = useState<PreviewShot>({ rect: null, ms: 0 });
 
   useEffect(() => {
+    if (!ready) return;
     const maybeFrame = frameRef.current;
     const maybePane = paneRef.current;
     if (!maybeFrame || !maybePane) return;
@@ -308,7 +312,7 @@ export function usePreviewScenario(
     });
 
     return () => controller.abort();
-  }, [frameRef, paneRef, company]);
+  }, [frameRef, paneRef, company, ready]);
 
   return { title, canGoBack: detailsReached, shot };
 }

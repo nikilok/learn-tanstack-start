@@ -25,16 +25,20 @@ export const Route = createFileRoute('/download')({
   // Entry points are hidden too, so this only catches direct-URL / crawler hits.
   // Owners bypass the dark-launch flag: the durable ss-owner credential must
   // keep the publish workflow reachable without a live toolbar override cookie.
+  // The owner check runs FIRST and short-circuits — it never touches the flags
+  // backend, so owner loads can't stall on flag-client init; only anonymous
+  // visitors pay a flag evaluation (which also warms the header/footer flag
+  // query — owners pick that up client-side like every other page).
   beforeLoad: async ({ context: { queryClient } }) => {
-    // ensureQueryData (not bare fn calls) so these SSR evals also warm the
-    // header/footer flag query and the owner view for the /download render.
-    const [enabled, ownerView] = await Promise.all([
-      queryClient.ensureQueryData(downloadsFlagQueryOptions),
-      queryClient.ensureQueryData(ownerDesktopReleasesQueryOptions),
-    ]);
-    if (!enabled && !ownerView.owner) {
-      throw notFound();
-    }
+    const ownerView = await queryClient.ensureQueryData(
+      ownerDesktopReleasesQueryOptions,
+    );
+    if (ownerView.owner) return { owner: true };
+    const enabled = await queryClient.ensureQueryData(
+      downloadsFlagQueryOptions,
+    );
+    if (!enabled) throw notFound();
+    return { owner: false };
   },
   head: () => ({
     meta: [
@@ -46,10 +50,14 @@ export const Route = createFileRoute('/download')({
       },
     ],
   }),
-  loader: async ({ context: { queryClient } }) => {
+  loader: async ({ context: { queryClient, owner } }) => {
     // The owner view (already warmed in beforeLoad) is safe to resolve during
     // SSR: /download documents are rendered per-request (no cache routeRule),
-    // so an owner's variant can never be served to anyone else.
+    // so an owner's variant can never be served to anyone else. Owners render
+    // that snapshot INSTEAD of the public list, so don't BLOCK on the public
+    // fetch — the component's useQuery still warms it post-hydration for the
+    // credential-downgrade swap.
+    if (owner) return;
     await queryClient.ensureQueryData(desktopReleasesQueryOptions);
   },
   component: Download,
@@ -86,13 +94,16 @@ const PREVIEW_WALLPAPER = {
 
 /** `/download` — desktop builds served from our CDN, grouped by version and platform. */
 function Download() {
-  const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
   const { data: ownerView } = useQuery(ownerDesktopReleasesQueryOptions);
   const owner = ownerView?.owner ?? false;
   // Owner renders the server's single consistent snapshot (public + private).
   // Do NOT merge the two lists: they refetch independently after a
   // publish/unpublish flip, and the stale/fresh overlap transiently duplicates
-  // (or drops) the flipped release.
+  // (or drops) the flipped release. The public query stays enabled for owners
+  // (non-blocking, edge-cached RPC): if the ss-owner credential dies
+  // mid-session, `owner` flips false and this must swap to an already-warm
+  // public list, not flash the "coming soon" empty state.
+  const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
   const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();

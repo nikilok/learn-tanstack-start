@@ -7,6 +7,7 @@ import {
   usePreviewScenario,
 } from '../hooks/usePreviewScenario';
 import { DESKTOP_PREVIEW_WINDOW_NAME } from '../utils/desktop-preview';
+import Logo from './Logo';
 import PreviewTitleBar from './PreviewTitleBar';
 
 // Mirrors the shell's default BaseWindow size (apps/desktop/src/main/index.ts).
@@ -70,10 +71,66 @@ export default function Preview({
   const paneRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [pane, setPane] = useState({ w: 0, h: 0 });
+  // Mount the iframe only after the parent page has fully loaded (fonts,
+  // wallpapers) and gone idle: it boots a full second copy of the app, which
+  // would otherwise compete with /download's own boot. SSR/no-JS renders just
+  // the window chrome over the wallpaper.
+  const [frameReady, setFrameReady] = useState(false);
+  useEffect(() => {
+    let idleId: number | undefined;
+    let timerId: number | undefined;
+    let armed = false;
+    /** Schedules the mount on idle (Safari: short timer) — at most once. */
+    const arm = () => {
+      if (armed) return;
+      armed = true;
+      if (timerId !== undefined) window.clearTimeout(timerId);
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(() => setFrameReady(true), {
+          timeout: 1500,
+        });
+      } else {
+        // Safari has no requestIdleCallback; load has fired, so a beat is enough.
+        timerId = window.setTimeout(() => setFrameReady(true), 300);
+      }
+    };
+    if (document.readyState === 'complete') {
+      arm();
+    } else {
+      window.addEventListener('load', arm, { once: true });
+      // Safety net: a straggling resource must not strand the demo unstarted.
+      timerId = window.setTimeout(arm, 4000);
+    }
+    return () => {
+      window.removeEventListener('load', arm);
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (timerId !== undefined) window.clearTimeout(timerId);
+    };
+  }, []);
+  // Splash → app handoff: the window shows a launch splash (base bg + mark,
+  // like the PWA/native splash) from first SSR paint, and reveals the live app
+  // only once the iframed document has painted — never a bare dark pane.
+  const [appVisible, setAppVisible] = useState(false);
+  useEffect(() => {
+    if (!frameReady) return;
+    const frame = frameRef.current;
+    if (!frame) return;
+    const reveal = () => requestAnimationFrame(() => setAppVisible(true));
+    // Covers a load that finished before this effect attached (the initial
+    // about:blank document also reports 'complete' — don't count it).
+    const doc = frame.contentDocument;
+    if (doc && doc.readyState === 'complete' && doc.URL !== 'about:blank') {
+      reveal();
+      return;
+    }
+    frame.addEventListener('load', reveal);
+    return () => frame.removeEventListener('load', reveal);
+  }, [frameReady]);
   const { title, canGoBack, shot } = usePreviewScenario(
     frameRef,
     paneRef,
     company,
+    frameReady,
   );
   const scale = (pane.w * (1 - INSET_X * 2)) / WINDOW_W;
 
@@ -124,7 +181,8 @@ export default function Preview({
     frame.addEventListener('load', sync);
     sync();
     return () => frame.removeEventListener('load', sync);
-  }, [isDark]);
+    // frameReady re-runs this once the deferred iframe actually exists.
+  }, [isDark, frameReady]);
 
   return (
     <div
@@ -189,14 +247,31 @@ export default function Preview({
                 visibility: scale > 0 ? 'visible' : 'hidden',
               }}
             >
-              <iframe
-                ref={frameRef}
-                src="/"
-                name={DESKTOP_PREVIEW_WINDOW_NAME}
-                title={`SponsorSearch desktop preview (${platform})`}
-                inert
-                className="h-full w-full border-0"
-              />
+              {frameReady ? (
+                <iframe
+                  ref={frameRef}
+                  src="/"
+                  name={DESKTOP_PREVIEW_WINDOW_NAME}
+                  title={`SponsorSearch desktop preview (${platform})`}
+                  inert
+                  className="h-full w-full border-0"
+                />
+              ) : null}
+              {/* Launch splash — replica of the shell/PWA splash (.app-splash
+                  in styles.css + INITIAL_BG in apps/desktop main: #120817 +
+                  white wordmark at min(80vw, 420px) → 420px at this window
+                  width); keep them in lockstep. Fades out over the loaded app. */}
+              <div
+                className={`absolute inset-0 flex items-center justify-center bg-[#120817] transition-opacity duration-500 ${
+                  appVisible ? 'opacity-0' : 'opacity-100'
+                }`}
+              >
+                <Logo
+                  className="w-105"
+                  navyColor="#ffffff"
+                  redColor="#ffffff"
+                />
+              </div>
               <PreviewTitleBar
                 platform={platform}
                 title={title}

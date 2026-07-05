@@ -369,4 +369,10 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   wallpaper+window layer within the fixed pane, so moving in grows the whole
   window past the card edges like a camera approaching the app. The transitioned
   scene layer must stay separate from the untransitioned base-scale layer, and
-  reduced-motion never moves the camera.
+  reduced-motion never moves the camera. The wallpaper's lens blur reads as
+  rack focus ONLY because blur endpoints are proportional to the zoom
+  (`LENS_BLUR_PER_ZOOM × (zoom − 1)`) and both transitions share the shot's
+  duration + `CAMERA_EASE` — identical timing makes blur track zoom exactly,
+  even mid-interrupt. Don't give the filter its own duration/curve, and keep
+  the lens layer oversized (`-inset-6`) so the blur's edge fade stays outside
+  the pane.

@@ -102,6 +102,9 @@ ${Array.from(
   <url>
     <loc>${BASE_URL}/privacy</loc>
   </url>
+  <url>
+    <loc>${BASE_URL}/download</loc>
+  </url>
 </urlset>`;
 
   await Bun.write(join(OUT_DIR, 'sitemap-0.xml'), sitemap0);

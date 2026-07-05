@@ -70,21 +70,41 @@ export default function Preview({
   const paneRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [pane, setPane] = useState({ w: 0, h: 0 });
-  // Mount the iframe only after the parent page has hydrated and gone idle:
-  // it boots a full second copy of the app, which would otherwise compete with
-  // /download's own document, hydration and fonts. SSR/no-JS renders just the
-  // window chrome over the wallpaper.
+  // Mount the iframe only after the parent page has fully loaded (fonts,
+  // wallpapers) and gone idle: it boots a full second copy of the app, which
+  // would otherwise compete with /download's own boot. SSR/no-JS renders just
+  // the window chrome over the wallpaper.
   const [frameReady, setFrameReady] = useState(false);
   useEffect(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(() => setFrameReady(true), {
-        timeout: 1500,
-      });
-      return () => window.cancelIdleCallback(id);
+    let idleId: number | undefined;
+    let timerId: number | undefined;
+    let armed = false;
+    /** Schedules the mount on idle (Safari: short timer) — at most once. */
+    const arm = () => {
+      if (armed) return;
+      armed = true;
+      if (timerId !== undefined) window.clearTimeout(timerId);
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(() => setFrameReady(true), {
+          timeout: 1500,
+        });
+      } else {
+        // Safari has no requestIdleCallback; load has fired, so a beat is enough.
+        timerId = window.setTimeout(() => setFrameReady(true), 300);
+      }
+    };
+    if (document.readyState === 'complete') {
+      arm();
+    } else {
+      window.addEventListener('load', arm, { once: true });
+      // Safety net: a straggling resource must not strand the demo unstarted.
+      timerId = window.setTimeout(arm, 4000);
     }
-    // Safari has no requestIdleCallback.
-    const timer = window.setTimeout(() => setFrameReady(true), 300);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.removeEventListener('load', arm);
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (timerId !== undefined) window.clearTimeout(timerId);
+    };
   }, []);
   const { title, canGoBack, shot } = usePreviewScenario(
     frameRef,

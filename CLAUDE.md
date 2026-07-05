@@ -280,12 +280,17 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   check (local cookie crypto) short-circuits before any flag evaluation, so owner
   loads never block on the flags backend; `flags.server.ts` builds the adapter with
   `createClient(FLAGS, { stream: false })` because SSE stream init from a serverless
-  function stalled the first evaluation per instance ~2.5s of TTFB. The loader skips
-  the public-releases fetch for owners (`context.owner`), and the component disables
-  that query via `enabled: !owner` — owners must never fetch the public list.
-- **`loadReleases` runs its two queries in parallel** (assets scoped by an
-  IN-subquery on the same LIMIT 50 release window). Keep the subquery's
-  where/order/limit identical to the releases query or the asset set drifts.
+  function stalled the first evaluation per instance ~2.5s of TTFB. Polling = a
+  bounded first fetch + a 30s background interval on warm instances, so dashboard
+  flag flips propagate within ~30s, not live. The loader skips the public-releases
+  fetch for owners (`context.owner`) so their SSR never blocks on it, but the
+  component's public useQuery must stay UNconditional: it warms the list
+  post-hydration so an ss-owner credential dying mid-session swaps to the public
+  view instead of flashing the "coming soon" empty state.
+- **`loadReleases` must stay a single SQL statement** (release-window subquery
+  LEFT JOIN assets): one snapshot means a concurrent publish/unpublish flip can't
+  tear the payload. Splitting it back into two queries can list a release without
+  its assets and edge-cache that for up to 30 days (the purge has already run).
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
 
@@ -320,11 +325,12 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   `autoFocus` on `!isDesktopPreview()`. Don't drop either — `inert` propagation
   into iframes has browser variance, and an ungated autofocus yanks focus (and
   scroll) from /download on load.
-- **The iframe mounts deferred** (`frameReady` in Preview.tsx: post-hydration
-  `requestIdleCallback`, setTimeout on Safari) so the second app copy doesn't
-  compete with /download's own boot; SSR/no-JS renders window chrome only.
-  `usePreviewScenario` takes `ready` and gates its effect on it — refs changing
-  alone never re-run effects, so dropping the param strands the demo unstarted.
+- **The iframe mounts deferred** (`frameReady` in Preview.tsx: window `load`
+  event — with a 4s safety net — then `requestIdleCallback`, setTimeout on
+  Safari) so the second app copy doesn't compete with /download's own boot;
+  SSR/no-JS renders window chrome only. `usePreviewScenario` takes `ready` and
+  gates its effect on it — refs changing alone never re-run effects, so
+  dropping the param strands the demo unstarted.
 - **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
   46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in

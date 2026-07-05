@@ -53,7 +53,7 @@ export const flags: Record<string, FlagSpec<FlagValue>> = {
 /** Memoized adapter factory; null when FLAGS is unset (e.g. local dev without Vercel Flags). */
 let adapterFactory: ReturnType<typeof createVercelAdapter> | null | undefined;
 
-/** Returns the Vercel Flags adapter on a polling-mode client (`stream: false`): SSE stream init from a serverless function stalls the first evaluation per instance ~2.5s; a one-shot datafile poll is bounded and cached in module scope. */
+/** Returns the Vercel Flags adapter on a polling-mode client (`stream: false`): SSE stream init from a serverless function stalls the first evaluation per instance ~2.5s. Polling's first datafile fetch is bounded (3s timeout), then a 30s background interval keeps warm instances fresh — flag flips propagate within ~30s instead of live. */
 function getAdapterFactory() {
   if (adapterFactory === undefined) {
     adapterFactory = process.env.FLAGS

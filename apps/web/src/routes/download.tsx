@@ -54,8 +54,9 @@ export const Route = createFileRoute('/download')({
     // The owner view (already warmed in beforeLoad) is safe to resolve during
     // SSR: /download documents are rendered per-request (no cache routeRule),
     // so an owner's variant can never be served to anyone else. Owners render
-    // that snapshot INSTEAD of the public list, so skip the public fetch — it
-    // would be a wasted blocking wave.
+    // that snapshot INSTEAD of the public list, so don't BLOCK on the public
+    // fetch — the component's useQuery still warms it post-hydration for the
+    // credential-downgrade swap.
     if (owner) return;
     await queryClient.ensureQueryData(desktopReleasesQueryOptions);
   },
@@ -95,14 +96,14 @@ const PREVIEW_WALLPAPER = {
 function Download() {
   const { data: ownerView } = useQuery(ownerDesktopReleasesQueryOptions);
   const owner = ownerView?.owner ?? false;
-  // Owner renders the server's single consistent snapshot (public + private),
-  // and the public query is disabled outright for them. Do NOT merge the two
-  // lists: they refetch independently after a publish/unpublish flip, and the
-  // stale/fresh overlap transiently duplicates (or drops) the flipped release.
-  const { data: publicReleases = [] } = useQuery({
-    ...desktopReleasesQueryOptions,
-    enabled: !owner,
-  });
+  // Owner renders the server's single consistent snapshot (public + private).
+  // Do NOT merge the two lists: they refetch independently after a
+  // publish/unpublish flip, and the stale/fresh overlap transiently duplicates
+  // (or drops) the flipped release. The public query stays enabled for owners
+  // (non-blocking, edge-cached RPC): if the ss-owner credential dies
+  // mid-session, `owner` flips false and this must swap to an already-warm
+  // public list, not flash the "coming soon" empty state.
+  const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
   const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
   const { installable: webInstallable, install } = useInstallPrompt();

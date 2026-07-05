@@ -1,7 +1,7 @@
 import { desktopReleaseAssets, desktopReleases } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 
 import {
   DESKTOP_RELEASES_TAG,
@@ -51,41 +51,46 @@ function emptyGroups(): Record<DesktopPlatform, DesktopAsset[]> {
  * private rows evict older public releases from the public window.
  */
 async function loadReleases(onlyPublic = false): Promise<DesktopRelease[]> {
-  const visibility = onlyPublic
-    ? eq(desktopReleases.visibility, 'public')
-    : undefined;
-  // The assets query scopes itself to the same release window via an
-  // IN-subquery instead of waiting for the releases result, so both queries
-  // run in parallel — one neon-http round-trip of latency instead of two.
+  // Single statement (release window LEFT JOIN assets): one neon-http
+  // round-trip AND one snapshot. Two separate statements can tear — a
+  // publish/unpublish flip landing between them lists a release without its
+  // assets, and that payload edge-caches for up to 30 days.
   const releaseWindow = db
-    .select({ id: desktopReleases.id })
+    .select()
     .from(desktopReleases)
-    .where(visibility)
+    .where(onlyPublic ? eq(desktopReleases.visibility, 'public') : undefined)
     .orderBy(desc(desktopReleases.publishedAt))
-    .limit(50);
-  const [releases, assets] = await Promise.all([
-    db
-      .select()
-      .from(desktopReleases)
-      .where(visibility)
-      .orderBy(desc(desktopReleases.publishedAt))
-      .limit(50),
-    db
-      .select()
-      .from(desktopReleaseAssets)
-      .where(inArray(desktopReleaseAssets.releaseId, releaseWindow))
-      .orderBy(
-        asc(desktopReleaseAssets.arch),
-        asc(desktopReleaseAssets.format),
-        asc(desktopReleaseAssets.installScope),
-      ),
-  ]);
+    .limit(50)
+    .as('release_window');
+  const rows = await db
+    .select()
+    .from(releaseWindow)
+    .leftJoin(
+      desktopReleaseAssets,
+      eq(desktopReleaseAssets.releaseId, releaseWindow.id),
+    )
+    .orderBy(
+      desc(releaseWindow.publishedAt),
+      asc(desktopReleaseAssets.arch),
+      asc(desktopReleaseAssets.format),
+      asc(desktopReleaseAssets.installScope),
+    );
 
-  if (releases.length === 0) return [];
+  if (rows.length === 0) return [];
 
+  // Rows arrive release-major (publishedAt desc); Maps keep first-seen order.
+  const releaseById = new Map<
+    number,
+    (typeof rows)[number]['release_window']
+  >();
   const byRelease = new Map<number, Record<DesktopPlatform, DesktopAsset[]>>();
-  for (const r of releases) byRelease.set(r.id, emptyGroups());
-  for (const a of assets) {
+  for (const { release_window: r, desktop_release_assets: a } of rows) {
+    if (!releaseById.has(r.id)) {
+      releaseById.set(r.id, r);
+      byRelease.set(r.id, emptyGroups());
+    }
+    // LEFT JOIN emits a single null-asset row for zero-asset releases.
+    if (!a) continue;
     const group = byRelease.get(a.releaseId);
     const platform = a.platform as DesktopPlatform;
     if (!group || !(platform in group)) continue;
@@ -100,7 +105,7 @@ async function loadReleases(onlyPublic = false): Promise<DesktopRelease[]> {
     });
   }
 
-  return releases.map(
+  return [...releaseById.values()].map(
     (r): DesktopRelease => ({
       version: r.version,
       channel: r.channel,

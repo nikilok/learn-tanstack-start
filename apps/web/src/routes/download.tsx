@@ -44,7 +44,7 @@ export const Route = createFileRoute('/download')({
     return { owner: false };
   },
   head: ({ match }) => {
-    const pageTitle = 'Download the desktop app — SponsorSearch.co.uk';
+    const pageTitle = 'SponsorSearch . Download';
     const pageDescription =
       'Download the SponsorSearch desktop app for macOS and Windows. Same data, native window, auto-updating.';
     const canonicalUrl = buildCanonical(match.pathname);

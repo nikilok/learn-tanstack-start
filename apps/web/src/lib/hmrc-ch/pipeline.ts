@@ -21,8 +21,9 @@ export const TIER_A2_SCORE = 0.98;
 const MIN_SQUASH_LENGTH = 3;
 
 /** Tier D only considers squashed names at least this long — short names give
- *  edit distance nothing to discriminate with. */
-const MIN_FUZZY_SQUASH_LENGTH = 9;
+ *  edit distance nothing to discriminate with. Exported for the bulk snapshot
+ *  matcher's fuzzy-blocking index. */
+export const MIN_FUZZY_SQUASH_LENGTH = 9;
 /** Squashed names at least this long may differ by 2 edits; shorter ones by 1. */
 const FUZZY_LONG_NAME_LENGTH = 16;
 

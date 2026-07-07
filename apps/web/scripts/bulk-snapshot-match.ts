@@ -126,10 +126,18 @@ function delay(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+/** Distinguishes "the company number genuinely isn't on the register" (404 →
+ *  a real verify mismatch) from systemic failures (auth, outage, exhausted
+ *  retries → errored, which trips the loud-failure guard). Collapsing both
+ *  into null would let a dead API key finish the run green. */
+type FetchOutcome =
+  | { ok: true; data: unknown }
+  | { ok: false; notFound: boolean };
+
 async function fetchApi(
   path: string,
   retriesLeft = FETCH_MAX_RETRIES,
-): Promise<unknown | null> {
+): Promise<FetchOutcome> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
@@ -142,7 +150,7 @@ async function fetchApi(
     clearTimeout(timeoutId);
     if (retriesLeft <= 0) {
       console.error(`  network error for ${path}, giving up: ${err}`);
-      return null;
+      return { ok: false, notFound: false };
     }
     console.log(`  network error, backing off 60s… (${retriesLeft} left)`);
     await delay(60_000);
@@ -152,14 +160,20 @@ async function fetchApi(
   if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
     if (retriesLeft <= 0) {
       console.error(`  ${res.status} retries exhausted for ${path}`);
-      return null;
+      return { ok: false, notFound: false };
     }
     console.log(`  ${res.status}, backing off 60s… (${retriesLeft} left)`);
     await delay(60_000);
     return fetchApi(path, retriesLeft - 1);
   }
-  if (!res.ok) return null;
-  return res.json();
+  if (res.status === 404 || res.status === 410) {
+    return { ok: false, notFound: true };
+  }
+  if (!res.ok) {
+    console.error(`  unexpected ${res.status} for ${path}`);
+    return { ok: false, notFound: false };
+  }
+  return { ok: true, data: await res.json() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -469,13 +483,24 @@ for (let i = 0; i < toVerify.length; i += 1) {
   const pick = toVerify[i];
   const org = pick.entry.organisationName;
   try {
-    const profile = (await fetchApi(
+    const res = await fetchApi(
       `/company/${encodeURIComponent(pick.company.companyNumber)}`,
-    )) as CHFullProfile | null;
-    if (!profile) {
-      verifyMismatch += 1;
+    );
+    if (!res.ok) {
+      if (res.notFound) {
+        verifyMismatch += 1; // number gone from the register since the snapshot
+      } else {
+        errored += 1;
+        if (errored >= 10 && verifiedConfirmed === 0) {
+          console.error(
+            '  first verifications are all failing — aborting loop (systemic CH failure)',
+          );
+          break;
+        }
+      }
       continue;
     }
+    const profile = res.data as CHFullProfile;
     const verdict = verifyAgainstLive(
       pick.entry.legal,
       profile,

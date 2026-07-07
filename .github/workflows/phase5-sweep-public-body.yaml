@@ -5,11 +5,14 @@ name: Phase 5 Sweep — Tier 4 (public_body)
 # "public body" whose name now resolves to a real CH entity) plus the
 # verified_at heartbeat. ~400 rows total; 500/run monthly covers the whole
 # bucket in one pass. Most rows short-circuit on the public-body regex with
-# zero CH calls, so runs are fast.
+# zero CH calls, so runs are fast. Scheduled at 14:00 — after every nightly
+# tier has finished even on drifted starts — because the shared concurrency
+# group keeps only ONE pending run: a second pending schedule would evict a
+# queued daily tier run (GitHub cancels the older pending run in a group).
 
 on:
   schedule:
-    - cron: '0 8 1 * *'
+    - cron: '0 14 1 * *'
   workflow_dispatch:
     inputs:
       max-rows:

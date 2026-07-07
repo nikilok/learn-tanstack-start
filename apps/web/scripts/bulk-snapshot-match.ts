@@ -391,7 +391,8 @@ console.log(
 );
 
 const workDir = mkdtempSync(join(tmpdir(), 'ch-snapshot-'));
-const csvPath = SNAPSHOT_FILE ?? (await downloadSnapshot(workDir));
+// || not ??: a valueless `--snapshot-file=` yields '' and must still download.
+const csvPath = SNAPSHOT_FILE || (await downloadSnapshot(workDir));
 if (!existsSync(csvPath)) throw new Error(`snapshot csv missing: ${csvPath}`);
 console.log(`Streaming ${csvPath} …`);
 
@@ -468,6 +469,7 @@ console.log(
     .join(' ')}), ${tied} tied/ambiguous`,
 );
 
+let attempted = 0;
 let verifiedConfirmed = 0;
 let verifyMismatch = 0;
 let committed = 0;
@@ -475,6 +477,7 @@ let wouldCommit = 0;
 let decideSkipped = 0;
 let lockMissed = 0;
 let errored = 0;
+let systemicAbort = false;
 
 const applyDeps = { commitPromotion: makeCommitPromotion(sql), upsertProfile };
 
@@ -482,6 +485,7 @@ for (let i = 0; i < toVerify.length; i += 1) {
   if (i > 0) await delay(550);
   const pick = toVerify[i];
   const org = pick.entry.organisationName;
+  attempted += 1;
   try {
     const res = await fetchApi(
       `/company/${encodeURIComponent(pick.company.companyNumber)}`,
@@ -495,6 +499,7 @@ for (let i = 0; i < toVerify.length; i += 1) {
           console.error(
             '  first verifications are all failing — aborting loop (systemic CH failure)',
           );
+          systemicAbort = true;
           break;
         }
       }
@@ -581,12 +586,20 @@ console.log(`  errored             : ${errored}`);
 console.log(`  duration            : ${durationSec}s`);
 
 // Same loud-failure posture as the sweep: mass errors or mass lock misses
-// mean something systemic broke — fail the workflow so it emails.
-if (toVerify.length > 0 && errored / toVerify.length > 0.25) {
+// mean something systemic broke — fail the workflow so it emails. Rates are
+// computed over what actually happened (attempted verifications; commit
+// attempts) so an early abort or heavy pre-commit filtering can't dilute
+// them below the thresholds.
+if (systemicAbort) {
+  console.error('  SYSTEMIC CH FAILURE — verification loop aborted early.');
+  process.exit(1);
+}
+if (attempted > 0 && errored / attempted > 0.25) {
   console.error('  ERROR RATE above 25% — check CH API auth/availability.');
   process.exit(1);
 }
-if (toVerify.length > 0 && lockMissed / toVerify.length > 0.5) {
+const commitAttempts = committed + lockMissed;
+if (commitAttempts > 0 && lockMissed / commitAttempts > 0.5) {
   console.error('  LOCK MISS RATE above 50% — optimistic lock is broken.');
   process.exit(1);
 }

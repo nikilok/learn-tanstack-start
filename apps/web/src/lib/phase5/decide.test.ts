@@ -460,3 +460,18 @@ describe('normalization-pack methods: exact_squash and fuzzy_edit', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 });
+
+describe('legacy NULL-method rows can heal to public_body', () => {
+  test('existing NULL method + proposed public_body → update, not eternal warn', () => {
+    const result = decide(
+      existing({ matchMethod: null, companyNumber: '12345678' }),
+      proposed({
+        verdict: 'public_body',
+        matchMethod: 'public_body',
+        companyNumber: null,
+        matchScore: null,
+      }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+});

@@ -13,6 +13,7 @@ import {
   matchTierB,
   matchTierD,
   MIN_FUZZY_SQUASH_LENGTH,
+  MIN_SQUASH_LENGTH,
   squashForComparison,
 } from '../hmrc-ch/pipeline.ts';
 import {
@@ -102,7 +103,14 @@ export function matchSnapshotCompany(
 
   for (const prev of company.previousNames) {
     const prevSquash = squashForComparison(prev);
-    if (prevSquash.length === 0 || prevSquash === nameSquash) continue;
+    if (prevSquash.length === 0) continue;
+    // Equal-squash previous names were already claimed by the exact-name
+    // path — but only when the squash was long enough for Tier A2 to fire;
+    // below MIN_SQUASH_LENGTH the exact path returned nothing, so Tier B
+    // must still get its chance.
+    if (prevSquash === nameSquash && prevSquash.length >= MIN_SQUASH_LENGTH) {
+      continue;
+    }
     for (const entry of index.exact.get(prevSquash) ?? []) {
       // matchTierB applies the exact-normalised comparison and the
       // TRADING-AS exclusion; a squash-key hit that fails it is dropped,

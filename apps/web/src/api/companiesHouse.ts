@@ -8,7 +8,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
@@ -183,10 +183,17 @@ const getCompanyProfile = createServerFn()
 
     let profile: CompanyProfile;
 
-    if (mapping) {
+    // Never-verified ingestion stubs (companyNumber NULL, verifiedAt NULL —
+    // seeded by ingest-hmrc-csv.ts Step 8 for orgs new to the register) fall
+    // through to the on-demand resolver below, so a first visit still
+    // resolves immediately; the nightly sweep covers the unvisited rest.
+    const isUnresolvedStub =
+      mapping != null && !mapping.companyNumber && mapping.verifiedAt === null;
+
+    if (mapping && !isUnresolvedStub) {
       // Mapping deliberately points at no CH entity (public body or no_match
-      // outcome from the Phase 1 backfill). Return null so the UI suppresses
-      // the CH panel and renders base sponsor data only.
+      // outcome from the Phase 1 backfill or a completed sweep). Return null
+      // so the UI suppresses the CH panel and renders base sponsor data only.
       if (!mapping.companyNumber) return null;
 
       // Found mapping — fetch profile from cache
@@ -253,17 +260,24 @@ const getCompanyProfile = createServerFn()
       );
 
       if (result.verdict === 'public_body') {
+        // Claim a never-verified ingestion stub if one exists; the verified_at
+        // guard means a sweep- or manually-resolved row is never clobbered.
+        const publicBodyRow = {
+          organisationName: companyName,
+          companyNumber: null,
+          isPublicBody: true,
+          matchMethod: 'public_body',
+          verifiedAt: new Date(),
+        };
         waitUntil(
           db
             .insert(hmrcCompanyMapping)
-            .values({
-              organisationName: companyName,
-              companyNumber: null,
-              isPublicBody: true,
-              matchMethod: 'public_body',
-              verifiedAt: new Date(),
-            })
-            .onConflictDoNothing(),
+            .values(publicBodyRow)
+            .onConflictDoUpdate({
+              target: hmrcCompanyMapping.organisationName,
+              set: publicBodyRow,
+              setWhere: isNull(hmrcCompanyMapping.verifiedAt),
+            }),
         );
         return null;
       }
@@ -282,17 +296,22 @@ const getCompanyProfile = createServerFn()
         // on-demand path: re-running the 5-call pipeline on every visit would
         // be expensive and the verdict won't change without ch-stream data
         // updates. Phase 5 re-verification can revisit later.
+        const noMatchRow = {
+          organisationName: companyName,
+          companyNumber: null,
+          matchMethod: 'no_match',
+          queryUsed: result.queryUsed,
+          verifiedAt: new Date(),
+        };
         waitUntil(
           db
             .insert(hmrcCompanyMapping)
-            .values({
-              organisationName: companyName,
-              companyNumber: null,
-              matchMethod: 'no_match',
-              queryUsed: result.queryUsed,
-              verifiedAt: new Date(),
-            })
-            .onConflictDoNothing(),
+            .values(noMatchRow)
+            .onConflictDoUpdate({
+              target: hmrcCompanyMapping.organisationName,
+              set: noMatchRow,
+              setWhere: isNull(hmrcCompanyMapping.verifiedAt),
+            }),
         );
         return null;
       }
@@ -300,19 +319,24 @@ const getCompanyProfile = createServerFn()
       // verdict === 'verified' — CHFullProfile and CompanyProfile come from the
       // same CH endpoint, so a structural cast is safe.
       profile = result.profile as CompanyProfile;
+      const verifiedRow = {
+        organisationName: companyName,
+        companyNumber: result.companyNumber,
+        matchMethod: result.matchMethod,
+        matchScore: result.matchScore.toString(),
+        queryUsed: result.queryUsed,
+        verifiedAt: new Date(),
+      };
       waitUntil(
         Promise.all([
           db
             .insert(hmrcCompanyMapping)
-            .values({
-              organisationName: companyName,
-              companyNumber: result.companyNumber,
-              matchMethod: result.matchMethod,
-              matchScore: result.matchScore.toString(),
-              queryUsed: result.queryUsed,
-              verifiedAt: new Date(),
-            })
-            .onConflictDoNothing(),
+            .values(verifiedRow)
+            .onConflictDoUpdate({
+              target: hmrcCompanyMapping.organisationName,
+              set: verifiedRow,
+              setWhere: isNull(hmrcCompanyMapping.verifiedAt),
+            }),
           upsertProfile(profile),
         ]),
       );

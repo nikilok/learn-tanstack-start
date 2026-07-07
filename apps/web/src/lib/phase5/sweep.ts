@@ -90,12 +90,14 @@ const CHANGED_BY: Record<Tier, string> = {
 };
 
 /** Default inter-row sleep when the caller doesn't override via `config.delayMs`.
- *  Sized for the resolver's worst case of 5 CH calls per row (1 embedded-
- *  number profile + 1 search + 3 Tier-B profile fetches when Tier-A/A2
- *  returned only inactive candidates). 5 calls / 2500ms = 2 req/sec, at CH's
- *  600/5min budget. CLI can override via `PHASE5_DELAY_MS` env var without
- *  redeploying. */
-const DEFAULT_DELAY_MS = 2500;
+ *  Sized for the common worst case of 4 CH calls per row (1 search + 3 Tier-B
+ *  profile fetches when Tier-A/A2 returned only inactive candidates):
+ *  4 / 2200ms ≈ 1.8 req/sec under CH's 600/5min budget. Embedded-number rows
+ *  add a 5th call but are <1% of the register, so they don't move the average
+ *  — and observed tier-1 runs already take 183–212 min of the workflow's
+ *  timeout, so the delay must not grow. CLI can override via `PHASE5_DELAY_MS`
+ *  env var without redeploying. */
+const DEFAULT_DELAY_MS = 2200;
 
 /** Adapt a `CHFullProfile` (as returned by the resolver or read from the
  *  cache) into the structural shape the comparer reads. */
@@ -163,8 +165,7 @@ export async function sweep(
         console.warn(
           `[phase5-sweep] ${decision.reason} for "${row.organisationName}" — bumping without write`,
         );
-        await bumpAndCount(row);
-        summary.warned += 1;
+        if (await bumpAndCount(row)) summary.warned += 1;
       } else if (decision.action === 'inline_score') {
         // Same-rank tie: existing and proposed are both verified at the same
         // ladder rank with different company_numbers. Score them on
@@ -179,8 +180,7 @@ export async function sweep(
           console.warn(
             `[phase5-sweep] inline_score missing profile for "${row.organisationName}" — bumping`,
           );
-          await bumpAndCount(row);
-          summary.inlineInconclusive += 1;
+          if (await bumpAndCount(row)) summary.inlineInconclusive += 1;
           continue;
         }
 
@@ -195,14 +195,12 @@ export async function sweep(
           if (result.ok) summary.inlineResolved += 1;
           else summary.lockMissed += 1;
         } else if (cmp.action === 'keep') {
-          await bumpAndCount(row);
-          summary.inlineResolved += 1;
+          if (await bumpAndCount(row)) summary.inlineResolved += 1;
         } else {
           console.warn(
             `[phase5-sweep] inline_score inconclusive for "${row.organisationName}" (s_e=${cmp.s_e} s_p=${cmp.s_p})`,
           );
-          await bumpAndCount(row);
-          summary.inlineInconclusive += 1;
+          if (await bumpAndCount(row)) summary.inlineInconclusive += 1;
         }
       }
     } catch (err) {

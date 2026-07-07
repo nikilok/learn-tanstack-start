@@ -24,11 +24,15 @@ export function pickForOrg(
 ): PickOutcome {
   if (hits.length === 0) return { kind: 'none' };
 
-  const bestTier = Math.min(...hits.map((h) => TIER_ORDER[h.tier]));
-  let contenders = hits.filter((h) => TIER_ORDER[h.tier] === bestTier);
+  // Active preference applies ACROSS tiers, exactly like the resolver's
+  // cascade: an active Tier-B/D match beats an inactive Tier-A namesake
+  // (the dissolved-namesake trap). Only when no hit is active at any tier
+  // does the inactive pool compete.
+  const active = hits.filter((h) => isSnapshotActive(h.company.status));
+  const pool = active.length > 0 ? active : hits;
 
-  const active = contenders.filter((h) => isSnapshotActive(h.company.status));
-  if (active.length > 0) contenders = active;
+  const bestTier = Math.min(...pool.map((h) => TIER_ORDER[h.tier]));
+  const contenders = pool.filter((h) => TIER_ORDER[h.tier] === bestTier);
 
   // One company can hit via both its current and a previous name — keep the
   // best-scoring hit per company number.

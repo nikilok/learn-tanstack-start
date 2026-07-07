@@ -153,6 +153,16 @@ function delay(ms: number) {
  *  is given up on as errored. */
 const FETCH_MAX_RETRIES = 3;
 
+/** Set by fetchApi whenever a null return means "CH couldn't answer"
+ *  (exhausted retries, auth failure) rather than "the resource doesn't
+ *  exist" (404). The resolver wrapper consumes it per row: a negative
+ *  verdict reached through a transport failure is an outage artifact, not
+ *  evidence of absence, and must count as errored — otherwise a sustained
+ *  CH outage bumps thousands of rows as healthy no_match re-checks and the
+ *  error-rate guard never fires. (Mirrors chFetchFailed in companiesHouse.ts;
+ *  safe as module state because the sweep processes rows sequentially.) */
+let chTransportFailure = false;
+
 /** Per-request timeout. CH's /search and /company endpoints normally respond
  *  in 200-500ms; anything past 30s is almost certainly a hung connection
  *  (network blip, NAT idle drop, DNS issue) — abort and retry rather than
@@ -180,6 +190,7 @@ async function fetchApi(
       console.error(
         `  Network error/timeout for ${path}, giving up: ${err instanceof Error ? err.message : err}`,
       );
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -193,6 +204,7 @@ async function fetchApi(
   if (res.status === 429) {
     if (retriesLeft <= 0) {
       console.error(`  Rate limit retries exhausted for ${path}, giving up`);
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -209,6 +221,7 @@ async function fetchApi(
       console.error(
         `  Server error ${res.status} retries exhausted for ${path}, giving up`,
       );
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -217,7 +230,13 @@ async function fetchApi(
     await delay(60_000);
     return fetchApi(path, retriesLeft - 1);
   }
-  if (!res.ok) return null;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    // 401/403 and other unexpected statuses are systemic, not evidence.
+    console.error(`  Unexpected ${res.status} for ${path}`);
+    chTransportFailure = true;
+    return null;
+  }
   return res.json();
 }
 
@@ -251,9 +270,21 @@ const dryRunOk = async (): Promise<ApplyResult> => ({ ok: true });
 const sweepDeps: SweepDeps = {
   selectRows: makeSelectRows(sql),
   lookupSponsor: makeLookupSponsor(sql),
-  resolveSponsor: makeResolveSponsor((orgName, locality) =>
-    resolveOneSponsor(orgName, locality, fetchApi),
-  ),
+  resolveSponsor: makeResolveSponsor(async (orgName, locality) => {
+    chTransportFailure = false;
+    const result = await resolveOneSponsor(orgName, locality, fetchApi);
+    if (
+      chTransportFailure &&
+      (result.verdict === 'no_match' || result.verdict === 'human_review')
+    ) {
+      // Negative verdicts reached through a failed CH call are outage
+      // artifacts — throw so the sweep counts the row as errored (and the
+      // error-rate guard can see a sustained outage) instead of bumping it
+      // as a healthy re-check.
+      throw new Error('CH transport failure during resolve');
+    }
+    return result;
+  }),
   getProfile: makeGetProfile(sql),
   applyPromotion: DRY_RUN
     ? dryRunOk

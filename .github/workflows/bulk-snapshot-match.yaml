@@ -82,6 +82,7 @@ jobs:
             echo "| 📞 Verified live | $(extract verified_confirmed) |"
             echo "| 🚫 Verify mismatch | $(extract verify_mismatch) |"
             echo "| ✅ Committed | $(extract committed) |"
+            echo "| 🧪 Dry-run would commit | $(extract dry_run_would_commit) |"
             echo "| ⏭️ Capped out | $(extract capped_out) |"
             echo "| 🔒 Lock missed | $(extract lock_missed) |"
             echo "| ❌ Errored | $(extract errored) |"

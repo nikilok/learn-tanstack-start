@@ -326,7 +326,7 @@ describe('sweep — rate-limit sleep', () => {
     await sweep({ tier: 'no_match', maxRows: 10 }, deps);
 
     expect(deps.sleep).toHaveBeenCalledTimes(2);
-    expect(deps.sleep).toHaveBeenCalledWith(2500);
+    expect(deps.sleep).toHaveBeenCalledWith(2200);
   });
 
   test('empty result set: sleep is not called', async () => {

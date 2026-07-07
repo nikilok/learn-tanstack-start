@@ -235,3 +235,71 @@ describe('pickForOrg', () => {
     expect(out.kind).toBe('tied');
   });
 });
+
+describe('pickForOrg — active preference crosses tiers (resolver cascade)', () => {
+  const org = entry('Acme Care Limited');
+  test('an active Tier-B successor beats an inactive Tier-A namesake', () => {
+    const out = pickForOrg(
+      [
+        {
+          entry: org,
+          company: company({
+            companyNumber: '1',
+            name: 'ACME CARE LIMITED',
+            status: 'Liquidation',
+          }),
+          tier: 'A',
+          score: 1,
+        },
+        {
+          entry: org,
+          company: company({
+            companyNumber: '2',
+            name: 'TOTALLY RENAMED LIMITED',
+            status: 'Active',
+            previousNames: ['ACME CARE LIMITED'],
+          }),
+          tier: 'B',
+          score: 0.95,
+        },
+      ],
+      null,
+      null,
+    );
+    expect(out.kind).toBe('picked');
+    if (out.kind !== 'picked') return;
+    expect(out.hit.company.companyNumber).toBe('2');
+  });
+
+  test('inactive pool still competes when no hit is active at any tier', () => {
+    const out = pickForOrg(
+      [
+        {
+          entry: org,
+          company: company({ companyNumber: '1', status: 'Liquidation' }),
+          tier: 'A',
+          score: 1,
+        },
+      ],
+      null,
+      null,
+    );
+    expect(out.kind).toBe('picked');
+  });
+});
+
+describe('matchSnapshotCompany — short-squash previous names still reach Tier B', () => {
+  test('prev name sharing a sub-minimum squash with the current name is not dropped', () => {
+    const shortEntry = entry('S K Ltd');
+    const index = buildBacklogIndex([shortEntry]);
+    const hits = matchSnapshotCompany(
+      index,
+      company({
+        name: 'S.K. LIMITED', // Tier A fails (dots), A2 fails (squash "SK" < 3)
+        previousNames: ['S K LIMITED'], // matchTierB exact-normalised hit
+      }),
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0].tier).toBe('B');
+  });
+});

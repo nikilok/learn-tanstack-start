@@ -30,9 +30,12 @@ and a no_match verdict just bumps.
 Rows enter Tier 1 in two ways: Phase 1's original classification, and the
 ingestion script (`ingest-hmrc-csv.ts` Step 8), which seeds a
 `no_match` stub with `verified_at NULL` for every org new to the register —
-NULLS FIRST puts new sponsors at the front of the next nightly run, so they
-resolve within a day instead of waiting for a page visit to trigger the
-on-demand resolver.
+NULLS FIRST puts new sponsors at the front of the next nightly run. Stubs do
+NOT disable the on-demand resolver: `getCompanyProfile` treats a
+`companyNumber NULL + verifiedAt NULL` row as unresolved and falls through
+to the resolver, whose writes claim the stub via a conditional upsert
+(`WHERE verified_at IS NULL` — a sweep- or manually-resolved row is never
+clobbered). First visits resolve immediately; the sweep covers the rest.
 
 ## Tables touched
 
@@ -56,11 +59,11 @@ sweep(tier):
 
   for row in rows:
     process(row, changed_by = "phase5_sweep_" + tier)
-    sleep(2500ms)        # 2 req/sec at the worst case of 5 CH calls/row
-                         # (1 embedded-number profile + 1 search + 3 Tier-B
-                         # profile fetches when Tier-A/A2 returned only
-                         # inactive candidates). See active-status preference
-                         # in apps/web/src/lib/hmrc-ch/resolve-sponsor.ts.
+    sleep(2200ms)        # ~1.8 req/sec at the common worst case of 4 CH
+                         # calls/row (1 search + 3 Tier-B profile fetches when
+                         # Tier-A/A2 returned only inactive candidates); rare
+                         # embedded-number rows add a 5th call. See
+                         # active-status preference in resolve-sponsor.ts.
 
   print summary(updated, bumped, lock_missed, warned, errored)
 ```

@@ -10,18 +10,36 @@ cron with `--tier=<name>`. Tiers differ only by SELECT predicate and
 cadence; the per-row logic is identical.
 
 ```text
-Tier 1  match_method = 'no_match'                                    daily,    4000 rows
+Tier 1  match_method = 'no_match' OR match_method IS NULL            daily,    4000 rows
 Tier 2  match_method IN ('token_sim','previous_name','fuzzy_edit')   2×/week,  3000 rows
 Tier 3  match_method IN ('exact','exact_squash')                     daily,    1500 rows
 Tier 4  match_method = 'public_body'                                 monthly,   500 rows
 ```
+
+Every tier is additionally gated on the live register (`EXISTS` against
+`hmrc_skilled_workers`): rows whose org left the register stop consuming
+sweep budget and CH API calls, but the mapping rows are kept — an org can
+return, and the audit trail stays intact.
+
+Tier 1's `IS NULL` arm covers the legacy top-hit mappings that predate the
+Phase 1 classification (rows with a company_number but no match_method) —
+previously invisible to every tier. The rank ladder treats a NULL method as
+the human_review fallback (rank 1), so any verified resolution promotes them
+and a no_match verdict just bumps.
+
+Rows enter Tier 1 in two ways: Phase 1's original classification, and the
+ingestion script (`ingest-hmrc-csv.ts` Step 8), which seeds a
+`no_match` stub with `verified_at NULL` for every org new to the register —
+NULLS FIRST puts new sponsors at the front of the next nightly run, so they
+resolve within a day instead of waiting for a page visit to trigger the
+on-demand resolver.
 
 ## Tables touched
 
 - `hmrc_company_mapping` — read tier slice, UPDATE on promote
 - `hmrc_company_mapping_audit` — INSERT one row per UPDATE
 - `companies_house_profiles` — UPSERT when a `no_match` flips to `verified`; read existing profile for the inline scorer
-- `hmrc_skilled_workers` — read for locality + route tiebreak
+- `hmrc_skilled_workers` — read for locality + route tiebreak, and as the live-register gate in every tier SELECT
 
 Earlier versions of this design used an `hmrc_company_mapping_review_queue` table for `same_rank_different_number` cases. The live sweep no longer enqueues — the inline scorer (see "Same-rank inline resolution" below) decides these cases at sweep time. The other reason classes the queue theoretically held (`manual_conflict`, `public_body_conflict`) never fired in production and are replaced with log-and-bump.
 

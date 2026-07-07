@@ -55,7 +55,7 @@ const makeDeps = (over: Partial<SweepDeps> = {}): SweepDeps => ({
   resolveSponsor: mock(async () => verifiedExact()),
   getProfile: mock(async () => null),
   applyPromotion: mock(async () => ({ ok: true as const })),
-  bumpVerifiedAt: mock(async () => undefined),
+  bumpVerifiedAt: mock(async () => ({ ok: true as const })),
   sleep: mock(async () => undefined),
   ...over,
 });
@@ -404,6 +404,39 @@ describe('sweep — lock_missed handling', () => {
 
     expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
     expect(deps.bumpVerifiedAt).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({
+      selected: 1,
+      updated: 0,
+      bumped: 0,
+      lockMissed: 1,
+      errored: 0,
+    });
+  });
+
+  test('bump that hits an optimistic-lock miss increments lockMissed, not bumped', async () => {
+    // Regression: the 2026-05-28 freeze was invisible because bumps counted
+    // as successes regardless of whether the UPDATE matched any row.
+    const r = row({ matchMethod: 'no_match' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      resolveSponsor: mock(async () => ({
+        verdict: 'no_match' as const,
+        companyNumber: null,
+        matchMethod: 'no_match' as const,
+        matchScore: null,
+        queryUsed: 'ACME LTD',
+      })),
+      bumpVerifiedAt: mock(
+        async (): Promise<ApplyResult> => ({
+          ok: false,
+          reason: 'lock_missed',
+        }),
+      ),
+    });
+
+    const summary = await sweep({ tier: 'no_match', maxRows: 10 }, deps);
+
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(1);
     expect(summary).toMatchObject({
       selected: 1,
       updated: 0,

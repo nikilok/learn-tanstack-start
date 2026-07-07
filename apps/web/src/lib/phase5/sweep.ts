@@ -59,7 +59,10 @@ export type SweepDeps = {
     proposed: ProposedResolution,
     changedBy: string,
   ) => Promise<ApplyResult>;
-  bumpVerifiedAt: (existing: ExistingMapping) => Promise<void>;
+  /** Touch `verified_at = now()` behind the optimistic lock. Reports
+   *  lock_missed when the lock matched zero rows so the sweep counts the
+   *  skipped write instead of assuming success. */
+  bumpVerifiedAt: (existing: ExistingMapping) => Promise<ApplyResult>;
   sleep: (ms: number) => Promise<void>;
 };
 
@@ -73,6 +76,8 @@ export type SweepSummary = {
   inlineInconclusive: number;
   /** `manual_conflict` / `public_body_conflict` rows; bumped with a warning. */
   warned: number;
+  /** Writes (promotions or bumps) the optimistic lock skipped. Occasional
+   *  misses are concurrency noise; a high rate means the lock is broken. */
   lockMissed: number;
   errored: number;
 };
@@ -132,6 +137,13 @@ export async function sweep(
   const changedBy = CHANGED_BY[config.tier];
   const delayMs = config.delayMs ?? DEFAULT_DELAY_MS;
 
+  /** Bump behind the lock; a miss counts as lockMissed, not as success. */
+  const bumpAndCount = async (r: ExistingMapping): Promise<boolean> => {
+    const result = await deps.bumpVerifiedAt(r);
+    if (!result.ok) summary.lockMissed += 1;
+    return result.ok;
+  };
+
   for (let i = 0; i < rows.length; i += 1) {
     if (i > 0) await deps.sleep(delayMs);
     const row = rows[i];
@@ -145,13 +157,12 @@ export async function sweep(
         if (result.ok) summary.updated += 1;
         else summary.lockMissed += 1;
       } else if (decision.action === 'bump') {
-        await deps.bumpVerifiedAt(row);
-        summary.bumped += 1;
+        if (await bumpAndCount(row)) summary.bumped += 1;
       } else if (decision.action === 'log_and_bump') {
         console.warn(
           `[phase5-sweep] ${decision.reason} for "${row.organisationName}" — bumping without write`,
         );
-        await deps.bumpVerifiedAt(row);
+        await bumpAndCount(row);
         summary.warned += 1;
       } else if (decision.action === 'inline_score') {
         // Same-rank tie: existing and proposed are both verified at the same
@@ -167,7 +178,7 @@ export async function sweep(
           console.warn(
             `[phase5-sweep] inline_score missing profile for "${row.organisationName}" — bumping`,
           );
-          await deps.bumpVerifiedAt(row);
+          await bumpAndCount(row);
           summary.inlineInconclusive += 1;
           continue;
         }
@@ -183,13 +194,13 @@ export async function sweep(
           if (result.ok) summary.inlineResolved += 1;
           else summary.lockMissed += 1;
         } else if (cmp.action === 'keep') {
-          await deps.bumpVerifiedAt(row);
+          await bumpAndCount(row);
           summary.inlineResolved += 1;
         } else {
           console.warn(
             `[phase5-sweep] inline_score inconclusive for "${row.organisationName}" (s_e=${cmp.s_e} s_p=${cmp.s_p})`,
           );
-          await deps.bumpVerifiedAt(row);
+          await bumpAndCount(row);
           summary.inlineInconclusive += 1;
         }
       }

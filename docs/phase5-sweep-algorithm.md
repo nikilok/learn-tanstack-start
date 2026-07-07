@@ -142,7 +142,9 @@ applyPromotion(row, proposed, changed_by):
            is_public_body = (proposed.verdict == 'public_body'),
            verified_at    = now()
      WHERE organisation_name = row.organisation_name
-       AND verified_at IS NOT DISTINCT FROM row.verified_at   # optimistic lock
+       AND date_trunc('milliseconds', verified_at)            # optimistic lock —
+           IS NOT DISTINCT FROM                               # truncate BOTH sides
+           date_trunc('milliseconds', row.verified_at::timestamp)
      RETURNING company_number, match_method
   )
   INSERT INTO hmrc_company_mapping_audit
@@ -175,12 +177,50 @@ bumpVerifiedAt(row):
   UPDATE hmrc_company_mapping
      SET verified_at = now()
    WHERE organisation_name = row.organisation_name
-     AND verified_at IS NOT DISTINCT FROM row.verified_at;
+     AND date_trunc('milliseconds', verified_at)
+         IS NOT DISTINCT FROM
+         date_trunc('milliseconds', row.verified_at::timestamp)
+   RETURNING organisation_name;      # 0 rows → counted as lock_missed
+
+  if 0 rows: lock_missed += 1        # NOT bumped — see "Optimistic lock"
+  else:      bumped += 1
 ```
 
 No audit row — the audit table is for material corrections, not
 heartbeats. Rows that bumped just fall to the bottom of their tier's
 queue.
+
+## Optimistic lock — truncate BOTH sides, count every miss
+
+The lock re-reads `verified_at` and sends it back as the UPDATE's guard
+param. Two precision regimes collide there:
+
+- Stored values carry `now()`'s **microseconds**.
+- The param is a **millisecond** JS Date — *or*, once `drizzle({client})`
+  has initialised anywhere in the process (the CLI creates it for the
+  profile UPSERT), a raw **microsecond string**: drizzle globally flips
+  the shared neon client's timestamp parsing from Date to text.
+
+Truncating only the stored side (`date_trunc('milliseconds',
+verified_at) IS NOT DISTINCT FROM $param`) therefore compared `.602`
+against `.602823` and matched **zero rows for every write**. That froze
+all three sweep tiers from 2026-05-28 (first run after PR #130, which
+introduced the one-sided truncation) to 2026-07-07 — runs stayed green
+because `bumped` was counted without checking the UPDATE's rowcount.
+
+Invariants, pinned by `sql.test.ts`:
+
+- Both lock sites (`makeBumpVerifiedAt`, `makeCommitPromotion`) truncate
+  **both** sides: `date_trunc('milliseconds', verified_at) IS NOT
+  DISTINCT FROM date_trunc('milliseconds', $param::timestamp)`. The
+  explicit `::timestamp` cast is required — an untyped param makes
+  `date_trunc` ambiguous — and must stay `timestamp`, not `timestamptz`
+  (wall-clock comparison against a zoneless column).
+- Every write checks its rowcount. Bumps `RETURNING` and report
+  `lock_missed` instead of assuming success; the CLI exits non-zero when
+  more than half the selected rows lock-miss (concurrency noise is
+  near-zero — tiers share a workflow concurrency group — so a high rate
+  always means the lock itself is broken).
 
 ## Same-rank inline resolution
 

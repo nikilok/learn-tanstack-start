@@ -111,14 +111,19 @@ export function decide(
 
   const existingIsPublicBody = existing.matchMethod === 'public_body';
   const proposedIsPublicBody = proposed.verdict === 'public_body';
+  // Legacy NULL-method rows (pre-Phase-1 top-hit mappings) carry no defensible
+  // signal, same as no_match — a positive public_body identification promotes
+  // them rather than warning forever.
+  const existingIsUnresolved =
+    existing.matchMethod === 'no_match' || existing.matchMethod === null;
   if (existingIsPublicBody && proposedIsPublicBody) return { action: 'bump' };
   if (existingIsPublicBody && proposed.verdict === 'verified') {
     return { action: 'log_and_bump', reason: 'public_body_conflict' };
   }
-  if (proposedIsPublicBody && existing.matchMethod !== 'no_match') {
+  if (proposedIsPublicBody && !existingIsUnresolved) {
     return { action: 'log_and_bump', reason: 'public_body_conflict' };
   }
-  if (proposedIsPublicBody && existing.matchMethod === 'no_match') {
+  if (proposedIsPublicBody && existingIsUnresolved) {
     return { action: 'update' };
   }
 

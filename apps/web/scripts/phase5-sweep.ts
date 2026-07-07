@@ -26,6 +26,7 @@ import { companiesHouseProfiles } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
 
+import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import { resolveOneSponsor } from '../src/lib/hmrc-ch/resolve-sponsor.ts';
 import type {
   ApplyPromotionDeps,
@@ -152,6 +153,16 @@ function delay(ms: number) {
  *  is given up on as errored. */
 const FETCH_MAX_RETRIES = 3;
 
+/** Set by fetchApi whenever a null return means "CH couldn't answer"
+ *  (exhausted retries, auth failure) rather than "the resource doesn't
+ *  exist" (404). The resolver wrapper consumes it per row: a negative
+ *  verdict reached through a transport failure is an outage artifact, not
+ *  evidence of absence, and must count as errored — otherwise a sustained
+ *  CH outage bumps thousands of rows as healthy no_match re-checks and the
+ *  error-rate guard never fires. (Mirrors chFetchFailed in companiesHouse.ts;
+ *  safe as module state because the sweep processes rows sequentially.) */
+let chTransportFailure = false;
+
 /** Per-request timeout. CH's /search and /company endpoints normally respond
  *  in 200-500ms; anything past 30s is almost certainly a hung connection
  *  (network blip, NAT idle drop, DNS issue) — abort and retry rather than
@@ -179,6 +190,7 @@ async function fetchApi(
       console.error(
         `  Network error/timeout for ${path}, giving up: ${err instanceof Error ? err.message : err}`,
       );
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -192,6 +204,7 @@ async function fetchApi(
   if (res.status === 429) {
     if (retriesLeft <= 0) {
       console.error(`  Rate limit retries exhausted for ${path}, giving up`);
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -208,6 +221,7 @@ async function fetchApi(
       console.error(
         `  Server error ${res.status} retries exhausted for ${path}, giving up`,
       );
+      chTransportFailure = true;
       return null;
     }
     console.log(
@@ -216,13 +230,19 @@ async function fetchApi(
     await delay(60_000);
     return fetchApi(path, retriesLeft - 1);
   }
-  if (!res.ok) return null;
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    // 401/403 and other unexpected statuses are systemic, not evidence.
+    console.error(`  Unexpected ${res.status} for ${path}`);
+    chTransportFailure = true;
+    return null;
+  }
   return res.json();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Profile UPSERT — mirrors the helper in apps/web/src/api/companiesHouse.ts
-// (kept inline so the script does not pull in the TanStack Start runtime).
+// Profile UPSERT — row mapping shared with the bulk snapshot matcher via
+// profile-row.ts (kept out of the TanStack Start runtime).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const sql = neon(process.env.POSTGRES_URL);
@@ -234,60 +254,6 @@ async function upsertProfile(profile: CHFullProfile): Promise<void> {
     target: companiesHouseProfiles.companyNumber,
     set: row,
   });
-}
-
-type CHRegisteredAddress = {
-  address_line_1?: string;
-  address_line_2?: string;
-  locality?: string;
-  region?: string;
-  postal_code?: string;
-  country?: string;
-};
-
-type CHAccounts = {
-  next_made_up_to?: string;
-  last_accounts?: { made_up_to?: string };
-  overdue?: boolean;
-};
-
-function profileToDbRow(profile: CHFullProfile) {
-  const address = (profile.registered_office_address ??
-    {}) as CHRegisteredAddress;
-  const accounts = (profile.accounts ?? {}) as CHAccounts;
-  const previousNames = (profile.previous_company_names ?? []) as {
-    name: string;
-  }[];
-  const confirmation = (profile.confirmation_statement ?? {}) as {
-    last_made_up_to?: string;
-  };
-
-  return {
-    companyNumber: profile.company_number,
-    companyName: profile.company_name,
-    companyStatus: profile.company_status ?? null,
-    companyType: (profile.type as string | undefined) ?? null,
-    dateOfCreation: (profile.date_of_creation as string | undefined) ?? null,
-    addressLine1: address.address_line_1 ?? null,
-    addressLine2: address.address_line_2 ?? null,
-    locality: address.locality ?? null,
-    region: address.region ?? null,
-    postalCode: address.postal_code ?? null,
-    country: address.country ?? null,
-    sicCodes: (profile.sic_codes as string[] | undefined) ?? [],
-    accountsNextMadeUpTo: accounts.next_made_up_to ?? null,
-    accountsLastMadeUpTo: accounts.last_accounts?.made_up_to ?? null,
-    accountsOverdue: accounts.overdue ?? null,
-    jurisdiction: (profile.jurisdiction as string | undefined) ?? null,
-    hasBeenLiquidated:
-      (profile.has_been_liquidated as boolean | undefined) ?? null,
-    hasInsolvencyHistory:
-      (profile.has_insolvency_history as boolean | undefined) ?? null,
-    hasCharges: (profile.has_charges as boolean | undefined) ?? null,
-    previousCompanyNames: previousNames.map((p) => p.name),
-    confirmationStatementLastMadeUpTo: confirmation.last_made_up_to ?? null,
-    updatedAt: new Date(),
-  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -304,9 +270,21 @@ const dryRunOk = async (): Promise<ApplyResult> => ({ ok: true });
 const sweepDeps: SweepDeps = {
   selectRows: makeSelectRows(sql),
   lookupSponsor: makeLookupSponsor(sql),
-  resolveSponsor: makeResolveSponsor((orgName, locality) =>
-    resolveOneSponsor(orgName, locality, fetchApi),
-  ),
+  resolveSponsor: makeResolveSponsor(async (orgName, locality) => {
+    chTransportFailure = false;
+    const result = await resolveOneSponsor(orgName, locality, fetchApi);
+    if (
+      chTransportFailure &&
+      (result.verdict === 'no_match' || result.verdict === 'human_review')
+    ) {
+      // Negative verdicts reached through a failed CH call are outage
+      // artifacts — throw so the sweep counts the row as errored (and the
+      // error-rate guard can see a sustained outage) instead of bumping it
+      // as a healthy re-check.
+      throw new Error('CH transport failure during resolve');
+    }
+    return result;
+  }),
   getProfile: makeGetProfile(sql),
   applyPromotion: DRY_RUN
     ? dryRunOk

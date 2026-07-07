@@ -317,3 +317,17 @@ describe('normaliseSearchQuery', () => {
     );
   });
 });
+
+describe('parseHmrcName — trailing numbers are only hints after a corporate suffix', () => {
+  test('digit-ending names without a suffix are never truncated', () => {
+    const p = parseHmrcName('PIZZA 20202020');
+    expect(p.companyNumberHint).toBeNull();
+    expect(p.parsedLegal).toBe('PIZZA 20202020');
+  });
+
+  test('suffix-anchored trailing number keeps the suffix in the legal name', () => {
+    const p = parseHmrcName('SS Creative Solutions UK Ltd 15462184');
+    expect(p.companyNumberHint).toBe('15462184');
+    expect(p.parsedLegal).toBe('SS Creative Solutions UK Ltd');
+  });
+});

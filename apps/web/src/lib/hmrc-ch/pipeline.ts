@@ -18,11 +18,12 @@ export const TIER_C_THRESHOLD = 0.85;
 const MIN_TOKENS_FOR_TIER_C = 2;
 
 export const TIER_A2_SCORE = 0.98;
-const MIN_SQUASH_LENGTH = 3;
+export const MIN_SQUASH_LENGTH = 3;
 
 /** Tier D only considers squashed names at least this long — short names give
- *  edit distance nothing to discriminate with. */
-const MIN_FUZZY_SQUASH_LENGTH = 9;
+ *  edit distance nothing to discriminate with. Exported for the bulk snapshot
+ *  matcher's fuzzy-blocking index. */
+export const MIN_FUZZY_SQUASH_LENGTH = 9;
 /** Squashed names at least this long may differ by 2 edits; shorter ones by 1. */
 const FUZZY_LONG_NAME_LENGTH = 16;
 
@@ -94,10 +95,14 @@ const CO_TAIL_REGEX = /^(.*?),?\s+c\/o\s+.+$/i;
 const BRANCH_REGEX =
   /^(.*?)\s*(?:\([^)]*Branch[^)]*\)|\bUK\s+Branch\b|\bUK\s+Establishment\b)\s*$/i;
 // "(Co Reg: 10843126)", "(Company No. SC123456)" — and, separately, a bare
-// trailing 8-digit or 2-letter+6-digit company number.
+// trailing 8-digit or 2-letter+6-digit company number. The bare form is
+// anchored on a preceding corporate suffix ("… Ltd 15462184"): stripping an
+// unanchored trailing number would truncate real names that end in digits
+// ("PIZZA 20202020") and hand Tier A a wrong stem to exact-match.
 const REG_NUMBER_PARENS_REGEX =
   /\s*\(\s*(?:co\.?|company|reg(?:istration)?)[\s.:]*(?:reg(?:istration)?|no\.?|number)?[\s.:]*([a-z]{2}\d{6}|\d{6,8})\s*\)\s*/i;
-const REG_NUMBER_TRAILING_REGEX = /\s+([a-z]{2}\d{6}|\d{8})\s*$/i;
+const REG_NUMBER_TRAILING_REGEX =
+  /(\b(?:limited|ltd|plc|llp)\b\.?),?\s+([a-z]{2}\d{6}|\d{8})\s*$/i;
 
 /** Pads bare numeric company numbers to CH's zero-filled 8-digit form. */
 function normaliseCompanyNumber(raw: string): string {
@@ -130,8 +135,8 @@ export function parseHmrcName(orgName: string): ParsedHmrcName {
   } else {
     const trailingReg = working.match(REG_NUMBER_TRAILING_REGEX);
     if (trailingReg) {
-      companyNumberHint = normaliseCompanyNumber(trailingReg[1]);
-      working = working.replace(REG_NUMBER_TRAILING_REGEX, '').trim();
+      companyNumberHint = normaliseCompanyNumber(trailingReg[2]);
+      working = working.replace(REG_NUMBER_TRAILING_REGEX, '$1').trim();
     }
   }
 

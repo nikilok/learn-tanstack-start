@@ -260,9 +260,13 @@ export async function resolveOneSponsor(
     isActive(s.candidate.company_status),
   );
 
+  // A prepended hint candidate must not displace a top-N search result from
+  // the previous-name probe window (its own profile is already cached, so
+  // the widened window costs no extra fetch).
+  const tierBProbeCount = parsed.companyNumberHint ? tierBTopN + 1 : tierBTopN;
   const tierB: ScoredCandidate[] = [];
   if (tierAActive.length === 0 && tierA2Active.length === 0) {
-    for (const shallow of candidates.slice(0, tierBTopN)) {
+    for (const shallow of candidates.slice(0, tierBProbeCount)) {
       const profile =
         profilesByNumber.get(shallow.company_number) ??
         ((await fetchApi(

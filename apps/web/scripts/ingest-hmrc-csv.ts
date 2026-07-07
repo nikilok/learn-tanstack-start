@@ -304,7 +304,24 @@ await sql.transaction([
   sql`ALTER INDEX "hmrc_skilled_workers_staging_hash_key" RENAME TO "hmrc_skilled_workers_hash_unique"`,
 ]);
 
-// Step 8: Record ingestion metadata
+// Step 8: Seed mapping stubs for orgs new to the register. verified_at NULL
+// sorts them to the FRONT of the nightly phase5 no_match sweep (NULLS FIRST),
+// so every new sponsor is resolved within a day instead of waiting for a page
+// visit to trigger the on-demand resolver. ON CONFLICT keeps this idempotent
+// and never touches existing mappings.
+console.log('Seeding mapping stubs for new organisations...');
+const stubbed = (await sql`
+  INSERT INTO "hmrc_company_mapping" ("organisation_name", "match_method")
+  SELECT DISTINCT w."organisation_name", 'no_match'
+  FROM "hmrc_skilled_workers" w
+  LEFT JOIN "hmrc_company_mapping" m ON m."organisation_name" = w."organisation_name"
+  WHERE m."organisation_name" IS NULL
+  ON CONFLICT ("organisation_name") DO NOTHING
+  RETURNING "organisation_name"
+`) as { organisation_name: string }[];
+console.log(`  ${stubbed.length} new mapping stubs seeded`);
+
+// Step 9: Record ingestion metadata
 await sql`INSERT INTO "hmrc_ingestion_meta" ("csv_url", "checksum", "record_count") VALUES (${url}, ${checksum}, ${dedupedRows.length})`;
 
 console.log(`Done! Ingested ${dedupedRows.length} records with zero downtime.`);

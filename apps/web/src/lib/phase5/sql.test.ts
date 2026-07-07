@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import type { CommitPromotionInput } from './apply-promotion.ts';
 import type { ExistingMapping } from './decide.ts';
-import { makeBumpVerifiedAt, makeCommitPromotion } from './sql.ts';
+import {
+  makeBumpVerifiedAt,
+  makeCommitPromotion,
+  makeSelectRows,
+} from './sql.ts';
 
 /**
  * Regression pins for the optimistic lock (2026-05-28 → 2026-07-07 freeze).
@@ -118,5 +122,63 @@ describe('makeCommitPromotion — optimistic lock', () => {
       newCompanyNumber: '12345678',
       newMatchMethod: 'exact',
     });
+  });
+});
+
+describe('makeSelectRows — tier predicates', () => {
+  /** Every tier must gate on the live register so departed orgs stop
+   *  consuming sweep budget. */
+  const LIVE_REGISTER_PATTERN =
+    /EXISTS \(SELECT 1 FROM hmrc_skilled_workers w\s+WHERE w\.organisation_name = m\.organisation_name\)/;
+
+  test('no_match tier also selects legacy NULL-method rows', async () => {
+    const { sql, calls } = makeFakeSql([]);
+
+    await makeSelectRows(sql)('no_match', 10);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).toMatch(
+      /\(match_method = 'no_match' OR match_method IS NULL\)/,
+    );
+    expect(calls[0].text).toMatch(LIVE_REGISTER_PATTERN);
+  });
+
+  test('non_exact tier covers all three fuzzy methods, live register only', async () => {
+    const { sql, calls } = makeFakeSql([]);
+
+    await makeSelectRows(sql)('non_exact', 10);
+
+    expect(calls[0].text).toContain(
+      "match_method IN ('token_sim', 'previous_name', 'fuzzy_edit')",
+    );
+    expect(calls[0].text).toMatch(LIVE_REGISTER_PATTERN);
+  });
+
+  test('exact tier covers exact + exact_squash, live register only', async () => {
+    const { sql, calls } = makeFakeSql([]);
+
+    await makeSelectRows(sql)('exact', 10);
+
+    expect(calls[0].text).toContain(
+      "match_method IN ('exact', 'exact_squash')",
+    );
+    expect(calls[0].text).toMatch(LIVE_REGISTER_PATTERN);
+  });
+
+  test('public_body tier gates on the live register', async () => {
+    const { sql, calls } = makeFakeSql([]);
+
+    await makeSelectRows(sql)('public_body', 10);
+
+    expect(calls[0].text).toContain("match_method = 'public_body'");
+    expect(calls[0].text).toMatch(LIVE_REGISTER_PATTERN);
+  });
+
+  test('rows order oldest-first with NULLs at the front', async () => {
+    const { sql, calls } = makeFakeSql([]);
+
+    await makeSelectRows(sql)('no_match', 10);
+
+    expect(calls[0].text).toContain('ORDER BY verified_at ASC NULLS FIRST');
   });
 });

@@ -51,7 +51,14 @@ type RawMappingRow = {
 };
 
 /** Build a `selectRows` matching `SweepDeps['selectRows']`. Filters by tier
- *  predicate, ordered by `verified_at` (oldest / null first). */
+ *  predicate, ordered by `verified_at` (oldest / null first).
+ *
+ *  Every tier is gated on the LIVE register (EXISTS against
+ *  `hmrc_skilled_workers`) so rows whose org left the register stop consuming
+ *  sweep budget and CH API calls — the mapping rows themselves are kept (an
+ *  org can return, and the audit trail stays intact). The no_match tier also
+ *  selects `match_method IS NULL` rows: legacy top-hit mappings that predate
+ *  Phase 1 classification and were previously invisible to every tier. */
 export function makeSelectRows(sql: Sql): SweepDeps['selectRows'] {
   return async (tier, maxRows) => {
     const rows = await selectRowsForTier(sql, tier, maxRows);
@@ -68,8 +75,10 @@ async function selectRowsForTier(
     return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
-      FROM hmrc_company_mapping
-      WHERE match_method = 'no_match'
+      FROM hmrc_company_mapping m
+      WHERE (match_method = 'no_match' OR match_method IS NULL)
+        AND EXISTS (SELECT 1 FROM hmrc_skilled_workers w
+                    WHERE w.organisation_name = m.organisation_name)
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `) as RawMappingRow[];
@@ -78,8 +87,10 @@ async function selectRowsForTier(
     return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
-      FROM hmrc_company_mapping
+      FROM hmrc_company_mapping m
       WHERE match_method IN ('token_sim', 'previous_name', 'fuzzy_edit')
+        AND EXISTS (SELECT 1 FROM hmrc_skilled_workers w
+                    WHERE w.organisation_name = m.organisation_name)
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `) as RawMappingRow[];
@@ -88,8 +99,10 @@ async function selectRowsForTier(
     return (await sql`
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
-      FROM hmrc_company_mapping
+      FROM hmrc_company_mapping m
       WHERE match_method IN ('exact', 'exact_squash')
+        AND EXISTS (SELECT 1 FROM hmrc_skilled_workers w
+                    WHERE w.organisation_name = m.organisation_name)
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `) as RawMappingRow[];
@@ -97,8 +110,10 @@ async function selectRowsForTier(
   return (await sql`
     SELECT organisation_name, company_number, match_method, match_score,
            verified_at, is_public_body
-    FROM hmrc_company_mapping
+    FROM hmrc_company_mapping m
     WHERE match_method = 'public_body'
+      AND EXISTS (SELECT 1 FROM hmrc_skilled_workers w
+                  WHERE w.organisation_name = m.organisation_name)
     ORDER BY verified_at ASC NULLS FIRST
     LIMIT ${maxRows}
   `) as RawMappingRow[];

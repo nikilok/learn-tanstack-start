@@ -74,7 +74,7 @@ const tierRotation = await sql`
     MAX(verified_at)::text AS newest_verified_at,
     EXTRACT(epoch FROM (MAX(verified_at) - MIN(verified_at)))::int / 86400 AS span_days
   FROM hmrc_company_mapping
-  WHERE match_method IN ('no_match', 'token_sim', 'previous_name', 'exact', 'public_body')
+  WHERE match_method IN ('no_match', 'token_sim', 'previous_name', 'fuzzy_edit', 'exact', 'exact_squash', 'public_body')
      OR match_method IS NULL
   GROUP BY match_method
   ORDER BY rows DESC

@@ -79,7 +79,7 @@ async function selectRowsForTier(
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
       FROM hmrc_company_mapping
-      WHERE match_method IN ('token_sim', 'previous_name')
+      WHERE match_method IN ('token_sim', 'previous_name', 'fuzzy_edit')
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `) as RawMappingRow[];
@@ -89,7 +89,7 @@ async function selectRowsForTier(
       SELECT organisation_name, company_number, match_method, match_score,
              verified_at, is_public_body
       FROM hmrc_company_mapping
-      WHERE match_method = 'exact'
+      WHERE match_method IN ('exact', 'exact_squash')
       ORDER BY verified_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `) as RawMappingRow[];

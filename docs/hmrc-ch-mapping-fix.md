@@ -1611,6 +1611,49 @@ to be worth the integration cost.
 
 ---
 
+## 2026-07 normalization pack (Tier A2, Tier D, parser + query upgrades)
+
+A diagnostic over the ~16k `no_match` rows (2026-07-07) showed the dominant
+failure was comparison strictness, not search recall: in 40% of a random
+corp-suffixed sample the right company was on page 1 of the existing search
+and Tiers A/C rejected it over punctuation/spacing, with another ~12% within
+edit distance ≤ 2. The pack adds (all in
+`apps/web/src/lib/hmrc-ch/pipeline.ts` — source of truth for the exact rules):
+
+- **Tier A2 `exact_squash` (score 0.98)** — equality on a squash key: NFKD
+  accent-fold, tolerant suffix strip (", ltd", "LTD."), then drop every
+  non-alphanumeric. `"JSB Haulage LTD" ≡ "J S B HAULAGE LIMITED"`,
+  `"Carel UK Limited" ≡ "CAREL U.K. LTD."`. Justified by CH's own name-
+  uniqueness rules, which treat punctuation/case/spacing variants as the same
+  name. Scanned only when Tier A has no active hit; active-status preference
+  and locality tiebreak apply as usual.
+- **Tier D `fuzzy_edit` (score 0.90/0.88)** — squashed edit distance ≤ 1
+  (≤ 2 for squash length ≥ 16, minimum length 9), compared suffix-stripped
+  and then suffix-retained (catches typo'd suffixes: "Limtied"). Accepted
+  ONLY for active candidates whose locality/region matches the HMRC
+  town/county — no inactive or unconfirmed fallback. Catches
+  "Llyods"→"LLOYDS", "Madani"→"MADNI".
+- **Parser upgrades** — `T/As`, `T/ As`, `T/A:`, bare `TA` after a corporate
+  suffix ("… LTD TA Maharanis", 943 no_match rows), parenthesised
+  `(T/A …)`/`(Trading as …)` (221 rows), `C/O …` tails, internal whitespace
+  collapse, and embedded company-number extraction ("(Co Reg: 10843126)",
+  trailing 8-digit/2-letter+6-digit) — the hinted company is fetched and
+  injected as a first-class candidate that competes through the normal tiers.
+- **Search-query normalization** — accent/quote folding, `+ . , / ?` → space,
+  non-ASCII (mojibake) stripped. Fixes zero-result queries ("Leaf.fm, ltd").
+  Comparisons still run against the raw legal candidate.
+
+Rank ladder positions: `exact_squash` = 4 (between `previous_name` and
+`exact`, which moved to 5); `fuzzy_edit` = 2 (peer of `token_sim`). Sweep
+tiers: `exact_squash` re-verifies with Tier 3, `fuzzy_edit` with Tier 2.
+
+Live validation (2026-07-07, read-only): 17 of 18 previously-no_match names
+resolved to the correct entity (7 exact_squash, 7 exact via parser fixes,
+3 fuzzy_edit — all active, locality-confirmed); 2 unincorporated controls
+correctly stayed no_match.
+
+---
+
 ## Decisions locked in
 
 Recorded here so future readers don't relitigate them:

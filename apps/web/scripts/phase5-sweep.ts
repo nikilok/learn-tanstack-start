@@ -43,6 +43,7 @@ import {
   makeSleep,
 } from '../src/lib/phase5/sql.ts';
 import type {
+  ApplyResult,
   SweepConfig,
   SweepDeps,
   SweepSummary,
@@ -298,7 +299,7 @@ const applyDeps: ApplyPromotionDeps = {
   upsertProfile,
 };
 
-const dryRunNoOp = async () => {};
+const dryRunOk = async (): Promise<ApplyResult> => ({ ok: true });
 
 const sweepDeps: SweepDeps = {
   selectRows: makeSelectRows(sql),
@@ -308,10 +309,10 @@ const sweepDeps: SweepDeps = {
   ),
   getProfile: makeGetProfile(sql),
   applyPromotion: DRY_RUN
-    ? async () => ({ ok: true })
+    ? dryRunOk
     : (existing, proposed, changedBy) =>
         applyPromotion(existing, proposed, changedBy, applyDeps),
-  bumpVerifiedAt: DRY_RUN ? dryRunNoOp : makeBumpVerifiedAt(sql),
+  bumpVerifiedAt: DRY_RUN ? dryRunOk : makeBumpVerifiedAt(sql),
   sleep: makeSleep(),
 };
 
@@ -358,5 +359,27 @@ if (errorRate > ERROR_RATE_THRESHOLD) {
     '  Likely a sustained CH outage, rate-limit exhaustion, or auth failure.',
   );
   console.error('  Check the run log for /search and /company error details.');
+  process.exit(1);
+}
+
+// Mass lock-misses mean the optimistic lock itself is broken (writes matching
+// zero rows), not concurrency noise — the tiers share a workflow concurrency
+// group, so legitimate misses are near-zero. This check would have caught the
+// 2026-05-28 → 2026-07-07 silent freeze on its first run.
+const LOCK_MISS_RATE_THRESHOLD = 0.5;
+const lockMissRate =
+  summary.selected > 0 ? summary.lockMissed / summary.selected : 0;
+if (lockMissRate > LOCK_MISS_RATE_THRESHOLD) {
+  console.error('');
+  console.error(
+    `  LOCK MISS RATE ${(lockMissRate * 100).toFixed(1)}% exceeds ${LOCK_MISS_RATE_THRESHOLD * 100}% threshold.`,
+  );
+  console.error(
+    '  The optimistic lock is matching zero rows — writes are being discarded.',
+  );
+  console.error(
+    '  Check verified_at param handling in src/lib/phase5/sql.ts (both lock',
+  );
+  console.error('  sides must be date_trunc-ed to milliseconds).');
   process.exit(1);
 }

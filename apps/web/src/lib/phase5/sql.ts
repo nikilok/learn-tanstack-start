@@ -183,24 +183,28 @@ export function makeGetProfile(sql: Sql): SweepDeps['getProfile'] {
   };
 }
 
-/** Build a `bumpVerifiedAt` matching `SweepDeps['bumpVerifiedAt']`. The
- *  optimistic-lock WHERE clause means a concurrent writer's update is
- *  detected as a 0-row UPDATE and silently skipped — the row will reappear
- *  in a future sweep window. No audit row written; the audit table is
- *  reserved for material corrections. */
+/** Build a `bumpVerifiedAt` matching `SweepDeps['bumpVerifiedAt']`. A 0-row
+ *  UPDATE (concurrent writer changed `verified_at`) is reported as
+ *  lock_missed so the sweep counts the skipped write; the row reappears in a
+ *  future sweep window. No audit row written; the audit table is reserved
+ *  for material corrections. */
 export function makeBumpVerifiedAt(sql: Sql): SweepDeps['bumpVerifiedAt'] {
   return async (existing) => {
-    // Lock compares at millisecond precision: Postgres stores verified_at with
-    // microseconds, but neon → JS Date truncates to ms on read. Without the
-    // date_trunc, a row whose verified_at has any non-zero microseconds (i.e.
-    // any row touched by a previous SQL `now()`) would silently lock-miss.
-    await sql`
+    // Truncate BOTH sides of the lock to milliseconds: the param arrives as a
+    // ms-precision Date — or as a raw microsecond STRING once drizzle({client})
+    // has initialised in this process — while stored values carry now()'s
+    // microseconds. One-sided truncation silently froze every sweep write from
+    // 2026-05-28 to 2026-07-07; see phase5-sweep-algorithm.md "Optimistic lock".
+    const rows = (await sql`
       UPDATE hmrc_company_mapping
       SET verified_at = now()
       WHERE organisation_name = ${existing.organisationName}
         AND date_trunc('milliseconds', verified_at)
-            IS NOT DISTINCT FROM ${existing.verifiedAt}
-    `;
+            IS NOT DISTINCT FROM date_trunc('milliseconds', ${existing.verifiedAt}::timestamp)
+      RETURNING organisation_name
+    `) as { organisation_name: string }[];
+    if (rows.length === 0) return { ok: false, reason: 'lock_missed' };
+    return { ok: true };
   };
 }
 
@@ -300,8 +304,7 @@ export function makeCommitPromotion(
   return async (
     input: CommitPromotionInput,
   ): Promise<CommitPromotionResult> => {
-    // Lock compares at millisecond precision: see comment in
-    // `makeBumpVerifiedAt` — same microsecond-truncation issue.
+    // Lock truncates BOTH sides to milliseconds — see makeBumpVerifiedAt.
     const rows = (await sql`
       WITH updated AS (
         UPDATE hmrc_company_mapping
@@ -313,7 +316,7 @@ export function makeCommitPromotion(
             verified_at    = now()
         WHERE organisation_name = ${input.organisationName}
           AND date_trunc('milliseconds', verified_at)
-              IS NOT DISTINCT FROM ${input.originalVerifiedAt}
+              IS NOT DISTINCT FROM date_trunc('milliseconds', ${input.originalVerifiedAt}::timestamp)
         RETURNING company_number, match_method
       ),
       audit_inserted AS (

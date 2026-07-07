@@ -357,3 +357,106 @@ describe('rule 6: same rank', () => {
     expect(result).toEqual({ action: 'bump' });
   });
 });
+
+describe('normalization-pack methods: exact_squash and fuzzy_edit', () => {
+  test('no_match → exact_squash promotes', () => {
+    const result = decide(
+      existing({ matchMethod: 'no_match', companyNumber: null }),
+      proposed({ verdict: 'verified', matchMethod: 'exact_squash' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('token_sim → exact_squash promotes', () => {
+    const result = decide(
+      existing({ matchMethod: 'token_sim' }),
+      proposed({ verdict: 'verified', matchMethod: 'exact_squash' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('previous_name → exact_squash promotes', () => {
+    const result = decide(
+      existing({ matchMethod: 'previous_name' }),
+      proposed({ verdict: 'verified', matchMethod: 'exact_squash' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('exact_squash → exact promotes (byte-exact beats squash)', () => {
+    const result = decide(
+      existing({ matchMethod: 'exact_squash' }),
+      proposed({ verdict: 'verified', matchMethod: 'exact' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('exact → exact_squash is a rejected demotion → bump', () => {
+    const result = decide(
+      existing({ matchMethod: 'exact' }),
+      proposed({ verdict: 'verified', matchMethod: 'exact_squash' }),
+    );
+    expect(result).toEqual({ action: 'bump' });
+  });
+
+  test('exact_squash → previous_name is a rejected demotion → bump', () => {
+    const result = decide(
+      existing({ matchMethod: 'exact_squash' }),
+      proposed({ verdict: 'verified', matchMethod: 'previous_name' }),
+    );
+    expect(result).toEqual({ action: 'bump' });
+  });
+
+  test('no_match → fuzzy_edit promotes', () => {
+    const result = decide(
+      existing({ matchMethod: 'no_match', companyNumber: null }),
+      proposed({ verdict: 'verified', matchMethod: 'fuzzy_edit' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('fuzzy_edit → no_match is a rejected demotion → bump', () => {
+    const result = decide(
+      existing({ matchMethod: 'fuzzy_edit' }),
+      proposed({
+        verdict: 'no_match',
+        matchMethod: 'no_match',
+        companyNumber: null,
+        matchScore: null,
+      }),
+    );
+    expect(result).toEqual({ action: 'bump' });
+  });
+
+  test('fuzzy_edit → previous_name promotes', () => {
+    const result = decide(
+      existing({ matchMethod: 'fuzzy_edit' }),
+      proposed({ verdict: 'verified', matchMethod: 'previous_name' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('fuzzy_edit vs token_sim tie with different numbers → inline_score', () => {
+    const result = decide(
+      existing({ matchMethod: 'fuzzy_edit', companyNumber: '12345678' }),
+      proposed({
+        verdict: 'verified',
+        matchMethod: 'token_sim',
+        companyNumber: '99999999',
+      }),
+    );
+    expect(result).toEqual({ action: 'inline_score' });
+  });
+
+  test('exact_squash:X same number re-confirmed → bump', () => {
+    const result = decide(
+      existing({ matchMethod: 'exact_squash', companyNumber: '12345678' }),
+      proposed({
+        verdict: 'verified',
+        matchMethod: 'exact_squash',
+        companyNumber: '12345678',
+      }),
+    );
+    expect(result).toEqual({ action: 'bump' });
+  });
+});

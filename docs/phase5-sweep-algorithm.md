@@ -10,10 +10,10 @@ cron with `--tier=<name>`. Tiers differ only by SELECT predicate and
 cadence; the per-row logic is identical.
 
 ```text
-Tier 1  match_method = 'no_match'                       daily,    4000 rows
-Tier 2  match_method IN ('token_sim','previous_name')   2×/week,  3000 rows
-Tier 3  match_method = 'exact'                          daily,    1500 rows
-Tier 4  match_method = 'public_body'                    monthly,   500 rows
+Tier 1  match_method = 'no_match'                                    daily,    4000 rows
+Tier 2  match_method IN ('token_sim','previous_name','fuzzy_edit')   2×/week,  3000 rows
+Tier 3  match_method IN ('exact','exact_squash')                     daily,    1500 rows
+Tier 4  match_method = 'public_body'                                 monthly,   500 rows
 ```
 
 ## Tables touched
@@ -38,11 +38,11 @@ sweep(tier):
 
   for row in rows:
     process(row, changed_by = "phase5_sweep_" + tier)
-    sleep(2200ms)        # ~1.8 req/sec at the post-patch worst case of
-                         # 4 CH calls/row (1 search + 3 Tier-B profile
-                         # fetches when Tier-A returned only inactive
-                         # candidates). See active-status preference in
-                         # apps/web/src/lib/hmrc-ch/resolve-sponsor.ts.
+    sleep(2500ms)        # 2 req/sec at the worst case of 5 CH calls/row
+                         # (1 embedded-number profile + 1 search + 3 Tier-B
+                         # profile fetches when Tier-A/A2 returned only
+                         # inactive candidates). See active-status preference
+                         # in apps/web/src/lib/hmrc-ch/resolve-sponsor.ts.
 
   print summary(updated, bumped, lock_missed, warned, errored)
 ```
@@ -77,9 +77,11 @@ Rank ladder for ordinary states:
 ```text
 0  no_match
 1  human_review
-2  verified · token_sim
+2  verified · token_sim / fuzzy_edit   (peers — both fuzzy name evidence;
+                                        inline scorer arbitrates ties)
 3  verified · previous_name
-4  verified · exact
+4  verified · exact_squash             (punctuation-only variance)
+5  verified · exact
 ```
 
 `public_body` and `manual` sit outside the ladder — terminal peers

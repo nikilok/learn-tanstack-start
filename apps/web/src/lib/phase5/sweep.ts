@@ -90,11 +90,12 @@ const CHANGED_BY: Record<Tier, string> = {
 };
 
 /** Default inter-row sleep when the caller doesn't override via `config.delayMs`.
- *  Sized for the resolver's post-patch worst case of 4 CH calls per row
- *  (1 search + 3 Tier-B profile fetches when Tier-A returned only inactive
- *  candidates). 4 calls / 2200ms ≈ 1.8 req/sec, under CH's 600/5min budget.
- *  CLI can override via `PHASE5_DELAY_MS` env var without redeploying. */
-const DEFAULT_DELAY_MS = 2200;
+ *  Sized for the resolver's worst case of 5 CH calls per row (1 embedded-
+ *  number profile + 1 search + 3 Tier-B profile fetches when Tier-A/A2
+ *  returned only inactive candidates). 5 calls / 2500ms = 2 req/sec, at CH's
+ *  600/5min budget. CLI can override via `PHASE5_DELAY_MS` env var without
+ *  redeploying. */
+const DEFAULT_DELAY_MS = 2500;
 
 /** Adapt a `CHFullProfile` (as returned by the resolver or read from the
  *  cache) into the structural shape the comparer reads. */

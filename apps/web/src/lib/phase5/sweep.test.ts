@@ -314,7 +314,7 @@ describe('sweep — inline_score dispatch', () => {
 });
 
 describe('sweep — rate-limit sleep', () => {
-  test('sleep(2200) is called between rows but not after the last one', async () => {
+  test('default sleep is called between rows but not after the last one', async () => {
     const r1 = row({ organisationName: 'ONE LTD' });
     const r2 = row({ organisationName: 'TWO LTD' });
     const r3 = row({ organisationName: 'THREE LTD' });
@@ -326,7 +326,7 @@ describe('sweep — rate-limit sleep', () => {
     await sweep({ tier: 'no_match', maxRows: 10 }, deps);
 
     expect(deps.sleep).toHaveBeenCalledTimes(2);
-    expect(deps.sleep).toHaveBeenCalledWith(2200);
+    expect(deps.sleep).toHaveBeenCalledWith(2500);
   });
 
   test('empty result set: sleep is not called', async () => {

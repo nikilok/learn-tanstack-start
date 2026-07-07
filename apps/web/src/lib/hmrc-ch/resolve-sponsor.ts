@@ -10,21 +10,32 @@
  *   - phase0b can be refactored to use this once its current run completes
  *
  * Pipeline (see docs/hmrc-ch-mapping-fix.md for rationale):
- *   1. Parse organisation name → legal candidate + public-body flag
+ *   1. Parse organisation name → legal candidate + public-body flag +
+ *      embedded company-number hint
  *   2. Public-body short-circuit (skip CH lookup entirely)
- *   3. Search CH with the LEGAL candidate only (Policy A — never trading-name)
- *   4. Tier A across all results → exact name match
- *   5. If no Tier A: fetch top-N profiles, try Tier B (clean previous-name)
- *   6. If no A/B: Tier C across all results (token-set Jaccard ≥ threshold)
- *   7. Locality tiebreak when multiple candidates pass at the same tier
- *   8. Fail closed if no verified match
+ *   3. Search CH with the LEGAL candidate only (Policy A — never trading-name),
+ *      through normaliseSearchQuery; inject the hinted company (if any) as a
+ *      first-class candidate
+ *   4. Tier A across all candidates → exact name match
+ *   5. If no active Tier A: Tier A2 (squash-key equality — punctuation/spacing/
+ *      suffix-form variants)
+ *   6. If no active A/A2: fetch top-N profiles, try Tier B (clean previous-name)
+ *   7. If no active A/A2/B: Tier C across all candidates (token-set Jaccard)
+ *   8. If nothing active yet: Tier D (squashed edit distance ≤ 1-2) — ACTIVE
+ *      candidates with corroborating locality only, no inactive fallback
+ *   9. Locality tiebreak when multiple candidates pass at the same tier
+ *  10. Fail closed if no verified match
  */
 
 import {
   type CHCandidate,
+  matchesHmrcLocality,
   matchTierA,
+  matchTierASquash,
   matchTierB,
   matchTierC,
+  matchTierD,
+  normaliseSearchQuery,
   parseHmrcName,
   pickByLocality,
   type ScoredCandidate,
@@ -83,7 +94,12 @@ export type ResolveResult =
   | {
       verdict: 'verified';
       companyNumber: string;
-      matchMethod: 'exact' | 'previous_name' | 'token_sim';
+      matchMethod:
+        | 'exact'
+        | 'exact_squash'
+        | 'previous_name'
+        | 'token_sim'
+        | 'fuzzy_edit';
       matchScore: number;
       queryUsed: string;
       profile: CHFullProfile;
@@ -148,9 +164,9 @@ function isActive(s: string | null | undefined): boolean {
  * a verdict object — never an exception for "no match" cases. Caller decides
  * what to do with each verdict (insert / skip / queue for review / etc.).
  *
- * The function may fetch up to 1 search + 3 profile lookups during scoring,
- * then 1 additional profile fetch only if the verified candidate's profile
- * isn't already in hand (Tier A and Tier C wins).
+ * The function may fetch up to 1 embedded-number profile + 1 search + 3
+ * profile lookups during scoring, then 1 additional profile fetch only if
+ * the verified candidate's profile isn't already in hand.
  */
 export async function resolveOneSponsor(
   orgName: string,
@@ -170,18 +186,40 @@ export async function resolveOneSponsor(
   }
 
   const legal = parsed.parsedLegal;
+  // Comparisons run against the raw legal candidate; only the query string is
+  // normalised (punctuation like "+", ".", "," makes CH search return junk or
+  // nothing at all — "Leaf.fm, ltd", "Landis+Gyr").
+  const searchQuery = normaliseSearchQuery(legal) || legal;
 
   const search = (await fetchApi(
-    `/search/companies?q=${encodeURIComponent(legal)}&items_per_page=${searchPageSize}`,
+    `/search/companies?q=${encodeURIComponent(searchQuery)}&items_per_page=${searchPageSize}`,
   )) as CHSearchResponse;
   const items = search?.items ?? [];
   const topResults = items.slice(0, 5);
 
-  if (items.length === 0) {
-    return { verdict: 'no_match', queryUsed: legal, topResults };
+  const profilesByNumber = new Map<string, CHFullProfile>();
+
+  // Candidate pool: search results, plus — when the HMRC name embeds a
+  // company number — that company injected as a first-class candidate. It
+  // competes through the normal tiers, so a bogus embedded number just loses.
+  const candidates: CHCandidate[] = items.map(searchItemToCandidate);
+  if (parsed.companyNumberHint) {
+    const hinted = (await fetchApi(
+      `/company/${encodeURIComponent(parsed.companyNumberHint)}`,
+    )) as CHFullProfile | null;
+    if (hinted) {
+      profilesByNumber.set(hinted.company_number, hinted);
+      const rest = candidates.filter(
+        (c) => c.company_number !== hinted.company_number,
+      );
+      candidates.length = 0;
+      candidates.push(profileToCandidate(hinted), ...rest);
+    }
   }
 
-  const profilesByNumber = new Map<string, CHFullProfile>();
+  if (candidates.length === 0) {
+    return { verdict: 'no_match', queryUsed: searchQuery, topResults };
+  }
 
   // ───────────────────────────────────────────────────────────────────────
   // Active-status preference
@@ -202,19 +240,34 @@ export async function resolveOneSponsor(
   // ───────────────────────────────────────────────────────────────────────
 
   const tierA: ScoredCandidate[] = [];
-  for (const item of items) {
-    const cand = searchItemToCandidate(item);
+  for (const cand of candidates) {
     const a = matchTierA(legal, cand);
     if (a !== null) tierA.push({ candidate: cand, tier: 'A', score: a });
   }
   const tierAActive = tierA.filter((s) => isActive(s.candidate.company_status));
 
-  const tierB: ScoredCandidate[] = [];
+  // Tier A2 — squash-key equality (punctuation / spacing / suffix-form
+  // variants of the same name). Scanned only when Tier A found no active
+  // match, mirroring the active-status preference cascade below.
+  const tierA2: ScoredCandidate[] = [];
   if (tierAActive.length === 0) {
-    for (const item of items.slice(0, tierBTopN)) {
-      const profile = (await fetchApi(
-        `/company/${encodeURIComponent(item.company_number)}`,
-      )) as CHFullProfile | null;
+    for (const cand of candidates) {
+      const a2 = matchTierASquash(legal, cand);
+      if (a2 !== null) tierA2.push({ candidate: cand, tier: 'A2', score: a2 });
+    }
+  }
+  const tierA2Active = tierA2.filter((s) =>
+    isActive(s.candidate.company_status),
+  );
+
+  const tierB: ScoredCandidate[] = [];
+  if (tierAActive.length === 0 && tierA2Active.length === 0) {
+    for (const shallow of candidates.slice(0, tierBTopN)) {
+      const profile =
+        profilesByNumber.get(shallow.company_number) ??
+        ((await fetchApi(
+          `/company/${encodeURIComponent(shallow.company_number)}`,
+        )) as CHFullProfile | null);
       if (!profile) continue;
       profilesByNumber.set(profile.company_number, profile);
       const cand = profileToCandidate(profile);
@@ -225,27 +278,59 @@ export async function resolveOneSponsor(
   const tierBActive = tierB.filter((s) => isActive(s.candidate.company_status));
 
   const tierC: ScoredCandidate[] = [];
-  if (tierAActive.length === 0 && tierBActive.length === 0) {
-    for (const item of items) {
-      const cand = searchItemToCandidate(item);
+  if (
+    tierAActive.length === 0 &&
+    tierA2Active.length === 0 &&
+    tierBActive.length === 0
+  ) {
+    for (const cand of candidates) {
       const c = matchTierC(legal, cand);
       if (c !== null) tierC.push({ candidate: cand, tier: 'C', score: c });
     }
   }
   const tierCActive = tierC.filter((s) => isActive(s.candidate.company_status));
 
-  // Prefer active at the strongest tier; fall back to inactive only when
-  // no tier produced any active candidate.
+  // Tier D — typo-distance matches. Name evidence this weak is only accepted
+  // for ACTIVE candidates whose locality corroborates the HMRC town/county;
+  // there is deliberately no inactive or unconfirmed fallback.
+  const tierD: ScoredCandidate[] = [];
+  if (
+    tierAActive.length === 0 &&
+    tierA2Active.length === 0 &&
+    tierBActive.length === 0 &&
+    tierCActive.length === 0
+  ) {
+    for (const cand of candidates) {
+      if (!isActive(cand.company_status)) continue;
+      if (
+        !matchesHmrcLocality(
+          cand,
+          hmrcLocation.townCity ?? null,
+          hmrcLocation.county ?? null,
+        )
+      ) {
+        continue;
+      }
+      const d = matchTierD(legal, cand);
+      if (d !== null) tierD.push({ candidate: cand, tier: 'D', score: d });
+    }
+  }
+
+  // Prefer active at the strongest tier; fall back to inactive only when no
+  // tier produced any active candidate (Tier D never has an inactive pool).
   let acceptedTier: ScoredCandidate[];
   if (tierAActive.length > 0) acceptedTier = tierAActive;
+  else if (tierA2Active.length > 0) acceptedTier = tierA2Active;
   else if (tierBActive.length > 0) acceptedTier = tierBActive;
   else if (tierCActive.length > 0) acceptedTier = tierCActive;
+  else if (tierD.length > 0) acceptedTier = tierD;
   else if (tierA.length > 0) acceptedTier = tierA;
+  else if (tierA2.length > 0) acceptedTier = tierA2;
   else if (tierB.length > 0) acceptedTier = tierB;
   else acceptedTier = tierC;
 
   if (acceptedTier.length === 0) {
-    return { verdict: 'no_match', queryUsed: legal, topResults };
+    return { verdict: 'no_match', queryUsed: searchQuery, topResults };
   }
 
   const picked = pickByLocality(
@@ -257,7 +342,7 @@ export async function resolveOneSponsor(
   if (picked === 'tied') {
     return {
       verdict: 'human_review',
-      queryUsed: legal,
+      queryUsed: searchQuery,
       contenders: acceptedTier.slice(0, 5),
       topResults,
     };
@@ -270,7 +355,7 @@ export async function resolveOneSponsor(
       `/company/${encodeURIComponent(verifiedNumber)}`,
     )) as CHFullProfile | null;
     if (!fetched) {
-      return { verdict: 'no_match', queryUsed: legal, topResults };
+      return { verdict: 'no_match', queryUsed: searchQuery, topResults };
     }
     verifiedProfile = fetched;
   }
@@ -281,11 +366,15 @@ export async function resolveOneSponsor(
     matchMethod:
       picked.tier === 'A'
         ? 'exact'
-        : picked.tier === 'B'
-          ? 'previous_name'
-          : 'token_sim',
+        : picked.tier === 'A2'
+          ? 'exact_squash'
+          : picked.tier === 'B'
+            ? 'previous_name'
+            : picked.tier === 'D'
+              ? 'fuzzy_edit'
+              : 'token_sim',
     matchScore: picked.score,
-    queryUsed: legal,
+    queryUsed: searchQuery,
     profile: verifiedProfile,
   };
 }

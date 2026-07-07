@@ -13,8 +13,10 @@
 
 export type MatchMethod =
   | 'exact'
+  | 'exact_squash'
   | 'previous_name'
   | 'token_sim'
+  | 'fuzzy_edit'
   | 'no_match'
   | 'public_body'
   | 'manual';
@@ -61,13 +63,18 @@ export type DecideResult =
   | { action: 'log_and_bump'; reason: LogAndBumpReason };
 
 /** Numeric rank for the upgrade-only ladder. Terminal peers (`public_body`,
- *  `manual`) are handled separately and intentionally not in this map. */
+ *  `manual`) are handled separately and intentionally not in this map.
+ *  `fuzzy_edit` deliberately ties `token_sim` (both are fuzzy name evidence;
+ *  the inline scorer arbitrates cross-method ties); `exact_squash`
+ *  (punctuation-only variance) sits between `previous_name` and `exact`. */
 const RANK: Record<string, number> = {
   no_match: 0,
   human_review: 1,
+  fuzzy_edit: 2,
   token_sim: 2,
   previous_name: 3,
-  exact: 4,
+  exact_squash: 4,
+  exact: 5,
 };
 
 function existingRank(existing: ExistingMapping): number {

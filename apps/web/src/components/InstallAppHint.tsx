@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { downloadsFlagQueryOptions } from '../api/flags';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
-import ChromeIcon from './ChromeIcon';
+import BrowserIcon from './BrowserIcon';
 import { HEADER_CONTROL_CLASS, HEADER_ICON_CLASS } from './headerControls';
 
 /**
@@ -29,7 +29,7 @@ export default function InstallAppHint() {
       title="Install as Chrome-based app"
       className={`group inline-flex items-center ${HEADER_CONTROL_CLASS}`}
     >
-      <ChromeIcon
+      <BrowserIcon
         className={`${HEADER_ICON_CLASS} grayscale transition group-hover:grayscale-0`}
       />
     </button>

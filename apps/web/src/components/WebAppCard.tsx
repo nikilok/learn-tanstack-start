@@ -1,4 +1,4 @@
-import { Download as DownloadIcon } from 'lucide-react';
+import { MonitorDown } from 'lucide-react';
 
 import BrowserIcon from './BrowserIcon';
 import DownloadCard from './DownloadCard';
@@ -27,8 +27,8 @@ export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
         onClick={onInstall}
         className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) transition hover:opacity-90"
       >
-        <DownloadIcon className="size-4" aria-hidden="true" />
-        Download Web
+        <MonitorDown className="size-4" aria-hidden="true" />
+        Install web app
       </button>
     </DownloadCard>
   );

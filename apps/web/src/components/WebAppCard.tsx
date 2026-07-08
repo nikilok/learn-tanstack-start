@@ -1,13 +1,13 @@
-import { Download as DownloadIcon } from 'lucide-react';
+import { MonitorDown } from 'lucide-react';
 
-import ChromeIcon from './ChromeIcon';
+import BrowserIcon from './BrowserIcon';
 import DownloadCard from './DownloadCard';
 
 /**
  * /download "Web" card — installs the site as a Chromium PWA. Rendered only when
  * the browser has actually offered an install (the parent gates on
  * useInstallPrompt), so on unsupported browsers (Safari, Firefox) it's absent
- * rather than shown disabled.
+ * rather than shown disabled. The icon reflects the visitor's actual browser.
  */
 export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
   return (
@@ -16,7 +16,7 @@ export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
         // Same sky gradient as Preview's no-wallpaper fallback — keeps the two
         // /download tiles reading as one set.
         <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]">
-          <ChromeIcon className="size-20" />
+          <BrowserIcon className="size-20" />
         </div>
       }
       title="Web"
@@ -27,8 +27,8 @@ export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
         onClick={onInstall}
         className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) transition hover:opacity-90"
       >
-        <DownloadIcon className="size-4" aria-hidden="true" />
-        Download Web
+        <MonitorDown className="size-4" aria-hidden="true" />
+        Install web app
       </button>
     </DownloadCard>
   );

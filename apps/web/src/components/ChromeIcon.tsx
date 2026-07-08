@@ -1,10 +1,14 @@
+import { useId } from 'react';
+
 /**
  * Google Chrome brand logo (flat, full-colour) — three colour petals wrapping
  * the blue hub. Full-colour by design so it reads as "Chrome" and stays distinct
  * from the monochrome download/control glyphs. `aria-hidden` — the surrounding
- * control supplies the label. Sized via `className`.
+ * control supplies the label. Sized via `className`. Gradient IDs are scoped with
+ * `useId` so two instances on one page (header pill + /download card) can't clash.
  */
 export default function ChromeIcon({ className }: { className?: string }) {
+  const id = useId();
   return (
     <svg
       viewBox="-10 -10 276 276"
@@ -13,7 +17,7 @@ export default function ChromeIcon({ className }: { className?: string }) {
       xmlns="http://www.w3.org/2000/svg"
     >
       <linearGradient
-        id="chrome-green"
+        id={`${id}-green`}
         x1="145"
         x2="34"
         y1="253"
@@ -24,7 +28,7 @@ export default function ChromeIcon({ className }: { className?: string }) {
         <stop offset="1" stopColor="#34a853" />
       </linearGradient>
       <linearGradient
-        id="chrome-yellow"
+        id={`${id}-yellow`}
         x1="111"
         x2="222"
         y1="254"
@@ -35,7 +39,7 @@ export default function ChromeIcon({ className }: { className?: string }) {
         <stop offset="1" stopColor="#fbbc04" />
       </linearGradient>
       <linearGradient
-        id="chrome-red"
+        id={`${id}-red`}
         x1="17"
         x2="239"
         y1="80"
@@ -48,16 +52,16 @@ export default function ChromeIcon({ className }: { className?: string }) {
       {/* white backing → the thin ring around the blue hub reads white */}
       <circle cx="128" cy="128" r="64" fill="#fff" />
       <path
-        fill="url(#chrome-green)"
+        fill={`url(#${id}-green)`}
         d="M96 183.4A63.7 63.7 0 0 1 72.6 160L17.2 64A128 128 0 0 0 128 256l55.4-96A64 64 0 0 1 96 183.4Z"
       />
       <path
-        fill="url(#chrome-yellow)"
+        fill={`url(#${id}-yellow)`}
         d="M192 128a63.7 63.7 0 0 1-8.6 32L128 256A128 128 0 0 0 238.9 64h-111a64 64 0 0 1 64 64Z"
       />
       <circle cx="128" cy="128" r="52" fill="#1a73e8" />
       <path
-        fill="url(#chrome-red)"
+        fill={`url(#${id}-red)`}
         d="M96 72.6a63.7 63.7 0 0 1 32-8.6h110.8a128 128 0 0 0-221.7 0l55.5 96A64 64 0 0 1 96 72.6Z"
       />
     </svg>

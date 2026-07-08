@@ -1,9 +1,13 @@
+import { useId } from 'react';
+
 /**
  * Microsoft Edge brand logo — the blue-to-teal wave. `aria-hidden`; sized via
- * `className`. Gradient/shape IDs namespaced (`edge-*`) to avoid clashing with
- * other inlined SVGs.
+ * `className`. The wave shapes are `<defs>` templates drawn only through the
+ * gradient `<use>` overlays (never painted directly, else the bare paths show a
+ * black fringe); IDs are scoped with `useId` so two instances can't clash.
  */
 export default function EdgeIcon({ className }: { className?: string }) {
+  const id = useId();
   return (
     <svg
       viewBox="0 0 27600 27600"
@@ -11,96 +15,98 @@ export default function EdgeIcon({ className }: { className?: string }) {
       className={className}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <linearGradient
-        id="edge-b"
-        x1="6870"
-        x2="24704"
-        y1="18705"
-        y2="18705"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset="0" stopColor="#0c59a4" />
-        <stop offset="1" stopColor="#114a8b" />
-      </linearGradient>
-      <linearGradient
-        id="edge-c"
-        x1="16272"
-        x2="5133"
-        y1="10968"
-        y2="23102"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset="0" stopColor="#1b9de2" />
-        <stop offset=".16" stopColor="#1595df" />
-        <stop offset=".67" stopColor="#0680d7" />
-        <stop offset="1" stopColor="#0078d4" />
-      </linearGradient>
-      <radialGradient
-        id="edge-d"
-        cx="16720"
-        cy="18747"
-        r="9538"
-        gradientUnits="userSpaceOnUse"
-      >
-        <stop offset=".72" stopOpacity="0" />
-        <stop offset=".95" stopOpacity=".53" />
-        <stop offset="1" />
-      </radialGradient>
-      <radialGradient
-        id="edge-e"
-        cx="7130"
-        cy="19866"
-        r="14324"
-        gradientUnits="userSpaceOnUse"
-        gradientTransform="matrix(.14843 -.98892 .79688 .1196 -8759 25542)"
-      >
-        <stop offset=".76" stopOpacity="0" />
-        <stop offset=".95" stopOpacity=".5" />
-        <stop offset="1" />
-      </radialGradient>
-      <radialGradient
-        id="edge-f"
-        cx="2523"
-        cy="4680"
-        r="20243"
-        gradientUnits="userSpaceOnUse"
-        gradientTransform="matrix(-.03715 .99931 -2.12836 -.07913 13579 3530)"
-      >
-        <stop offset="0" stopColor="#35c1f1" />
-        <stop offset=".11" stopColor="#34c1ed" />
-        <stop offset=".23" stopColor="#2fc2df" />
-        <stop offset=".31" stopColor="#2bc3d2" />
-        <stop offset=".67" stopColor="#36c752" />
-      </radialGradient>
-      <radialGradient
-        id="edge-g"
-        cx="24247"
-        cy="7758"
-        r="9734"
-        gradientUnits="userSpaceOnUse"
-        gradientTransform="matrix(.28109 .95968 -.78353 .22949 24510 -16292)"
-      >
-        <stop offset="0" stopColor="#66eb6e" />
-        <stop offset="1" stopColor="#66eb6e" stopOpacity="0" />
-      </radialGradient>
-      <path
-        id="edge-h"
-        d="M24105 20053a9345 9345 0 01-1053 472 10202 10202 0 01-3590 646c-4732 0-8855-3255-8855-7432 0-1175 680-2193 1643-2729-4280 180-5380 4640-5380 7253 0 7387 6810 8137 8276 8137 791 0 1984-230 2704-456l130-44a12834 12834 0 006660-5282c220-350-168-757-535-565z"
-      />
-      <path
-        id="edge-i"
-        d="M11571 25141a7913 7913 0 01-2273-2137 8145 8145 0 01-1514-4740 8093 8093 0 013093-6395 8082 8082 0 011373-859c312-148 846-414 1554-404a3236 3236 0 012569 1297 3184 3184 0 01636 1866c0-21 2446-7960-8005-7960-4390 0-8004 4166-8004 7820 0 2319 538 4170 1212 5604a12833 12833 0 007684 6757 12795 12795 0 003908 610c1414 0 2774-233 4045-656a7575 7575 0 01-6278-803z"
-      />
-      <path
-        id="edge-j"
-        d="M16231 15886c-80 105-330 250-330 566 0 260 170 512 472 723 1438 1003 4149 868 4156 868a5954 5954 0 003027-839 6147 6147 0 001133-850 6180 6180 0 001910-4437c26-2242-796-3732-1133-4392-2120-4141-6694-6525-11668-6525-7011 0-12703 5635-12798 12620 47-3654 3679-6605 7996-6605 350 0 2346 34 4200 1007 1634 858 2490 1894 3086 2921 618 1067 728 2415 728 2952s-271 1333-780 1990z"
-      />
-      <use fill="url(#edge-b)" href="#edge-h" />
-      <use fill="url(#edge-d)" opacity=".35" href="#edge-h" />
-      <use fill="url(#edge-c)" href="#edge-i" />
-      <use fill="url(#edge-e)" opacity=".4" href="#edge-i" />
-      <use fill="url(#edge-f)" href="#edge-j" />
-      <use fill="url(#edge-g)" href="#edge-j" />
+      <defs>
+        <linearGradient
+          id={`${id}-b`}
+          x1="6870"
+          x2="24704"
+          y1="18705"
+          y2="18705"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0" stopColor="#0c59a4" />
+          <stop offset="1" stopColor="#114a8b" />
+        </linearGradient>
+        <linearGradient
+          id={`${id}-c`}
+          x1="16272"
+          x2="5133"
+          y1="10968"
+          y2="23102"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0" stopColor="#1b9de2" />
+          <stop offset=".16" stopColor="#1595df" />
+          <stop offset=".67" stopColor="#0680d7" />
+          <stop offset="1" stopColor="#0078d4" />
+        </linearGradient>
+        <radialGradient
+          id={`${id}-d`}
+          cx="16720"
+          cy="18747"
+          r="9538"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset=".72" stopOpacity="0" />
+          <stop offset=".95" stopOpacity=".53" />
+          <stop offset="1" />
+        </radialGradient>
+        <radialGradient
+          id={`${id}-e`}
+          cx="7130"
+          cy="19866"
+          r="14324"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform="matrix(.14843 -.98892 .79688 .1196 -8759 25542)"
+        >
+          <stop offset=".76" stopOpacity="0" />
+          <stop offset=".95" stopOpacity=".5" />
+          <stop offset="1" />
+        </radialGradient>
+        <radialGradient
+          id={`${id}-f`}
+          cx="2523"
+          cy="4680"
+          r="20243"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform="matrix(-.03715 .99931 -2.12836 -.07913 13579 3530)"
+        >
+          <stop offset="0" stopColor="#35c1f1" />
+          <stop offset=".11" stopColor="#34c1ed" />
+          <stop offset=".23" stopColor="#2fc2df" />
+          <stop offset=".31" stopColor="#2bc3d2" />
+          <stop offset=".67" stopColor="#36c752" />
+        </radialGradient>
+        <radialGradient
+          id={`${id}-g`}
+          cx="24247"
+          cy="7758"
+          r="9734"
+          gradientUnits="userSpaceOnUse"
+          gradientTransform="matrix(.28109 .95968 -.78353 .22949 24510 -16292)"
+        >
+          <stop offset="0" stopColor="#66eb6e" />
+          <stop offset="1" stopColor="#66eb6e" stopOpacity="0" />
+        </radialGradient>
+        <path
+          id={`${id}-h`}
+          d="M24105 20053a9345 9345 0 01-1053 472 10202 10202 0 01-3590 646c-4732 0-8855-3255-8855-7432 0-1175 680-2193 1643-2729-4280 180-5380 4640-5380 7253 0 7387 6810 8137 8276 8137 791 0 1984-230 2704-456l130-44a12834 12834 0 006660-5282c220-350-168-757-535-565z"
+        />
+        <path
+          id={`${id}-i`}
+          d="M11571 25141a7913 7913 0 01-2273-2137 8145 8145 0 01-1514-4740 8093 8093 0 013093-6395 8082 8082 0 011373-859c312-148 846-414 1554-404a3236 3236 0 012569 1297 3184 3184 0 01636 1866c0-21 2446-7960-8005-7960-4390 0-8004 4166-8004 7820 0 2319 538 4170 1212 5604a12833 12833 0 007684 6757 12795 12795 0 003908 610c1414 0 2774-233 4045-656a7575 7575 0 01-6278-803z"
+        />
+        <path
+          id={`${id}-j`}
+          d="M16231 15886c-80 105-330 250-330 566 0 260 170 512 472 723 1438 1003 4149 868 4156 868a5954 5954 0 003027-839 6147 6147 0 001133-850 6180 6180 0 001910-4437c26-2242-796-3732-1133-4392-2120-4141-6694-6525-11668-6525-7011 0-12703 5635-12798 12620 47-3654 3679-6605 7996-6605 350 0 2346 34 4200 1007 1634 858 2490 1894 3086 2921 618 1067 728 2415 728 2952s-271 1333-780 1990z"
+        />
+      </defs>
+      <use fill={`url(#${id}-b)`} href={`#${id}-h`} />
+      <use fill={`url(#${id}-d)`} opacity=".35" href={`#${id}-h`} />
+      <use fill={`url(#${id}-c)`} href={`#${id}-i`} />
+      <use fill={`url(#${id}-e)`} opacity=".4" href={`#${id}-i`} />
+      <use fill={`url(#${id}-f)`} href={`#${id}-j`} />
+      <use fill={`url(#${id}-g)`} href={`#${id}-j`} />
     </svg>
   );
 }

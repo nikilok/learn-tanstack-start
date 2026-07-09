@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 export { neon } from '@neondatabase/serverless';
+export type { NeonQueryFunction } from '@neondatabase/serverless';
 
 /**
  * Build a Drizzle client backed by Neon's serverless HTTP driver. The returned

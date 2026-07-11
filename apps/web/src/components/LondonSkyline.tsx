@@ -475,6 +475,9 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
   const isDark = useIsDark();
   const [themeFlips, setThemeFlips] = useState(0);
   const wasDark = useRef(isDark);
+  const smokeFreqRef = useRef<SVGAnimateElement>(null);
+  const smokeScaleRef = useRef<SVGAnimateElement>(null);
+  const smokeArmedRef = useRef(false);
 
   // Re-play the sky-fill animation each time the skyline enters the viewport.
   useEffect(() => {
@@ -503,6 +506,41 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
     }
   }, [isDark]);
 
+  // Billow the ink like smoke each time the skyline properly comes on show.
+  // Dedicated observer: fire at 60% visible, re-arm only below 15% — the main
+  // inView state arms during load-time layout shifts and would burn the burst
+  // before anyone sees it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        if (entry.intersectionRatio >= 0.6 && !smokeArmedRef.current) {
+          smokeArmedRef.current = true;
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            smokeFreqRef.current?.beginElement();
+            smokeScaleRef.current?.beginElement();
+          }
+        } else if (entry.intersectionRatio <= 0.15) {
+          smokeArmedRef.current = false;
+        }
+      },
+      { threshold: [0.15, 0.6] },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Replay the smoke when a theme flip lands while the skyline is on show.
+  useEffect(() => {
+    if (themeFlips === 0 || !smokeArmedRef.current) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    smokeFreqRef.current?.beginElement();
+    smokeScaleRef.current?.beginElement();
+  }, [themeFlips]);
+
   return (
     <svg
       ref={ref}
@@ -530,7 +568,10 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
     >
       {/* Sky ink — light mode only; always present (no entrance animation).
           The mask reserves a blank circle around the sun so ink never shows
-          through the disc while its entrance fill is still transparent. */}
+          through the disc while its entrance fill is still transparent. The
+          filter billows the ink like smoke for ~4.5s when triggered (scale
+          rests at 0 = crisp stroke), masked after filtering so the sun's
+          reserve stays fixed while the ink curls around it. */}
       <mask id="inkSunReserve">
         <rect width={1460} height={600} fill="#ffffff" stroke="none" />
         <circle
@@ -541,7 +582,48 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
           stroke="none"
         />
       </mask>
-      <g className={styles.ink} mask="url(#inkSunReserve)">
+      <filter id="inkSmoke" x="-5%" y="-20%" width="110%" height="140%">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.011 0.019"
+          numOctaves={3}
+          seed={7}
+          result="n"
+        >
+          <animate
+            ref={smokeFreqRef}
+            attributeName="baseFrequency"
+            begin="indefinite"
+            dur="5s"
+            values="0.011 0.019;0.016 0.028;0.011 0.019"
+            fill="freeze"
+          />
+        </feTurbulence>
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="n"
+          scale={0}
+          xChannelSelector="R"
+          yChannelSelector="G"
+        >
+          <animate
+            ref={smokeScaleRef}
+            attributeName="scale"
+            begin="indefinite"
+            dur="5s"
+            values="0;75;40;62;0"
+            keyTimes="0;0.15;0.45;0.68;1"
+            calcMode="spline"
+            keySplines="0.3 0 0.4 1;0.35 0 0.5 1;0.35 0 0.5 1;0.3 0 0.3 1"
+            fill="freeze"
+          />
+        </feDisplacementMap>
+      </filter>
+      <g
+        className={styles.ink}
+        filter="url(#inkSmoke)"
+        mask="url(#inkSunReserve)"
+      >
         {INK_STROKES.map((s) => (
           <path
             key={s.key}

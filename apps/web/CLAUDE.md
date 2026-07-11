@@ -261,6 +261,12 @@ is owner-gated via `src/owner.server.ts`: a valid `vercel-flag-overrides` cookie
 httpOnly `ss-owner` cookie. Rotating `FLAGS_SECRET` revokes ALL owner credentials —
 that is the kill-switch (also for ex-team-members, whose cookies outlive membership).
 
+- **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
+  (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie
+  when the Flags Explorer has ≥1 flag to toggle. It gates no UI and looks unused —
+  deleting it empties the registry and silently breaks new-owner bootstrap (and
+  makes the `FLAGS_SECRET` kill-switch irreversible). It is the sole registry
+  entry since the `downloads` flag was removed.
 - **`/download` must NEVER get a cache routeRule** (vite.config.ts): the loader
   SSR-renders owner-specific content (private releases + Publish buttons from
   `getOwnerDesktopReleases`), which is only safe because documents render

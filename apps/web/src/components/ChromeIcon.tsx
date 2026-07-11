@@ -5,7 +5,7 @@ import { useId } from 'react';
  * the blue hub. Full-colour by design so it reads as "Chrome" and stays distinct
  * from the monochrome download/control glyphs. `aria-hidden` — the surrounding
  * control supplies the label. Sized via `className`. Gradient IDs are scoped with
- * `useId` so two instances on one page (header pill + /download card) can't clash.
+ * `useId` so multiple instances on a page can't clash (SVG gradient ids are global).
  */
 export default function ChromeIcon({ className }: { className?: string }) {
   const id = useId();

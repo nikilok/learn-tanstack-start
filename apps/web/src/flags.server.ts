@@ -33,8 +33,22 @@ export async function decryptFlagOverrides(
   }
 }
 
-/** Active flag registry (currently empty). Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
-export const flags: Record<string, FlagSpec<FlagValue>> = {};
+/** No-op anchor flag — load-bearing: the Flags Explorer only mints the `vercel-flag-overrides` cookie (which owner.server.ts upgrades to the durable ss-owner credential) when ≥1 flag exists, so an empty registry silently breaks new-owner bootstrap. Gates no UI; do NOT delete as "unused". */
+export const ownerBootstrapFlag: FlagSpec<boolean> = {
+  key: 'owner-bootstrap',
+  description:
+    'Anchor for owner bootstrap — toggle + Apply in the Flags Explorer to mint the overrides cookie owner.server.ts upgrades to ss-owner. Gates no UI.',
+  defaultValue: false,
+  options: [
+    { value: false, label: 'Off' },
+    { value: true, label: 'On' },
+  ],
+};
+
+/** Active flag registry. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
+export const flags: Record<string, FlagSpec<FlagValue>> = {
+  [ownerBootstrapFlag.key]: ownerBootstrapFlag,
+};
 
 /** Memoized adapter factory; null when FLAGS is unset (e.g. local dev without Vercel Flags). */
 let adapterFactory: ReturnType<typeof createVercelAdapter> | null | undefined;

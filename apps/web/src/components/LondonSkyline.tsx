@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { useIsDark } from '../hooks/useIsDark';
 
@@ -475,25 +475,118 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
   const isDark = useIsDark();
   const [themeFlips, setThemeFlips] = useState(0);
   const wasDark = useRef(isDark);
+  const smokeFreqRef = useRef<SVGAnimateElement>(null);
+  const smokeDriftRef = useRef<SVGAnimateElement>(null);
+  const smokeScaleRef = useRef<SVGAnimateElement>(null);
+  const smokeArmedRef = useRef(false);
+  const smokePlayingRef = useRef(false);
+  const smokeTimerRef = useRef<number | undefined>(undefined);
+  const smokeQueueRef = useRef<(() => void) | null>(null);
+  const inkGroupRef = useRef<SVGGElement>(null);
+  // Per-instance ids: url(#…) resolves document-globally, so fixed ids would
+  // bind every instance's ink to the first mount's filter/mask.
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const smokeFilterId = `ink-smoke-${uid}`;
+  const sunMaskId = `ink-sun-reserve-${uid}`;
 
-  // Re-play the sky-fill animation each time the skyline enters the viewport.
+  // One observer, two state machines, every batched entry processed so no
+  // crossing is dropped: the sky-fill entrance arms at 35% visible (reset once
+  // fully out of view); the smoke burst arms at 60% (re-armed below 15%).
   useEffect(() => {
     setMounted(true);
     const el = ref.current;
     if (!el) return;
+
+    /** Live visible fraction of the skyline, independent of observer batching. */
+    const visibleRatio = () => {
+      const rect = el.getBoundingClientRect();
+      if (!rect.height) return 0;
+      return (
+        Math.max(
+          0,
+          Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0),
+        ) / rect.height
+      );
+    };
+
+    /** Ends an in-flight burst and returns the ink to crisp vector paint. */
+    const stopSmoke = () => {
+      window.clearTimeout(smokeTimerRef.current);
+      if (!smokePlayingRef.current) return;
+      smokePlayingRef.current = false;
+      smokeScaleRef.current?.endElement();
+      smokeFreqRef.current?.endElement();
+      smokeDriftRef.current?.endElement();
+      inkGroupRef.current?.removeAttribute('filter');
+    };
+
+    // Queue a burst behind a settle beat: re-checking visibility, theme and
+    // motion 600ms later stops load-time layout shifts and mid-overlay theme
+    // swaps from burning the burst while nobody can see it.
+    const queueSmoke = () => {
+      window.clearTimeout(smokeTimerRef.current);
+      smokeTimerRef.current = window.setTimeout(() => {
+        // restarting mid-flight snaps billowed ink back to crisp for a frame
+        if (smokePlayingRef.current) return;
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+          return;
+        // the ink layer is display:none in dark mode — nothing to animate
+        if (document.documentElement.classList.contains('dark')) return;
+        if (visibleRatio() < 0.6) {
+          smokeArmedRef.current = false;
+          return;
+        }
+        smokePlayingRef.current = true;
+        // Attached only while the burst plays — at rest the sky stays direct
+        // vector paint instead of a rasterizing filter pipeline.
+        inkGroupRef.current?.setAttribute('filter', `url(#${smokeFilterId})`);
+        smokeFreqRef.current?.beginElement();
+        smokeDriftRef.current?.beginElement();
+        smokeScaleRef.current?.beginElement();
+      }, 600);
+    };
+    smokeQueueRef.current = queueSmoke;
+
+    const scaleAnim = smokeScaleRef.current;
+    const onSmokeEnd = () => {
+      smokePlayingRef.current = false;
+      inkGroupRef.current?.removeAttribute('filter');
+    };
+    scaleAnim?.addEventListener('endEvent', onSmokeEnd);
+
+    // A live reduced-motion flip halts an in-flight burst, matching the CSS
+    // animations that stop when their media block no longer applies.
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onMotionChange = () => {
+      if (motionQuery.matches) stopSmoke();
+    };
+    motionQuery.addEventListener('change', onMotionChange);
+
     const observer = new IntersectionObserver(
       (entries) => {
-        const entry = entries[0];
-        if (!entry) return;
-        // Arm at 35% visible; reset (so it re-arms) only once fully out of view.
-        if (entry.intersectionRatio >= 0.35) setInView(true);
-        else if (entry.intersectionRatio <= 0) setInView(false);
+        for (const entry of entries) {
+          const ratio = entry.intersectionRatio;
+          if (ratio >= 0.35) setInView(true);
+          else if (ratio <= 0) setInView(false);
+          if (ratio >= 0.6 && !smokeArmedRef.current) {
+            smokeArmedRef.current = true;
+            queueSmoke();
+          } else if (ratio <= 0.15) {
+            smokeArmedRef.current = false;
+          }
+        }
       },
-      { threshold: [0, 0.35] },
+      { threshold: [0, 0.15, 0.35, 0.6] },
     );
     observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    return () => {
+      observer.disconnect();
+      motionQuery.removeEventListener('change', onMotionChange);
+      scaleAnim?.removeEventListener('endEvent', onSmokeEnd);
+      window.clearTimeout(smokeTimerRef.current);
+      smokeQueueRef.current = null;
+    };
+  }, [smokeFilterId]);
 
   // A light<->dark switch replays the sky-fill via the keyed remount below.
   useEffect(() => {
@@ -502,6 +595,13 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       setThemeFlips((n) => n + 1);
     }
   }, [isDark]);
+
+  // Replay the smoke on theme flips; the queue re-checks visibility, theme and
+  // motion live, so it only plays when the skyline is truly on show in light.
+  useEffect(() => {
+    if (themeFlips === 0) return;
+    smokeQueueRef.current?.();
+  }, [themeFlips]);
 
   return (
     <svg
@@ -530,8 +630,12 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
     >
       {/* Sky ink — light mode only; always present (no entrance animation).
           The mask reserves a blank circle around the sun so ink never shows
-          through the disc while its entrance fill is still transparent. */}
-      <mask id="inkSunReserve">
+          through the disc while its entrance fill is still transparent. The
+          filter billows the ink like smoke for ~3s per burst — queueSmoke
+          attaches it to the group only while playing, so the resting stroke
+          is direct vector paint; masking happens after filtering so the sun's
+          reserve stays fixed while the ink curls around it. */}
+      <mask id={sunMaskId}>
         <rect width={1460} height={600} fill="#ffffff" stroke="none" />
         <circle
           cx={CELESTIAL.cx}
@@ -541,7 +645,56 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
           stroke="none"
         />
       </mask>
-      <g className={styles.ink} mask="url(#inkSunReserve)">
+      <filter id={smokeFilterId} x="-5%" y="-20%" width="110%" height="140%">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.011 0.019"
+          numOctaves={3}
+          seed={7}
+          result="n"
+        >
+          <animate
+            ref={smokeFreqRef}
+            attributeName="baseFrequency"
+            begin="indefinite"
+            dur="3s"
+            values="0.011 0.019;0.016 0.027"
+            fill="freeze"
+          />
+        </feTurbulence>
+        {/* Pans the noise field one way for the whole burst, so the dissolve
+            never retraces the swell — the smoke drifts instead of reversing. */}
+        <feOffset in="n" dx={0} dy={0} result="np">
+          <animate
+            ref={smokeDriftRef}
+            attributeName="dx"
+            begin="indefinite"
+            dur="3s"
+            values="0;36"
+            fill="freeze"
+          />
+        </feOffset>
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="np"
+          scale={0}
+          xChannelSelector="R"
+          yChannelSelector="G"
+        >
+          <animate
+            ref={smokeScaleRef}
+            attributeName="scale"
+            begin="indefinite"
+            dur="3s"
+            values="0;75;0"
+            keyTimes="0;0.3;1"
+            calcMode="spline"
+            keySplines="0.25 0 0.45 1;0.3 0 0.35 1"
+            fill="freeze"
+          />
+        </feDisplacementMap>
+      </filter>
+      <g ref={inkGroupRef} className={styles.ink} mask={`url(#${sunMaskId})`}>
         {INK_STROKES.map((s) => (
           <path
             key={s.key}

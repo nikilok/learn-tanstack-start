@@ -81,7 +81,8 @@
 }
 
 /* Dark mode reverts every landmark to the inherited ink — outline only. */
-:global(.dark) .skyline
+:global(.dark)
+  .skyline
   :is(
     .limestone,
     .roofSlate,
@@ -121,9 +122,9 @@
   display: none;
 }
 
-/* Sky ink — watercolour-blue brush washes in the light-mode sky only. */
+/* Sky ink — royal-blue brush washes in the light-mode sky only. */
 .ink {
-  fill: #4171cf;
+  fill: #2b50c2;
   stroke: none;
 }
 :global(.dark) .ink {
@@ -165,16 +166,6 @@
     transform: translateX(0);
   }
 }
-@keyframes skyline-ink-brush {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 @media (prefers-reduced-motion: no-preference) {
   /* Once JS is live, the celestial shapes rest empty until animated in, so each
      re-entry into view starts the fill from scratch (no JS = stays shown). */
@@ -184,9 +175,6 @@
     fill-opacity: 0;
   }
   .js .cloud {
-    opacity: 0;
-  }
-  .js .inkStroke {
     opacity: 0;
   }
   .animate .sunDisc,
@@ -199,8 +187,5 @@
   .animate .cloud {
     transform-box: fill-box;
     animation: skyline-cloud-drift 1.5s ease-out both;
-  }
-  .animate .inkStroke {
-    animation: skyline-ink-brush 1.2s ease-out both;
   }
 }

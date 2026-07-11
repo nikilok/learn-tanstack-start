@@ -1,8 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Suspense } from 'react';
 
-import { downloadsFlagQueryOptions } from '../api/flags';
 import LastUpdated, { LastUpdatedSkeleton } from './LastUpdated';
 import Logo from './Logo';
 import LondonSkyline from './LondonSkyline';
@@ -15,7 +13,6 @@ import LondonSkyline from './LondonSkyline';
  */
 export default function Footer() {
   const year = new Date().getFullYear();
-  const { data: downloadsEnabled } = useQuery(downloadsFlagQueryOptions);
 
   return (
     <footer className="site-footer relative mt-20 px-4 pt-10 pb-10">
@@ -84,21 +81,20 @@ export default function Footer() {
             >
               Privacy Policy
             </Link>
-            {downloadsEnabled ? (
-              // hidden sm:contents — desktop installers are useless on a phone, so
-              // suppress below sm, matching the header DownloadButton's gating.
-              <span className="footer-desktop-link hidden sm:contents">
-                <span aria-hidden="true" className="text-(--sea-ink-faint)">
-                  &middot;
-                </span>
-                <Link
-                  to="/download"
-                  className="no-underline transition hover:text-(--sea-ink)"
-                >
-                  Download
-                </Link>
+            {/* hidden sm:contents — desktop installers are useless on a phone,
+                so suppress below sm, matching the header DownloadButton's sm+
+                visibility. */}
+            <span className="footer-desktop-link hidden sm:contents">
+              <span aria-hidden="true" className="text-(--sea-ink-faint)">
+                &middot;
               </span>
-            ) : null}
+              <Link
+                to="/download"
+                className="no-underline transition hover:text-(--sea-ink)"
+              >
+                Download
+              </Link>
+            </span>
           </div>
 
           <p className="m-0 text-xs text-(--sea-ink-faint)">

@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, notFound } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import { Download as DownloadIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { downloadsFlagQueryOptions } from '../api/flags';
 import {
   type DesktopPlatform,
   desktopReleasesQueryOptions,
@@ -23,25 +22,15 @@ import { buildDownloadJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
 
 export const Route = createFileRoute('/download')({
-  // Gated: when the downloads flag is off, /download 404s (NotFound) rather than
-  // redirecting, so a visitor can't tell it's flag-restricted vs nonexistent.
-  // Entry points are hidden too, so this only catches direct-URL / crawler hits.
-  // Owners bypass the dark-launch flag: the durable ss-owner credential must
-  // keep the publish workflow reachable without a live toolbar override cookie.
-  // The owner check runs FIRST and short-circuits — it never touches the flags
-  // backend, so owner loads can't stall on flag-client init; only anonymous
-  // visitors pay a flag evaluation (which also warms the header/footer flag
-  // query — owners pick that up client-side like every other page).
+  // Resolve owner membership up front so the loader can render the owner's
+  // public+private snapshot and skip the public fetch. The owner check is local
+  // cookie crypto (no backend), so the load never stalls on it. The page itself
+  // is public — anonymous visitors get `owner: false` and the public list.
   beforeLoad: async ({ context: { queryClient } }) => {
     const ownerView = await queryClient.ensureQueryData(
       ownerDesktopReleasesQueryOptions,
     );
-    if (ownerView.owner) return { owner: true };
-    const enabled = await queryClient.ensureQueryData(
-      downloadsFlagQueryOptions,
-    );
-    if (!enabled) throw notFound();
-    return { owner: false };
+    return { owner: ownerView.owner };
   },
   head: ({ match }) => {
     const pageTitle = 'SponsorSearch . Download';

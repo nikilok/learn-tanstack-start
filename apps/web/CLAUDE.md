@@ -276,17 +276,13 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
 - Visibility flips propagate via the tag purge in `setReleaseVisibility` (gated on
   `VERCEL_CACHE_INVALIDATION`, like the release POST endpoint's). If you change the
   tag name or caching, keep mutation-purge and cache-tag in lockstep.
-- **`beforeLoad` is owner-first and the flags client is polling-mode**: the owner
-  check (local cookie crypto) short-circuits before any flag evaluation, so owner
-  loads never block on the flags backend; `flags.server.ts` builds the adapter with
-  `createClient(FLAGS, { stream: false })` because SSE stream init from a serverless
-  function stalled the first evaluation per instance ~2.5s of TTFB. Polling = a
-  bounded first fetch + a 30s background interval on warm instances, so dashboard
-  flag flips propagate within ~30s, not live. The loader skips the public-releases
-  fetch for owners (`context.owner`) so their SSR never blocks on it, but the
-  component's public useQuery must stay UNconditional: it warms the list
-  post-hydration so an ss-owner credential dying mid-session swaps to the public
-  view instead of flashing the "coming soon" empty state.
+- **`beforeLoad` resolves owner membership; the loader forks on it**: the owner
+  check is local cookie crypto (no backend), so the load never stalls on it. The
+  loader skips the public-releases fetch for owners (`context.owner`) so their SSR
+  never blocks on it, but the component's public useQuery must stay UNconditional:
+  it warms the list post-hydration so an ss-owner credential dying mid-session
+  swaps to the public view instead of flashing the "coming soon" empty state.
+  (`/download` itself is public — no feature-flag gate.)
 - **`loadReleases` must stay a single SQL statement** (release-window subquery
   LEFT JOIN assets): one snapshot means a concurrent publish/unpublish flip can't
   tear the payload. Splitting it back into two queries can list a release without

@@ -33,22 +33,8 @@ export async function decryptFlagOverrides(
   }
 }
 
-/** Gates the desktop-app download UI (header button, footer link, /download page) so the branch can ship dark until the release pipeline is ready. Default hidden; flip in the Vercel dashboard (or Flags Explorer) when ready. */
-export const downloadsFlag: FlagSpec<boolean> = {
-  key: 'downloads',
-  description:
-    'Show the desktop-app download entry points and the /download page.',
-  defaultValue: false,
-  options: [
-    { value: false, label: 'Hidden' },
-    { value: true, label: 'Visible' },
-  ],
-};
-
-/** Active flag registry. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
-export const flags: Record<string, FlagSpec<FlagValue>> = {
-  [downloadsFlag.key]: downloadsFlag,
-};
+/** Active flag registry (currently empty). Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
+export const flags: Record<string, FlagSpec<FlagValue>> = {};
 
 /** Memoized adapter factory; null when FLAGS is unset (e.g. local dev without Vercel Flags). */
 let adapterFactory: ReturnType<typeof createVercelAdapter> | null | undefined;

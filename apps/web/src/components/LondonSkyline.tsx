@@ -179,12 +179,290 @@ const clouds = [
   { path: CLOUD_PUFFY, x: 815, y: 180, scale: 0.95, delay: 0.6 },
 ];
 
+// Sky wash (light mode) — a sumi-e brush sweep behind the sun, clouds and
+// buildings; every mark is generated from seeded PRNGs so SSR and client match.
+
+/** Deterministic PRNG (mulberry32) so the generated ink matches across SSR and client. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Rounds ink coordinates to whole units — sub-pixel at footer scale, and it
+ * keeps the generated path data ~20% smaller in every SSR document. */
+const ri = (n: number) => Math.round(n);
+
+// The sweep's skeleton: [x, top edge y, bottom edge y] stations across the sky.
+const INK_STATIONS: Array<[number, number, number]> = [
+  [66, 148, 148],
+  [120, 100, 166],
+  [180, 70, 180],
+  [240, 46, 188],
+  [300, 34, 190],
+  [360, 38, 196],
+  [420, 52, 202],
+  [480, 74, 208],
+  [540, 96, 216],
+  [600, 108, 232],
+  [660, 110, 258],
+  [720, 102, 280],
+  [780, 106, 286],
+  [840, 130, 288],
+  [900, 158, 284],
+  [940, 160, 282],
+  [1000, 136, 280],
+  [1060, 106, 276],
+  [1120, 74, 268],
+  [1180, 48, 252],
+  [1240, 28, 240],
+  [1300, 18, 228],
+  [1360, 14, 214],
+  [1420, 20, 196],
+  [1450, 34, 180],
+];
+
+/** Catmull-Rom interpolation of a station edge (1 = top, 2 = bottom) at x. */
+function edgeYAt(x: number, edge: 1 | 2): number {
+  const s = INK_STATIONS;
+  const cx = Math.min(s[s.length - 1][0], Math.max(s[0][0], x));
+  let i = 0;
+  while (i < s.length - 2 && s[i + 1][0] <= cx) i++;
+  const t = (cx - s[i][0]) / (s[i + 1][0] - s[i][0]);
+  const y0 = s[Math.max(0, i - 1)][edge];
+  const y1 = s[i][edge];
+  const y2 = s[i + 1][edge];
+  const y3 = s[Math.min(s.length - 1, i + 2)][edge];
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (
+    0.5 *
+    (2 * y1 +
+      (-y0 + y2) * t +
+      (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 +
+      (-y0 + 3 * y1 - 3 * y2 + y3) * t3)
+  );
+}
+
+/** Local tangent angle of a sweep edge at x (radians, SVG y-down). */
+function edgeAngleAt(x: number, edge: 1 | 2): number {
+  return Math.atan2(edgeYAt(x + 20, edge) - edgeYAt(x - 20, edge), 40);
+}
+
+/** Seeded 1-D value noise over x, smoothstep-blended between lattice points. */
+function makeNoise(rand: () => number, wavelength: number, amplitude: number) {
+  const n = Math.ceil(1460 / wavelength) + 2;
+  const lattice = Array.from({ length: n }, () => rand() - 0.5);
+  return (x: number) => {
+    const t = Math.max(0, x / wavelength);
+    const i = Math.min(n - 2, Math.floor(t));
+    const f = Math.min(1, t - i);
+    const s = f * f * (3 - 2 * f);
+    return (lattice[i] + (lattice[i + 1] - lattice[i]) * s) * 2 * amplitude;
+  };
+}
+
+/** Thin tapered sliver from (x, y) along `angle` — a bristle mark or comb gap. */
+function sliver(
+  x: number,
+  y: number,
+  angle: number,
+  len: number,
+  w: number,
+  bow: number,
+): string {
+  const ux = Math.cos(angle);
+  const uy = Math.sin(angle);
+  const nx = -uy;
+  const ny = ux;
+  const tx = x + ux * len;
+  const ty = y + uy * len;
+  const cx = x + ux * len * 0.5 + nx * bow;
+  const cy = y + uy * len * 0.5 + ny * bow;
+  return `M${ri(x + nx * w)},${ri(y + ny * w)} Q${ri(cx + nx * w)},${ri(cy + ny * w)} ${ri(tx)},${ri(ty)} Q${ri(cx - nx * w)},${ri(cy - ny * w)} ${ri(x - nx * w)},${ri(y - ny * w)} Z`;
+}
+
+/** Irregular splot: a jittered ring joined with quadratic segments. */
+function splot(rand: () => number, cx: number, cy: number, rBase: number) {
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const rad = rBase * (0.6 + rand() * 0.8);
+    pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]);
+  }
+  const mid = (p: [number, number], q: [number, number]) =>
+    `${ri((p[0] + q[0]) / 2)},${ri((p[1] + q[1]) / 2)}`;
+  let d = `M${mid(pts[5], pts[0])}`;
+  for (let i = 0; i < 6; i++) {
+    const p = pts[i];
+    d += ` Q${ri(p[0])},${ri(p[1])} ${mid(p, pts[(i + 1) % 6])}`;
+  }
+  return `${d} Z`;
+}
+
+/** Ragged sweep body: noisy sampled edges with bristle nicks, plus dry-brush
+ * comb gaps (evenodd holes) running parallel to the flanks. */
+function buildInkBody(): string {
+  const rand = mulberry32(0x5eed);
+  const coarseTop = makeNoise(rand, 90, 7);
+  const fineTop = makeNoise(rand, 22, 3);
+  const coarseBot = makeNoise(rand, 80, 9);
+  const fineBot = makeNoise(rand, 20, 4);
+  const pts: string[] = [];
+  for (let x = 66; x <= 1450; x += 12) {
+    let y = edgeYAt(x, 1) + coarseTop(x) + fineTop(x);
+    if (rand() < 0.12) y -= 5 + rand() * 9;
+    pts.push(`${ri(x)},${ri(y)}`);
+  }
+  // right terminus: torn, not straight — jittered walk down with inward notches
+  for (let y = 52; y <= 172; y += 11) {
+    let x = 1451 + (rand() - 0.5) * 7;
+    if (rand() < 0.3) x -= 10 + rand() * 16;
+    pts.push(`${ri(x)},${ri(y + (rand() - 0.5) * 4)}`);
+  }
+  for (let x = 1450; x >= 66; x -= 12) {
+    let y = edgeYAt(x, 2) + coarseBot(x) + fineBot(x);
+    if (rand() < 0.16) y += 5 + rand() * 11;
+    pts.push(`${ri(x)},${ri(y)}`);
+  }
+  let d = `M${pts[0]} L${pts.slice(1).join(' ')} Z`;
+  // comb gaps: [x0, x1, edge, inset0, inset1, count, len0, len1]
+  const zones: Array<
+    [number, number, 1 | 2, number, number, number, number, number]
+  > = [
+    [950, 1210, 1, 12, 42, 5, 80, 170],
+    [120, 320, 1, 12, 38, 4, 60, 130],
+    [620, 900, 2, 12, 32, 3, 90, 180],
+    [1230, 1400, 1, 14, 40, 3, 60, 120],
+    [1280, 1442, 1, 44, 92, 4, 50, 110],
+  ];
+  for (const [x0, x1, edge, in0, in1, count, len0, len1] of zones) {
+    for (let k = 0; k < count; k++) {
+      const x = x0 + ((x1 - x0) * (k + rand() * 0.6)) / count;
+      const out = edge === 1 ? 1 : -1;
+      const y = edgeYAt(x, edge) + out * (in0 + rand() * (in1 - in0));
+      const angle = edgeAngleAt(x, edge) + (rand() - 0.5) * 0.12;
+      let len = len0 + rand() * (len1 - len0);
+      // cap tips left of the torn terminus — outside the body, evenodd would
+      // paint these gaps as solid streaks
+      const ux = Math.cos(angle);
+      if (ux > 0) len = Math.min(len, (1408 - x) / ux);
+      if (len < 24) continue;
+      d += ` ${sliver(x, y, angle, len, 1.6 + rand() * 1.8, (rand() - 0.5) * 10)}`;
+    }
+  }
+  return d;
+}
+
+/** Bristle filaments fanning off the sweep's edges along the local tangent,
+ * split into two bundles so they can layer at different opacities. */
+function buildInkFilaments(): [string, string] {
+  const rand = mulberry32(0xb1e55);
+  // [x0, x1, edge, count]
+  const zones: Array<[number, number, 1 | 2, number]> = [
+    [80, 330, 1, 18],
+    [1130, 1452, 1, 24],
+    [20, 150, 2, 10],
+    [600, 920, 2, 12],
+    [1240, 1452, 2, 14],
+  ];
+  const bundles: [string[], string[]] = [[], []];
+  for (const [x0, x1, edge, count] of zones) {
+    for (let k = 0; k < count; k++) {
+      const x = x0 + (x1 - x0) * ((k + rand()) / count);
+      const out = edge === 1 ? -1 : 1;
+      const y = edgeYAt(x, edge) + out * (1 + rand() * 4);
+      const angle = edgeAngleAt(x, edge) + out * (0.05 + rand() * 0.12);
+      let len = 14 + rand() * rand() * 80;
+      // cap tips inside the viewBox — overshoot clips to a razor-straight edge
+      const ux = Math.cos(angle);
+      if (ux > 0) len = Math.min(len, (1455 - x) / ux);
+      if (len < 6) continue;
+      const mark = sliver(
+        x,
+        y,
+        angle,
+        len,
+        0.8 + rand() * 1.4,
+        out * (2 + rand() * 7),
+      );
+      bundles[rand() < 0.5 ? 0 : 1].push(mark);
+    }
+  }
+  return [bundles[0].join(' '), bundles[1].join(' ')];
+}
+
+/** Clustered ink spatter around the sweep: fine mist and heavier dots (sizes
+ * power-law distributed), plus a few wobbly splots at the cluster hearts. */
+function buildInkSpatter(): [string, string] {
+  const rand = mulberry32(0x50a7);
+  // [cx, cy, rx, ry, count]
+  const clusters: Array<[number, number, number, number, number]> = [
+    [560, 58, 300, 60, 55],
+    [940, 104, 100, 55, 28],
+    [1250, 84, 170, 75, 45],
+    [150, 244, 130, 55, 30],
+    [390, 228, 120, 40, 18],
+    [1420, 240, 80, 50, 16],
+    [700, 26, 180, 26, 20],
+    [1432, 148, 42, 85, 24],
+  ];
+  const mist: string[] = [];
+  const dots: string[] = [];
+  for (const [cx, cy, rx, ry, count] of clusters) {
+    for (let i = 0; i < count; i++) {
+      const s = 0.7 + rand() ** 3 * 5.5;
+      // clamp inside the viewBox — overshoot clips dots to razor-flat edges
+      const px = Math.min(cx + (rand() + rand() - 1) * rx, 1455 - s);
+      const py = cy + (rand() + rand() - 1) * ry;
+      const dot = `M${ri(px - s)},${ri(py)} a${r(s)},${r(s)} 0 1 0 ${r(s * 2)},0 a${r(s)},${r(s)} 0 1 0 ${r(-s * 2)},0 Z`;
+      (s < 1.7 ? mist : dots).push(dot);
+    }
+  }
+  for (let k = 0; k < clusters.length; k++) {
+    const [cx, cy, rx, ry] = clusters[k];
+    dots.push(
+      splot(
+        rand,
+        Math.min(cx + (rand() - 0.5) * rx, 1444),
+        cy + (rand() - 0.5) * ry,
+        4 + rand() * 5,
+      ),
+    );
+  }
+  return [mist.join(' '), dots.join(' ')];
+}
+
+const [inkFilamentsA, inkFilamentsB] = buildInkFilaments();
+const [inkMist, inkDots] = buildInkSpatter();
+// Only the body may use evenodd (its comb gaps are holes) — on the spatter
+// paths it would erase overlapping dots into white lenses instead of merging.
+const INK_STROKES: Array<{
+  key: string;
+  d: string;
+  opacity: number;
+  fillRule?: 'evenodd';
+}> = [
+  { key: 'body', d: buildInkBody(), opacity: 0.16, fillRule: 'evenodd' },
+  { key: 'filaments-a', d: inkFilamentsA, opacity: 0.16 },
+  { key: 'filaments-b', d: inkFilamentsB, opacity: 0.11 },
+  { key: 'dots', d: inkDots, opacity: 0.42 },
+  { key: 'mist', d: inkMist, opacity: 0.2 },
+];
+
 /**
  * Clean single-stroke line drawing of the London skyline — Big Ben, the London
  * Eye, St Paul's Cathedral, Tower Bridge, the Shard and the Gherkin — sitting on
- * a shared ground line, with a sun (light mode) / crescent moon + stars (dark
- * mode) in the sky behind them. Drawn in `currentColor` so callers theme it via
- * text colour and opacity; used as the faint footer watermark.
+ * a shared ground line, with a sun + blue ink-wash sky (light mode) / crescent
+ * moon + stars (dark mode) behind them. Strokes resolve from `currentColor`
+ * per element: light mode paints each landmark via the module's real-world
+ * palette classes (coloured strokes + translucent fill washes), dark mode
+ * reverts them all to one faint ink outline; used as the faint footer
+ * watermark.
  */
 export default function LondonSkyline({ className }: LondonSkylineProps) {
   const ref = useRef<SVGSVGElement>(null);
@@ -250,6 +528,30 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       data-sun-x={CELESTIAL.cx}
       data-sun-y={CELESTIAL.cy}
     >
+      {/* Sky ink — light mode only; always present (no entrance animation).
+          The mask reserves a blank circle around the sun so ink never shows
+          through the disc while its entrance fill is still transparent. */}
+      <mask id="inkSunReserve">
+        <rect width={1460} height={600} fill="#ffffff" stroke="none" />
+        <circle
+          cx={CELESTIAL.cx}
+          cy={CELESTIAL.cy}
+          r={SUN_R + 12}
+          fill="#000000"
+          stroke="none"
+        />
+      </mask>
+      <g className={styles.ink} mask="url(#inkSunReserve)">
+        {INK_STROKES.map((s) => (
+          <path
+            key={s.key}
+            d={s.d}
+            fillRule={s.fillRule}
+            fillOpacity={s.opacity}
+          />
+        ))}
+      </g>
+
       {/* Sun — light mode only (disc fills in gradually + rays) */}
       <g key={`sun-${themeFlips}`} className={styles.sun}>
         <circle
@@ -296,24 +598,44 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       </g>
 
       {/* Big Ben (Elizabeth Tower) */}
-      <g>
-        <circle cx={150} cy={96} r={5} />
-        <path d="M150,118 L150,101" />
-        <path d="M118,210 L150,118 L182,210" />
-        <path d="M118,210 L182,210" />
-        <path d="M122,210 L122,255 L178,255 L178,210" />
+      <g className={styles.limestone}>
+        <path
+          className={styles.wash}
+          d="M124,320 L176,320 L176,600 L124,600 Z"
+        />
+        <circle
+          className={`${styles.gold} ${styles.tint}`}
+          cx={150}
+          cy={96}
+          r={5}
+        />
+        <path className={styles.gold} d="M150,118 L150,101" />
+        <path
+          className={`${styles.roofSlate} ${styles.tint}`}
+          d="M118,210 L150,118 L182,210"
+        />
+        <path className={styles.roofSlate} d="M118,210 L182,210" />
+        <path className={styles.tint} d="M122,210 L122,255 L178,255 L178,210" />
         <path d="M134,215 L134,250 M146,215 L146,250 M158,215 L158,250 M170,215 L170,250" />
-        <path d="M114,255 L114,265 L186,265 L186,255" />
-        <path d="M120,265 L120,320 L180,320 L180,265" />
-        <circle cx={150} cy={292} r={19} />
-        <path d="M150,292 L150,279 M150,292 L161,292" />
+        <path className={styles.tint} d="M114,255 L114,265 L186,265 L186,255" />
+        <path className={styles.tint} d="M120,265 L120,320 L180,320 L180,265" />
+        <circle
+          className={`${styles.clockBlue} ${styles.dialFace}`}
+          cx={150}
+          cy={292}
+          r={19}
+        />
+        <path
+          className={styles.clockBlue}
+          d="M150,292 L150,279 M150,292 L161,292"
+        />
         <path d="M124,320 L124,600 M176,320 L176,600" />
         <path d="M138,330 L138,600 M150,330 L150,600 M162,330 L162,600" />
         <path d="M124,420 L176,420 M124,510 L176,510" />
       </g>
 
       {/* London Eye */}
-      <g>
+      <g className={styles.steel}>
         <path d="M305,600 L335,408 M368,600 L335,408" />
         <path d="M316,600 L356,600" />
         <circle cx={EYE_CX} cy={EYE_CY} r={118} />
@@ -324,57 +646,98 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
           <path key={d} d={d} />
         ))}
         {eyeCapsules.map((c) => (
-          <circle key={`${c.cx},${c.cy}`} cx={c.cx} cy={c.cy} r={6} />
+          <circle
+            key={`${c.cx},${c.cy}`}
+            className={`${styles.capsuleGlass} ${styles.tint}`}
+            cx={c.cx}
+            cy={c.cy}
+            r={6}
+          />
         ))}
       </g>
 
       {/* St Paul's Cathedral */}
-      <g>
-        <path d="M560,279 L560,305 M553,293 L567,293" />
-        <path d="M550,305 Q560,296 570,305" />
-        <path d="M550,330 L550,305 L570,305 L570,330" />
-        <path d="M525,395 Q525,335 560,330 Q595,335 595,395" />
-        <path d="M525,440 L525,395 L595,395 L595,440" />
+      <g className={styles.portland}>
+        <path
+          className={styles.wash}
+          d="M478,470 L642,470 L642,595 L478,595 Z"
+        />
+        <path className={styles.gold} d="M560,279 L560,305 M553,293 L567,293" />
+        <path
+          className={`${styles.lead} ${styles.tint}`}
+          d="M550,305 Q560,296 570,305"
+        />
+        <path className={styles.tint} d="M550,330 L550,305 L570,305 L570,330" />
+        <path
+          className={`${styles.lead} ${styles.tint}`}
+          d="M525,395 Q525,335 560,330 Q595,335 595,395"
+        />
+        <path className={styles.tint} d="M525,440 L525,395 L595,395 L595,440" />
         <path d="M537,400 L537,438 M549,400 L549,438 M561,400 L561,438 M573,400 L573,438 M585,400 L585,438" />
-        <path d="M488,470 L560,440 L632,470" />
+        <path className={styles.tint} d="M488,470 L560,440 L632,470" />
         <path d="M478,470 L478,600 M642,470 L642,600" />
         <path d="M505,470 L505,595 M527,470 L527,595 M549,470 L549,595 M571,470 L571,595 M593,470 L593,595 M615,470 L615,595" />
         <path d="M478,595 L642,595" />
-        <path d="M482,470 L482,430 L500,430 L500,470 M482,430 L491,418 L500,430" />
-        <path d="M620,470 L620,430 L638,430 L638,470 M620,430 L629,418 L638,430" />
+        <path
+          className={styles.tint}
+          d="M482,470 L482,430 L500,430 L500,470 M482,430 L491,418 L500,430"
+        />
+        <path
+          className={styles.tint}
+          d="M620,470 L620,430 L638,430 L638,470 M620,430 L629,418 L638,430"
+        />
       </g>
 
       {/* Tower Bridge */}
-      <g>
+      <g className={styles.bridgeBlue}>
         {/* deck and outer approaches */}
         <path d="M610,560 L1110,560" />
-        <path d="M610,560 L610,600 M1110,560 L1110,600" />
-        <path d="M686,560 L686,600 M764,560 L764,600 M956,560 L956,600 M1034,560 L1034,600" />
+        <path
+          className={styles.portland}
+          d="M610,560 L610,600 M1110,560 L1110,600"
+        />
+        <path
+          className={styles.portland}
+          d="M686,560 L686,600 M764,560 L764,600 M956,560 L956,600 M1034,560 L1034,600"
+        />
         <path d="M768,560 Q860,600 952,560" />
 
-        {/* left tower */}
-        <path d="M692,560 L692,335 L758,335 L758,560" />
-        <path d="M692,380 L758,380 M692,420 L758,420 M692,460 L758,460 M692,500 L758,500 M692,540 L758,540" />
-        <path d="M708,345 L708,555 M725,345 L725,555 M742,345 L742,555" />
-        <path d="M684,335 L766,335" />
-        <path d="M709,335 L709,302 L741,302 L741,335" />
-        <path d="M703,302 L725,255 L747,302" />
-        <path d="M725,255 L725,243" />
-        <path d="M686,335 L686,318 L696,318 L696,335 M686,318 L691,306 L696,318" />
-        <path d="M754,335 L754,318 L764,318 L764,335 M754,318 L759,306 L764,318" />
-
-        {/* right tower */}
-        <path d="M962,560 L962,335 L1028,335 L1028,560" />
-        <path d="M962,380 L1028,380 M962,420 L1028,420 M962,460 L1028,460 M962,500 L1028,500 M962,540 L1028,540" />
-        <path d="M978,345 L978,555 M995,345 L995,555 M1012,345 L1012,555" />
-        <path d="M954,335 L1036,335" />
-        <path d="M979,335 L979,302 L1011,302 L1011,335" />
-        <path d="M973,302 L995,255 L1017,302" />
-        <path d="M995,255 L995,243" />
-        <path d="M956,335 L956,318 L966,318 L966,335 M956,318 L961,306 L966,318" />
-        <path d="M1024,335 L1024,318 L1034,318 L1034,335 M1024,318 L1029,306 L1034,318" />
+        {/* towers — the right tower is the left one shifted +270 */}
+        {[0, 270].map((dx) => (
+          <g
+            key={dx}
+            className={styles.portland}
+            transform={dx ? `translate(${dx} 0)` : undefined}
+          >
+            <path
+              className={styles.tint}
+              d="M692,560 L692,335 L758,335 L758,560"
+            />
+            <path d="M692,380 L758,380 M692,420 L758,420 M692,460 L758,460 M692,500 L758,500 M692,540 L758,540" />
+            <path d="M708,345 L708,555 M725,345 L725,555 M742,345 L742,555" />
+            <path d="M684,335 L766,335" />
+            <path
+              className={styles.tint}
+              d="M709,335 L709,302 L741,302 L741,335"
+            />
+            <path className={styles.tint} d="M703,302 L725,255 L747,302" />
+            <path d="M725,255 L725,243" />
+            <path
+              className={styles.tint}
+              d="M686,335 L686,318 L696,318 L696,335 M686,318 L691,306 L696,318"
+            />
+            <path
+              className={styles.tint}
+              d="M754,335 L754,318 L764,318 L764,335 M754,318 L759,306 L764,318"
+            />
+          </g>
+        ))}
 
         {/* high-level walkways */}
+        <path
+          className={styles.wash}
+          d="M758,338 L962,338 L962,366 L758,366 Z"
+        />
         <path d="M758,338 L962,338 M758,366 L962,366" />
         <path d="M758,338 L758,366 M962,338 L962,366" />
         <path d="M772,338 L772,366 M788,338 L788,366 M804,338 L804,366 M820,338 L820,366 M836,338 L836,366 M884,338 L884,366 M900,338 L900,366 M916,338 L916,366 M932,338 L932,366 M948,338 L948,366" />
@@ -392,7 +755,11 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       </g>
 
       {/* The Shard */}
-      <g>
+      <g className={styles.shardGlass}>
+        <path
+          className={styles.wash}
+          d="M1140,600 L1181,112 L1187,112 L1226,600 Z"
+        />
         <path d="M1140,600 L1181,112 M1226,600 L1187,112" />
         <path d="M1183,560 L1184,118" />
         <path d="M1181,112 L1178,88 M1184,112 L1184,82 M1187,112 L1191,92" />
@@ -402,10 +769,10 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       </g>
 
       {/* The Gherkin (30 St Mary Axe) */}
-      <g>
+      <g className={styles.gherkinGlass}>
         <circle cx={1338} cy={232} r={4} />
         <path d="M1338,250 L1338,236" />
-        <path d={GHERKIN_SILHOUETTE} />
+        <path className={styles.tint} d={GHERKIN_SILHOUETTE} />
         <clipPath id="gherkinClip">
           <path d={GHERKIN_SILHOUETTE} />
         </clipPath>

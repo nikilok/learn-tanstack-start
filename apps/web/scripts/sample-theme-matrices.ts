@@ -187,11 +187,19 @@ try {
   if (!detailsPath) throw new Error('no company link found on search page');
   console.log('details page:', detailsPath);
 
+  // Force the PWA install-card state via the app's own event chain (see
+  // install-prompt-init.ts / useInstallPrompt), so the two /download variants
+  // sample deterministically regardless of whether headless Chrome's service
+  // worker actually fired beforeinstallprompt.
+  const FORCE_NO_INSTALL = `window.__ssInstallPrompt = null; window.dispatchEvent(new Event('ss:installed'));`;
+  const FORCE_INSTALL = `window.__ssInstallPrompt = new Event('beforeinstallprompt'); window.dispatchEvent(new Event('ss:installable'));`;
+
   const pages: Array<{
     key: string;
     url: string;
     mobile: boolean;
     reduced?: boolean;
+    setup?: string;
   }> = [
     { key: 'HOME', url: `${BASE_URL}/`, mobile: false },
     { key: 'DETAILS', url: `${BASE_URL}${detailsPath}`, mobile: false },
@@ -202,6 +210,14 @@ try {
       url: `${BASE_URL}/download`,
       mobile: false,
       reduced: true,
+      setup: FORCE_NO_INSTALL,
+    },
+    {
+      key: 'DOWNLOAD_INSTALL',
+      url: `${BASE_URL}/download`,
+      mobile: false,
+      reduced: true,
+      setup: FORCE_INSTALL,
     },
   ];
 
@@ -229,6 +245,10 @@ try {
     for (const dark of [false, true]) {
       const constName = `${page.key}_${dark ? 'DARK' : 'LIGHT'}_HEX`;
       await load(page.url, dark, page.mobile, page.reduced);
+      if (page.setup) {
+        await send('Runtime.evaluate', { expression: page.setup });
+        await sleep(700);
+      }
       const hex = await sample(constName);
       // also matches the '…'.repeat(MAP_N) placeholder form of a new set
       const re = new RegExp(

@@ -11,25 +11,29 @@ import DownloadCard from './DownloadCard';
  */
 export default function WebAppCard({ onInstall }: { onInstall: () => void }) {
   return (
-    <DownloadCard
-      image={
-        // Same sky gradient as Preview's no-wallpaper fallback — keeps the two
-        // /download tiles reading as one set.
-        <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]">
-          <BrowserIcon className="size-20" />
-        </div>
-      }
-      title="Web"
-      description="The web version installed locally for faster access. Runs in its own window, no download required."
-    >
-      <button
-        type="button"
-        onClick={onInstall}
-        className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) transition hover:opacity-90"
+    // data-install-card: layout-neutral marker so the theme transition can
+    // detect this conditional card and pick the matching colour matrix.
+    <div data-install-card style={{ display: 'contents' }}>
+      <DownloadCard
+        image={
+          // Same sky gradient as Preview's no-wallpaper fallback — keeps the two
+          // /download tiles reading as one set.
+          <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-[#c7d2e8] via-[#e9e2ee] to-[#f2dcc8] dark:from-[#131a33] dark:via-[#1d1430] dark:to-[#3a1d33]">
+            <BrowserIcon className="size-20" />
+          </div>
+        }
+        title="Web"
+        description="The web version installed locally for faster access. Runs in its own window, no download required."
       >
-        <MonitorDown className="size-4" aria-hidden="true" />
-        Install web app
-      </button>
-    </DownloadCard>
+        <button
+          type="button"
+          onClick={onInstall}
+          className="inline-flex items-center gap-2 rounded-full bg-(--sea-ink) px-5 py-2.5 text-sm font-medium text-(--bg-base) transition hover:opacity-90"
+        >
+          <MonitorDown className="size-4" aria-hidden="true" />
+          Install web app
+        </button>
+      </DownloadCard>
+    </div>
   );
 }

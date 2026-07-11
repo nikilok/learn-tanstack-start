@@ -1,9 +1,14 @@
 /**
- * Regenerates the theme-transition colour matrices from live page screenshots.
+ * Regenerates the theme-transition colour matrices AND layout anchors from
+ * live page screenshots.
  *
- * Captures each sampled page (home, details, search results, mobile home) in
- * light and dark via headless Chrome, downsamples to MAP_COLS×MAP_ROWS with
- * sips (macOS), and rewrites the packed hex constants in theme-transition.ts.
+ * Captures each sampled view — home, company details, search results, mobile
+ * home, and /download both with and without the PWA install card (the install
+ * state is forced via the app's own events; /download is captured under
+ * emulated reduced motion so its preview tour holds still) — in light and
+ * dark via headless Chrome, downsamples to MAP_COLS×MAP_ROWS with sips
+ * (macOS), and rewrites BOTH the packed hex constants and the *_ANCHORS
+ * literals in theme-transition.ts.
  *
  * Run whenever the visual design changes:
  *   bun apps/web/scripts/sample-theme-matrices.ts
@@ -14,6 +19,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { measureAnchors } from '../src/measure-anchors';
 
 const BASE_URL = process.env.BASE_URL ?? 'https://sponsorsearch.co.uk';
 const TARGET = new URL('../src/theme-transition.ts', new URL(import.meta.url))
@@ -221,24 +228,10 @@ try {
     },
   ];
 
-  // Layout anchors (viewport fractions) so the runtime can warp the matrices
-  // onto the live layout — mirror measureAnchors() in theme-transition.ts.
-  const ANCHOR_EXPR = `(() => {
-    const f = (n) => Math.round(n * 1000) / 1000;
-    const rect = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
-    const wrap = rect('.page-wrap');
-    const head = rect('header');
-    const hero = rect('[data-hero-stat]');
-    const sky = rect('[data-london-skyline]');
-    return {
-      colL: wrap ? f(wrap.left / innerWidth) : -1,
-      colR: wrap ? f(wrap.right / innerWidth) : -1,
-      header: head ? f(head.bottom / innerHeight) : -1,
-      hero: hero ? f((hero.top + hero.bottom) / 2 / innerHeight) : -1,
-      skyT: sky ? f(sky.top / innerHeight) : -1,
-      skyB: sky ? f(sky.bottom / innerHeight) : -1,
-    };
-  })()`;
+  // Inject the runtime's own anchor measurement (src/measure-anchors.ts), so
+  // the reference anchors are produced by the exact code that measures the
+  // live ones at toggle time — the two can never drift.
+  const ANCHOR_EXPR = `(${measureAnchors.toString()})()`;
 
   let source = await Bun.file(TARGET).text();
   for (const page of pages) {
@@ -263,8 +256,11 @@ try {
             expression: ANCHOR_EXPR,
             returnByValue: true,
           })
-        ).result?.value as Record<string, number>;
-        const lit = `{ colL: ${a.colL}, colR: ${a.colR}, header: ${a.header}, hero: ${a.hero}, skyT: ${a.skyT}, skyB: ${a.skyB} }`;
+        ).result?.value as Record<string, number> | undefined;
+        if (!a) throw new Error(`anchor measurement failed on ${page.key}`);
+        const lit = `{ ${Object.entries(a)
+          .map(([k, v]) => `${k}: ${Math.round(v * 1000) / 1000}`)
+          .join(', ')} }`;
         const are = new RegExp(
           `(const ${page.key}_ANCHORS: PageAnchors = )\\{[^}]*\\}`,
         );

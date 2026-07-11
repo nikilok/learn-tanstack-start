@@ -432,8 +432,8 @@ const INK_STROKES = [
   { d: buildInkBody(), opacity: 0.16 },
   { d: inkFilamentsA, opacity: 0.16 },
   { d: inkFilamentsB, opacity: 0.11 },
-  { d: inkDots, opacity: 0.2 },
-  { d: inkMist, opacity: 0.12 },
+  { d: inkDots, opacity: 0.42 },
+  { d: inkMist, opacity: 0.2 },
 ];
 
 /**

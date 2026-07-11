@@ -20,8 +20,8 @@ function getInstallPrompt(): BeforeInstallPromptEvent | null {
 /**
  * Shared PWA-install state: whether a desktop Chromium install is currently on
  * offer (deferred prompt captured pre-hydration), plus a one-shot `install`
- * that opens the browser's native install dialog. Consumed by the header hint
- * and the /download Chrome-app card so they share one source of truth.
+ * that opens the browser's native install dialog. Consumed by the /download
+ * Chrome-app card (WebAppCard).
  */
 export function useInstallPrompt(): {
   installable: boolean;

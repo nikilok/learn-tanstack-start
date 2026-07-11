@@ -1,12 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 
-import { downloadsFlagQueryOptions } from '../api/flags';
-
-/** Primary header CTA → desktop-app download page; gated by the `downloads` flag, sm+ only. Inverted fill. */
+/** Primary header CTA → desktop-app download page; sm+ only. Inverted fill. */
 export default function DownloadButton() {
-  const { data: enabled } = useQuery(downloadsFlagQueryOptions);
-  if (!enabled) return null;
   return (
     <Link
       to="/download"

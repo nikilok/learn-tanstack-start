@@ -33,21 +33,21 @@ export async function decryptFlagOverrides(
   }
 }
 
-/** Gates the desktop-app download UI (header button, footer link, /download page) so the branch can ship dark until the release pipeline is ready. Default hidden; flip in the Vercel dashboard (or Flags Explorer) when ready. */
-export const downloadsFlag: FlagSpec<boolean> = {
-  key: 'downloads',
+/** No-op anchor flag — load-bearing: the Flags Explorer only mints the `vercel-flag-overrides` cookie (which owner.server.ts upgrades to the durable ss-owner credential) when ≥1 flag exists, so an empty registry silently breaks new-owner bootstrap. Gates no UI; do NOT delete as "unused". */
+export const ownerBootstrapFlag: FlagSpec<boolean> = {
+  key: 'owner-bootstrap',
   description:
-    'Show the desktop-app download entry points and the /download page.',
+    'Anchor for owner bootstrap — toggle + Apply in the Flags Explorer to mint the overrides cookie owner.server.ts upgrades to ss-owner. Gates no UI.',
   defaultValue: false,
   options: [
-    { value: false, label: 'Hidden' },
-    { value: true, label: 'Visible' },
+    { value: false, label: 'Off' },
+    { value: true, label: 'On' },
   ],
 };
 
 /** Active flag registry. Add a FlagSpec here and the discovery endpoint exposes it to the Flags Explorer automatically; resolve values at the call site with evaluateFlag. */
 export const flags: Record<string, FlagSpec<FlagValue>> = {
-  [downloadsFlag.key]: downloadsFlag,
+  [ownerBootstrapFlag.key]: ownerBootstrapFlag,
 };
 
 /** Memoized adapter factory; null when FLAGS is unset (e.g. local dev without Vercel Flags). */

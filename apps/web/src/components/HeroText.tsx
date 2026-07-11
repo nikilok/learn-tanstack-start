@@ -22,6 +22,7 @@ export default function HeroText({ count }: { count?: number }) {
   return (
     <h2
       className={styles.hero}
+      data-hero-stat
       aria-label={`${(thousands * 1000).toLocaleString('en-GB')}+ licensed UK visa sponsors`}
     >
       <span className={styles.streaks} aria-hidden="true" />

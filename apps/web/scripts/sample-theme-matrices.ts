@@ -137,11 +137,21 @@ try {
     return hex;
   };
 
-  /** Loads a page in the given theme/viewport and waits for it to settle. */
-  const load = async (url: string, dark: boolean, mobile: boolean) => {
+  /** Loads a page in the given theme/viewport and waits for it to settle.
+   * `reduced` freezes animated pages (e.g. /download's preview tour). */
+  const load = async (
+    url: string,
+    dark: boolean,
+    mobile: boolean,
+    reduced = false,
+  ) => {
     await send('Emulation.setEmulatedMedia', {
       features: [
         { name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' },
+        {
+          name: 'prefers-reduced-motion',
+          value: reduced ? 'reduce' : 'no-preference',
+        },
       ],
     });
     if (mobile) {
@@ -177,23 +187,71 @@ try {
   if (!detailsPath) throw new Error('no company link found on search page');
   console.log('details page:', detailsPath);
 
-  const pages: Array<{ key: string; url: string; mobile: boolean }> = [
+  const pages: Array<{
+    key: string;
+    url: string;
+    mobile: boolean;
+    reduced?: boolean;
+  }> = [
     { key: 'HOME', url: `${BASE_URL}/`, mobile: false },
     { key: 'DETAILS', url: `${BASE_URL}${detailsPath}`, mobile: false },
     { key: 'SEARCH', url: `${BASE_URL}/?search=bbc`, mobile: false },
     { key: 'MOBILE', url: `${BASE_URL}/`, mobile: true },
+    {
+      key: 'DOWNLOAD',
+      url: `${BASE_URL}/download`,
+      mobile: false,
+      reduced: true,
+    },
   ];
+
+  // Layout anchors (viewport fractions) so the runtime can warp the matrices
+  // onto the live layout — mirror measureAnchors() in theme-transition.ts.
+  const ANCHOR_EXPR = `(() => {
+    const f = (n) => Math.round(n * 1000) / 1000;
+    const rect = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+    const wrap = rect('.page-wrap');
+    const head = rect('header');
+    const hero = rect('[data-hero-stat]');
+    const sky = rect('[data-london-skyline]');
+    return {
+      colL: wrap ? f(wrap.left / innerWidth) : -1,
+      colR: wrap ? f(wrap.right / innerWidth) : -1,
+      header: head ? f(head.bottom / innerHeight) : -1,
+      hero: hero ? f((hero.top + hero.bottom) / 2 / innerHeight) : -1,
+      skyT: sky ? f(sky.top / innerHeight) : -1,
+      skyB: sky ? f(sky.bottom / innerHeight) : -1,
+    };
+  })()`;
 
   let source = await Bun.file(TARGET).text();
   for (const page of pages) {
     for (const dark of [false, true]) {
       const constName = `${page.key}_${dark ? 'DARK' : 'LIGHT'}_HEX`;
-      await load(page.url, dark, page.mobile);
+      await load(page.url, dark, page.mobile, page.reduced);
       const hex = await sample(constName);
-      const re = new RegExp(`(const ${constName} =\\s*')([0-9a-f]+)(')`);
+      // also matches the '…'.repeat(MAP_N) placeholder form of a new set
+      const re = new RegExp(
+        `(const ${constName} =\\s*)'[0-9a-f]+'(\\.repeat\\(MAP_N\\))?`,
+      );
       if (!re.test(source)) throw new Error(`constant ${constName} not found`);
-      source = source.replace(re, `$1${hex}$3`);
+      source = source.replace(re, `$1'${hex}'`);
       console.log(`sampled ${constName}`);
+      if (!dark) {
+        const a = (
+          await send('Runtime.evaluate', {
+            expression: ANCHOR_EXPR,
+            returnByValue: true,
+          })
+        ).result?.value as Record<string, number>;
+        const lit = `{ colL: ${a.colL}, colR: ${a.colR}, header: ${a.header}, hero: ${a.hero}, skyT: ${a.skyT}, skyB: ${a.skyB} }`;
+        const are = new RegExp(
+          `(const ${page.key}_ANCHORS: PageAnchors = )\\{[^}]*\\}`,
+        );
+        if (!are.test(source)) throw new Error(`anchors ${page.key} not found`);
+        source = source.replace(are, `$1${lit}`);
+        console.log(`anchors ${page.key}:`, lit);
+      }
     }
   }
   await Bun.write(TARGET, source);

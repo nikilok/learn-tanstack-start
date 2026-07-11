@@ -5,6 +5,9 @@
    real-world colours; dark draws everything as faint single-colour ink. */
 .skyline {
   color: color-mix(in srgb, var(--sea-ink-faint) 85%, transparent);
+  /* Displaced ink may billow past the viewBox mid-burst; clipping it there
+     would cut the smoke to razor-straight edges. */
+  overflow: visible;
 }
 :global(.dark) .skyline {
   color: color-mix(in srgb, var(--sea-ink) 28%, transparent);

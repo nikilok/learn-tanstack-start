@@ -124,7 +124,21 @@ try {
   const sample = async (name: string): Promise<string> => {
     const png = join(work, `${name}.png`);
     const bmp = join(work, `${name}.bmp`);
-    const shot = await send('Page.captureScreenshot', { format: 'png' });
+    // Clip to the layout viewport (clientWidth excludes the classic
+    // scrollbar) — the scrollbar's white strip must not bleed into the
+    // matrix's rightmost column, where it dithers as a pale band.
+    const view = (
+      await send('Runtime.evaluate', {
+        expression: `({ w: document.documentElement.clientWidth, h: document.documentElement.clientHeight })`,
+        returnByValue: true,
+      })
+    ).result?.value as { w: number; h: number } | undefined;
+    if (!view?.w || !view.h)
+      throw new Error(`viewport read failed for ${name}`);
+    const shot = await send('Page.captureScreenshot', {
+      format: 'png',
+      clip: { x: 0, y: 0, width: view.w, height: view.h, scale: 1 },
+    });
     await Bun.write(png, Buffer.from(shot.data, 'base64'));
     const sips = Bun.spawnSync([
       'sips',

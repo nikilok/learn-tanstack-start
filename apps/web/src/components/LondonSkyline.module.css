@@ -10,57 +10,59 @@
   color: color-mix(in srgb, var(--sea-ink) 28%, transparent);
 }
 
-/* Light-mode landmark palette — muted true-to-life material colours. */
+/* Light-mode landmark palette — muted true-to-life material colours. Each
+   class composes .landmark so the stroke and dark-revert rules bind to one
+   marker instead of repeating the full class list. */
+.landmark {
+}
 .limestone {
+  composes: landmark;
   color: #b08d55; /* Big Ben's honeyed Anston stone */
 }
 .roofSlate {
+  composes: landmark;
   color: #6e7d78; /* Big Ben's grey-green cast-iron spire */
 }
 .clockBlue {
+  composes: landmark;
   color: #3c6183; /* the dials' restored Prussian blue */
 }
 .gold {
+  composes: landmark;
   color: #bd9433; /* gilded finial + St Paul's cross */
 }
 .steel {
+  composes: landmark;
   color: #9da9b4; /* the Eye's white-painted steel */
 }
 .capsuleGlass {
+  composes: landmark;
   color: #79a5c8; /* the Eye's glazed capsules */
 }
 .portland {
+  composes: landmark;
   color: #ab9e85; /* Portland-stone masonry (St Paul's, bridge towers) */
 }
 .lead {
+  composes: landmark;
   color: #8695a1; /* St Paul's lead-sheathed dome */
 }
 .bridgeBlue {
+  composes: landmark;
   color: #6b9dcb; /* Tower Bridge's blue-painted steelwork */
 }
 .shardGlass {
+  composes: landmark;
   color: #8fb3d1; /* the Shard's pale glazing */
 }
 .gherkinGlass {
+  composes: landmark;
   color: #72a5ab; /* the Gherkin's blue-green glass */
 }
 
 /* Landmark line work runs darker than its fill — each outline is its palette
    colour mixed toward ink, so edges stay crisp over the coloured washes. */
-.skyline
-  :is(
-    .limestone,
-    .roofSlate,
-    .clockBlue,
-    .gold,
-    .steel,
-    .capsuleGlass,
-    .portland,
-    .lead,
-    .bridgeBlue,
-    .shardGlass,
-    .gherkinGlass
-  ) {
+.skyline .landmark {
   stroke: color-mix(in srgb, currentcolor 70%, #1f2c3a);
 }
 
@@ -72,8 +74,7 @@
   fill-opacity: 0.45;
 }
 .wash {
-  fill: currentColor;
-  fill-opacity: 0.45;
+  composes: tint;
   stroke: none;
 }
 .dialFace {
@@ -81,21 +82,7 @@
 }
 
 /* Dark mode reverts every landmark to the inherited ink — outline only. */
-:global(.dark)
-  .skyline
-  :is(
-    .limestone,
-    .roofSlate,
-    .clockBlue,
-    .gold,
-    .steel,
-    .capsuleGlass,
-    .portland,
-    .lead,
-    .bridgeBlue,
-    .shardGlass,
-    .gherkinGlass
-  ) {
+:global(.dark) .skyline .landmark {
   color: inherit;
   stroke: currentColor;
 }

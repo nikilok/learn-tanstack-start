@@ -179,12 +179,8 @@ const clouds = [
   { path: CLOUD_PUFFY, x: 815, y: 180, scale: 0.95, delay: 0.6 },
 ];
 
-// Sky wash (light mode) — one sumi-e brush sweep behind the sun, clouds and
-// building tops: a wave cresting left, sagging through a deep belly mid-frame
-// and surging up to the right edge. Everything below is generated
-// deterministically (seeded PRNG, identical on server and client): ragged
-// noisy edges with bristle nicks, dry-brush comb gaps cut along the flanks,
-// filament bundles trailing off every edge, and clustered ink spatter.
+// Sky wash (light mode) — a sumi-e brush sweep behind the sun, clouds and
+// buildings; every mark is generated from seeded PRNGs so SSR and client match.
 
 /** Deterministic PRNG (mulberry32) so the generated ink matches across SSR and client. */
 function mulberry32(seed: number) {
@@ -196,6 +192,10 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** Rounds ink coordinates to whole units — sub-pixel at footer scale, and it
+ * keeps the generated path data ~20% smaller in every SSR document. */
+const ri = (n: number) => Math.round(n);
 
 // The sweep's skeleton: [x, top edge y, bottom edge y] stations across the sky.
 const INK_STATIONS: Array<[number, number, number]> = [
@@ -283,7 +283,7 @@ function sliver(
   const ty = y + uy * len;
   const cx = x + ux * len * 0.5 + nx * bow;
   const cy = y + uy * len * 0.5 + ny * bow;
-  return `M${r(x + nx * w)},${r(y + ny * w)} Q${r(cx + nx * w)},${r(cy + ny * w)} ${r(tx)},${r(ty)} Q${r(cx - nx * w)},${r(cy - ny * w)} ${r(x - nx * w)},${r(y - ny * w)} Z`;
+  return `M${ri(x + nx * w)},${ri(y + ny * w)} Q${ri(cx + nx * w)},${ri(cy + ny * w)} ${ri(tx)},${ri(ty)} Q${ri(cx - nx * w)},${ri(cy - ny * w)} ${ri(x - nx * w)},${ri(y - ny * w)} Z`;
 }
 
 /** Irregular splot: a jittered ring joined with quadratic segments. */
@@ -295,11 +295,11 @@ function splot(rand: () => number, cx: number, cy: number, rBase: number) {
     pts.push([cx + Math.cos(a) * rad, cy + Math.sin(a) * rad]);
   }
   const mid = (p: [number, number], q: [number, number]) =>
-    `${r((p[0] + q[0]) / 2)},${r((p[1] + q[1]) / 2)}`;
+    `${ri((p[0] + q[0]) / 2)},${ri((p[1] + q[1]) / 2)}`;
   let d = `M${mid(pts[5], pts[0])}`;
   for (let i = 0; i < 6; i++) {
     const p = pts[i];
-    d += ` Q${r(p[0])},${r(p[1])} ${mid(p, pts[(i + 1) % 6])}`;
+    d += ` Q${ri(p[0])},${ri(p[1])} ${mid(p, pts[(i + 1) % 6])}`;
   }
   return `${d} Z`;
 }
@@ -316,18 +316,18 @@ function buildInkBody(): string {
   for (let x = 66; x <= 1450; x += 12) {
     let y = edgeYAt(x, 1) + coarseTop(x) + fineTop(x);
     if (rand() < 0.12) y -= 5 + rand() * 9;
-    pts.push(`${r(x)},${r(y)}`);
+    pts.push(`${ri(x)},${ri(y)}`);
   }
   // right terminus: torn, not straight — jittered walk down with inward notches
   for (let y = 52; y <= 172; y += 11) {
     let x = 1451 + (rand() - 0.5) * 7;
     if (rand() < 0.3) x -= 10 + rand() * 16;
-    pts.push(`${r(x)},${r(y + (rand() - 0.5) * 4)}`);
+    pts.push(`${ri(x)},${ri(y + (rand() - 0.5) * 4)}`);
   }
   for (let x = 1450; x >= 66; x -= 12) {
     let y = edgeYAt(x, 2) + coarseBot(x) + fineBot(x);
     if (rand() < 0.16) y += 5 + rand() * 11;
-    pts.push(`${r(x)},${r(y)}`);
+    pts.push(`${ri(x)},${ri(y)}`);
   }
   let d = `M${pts[0]} L${pts.slice(1).join(' ')} Z`;
   // comb gaps: [x0, x1, edge, inset0, inset1, count, len0, len1]
@@ -346,7 +346,13 @@ function buildInkBody(): string {
       const out = edge === 1 ? 1 : -1;
       const y = edgeYAt(x, edge) + out * (in0 + rand() * (in1 - in0));
       const angle = edgeAngleAt(x, edge) + (rand() - 0.5) * 0.12;
-      d += ` ${sliver(x, y, angle, len0 + rand() * (len1 - len0), 1.6 + rand() * 1.8, (rand() - 0.5) * 10)}`;
+      let len = len0 + rand() * (len1 - len0);
+      // cap tips left of the torn terminus — outside the body, evenodd would
+      // paint these gaps as solid streaks
+      const ux = Math.cos(angle);
+      if (ux > 0) len = Math.min(len, (1408 - x) / ux);
+      if (len < 24) continue;
+      d += ` ${sliver(x, y, angle, len, 1.6 + rand() * 1.8, (rand() - 0.5) * 10)}`;
     }
   }
   return d;
@@ -371,7 +377,11 @@ function buildInkFilaments(): [string, string] {
       const out = edge === 1 ? -1 : 1;
       const y = edgeYAt(x, edge) + out * (1 + rand() * 4);
       const angle = edgeAngleAt(x, edge) + out * (0.05 + rand() * 0.12);
-      const len = 14 + rand() * rand() * 80;
+      let len = 14 + rand() * rand() * 80;
+      // cap tips inside the viewBox — overshoot clips to a razor-straight edge
+      const ux = Math.cos(angle);
+      if (ux > 0) len = Math.min(len, (1455 - x) / ux);
+      if (len < 6) continue;
       const mark = sliver(
         x,
         y,
@@ -405,10 +415,11 @@ function buildInkSpatter(): [string, string] {
   const dots: string[] = [];
   for (const [cx, cy, rx, ry, count] of clusters) {
     for (let i = 0; i < count; i++) {
-      const px = cx + (rand() + rand() - 1) * rx;
-      const py = cy + (rand() + rand() - 1) * ry;
       const s = 0.7 + rand() ** 3 * 5.5;
-      const dot = `M${r(px - s)},${r(py)} a${r(s)},${r(s)} 0 1 0 ${r(s * 2)},0 a${r(s)},${r(s)} 0 1 0 ${r(-s * 2)},0 Z`;
+      // clamp inside the viewBox — overshoot clips dots to razor-flat edges
+      const px = Math.min(cx + (rand() + rand() - 1) * rx, 1455 - s);
+      const py = cy + (rand() + rand() - 1) * ry;
+      const dot = `M${ri(px - s)},${ri(py)} a${r(s)},${r(s)} 0 1 0 ${r(s * 2)},0 a${r(s)},${r(s)} 0 1 0 ${r(-s * 2)},0 Z`;
       (s < 1.7 ? mist : dots).push(dot);
     }
   }
@@ -417,7 +428,7 @@ function buildInkSpatter(): [string, string] {
     dots.push(
       splot(
         rand,
-        cx + (rand() - 0.5) * rx,
+        Math.min(cx + (rand() - 0.5) * rx, 1444),
         cy + (rand() - 0.5) * ry,
         4 + rand() * 5,
       ),
@@ -428,12 +439,19 @@ function buildInkSpatter(): [string, string] {
 
 const [inkFilamentsA, inkFilamentsB] = buildInkFilaments();
 const [inkMist, inkDots] = buildInkSpatter();
-const INK_STROKES = [
-  { d: buildInkBody(), opacity: 0.16 },
-  { d: inkFilamentsA, opacity: 0.16 },
-  { d: inkFilamentsB, opacity: 0.11 },
-  { d: inkDots, opacity: 0.42 },
-  { d: inkMist, opacity: 0.2 },
+// Only the body may use evenodd (its comb gaps are holes) — on the spatter
+// paths it would erase overlapping dots into white lenses instead of merging.
+const INK_STROKES: Array<{
+  key: string;
+  d: string;
+  opacity: number;
+  fillRule?: 'evenodd';
+}> = [
+  { key: 'body', d: buildInkBody(), opacity: 0.16, fillRule: 'evenodd' },
+  { key: 'filaments-a', d: inkFilamentsA, opacity: 0.16 },
+  { key: 'filaments-b', d: inkFilamentsB, opacity: 0.11 },
+  { key: 'dots', d: inkDots, opacity: 0.42 },
+  { key: 'mist', d: inkMist, opacity: 0.2 },
 ];
 
 /**
@@ -510,10 +528,27 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
       data-sun-x={CELESTIAL.cx}
       data-sun-y={CELESTIAL.cy}
     >
-      {/* Sky ink — light mode only; always present (no entrance animation) */}
-      <g className={styles.ink}>
+      {/* Sky ink — light mode only; always present (no entrance animation).
+          The mask reserves a blank circle around the sun so ink never shows
+          through the disc while its entrance fill is still transparent. */}
+      <mask id="inkSunReserve">
+        <rect width={1460} height={600} fill="#ffffff" stroke="none" />
+        <circle
+          cx={CELESTIAL.cx}
+          cy={CELESTIAL.cy}
+          r={SUN_R + 12}
+          fill="#000000"
+          stroke="none"
+        />
+      </mask>
+      <g className={styles.ink} mask="url(#inkSunReserve)">
         {INK_STROKES.map((s) => (
-          <path key={s.d} d={s.d} fillRule="evenodd" fillOpacity={s.opacity} />
+          <path
+            key={s.key}
+            d={s.d}
+            fillRule={s.fillRule}
+            fillOpacity={s.opacity}
+          />
         ))}
       </g>
 
@@ -667,55 +702,36 @@ export default function LondonSkyline({ className }: LondonSkylineProps) {
         />
         <path d="M768,560 Q860,600 952,560" />
 
-        {/* left tower */}
-        <g className={styles.portland}>
-          <path
-            className={styles.tint}
-            d="M692,560 L692,335 L758,335 L758,560"
-          />
-          <path d="M692,380 L758,380 M692,420 L758,420 M692,460 L758,460 M692,500 L758,500 M692,540 L758,540" />
-          <path d="M708,345 L708,555 M725,345 L725,555 M742,345 L742,555" />
-          <path d="M684,335 L766,335" />
-          <path
-            className={styles.tint}
-            d="M709,335 L709,302 L741,302 L741,335"
-          />
-          <path className={styles.tint} d="M703,302 L725,255 L747,302" />
-          <path d="M725,255 L725,243" />
-          <path
-            className={styles.tint}
-            d="M686,335 L686,318 L696,318 L696,335 M686,318 L691,306 L696,318"
-          />
-          <path
-            className={styles.tint}
-            d="M754,335 L754,318 L764,318 L764,335 M754,318 L759,306 L764,318"
-          />
-        </g>
-
-        {/* right tower */}
-        <g className={styles.portland}>
-          <path
-            className={styles.tint}
-            d="M962,560 L962,335 L1028,335 L1028,560"
-          />
-          <path d="M962,380 L1028,380 M962,420 L1028,420 M962,460 L1028,460 M962,500 L1028,500 M962,540 L1028,540" />
-          <path d="M978,345 L978,555 M995,345 L995,555 M1012,345 L1012,555" />
-          <path d="M954,335 L1036,335" />
-          <path
-            className={styles.tint}
-            d="M979,335 L979,302 L1011,302 L1011,335"
-          />
-          <path className={styles.tint} d="M973,302 L995,255 L1017,302" />
-          <path d="M995,255 L995,243" />
-          <path
-            className={styles.tint}
-            d="M956,335 L956,318 L966,318 L966,335 M956,318 L961,306 L966,318"
-          />
-          <path
-            className={styles.tint}
-            d="M1024,335 L1024,318 L1034,318 L1034,335 M1024,318 L1029,306 L1034,318"
-          />
-        </g>
+        {/* towers — the right tower is the left one shifted +270 */}
+        {[0, 270].map((dx) => (
+          <g
+            key={dx}
+            className={styles.portland}
+            transform={dx ? `translate(${dx} 0)` : undefined}
+          >
+            <path
+              className={styles.tint}
+              d="M692,560 L692,335 L758,335 L758,560"
+            />
+            <path d="M692,380 L758,380 M692,420 L758,420 M692,460 L758,460 M692,500 L758,500 M692,540 L758,540" />
+            <path d="M708,345 L708,555 M725,345 L725,555 M742,345 L742,555" />
+            <path d="M684,335 L766,335" />
+            <path
+              className={styles.tint}
+              d="M709,335 L709,302 L741,302 L741,335"
+            />
+            <path className={styles.tint} d="M703,302 L725,255 L747,302" />
+            <path d="M725,255 L725,243" />
+            <path
+              className={styles.tint}
+              d="M686,335 L686,318 L696,318 L696,335 M686,318 L691,306 L696,318"
+            />
+            <path
+              className={styles.tint}
+              d="M754,335 L754,318 L764,318 L764,335 M754,318 L759,306 L764,318"
+            />
+          </g>
+        ))}
 
         {/* high-level walkways */}
         <path

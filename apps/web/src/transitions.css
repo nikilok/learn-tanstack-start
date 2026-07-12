@@ -5,16 +5,19 @@
  * Back: the reverse — the details content contracts and dissolves over a
  * quick root crossfade back to the restored listing.
  * Safari opts out of the morph in both directions (GPU pressure, see the
- * Safari block below): forward is a page-level slide, back is just the
- * root crossfade (fade out details, fade in home).
+ * Safari block below): forward is a page-level slide, back is the root
+ * crossfade (fade out details, fade in home) on desktop — touch-device
+ * Safari keeps the original back sweep (mobile block at the bottom).
  */
 
 /*
- * Safari-forward slide: outgoing page recedes (scale + slight slide +
+ * Safari page-level slides: outgoing page recedes (scale + slight slide +
  * fade), incoming page rises into place. The combined scale + translate
  * gives a subtle "depth pass" feel without long travel distances that
  * can trigger motion sickness. Outgoing distance is small (12%) and
- * dampened with a blur tick so the eye doesn't track it.
+ * dampened with a blur tick so the eye doesn't track it. The left pair
+ * runs Safari forward everywhere; the mirrored right pair runs the back
+ * sweep on touch Safari only.
  */
 @keyframes route-recede-left {
   from {
@@ -35,6 +38,37 @@
     opacity: 0;
     filter: blur(2px);
     clip-path: inset(0 0 0 50%);
+  }
+  60% {
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes route-recede-right {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: translate3d(12%, 0, 0) scale(0.96);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+@keyframes route-rise-from-left {
+  from {
+    transform: translate3d(-8%, 0, 0) scale(0.985);
+    opacity: 0;
+    filter: blur(2px);
+    clip-path: inset(0 50% 0 0);
   }
   60% {
     filter: blur(0);
@@ -231,7 +265,8 @@ html:active-view-transition-type(forward)::view-transition-new(active-card) {
  * slide. WebKit handles a single root pair cleanly without the
  * cumulative GPU pressure that the active-card pairing was causing.
  * Dropping the name here also opts Safari out of the back contract —
- * with no named region, back falls through to the root crossfade.
+ * with no named region, back falls through to the root crossfade
+ * (desktop) or the touch-device sweep (mobile block at the bottom).
  *
  * The override on the listing card uses an attribute selector +
  * `!important` because the name is set as an inline style by HmrcCard
@@ -302,6 +337,33 @@ html:active-view-transition-type(back)::view-transition-old(active-card) {
   mix-blend-mode: normal;
 }
 
+/*
+ * Touch-device Safari (iPhone/iPad): keep the original left-to-right back
+ * sweep — the plain crossfade read flat on phones. Desktop Safari keeps
+ * the crossfade above. Keyed on the primary pointer, not viewport width,
+ * so a narrow desktop window doesn't switch animations. Higher specificity
+ * than the generic back rules, so it wins where it matches.
+ */
+@media (hover: none) and (pointer: coarse) {
+  html[data-browser='safari']:active-view-transition-type(
+      back
+    )::view-transition-group(root) {
+    animation-duration: 380ms;
+  }
+  html[data-browser='safari']:active-view-transition-type(
+      back
+    )::view-transition-old(root) {
+    animation: route-recede-right 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
+    transform-origin: center center;
+  }
+  html[data-browser='safari']:active-view-transition-type(
+      back
+    )::view-transition-new(root) {
+    animation: route-rise-from-left 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transform-origin: center center;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(root),
   ::view-transition-old(root),
@@ -309,6 +371,8 @@ html:active-view-transition-type(back)::view-transition-old(active-card) {
   ::view-transition-group(active-card),
   ::view-transition-old(active-card),
   ::view-transition-new(active-card) {
-    animation: none;
+    /* !important: must outrank the direction/browser-scoped rules above,
+       which otherwise win on specificity and animate despite the setting. */
+    animation: none !important;
   }
 }

@@ -35,10 +35,11 @@ export default function HmrcResults({ search }: { search: string }) {
   const router = useRouter();
   // `activeId` only gets set when the user clicks a card on this very
   // mount (via flushSync below). On a remount after back-nav we leave it
-  // null on purpose — that way the listing's matching card does *not*
-  // receive `view-transition-name: active-card`, so the browser won't
-  // pair it with the details wrapper and morph back. Back-nav uses a
-  // page-level slide instead (see styles.css).
+  // null on purpose — no listing card may carry `view-transition-name:
+  // active-card` at capture time, or the browser would pair it with the
+  // details wrapper and morph to a mid-restore position. Back-nav relies
+  // on this: it contracts the deliberately UNPAIRED old details snapshot
+  // over a root crossfade (see transitions.css).
   const [activeId, setActiveId] = useState<string | null>(null);
   // The card's metadata stacks below `sm` (640px): one inline line ≥sm, two
   // lines <sm (rating+location / route chip). HmrcCard switches on the same

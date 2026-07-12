@@ -256,18 +256,38 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   `false`, which is what keeps search-param updates instant. Direction comes from
   `state.__TSR_index` (a decreasing index is provably a back traversal; forward-index
   motion landing on home, e.g. the header-logo push, stays instant). The resolver also
-  stamps `data-page-flip` (pops have no click handler) and skips when reduced motion is
-  on or a screen-edge touch was seen recently (iOS edge-swipe already plays the native
-  slide — don't double-animate). **The option MUST stay gated on
-  `supportsTypedViewTransitions`**: on WebKit without `:active-view-transition-type()`
-  the router never evaluates the resolver, so an ungated object default would run an
-  untyped transition for EVERY navigation — including each search keystroke, where a
-  stale `data-page-flip` could fire the back sweep. Old-iOS pops are instant by design.
-  A forward pop onto details replays the click morph: the resolver names the origin
+  stamps `data-page-flip` (pops have no click handler), skips under reduced motion,
+  and skips when the pop's own popstate was flagged gesture-driven (below). It requires
+  the OLD page's structural marker (`.page-flip-details` / `.page-flip-listing`) to
+  exist — the root `RouteError` renders at the failed route's URL, and its
+  `history.back()` must stay instant, not flip the crash screen. **The option MUST
+  stay gated on `supportsTypedViewTransitions`**: on WebKit without
+  `:active-view-transition-type()` the router never evaluates the resolver, so an
+  ungated object default would run an untyped transition for EVERY navigation —
+  including each search keystroke, where a stale `data-page-flip` could fire the back
+  sweep. Old-iOS pops are instant by design.
+- The gesture guard is iOS-scoped and popstate-sampled: the edge tracker registers
+  only when `data-browser='safari'` AND typed transitions are supported (every iOS
+  engine stamps `safari`; Android's system back gesture plays NO native slide for SPA
+  pops, so suppressing there would just kill the animation — and old-WebKit listeners
+  would be dead hot-path weight). It tracks touch *identifiers* whose `changedTouches`
+  start within 24px of a layout-viewport edge (`documentElement.clientWidth`, not
+  `innerWidth`, which shrinks under pinch zoom), refreshes on that touch's end/cancel
+  (long holds), and uses `performance.now()` (monotonic). The popstate listener — not
+  the resolver, which can run seconds later behind a loader — decides
+  `lastPopWasGesture`; the resolver consumes the flag once. KNOWN LIMITATION: desktop
+  Safari trackpad two-finger swipe-back plays a native slide but emits no page events
+  at all, so its pop double-animates (a subtle 240ms crossfade) — undetectable, accepted.
+- A forward pop onto details replays the click morph: the resolver names the origin
   card via a direct inline-style DOM write (React state can't commit before the OLD
   snapshot capture; the node unmounts with the nav), sweeping stale inline names first
-  so duplicate `active-card` regions can't abort the transition. If the virtualized
-  listing has scrolled the card out, it falls back to fading the details content in.
+  — in BOTH directions, a leftover cmd+click name must not pair on a back pop — since
+  duplicate `active-card` regions abort the transition. The card path is
+  `CSS.escape`d (router pathnames arrive DECODED; a quote would otherwise throw
+  mid-commit and strand the navigation), and the card is named only if its bbox
+  intersects the viewport: `useWindowVirtualizer`'s overscan keeps ~5 off-screen rows
+  mounted, and a morph from an off-viewport bbox streaks across the page and paints
+  over the header. Otherwise the details content just fades in.
 - **Every transition-triggering nav must ALSO call `stampPageFlip('forward'|'back')`**
   (utils.ts) in its click/key handler, synchronously before the navigate. It sets
   `data-page-flip` on `<html>`, which the Safari-scoped rules in `transitions.css` key

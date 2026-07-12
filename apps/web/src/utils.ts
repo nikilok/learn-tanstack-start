@@ -188,3 +188,8 @@ export function hasWebGpu() {
 export function stampPageFlip(direction: 'forward' | 'back') {
   document.documentElement.setAttribute('data-page-flip', direction);
 }
+
+/** Whether the pathname is a company-details page. */
+export function isDetailsPath(pathname: string) {
+  return pathname.startsWith('/company/');
+}

@@ -3,65 +3,66 @@ import { createRouter as createTanStackRouter } from '@tanstack/react-router';
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query';
 
 import { routeTree } from './routeTree.gen';
-import { prefersReducedMotion, stampPageFlip } from './utils';
+import { isDetailsPath, prefersReducedMotion, stampPageFlip } from './utils';
 
-/** Whether the pathname is a company-details page. */
-function isDetailsPath(pathname: string) {
-  return pathname.startsWith('/company/');
-}
-
-/*
- * Edge-swipe tracker for the pop-navigation transitions below: an iOS
- * edge-swipe back/forward plays the native page-slide, so running our view
- * transition on the popstate that follows would animate twice. A touch
- * starting near a screen edge marks the next pop (while held + a grace
- * window after release) as gesture-driven. Best effort — WebKit sometimes
- * swallows the touchstart when the system gesture claims it.
- */
-const EDGE_TOUCH_PX = 40;
-const EDGE_GESTURE_GRACE_MS = 1000;
-let edgeTouchActive = false;
-let edgeGestureEndedAt = 0;
-if (typeof window !== 'undefined') {
-  const onEdgeTouchEnd = () => {
-    if (!edgeTouchActive) return;
-    edgeTouchActive = false;
-    edgeGestureEndedAt = Date.now();
-  };
-  window.addEventListener(
-    'touchstart',
-    (e) => {
-      const x = e.touches[0]?.clientX ?? Number.NaN;
-      if (x <= EDGE_TOUCH_PX || x >= window.innerWidth - EDGE_TOUCH_PX) {
-        edgeTouchActive = true;
-      }
-    },
-    { capture: true, passive: true },
-  );
-  window.addEventListener('touchend', onEdgeTouchEnd, {
-    capture: true,
-    passive: true,
-  });
-  window.addEventListener('touchcancel', onEdgeTouchEnd, {
-    capture: true,
-    passive: true,
-  });
-}
-
-/*
- * Gate for `defaultViewTransition`: the router only evaluates the `types`
- * resolver when the browser supports `:active-view-transition-type()`
- * (its own CSS.supports check). Without support (e.g. iOS Safari < 18.2)
- * an object default would run an UNTYPED transition for EVERY navigation
- * — including each search keystroke — so those browsers get no default
- * at all: pops stay instant there, explicit navs keep their handler-side
- * stamps.
- */
+// Gate: without :active-view-transition-type() the router runs UNTYPED
+// transitions for every nav (search keystrokes included) — see CLAUDE.md.
 const supportsTypedViewTransitions =
   typeof window !== 'undefined' &&
   typeof CSS !== 'undefined' &&
   typeof CSS.supports === 'function' &&
   CSS.supports('selector(:active-view-transition-type(a))');
+
+// iOS edge-swipe pops already play the native slide; iOS-only (data-browser
+// covers every iOS engine, and Android/desktop gestures have no native
+// slide to double). Sampled at popstate — the resolver can run seconds
+// later behind a loader. Best effort: WebKit may swallow the touch events.
+const EDGE_TOUCH_PX = 24;
+const EDGE_POP_WINDOW_MS = 1500;
+let lastPopWasGesture = false;
+if (
+  supportsTypedViewTransitions &&
+  document.documentElement.getAttribute('data-browser') === 'safari'
+) {
+  const edgeTouchIds = new Set<number>();
+  let lastEdgeTouchAt = Number.NEGATIVE_INFINITY;
+  window.addEventListener(
+    'touchstart',
+    (e) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const x = e.changedTouches[i].clientX;
+        // Layout-viewport width: innerWidth shrinks under pinch zoom.
+        const width = document.documentElement.clientWidth;
+        if (x <= EDGE_TOUCH_PX || x >= width - EDGE_TOUCH_PX) {
+          if (edgeTouchIds.size >= 10) edgeTouchIds.clear();
+          edgeTouchIds.add(e.changedTouches[i].identifier);
+          lastEdgeTouchAt = performance.now();
+        }
+      }
+    },
+    { capture: true, passive: true },
+  );
+  // End/cancel of an edge-started touch refreshes the window (long holds).
+  const onEdgeTouchDone = (e: TouchEvent) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (edgeTouchIds.delete(e.changedTouches[i].identifier)) {
+        lastEdgeTouchAt = performance.now();
+      }
+    }
+  };
+  window.addEventListener('touchend', onEdgeTouchDone, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener('touchcancel', onEdgeTouchDone, {
+    capture: true,
+    passive: true,
+  });
+  window.addEventListener('popstate', () => {
+    lastPopWasGesture =
+      performance.now() - lastEdgeTouchAt < EDGE_POP_WINDOW_MS;
+  });
+}
 
 /**
  * Resolves transition types for navigations without an explicit
@@ -80,6 +81,8 @@ function resolvePopTransitionTypes({
   toLocation: { pathname: string; state: { __TSR_index: number } };
   pathChanged: boolean;
 }): Array<string> | false {
+  const popWasGesture = lastPopWasGesture;
+  lastPopWasGesture = false;
   if (!pathChanged || !fromLocation) return false;
   const from = fromLocation.pathname;
   const to = toLocation.pathname;
@@ -88,32 +91,38 @@ function resolvePopTransitionTypes({
   if (!withinPair) return false;
   if (prefersReducedMotion()) return false;
   // The native swipe animation already ran — don't animate twice.
-  if (
-    edgeTouchActive ||
-    Date.now() - edgeGestureEndedAt < EDGE_GESTURE_GRACE_MS
-  )
-    return false;
+  if (popWasGesture) return false;
+  // An error screen at a pair URL (RouteError renders in place) pops instantly.
+  const oldPageMarker = isDetailsPath(from)
+    ? '.page-flip-details'
+    : '.page-flip-listing';
+  if (!document.querySelector(oldPageMarker)) return false;
+  // Sweep stale inline names (e.g. from a cmd+click) in BOTH directions so a
+  // leftover card can't pair — duplicate `active-card` aborts the transition.
+  for (const el of document.querySelectorAll<HTMLElement>(
+    '.page-flip-listing a[style*="view-transition-name"]',
+  )) {
+    el.style.removeProperty('view-transition-name');
+  }
   if (toLocation.state.__TSR_index < fromLocation.state.__TSR_index) {
     stampPageFlip('back');
     return ['back'];
   }
   if (isDetailsPath(to)) {
-    // Re-arm the click morph: name the origin card (when still rendered —
-    // the virtualized listing may have scrolled it out, then this is a
-    // no-op and the details content just fades in). A direct DOM write,
-    // not React state: it must land synchronously before the OLD snapshot
-    // capture, and the node unmounts with the navigation anyway. The
-    // sweep first clears any stale inline name so the transition can't
-    // abort on duplicate `active-card` regions. Safari strips the name
-    // via its [style*=…] override and keeps its root slide.
-    for (const el of document.querySelectorAll<HTMLElement>(
-      '.page-flip-listing a[style*="view-transition-name"]',
-    )) {
-      el.style.removeProperty('view-transition-name');
+    // Re-arm the click morph via a direct DOM write (must land before the
+    // OLD snapshot capture; the node unmounts with the nav) — see CLAUDE.md.
+    // CSS.escape guards decoded quotes; encoded hrefs then simply not match.
+    const anchor = document.querySelector<HTMLElement>(
+      `.page-flip-listing a[href^="${CSS.escape(to)}"]`,
+    );
+    if (anchor) {
+      // Only when actually in view: overscan keeps off-viewport rows mounted,
+      // and a morph from an off-screen bbox streaks and covers the header.
+      const rect = anchor.getBoundingClientRect();
+      if (rect.bottom > 0 && rect.top < document.documentElement.clientHeight) {
+        anchor.style.setProperty('view-transition-name', 'active-card');
+      }
     }
-    document
-      .querySelector<HTMLElement>(`.page-flip-listing a[href^="${to}"]`)
-      ?.style.setProperty('view-transition-name', 'active-card');
     stampPageFlip('forward');
     return ['forward'];
   }

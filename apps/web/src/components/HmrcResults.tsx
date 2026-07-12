@@ -6,7 +6,12 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { formatLocation, hasWebGpu, prefersReducedMotion } from '../utils';
+import {
+  formatLocation,
+  hasWebGpu,
+  prefersReducedMotion,
+  stampPageFlip,
+} from '../utils';
 import BlackHole from './BlackHole';
 import HmrcCard from './HmrcCard';
 import SkeletonCards from './SkeletonCards';
@@ -378,6 +383,7 @@ export default function HmrcResults({ search }: { search: string }) {
               isActive={activeId === results[virtualRow.index].slugId}
               isHighlighted={highlightedIndex === virtualRow.index}
               onActivate={() => {
+                stampPageFlip('forward');
                 // flushSync forces React to commit the state update before
                 // TanStack Router's click handler triggers
                 // startViewTransition — otherwise the OLD snapshot would be

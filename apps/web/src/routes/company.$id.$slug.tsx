@@ -32,6 +32,7 @@ import {
   formatAddress,
   formatDate,
   formatLocation,
+  stampPageFlip,
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -262,6 +263,7 @@ function CompanyDetail() {
       if (e.key !== 'Escape') return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       e.preventDefault();
+      stampPageFlip('back');
       navigate({
         to: '/',
         search: { search },
@@ -509,6 +511,7 @@ function CompanyDetail() {
           to="/"
           search={{ search }}
           viewTransition={{ types: ['back'] }}
+          onClick={() => stampPageFlip('back')}
           style={{ transition: 'none' }}
           className={`sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) no-underline hover:text-(--sea-ink) ${
             stuck

@@ -178,3 +178,13 @@ export function prefersReducedMotion() {
 export function hasWebGpu() {
   return typeof navigator !== 'undefined' && !!navigator.gpu;
 }
+
+/**
+ * Stamps the page-flip direction on `<html>` for the Safari-scoped view-transition
+ * rules in transitions.css (which can't rely on `:active-view-transition-type()` —
+ * see the Safari block there). Call synchronously from the handler that navigates
+ * with `viewTransition: { types }`, before the OLD snapshot is captured.
+ */
+export function stampPageFlip(direction: 'forward' | 'back') {
+  document.documentElement.setAttribute('data-page-flip', direction);
+}

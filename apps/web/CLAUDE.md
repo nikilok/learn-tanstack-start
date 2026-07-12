@@ -252,6 +252,17 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   `HmrcCard`; back navigation passes `['back']` on the back link in `company.$id.$slug.tsx`.
   Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`
   so they don't trigger animations.
+- **Every transition-triggering nav must ALSO call `stampPageFlip('forward'|'back')`**
+  (utils.ts) in its click/key handler, synchronously before the navigate. It sets
+  `data-page-flip` on `<html>`, which the Safari-scoped rules in `transitions.css` key
+  on instead of `:active-view-transition-type()`: TanStack Router only passes `types`
+  to `startViewTransition` when `CSS.supports('selector(:active-view-transition-type(a))')`
+  is true (router-core's gate), and WebKit only shipped that pseudo-class in Safari 18.2 —
+  on iOS 18.0/18.1 the transition runs untyped, typed selectors match nothing, and Safari
+  silently falls back to the UA cross-fade. Current stamp sites: `HmrcCard` onClick (via
+  `onActivate` in `HmrcResults`), and the Esc handler + back `Link` in
+  `company.$id.$slug.tsx`. The attribute is re-stamped by every such nav and inert between
+  transitions, so it needs no cleanup. Chrome-only rules may keep the typed pseudo-class.
 
 ## /download owner gating — cross-file invariants
 

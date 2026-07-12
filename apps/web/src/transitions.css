@@ -1,9 +1,23 @@
 /*
- * Page transitions: outgoing page recedes (scale + slight slide + fade),
- * incoming page rises into place (scale + slide + fade). The combined
- * scale + translate gives a subtle "depth pass" feel without long travel
- * distances that can trigger motion sickness. Outgoing distance is small
- * (12%) and dampened with a blur tick so the eye doesn't track it.
+ * Page transitions, keyed off :active-view-transition-type(forward|back).
+ * Forward: the clicked listing card expands into the details wrapper
+ * (shared-element morph on `active-card`; root swaps instantly beneath).
+ * Back: the reverse — the details content contracts and dissolves over a
+ * quick root crossfade back to the restored listing.
+ * Safari opts out of the morph in both directions (GPU pressure, see the
+ * Safari block below): forward is a page-level slide, back is the root
+ * crossfade (fade out details, fade in home) on desktop — touch-device
+ * Safari keeps the original back sweep (mobile block at the bottom).
+ */
+
+/*
+ * Safari page-level slides: outgoing page recedes (scale + slight slide +
+ * fade), incoming page rises into place. The combined scale + translate
+ * gives a subtle "depth pass" feel without long travel distances that
+ * can trigger motion sickness. Outgoing distance is small (12%) and
+ * dampened with a blur tick so the eye doesn't track it. The left pair
+ * runs Safari forward everywhere; the mirrored right pair runs the back
+ * sweep on touch Safari only.
  */
 @keyframes route-recede-left {
   from {
@@ -64,6 +78,38 @@
     opacity: 1;
     filter: blur(0);
     clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Back: the details content shrinking away — the forward expand reversed. */
+@keyframes route-contract-away {
+  from {
+    transform: scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    transform: scale(0.72);
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+@keyframes route-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes route-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
@@ -174,15 +220,14 @@ html:active-view-transition [data-uj-cursor] > div[data-cursor-box='active'] {
 }
 
 /*
- * On back-nav the active-card name is dropped so the entire page is
- * captured into a single `root` snapshot and animates as one piece.
- * (A shrink-back morph isn't practical here — the listing is virtualized
- * and scroll-restored asynchronously, so the morph target isn't reliably
- * in the DOM at NEW-snapshot capture time. See CLAUDE.md.)
+ * The name stays on for back-nav too, but deliberately UNPAIRED:
+ * HmrcResults leaves `activeId` null on a back-nav remount, so no listing
+ * card carries the name at NEW-snapshot capture time and the old-side
+ * details snapshot contracts on its own (back block below). A true
+ * shrink-back morph to the card isn't practical — the listing is
+ * virtualized and scroll-restored asynchronously, so the morph target
+ * isn't reliably in the DOM (or in position) at capture time.
  */
-html:active-view-transition-type(back) .page-flip-details {
-  view-transition-name: none;
-}
 
 /*
  * Active card morph: the browser pairs the listing card with the details
@@ -191,13 +236,13 @@ html:active-view-transition-type(back) .page-flip-details {
  * produces the magnify-in / shrink-back effect. We just tune the timing
  * and let the default cross-fade between the two snapshots run.
  */
-::view-transition-group(active-card) {
+html:active-view-transition-type(forward)::view-transition-group(active-card) {
   animation-duration: 420ms;
   animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-::view-transition-old(active-card),
-::view-transition-new(active-card) {
+html:active-view-transition-type(forward)::view-transition-old(active-card),
+html:active-view-transition-type(forward)::view-transition-new(active-card) {
   animation-duration: 420ms;
   animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
   mix-blend-mode: normal;
@@ -216,10 +261,12 @@ html:active-view-transition-type(back) .page-flip-details {
  * Safari: skip the shared-element morph entirely and use the original
  * page-level slide that was on main before the morph was added. Drop
  * the named regions so the whole page is captured into a single `root`
- * snapshot, then animate root with the same recede-left / rise-from-
- * right pattern used on back. WebKit handles a single root pair
- * cleanly without the cumulative GPU pressure that the active-card
- * pairing was causing.
+ * snapshot, then animate root with the recede-left / rise-from-right
+ * slide. WebKit handles a single root pair cleanly without the
+ * cumulative GPU pressure that the active-card pairing was causing.
+ * Dropping the name here also opts Safari out of the back contract —
+ * with no named region, back falls through to the root crossfade
+ * (desktop) or the touch-device sweep (mobile block at the bottom).
  *
  * The override on the listing card uses an attribute selector +
  * `!important` because the name is set as an inline style by HmrcCard
@@ -233,22 +280,35 @@ html[data-browser='safari'] .page-flip-listing [style*='view-transition-name'] {
   view-transition-name: none !important;
 }
 
+/*
+ * Safari rules are keyed on `data-page-flip` (stamped on <html> by the nav
+ * handlers via stampPageFlip, utils.ts) instead of
+ * `:active-view-transition-type()`. WebKit without that pseudo-class makes
+ * the router downgrade to an UNTYPED startViewTransition (its CSS.supports
+ * gate, see router-core), so typed selectors silently never match there —
+ * the sweep/slide would fall back to the UA default cross-fade. The
+ * attribute is our own direction channel: stamped synchronously before the
+ * OLD snapshot is captured, re-stamped by every transition-triggering nav,
+ * and inert between transitions (the ::view-transition-* pseudos only
+ * exist while one runs). Chrome rules keep the typed pseudo-class.
+ */
+
 /* Forward root animation for Safari. Higher specificity than the shared
    `forward root: animation: none` rule below, so it wins on Safari. */
-html[data-browser='safari']:active-view-transition-type(
-    forward
-  )::view-transition-group(root) {
+html[data-browser='safari'][data-page-flip='forward']::view-transition-group(
+    root
+  ) {
   animation-duration: 280ms;
 }
-html[data-browser='safari']:active-view-transition-type(
-    forward
-  )::view-transition-old(root) {
+html[data-browser='safari'][data-page-flip='forward']::view-transition-old(
+    root
+  ) {
   animation: route-recede-left 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
   transform-origin: center center;
 }
-html[data-browser='safari']:active-view-transition-type(
-    forward
-  )::view-transition-new(root) {
+html[data-browser='safari'][data-page-flip='forward']::view-transition-new(
+    root
+  ) {
   animation: route-rise-from-right 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transform-origin: center center;
 }
@@ -268,22 +328,55 @@ html:active-view-transition-type(forward)::view-transition-new(root) {
 }
 
 /*
- * Back: page-level slide. With no named regions carved out on back, the
- * whole page (header, footer, content) is captured into the `root`
- * snapshot and animates as one piece — old recedes right, new rises in
- * from the left. The header stays in its normal stacking position so
- * it never gets covered by a tall listing snapshot mid-animation.
+ * Back: the forward morph played in reverse, minus the pairing. The root
+ * pair crossfades quickly (details chrome out, restored listing in) while
+ * the unpaired `active-card` old snapshot — the details content — contracts
+ * and dissolves on top of it. On Safari the name is dropped wholesale
+ * (Safari block above), so back there is just this root crossfade: fade
+ * out details, fade in home.
  */
 html:active-view-transition-type(back)::view-transition-group(root) {
-  animation-duration: 380ms;
+  animation-duration: 240ms;
 }
 html:active-view-transition-type(back)::view-transition-old(root) {
-  animation: route-recede-right 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
-  transform-origin: center center;
+  animation: route-fade-out 240ms ease forwards;
 }
 html:active-view-transition-type(back)::view-transition-new(root) {
-  animation: route-rise-from-left 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: route-fade-in 240ms ease forwards;
+}
+html:active-view-transition-type(back)::view-transition-old(active-card) {
+  animation: route-contract-away 340ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
   transform-origin: center center;
+  mix-blend-mode: normal;
+}
+
+/*
+ * Touch-device Safari (iPhone/iPad): keep the original left-to-right back
+ * sweep — the plain crossfade read flat on phones. Desktop Safari keeps
+ * the crossfade above. Keyed on the primary pointer, not viewport width,
+ * so a narrow desktop window doesn't switch animations. `data-page-flip`
+ * instead of the typed pseudo-class so it works on WebKit without
+ * `:active-view-transition-type()` (see the Safari block above). Higher
+ * specificity than the generic back rules, so it wins where it matches.
+ */
+@media (hover: none) and (pointer: coarse) {
+  html[data-browser='safari'][data-page-flip='back']::view-transition-group(
+      root
+    ) {
+    animation-duration: 380ms;
+  }
+  html[data-browser='safari'][data-page-flip='back']::view-transition-old(
+      root
+    ) {
+    animation: route-recede-right 280ms cubic-bezier(0.4, 0, 1, 1) forwards;
+    transform-origin: center center;
+  }
+  html[data-browser='safari'][data-page-flip='back']::view-transition-new(
+      root
+    ) {
+    animation: route-rise-from-left 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    transform-origin: center center;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -293,6 +386,8 @@ html:active-view-transition-type(back)::view-transition-new(root) {
   ::view-transition-group(active-card),
   ::view-transition-old(active-card),
   ::view-transition-new(active-card) {
-    animation: none;
+    /* !important: must outrank the direction/browser-scoped rules above,
+       which otherwise win on specificity and animate despite the setting. */
+    animation: none !important;
   }
 }

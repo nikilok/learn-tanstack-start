@@ -250,8 +250,24 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   rules in `transitions.css` for future per-browser tweaks.
 - Forward navigation passes `viewTransition={{ types: ['forward'] }}` on the `Link` in
   `HmrcCard`; back navigation passes `['back']` on the back link in `company.$id.$slug.tsx`.
-  Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`
-  so they don't trigger animations.
+  Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`.
+- Browser back/forward pops animate via `defaultViewTransition` in `router.tsx`
+  (`resolvePopTransitionTypes`): home ↔ details pops only — everything else returns
+  `false`, which is what keeps search-param updates instant. Direction comes from
+  `state.__TSR_index` (a decreasing index is provably a back traversal; forward-index
+  motion landing on home, e.g. the header-logo push, stays instant). The resolver also
+  stamps `data-page-flip` (pops have no click handler) and skips when reduced motion is
+  on or a screen-edge touch was seen recently (iOS edge-swipe already plays the native
+  slide — don't double-animate). **The option MUST stay gated on
+  `supportsTypedViewTransitions`**: on WebKit without `:active-view-transition-type()`
+  the router never evaluates the resolver, so an ungated object default would run an
+  untyped transition for EVERY navigation — including each search keystroke, where a
+  stale `data-page-flip` could fire the back sweep. Old-iOS pops are instant by design.
+  A forward pop onto details replays the click morph: the resolver names the origin
+  card via a direct inline-style DOM write (React state can't commit before the OLD
+  snapshot capture; the node unmounts with the nav), sweeping stale inline names first
+  so duplicate `active-card` regions can't abort the transition. If the virtualized
+  listing has scrolled the card out, it falls back to fading the details content in.
 - **Every transition-triggering nav must ALSO call `stampPageFlip('forward'|'back')`**
   (utils.ts) in its click/key handler, synchronously before the navigate. It sets
   `data-page-flip` on `<html>`, which the Safari-scoped rules in `transitions.css` key

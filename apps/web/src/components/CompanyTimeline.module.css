@@ -1,0 +1,8 @@
+/* Visible focus ring for the row focused when "show earlier" expands;
+   focus-visible keeps it keyboard-only. Explicit style so it can't render as
+   outline-style:none the way Tailwind's outline-2 utility does. */
+.event:focus-visible {
+  outline: 2px solid var(--sea-ink-soft);
+  outline-offset: 3px;
+  border-radius: 2px;
+}

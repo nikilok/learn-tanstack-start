@@ -409,6 +409,12 @@ html[data-desktop] .footer-desktop-link {
   border-radius: 2px;
 }
 
+/* Brand-red dotted connector on the address-change journey map. Set here (not
+   via Leaflet's color option) so it can use the theme-aware --logo-red var. */
+.journey-line {
+  stroke: var(--logo-red);
+}
+
 .glass:hover {
   box-shadow: var(--shadow-card-full);
 }

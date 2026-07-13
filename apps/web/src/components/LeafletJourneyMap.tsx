@@ -2,7 +2,6 @@ import L from 'leaflet';
 import { Marker, Polyline } from 'react-leaflet';
 
 import type { Geocoded } from '../api/geocode';
-import { useIsDark } from '../hooks/useIsDark';
 import { unionJackIcon } from './LeafletMap';
 import { MapShell } from './MapShell';
 
@@ -26,7 +25,6 @@ export default function LeafletJourneyMap({
   from: Geocoded;
   to: Geocoded;
 }) {
-  const isDark = useIsDark();
   const fromPos: [number, number] = [from.lat, from.lon];
   const toPos: [number, number] = [to.lat, to.lon];
   return (
@@ -43,8 +41,11 @@ export default function LeafletJourneyMap({
     >
       <Polyline
         positions={[fromPos, toPos]}
+        // Stroke colour is set via `.journey-line` in styles.css so it can use
+        // the theme-aware brand-red token; SVG stroke attributes can't resolve
+        // a CSS var, but a stylesheet rule beats the attribute.
         pathOptions={{
-          color: isDark ? '#94a3b8' : '#475569',
+          className: 'journey-line',
           weight: 2.5,
           opacity: 0.9,
           dashArray: '1 9',

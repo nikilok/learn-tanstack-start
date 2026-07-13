@@ -1,0 +1,39 @@
+/* Styles for the address-change journey map. The hashed class names are passed
+   straight to Leaflet's divIcon/path `className`, so they scope cleanly even on
+   Leaflet-created DOM. */
+
+/* Brand-red dotted connector. Set here (not via Leaflet's color option) so it
+   can use the theme-aware --logo-red var. */
+.line {
+  stroke: var(--logo-red);
+}
+
+.distanceIcon {
+  line-height: 22px;
+  pointer-events: none;
+}
+
+/* The label hugs the inner edge that faces the current-location pin. */
+.onRight {
+  text-align: left;
+}
+.onLeft {
+  text-align: right;
+}
+
+/* Read like the map's own white-faced A-road shields (rounded rectangle,
+   defined border) — the same on both tile themes, since the shields stay
+   white-faced on the dark map too. */
+.distance {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f5f4f1;
+  color: #35342f;
+  border: 1.5px solid #6f6f6b;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}

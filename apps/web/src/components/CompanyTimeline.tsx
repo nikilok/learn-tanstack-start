@@ -4,6 +4,8 @@ import type { TimelineEvent, TimelineTone } from '../lib/timeline/types';
 import { AddressChangeMap } from './AddressChangeMap';
 import { LABEL_CLASS } from './DetailField';
 
+import styles from './CompanyTimeline.module.css';
+
 // Change events shown before the expand button reveals the rest.
 const INITIAL_VISIBLE = 8;
 
@@ -148,7 +150,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
           return (
             <li
               key={event.id}
-              className="timeline-event flex gap-2.5"
+              className={`${styles.event} flex gap-2.5`}
               tabIndex={expanded && i === firstRevealedIndex ? -1 : undefined}
             >
               <RailCell line={line} tone={event.tone} />

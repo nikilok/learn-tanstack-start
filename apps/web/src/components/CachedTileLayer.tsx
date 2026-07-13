@@ -1,6 +1,6 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import L from 'leaflet';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useMap } from 'react-leaflet';
 
 interface CachedTileLayerOptions extends L.TileLayerOptions {
@@ -131,29 +131,26 @@ interface CachedTileLayerProps {
   attribution?: string;
 }
 
-/** Drop-in replacement for react-leaflet's `<TileLayer>` that routes tiles through the TanStack Query cache. A `url` change (light/dark theme swap) re-requests tiles via Leaflet's in-place `setUrl` rather than rebuilding the layer. */
+/** Drop-in replacement for react-leaflet's `<TileLayer>` that routes tiles through the TanStack Query cache. A `url` change (light/dark theme swap) rebuilds the layer so it re-adds through Leaflet's `_setView` path. */
 export function CachedTileLayer({ url, attribution }: CachedTileLayerProps) {
   const map = useMap();
   const queryClient = useQueryClient();
-  const layerRef = useRef<CachedLeafletTileLayer | null>(null);
 
   useEffect(() => {
     const layer = new CachedLeafletTileLayer(url, { attribution, queryClient });
-    layerRef.current = layer;
     layer.addTo(map);
     return () => {
       layer.remove();
-      layerRef.current = null;
     };
-    // Rebuild only on map/client identity change. `url` is applied in place by the
-    // effect below (Leaflet setUrl), so a theme swap doesn't tear the layer down;
-    // `attribution` is a constant.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, queryClient]);
-
-  useEffect(() => {
-    layerRef.current?.setUrl(url);
-  }, [url]);
+    // Rebuild on a `url` (theme) change rather than calling `setUrl`: Leaflet's
+    // in-place setUrl → GridLayer.redraw sets `_tileZoom` via `_clampZoom`, which
+    // does NOT round, so on a fractional-zoom map (zoomSnap < 1, e.g. the
+    // address-change journey map) tiles get a fractional `coords.z`, the tile URL
+    // carries a non-integer z the proxy rejects, and the map blanks until the next
+    // pan/zoom. Re-adding routes through `_setView`, which rounds `_tileZoom`
+    // correctly. Tiles are keyed by url in the query cache, so this refetches
+    // nothing already seen.
+  }, [map, queryClient, url, attribution]);
 
   return null;
 }

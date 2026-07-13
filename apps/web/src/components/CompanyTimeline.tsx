@@ -7,14 +7,39 @@ import { LABEL_CLASS } from './DetailField';
 // Change events shown before the expand button reveals the rest.
 const INITIAL_VISIBLE = 8;
 
-// Dot colors reuse StatusBadge's theme-paired shades; neutral is a hollow
-// ring like NameHistory's previous-name dots.
+// Dots share StatusBadge's --status-* palette; neutral is a hollow ring like
+// NameHistory's previous-name dots.
 const TONE_DOT: Record<TimelineTone, string> = {
-  positive: 'bg-[#166534] dark:bg-[#4ade80]',
-  warning: 'bg-[#92400e] dark:bg-[#fbbf24]',
-  negative: 'bg-[#b91c1c] dark:bg-[#f87171]',
+  positive: 'bg-(--status-green)',
+  warning: 'bg-(--status-amber)',
+  negative: 'bg-(--status-red)',
   neutral: 'border border-(--sea-ink-soft) bg-(--sponsor-card-bg)',
 };
+
+type RailLine = 'start' | 'middle' | 'end' | 'none';
+
+const RAIL_LINE: Record<RailLine, string> = {
+  start: 'top-2.5 bottom-0',
+  middle: 'inset-y-0',
+  end: 'top-0 h-3',
+  none: 'hidden',
+};
+
+/** Rail gutter cell: one row's connector-line segment plus optional tone dot. */
+function RailCell({ line, tone }: { line: RailLine; tone?: TimelineTone }) {
+  return (
+    <span className="relative w-2 shrink-0" aria-hidden>
+      <span
+        className={`absolute left-1/2 w-px -translate-x-1/2 bg-(--sea-ink-soft)/30 ${RAIL_LINE[line]}`}
+      />
+      {tone && (
+        <span
+          className={`absolute top-2 left-1/2 size-2 -translate-x-1/2 rounded-full ${TONE_DOT[tone]}`}
+        />
+      )}
+    </span>
+  );
+}
 
 /** Whether an event is a context anchor rather than an observed change. */
 function isAnchor(event: TimelineEvent) {
@@ -39,6 +64,8 @@ function ChangeDetail({ from, to }: { from: string; to: string }) {
     </>
   );
 }
+
+type Row = { type: 'event'; event: TimelineEvent } | { type: 'button' };
 
 /**
  * Vertical change-history timeline for a company's Companies House record,
@@ -66,6 +93,11 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
     : events;
   const noChanges = events.every(isAnchor);
 
+  // The expand button is its own row so it exists even when no anchors
+  // survive into the collapsed tail.
+  const rows: Row[] = visible.map((event) => ({ type: 'event', event }));
+  if (collapsed) rows.splice(INITIAL_VISIBLE, 0, { type: 'button' });
+
   return (
     <div className="mt-1">
       {noChanges && (
@@ -78,70 +110,65 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
         className="m-0 list-none p-0"
         aria-label="Company change history"
       >
-        {visible.map((event, i) => {
-          const isLast = i === visible.length - 1;
+        {rows.map((row, i) => {
+          const isLast = i === rows.length - 1;
+          const line: RailLine =
+            rows.length === 1
+              ? 'none'
+              : i === 0
+                ? 'start'
+                : isLast
+                  ? 'end'
+                  : 'middle';
+
+          if (row.type === 'button') {
+            return (
+              <li key="show-earlier" className="flex gap-2.5">
+                <RailCell line={line} />
+                <button
+                  type="button"
+                  onClick={() => setExpanded(true)}
+                  className="mb-4 w-fit cursor-pointer text-sm text-(--sea-ink-soft) underline decoration-(--sea-ink-soft)/40 underline-offset-2 hover:text-(--sea-ink)"
+                >
+                  Show {hiddenChanges} earlier changes
+                </button>
+              </li>
+            );
+          }
+
+          const { event } = row;
           const anchor = isAnchor(event);
-          const showButton = collapsed && i === INITIAL_VISIBLE;
           return (
             <li
               key={event.id}
-              className="flex flex-col focus:outline-none"
+              className="flex gap-2.5 focus:outline-none"
               tabIndex={expanded && i === INITIAL_VISIBLE ? -1 : undefined}
             >
-              {showButton && (
-                <div className="flex gap-2.5">
-                  <span className="relative w-2 shrink-0" aria-hidden>
-                    <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-(--sea-ink-soft)/30" />
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setExpanded(true)}
-                    className="mb-4 w-fit cursor-pointer text-sm text-(--sea-ink-soft) underline decoration-(--sea-ink-soft)/40 underline-offset-2 hover:text-(--sea-ink)"
-                  >
-                    Show {hiddenChanges} earlier changes
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-2.5">
-                <span className="relative w-2 shrink-0" aria-hidden>
-                  <span
-                    className={`absolute left-1/2 w-px -translate-x-1/2 bg-(--sea-ink-soft)/30 ${
-                      isLast
-                        ? 'top-0 h-3'
-                        : i === 0
-                          ? 'top-2.5 bottom-0'
-                          : 'inset-y-0'
-                    } ${visible.length === 1 ? 'hidden' : ''}`}
-                  />
-                  <span
-                    className={`absolute top-2 left-1/2 size-2 -translate-x-1/2 rounded-full ${TONE_DOT[event.tone]}`}
-                  />
-                </span>
-                <div className={`min-w-0 ${isLast ? '' : 'pb-4'}`}>
-                  <time dateTime={event.dateISO} className={LABEL_CLASS}>
-                    {event.dateLabel}
-                  </time>
-                  <p
-                    className={
-                      anchor
-                        ? 'text-sm text-(--sea-ink-soft)'
-                        : 'text-sm font-medium text-(--sea-ink)'
-                    }
-                  >
-                    {event.title}
+              <RailCell line={line} tone={event.tone} />
+              <div className={`min-w-0 ${isLast ? '' : 'pb-4'}`}>
+                <time dateTime={event.dateISO} className={LABEL_CLASS}>
+                  {event.dateLabel}
+                </time>
+                <p
+                  className={
+                    anchor
+                      ? 'text-sm text-(--sea-ink-soft)'
+                      : 'text-sm font-medium text-(--sea-ink)'
+                  }
+                >
+                  {event.title}
+                </p>
+                {event.from && event.to && (
+                  <ChangeDetail from={event.from} to={event.to} />
+                )}
+                {event.detail && (
+                  <p className="text-sm whitespace-pre-line text-(--sea-ink-soft)">
+                    {event.detail}
                   </p>
-                  {event.from && event.to && (
-                    <ChangeDetail from={event.from} to={event.to} />
-                  )}
-                  {event.detail && (
-                    <p className="text-sm whitespace-pre-line text-(--sea-ink-soft)">
-                      {event.detail}
-                    </p>
-                  )}
-                  {event.mappable && event.from && event.to && (
-                    <AddressChangeMap from={event.from} to={event.to} />
-                  )}
-                </div>
+                )}
+                {event.mappable && event.from && event.to && (
+                  <AddressChangeMap from={event.from} to={event.to} />
+                )}
               </div>
             </li>
           );

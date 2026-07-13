@@ -34,6 +34,7 @@ import {
   formatAddress,
   formatDate,
   formatLocation,
+  humanizeEnum,
   stampPageFlip,
   titleCase,
 } from '../utils';
@@ -154,8 +155,14 @@ export const Route = createFileRoute('/company/$id/$slug')({
     // Timeline is auxiliary — a transient failure must not take down the page.
     const timeline = profile?.company_number
       ? await queryClient
-          .ensureQueryData(companyTimelineQueryOptions(profile.company_number))
-          .catch(() => null)
+          .ensureQueryData({
+            ...companyTimelineQueryOptions(profile.company_number),
+            revalidateIfStale: true,
+          })
+          .catch((error) => {
+            console.error('[Timeline] load failed:', error);
+            return null;
+          })
       : null;
 
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
@@ -412,7 +419,7 @@ function CompanyDetail() {
                 {profile.type && (
                   <DetailField
                     label="Company Type"
-                    value={titleCase(profile.type.replace(/-/g, ' '))}
+                    value={humanizeEnum(profile.type)}
                   />
                 )}
 

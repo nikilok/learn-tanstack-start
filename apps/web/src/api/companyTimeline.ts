@@ -76,7 +76,8 @@ const getCompanyTimeline = createServerFn()
       }
 
       let rows: TrailRow[] = trailRows;
-      if (rows.length === TRAIL_ROW_LIMIT) {
+      const truncated = rows.length === TRAIL_ROW_LIMIT;
+      if (truncated) {
         // The limit can split the oldest same-created_at batch mid-event,
         // which would curate a partial (never-existed) change — drop it.
         const oldest = rows[rows.length - 1].createdAt;
@@ -93,6 +94,7 @@ const getCompanyTimeline = createServerFn()
         rows,
         dateOfCreation: profile.dateOfCreation,
         sicDescriptions,
+        truncated,
       });
 
       // Same tag as the profile RPC + SSR doc, so the existing trail-driven
@@ -104,9 +106,15 @@ const getCompanyTimeline = createServerFn()
     },
   );
 
-/** React Query options for `getCompanyTimeline`, keyed by company number. */
+/**
+ * React Query options for `getCompanyTimeline`, keyed by company number.
+ * A null result can be the profile-upsert race on a first visit — mark it
+ * immediately stale so the next navigation refetches instead of pinning the
+ * miss for the whole SPA session (non-null keeps the router's 5-min default).
+ */
 export const companyTimelineQueryOptions = (companyNumber: string) =>
   queryOptions({
     queryKey: ['company-timeline', companyNumber],
     queryFn: () => getCompanyTimeline({ data: { companyNumber } }),
+    staleTime: (query) => (query.state.data === null ? 0 : 5 * 60 * 1000),
   });

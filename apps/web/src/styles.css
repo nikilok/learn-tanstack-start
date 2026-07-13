@@ -21,6 +21,12 @@
   --gray-600: #4d4d4d;
   --link-blue: #0072f5;
 
+  /* Status tone colours — shared by StatusBadge and the timeline dots */
+  --status-green: #166534;
+  --status-amber: #92400e;
+  --status-red: #b91c1c;
+  --status-grey: #374151;
+
   /* Mapped tokens for components */
   --sea-ink: #171717;
   --sea-ink-soft: #4d4d4d;
@@ -73,6 +79,11 @@
   --gray-600: #a0a0a0;
   --badge-bg: rgba(0, 114, 245, 0.15);
   --badge-text: #3b9eff;
+
+  --status-green: #4ade80;
+  --status-amber: #fbbf24;
+  --status-red: #f87171;
+  --status-grey: #9ca3af;
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;

@@ -40,6 +40,11 @@ export function slugify(str: string): string {
     .replace(/^-|-$/g, '');
 }
 
+/** Humanize a hyphenated CH enum value ("voluntary-arrangement" → "Voluntary Arrangement"). */
+export function humanizeEnum(value: string | null): string {
+  return titleCase((value ?? '').replace(/-/g, ' '));
+}
+
 /**
  * Join the defined fields of a Companies House address into a single
  * comma-separated string. Returns an empty string when the address is

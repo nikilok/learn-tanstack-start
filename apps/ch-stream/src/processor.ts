@@ -109,13 +109,15 @@ export async function processEvent(
     return true;
   }
 
+  // Trails first: a failed insert replays and re-diffs cleanly, whereas
+  // insert-after-update loses the trail forever (replay sees no diff).
+  await db.insert(companiesHouseProfileTrails).values(trails);
+
   const { companyNumber: _, companyName: __, ...updateFields } = newRow;
   await db
     .update(companiesHouseProfiles)
     .set({ ...updateFields, updatedAt: new Date() })
     .where(eq(companiesHouseProfiles.companyNumber, event.resource_id));
-
-  await db.insert(companiesHouseProfileTrails).values(trails);
 
   return true;
 }

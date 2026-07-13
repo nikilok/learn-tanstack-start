@@ -2,6 +2,7 @@ import { useSuspenseQueries } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { geocodeQueryOptions } from '../api/geocode';
+import { MapErrorBoundary } from './MapErrorBoundary';
 
 const LeafletJourneyMap = lazy(() => import('./LeafletJourneyMap'));
 
@@ -49,8 +50,10 @@ export function AddressChangeMap({ from, to }: { from: string; to: string }) {
   if (!near) return <div ref={frameRef} className={FRAME_CLASS} />;
 
   return (
-    <Suspense fallback={placeholder}>
-      <GeocodedJourney from={from} to={to} />
-    </Suspense>
+    <MapErrorBoundary>
+      <Suspense fallback={placeholder}>
+        <GeocodedJourney from={from} to={to} />
+      </Suspense>
+    </MapErrorBoundary>
   );
 }

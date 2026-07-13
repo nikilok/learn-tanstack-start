@@ -1,5 +1,10 @@
 import { STATUS_TONES, type Tone } from '../../components/StatusBadge';
-import { formatDate, titleCase } from '../../utils';
+import {
+  formatAddress,
+  formatDate,
+  humanizeEnum,
+  titleCase,
+} from '../../utils';
 import type {
   TimelineEvent,
   TimelineEventKind,
@@ -85,14 +90,20 @@ function parseJsonStringArray(value: string | null): string[] | null {
   }
 }
 
-/** Compose one side of an address change from the fields present in a chain. */
+/** Compose one side of an address change via the page's shared formatAddress. */
 function composeAddress(
   fields: Map<string, FieldChange>,
   side: 'old' | 'new',
 ): string {
-  return ADDRESS_COLUMNS.map((col) => fields.get(col)?.[side])
-    .filter(Boolean)
-    .join(', ');
+  const value = (col: string) => fields.get(col)?.[side] ?? undefined;
+  return formatAddress({
+    address_line_1: value('addressLine1'),
+    address_line_2: value('addressLine2'),
+    locality: value('locality'),
+    region: value('region'),
+    postal_code: value('postalCode'),
+    country: value('country'),
+  });
 }
 
 /** Tone for a company status value, via StatusBadge's shared buckets. */
@@ -101,11 +112,6 @@ function statusTone(status: string | null): TimelineTone {
     ? STATUS_TONES[status as keyof typeof STATUS_TONES]
     : undefined;
   return bucket ? TONE_BY_BUCKET[bucket] : 'neutral';
-}
-
-/** Humanize a hyphenated CH enum value ("voluntary-arrangement" → "Voluntary Arrangement"). */
-function humanizeEnum(value: string | null): string {
-  return titleCase((value ?? '').replace(/-/g, ' '));
 }
 
 /** Group rows into per-event candidates and merge same-day same-category chains. */
@@ -209,6 +215,8 @@ function renderChain(
       if (!to) {
         return { ...base, title: 'Registered address removed', detail: from };
       }
+      // A value shuffled between address columns composes identically — no-op.
+      if (from === to) return null;
       // Map only real moves: a postcode on both sides geocodes precisely.
       const postcode = fields.get('postalCode');
       return {
@@ -233,14 +241,15 @@ function renderChain(
       if (overdue?.new === 'true') {
         return { ...base, title: 'Annual accounts overdue', tone: 'warning' };
       }
-      if (overdue) {
+      // Only a real true→false clears; null→false just records the absence.
+      if (overdue?.old === 'true') {
         return {
           ...base,
           title: 'Accounts overdue flag cleared',
           tone: 'positive',
         };
       }
-      // Only accountsNextMadeUpTo (CH deadline recalc) — bookkeeping noise.
+      // Deadline recalcs and first-recorded-false flags — bookkeeping noise.
       return null;
     }
     case 'confirmation': {
@@ -290,7 +299,10 @@ function renderChain(
       };
     }
     case 'insolvency': {
-      const recorded = fields.get('hasInsolvencyHistory')?.new === 'true';
+      const change = fields.get('hasInsolvencyHistory');
+      const recorded = change?.new === 'true';
+      // null→false first-records the flag — a "cleared" needs a real true.
+      if (!recorded && change?.old !== 'true') return null;
       return {
         ...base,
         title: recorded
@@ -300,7 +312,9 @@ function renderChain(
       };
     }
     case 'liquidation': {
-      const recorded = fields.get('hasBeenLiquidated')?.new === 'true';
+      const change = fields.get('hasBeenLiquidated');
+      const recorded = change?.new === 'true';
+      if (!recorded && change?.old !== 'true') return null;
       return {
         ...base,
         title: recorded ? 'Liquidation recorded' : 'Liquidation flag cleared',
@@ -308,7 +322,9 @@ function renderChain(
       };
     }
     case 'charges': {
-      const recorded = fields.get('hasCharges')?.new === 'true';
+      const change = fields.get('hasCharges');
+      const recorded = change?.new === 'true';
+      if (!recorded && change?.old !== 'true') return null;
       return {
         ...base,
         title: recorded ? 'Charges registered' : 'Charges cleared',
@@ -394,6 +410,8 @@ export function curateTimeline(input: {
   rows: TrailRow[];
   dateOfCreation: string | null;
   sicDescriptions: ReadonlyMap<string, string>;
+  // True when rows were capped — older history exists but wasn't fetched.
+  truncated?: boolean;
 }): TimelineEvent[] {
   const sortable: { event: TimelineEvent; sortTs: string }[] = [];
   const deletedDates = new Set<string>();
@@ -409,15 +427,26 @@ export function curateTimeline(input: {
     sortable.push({ event, sortTs: chain.sortTs });
   }
 
+  // When history was capped, "tracking began 14 April" would falsely assert
+  // completeness — anchor at the oldest retained event instead.
+  const oldestShown =
+    input.truncated && sortable.length > 0
+      ? sortable.reduce<string>(
+          (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
+          sortable[0].event.dateISO,
+        )
+      : TRACKING_SINCE;
   sortable.push({
     sortTs: '',
     event: {
-      id: `tracking-start:${TRACKING_SINCE}`,
+      id: `tracking-start:${oldestShown}`,
       kind: 'tracking-start',
-      dateISO: TRACKING_SINCE,
-      dateLabel: formatDate(TRACKING_SINCE),
-      title: 'Change tracking began',
-      detail: 'Earlier changes aren’t shown',
+      dateISO: oldestShown,
+      dateLabel: formatDate(oldestShown),
+      title: input.truncated
+        ? 'Earlier changes not shown'
+        : 'Change tracking began',
+      detail: input.truncated ? undefined : 'Earlier changes aren’t shown',
       tone: 'neutral',
     },
   });

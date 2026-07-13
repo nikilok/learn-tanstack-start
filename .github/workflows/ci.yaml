@@ -27,5 +27,5 @@ jobs:
       - name: Format check (oxfmt)
         run: bun format:check
 
-      - name: Unit tests (bun test)
-        run: bun test
+      - name: Unit tests (turbo)
+        run: bun run test

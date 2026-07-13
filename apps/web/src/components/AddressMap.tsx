@@ -3,6 +3,7 @@ import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 
 import { geocodeQueryOptions } from '../api/geocode';
+import { MapErrorBoundary } from './MapErrorBoundary';
 
 const LeafletMap = lazy(() => import('./LeafletMap'));
 
@@ -37,9 +38,11 @@ export function AddressMap({
 }) {
   return (
     <ClientOnly fallback={placeholder}>
-      <Suspense fallback={placeholder}>
-        <GeocodedMap address={address} companyName={companyName} />
-      </Suspense>
+      <MapErrorBoundary>
+        <Suspense fallback={placeholder}>
+          <GeocodedMap address={address} companyName={companyName} />
+        </Suspense>
+      </MapErrorBoundary>
     </ClientOnly>
   );
 }

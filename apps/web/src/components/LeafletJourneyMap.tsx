@@ -1,25 +1,10 @@
 import L from 'leaflet';
-
-import 'leaflet/dist/leaflet.css';
-import {
-  AttributionControl,
-  MapContainer,
-  Marker,
-  Polyline,
-} from 'react-leaflet';
+import { Marker, Polyline } from 'react-leaflet';
 
 import type { Geocoded } from '../api/geocode';
 import { useIsDark } from '../hooks/useIsDark';
-import { TILE_MAX_ZOOM, TILE_MIN_ZOOM } from '../utils/tileBounds';
-import { CachedTileLayer } from './CachedTileLayer';
-
-import './LeafletMap.css';
-import {
-  DARK_TILES,
-  LIGHT_TILES,
-  TILE_ATTRIBUTION,
-  unionJackIcon,
-} from './LeafletMap';
+import { unionJackIcon } from './LeafletMap';
+import { MapShell } from './MapShell';
 
 // Hollow ring for the previous address, echoing the timeline's neutral dot.
 const previousIcon = L.divIcon({
@@ -45,7 +30,7 @@ export default function LeafletJourneyMap({
   const fromPos: [number, number] = [from.lat, from.lon];
   const toPos: [number, number] = [to.lat, to.lon];
   return (
-    <MapContainer
+    <MapShell
       bounds={L.latLngBounds(fromPos, toPos)}
       // Tight fit: fractional zoom (integer zoomSnap rounds the fit a whole
       // level out) + just enough padding for the 42px pin graphic.
@@ -55,17 +40,7 @@ export default function LeafletJourneyMap({
         maxZoom: 16,
       }}
       zoomSnap={0.25}
-      minZoom={TILE_MIN_ZOOM}
-      maxZoom={TILE_MAX_ZOOM}
-      scrollWheelZoom={false}
-      attributionControl={false}
-      className="absolute inset-0 isolate h-full w-full"
     >
-      <AttributionControl prefix={false} />
-      <CachedTileLayer
-        attribution={TILE_ATTRIBUTION}
-        url={isDark ? DARK_TILES : LIGHT_TILES}
-      />
       <Polyline
         positions={[fromPos, toPos]}
         pathOptions={{
@@ -78,6 +53,6 @@ export default function LeafletJourneyMap({
       />
       <Marker position={fromPos} icon={previousIcon} title="Previous address" />
       <Marker position={toPos} icon={unionJackIcon} title="New address" />
-    </MapContainer>
+    </MapShell>
   );
 }

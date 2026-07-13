@@ -334,6 +334,27 @@ describe('address composition', () => {
     expect(events[0].detail).toBe('BB2 2BB');
   });
 
+  test('a value shuffled between address columns is suppressed as a no-op', () => {
+    const ts = '2026-06-25 10:00:00.000001';
+    const events = changes(
+      curate([
+        row({
+          columnName: 'addressLine2',
+          createdAt: ts,
+          oldValue: 'Maldon',
+          newValue: null,
+        }),
+        row({
+          columnName: 'locality',
+          createdAt: ts,
+          oldValue: null,
+          newValue: 'Maldon',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(0);
+  });
+
   test('address cleared to nothing reads as removed, not an empty arrow', () => {
     const events = changes(
       curate([row({ oldValue: 'BB2 2BB', newValue: null })]),
@@ -480,6 +501,44 @@ describe('flags, deletion, and unknown columns', () => {
     expect(events).toHaveLength(0);
   });
 
+  test('null→false flag rows are suppressed, never rendered as cleared', () => {
+    const events = changes(
+      curate([
+        row({
+          columnName: 'hasInsolvencyHistory',
+          oldValue: null,
+          newValue: 'false',
+        }),
+        row({
+          columnName: 'hasCharges',
+          createdAt: '2026-06-09 10:00:00.000001',
+          oldValue: null,
+          newValue: 'false',
+        }),
+        row({
+          columnName: 'accountsOverdue',
+          createdAt: '2026-06-10 10:00:00.000001',
+          oldValue: null,
+          newValue: 'false',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  test('true→false flags still render as cleared', () => {
+    const events = changes(
+      curate([
+        row({
+          columnName: 'hasInsolvencyHistory',
+          oldValue: 'true',
+          newValue: 'false',
+        }),
+      ]),
+    );
+    expect(events[0].title).toBe('Insolvency history flag cleared');
+  });
+
   test('null-old enum fields read as recorded with the new value visible', () => {
     const events = changes(
       curate([
@@ -553,6 +612,18 @@ describe('anchors and ordering', () => {
       'incorporated',
     ]);
     expect(events[0].dateISO).toBe('2026-06-01');
+  });
+});
+
+describe('truncated history', () => {
+  test('the tracking anchor stops asserting completeness when rows were capped', () => {
+    const events = curate([row({ createdAt: '2026-06-01 10:00:00.000001' })], {
+      truncated: true,
+    });
+    const anchor = events.find((e) => e.kind === 'tracking-start');
+    expect(anchor?.title).toBe('Earlier changes not shown');
+    expect(anchor?.dateISO).toBe('2026-06-01');
+    expect(anchor?.detail).toBeUndefined();
   });
 });
 

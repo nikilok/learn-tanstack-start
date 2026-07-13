@@ -57,7 +57,12 @@ const TONE_BY_BUCKET: Record<Tone, TimelineTone> = {
 
 type FieldChange = { old: string | null; new: string | null };
 
-// A same-day chain of merged same-category candidates.
+// Consecutive same-category changes whose days fall within this window merge
+// into one chain — so a value that flip-flops back within a week (a Companies
+// House correction, not a real move) nets out instead of showing separately.
+const COLLAPSE_WINDOW_DAYS = 7;
+
+// A chain of merged same-category candidates within the collapse window.
 type Chain = {
   kind: TimelineEventKind;
   fields: Map<string, FieldChange>;
@@ -76,6 +81,13 @@ export function collectSicCodes(rows: TrailRow[]): string[] {
     }
   }
   return [...codes];
+}
+
+/** Whole days between two 'YYYY-MM-DD' day keys. */
+function daysBetween(dayA: string, dayB: string): number {
+  const a = Date.parse(`${dayA}T00:00:00Z`);
+  const b = Date.parse(`${dayB}T00:00:00Z`);
+  return Math.abs(a - b) / 86_400_000;
 }
 
 /** Parse a JSON-stringified string array trail value; null when not one. */
@@ -138,14 +150,18 @@ function buildChains(rows: TrailRow[]): Chain[] {
       fields.set(row.columnName, { old: row.oldValue, new: row.newValue });
     }
     for (const [kind, fields] of byKind) {
-      // Same category + same event day → merge into the chain (keeps the
-      // chain's `old`, takes the candidate's `new`) so flip-flops collapse.
+      // Merge into the most recent same-category chain when it's within the
+      // collapse window (keeps the chain's `old`, takes the candidate's `new`)
+      // so a value returning to a recent one — a within-a-week flip-flop — nets
+      // out. The most recent chain has the latest day, so if it's out of window,
+      // every older one is too.
       let chain: Chain | undefined;
       for (let i = chains.length - 1; i >= 0; i--) {
-        if (chains[i].kind === kind && chains[i].dateKey === dateKey) {
+        if (chains[i].kind !== kind) continue;
+        if (daysBetween(chains[i].dateKey, dateKey) <= COLLAPSE_WINDOW_DAYS) {
           chain = chains[i];
-          break;
         }
+        break;
       }
       if (chain) {
         for (const [col, change] of fields) {

@@ -44,12 +44,12 @@ describe('grouping', () => {
     expect(events[0].title).toBe('Registered address changed');
   });
 
-  test('different created_at days produce separate events', () => {
+  test('changes more than a week apart stay separate events', () => {
     const events = changes(
       curate([
         row({ createdAt: '2026-06-01 10:00:00.000001' }),
         row({
-          createdAt: '2026-06-02 10:00:00.000001',
+          createdAt: '2026-06-12 10:00:00.000001',
           oldValue: 'BB2 2BB',
           newValue: 'CC3 3CC',
         }),
@@ -241,14 +241,50 @@ describe('net-zero same-day collapse', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('the same reversal across midnight stays two events', () => {
+  test('a reversal within the collapse window nets out across days', () => {
     const events = changes(
       curate([
         ...reading('2026-06-08 23:59:00.000001'),
-        ...maldon('2026-06-09 00:01:00.000001'),
+        ...maldon('2026-06-11 09:00:00.000001'),
+      ]),
+    );
+    expect(events).toHaveLength(0);
+  });
+
+  test('a reversal beyond the collapse window stays two events', () => {
+    const events = changes(
+      curate([
+        ...reading('2026-06-08 09:00:00.000001'),
+        ...maldon('2026-06-20 09:00:00.000001'),
       ]),
     );
     expect(events).toHaveLength(2);
+  });
+
+  test('a mid-move excursion that returns collapses to the net move', () => {
+    // CREST WILSON shape: London → B8 → B18 → B8 over a week nets to London → B8.
+    const events = changes(
+      curate([
+        row({
+          createdAt: '2026-04-20 10:00:00.000001',
+          oldValue: 'SW19 2BT',
+          newValue: 'B8 2QZ',
+        }),
+        row({
+          createdAt: '2026-04-25 10:00:00.000001',
+          oldValue: 'B8 2QZ',
+          newValue: 'B18 5QS',
+        }),
+        row({
+          createdAt: '2026-04-27 10:00:00.000001',
+          oldValue: 'B18 5QS',
+          newValue: 'B8 2QZ',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].from).toBe('SW19 2BT');
+    expect(events[0].to).toBe('B8 2QZ');
   });
 
   test('collapse keys on the published day, not the ingestion day', () => {

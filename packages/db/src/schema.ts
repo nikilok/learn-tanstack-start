@@ -217,6 +217,8 @@ export const companiesHouseProfileTrails = pgTable(
     oldValue: text('old_value'),
     newValue: text('new_value'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    // CH event time from the stream; null on rows written before 2026-07.
+    publishedAt: timestamp('published_at'),
   },
   (table) => [
     index('idx_ch_trail_company_number').on(table.companyNumber),

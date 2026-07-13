@@ -40,6 +40,19 @@ function stringify(value: unknown): string | null {
 }
 
 /**
+ * Parse a CH `published_at` into a UTC Date; null when absent or unparseable.
+ * CH sends zone-less ISO strings — pin them to UTC so the stored value doesn't
+ * shift with the process's local timezone.
+ */
+function parsePublishedAt(value: string | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(
+    /[Zz]|[+-]\d{2}:?\d{2}$/.test(value) ? value : `${value}Z`,
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
  * Apply a single stream event: skip events for untracked companies or rows
  * without real changes, otherwise update the profile and append per-column
  * trail rows. Returns `true` when the row was updated (or would be, in
@@ -64,12 +77,14 @@ export async function processEvent(
   if (!existing) return false;
 
   const newRow = mapProfileToRow(event.data);
+  const publishedAt = parsePublishedAt(event.event.published_at);
 
   const trails: {
     companyNumber: string;
     columnName: string;
     oldValue: string | null;
     newValue: string | null;
+    publishedAt: Date | null;
   }[] = [];
 
   for (const col of Object.keys(newRow)) {
@@ -82,6 +97,7 @@ export async function processEvent(
         columnName: col,
         oldValue: oldVal,
         newValue: newVal,
+        publishedAt,
       });
     }
   }
@@ -128,6 +144,7 @@ async function processDeletedEvent(
     columnName: '_deleted',
     oldValue: null,
     newValue: event.event.published_at,
+    publishedAt: parsePublishedAt(event.event.published_at),
   });
 
   return true;

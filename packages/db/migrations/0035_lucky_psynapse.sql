@@ -1,0 +1,1 @@
+ALTER TABLE "companies_house_profile_trails" ADD COLUMN "published_at" timestamp;

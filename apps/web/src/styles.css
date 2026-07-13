@@ -403,6 +403,20 @@ html[data-desktop] .footer-desktop-link {
   filter: grayscale(0);
 }
 
+/* GOV.UK wordmark is monochrome currentColor, so the grayscale trick doesn't apply;
+   its dot echoes the brand turquoise on hover — but only in dark mode, where the
+   wordmark is white like on gov.uk; against the light mode black wordmark the
+   turquoise clashes, so it gets the grayscale(1) rendering of #00ffe0 instead. */
+.brand-link .govuk-dot {
+  transition: fill 0.3s ease;
+}
+.brand-link:hover .govuk-dot {
+  fill: #c6c6c6;
+}
+.dark .brand-link:hover .govuk-dot {
+  fill: #00ffe0;
+}
+
 .heading-card {
   letter-spacing: -0.4px;
 }

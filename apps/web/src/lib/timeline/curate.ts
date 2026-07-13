@@ -57,17 +57,11 @@ const TONE_BY_BUCKET: Record<Tone, TimelineTone> = {
 
 type FieldChange = { old: string | null; new: string | null };
 
-// Consecutive same-category changes whose days fall within this window merge
-// into one chain — so a value that flip-flops back within a week (a Companies
-// House correction, not a real move) nets out instead of showing separately.
-const COLLAPSE_WINDOW_DAYS = 7;
-
-// A chain of merged same-category candidates within the collapse window.
+// A same-day chain of merged same-category candidates.
 type Chain = {
   kind: TimelineEventKind;
   fields: Map<string, FieldChange>;
   sortTs: string;
-  displayTs: string;
   dateKey: string;
 };
 
@@ -83,13 +77,6 @@ export function collectSicCodes(rows: TrailRow[]): string[] {
   return [...codes];
 }
 
-/** Whole days between two 'YYYY-MM-DD' day keys. */
-function daysBetween(dayA: string, dayB: string): number {
-  const a = Date.parse(`${dayA}T00:00:00Z`);
-  const b = Date.parse(`${dayB}T00:00:00Z`);
-  return Math.abs(a - b) / 86_400_000;
-}
-
 /** Parse a JSON-stringified string array trail value; null when not one. */
 function parseJsonStringArray(value: string | null): string[] | null {
   if (!value) return null;
@@ -100,6 +87,12 @@ function parseJsonStringArray(value: string | null): string[] | null {
   } catch {
     return null;
   }
+}
+
+/** Companies House's placeholder for a disputed/removed registered office —
+ * not a real location, so a move to/from it is a dispute event, not a move. */
+function isDefaultAddress(addr: string): boolean {
+  return /COMPANIES HOUSE DEFAULT ADDRESS/i.test(addr);
 }
 
 /** Compose one side of an address change via the page's shared formatAddress. */
@@ -150,18 +143,14 @@ function buildChains(rows: TrailRow[]): Chain[] {
       fields.set(row.columnName, { old: row.oldValue, new: row.newValue });
     }
     for (const [kind, fields] of byKind) {
-      // Merge into the most recent same-category chain when it's within the
-      // collapse window (keeps the chain's `old`, takes the candidate's `new`)
-      // so a value returning to a recent one — a within-a-week flip-flop — nets
-      // out. The most recent chain has the latest day, so if it's out of window,
-      // every older one is too.
+      // Same category + same event day → merge into the chain (keeps the
+      // chain's `old`, takes the candidate's `new`) so flip-flops collapse.
       let chain: Chain | undefined;
       for (let i = chains.length - 1; i >= 0; i--) {
-        if (chains[i].kind !== kind) continue;
-        if (daysBetween(chains[i].dateKey, dateKey) <= COLLAPSE_WINDOW_DAYS) {
+        if (chains[i].kind === kind && chains[i].dateKey === dateKey) {
           chain = chains[i];
+          break;
         }
-        break;
       }
       if (chain) {
         for (const [col, change] of fields) {
@@ -170,9 +159,8 @@ function buildChains(rows: TrailRow[]): Chain[] {
           else chain.fields.set(col, { ...change });
         }
         chain.sortTs = createdAt;
-        chain.displayTs = displayTs;
       } else {
-        chains.push({ kind, fields, sortTs: createdAt, displayTs, dateKey });
+        chains.push({ kind, fields, sortTs: createdAt, dateKey });
       }
     }
   }
@@ -230,6 +218,19 @@ function renderChain(
       }
       if (!to) {
         return { ...base, title: 'Registered address removed', detail: from };
+      }
+      // The default address is a dispute/removal state, not a real place: show
+      // it as the office being removed or reinstated, never a Cardiff↔X move.
+      if (isDefaultAddress(from)) {
+        return { ...base, title: 'Registered office reinstated', detail: to };
+      }
+      if (isDefaultAddress(to)) {
+        return {
+          ...base,
+          title: 'Registered office removed',
+          detail: from,
+          tone: 'warning',
+        };
       }
       // A value shuffled between address columns composes identically — no-op.
       if (from === to) return null;
@@ -421,6 +422,76 @@ const KIND_RANK: Partial<Record<TimelineEventKind, number>> = {
   'tracking-start': 0,
 };
 
+// Postcode from a composed address, for comparing locations by area not text.
+const UK_POSTCODE_RE = /\b([A-Z]{1,2}\d[A-Z\d]?)\s+(\d[A-Z]{2})\b/i;
+function addressPostcode(addr: string | undefined): string | null {
+  const m = addr?.match(UK_POSTCODE_RE);
+  return m ? `${m[1]} ${m[2]}`.toUpperCase() : null;
+}
+
+/** Whole days between two 'YYYY-MM-DD' day keys. */
+function daysBetween(dayA: string, dayB: string): number {
+  return (
+    Math.abs(
+      Date.parse(`${dayA}T00:00:00Z`) - Date.parse(`${dayB}T00:00:00Z`),
+    ) / 86_400_000
+  );
+}
+
+// An office that leaves the current address and returns within this many days
+// is a Companies House correction (a flip), not a real move.
+const FLIP_WINDOW_DAYS = 7;
+
+/**
+ * Ids of address events forming a there-and-back flip: an event leaving the
+ * current (newest) address paired with a later one returning to it within the
+ * window, plus any hops between. Compared by postcode so a country-field
+ * difference (e.g. gaining "England" on the return) doesn't defeat the match.
+ * Works on already-published-date-sorted events, so it's immune to the
+ * ingestion-order hazards of the raw trail.
+ */
+function flipEventIds(events: TimelineEvent[]): Set<string> {
+  const drop = new Set<string>();
+  const moves = events
+    .filter((e) => e.kind === 'address' && e.from && e.to)
+    .sort((a, b) =>
+      a.dateISO !== b.dateISO
+        ? a.dateISO < b.dateISO
+          ? -1
+          : 1
+        : a.id < b.id
+          ? -1
+          : 1,
+    );
+  if (moves.length < 2) return drop;
+  const current = addressPostcode(moves[moves.length - 1].to);
+  if (!current) return drop;
+
+  let i = 0;
+  while (i < moves.length) {
+    const leaveTo = addressPostcode(moves[i].to);
+    // Departs the current address for a different, real one?
+    if (
+      addressPostcode(moves[i].from) === current &&
+      leaveTo &&
+      leaveTo !== current
+    ) {
+      let j = i + 1;
+      while (j < moves.length && addressPostcode(moves[j].to) !== current) j++;
+      if (
+        j < moves.length &&
+        daysBetween(moves[i].dateISO, moves[j].dateISO) <= FLIP_WINDOW_DAYS
+      ) {
+        for (let k = i; k <= j; k++) drop.add(moves[k].id);
+        i = j + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return drop;
+}
+
 /** Curate ordered trail rows into display-ready events, newest first, anchors in place. */
 export function curateTimeline(input: {
   rows: TrailRow[];
@@ -443,16 +514,23 @@ export function curateTimeline(input: {
     sortable.push({ event, sortTs: chain.sortTs });
   }
 
+  // Drop there-and-back address flips (Companies House corrections) so a
+  // registered office that reverts within a week isn't shown as real moves.
+  const flips = flipEventIds(sortable.map((s) => s.event));
+  const kept = flips.size
+    ? sortable.filter((s) => !flips.has(s.event.id))
+    : sortable;
+
   // When history was capped, "tracking began 14 April" would falsely assert
   // completeness — anchor at the oldest retained event instead.
   const oldestShown =
-    input.truncated && sortable.length > 0
-      ? sortable.reduce<string>(
+    input.truncated && kept.length > 0
+      ? kept.reduce<string>(
           (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
-          sortable[0].event.dateISO,
+          kept[0].event.dateISO,
         )
       : TRACKING_SINCE;
-  sortable.push({
+  kept.push({
     sortTs: '',
     event: {
       id: `tracking-start:${oldestShown}`,
@@ -468,7 +546,7 @@ export function curateTimeline(input: {
   });
 
   if (input.dateOfCreation) {
-    sortable.push({
+    kept.push({
       sortTs: '',
       event: {
         id: `incorporated:${input.dateOfCreation}`,
@@ -481,7 +559,7 @@ export function curateTimeline(input: {
     });
   }
 
-  return sortable
+  return kept
     .sort((a, b) => {
       if (a.event.dateISO !== b.event.dateISO) {
         return a.event.dateISO < b.event.dateISO ? 1 : -1;

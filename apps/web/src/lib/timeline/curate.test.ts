@@ -44,12 +44,12 @@ describe('grouping', () => {
     expect(events[0].title).toBe('Registered address changed');
   });
 
-  test('changes more than a week apart stay separate events', () => {
+  test('different created_at days produce separate events', () => {
     const events = changes(
       curate([
         row({ createdAt: '2026-06-01 10:00:00.000001' }),
         row({
-          createdAt: '2026-06-12 10:00:00.000001',
+          createdAt: '2026-06-02 10:00:00.000001',
           oldValue: 'BB2 2BB',
           newValue: 'CC3 3CC',
         }),
@@ -241,28 +241,62 @@ describe('net-zero same-day collapse', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('a reversal within the collapse window nets out across days', () => {
+  test('collapse keys on the published day, not the ingestion day', () => {
+    // Replay after downtime: ingested on different days, published same day.
     const events = changes(
       curate([
-        ...reading('2026-06-08 23:59:00.000001'),
-        ...maldon('2026-06-11 09:00:00.000001'),
+        ...reading('2026-06-10 09:00:00.000001').map((r) => ({
+          ...r,
+          publishedAt: '2026-06-08 10:01:07',
+        })),
+        ...maldon('2026-06-11 09:00:00.000001').map((r) => ({
+          ...r,
+          publishedAt: '2026-06-08 10:54:17',
+        })),
+      ]),
+    );
+    expect(events).toHaveLength(0);
+  });
+});
+
+describe('there-and-back flip collapse', () => {
+  test('a flip returning to the current address within a week collapses', () => {
+    const events = changes(
+      curate([
+        row({
+          createdAt: '2026-06-01 10:00:00.000001',
+          oldValue: 'W1W 5PF',
+          newValue: 'HP9 1QL',
+        }),
+        row({
+          createdAt: '2026-06-03 10:00:00.000001',
+          oldValue: 'HP9 1QL',
+          newValue: 'W1W 5PF',
+        }),
       ]),
     );
     expect(events).toHaveLength(0);
   });
 
-  test('a reversal beyond the collapse window stays two events', () => {
+  test('a reversal beyond the window is kept as real moves', () => {
     const events = changes(
       curate([
-        ...reading('2026-06-08 09:00:00.000001'),
-        ...maldon('2026-06-20 09:00:00.000001'),
+        row({
+          createdAt: '2026-06-01 10:00:00.000001',
+          oldValue: 'W1W 5PF',
+          newValue: 'HP9 1QL',
+        }),
+        row({
+          createdAt: '2026-06-12 10:00:00.000001',
+          oldValue: 'HP9 1QL',
+          newValue: 'W1W 5PF',
+        }),
       ]),
     );
     expect(events).toHaveLength(2);
   });
 
-  test('a mid-move excursion that returns collapses to the net move', () => {
-    // CREST WILSON shape: London → B8 → B18 → B8 over a week nets to London → B8.
+  test('a mid-move excursion drops, leaving the real move (CREST WILSON shape)', () => {
     const events = changes(
       curate([
         row({
@@ -287,21 +321,77 @@ describe('net-zero same-day collapse', () => {
     expect(events[0].to).toBe('B8 2QZ');
   });
 
-  test('collapse keys on the published day, not the ingestion day', () => {
-    // Replay after downtime: ingested on different days, published same day.
+  test('distinct sequential moves within a week are NOT collapsed', () => {
     const events = changes(
       curate([
-        ...reading('2026-06-10 09:00:00.000001').map((r) => ({
-          ...r,
-          publishedAt: '2026-06-08 10:01:07',
-        })),
-        ...maldon('2026-06-11 09:00:00.000001').map((r) => ({
-          ...r,
-          publishedAt: '2026-06-08 10:54:17',
-        })),
+        row({
+          createdAt: '2026-06-01 10:00:00.000001',
+          oldValue: 'AA1 1AA',
+          newValue: 'BB2 2BB',
+        }),
+        row({
+          createdAt: '2026-06-03 10:00:00.000001',
+          oldValue: 'BB2 2BB',
+          newValue: 'CC3 3CC',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(2);
+  });
+
+  test('return matches by postcode despite a country-field difference', () => {
+    // The return leg gains ", England"; postcode comparison still pairs them.
+    const events = changes(
+      curate([
+        row({
+          columnName: 'postalCode',
+          createdAt: '2026-06-25 10:00:00.000001',
+          oldValue: 'W1W 5PF',
+          newValue: 'HP9 1QL',
+        }),
+        ...[
+          {
+            columnName: 'postalCode',
+            oldValue: 'HP9 1QL',
+            newValue: 'W1W 5PF',
+          },
+          { columnName: 'country', oldValue: null, newValue: 'England' },
+        ].map((r) => row({ ...r, createdAt: '2026-06-26 10:00:00.000001' })),
       ]),
     );
     expect(events).toHaveLength(0);
+  });
+});
+
+describe('Companies House default address', () => {
+  test('a move from the default address reads as office reinstated', () => {
+    const events = changes(
+      curate([
+        row({
+          columnName: 'addressLine1',
+          oldValue: 'COMPANIES HOUSE DEFAULT ADDRESS',
+          newValue: '167-169 Great Portland Street',
+        }),
+      ]),
+    );
+    expect(events[0].title).toBe('Registered office reinstated');
+    expect(events[0].detail).toBe('167-169 Great Portland Street');
+    expect(events[0].from).toBeUndefined();
+  });
+
+  test('a move to the default address reads as office removed', () => {
+    const events = changes(
+      curate([
+        row({
+          columnName: 'addressLine1',
+          oldValue: '55 Real Street',
+          newValue: 'COMPANIES HOUSE DEFAULT ADDRESS',
+        }),
+      ]),
+    );
+    expect(events[0].title).toBe('Registered office removed');
+    expect(events[0].tone).toBe('warning');
+    expect(events[0].detail).toBe('55 Real Street');
   });
 });
 

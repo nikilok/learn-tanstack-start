@@ -154,7 +154,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
               tabIndex={expanded && i === firstRevealedIndex ? -1 : undefined}
             >
               <RailCell line={line} tone={event.tone} />
-              <div className={`min-w-0 ${isLast ? '' : 'pb-4'}`}>
+              <div className={`min-w-0 grow ${isLast ? '' : 'pb-4'}`}>
                 <time dateTime={event.dateISO} className={LABEL_CLASS}>
                   {event.dateLabel}
                 </time>

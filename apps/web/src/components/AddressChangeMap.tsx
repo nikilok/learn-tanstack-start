@@ -7,7 +7,7 @@ import { MapErrorBoundary } from './MapErrorBoundary';
 const LeafletJourneyMap = lazy(() => import('./LeafletJourneyMap'));
 
 const FRAME_CLASS =
-  'relative mt-2 h-44 w-full overflow-hidden rounded-md bg-(--sea-ink-soft)/10';
+  'relative mt-2 h-64 w-full overflow-hidden rounded-md bg-(--sea-ink-soft)/10';
 
 const placeholder = <div className={FRAME_CLASS} />;
 

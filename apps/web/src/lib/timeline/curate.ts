@@ -443,12 +443,13 @@ function daysBetween(dayA: string, dayB: string): number {
 const FLIP_WINDOW_DAYS = 7;
 
 /**
- * Ids of address events forming a there-and-back flip: an event leaving the
- * current (newest) address paired with a later one returning to it within the
- * window, plus any hops between. Compared by postcode so a country-field
- * difference (e.g. gaining "England" on the return) doesn't defeat the match.
- * Works on already-published-date-sorted events, so it's immune to the
- * ingestion-order hazards of the raw trail.
+ * Ids of there-and-back address flips to drop: an event leaving the current
+ * (newest) address paired with a later one returning to it within the window,
+ * plus any hops between. Matched by postcode so a country-field difference
+ * (e.g. gaining "England" on the return) doesn't defeat it, on already-
+ * published-date-sorted events (immune to raw-trail ordering). Never drops the
+ * last move: if every move is a flip leg, the newest flip's outbound is kept so
+ * one move (with its map) still shows.
  */
 function flipEventIds(events: TimelineEvent[]): Set<string> {
   const drop = new Set<string>();
@@ -467,6 +468,9 @@ function flipEventIds(events: TimelineEvent[]): Set<string> {
   const current = addressPostcode(moves[moves.length - 1].to);
   if (!current) return drop;
 
+  // Outbound leg of the newest flip run — kept if the collapse would otherwise
+  // erase every move, so a lone round-trip still shows one move (with its map).
+  let lastFlipOutbound: string | null = null;
   let i = 0;
   while (i < moves.length) {
     const leaveTo = addressPostcode(moves[i].to);
@@ -483,11 +487,18 @@ function flipEventIds(events: TimelineEvent[]): Set<string> {
         daysBetween(moves[i].dateISO, moves[j].dateISO) <= FLIP_WINDOW_DAYS
       ) {
         for (let k = i; k <= j; k++) drop.add(moves[k].id);
+        lastFlipOutbound = moves[i].id;
         i = j + 1;
         continue;
       }
     }
     i++;
+  }
+
+  // Floor: never collapse away the last move. If every move was a flip leg, keep
+  // the newest flip's outbound so one move (and its map) still shows.
+  if (lastFlipOutbound && moves.every((m) => drop.has(m.id))) {
+    drop.delete(lastFlipOutbound);
   }
   return drop;
 }
@@ -514,8 +525,8 @@ export function curateTimeline(input: {
     sortable.push({ event, sortTs: chain.sortTs });
   }
 
-  // Drop there-and-back address flips (Companies House corrections) so a
-  // registered office that reverts within a week isn't shown as real moves.
+  // Drop there-and-back address flips (CH corrections) so a week-long revert
+  // isn't shown as churn — but never the last move, so one map always remains.
   const flips = flipEventIds(sortable.map((s) => s.event));
   const kept = flips.size
     ? sortable.filter((s) => !flips.has(s.event.id))

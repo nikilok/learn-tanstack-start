@@ -26,7 +26,7 @@
 
 import { measureAnchors, type PageAnchors } from './measure-anchors';
 import WGSL from './theme-transition.wgsl?raw';
-import { prefersReducedMotion } from './utils';
+import { isDetailsPath, prefersReducedMotion } from './utils';
 
 // This TS lib.dom ships the WebGPU interfaces but not the GPUBufferUsage flag
 // constant — declare the bits we use; the browser provides them at runtime.
@@ -732,7 +732,7 @@ export function runThemeTransition(swap: () => void): void {
     (new URLSearchParams(window.location.search).get('search') ?? '').trim()
       .length > 0;
   let set: PageSet = PAGE_SETS.home;
-  if (path.startsWith('/company/')) {
+  if (isDetailsPath(path)) {
     set = PAGE_SETS.details;
   } else if (hasSearch) {
     set = PAGE_SETS.search;

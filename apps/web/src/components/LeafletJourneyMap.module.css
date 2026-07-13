@@ -1,12 +1,7 @@
 /* Styles for the address-change journey map. The hashed class names are passed
-   straight to Leaflet's divIcon/path `className`, so they scope cleanly even on
-   Leaflet-created DOM. */
-
-/* Brand-red dotted connector. Set here (not via Leaflet's color option) so it
-   can use the theme-aware --logo-red var. */
-.line {
-  stroke: var(--logo-red);
-}
+   straight to Leaflet's divIcon `className`, so they scope cleanly on the label
+   DOM. (The polyline stroke is set inline in the component — a module class on
+   Leaflet's <path> drops in the production build.) */
 
 .distanceIcon {
   line-height: 22px;

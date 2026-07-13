@@ -2,10 +2,16 @@ import L from 'leaflet';
 import { Marker, Polyline } from 'react-leaflet';
 
 import type { Geocoded } from '../api/geocode';
+import { useIsDark } from '../hooks/useIsDark';
 import { unionJackIcon } from './LeafletMap';
 import { MapShell } from './MapShell';
 
 import styles from './LeafletJourneyMap.module.css';
+
+// --logo-red per theme. Set inline (below) rather than via a CSS class: a
+// CSS-module class on Leaflet's <path> resolves in dev but drops in the Vite
+// production build, leaving Leaflet's default blue stroke.
+const LINE_COLOR = { light: '#c8102e', dark: '#f87171' } as const;
 
 // Hollow ring for the previous address, echoing the timeline's neutral dot.
 const previousIcon = L.divIcon({
@@ -34,6 +40,7 @@ export default function LeafletJourneyMap({
   from: Geocoded;
   to: Geocoded;
 }) {
+  const isDark = useIsDark();
   const fromLatLng = L.latLng(from.lat, from.lon);
   const toLatLng = L.latLng(to.lat, to.lon);
   const fromPos: [number, number] = [from.lat, from.lon];
@@ -68,11 +75,8 @@ export default function LeafletJourneyMap({
     >
       <Polyline
         positions={[fromPos, toPos]}
-        // Stroke colour is set via the module's `.line` rule so it can use the
-        // theme-aware brand-red token; SVG stroke attributes can't resolve a CSS
-        // var, but a stylesheet rule beats the attribute.
         pathOptions={{
-          className: styles.line,
+          color: isDark ? LINE_COLOR.dark : LINE_COLOR.light,
           weight: 2.5,
           opacity: 0.9,
           dashArray: '1 9',

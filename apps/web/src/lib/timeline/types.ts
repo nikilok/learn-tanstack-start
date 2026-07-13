@@ -28,6 +28,8 @@ export type TimelineEvent = {
   detail?: string;
   from?: string;
   to?: string;
+  // Address changes where both sides carry a postcode — geocodable for the map.
+  mappable?: boolean;
   tone: TimelineTone;
 };
 

@@ -2,17 +2,20 @@ import {
   companiesHouseProfiles,
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
-  sicCodes,
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { setResponseHeader } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
-import { asc, eq, inArray, isNull } from 'drizzle-orm';
+import { asc, eq, isNull } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
-import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
+import {
+  LONG_EDGE_CACHE,
+  setCacheTag,
+  setRpcCacheControl,
+} from './cache-headers';
+import { loadSicDescriptions } from './sic';
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';
 
@@ -343,21 +346,9 @@ const getCompanyProfile = createServerFn()
     }
 
     // Look up SIC code descriptions from our database
-    let sicDescriptions: { code: string; description: string }[] = [];
-    if (profile.sic_codes?.length) {
-      sicDescriptions = await db
-        .select({
-          code: sicCodes.code,
-          description: sicCodes.description,
-        })
-        .from(sicCodes)
-        .where(inArray(sicCodes.code, profile.sic_codes));
-    }
+    const sicDescriptions = await loadSicDescriptions(profile.sic_codes ?? []);
 
-    setResponseHeader(
-      'x-vercel-cache-tag',
-      `company-${profile.company_number}`,
-    );
+    setCacheTag(`company-${profile.company_number}`);
 
     // RPC calls don't inherit the Nitro route rule's s-maxage, so set it explicitly
     setRpcCacheControl(LONG_EDGE_CACHE);

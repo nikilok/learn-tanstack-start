@@ -12,9 +12,9 @@ import { CachedTileLayer } from './CachedTileLayer';
 import './LeafletMap.css';
 import UnionJackLens from './UnionJackLens';
 
-const LIGHT_TILES = '/api/tiles/alidade_smooth/{z}/{x}/{y}{r}';
-const DARK_TILES = '/api/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}';
-const TILE_ATTRIBUTION =
+export const LIGHT_TILES = '/api/tiles/alidade_smooth/{z}/{x}/{y}{r}';
+export const DARK_TILES = '/api/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}';
+export const TILE_ATTRIBUTION =
   '&copy; <a target="_blank" href="https://leafletjs.com">Leaflet</a> &copy; <a target="_blank" href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>';
 
 const ICON_W = 32;
@@ -36,7 +36,7 @@ const lensSvg = renderToStaticMarkup(
   />,
 );
 
-const unionJackIcon = L.divIcon({
+export const unionJackIcon = L.divIcon({
   html: `<div style="--logo-navy:var(--surface);position:relative;width:${ICON_W}px;height:${ICON_H}px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));">${teardropSvg}${lensSvg}</div>`,
   className: '',
   iconSize: [ICON_W, ICON_H],

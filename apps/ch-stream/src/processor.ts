@@ -79,13 +79,8 @@ export async function processEvent(
   const newRow = mapProfileToRow(event.data);
   const publishedAt = parsePublishedAt(event.event.published_at);
 
-  const trails: {
-    companyNumber: string;
-    columnName: string;
-    oldValue: string | null;
-    newValue: string | null;
-    publishedAt: Date | null;
-  }[] = [];
+  // Typed from the schema so this row shape can't drift from the table.
+  const trails: (typeof companiesHouseProfileTrails.$inferInsert)[] = [];
 
   for (const col of Object.keys(newRow)) {
     if (col === 'companyNumber' || col === 'companyName') continue;

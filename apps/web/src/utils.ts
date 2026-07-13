@@ -153,10 +153,13 @@ export function formatDate(dateStr?: string | null) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return '';
+  // Date-only strings parse as UTC midnight — format in UTC too, or the
+  // label renders a day early in any timezone west of Greenwich.
   return d.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'UTC',
   });
 }
 

@@ -333,6 +333,32 @@ describe('address composition', () => {
     expect(events[0].title).toBe('Registered address recorded');
     expect(events[0].detail).toBe('BB2 2BB');
   });
+
+  test('address cleared to nothing reads as removed, not an empty arrow', () => {
+    const events = changes(
+      curate([row({ oldValue: 'BB2 2BB', newValue: null })]),
+    );
+    expect(events[0].title).toBe('Registered address removed');
+    expect(events[0].detail).toBe('BB2 2BB');
+    expect(events[0].from).toBeUndefined();
+  });
+
+  test('mappable only when both sides carry a postcode', () => {
+    const withPostcode = changes(curate([row()]));
+    expect(withPostcode[0].mappable).toBe(true);
+
+    const lineOnly = changes(
+      curate([
+        row({ columnName: 'addressLine1', oldValue: 'Old', newValue: 'New' }),
+      ]),
+    );
+    expect(lineOnly[0].mappable).toBeUndefined();
+
+    const gained = changes(
+      curate([row({ oldValue: null, newValue: 'BB2 2BB' })]),
+    );
+    expect(gained[0].mappable).toBeUndefined();
+  });
 });
 
 describe('SIC changes', () => {
@@ -452,6 +478,38 @@ describe('flags, deletion, and unknown columns', () => {
   test('unknown future columns are suppressed, not mislabeled', () => {
     const events = changes(curate([row({ columnName: 'someFutureColumn' })]));
     expect(events).toHaveLength(0);
+  });
+
+  test('null-old enum fields read as recorded with the new value visible', () => {
+    const events = changes(
+      curate([
+        row({ columnName: 'companyType', oldValue: null, newValue: 'ltd' }),
+      ]),
+    );
+    expect(events[0].title).toBe('Company type recorded');
+    expect(events[0].detail).toBe('LTD');
+    expect(events[0].from).toBeUndefined();
+  });
+
+  test('replayed _deleted tombstones across midnight dedupe to one event', () => {
+    const events = changes(
+      curate([
+        row({
+          columnName: '_deleted',
+          oldValue: null,
+          newValue: '2026-05-01T18:00:00',
+          createdAt: '2026-05-01 23:58:00.000001',
+        }),
+        row({
+          columnName: '_deleted',
+          oldValue: null,
+          newValue: '2026-05-01T18:00:00',
+          createdAt: '2026-05-02 00:03:00.000001',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].title).toBe('Removed from the Companies House register');
   });
 });
 

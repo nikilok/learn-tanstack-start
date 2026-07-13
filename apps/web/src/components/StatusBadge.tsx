@@ -19,9 +19,10 @@ type CompanyStatus =
   | 'receivership'
   | 'removed';
 
-type Tone = 'green' | 'amber' | 'red' | 'grey';
+export type Tone = 'green' | 'amber' | 'red' | 'grey';
 
-const STATUS_TONES: Record<CompanyStatus, Tone> = {
+// Exported so the timeline's dot tones stay in lockstep with the badge.
+export const STATUS_TONES: Record<CompanyStatus, Tone> = {
   active: 'green',
   open: 'green',
   registered: 'green',

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { TimelineEvent, TimelineTone } from '../lib/timeline/types';
+import { AddressChangeMap } from './AddressChangeMap';
 import { LABEL_CLASS } from './DetailField';
 
 // Change events shown before the expand button reveals the rest.
@@ -47,6 +48,15 @@ function ChangeDetail({ from, to }: { from: string; to: string }) {
  */
 export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   const [expanded, setExpanded] = useState(false);
+  const listRef = useRef<HTMLOListElement>(null);
+
+  // Expanding unmounts the button — move focus to the first revealed event so
+  // keyboard/screen-reader users aren't dropped back to <body>.
+  useEffect(() => {
+    if (!expanded) return;
+    const revealed = listRef.current?.children.item(INITIAL_VISIBLE);
+    if (revealed instanceof HTMLElement) revealed.focus();
+  }, [expanded]);
 
   const tail = events.slice(INITIAL_VISIBLE);
   const hiddenChanges = tail.filter((event) => !isAnchor(event)).length;
@@ -63,13 +73,21 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
           No changes observed yet.
         </p>
       )}
-      <ol className="m-0 list-none p-0" aria-label="Company change history">
+      <ol
+        ref={listRef}
+        className="m-0 list-none p-0"
+        aria-label="Company change history"
+      >
         {visible.map((event, i) => {
           const isLast = i === visible.length - 1;
           const anchor = isAnchor(event);
           const showButton = collapsed && i === INITIAL_VISIBLE;
           return (
-            <li key={event.id} className="flex flex-col">
+            <li
+              key={event.id}
+              className="flex flex-col focus:outline-none"
+              tabIndex={expanded && i === INITIAL_VISIBLE ? -1 : undefined}
+            >
               {showButton && (
                 <div className="flex gap-2.5">
                   <span className="relative w-2 shrink-0" aria-hidden>
@@ -77,7 +95,6 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
                   </span>
                   <button
                     type="button"
-                    aria-expanded={false}
                     onClick={() => setExpanded(true)}
                     className="mb-4 w-fit cursor-pointer text-sm text-(--sea-ink-soft) underline decoration-(--sea-ink-soft)/40 underline-offset-2 hover:text-(--sea-ink)"
                   >
@@ -120,6 +137,9 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
                     <p className="text-sm whitespace-pre-line text-(--sea-ink-soft)">
                       {event.detail}
                     </p>
+                  )}
+                  {event.mappable && event.from && event.to && (
+                    <AddressChangeMap from={event.from} to={event.to} />
                   )}
                 </div>
               </div>

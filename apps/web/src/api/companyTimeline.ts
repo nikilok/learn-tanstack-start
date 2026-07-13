@@ -1,12 +1,7 @@
-import {
-  companiesHouseProfiles,
-  companiesHouseProfileTrails,
-  sicCodes,
-} from '@ss/db';
+import { companiesHouseProfiles, companiesHouseProfileTrails } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { setResponseHeader } from '@tanstack/react-start/server';
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { collectSicCodes, curateTimeline } from '../lib/timeline/curate';
@@ -14,8 +9,10 @@ import type { TimelineEvent, TrailRow } from '../lib/timeline/types';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
+  setCacheTag,
   setRpcCacheControl,
 } from './cache-headers';
+import { loadSicDescriptions } from './sic';
 
 export type CompanyTimeline = {
   companyNumber: string;
@@ -32,7 +29,8 @@ const TRAIL_ROW_LIMIT = 500;
  */
 const getCompanyTimeline = createServerFn()
   .inputValidator((input: unknown) => {
-    const { companyNumber } = input as { companyNumber: string };
+    const companyNumber = (input as { companyNumber?: unknown } | null)
+      ?.companyNumber;
     if (
       typeof companyNumber !== 'string' ||
       !/^[A-Za-z0-9]{1,20}$/.test(companyNumber)
@@ -43,50 +41,53 @@ const getCompanyTimeline = createServerFn()
   })
   .handler(
     async ({ data: { companyNumber } }): Promise<CompanyTimeline | null> => {
-      const [profile] = await db
-        .select({ dateOfCreation: companiesHouseProfiles.dateOfCreation })
-        .from(companiesHouseProfiles)
-        .where(eq(companiesHouseProfiles.companyNumber, companyNumber))
-        .limit(1);
+      // Timestamps as ::text — the neon driver's Date mapping parses naive
+      // timestamps in the local TZ and truncates the µs the grouping needs.
+      const [profileRows, trailRows] = await Promise.all([
+        db
+          .select({ dateOfCreation: companiesHouseProfiles.dateOfCreation })
+          .from(companiesHouseProfiles)
+          .where(eq(companiesHouseProfiles.companyNumber, companyNumber))
+          .limit(1),
+        db
+          .select({
+            columnName: companiesHouseProfileTrails.columnName,
+            oldValue: companiesHouseProfileTrails.oldValue,
+            newValue: companiesHouseProfileTrails.newValue,
+            createdAt: sql<string>`${companiesHouseProfileTrails.createdAt}::text`,
+            publishedAt: sql<
+              string | null
+            >`${companiesHouseProfileTrails.publishedAt}::text`,
+          })
+          .from(companiesHouseProfileTrails)
+          .where(eq(companiesHouseProfileTrails.companyNumber, companyNumber))
+          .orderBy(
+            desc(companiesHouseProfileTrails.createdAt),
+            desc(companiesHouseProfileTrails.id),
+          )
+          .limit(TRAIL_ROW_LIMIT),
+      ]);
 
       // Unknown number — short-cache the miss like the profile fn's 404 path.
+      const [profile] = profileRows;
       if (!profile) {
         setRpcCacheControl(SHORT_EDGE_CACHE);
         return null;
       }
 
-      // Timestamps as ::text — the neon driver's Date mapping parses naive
-      // timestamps in the local TZ and truncates the µs the grouping needs.
-      const rows: TrailRow[] = await db
-        .select({
-          columnName: companiesHouseProfileTrails.columnName,
-          oldValue: companiesHouseProfileTrails.oldValue,
-          newValue: companiesHouseProfileTrails.newValue,
-          createdAt: sql<string>`${companiesHouseProfileTrails.createdAt}::text`,
-          publishedAt: sql<
-            string | null
-          >`${companiesHouseProfileTrails.publishedAt}::text`,
-        })
-        .from(companiesHouseProfileTrails)
-        .where(eq(companiesHouseProfileTrails.companyNumber, companyNumber))
-        .orderBy(
-          desc(companiesHouseProfileTrails.createdAt),
-          desc(companiesHouseProfileTrails.id),
-        )
-        .limit(TRAIL_ROW_LIMIT);
+      let rows: TrailRow[] = trailRows;
+      if (rows.length === TRAIL_ROW_LIMIT) {
+        // The limit can split the oldest same-created_at batch mid-event,
+        // which would curate a partial (never-existed) change — drop it.
+        const oldest = rows[rows.length - 1].createdAt;
+        rows = rows.filter((row) => row.createdAt !== oldest);
+      }
       rows.reverse();
 
-      const codes = collectSicCodes(rows);
-      const sicDescriptions = new Map<string, string>();
-      if (codes.length > 0) {
-        const descriptions = await db
-          .select({ code: sicCodes.code, description: sicCodes.description })
-          .from(sicCodes)
-          .where(inArray(sicCodes.code, codes));
-        for (const { code, description } of descriptions) {
-          sicDescriptions.set(code, description);
-        }
-      }
+      const descriptions = await loadSicDescriptions(collectSicCodes(rows));
+      const sicDescriptions = new Map(
+        descriptions.map(({ code, description }) => [code, description]),
+      );
 
       const events = curateTimeline({
         rows,
@@ -96,7 +97,7 @@ const getCompanyTimeline = createServerFn()
 
       // Same tag as the profile RPC + SSR doc, so the existing trail-driven
       // purge pipeline refreshes the timeline with no new wiring.
-      setResponseHeader('x-vercel-cache-tag', `company-${companyNumber}`);
+      setCacheTag(`company-${companyNumber}`);
       setRpcCacheControl(LONG_EDGE_CACHE);
 
       return { companyNumber, events };

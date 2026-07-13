@@ -1,3 +1,4 @@
+import { STATUS_TONES, type Tone } from '../../components/StatusBadge';
 import { formatDate, titleCase } from '../../utils';
 import type {
   TimelineEvent,
@@ -41,17 +42,12 @@ const COLUMN_CATEGORY: Record<string, TimelineEventKind> = {
   _deleted: 'deleted',
 };
 
-// Mirrors StatusBadge's semantic buckets (green/amber/red/grey).
-const STATUS_TONES: Record<string, TimelineTone> = {
-  active: 'positive',
-  open: 'positive',
-  registered: 'positive',
-  administration: 'warning',
-  'voluntary-arrangement': 'warning',
-  receivership: 'warning',
-  'insolvency-proceedings': 'warning',
-  dissolved: 'negative',
-  liquidation: 'negative',
+// Derived from StatusBadge's buckets so badge and timeline dot never disagree.
+const TONE_BY_BUCKET: Record<Tone, TimelineTone> = {
+  green: 'positive',
+  amber: 'warning',
+  red: 'negative',
+  grey: 'neutral',
 };
 
 type FieldChange = { old: string | null; new: string | null };
@@ -99,9 +95,12 @@ function composeAddress(
     .join(', ');
 }
 
-/** Tone for a company status value, bucketed like StatusBadge. */
+/** Tone for a company status value, via StatusBadge's shared buckets. */
 function statusTone(status: string | null): TimelineTone {
-  return (status && STATUS_TONES[status]) || 'neutral';
+  const bucket = status
+    ? STATUS_TONES[status as keyof typeof STATUS_TONES]
+    : undefined;
+  return bucket ? TONE_BY_BUCKET[bucket] : 'neutral';
 }
 
 /** Humanize a hyphenated CH enum value ("voluntary-arrangement" → "Voluntary Arrangement"). */
@@ -207,7 +206,18 @@ function renderChain(
       if (!from) {
         return { ...base, title: 'Registered address recorded', detail: to };
       }
-      return { ...base, title: 'Registered address changed', from, to };
+      if (!to) {
+        return { ...base, title: 'Registered address removed', detail: from };
+      }
+      // Map only real moves: a postcode on both sides geocodes precisely.
+      const postcode = fields.get('postalCode');
+      return {
+        ...base,
+        title: 'Registered address changed',
+        from,
+        to,
+        mappable: Boolean(postcode?.old && postcode.new) || undefined,
+      };
     }
     case 'accounts': {
       const filed = fields.get('accountsLastMadeUpTo');
@@ -307,6 +317,13 @@ function renderChain(
     case 'company-type': {
       const change = fields.get('companyType');
       if (!change?.new) return null;
+      if (!change.old) {
+        return {
+          ...base,
+          title: 'Company type recorded',
+          detail: humanizeEnum(change.new),
+        };
+      }
       return {
         ...base,
         title: 'Company type changed',
@@ -317,6 +334,13 @@ function renderChain(
     case 'jurisdiction': {
       const change = fields.get('jurisdiction');
       if (!change?.new) return null;
+      if (!change.old) {
+        return {
+          ...base,
+          title: 'Jurisdiction recorded',
+          detail: humanizeEnum(change.new),
+        };
+      }
       return {
         ...base,
         title: 'Jurisdiction changed',
@@ -327,6 +351,13 @@ function renderChain(
     case 'incorporation-date-fix': {
       const change = fields.get('dateOfCreation');
       if (!change?.new) return null;
+      if (!change.old) {
+        return {
+          ...base,
+          title: 'Incorporation date recorded',
+          detail: formatDate(change.new),
+        };
+      }
       return {
         ...base,
         title: 'Incorporation date corrected',
@@ -365,9 +396,17 @@ export function curateTimeline(input: {
   sicDescriptions: ReadonlyMap<string, string>;
 }): TimelineEvent[] {
   const sortable: { event: TimelineEvent; sortTs: string }[] = [];
+  const deletedDates = new Set<string>();
   for (const chain of buildChains(input.rows)) {
     const event = renderChain(chain, input.sicDescriptions);
-    if (event) sortable.push({ event, sortTs: chain.sortTs });
+    if (!event) continue;
+    // Replayed _deleted tombstones straddling midnight escape the same-day
+    // merge but re-derive one date from new_value — keep a single event.
+    if (event.kind === 'deleted') {
+      if (deletedDates.has(event.dateISO)) continue;
+      deletedDates.add(event.dateISO);
+    }
+    sortable.push({ event, sortTs: chain.sortTs });
   }
 
   sortable.push({

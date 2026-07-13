@@ -13,7 +13,7 @@ import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
   setSsrCacheControl,
-  setSsrCacheTag,
+  setCacheTag,
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
@@ -151,17 +151,22 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
+    // Timeline is auxiliary — a transient failure must not take down the page.
     const timeline = profile?.company_number
-      ? await queryClient.ensureQueryData(
-          companyTimelineQueryOptions(profile.company_number),
-        )
+      ? await queryClient
+          .ensureQueryData(companyTimelineQueryOptions(profile.company_number))
+          .catch(() => null)
       : null;
 
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
-    setSsrCacheControl(LONG_EDGE_CACHE);
+    // Short-cache when the timeline is missing for a company that should have
+    // one (RPC error, or a first visit racing getCompanyProfile's background
+    // upsert) so the degraded document isn't baked in for 30 days.
+    const timelineMissing = Boolean(profile?.company_number) && !timeline;
+    setSsrCacheControl(timelineMissing ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
     // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
     if (profile?.company_number) {
-      setSsrCacheTag(`company-${profile.company_number}`);
+      setCacheTag(`company-${profile.company_number}`);
     }
 
     return { sponsor, profile, timeline };

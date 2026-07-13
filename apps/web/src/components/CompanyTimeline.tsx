@@ -77,13 +77,20 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   const [expanded, setExpanded] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
 
-  // Expanding unmounts the button — move focus to the first revealed event so
+  // First non-anchor event past the fold — the anchors below the fold stay
+  // visible while collapsed, so this (not INITIAL_VISIBLE) is what expanding
+  // newly reveals. In the expanded list DOM index === event index (no button).
+  const firstRevealedIndex = events.findIndex(
+    (event, i) => i >= INITIAL_VISIBLE && !isAnchor(event),
+  );
+
+  // Expanding unmounts the button — move focus to the first revealed change so
   // keyboard/screen-reader users aren't dropped back to <body>.
   useEffect(() => {
-    if (!expanded) return;
-    const revealed = listRef.current?.children.item(INITIAL_VISIBLE);
+    if (!expanded || firstRevealedIndex < 0) return;
+    const revealed = listRef.current?.children.item(firstRevealedIndex);
     if (revealed instanceof HTMLElement) revealed.focus();
-  }, [expanded]);
+  }, [expanded, firstRevealedIndex]);
 
   const tail = events.slice(INITIAL_VISIBLE);
   const hiddenChanges = tail.filter((event) => !isAnchor(event)).length;
@@ -141,8 +148,8 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
           return (
             <li
               key={event.id}
-              className="flex gap-2.5 focus:outline-none"
-              tabIndex={expanded && i === INITIAL_VISIBLE ? -1 : undefined}
+              className="timeline-event flex gap-2.5"
+              tabIndex={expanded && i === firstRevealedIndex ? -1 : undefined}
             >
               <RailCell line={line} tone={event.tone} />
               <div className={`min-w-0 ${isLast ? '' : 'pb-4'}`}>

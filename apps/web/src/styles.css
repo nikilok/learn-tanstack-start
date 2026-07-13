@@ -400,6 +400,15 @@ html[data-desktop] .footer-desktop-link {
   transition: box-shadow 0.2s;
 }
 
+/* Visible focus ring for the timeline row focused when "show earlier" expands;
+   focus-visible keeps it keyboard-only. Explicit style so it can't render as
+   outline-style:none the way Tailwind's outline-2 utility does. */
+.timeline-event:focus-visible {
+  outline: 2px solid var(--sea-ink-soft);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
 .glass:hover {
   box-shadow: var(--shadow-card-full);
 }

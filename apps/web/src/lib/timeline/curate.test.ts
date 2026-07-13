@@ -260,7 +260,9 @@ describe('net-zero same-day collapse', () => {
 });
 
 describe('there-and-back flip collapse', () => {
-  test('a flip returning to the current address within a week collapses', () => {
+  test('a lone flip keeps its outbound leg so one move still maps', () => {
+    // Nothing else to show, so the collapse keeps the leave leg (W1W→HP9) even
+    // though the office reverted — the floor guarantees at least one move.
     const events = changes(
       curate([
         row({
@@ -275,7 +277,36 @@ describe('there-and-back flip collapse', () => {
         }),
       ]),
     );
-    expect(events).toHaveLength(0);
+    expect(events).toHaveLength(1);
+    expect(events[0].from).toBe('W1W 5PF');
+    expect(events[0].to).toBe('HP9 1QL');
+  });
+
+  test('the flip is fully collapsed when a real move survives it', () => {
+    // A genuine move (AA→BB) then a there-and-back excursion: the excursion
+    // collapses entirely because BB→AA already satisfies the floor.
+    const events = changes(
+      curate([
+        row({
+          createdAt: '2026-06-01 10:00:00.000001',
+          oldValue: 'W1W 5PF',
+          newValue: 'BB2 2BB',
+        }),
+        row({
+          createdAt: '2026-06-05 10:00:00.000001',
+          oldValue: 'BB2 2BB',
+          newValue: 'HP9 1QL',
+        }),
+        row({
+          createdAt: '2026-06-07 10:00:00.000001',
+          oldValue: 'HP9 1QL',
+          newValue: 'BB2 2BB',
+        }),
+      ]),
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].from).toBe('W1W 5PF');
+    expect(events[0].to).toBe('BB2 2BB');
   });
 
   test('a reversal beyond the window is kept as real moves', () => {
@@ -340,7 +371,8 @@ describe('there-and-back flip collapse', () => {
   });
 
   test('return matches by postcode despite a country-field difference', () => {
-    // The return leg gains ", England"; postcode comparison still pairs them.
+    // The return leg gains ", England"; postcode comparison still pairs them so
+    // the return drops, and the lone flip keeps its outbound leg (W1W→HP9).
     const events = changes(
       curate([
         row({
@@ -359,7 +391,9 @@ describe('there-and-back flip collapse', () => {
         ].map((r) => row({ ...r, createdAt: '2026-06-26 10:00:00.000001' })),
       ]),
     );
-    expect(events).toHaveLength(0);
+    expect(events).toHaveLength(1);
+    expect(events[0].from).toBe('W1W 5PF');
+    expect(events[0].to).toBe('HP9 1QL');
   });
 });
 

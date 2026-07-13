@@ -43,13 +43,13 @@ export const setSsrCacheControl = createIsomorphicFn()
   .client(() => {});
 
 /**
- * Attach a cache tag to the current SSR document response so the
- * `company-{number}` purge pipeline (`server/api/revalidate`) invalidates the
- * cached HTML alongside the RPC data it already tags. Server-only; no-op on the
- * client. Uses the same `x-vercel-cache-tag` header as the RPC so a single
- * `invalidateByTags` call clears both.
+ * Attach a cache tag to the current response — SSR document or RPC alike — so
+ * the purge pipelines (`server/api/revalidate`, release publishing) invalidate
+ * every response carrying the tag with a single `invalidateByTags` call.
+ * Server-only; no-op on the client. The sole spelling of the
+ * `x-vercel-cache-tag` header.
  */
-export const setSsrCacheTag = createIsomorphicFn()
+export const setCacheTag = createIsomorphicFn()
   .server((tag: string) => {
     setResponseHeader('x-vercel-cache-tag', tag);
   })

@@ -13,12 +13,14 @@ import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
   setSsrCacheControl,
-  setSsrCacheTag,
+  setCacheTag,
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { companyTimelineQueryOptions } from '../api/companyTimeline';
 import { getHmrcBySlug, hmrcBySlugIdQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
+import { CompanyTimeline } from '../components/CompanyTimeline';
 import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
@@ -32,6 +34,7 @@ import {
   formatAddress,
   formatDate,
   formatLocation,
+  humanizeEnum,
   stampPageFlip,
   titleCase,
 } from '../utils';
@@ -149,14 +152,31 @@ export const Route = createFileRoute('/company/$id/$slug')({
       companyProfileQueryOptions(sponsor.organisationName),
     );
 
+    // Timeline is auxiliary — a transient failure must not take down the page.
+    const timeline = profile?.company_number
+      ? await queryClient
+          .ensureQueryData({
+            ...companyTimelineQueryOptions(profile.company_number),
+            revalidateIfStale: true,
+          })
+          .catch((error) => {
+            console.error('[Timeline] load failed:', error);
+            return null;
+          })
+      : null;
+
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
-    setSsrCacheControl(LONG_EDGE_CACHE);
+    // Short-cache when the timeline is missing for a company that should have
+    // one (RPC error, or a first visit racing getCompanyProfile's background
+    // upsert) so the degraded document isn't baked in for 30 days.
+    const timelineMissing = Boolean(profile?.company_number) && !timeline;
+    setSsrCacheControl(timelineMissing ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
     // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
     if (profile?.company_number) {
-      setSsrCacheTag(`company-${profile.company_number}`);
+      setCacheTag(`company-${profile.company_number}`);
     }
 
-    return { sponsor, profile };
+    return { sponsor, profile, timeline };
   },
   head: ({ match }) => {
     const loaderData = match.loaderData as
@@ -252,7 +272,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile } = Route.useLoaderData();
+  const { sponsor, profile, timeline } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -399,7 +419,7 @@ function CompanyDetail() {
                 {profile.type && (
                   <DetailField
                     label="Company Type"
-                    value={titleCase(profile.type.replace(/-/g, ' '))}
+                    value={humanizeEnum(profile.type)}
                   />
                 )}
 
@@ -469,41 +489,53 @@ function CompanyDetail() {
           <p className="mt-1 text-sm leading-relaxed text-(--sea-ink-soft)">
             {summary}
           </p>
-          <div className="mt-4">
-            <h3 className={`mb-2 ${LABEL_CLASS}`}>See more on</h3>
-            <div className="flex flex-wrap gap-4 sm:gap-x-2">
-              {/* GOV.UK needs the Companies House record; the search engines query by name. */}
-              {profile?.company_number && (
-                <SeeMoreLink
-                  href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
-                  logo={<GovUkLogo className="h-5 w-auto" />}
-                />
-              )}
+        </section>
+
+        {timeline && (
+          <section className="mt-6" aria-labelledby="company-timeline-heading">
+            <h2 id="company-timeline-heading" className={LABEL_CLASS}>
+              Timeline
+            </h2>
+            <CompanyTimeline events={timeline.events} />
+          </section>
+        )}
+
+        <section className="mt-6" aria-labelledby="see-more-heading">
+          <h2 id="see-more-heading" className={`mb-2 ${LABEL_CLASS}`}>
+            See more on
+          </h2>
+          <div className="flex flex-wrap gap-4 sm:gap-x-2">
+            {/* GOV.UK needs the Companies House record; the search engines query by name. */}
+            {profile?.company_number && (
               <SeeMoreLink
-                href={`https://www.google.com/search?q=${searchQuery}`}
-                logo={<GoogleLogo className="brand-mark h-5 w-auto" />}
-                label="Google"
-                ariaLabel={`Search Google for ${displayName}`}
+                href={`https://find-and-update.company-information.service.gov.uk/company/${profile.company_number}`}
+                logo={<GovUkLogo className="h-5 w-auto" />}
               />
-              <SeeMoreLink
-                href={`https://www.bing.com/search?q=${searchQuery}`}
-                logo={<BingLogo className="brand-mark h-5 w-auto" />}
-                label="Bing"
-                ariaLabel={`Search Bing for ${displayName}`}
-              />
-              <SeeMoreLink
-                href={`https://duckduckgo.com/?q=${searchQuery}`}
-                logo={<DuckDuckGoLogo className="brand-mark h-5 w-auto" />}
-                label="DuckDuckGo"
-                ariaLabel={`Search DuckDuckGo for ${displayName}`}
-              />
-              <SeeMoreLink
-                href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
-                logo={<LinkedInLogo className="brand-mark h-5 w-auto" />}
-                label="LinkedIn"
-                ariaLabel={`Search LinkedIn for ${displayName}`}
-              />
-            </div>
+            )}
+            <SeeMoreLink
+              href={`https://www.google.com/search?q=${searchQuery}`}
+              logo={<GoogleLogo className="brand-mark h-5 w-auto" />}
+              label="Google"
+              ariaLabel={`Search Google for ${displayName}`}
+            />
+            <SeeMoreLink
+              href={`https://www.bing.com/search?q=${searchQuery}`}
+              logo={<BingLogo className="brand-mark h-5 w-auto" />}
+              label="Bing"
+              ariaLabel={`Search Bing for ${displayName}`}
+            />
+            <SeeMoreLink
+              href={`https://duckduckgo.com/?q=${searchQuery}`}
+              logo={<DuckDuckGoLogo className="brand-mark h-5 w-auto" />}
+              label="DuckDuckGo"
+              ariaLabel={`Search DuckDuckGo for ${displayName}`}
+            />
+            <SeeMoreLink
+              href={`https://www.linkedin.com/search/results/companies/?keywords=${searchQuery}`}
+              logo={<LinkedInLogo className="brand-mark h-5 w-auto" />}
+              label="LinkedIn"
+              ariaLabel={`Search LinkedIn for ${displayName}`}
+            />
           </div>
         </section>
 

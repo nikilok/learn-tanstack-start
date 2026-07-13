@@ -19,9 +19,10 @@ type CompanyStatus =
   | 'receivership'
   | 'removed';
 
-type Tone = 'green' | 'amber' | 'red' | 'grey';
+export type Tone = 'green' | 'amber' | 'red' | 'grey';
 
-const STATUS_TONES: Record<CompanyStatus, Tone> = {
+// Exported so the timeline's dot tones stay in lockstep with the badge.
+export const STATUS_TONES: Record<CompanyStatus, Tone> = {
   active: 'green',
   open: 'green',
   registered: 'green',
@@ -36,16 +37,13 @@ const STATUS_TONES: Record<CompanyStatus, Tone> = {
   removed: 'grey',
 };
 
-// Each tone pairs a dark shade (Tailwind 700/800) for light-mode text on white
-// with a light shade (Tailwind 400) for dark-mode text on near-black, matching
-// the green/red contrast already used in this project.
+// Theme-paired shades live in styles.css (--status-*) so the badge and the
+// timeline dots draw from one palette.
 const TONE_CLASSES: Record<Tone, string> = {
-  green:
-    'border border-[#166534]/40 text-[#166534] dark:border-[#4ade80]/40 dark:text-[#4ade80]',
-  amber:
-    'border border-[#92400e]/40 text-[#92400e] dark:border-[#fbbf24]/40 dark:text-[#fbbf24]',
-  red: 'border border-[#b91c1c]/40 text-[#b91c1c] dark:border-[#f87171]/40 dark:text-[#f87171]',
-  grey: 'border border-[#374151]/40 text-[#374151] dark:border-[#9ca3af]/40 dark:text-[#9ca3af]',
+  green: 'border border-(--status-green)/40 text-(--status-green)',
+  amber: 'border border-(--status-amber)/40 text-(--status-amber)',
+  red: 'border border-(--status-red)/40 text-(--status-red)',
+  grey: 'border border-(--status-grey)/40 text-(--status-grey)',
 };
 
 /**

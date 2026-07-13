@@ -14,7 +14,7 @@ import {
   SHORT_EDGE_CACHE,
   setRpcCacheControl,
   setSsrCacheControl,
-  setSsrCacheTag,
+  setCacheTag,
 } from './cache-headers';
 import type { DesktopPlatform } from './desktopPlatforms';
 
@@ -125,7 +125,7 @@ async function loadReleases(onlyPublic = false): Promise<DesktopRelease[]> {
  * public releases exist yet or the query fails.
  */
 export const getDesktopReleases = createServerFn().handler(async () => {
-  setSsrCacheTag(DESKTOP_RELEASES_TAG);
+  setCacheTag(DESKTOP_RELEASES_TAG);
   try {
     const releases = await loadReleases(true);
     // Long-cache a populated list (purged on publish); short-cache an empty one

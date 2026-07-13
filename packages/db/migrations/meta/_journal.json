@@ -246,6 +246,13 @@
       "when": 1783155738897,
       "tag": "0034_gorgeous_maximus",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1783940591494,
+      "tag": "0035_lucky_psynapse",
+      "breakpoints": true
     }
   ]
 }

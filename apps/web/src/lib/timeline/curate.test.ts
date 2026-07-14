@@ -955,4 +955,16 @@ describe('dated renames', () => {
     expect(events[0].detail).toContain('Formerly');
     expect(events[0].to).toBeUndefined();
   });
+
+  test('hides the "tracking began" anchor when dated renames are present', () => {
+    const withDated = curate([], {
+      previousCompanyNamesDated: chain,
+      currentName: QUANTUM,
+    });
+    expect(withDated.some((e) => e.kind === 'tracking-start')).toBe(false);
+
+    // Kept when there are no dated renames — the "nothing older to show" case.
+    const withoutDated = curate([row({ columnName: 'postalCode' })]);
+    expect(withoutDated.some((e) => e.kind === 'tracking-start')).toBe(true);
+  });
 });

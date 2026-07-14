@@ -582,29 +582,34 @@ export function curateTimeline(input: {
     ? sortable.filter((s) => !flips.has(s.event.id))
     : sortable;
 
-  // When history was capped, "tracking began 14 April" would falsely assert
-  // completeness — anchor at the oldest retained event instead.
-  const oldestShown =
-    input.truncated && kept.length > 0
-      ? kept.reduce<string>(
-          (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
-          kept[0].event.dateISO,
-        )
-      : TRACKING_SINCE;
-  kept.push({
-    sortTs: '',
-    event: {
-      id: `tracking-start:${oldestShown}`,
-      kind: 'tracking-start',
-      dateISO: oldestShown,
-      dateLabel: formatDate(oldestShown),
-      title: input.truncated
-        ? 'Earlier changes not shown'
-        : 'Change tracking began',
-      detail: input.truncated ? undefined : 'Automatic tracking started here',
-      tone: 'neutral',
-    },
-  });
+  // The "tracking began" anchor reads as a contradiction sitting above older
+  // dated (pre-tracking) renames, so show it only when there are none — it earns
+  // its place as a "nothing older to show" marker, not amid real history.
+  if (datedRenames.length === 0) {
+    // When history was capped, "tracking began 14 April" would falsely assert
+    // completeness — anchor at the oldest retained event instead.
+    const oldestShown =
+      input.truncated && kept.length > 0
+        ? kept.reduce<string>(
+            (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
+            kept[0].event.dateISO,
+          )
+        : TRACKING_SINCE;
+    kept.push({
+      sortTs: '',
+      event: {
+        id: `tracking-start:${oldestShown}`,
+        kind: 'tracking-start',
+        dateISO: oldestShown,
+        dateLabel: formatDate(oldestShown),
+        title: input.truncated
+          ? 'Earlier changes not shown'
+          : 'Change tracking began',
+        detail: input.truncated ? undefined : 'Automatic tracking started here',
+        tone: 'neutral',
+      },
+    });
+  }
 
   if (input.dateOfCreation) {
     kept.push({

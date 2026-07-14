@@ -2,12 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { TimelineEvent, TimelineTone } from '../lib/timeline/types';
 import { AddressChangeMap } from './AddressChangeMap';
-import { LABEL_CLASS } from './DetailField';
 
 import styles from './CompanyTimeline.module.css';
 
 // Change events shown before the expand button reveals the rest.
 const INITIAL_VISIBLE = 8;
+
+// Event dates in brand red (matching the highlighted search name) so they
+// anchor each row — same 10px uppercase scale as the shared LABEL_CLASS.
+const DATE_CLASS =
+  'text-[10px] font-medium tracking-wider text-(--logo-red) uppercase';
 
 // Dots share StatusBadge's --status-* palette; neutral is a hollow ring.
 const TONE_DOT: Record<TimelineTone, string> = {
@@ -172,7 +176,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
             >
               <RailCell tone={event.tone} />
               <div className={`min-w-0 grow ${isLast ? '' : 'pb-4'}`}>
-                <time dateTime={event.dateISO} className={LABEL_CLASS}>
+                <time dateTime={event.dateISO} className={DATE_CLASS}>
                   {event.dateLabel}
                 </time>
                 <p

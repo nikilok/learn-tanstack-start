@@ -306,8 +306,8 @@ function renderChain(
       const added = (parseJsonStringArray(change.new) ?? []).filter(
         (name) => !before.has(name),
       );
-      // A name entering previous_company_names is the name being given up;
-      // the new name isn't trailed (companyName is excluded from diffing).
+      // A name entering previous_company_names is the name being given up; the
+      // dated-rename rework will surface what it was renamed to.
       if (added.length === 0) return null;
       return {
         ...base,

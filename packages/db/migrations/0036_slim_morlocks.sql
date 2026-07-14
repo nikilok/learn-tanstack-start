@@ -1,0 +1,1 @@
+ALTER TABLE "companies_house_profiles" ADD COLUMN "previous_company_names_dated" jsonb DEFAULT '[]'::jsonb NOT NULL;

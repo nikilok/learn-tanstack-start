@@ -35,6 +35,10 @@ export type CHCompanyProfile = {
   has_been_liquidated?: boolean;
   has_insolvency_history?: boolean;
   has_charges?: boolean;
-  previous_company_names?: { name: string }[];
+  previous_company_names?: {
+    name: string;
+    effective_from?: string;
+    ceased_on?: string;
+  }[];
   confirmation_statement?: { last_made_up_to?: string };
 };

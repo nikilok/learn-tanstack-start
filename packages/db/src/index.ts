@@ -13,5 +13,8 @@ export {
   hmrcIngestionMeta,
   hmrcSkilledWorkers,
   hmrcSponsorLicences,
+  sameDatedPreviousNames,
   sicCodes,
+  toDatedPreviousNames,
 } from './schema.ts';
+export type { DatedPreviousName } from './schema.ts';

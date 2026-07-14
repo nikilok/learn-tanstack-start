@@ -3,6 +3,8 @@ import {
   chStreamState,
   companiesHouseProfiles,
   companiesHouseProfileTrails,
+  type DatedPreviousName,
+  sameDatedPreviousNames,
 } from '@ss/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -83,8 +85,9 @@ export async function processEvent(
   const trails: (typeof companiesHouseProfileTrails.$inferInsert)[] = [];
 
   for (const col of Object.keys(newRow)) {
-    // Skip only the PK — companyName is diffed so renames advance + trail it.
-    if (col === 'companyNumber') continue;
+    // Skip PK + dated jsonb (PG normalises its key order → false diff every event).
+    if (col === 'companyNumber' || col === 'previousCompanyNamesDated')
+      continue;
     const oldVal = stringify(existing[col as keyof typeof existing]);
     const newVal = stringify(newRow[col]);
     if (oldVal !== newVal) {
@@ -98,15 +101,28 @@ export async function processEvent(
     }
   }
 
-  if (trails.length === 0) return false;
+  // The dated jsonb is skipped in the diff (PG key-order false-diff), so detect a
+  // date-only change explicitly — else a pure effective_from/ceased_on fix (no
+  // other field changed → no trail) would never persist to the column.
+  const newDated = newRow.previousCompanyNamesDated as
+    | DatedPreviousName[]
+    | undefined;
+  const datedChanged =
+    newDated !== undefined &&
+    !sameDatedPreviousNames(existing.previousCompanyNamesDated ?? [], newDated);
+
+  if (trails.length === 0 && !datedChanged) return false;
 
   if (dryRun) {
+    const count = trails.length + (datedChanged ? 1 : 0);
     console.log(
-      `[dry-run] Would update ${event.resource_id} (${trails.length} fields):`,
+      `[dry-run] Would update ${event.resource_id} (${count} fields):`,
     );
     for (const t of trails) {
       console.log(`  ${t.columnName}: ${t.oldValue} → ${t.newValue}`);
     }
+    if (datedChanged)
+      console.log('  previousCompanyNamesDated: date changes (diff skipped)');
     return true;
   }
 

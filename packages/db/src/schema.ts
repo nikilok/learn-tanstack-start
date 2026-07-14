@@ -63,6 +63,47 @@ export const sicCodes = pgTable('sic_codes', {
   description: text('description').notNull(),
 });
 
+// One CH previous-name with its date range; dates are 'YYYY-MM-DD' or null.
+export type DatedPreviousName = {
+  name: string;
+  effectiveFrom: string | null;
+  ceasedOn: string | null;
+};
+
+/** Map CH previous_company_names[] (snake_case dates) into stored DatedPreviousName[]. */
+export function toDatedPreviousNames(
+  prev:
+    | {
+        name?: string | null;
+        effective_from?: string | null;
+        ceased_on?: string | null;
+      }[]
+    | null
+    | undefined,
+): DatedPreviousName[] {
+  return (prev ?? [])
+    .filter((p) => !!p?.name) // guards null array elements, not just blank names
+    .map((p) => ({
+      name: p.name as string,
+      effectiveFrom: p.effective_from ?? null,
+      ceasedOn: p.ceased_on ?? null,
+    }));
+}
+
+/** True when two dated previous-name arrays are equal (order + fields), key-order-insensitive. */
+export function sameDatedPreviousNames(
+  a: DatedPreviousName[],
+  b: DatedPreviousName[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (x, i) =>
+      x.name === b[i].name &&
+      x.effectiveFrom === b[i].effectiveFrom &&
+      x.ceasedOn === b[i].ceasedOn,
+  );
+}
+
 export const companiesHouseProfiles = pgTable(
   'companies_house_profiles',
   {
@@ -90,6 +131,11 @@ export const companiesHouseProfiles = pgTable(
     previousCompanyNames: text('previous_company_names')
       .array()
       .default(sql`'{}'::text[]`),
+    // Dated CH previous names (effective_from/ceased_on); text[] above drives search.
+    previousCompanyNamesDated: jsonb('previous_company_names_dated')
+      .$type<DatedPreviousName[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     confirmationStatementLastMadeUpTo: date(
       'confirmation_statement_last_made_up_to',
     ),

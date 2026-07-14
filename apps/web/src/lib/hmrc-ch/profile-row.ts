@@ -6,6 +6,8 @@
  * wired to the TanStack Start runtime types.
  */
 
+import { toDatedPreviousNames } from '@ss/db';
+
 import type { CHFullProfile } from '../phase5/apply-promotion.ts';
 
 type CHRegisteredAddress = {
@@ -30,6 +32,8 @@ export function profileToDbRow(profile: CHFullProfile) {
   const accounts = (profile.accounts ?? {}) as CHAccounts;
   const previousNames = (profile.previous_company_names ?? []) as {
     name: string;
+    effective_from?: string;
+    ceased_on?: string;
   }[];
   const confirmation = (profile.confirmation_statement ?? {}) as {
     last_made_up_to?: string;
@@ -57,7 +61,8 @@ export function profileToDbRow(profile: CHFullProfile) {
     hasInsolvencyHistory:
       (profile.has_insolvency_history as boolean | undefined) ?? null,
     hasCharges: (profile.has_charges as boolean | undefined) ?? null,
-    previousCompanyNames: previousNames.map((p) => p.name),
+    previousCompanyNames: previousNames.map((p) => p.name).filter((n) => !!n),
+    previousCompanyNamesDated: toDatedPreviousNames(previousNames),
     confirmationStatementLastMadeUpTo: confirmation.last_made_up_to ?? null,
     updatedAt: new Date(),
   };

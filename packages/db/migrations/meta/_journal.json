@@ -253,6 +253,13 @@
       "when": 1783940591494,
       "tag": "0035_lucky_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784033155065,
+      "tag": "0036_slim_morlocks",
+      "breakpoints": true
     }
   ]
 }

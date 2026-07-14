@@ -1,3 +1,5 @@
+import { toDatedPreviousNames } from '@ss/db/schema';
+
 import type { CHCompanyProfile } from './types.ts';
 
 /**
@@ -36,9 +38,13 @@ export function mapProfileToRow(data: CHCompanyProfile) {
   if (data.has_insolvency_history !== undefined)
     row.hasInsolvencyHistory = data.has_insolvency_history ?? null;
   if (data.has_charges !== undefined) row.hasCharges = data.has_charges ?? null;
-  if (data.previous_company_names !== undefined)
+  if (data.previous_company_names !== undefined) {
     row.previousCompanyNames =
       data.previous_company_names?.map((p) => p.name).filter((n) => !!n) ?? [];
+    row.previousCompanyNamesDated = toDatedPreviousNames(
+      data.previous_company_names,
+    );
+  }
 
   if (data.accounts !== undefined) {
     const acc = data.accounts;

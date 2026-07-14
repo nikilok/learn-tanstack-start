@@ -203,7 +203,9 @@ async function purgeTags(tags: string[]): Promise<void> {
       await delay(60_000);
     }
   }
-  console.log(`[purge] Invalidated ${tags.length} tags in ${requests} batches.`);
+  console.log(
+    `[purge] Invalidated ${tags.length} tags in ${requests} batches.`,
+  );
 }
 
 /** Dedup tags recorded in the recovery file (missing file → empty). */
@@ -229,7 +231,8 @@ function sameNameSet(a: string[], b: string[]): boolean {
 
 /** --purge-from: replay a recovery file's tags, then clear it, and exit. */
 async function purgeFromFile(file: string) {
-  if (!existsSync(file)) throw new Error(`--purge-from file not found: ${file}`);
+  if (!existsSync(file))
+    throw new Error(`--purge-from file not found: ${file}`);
   const tags = [
     ...new Set(
       readFileSync(file, 'utf8')

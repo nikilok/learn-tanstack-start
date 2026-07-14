@@ -86,6 +86,12 @@ export default memo(function SearchInput({
       <input
         ref={inputRef}
         type="text"
+        // Company names aren't dictionary words — stop the mobile keyboard from
+        // autocorrecting/suggesting/capitalising them mid-search.
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         defaultValue={defaultValue}
         onInput={() => {
           syncClearButton();

@@ -128,7 +128,10 @@ export async function processEvent(
 
   // Trails first: a failed insert replays and re-diffs cleanly, whereas
   // insert-after-update loses the trail forever (replay sees no diff).
-  await db.insert(companiesHouseProfileTrails).values(trails);
+  // Empty on a date-only change — Drizzle throws on .values([]).
+  if (trails.length > 0) {
+    await db.insert(companiesHouseProfileTrails).values(trails);
+  }
 
   // Exclude only the PK from the SET; companyName updates like any other column.
   const { companyNumber: _, ...updateFields } = newRow;

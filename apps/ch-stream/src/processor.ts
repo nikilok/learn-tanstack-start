@@ -83,7 +83,8 @@ export async function processEvent(
   const trails: (typeof companiesHouseProfileTrails.$inferInsert)[] = [];
 
   for (const col of Object.keys(newRow)) {
-    if (col === 'companyNumber' || col === 'companyName') continue;
+    // Skip only the PK — companyName is diffed so renames advance + trail it.
+    if (col === 'companyNumber') continue;
     const oldVal = stringify(existing[col as keyof typeof existing]);
     const newVal = stringify(newRow[col]);
     if (oldVal !== newVal) {
@@ -113,7 +114,8 @@ export async function processEvent(
   // insert-after-update loses the trail forever (replay sees no diff).
   await db.insert(companiesHouseProfileTrails).values(trails);
 
-  const { companyNumber: _, companyName: __, ...updateFields } = newRow;
+  // Exclude only the PK from the SET; companyName updates like any other column.
+  const { companyNumber: _, ...updateFields } = newRow;
   await db
     .update(companiesHouseProfiles)
     .set({ ...updateFields, updatedAt: new Date() })

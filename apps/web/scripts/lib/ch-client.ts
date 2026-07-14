@@ -53,50 +53,55 @@ export async function fetchApi(
   const auth = authHeader();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
+  // Clear the timer in finally so it stays armed through res.json() too — a
+  // server that sends headers then stalls the body would otherwise hang the run
+  // with no timeout; instead the abort fires and we retry.
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      headers: { Authorization: auth },
-      signal: controller.signal,
-    });
-  } catch (err) {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}${path}`, {
+        headers: { Authorization: auth },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (retriesLeft <= 0) {
+        console.error(`  network error for ${path}, giving up: ${err}`);
+        return { ok: false, notFound: false };
+      }
+      await delay(60_000);
+      return fetchApi(path, retriesLeft - 1);
+    }
+    if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+      if (retriesLeft <= 0) {
+        console.error(`  ${res.status} retries exhausted for ${path}`);
+        return { ok: false, notFound: false };
+      }
+      const wait = retryAfterMs(res);
+      console.log(
+        `  ${res.status}, backing off ${Math.round(wait / 1000)}s… (${retriesLeft} left)`,
+      );
+      await delay(wait);
+      return fetchApi(path, retriesLeft - 1);
+    }
+    if (res.status === 404 || res.status === 410)
+      return { ok: false, notFound: true };
+    if (!res.ok) {
+      console.error(`  unexpected ${res.status} for ${path}`);
+      return { ok: false, notFound: false };
+    }
+    // Parse inside the guard: a truncated / non-JSON 200 body is a transient
+    // error (retryable), not an uncaught throw that kills the whole run.
+    try {
+      return { ok: true, data: await res.json() };
+    } catch (err) {
+      if (retriesLeft <= 0) {
+        console.error(`  body parse failed for ${path}, giving up: ${err}`);
+        return { ok: false, notFound: false };
+      }
+      await delay(60_000);
+      return fetchApi(path, retriesLeft - 1);
+    }
+  } finally {
     clearTimeout(timeoutId);
-    if (retriesLeft <= 0) {
-      console.error(`  network error for ${path}, giving up: ${err}`);
-      return { ok: false, notFound: false };
-    }
-    await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
-  }
-  clearTimeout(timeoutId);
-  if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
-    if (retriesLeft <= 0) {
-      console.error(`  ${res.status} retries exhausted for ${path}`);
-      return { ok: false, notFound: false };
-    }
-    const wait = retryAfterMs(res);
-    console.log(
-      `  ${res.status}, backing off ${Math.round(wait / 1000)}s… (${retriesLeft} left)`,
-    );
-    await delay(wait);
-    return fetchApi(path, retriesLeft - 1);
-  }
-  if (res.status === 404 || res.status === 410)
-    return { ok: false, notFound: true };
-  if (!res.ok) {
-    console.error(`  unexpected ${res.status} for ${path}`);
-    return { ok: false, notFound: false };
-  }
-  // Parse inside the guard: a truncated / non-JSON 200 body is a transient error
-  // (retryable), not an uncaught throw that kills the whole run.
-  try {
-    return { ok: true, data: await res.json() };
-  } catch (err) {
-    if (retriesLeft <= 0) {
-      console.error(`  body parse failed for ${path}, giving up: ${err}`);
-      return { ok: false, notFound: false };
-    }
-    await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
   }
 }

@@ -114,12 +114,15 @@ export async function processEvent(
   if (trails.length === 0 && !datedChanged) return false;
 
   if (dryRun) {
+    const count = trails.length + (datedChanged ? 1 : 0);
     console.log(
-      `[dry-run] Would update ${event.resource_id} (${trails.length} fields):`,
+      `[dry-run] Would update ${event.resource_id} (${count} fields):`,
     );
     for (const t of trails) {
       console.log(`  ${t.columnName}: ${t.oldValue} → ${t.newValue}`);
     }
+    if (datedChanged)
+      console.log('  previousCompanyNamesDated: date changes (diff skipped)');
     return true;
   }
 

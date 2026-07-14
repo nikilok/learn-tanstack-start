@@ -12,13 +12,19 @@ import dotenv from 'dotenv';
 /** Abort a bulk run once this fraction of processed rows have errored. */
 export const ERROR_RATE_THRESHOLD = 0.1;
 
-/** Parse a whole non-negative integer; rejects '', '1e3', '10.5', '100abc'. */
+/** Parse a whole non-negative integer; rejects '', '1e3', '10.5', '100abc', and
+ *  digit strings above MAX_SAFE_INTEGER (which parseInt would silently round). */
 export function parseStrictInt(raw: string, label: string): number {
   if (!/^\d+$/.test(raw))
     throw new Error(
       `Invalid ${label}="${raw}" — must be a whole non-negative integer`,
     );
-  return Number.parseInt(raw, 10);
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(n))
+    throw new Error(
+      `Invalid ${label}="${raw}" — exceeds the safe integer range`,
+    );
+  return n;
 }
 
 /**

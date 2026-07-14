@@ -132,3 +132,26 @@ custom action with `tier: public_body`.
 
 **Done when**: workflow file exists, dispatches monthly (e.g.
 `0 3 1 * *`), passes a manual `workflow_dispatch` run with `--dry-run`.
+
+---
+
+## Company timeline — dated previous names
+
+### Ingest CH previous-name dates and fold renames into the timeline
+
+**Status**: open. **Source**: 2026-07-14, follow-up to the company timeline
+feature (#251 / #255).
+
+Previous company names render undated in the header "formerly known as" block
+(`NameHistory`), separate from the timeline. Companies House returns
+`effective_from`/`ceased_on` per previous name, but both ingestion paths discard
+them (`apps/web/src/lib/hmrc-ch/profile-row.ts:60`,
+`apps/ch-stream/src/mapper.ts:41`). Ingest the dates into a new dated column,
+emit each rename as a dated `rename` timeline event ordered by `ceased_on`
+(deduped against the existing trail-diff rename path), and retire the top block
+(keep the SEO summary sentence). Requires a rate-limited CH re-fetch backfill to
+date *historical* (pre-`TRACKING_SINCE`) renames.
+
+Full design: [previous-names-timeline.md](./previous-names-timeline.md).
+
+**Done when**: see the "Done when" section of the design doc.

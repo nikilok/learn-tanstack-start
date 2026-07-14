@@ -45,7 +45,12 @@ const getCompanyTimeline = createServerFn()
       // timestamps in the local TZ and truncates the µs the grouping needs.
       const [profileRows, trailRows] = await Promise.all([
         db
-          .select({ dateOfCreation: companiesHouseProfiles.dateOfCreation })
+          .select({
+            dateOfCreation: companiesHouseProfiles.dateOfCreation,
+            companyName: companiesHouseProfiles.companyName,
+            previousCompanyNamesDated:
+              companiesHouseProfiles.previousCompanyNamesDated,
+          })
           .from(companiesHouseProfiles)
           .where(eq(companiesHouseProfiles.companyNumber, companyNumber))
           .limit(1),
@@ -93,6 +98,8 @@ const getCompanyTimeline = createServerFn()
       const events = curateTimeline({
         rows,
         dateOfCreation: profile.dateOfCreation,
+        previousCompanyNamesDated: profile.previousCompanyNamesDated,
+        currentName: profile.companyName,
         sicDescriptions,
         truncated,
       });

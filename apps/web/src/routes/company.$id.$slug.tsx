@@ -26,7 +26,6 @@ import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
-import { NameHistory } from '../components/NameHistory';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
 import {
@@ -35,6 +34,7 @@ import {
   formatDate,
   formatLocation,
   humanizeEnum,
+  normalizeName,
   stampPageFlip,
   titleCase,
 } from '../utils';
@@ -61,16 +61,6 @@ function registeredLocation(
     address?.locality ?? address?.address_line_2,
     address?.region,
   );
-}
-
-// Canonical key for company-name equality (case, punctuation, LTD/LIMITED).
-function normalizeName(name: string): string {
-  return name
-    .toUpperCase()
-    .replace(/[.,]/g, '')
-    .replace(/\bLIMITED\b/g, 'LTD')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 export const Route = createFileRoute('/company/$id/$slug')({
@@ -325,7 +315,7 @@ function CompanyDetail() {
     .join(', ');
   // Former names from Companies House: drop the current name and blanks, and
   // dedupe (normalised) so LTD/LIMITED and repeat entries collapse. Title-casing
-  // happens at the display layer (NameHistory / the summary sentence).
+  // happens at the display layer (the summary sentence).
   const seenNames = new Set([currentKey]);
   const formerNames: string[] = [];
   for (const raw of profile?.previousNames ?? []) {
@@ -361,20 +351,21 @@ function CompanyDetail() {
       <section className="mx-auto max-w-2xl">
         <div className="page-flip-details">
           <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
-            <NameHistory currentName={displayName} previousNames={formerNames}>
-              <p className="mt-1 text-sm text-(--sea-ink)">
-                Licensed UK {displayRoute} visa sponsor
-                {displayLocation ? ` in ${displayLocation}` : ''}
+            <h1 className="text-xl font-semibold text-(--sea-ink)">
+              {displayName}
+            </h1>
+            <p className="mt-1 text-sm text-(--sea-ink)">
+              Licensed UK {displayRoute} visa sponsor
+              {displayLocation ? ` in ${displayLocation}` : ''}
+            </p>
+            {alsoRegisteredAs && (
+              <p className="mt-1 text-sm text-(--sea-ink-soft)">
+                Also registered with HMRC as {alsoRegisteredAs}
               </p>
-              {alsoRegisteredAs && (
-                <p className="mt-1 text-sm text-(--sea-ink-soft)">
-                  Also registered with HMRC as {alsoRegisteredAs}
-                </p>
-              )}
-              {industry && (
-                <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
-              )}
-            </NameHistory>
+            )}
+            {industry && (
+              <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
+            )}
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <DetailField
                 label="Location"

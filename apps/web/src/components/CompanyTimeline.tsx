@@ -9,8 +9,7 @@ import styles from './CompanyTimeline.module.css';
 // Change events shown before the expand button reveals the rest.
 const INITIAL_VISIBLE = 8;
 
-// Dots share StatusBadge's --status-* palette; neutral is a hollow ring like
-// NameHistory's previous-name dots.
+// Dots share StatusBadge's --status-* palette; neutral is a hollow ring.
 const TONE_DOT: Record<TimelineTone, string> = {
   positive: 'bg-(--status-green)',
   warning: 'bg-(--status-amber)',

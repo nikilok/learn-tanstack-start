@@ -1,8 +1,11 @@
+import type { DatedPreviousName } from '@ss/db';
+
 import { STATUS_TONES, type Tone } from '../../components/StatusBadge';
 import {
   formatAddress,
   formatDate,
   humanizeEnum,
+  normalizeName,
   titleCase,
 } from '../../utils';
 import type {
@@ -503,17 +506,61 @@ function flipEventIds(events: TimelineEvent[]): Set<string> {
   return drop;
 }
 
+/** Build dated A→B rename events from CH's dated previous names. Each former name
+ *  renamed to the next-newer one (by effectiveFrom), or the current name for the
+ *  most recent former name. Ordering into the timeline is left to the caller's sort. */
+function buildDatedRenameEvents(
+  dated: DatedPreviousName[],
+  currentName: string,
+): TimelineEvent[] {
+  const sorted = [...dated].sort((a, b) =>
+    (a.effectiveFrom ?? '') < (b.effectiveFrom ?? '') ? -1 : 1,
+  );
+  const events: TimelineEvent[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const from = sorted[i].name;
+    const ceasedOn = sorted[i].ceasedOn;
+    // No ceased_on → can't date the event; the name still shows in the SEO
+    // sentence. Rare (very old records).
+    if (!ceasedOn) continue;
+    const to = i < sorted.length - 1 ? sorted[i + 1].name : currentName;
+    // Collapse cosmetic LTD/LIMITED-only renames.
+    if (normalizeName(from) === normalizeName(to)) continue;
+    events.push({
+      id: `rename:${ceasedOn}:${normalizeName(from)}`,
+      kind: 'rename',
+      dateISO: ceasedOn,
+      dateLabel: formatDate(ceasedOn),
+      title: 'Company renamed',
+      from: titleCase(from),
+      to: titleCase(to),
+      tone: 'neutral',
+    });
+  }
+  return events;
+}
+
 /** Curate ordered trail rows into display-ready events, newest first, anchors in place. */
 export function curateTimeline(input: {
   rows: TrailRow[];
   dateOfCreation: string | null;
   sicDescriptions: ReadonlyMap<string, string>;
+  previousCompanyNamesDated: DatedPreviousName[];
+  currentName: string;
   // True when rows were capped — older history exists but wasn't fetched.
   truncated?: boolean;
 }): TimelineEvent[] {
   const sortable: { event: TimelineEvent; sortTs: string }[] = [];
   const deletedDates = new Set<string>();
+  // Dated renames from the CH profile are the source of truth when present;
+  // suppress the trail-diff `rename` to avoid double-counting. Un-backfilled
+  // companies (empty dated array) fall back to the trail-diff case.
+  const hasDated = input.previousCompanyNamesDated.length > 0;
+  const datedRenames = hasDated
+    ? buildDatedRenameEvents(input.previousCompanyNamesDated, input.currentName)
+    : [];
   for (const chain of buildChains(input.rows)) {
+    if (hasDated && chain.kind === 'rename') continue;
     const event = renderChain(chain, input.sicDescriptions);
     if (!event) continue;
     // Replayed _deleted tombstones straddling midnight escape the same-day
@@ -523,6 +570,9 @@ export function curateTimeline(input: {
       deletedDates.add(event.dateISO);
     }
     sortable.push({ event, sortTs: chain.sortTs });
+  }
+  for (const event of datedRenames) {
+    sortable.push({ event, sortTs: event.dateISO });
   }
 
   // Drop there-and-back address flips (CH corrections) so a week-long revert
@@ -551,7 +601,7 @@ export function curateTimeline(input: {
       title: input.truncated
         ? 'Earlier changes not shown'
         : 'Change tracking began',
-      detail: input.truncated ? undefined : 'Earlier changes aren’t shown',
+      detail: input.truncated ? undefined : 'Automatic tracking started here',
       tone: 'neutral',
     },
   });

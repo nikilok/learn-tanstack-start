@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { TimelineEvent, TimelineTone } from '../lib/timeline/types';
 import { AddressChangeMap } from './AddressChangeMap';
 
 import styles from './CompanyTimeline.module.css';
+
+// Measure the rail before paint on the client (no connector flash); on the
+// server this is useEffect (a no-op there — avoids the SSR layout-effect warning).
+const useIsoLayoutEffect =
+  typeof document !== 'undefined' ? useLayoutEffect : useEffect;
 
 // Change events shown before the expand button reveals the rest.
 const INITIAL_VISIBLE = 8;
@@ -90,30 +95,45 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
     if (revealed instanceof HTMLElement) revealed.focus();
   }, [expanded, firstRevealedIndex]);
 
-  // Span the gradient rail from the first dot's centre to the last dot's —
-  // re-measured on expand and resize so it tracks reflow.
-  useEffect(() => {
+  // Span the gradient rail from the first dot's centre to the last dot's,
+  // measured in the wrapper's frame (the rail's offset parent — the "No changes
+  // observed yet." note offsets the <ol> from it). A ResizeObserver re-measures
+  // on ANY in-list reflow — a map collapsing on a failed geocode, a font swap,
+  // expand — not just window resize. rAF-coalesced and value-guarded so a no-op
+  // measure doesn't re-render the timeline (Leaflet rows included).
+  useIsoLayoutEffect(() => {
     const ol = listRef.current;
     const wrap = wrapRef.current;
     if (!ol || !wrap) return;
+    let raf = 0;
     const measure = () => {
+      raf = 0;
       const dots = ol.querySelectorAll<HTMLElement>('[data-timeline-dot]');
       if (dots.length < 2) {
-        setRail(null);
+        setRail((prev) => (prev === null ? prev : null));
         return;
       }
-      // Measure in the rail's offset-parent frame (the wrapper), NOT the <ol>:
-      // the "No changes observed yet." note offsets the list from the wrapper,
-      // and the rail is positioned against the wrapper.
       const baseTop = wrap.getBoundingClientRect().top;
       const first = dots[0].getBoundingClientRect();
       const last = dots[dots.length - 1].getBoundingClientRect();
       const top = first.top - baseTop + first.height / 2;
-      setRail({ top, height: last.top - baseTop + last.height / 2 - top });
+      const height = last.top - baseTop + last.height / 2 - top;
+      setRail((prev) =>
+        prev && prev.top === top && prev.height === height
+          ? prev
+          : { top, height },
+      );
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(measure);
     };
     measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    const observer = new ResizeObserver(schedule);
+    observer.observe(ol);
+    return () => {
+      observer.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [events, expanded]);
 
   const tail = events.slice(INITIAL_VISIBLE);
@@ -123,6 +143,10 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
     ? [...events.slice(0, INITIAL_VISIBLE), ...tail.filter(isAnchor)]
     : events;
   const noChanges = events.every(isAnchor);
+  // The rail connects dot to dot, so it only shows with ≥2 dotted rows.
+  // Computed from the data (not measurement) so the connector is in the SSR
+  // HTML and survives no-JS/pre-hydration; the measured style refines it.
+  const showRail = visible.filter((event) => event.tone).length >= 2;
 
   // The expand button is its own row so it exists even when no anchors
   // survive into the collapsed tail.
@@ -136,10 +160,10 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
           No changes observed yet.
         </p>
       )}
-      {rail && (
+      {showRail && (
         <span
           className={styles.railTrack}
-          style={{ top: rail.top, height: rail.height }}
+          style={rail ? { top: rail.top, height: rail.height } : undefined}
           aria-hidden
         />
       )}

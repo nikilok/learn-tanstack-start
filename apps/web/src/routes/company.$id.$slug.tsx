@@ -248,10 +248,12 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const pageDescription = `${description}.`;
     const canonicalUrl = buildCanonical(match.pathname);
 
-    // Former CH names + the HMRC "also registered as" name → schema.org
-    // alternateName, deduped, so bots resolve a search for any prior name to
-    // this page. Same source as the visible "previously known as" summary —
-    // structured data must mirror on-page content.
+    // schema.org alternateName = every alias the page shows — the visible
+    // "previously known as" names (same formerCompanyNames source as the About
+    // summary) plus the HMRC "also registered as" name — so the structured data
+    // mirrors the on-page copy. Exact-dedup only, NOT normalised: when the HMRC
+    // and CH forms differ ("Acme Ltd" vs "Acme Limited") the page shows both, so
+    // both belong here; normalising would drop one the copy still renders.
     const priorNames = loaderData
       ? formerCompanyNames(
           loaderData.profile?.previousNames,
@@ -259,14 +261,10 @@ export const Route = createFileRoute('/company/$id/$slug')({
             loaderData.sponsor.organisationName,
         ).map(titleCase)
       : [];
-    const altSeen = new Set<string>();
-    const alternateName: string[] = [];
-    for (const alt of [registeredAs, ...priorNames]) {
-      const key = alt ? normalizeName(alt) : '';
-      if (!key || altSeen.has(key)) continue;
-      altSeen.add(key);
-      alternateName.push(alt);
-    }
+    const alternateName = [
+      ...(registeredAs ? [registeredAs] : []),
+      ...priorNames,
+    ].filter((alt, i, all) => all.indexOf(alt) === i);
 
     const jsonLd = loaderData
       ? buildCompanyJsonLd({

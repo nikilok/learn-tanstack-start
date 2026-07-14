@@ -27,6 +27,18 @@
   --status-red: #b91c1c;
   --status-grey: #374151;
 
+  /* Rainbow spectrum shared by the search guide-rail and the timeline rail.
+     Loops back to the start colour at 100% so a vertical repeat is seamless. */
+  --rail-spectrum: linear-gradient(
+    180deg,
+    #2954d6 0%,
+    #7b3fe4 20%,
+    #e23b86 40%,
+    #e2820e 60%,
+    #18a06d 80%,
+    #2954d6 100%
+  );
+
   /* Mapped tokens for components */
   --sea-ink: #171717;
   --sea-ink-soft: #4d4d4d;
@@ -84,6 +96,17 @@
   --status-amber: #fbbf24;
   --status-red: #f87171;
   --status-grey: #9ca3af;
+
+  /* Brighter stops pop on the dark page; the deeper light stops would muddy. */
+  --rail-spectrum: linear-gradient(
+    180deg,
+    #4f7cff 0%,
+    #9a5cff 20%,
+    #ff6fae 40%,
+    #ffb347 60%,
+    #5fd0a0 80%,
+    #4f7cff 100%
+  );
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;
@@ -215,16 +238,9 @@ body::after {
    Light mode uses deeper, more saturated stops (the bright stops wash out on the
    near-white page); dark mode keeps the brighter stops on the #0a0a0a page. */
 .guide-rail {
-  /* Loops back to the start colour at 100% so the vertical repeat is seamless. */
-  background-image: linear-gradient(
-    180deg,
-    #2954d6 0%,
-    #7b3fe4 20%,
-    #e23b86 40%,
-    #e2820e 60%,
-    #18a06d 80%,
-    #2954d6 100%
-  );
+  /* Shared spectrum — see --rail-spectrum in the token blocks (also drives the
+     company-timeline rail), so the two rails can never drift out of sync. */
+  background-image: var(--rail-spectrum);
   /* One full spectrum per viewport height, repeated down the rail — so the whole
      sweep stays visible whether the list is two rows or two hundred. */
   background-size: 100% 100vh;
@@ -232,16 +248,7 @@ body::after {
   opacity: 0.8;
 }
 .dark .guide-rail {
-  /* Brighter stops pop on the dark page; the deeper light-mode stops would muddy. */
-  background-image: linear-gradient(
-    180deg,
-    #4f7cff 0%,
-    #9a5cff 20%,
-    #ff6fae 40%,
-    #ffb347 60%,
-    #5fd0a0 80%,
-    #4f7cff 100%
-  );
+  /* Spectrum comes from --rail-spectrum (dark variant); only opacity differs. */
   opacity: 0.6;
 }
 

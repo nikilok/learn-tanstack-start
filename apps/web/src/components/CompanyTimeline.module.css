@@ -15,30 +15,19 @@
 .railTrack {
   position: absolute;
   left: 4px;
+  /* Full-height fallback for SSR / no-JS / pre-measure; the measured inline
+     top+height snap it to the exact first-dot → last-dot span once JS runs. */
+  top: 0;
+  height: 100%;
   width: 1px;
   transform: translateX(-50%);
-  background-image: linear-gradient(
-    180deg,
-    #2954d6 0%,
-    #7b3fe4 20%,
-    #e23b86 40%,
-    #e2820e 60%,
-    #18a06d 80%,
-    #2954d6 100%
-  );
+  /* Shared spectrum (styles.css --rail-spectrum, same as the search guide-rail)
+     so the two rails can never drift out of sync. */
+  background-image: var(--rail-spectrum);
   background-size: 100% 100%;
   opacity: 0.8;
   pointer-events: none;
 }
 :global(.dark) .railTrack {
-  background-image: linear-gradient(
-    180deg,
-    #4f7cff 0%,
-    #9a5cff 20%,
-    #ff6fae 40%,
-    #ffb347 60%,
-    #5fd0a0 80%,
-    #4f7cff 100%
-  );
   opacity: 0.6;
 }

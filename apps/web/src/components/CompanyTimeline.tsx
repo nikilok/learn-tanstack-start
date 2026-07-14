@@ -66,6 +66,7 @@ type Row = { type: 'event'; event: TimelineEvent } | { type: 'button' };
 export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   const [expanded, setExpanded] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [rail, setRail] = useState<{ top: number; height: number } | null>(
     null,
   );
@@ -85,22 +86,26 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
     if (revealed instanceof HTMLElement) revealed.focus();
   }, [expanded, firstRevealedIndex]);
 
-  // Span the gradient rail from the first dot's centre to the last dot's, in
-  // the list's own frame — re-measured on expand and resize so it tracks reflow.
+  // Span the gradient rail from the first dot's centre to the last dot's —
+  // re-measured on expand and resize so it tracks reflow.
   useEffect(() => {
     const ol = listRef.current;
-    if (!ol) return;
+    const wrap = wrapRef.current;
+    if (!ol || !wrap) return;
     const measure = () => {
       const dots = ol.querySelectorAll<HTMLElement>('[data-timeline-dot]');
       if (dots.length < 2) {
         setRail(null);
         return;
       }
-      const olTop = ol.getBoundingClientRect().top;
+      // Measure in the rail's offset-parent frame (the wrapper), NOT the <ol>:
+      // the "No changes observed yet." note offsets the list from the wrapper,
+      // and the rail is positioned against the wrapper.
+      const baseTop = wrap.getBoundingClientRect().top;
       const first = dots[0].getBoundingClientRect();
       const last = dots[dots.length - 1].getBoundingClientRect();
-      const top = first.top - olTop + first.height / 2;
-      setRail({ top, height: last.top - olTop + last.height / 2 - top });
+      const top = first.top - baseTop + first.height / 2;
+      setRail({ top, height: last.top - baseTop + last.height / 2 - top });
     };
     measure();
     window.addEventListener('resize', measure);
@@ -121,7 +126,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   if (collapsed) rows.splice(INITIAL_VISIBLE, 0, { type: 'button' });
 
   return (
-    <div className="relative mt-1">
+    <div ref={wrapRef} className="relative mt-1">
       {noChanges && (
         <p className="mb-2 text-sm text-(--sea-ink-soft)">
           No changes observed yet.

@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import type { TimelineEvent, TimelineTone } from '../lib/timeline/types';
 import { AddressChangeMap } from './AddressChangeMap';
@@ -153,6 +159,16 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   const rows: Row[] = visible.map((event) => ({ type: 'event', event }));
   if (collapsed) rows.splice(INITIAL_VISIBLE, 0, { type: 'button' });
 
+  // Measured span once JS runs; otherwise the full-height CSS fallback (so the
+  // connector is in the SSR HTML / no-JS). Exception: in the noChanges state the
+  // "No changes observed yet." note sits in the wrapper and a full-height
+  // fallback would run up through it — hold it hidden there until measured.
+  const railStyle: CSSProperties | undefined = rail
+    ? { top: rail.top, height: rail.height }
+    : noChanges
+      ? { display: 'none' }
+      : undefined;
+
   return (
     <div ref={wrapRef} className="relative mt-1">
       {noChanges && (
@@ -161,11 +177,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
         </p>
       )}
       {showRail && (
-        <span
-          className={styles.railTrack}
-          style={rail ? { top: rail.top, height: rail.height } : undefined}
-          aria-hidden
-        />
+        <span className={styles.railTrack} style={railStyle} aria-hidden />
       )}
       <ol
         ref={listRef}

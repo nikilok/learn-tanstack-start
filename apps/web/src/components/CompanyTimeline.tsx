@@ -17,24 +17,13 @@ const TONE_DOT: Record<TimelineTone, string> = {
   neutral: 'border border-(--sea-ink-soft) bg-(--sponsor-card-bg)',
 };
 
-type RailLine = 'start' | 'middle' | 'end' | 'none';
-
-const RAIL_LINE: Record<RailLine, string> = {
-  start: 'top-2.5 bottom-0',
-  middle: 'inset-y-0',
-  end: 'top-0 h-3',
-  none: 'hidden',
-};
-
-/** Rail gutter cell: one row's connector-line segment plus optional tone dot. */
-function RailCell({ line, tone }: { line: RailLine; tone?: TimelineTone }) {
+/** Rail gutter cell: one row's tone dot riding the shared gradient rail. */
+function RailCell({ tone }: { tone?: TimelineTone }) {
   return (
     <span className="relative w-2 shrink-0" aria-hidden>
-      <span
-        className={`absolute left-1/2 w-px -translate-x-1/2 bg-(--sea-ink-soft)/30 ${RAIL_LINE[line]}`}
-      />
       {tone && (
         <span
+          data-timeline-dot
           className={`absolute top-2 left-1/2 size-2 -translate-x-1/2 rounded-full ${TONE_DOT[tone]}`}
         />
       )}
@@ -77,6 +66,9 @@ type Row = { type: 'event'; event: TimelineEvent } | { type: 'button' };
 export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   const [expanded, setExpanded] = useState(false);
   const listRef = useRef<HTMLOListElement>(null);
+  const [rail, setRail] = useState<{ top: number; height: number } | null>(
+    null,
+  );
 
   // First non-anchor event past the fold — the anchors below the fold stay
   // visible while collapsed, so this (not INITIAL_VISIBLE) is what expanding
@@ -93,6 +85,28 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
     if (revealed instanceof HTMLElement) revealed.focus();
   }, [expanded, firstRevealedIndex]);
 
+  // Span the gradient rail from the first dot's centre to the last dot's, in
+  // the list's own frame — re-measured on expand and resize so it tracks reflow.
+  useEffect(() => {
+    const ol = listRef.current;
+    if (!ol) return;
+    const measure = () => {
+      const dots = ol.querySelectorAll<HTMLElement>('[data-timeline-dot]');
+      if (dots.length < 2) {
+        setRail(null);
+        return;
+      }
+      const olTop = ol.getBoundingClientRect().top;
+      const first = dots[0].getBoundingClientRect();
+      const last = dots[dots.length - 1].getBoundingClientRect();
+      const top = first.top - olTop + first.height / 2;
+      setRail({ top, height: last.top - olTop + last.height / 2 - top });
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [events, expanded]);
+
   const tail = events.slice(INITIAL_VISIBLE);
   const hiddenChanges = tail.filter((event) => !isAnchor(event)).length;
   const collapsed = !expanded && hiddenChanges > 1;
@@ -107,11 +121,18 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
   if (collapsed) rows.splice(INITIAL_VISIBLE, 0, { type: 'button' });
 
   return (
-    <div className="mt-1">
+    <div className="relative mt-1">
       {noChanges && (
         <p className="mb-2 text-sm text-(--sea-ink-soft)">
           No changes observed yet.
         </p>
+      )}
+      {rail && (
+        <span
+          className={styles.railTrack}
+          style={{ top: rail.top, height: rail.height }}
+          aria-hidden
+        />
       )}
       <ol
         ref={listRef}
@@ -120,19 +141,11 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
       >
         {rows.map((row, i) => {
           const isLast = i === rows.length - 1;
-          const line: RailLine =
-            rows.length === 1
-              ? 'none'
-              : i === 0
-                ? 'start'
-                : isLast
-                  ? 'end'
-                  : 'middle';
 
           if (row.type === 'button') {
             return (
               <li key="show-earlier" className="flex gap-2.5">
-                <RailCell line={line} />
+                <RailCell />
                 <button
                   type="button"
                   onClick={() => setExpanded(true)}
@@ -152,7 +165,7 @@ export function CompanyTimeline({ events }: { events: TimelineEvent[] }) {
               className={`${styles.event} flex gap-2.5`}
               tabIndex={expanded && i === firstRevealedIndex ? -1 : undefined}
             >
-              <RailCell line={line} tone={event.tone} />
+              <RailCell tone={event.tone} />
               <div className={`min-w-0 grow ${isLast ? '' : 'pb-4'}`}>
                 <time dateTime={event.dateISO} className={LABEL_CLASS}>
                   {event.dateLabel}

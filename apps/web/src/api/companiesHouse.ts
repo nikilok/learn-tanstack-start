@@ -2,6 +2,7 @@ import {
   companiesHouseProfiles,
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
+  toDatedPreviousNames,
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
@@ -43,7 +44,11 @@ type CompanyProfile = {
   has_been_liquidated?: boolean;
   has_insolvency_history?: boolean;
   has_charges?: boolean;
-  previous_company_names?: { name: string }[];
+  previous_company_names?: {
+    name: string;
+    effective_from?: string;
+    ceased_on?: string;
+  }[];
   confirmation_statement?: {
     last_made_up_to?: string;
   };
@@ -120,6 +125,9 @@ function profileToDbRow(profile: CompanyProfile) {
     previousCompanyNames:
       profile.previous_company_names?.map((p) => p.name).filter((n) => !!n) ??
       [],
+    previousCompanyNamesDated: toDatedPreviousNames(
+      profile.previous_company_names,
+    ),
     confirmationStatementLastMadeUpTo:
       profile.confirmation_statement?.last_made_up_to || null,
     updatedAt: new Date(),

@@ -14,4 +14,6 @@ export {
   hmrcSkilledWorkers,
   hmrcSponsorLicences,
   sicCodes,
+  toDatedPreviousNames,
 } from './schema.ts';
+export type { DatedPreviousName } from './schema.ts';

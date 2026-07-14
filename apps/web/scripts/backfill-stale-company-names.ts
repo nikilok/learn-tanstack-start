@@ -42,6 +42,7 @@ import { drizzle } from 'drizzle-orm/neon-http';
 
 import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import type { CHFullProfile } from '../src/lib/phase5/apply-promotion.ts';
+import { delay, fetchApi } from './lib/ch-client.ts';
 
 // ── Env ──────────────────────────────────────────────────────────────────────
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -91,94 +92,12 @@ for (const arg of process.argv.slice(2)) {
 const sql = neon(process.env.POSTGRES_URL);
 const db = drizzle({ client: sql });
 
-const BASE_URL = 'https://api.company-information.service.gov.uk';
-const AUTH_HEADER = `Basic ${Buffer.from(`${CH_API_KEY}:`).toString('base64')}`;
-const FETCH_MAX_RETRIES = 3;
-const FETCH_TIMEOUT_MS = 30_000;
-const MAX_BACKOFF_MS = 300_000;
 // Durable append-log of company-{n} tags whose row was corrected but whose cache
 // purge may not have completed — the recovery source for --purge-from.
 const PURGE_LOG = resolve(tmpdir(), 'backfill-stale-names-purge-pending.txt');
 // Abort if too many rows error (dead key / CH outage) so the run can't exit 0
 // looking successful (mirrors phase5-sweep's guard).
 const ERROR_RATE_THRESHOLD = 0.1;
-
-/** Sleep for `ms` milliseconds. */
-function delay(ms: number) {
-  return new Promise<void>((r) => setTimeout(r, ms));
-}
-
-/** Backoff for a 429/5xx, honouring Retry-After (seconds or HTTP date), capped. */
-function retryAfterMs(res: Response): number {
-  const header = res.headers.get('retry-after');
-  if (header) {
-    const secs = Number(header);
-    if (Number.isFinite(secs)) return Math.min(secs * 1000, MAX_BACKOFF_MS);
-    const when = Date.parse(header);
-    if (!Number.isNaN(when))
-      return Math.min(Math.max(when - Date.now(), 0), MAX_BACKOFF_MS);
-  }
-  return 60_000;
-}
-
-type FetchOutcome =
-  | { ok: true; data: unknown }
-  | { ok: false; notFound: boolean };
-
-/** GET a CH REST path with Basic auth; retries 429/5xx/network/parse on backoff. */
-async function fetchApi(
-  path: string,
-  retriesLeft = FETCH_MAX_RETRIES,
-): Promise<FetchOutcome> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(`${BASE_URL}${path}`, {
-      headers: { Authorization: AUTH_HEADER },
-      signal: controller.signal,
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (retriesLeft <= 0) {
-      console.error(`  network error for ${path}, giving up: ${err}`);
-      return { ok: false, notFound: false };
-    }
-    await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
-  }
-  clearTimeout(timeoutId);
-  if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
-    if (retriesLeft <= 0) {
-      console.error(`  ${res.status} retries exhausted for ${path}`);
-      return { ok: false, notFound: false };
-    }
-    const wait = retryAfterMs(res);
-    console.log(
-      `  ${res.status}, backing off ${Math.round(wait / 1000)}s… (${retriesLeft} left)`,
-    );
-    await delay(wait);
-    return fetchApi(path, retriesLeft - 1);
-  }
-  if (res.status === 404 || res.status === 410)
-    return { ok: false, notFound: true };
-  if (!res.ok) {
-    console.error(`  unexpected ${res.status} for ${path}`);
-    return { ok: false, notFound: false };
-  }
-  // Parse inside the guard: a truncated / non-JSON 200 body is a transient error
-  // (retryable), not an uncaught throw that kills the whole run.
-  try {
-    return { ok: true, data: await res.json() };
-  } catch (err) {
-    if (retriesLeft <= 0) {
-      console.error(`  body parse failed for ${path}, giving up: ${err}`);
-      return { ok: false, notFound: false };
-    }
-    await delay(60_000);
-    return fetchApi(path, retriesLeft - 1);
-  }
-}
 
 /** Purge `company-{number}` edge-cache tags via the Vercel SDK (16/req, 5/min). Throws on failure. */
 async function purgeTags(tags: string[]): Promise<void> {

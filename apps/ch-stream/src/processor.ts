@@ -83,8 +83,9 @@ export async function processEvent(
   const trails: (typeof companiesHouseProfileTrails.$inferInsert)[] = [];
 
   for (const col of Object.keys(newRow)) {
-    // Skip only the PK — companyName is diffed so renames advance + trail it.
-    if (col === 'companyNumber') continue;
+    // Skip PK + dated jsonb (PG normalises its key order → false diff every event).
+    if (col === 'companyNumber' || col === 'previousCompanyNamesDated')
+      continue;
     const oldVal = stringify(existing[col as keyof typeof existing]);
     const newVal = stringify(newRow[col]);
     if (oldVal !== newVal) {

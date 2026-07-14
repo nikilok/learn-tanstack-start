@@ -45,6 +45,16 @@ export function humanizeEnum(value: string | null): string {
   return titleCase((value ?? '').replace(/-/g, ' '));
 }
 
+/** Canonical key for company-name equality (case, punctuation, LTD/LIMITED). */
+export function normalizeName(name: string): string {
+  return name
+    .toUpperCase()
+    .replace(/[.,]/g, '')
+    .replace(/\bLIMITED\b/g, 'LTD')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Join the defined fields of a Companies House address into a single
  * comma-separated string. Returns an empty string when the address is

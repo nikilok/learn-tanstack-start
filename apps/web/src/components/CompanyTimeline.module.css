@@ -6,3 +6,28 @@
   outline-offset: 3px;
   border-radius: 2px;
 }
+
+/* Single continuous rail behind the dots. Reuses the home search guide-rail
+   spectrum (styles.css `.guide-rail`) so the timeline reads as part of the same
+   colourful system; JS measures top/height (first dot centre → last) and the
+   spectrum stretches to fill it, so the full sweep shows at any list length.
+   Sits at the dot column centre (RailCell is w-2 → 4px); dots paint over it. */
+.railTrack {
+  position: absolute;
+  left: 4px;
+  /* Full-height fallback for SSR / no-JS / pre-measure; the measured inline
+     top+height snap it to the exact first-dot → last-dot span once JS runs. */
+  top: 0;
+  height: 100%;
+  width: 1px;
+  transform: translateX(-50%);
+  /* Shared spectrum (styles.css --rail-spectrum, same as the search guide-rail)
+     so the two rails can never drift out of sync. */
+  background-image: var(--rail-spectrum);
+  background-size: 100% 100%;
+  opacity: 0.8;
+  pointer-events: none;
+}
+:global(.dark) .railTrack {
+  opacity: 0.6;
+}

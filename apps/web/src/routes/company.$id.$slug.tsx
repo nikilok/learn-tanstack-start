@@ -26,7 +26,6 @@ import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
-import { NameHistory } from '../components/NameHistory';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
 import {
@@ -35,6 +34,7 @@ import {
   formatDate,
   formatLocation,
   humanizeEnum,
+  normalizeName,
   stampPageFlip,
   titleCase,
 } from '../utils';
@@ -63,14 +63,25 @@ function registeredLocation(
   );
 }
 
-// Canonical key for company-name equality (case, punctuation, LTD/LIMITED).
-function normalizeName(name: string): string {
-  return name
-    .toUpperCase()
-    .replace(/[.,]/g, '')
-    .replace(/\bLIMITED\b/g, 'LTD')
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * Former Companies House names for a company, with the current name, blanks, and
+ * normalised duplicates (LTD/LIMITED, repeats) removed. Single source for both
+ * the visible "previously known as" summary and the alternateName structured
+ * data, so on-page content and JSON-LD can never diverge.
+ */
+function formerCompanyNames(
+  previousNames: string[] | undefined,
+  currentName: string,
+): string[] {
+  const seen = new Set([normalizeName(currentName)]);
+  const out: string[] = [];
+  for (const raw of previousNames ?? []) {
+    const key = normalizeName(raw);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
 }
 
 export const Route = createFileRoute('/company/$id/$slug')({
@@ -188,6 +199,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
           };
           profile?: {
             company_name?: string;
+            previousNames?: string[];
             company_number?: string;
             date_of_creation?: string;
             registered_office_address?: {
@@ -236,13 +248,31 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const pageDescription = `${description}.`;
     const canonicalUrl = buildCanonical(match.pathname);
 
+    // schema.org alternateName = every alias the page shows — the visible
+    // "previously known as" names (same formerCompanyNames source as the About
+    // summary) plus the HMRC "also registered as" name — so the structured data
+    // mirrors the on-page copy. Exact-dedup only, NOT normalised: when the HMRC
+    // and CH forms differ ("Acme Ltd" vs "Acme Limited") the page shows both, so
+    // both belong here; normalising would drop one the copy still renders.
+    const priorNames = loaderData
+      ? formerCompanyNames(
+          loaderData.profile?.previousNames,
+          loaderData.profile?.company_name ??
+            loaderData.sponsor.organisationName,
+        ).map(titleCase)
+      : [];
+    const alternateName = [
+      ...(registeredAs ? [registeredAs] : []),
+      ...priorNames,
+    ].filter((alt, i, all) => all.indexOf(alt) === i);
+
     const jsonLd = loaderData
       ? buildCompanyJsonLd({
           name,
           legalName:
             loaderData.profile?.company_name ??
             loaderData.sponsor.organisationName,
-          alternateName: registeredAs || undefined,
+          alternateName,
           route,
           typeRating: loaderData.sponsor.typeRating,
           location,
@@ -323,17 +353,12 @@ function CompanyDetail() {
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
     .join(', ');
-  // Former names from Companies House: drop the current name and blanks, and
-  // dedupe (normalised) so LTD/LIMITED and repeat entries collapse. Title-casing
-  // happens at the display layer (NameHistory / the summary sentence).
-  const seenNames = new Set([currentKey]);
-  const formerNames: string[] = [];
-  for (const raw of profile?.previousNames ?? []) {
-    const key = normalizeName(raw);
-    if (!key || seenNames.has(key)) continue;
-    seenNames.add(key);
-    formerNames.push(raw);
-  }
+  // Former names from Companies House, deduped against the current name;
+  // title-cased at the display layer (the summary sentence).
+  const formerNames = formerCompanyNames(
+    profile?.previousNames,
+    profile?.company_name ?? sponsor.organisationName,
+  );
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = ratingPhrase(sponsor.typeRating);
   const intro = `${displayName} is a licensed UK ${displayRoute} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
@@ -361,20 +386,21 @@ function CompanyDetail() {
       <section className="mx-auto max-w-2xl">
         <div className="page-flip-details">
           <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
-            <NameHistory currentName={displayName} previousNames={formerNames}>
-              <p className="mt-1 text-sm text-(--sea-ink)">
-                Licensed UK {displayRoute} visa sponsor
-                {displayLocation ? ` in ${displayLocation}` : ''}
+            <h1 className="text-xl font-semibold text-(--sea-ink)">
+              {displayName}
+            </h1>
+            <p className="mt-1 text-sm text-(--sea-ink)">
+              Licensed UK {displayRoute} visa sponsor
+              {displayLocation ? ` in ${displayLocation}` : ''}
+            </p>
+            {alsoRegisteredAs && (
+              <p className="mt-1 text-sm text-(--sea-ink-soft)">
+                Also registered with HMRC as {alsoRegisteredAs}
               </p>
-              {alsoRegisteredAs && (
-                <p className="mt-1 text-sm text-(--sea-ink-soft)">
-                  Also registered with HMRC as {alsoRegisteredAs}
-                </p>
-              )}
-              {industry && (
-                <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
-              )}
-            </NameHistory>
+            )}
+            {industry && (
+              <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
+            )}
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <DetailField
                 label="Location"

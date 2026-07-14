@@ -1,8 +1,11 @@
+import type { DatedPreviousName } from '@ss/db';
+
 import { STATUS_TONES, type Tone } from '../../components/StatusBadge';
 import {
   formatAddress,
   formatDate,
   humanizeEnum,
+  normalizeName,
   titleCase,
 } from '../../utils';
 import type {
@@ -503,17 +506,69 @@ function flipEventIds(events: TimelineEvent[]): Set<string> {
   return drop;
 }
 
+/** Build dated A→B rename events from CH's dated previous names. Each former name
+ *  renamed to the next-newer one (by effectiveFrom), or the current name for the
+ *  most recent former name. Ordering into the timeline is left to the caller's sort. */
+function buildDatedRenameEvents(
+  dated: DatedPreviousName[],
+  currentName: string,
+): TimelineEvent[] {
+  // Oldest→newest by when each name took effect; ceasedOn breaks ties so
+  // tied/null effectiveFrom entries still chain deterministically (total order).
+  const key = (e: DatedPreviousName) =>
+    `${e.effectiveFrom ?? ''}|${e.ceasedOn ?? ''}`;
+  const sorted = [...dated].sort((a, b) => {
+    const ka = key(a);
+    const kb = key(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+  const events: TimelineEvent[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const from = sorted[i].name;
+    const ceasedOn = sorted[i].ceasedOn;
+    // No ceased_on → can't date the event; the name still shows in the SEO
+    // sentence. Rare (very old records).
+    if (!ceasedOn) continue;
+    const to = i < sorted.length - 1 ? sorted[i + 1].name : currentName;
+    // Collapse cosmetic LTD/LIMITED-only renames.
+    if (normalizeName(from) === normalizeName(to)) continue;
+    events.push({
+      id: `rename:${i}:${ceasedOn}:${normalizeName(from)}`,
+      kind: 'rename',
+      dateISO: ceasedOn,
+      dateLabel: formatDate(ceasedOn),
+      title: 'Company renamed',
+      from: titleCase(from),
+      to: titleCase(to),
+      tone: 'neutral',
+    });
+  }
+  return events;
+}
+
 /** Curate ordered trail rows into display-ready events, newest first, anchors in place. */
 export function curateTimeline(input: {
   rows: TrailRow[];
   dateOfCreation: string | null;
   sicDescriptions: ReadonlyMap<string, string>;
+  previousCompanyNamesDated: DatedPreviousName[];
+  currentName: string;
   // True when rows were capped — older history exists but wasn't fetched.
   truncated?: boolean;
 }): TimelineEvent[] {
   const sortable: { event: TimelineEvent; sortTs: string }[] = [];
   const deletedDates = new Set<string>();
+  // Dated renames from the CH profile are the source of truth when present;
+  // suppress the trail-diff `rename` to avoid double-counting. Keyed on the
+  // EMITTED events (not the raw array): if the dated entries yield none (e.g. all
+  // null ceased_on), keep the trail-diff fallback so the rename doesn't vanish.
+  const datedRenames = buildDatedRenameEvents(
+    input.previousCompanyNamesDated,
+    input.currentName,
+  );
+  const hasDatedRenames = datedRenames.length > 0;
   for (const chain of buildChains(input.rows)) {
+    if (hasDatedRenames && chain.kind === 'rename') continue;
     const event = renderChain(chain, input.sicDescriptions);
     if (!event) continue;
     // Replayed _deleted tombstones straddling midnight escape the same-day
@@ -524,6 +579,11 @@ export function curateTimeline(input: {
     }
     sortable.push({ event, sortTs: chain.sortTs });
   }
+  for (const event of datedRenames) {
+    // Full-timestamp sortTs (end of day) so a dated rename doesn't string-sort
+    // below same-day trail events, which carry a real time.
+    sortable.push({ event, sortTs: `${event.dateISO} 23:59:59` });
+  }
 
   // Drop there-and-back address flips (CH corrections) so a week-long revert
   // isn't shown as churn — but never the last move, so one map always remains.
@@ -532,29 +592,44 @@ export function curateTimeline(input: {
     ? sortable.filter((s) => !flips.has(s.event.id))
     : sortable;
 
-  // When history was capped, "tracking began 14 April" would falsely assert
-  // completeness — anchor at the oldest retained event instead.
-  const oldestShown =
-    input.truncated && kept.length > 0
-      ? kept.reduce<string>(
-          (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
-          kept[0].event.dateISO,
-        )
-      : TRACKING_SINCE;
-  kept.push({
-    sortTs: '',
-    event: {
-      id: `tracking-start:${oldestShown}`,
-      kind: 'tracking-start',
-      dateISO: oldestShown,
-      dateLabel: formatDate(oldestShown),
-      title: input.truncated
-        ? 'Earlier changes not shown'
-        : 'Change tracking began',
-      detail: input.truncated ? undefined : 'Earlier changes aren’t shown',
-      tone: 'neutral',
-    },
-  });
+  // Anchor: the truncation "Earlier changes not shown" marker is a data-honesty
+  // caveat and must ALWAYS show when history was capped. The "Change tracking
+  // began" marker, by contrast, reads as a contradiction sitting above older
+  // dated (pre-tracking) renames, so show it only when there are none.
+  if (input.truncated) {
+    // Capped — anchor at the oldest retained event, not the tracking date.
+    const oldestShown =
+      kept.length > 0
+        ? kept.reduce<string>(
+            (min, s) => (s.event.dateISO < min ? s.event.dateISO : min),
+            kept[0].event.dateISO,
+          )
+        : TRACKING_SINCE;
+    kept.push({
+      sortTs: '',
+      event: {
+        id: `tracking-start:${oldestShown}`,
+        kind: 'tracking-start',
+        dateISO: oldestShown,
+        dateLabel: formatDate(oldestShown),
+        title: 'Earlier changes not shown',
+        tone: 'neutral',
+      },
+    });
+  } else if (!hasDatedRenames) {
+    kept.push({
+      sortTs: '',
+      event: {
+        id: `tracking-start:${TRACKING_SINCE}`,
+        kind: 'tracking-start',
+        dateISO: TRACKING_SINCE,
+        dateLabel: formatDate(TRACKING_SINCE),
+        title: 'Change tracking began',
+        detail: 'Automatic tracking started here',
+        tone: 'neutral',
+      },
+    });
+  }
 
   if (input.dateOfCreation) {
     kept.push({

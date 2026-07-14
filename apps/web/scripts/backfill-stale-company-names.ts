@@ -30,46 +30,31 @@
 
 import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 import { neon } from '@ss/db/client';
 import { companiesHouseProfiles } from '@ss/db/schema';
 import { Vercel } from '@vercel/sdk';
-import dotenv from 'dotenv';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import type { CHFullProfile } from '../src/lib/phase5/apply-promotion.ts';
 import { delay, fetchApi } from './lib/ch-client.ts';
+import {
+  ERROR_RATE_THRESHOLD,
+  loadScriptEnv,
+  parseStrictInt,
+} from './lib/script-utils.ts';
 
 // ── Env ──────────────────────────────────────────────────────────────────────
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT_ENV = resolve(SCRIPT_DIR, '../../../.env.local');
-const APP_ENV = resolve(SCRIPT_DIR, '../.env.local');
-dotenv.config({ path: ROOT_ENV });
-dotenv.config({ path: APP_ENV });
-
-if (!process.env.POSTGRES_URL)
-  throw new Error(`POSTGRES_URL not in ${ROOT_ENV} or ${APP_ENV}`);
-const CH_API_KEY = process.env.COMPANIES_HOUSE_SEED_API_KEY;
-if (!CH_API_KEY)
-  throw new Error(`Set COMPANIES_HOUSE_SEED_API_KEY in ${APP_ENV}`);
+loadScriptEnv(import.meta.url);
+if (!process.env.COMPANIES_HOUSE_SEED_API_KEY)
+  throw new Error('Set COMPANIES_HOUSE_SEED_API_KEY in apps/web/.env.local');
 
 // ── Args ───────────────────────────────────────────────────────────────────
 // Strict: unknown or malformed tokens throw, so a typo (`--dry-run=true`,
 // `--max-rows 10`, `--max-rows=1e3`) can't silently escalate a production run.
-
-/** Parse a whole non-negative integer; rejects '', '1e3', '10.5', '100abc'. */
-function parseStrictInt(raw: string, label: string): number {
-  if (!/^\d+$/.test(raw))
-    throw new Error(
-      `Invalid ${label}="${raw}" — must be a whole non-negative integer`,
-    );
-  return Number.parseInt(raw, 10);
-}
-
 let DRY_RUN = false;
 let ALL = false;
 let NO_PURGE = false;
@@ -89,15 +74,12 @@ for (const arg of process.argv.slice(2)) {
   else throw new Error(`Unknown argument "${arg}"`);
 }
 
-const sql = neon(process.env.POSTGRES_URL);
+const sql = neon(process.env.POSTGRES_URL as string);
 const db = drizzle({ client: sql });
 
 // Durable append-log of company-{n} tags whose row was corrected but whose cache
 // purge may not have completed — the recovery source for --purge-from.
 const PURGE_LOG = resolve(tmpdir(), 'backfill-stale-names-purge-pending.txt');
-// Abort if too many rows error (dead key / CH outage) so the run can't exit 0
-// looking successful (mirrors phase5-sweep's guard).
-const ERROR_RATE_THRESHOLD = 0.1;
 
 /** Purge `company-{number}` edge-cache tags via the Vercel SDK (16/req, 5/min). Throws on failure. */
 async function purgeTags(tags: string[]): Promise<void> {

@@ -28,7 +28,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { neon } from '@ss/db/client';
-import { companiesHouseProfiles } from '@ss/db/schema';
+import { companiesHouseProfiles, toDatedPreviousNames } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
 
@@ -201,6 +201,8 @@ function profileToDbRow(profile: CHFullProfile) {
   const accounts = (profile.accounts ?? {}) as CHAccounts;
   const previousNames = (profile.previous_company_names ?? []) as {
     name: string;
+    effective_from?: string;
+    ceased_on?: string;
   }[];
   const confirmation = (profile.confirmation_statement ?? {}) as {
     last_made_up_to?: string;
@@ -229,6 +231,7 @@ function profileToDbRow(profile: CHFullProfile) {
       (profile.has_insolvency_history as boolean | undefined) ?? null,
     hasCharges: (profile.has_charges as boolean | undefined) ?? null,
     previousCompanyNames: previousNames.map((p) => p.name).filter((n) => !!n),
+    previousCompanyNamesDated: toDatedPreviousNames(previousNames),
     confirmationStatementLastMadeUpTo: confirmation.last_made_up_to ?? null,
     updatedAt: new Date(),
   };

@@ -1,12 +1,16 @@
 /**
- * Phase 1 backfill: populate companies_house_profiles.previous_company_names_dated
- * from Companies House for rows that carry previous names but no dated data yet
- * (the effective_from/ceased_on dates were discarded at ingest before this
- * feature). DB-only — nothing reads the column until Phase 2, so no cache purge.
+ * Phase 1 backfill: reconcile the two previous-name columns on
+ * companies_house_profiles — previous_company_names (text[], search) and
+ * previous_company_names_dated (jsonb, timeline) — from the authoritative
+ * Companies House profile, for rows that carry previous names but no dated data
+ * yet. Writes BOTH columns from the same CH fetch so they can't diverge; DB-only
+ * (nothing reads the dated column until Phase 2, so no cache purge).
  *
- * Self-resuming: it only targets rows still at the '[]' default, so a paused or
- * interrupted run just needs re-running — filled rows are skipped without a
- * fetch. Idempotent.
+ * Self-resuming: targets rows still at the '[]' dated default, and an optimistic
+ * guard (WHERE dated = '[]') means a concurrent ch-stream write is never
+ * clobbered. Empty CH names clear our stale text[], dropping the row from the
+ * predicate (so drift rows converge instead of being re-fetched forever).
+ * Idempotent; safe to pause / re-run.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/backfill-previous-names-dated.ts --dry-run --max-rows=20
@@ -17,37 +21,23 @@
  *   POSTGRES_URL, COMPANIES_HOUSE_SEED_API_KEY
  */
 
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { companiesHouseProfiles, toDatedPreviousNames } from '@ss/db';
 import { neon } from '@ss/db/client';
-import dotenv from 'dotenv';
-import { eq } from 'drizzle-orm';
+import { and, eq, sql as dsql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import { delay, fetchApi } from './lib/ch-client.ts';
+import {
+  ERROR_RATE_THRESHOLD,
+  loadScriptEnv,
+  parseStrictInt,
+} from './lib/script-utils.ts';
 
-// ── Env ──────────────────────────────────────────────────────────────────────
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT_ENV = resolve(SCRIPT_DIR, '../../../.env.local');
-const APP_ENV = resolve(SCRIPT_DIR, '../.env.local');
-dotenv.config({ path: ROOT_ENV });
-dotenv.config({ path: APP_ENV });
-if (!process.env.POSTGRES_URL)
-  throw new Error(`POSTGRES_URL not in ${ROOT_ENV} or ${APP_ENV}`);
+loadScriptEnv(import.meta.url);
 if (!process.env.COMPANIES_HOUSE_SEED_API_KEY)
-  throw new Error(`Set COMPANIES_HOUSE_SEED_API_KEY in ${APP_ENV}`);
+  throw new Error('Set COMPANIES_HOUSE_SEED_API_KEY in apps/web/.env.local');
 
 // ── Args (strict; unknown/malformed tokens throw) ──
-/** Parse a whole non-negative integer; rejects '', '1e3', '10.5', '100abc'. */
-function parseStrictInt(raw: string, label: string): number {
-  if (!/^\d+$/.test(raw))
-    throw new Error(
-      `Invalid ${label}="${raw}" — must be a whole non-negative integer`,
-    );
-  return Number.parseInt(raw, 10);
-}
 let DRY_RUN = false;
 let MAX_ROWS = Number.POSITIVE_INFINITY;
 let DELAY_MS = 600; // CH REST limit is 600 req / 5 min (2/sec); 600ms stays under.
@@ -60,14 +50,15 @@ for (const arg of process.argv.slice(2)) {
   else throw new Error(`Unknown argument "${arg}"`);
 }
 
-const sql = neon(process.env.POSTGRES_URL);
+const sql = neon(process.env.POSTGRES_URL as string);
 const db = drizzle({ client: sql });
-const ERROR_RATE_THRESHOLD = 0.1;
+// Only start evaluating the abort rate once enough rows have run to be meaningful.
+const MIN_ROWS_BEFORE_ABORT = 20;
 
 type CHPrev = { name?: string; effective_from?: string; ceased_on?: string }[];
 
 async function main() {
-  // Only rows with previous names still at the '[]' default → self-resuming.
+  // Rows with previous names still at the '[]' default → self-resuming target.
   const targets = (await sql`
     SELECT company_number
     FROM companies_house_profiles
@@ -85,53 +76,93 @@ async function main() {
   );
 
   let filled = 0;
-  let noPrev = 0;
+  let reconciledEmpty = 0;
+  let superseded = 0;
   let gone = 0;
   let errored = 0;
 
   for (const [i, t] of slice.entries()) {
     const num = t.company_number;
     const label = `[${i + 1}/${slice.length}] ${num}`;
-    const outcome = await fetchApi(`/company/${num}`);
-    if (!outcome.ok) {
-      if (outcome.notFound) {
-        gone++;
-        console.log(`  ${label} GONE (404/410)`);
-      } else {
-        errored++;
-        console.log(`  ${label} ERROR`);
+
+    // Fail fast on a dead key / CH outage instead of burning the whole ~32k run.
+    if (i >= MIN_ROWS_BEFORE_ABORT && errored / i > ERROR_RATE_THRESHOLD) {
+      console.error(
+        `\nAbort: error rate ${((errored / i) * 100).toFixed(1)}% after ${i} rows exceeds ${ERROR_RATE_THRESHOLD * 100}% — stopping early.`,
+      );
+      process.exitCode = 1;
+      break;
+    }
+
+    try {
+      const outcome = await fetchApi(`/company/${num}`);
+      if (!outcome.ok) {
+        if (outcome.notFound) {
+          gone++;
+          console.log(`  ${label} GONE (404/410)`);
+        } else {
+          errored++;
+          console.log(`  ${label} ERROR`);
+        }
+        await delay(DELAY_MS);
+        continue;
       }
-      await delay(DELAY_MS);
-      continue;
+
+      const profile = outcome.data as { previous_company_names?: CHPrev };
+      const chNames = (profile.previous_company_names ?? [])
+        .map((p) => p?.name)
+        .filter((n): n is string => !!n);
+      const dated = toDatedPreviousNames(profile.previous_company_names);
+
+      if (!DRY_RUN) {
+        // Write both columns from the same CH payload so they can't diverge.
+        // Optimistic guard: only if dated is still '[]' — if ch-stream filled it
+        // mid-run, skip rather than clobber its fresher value. No updatedAt bump:
+        // this reconciliation isn't a new CH event and shouldn't read as one.
+        const applied = await db
+          .update(companiesHouseProfiles)
+          .set({
+            previousCompanyNames: chNames,
+            previousCompanyNamesDated: dated,
+          })
+          .where(
+            and(
+              eq(companiesHouseProfiles.companyNumber, num),
+              dsql`${companiesHouseProfiles.previousCompanyNamesDated} = '[]'::jsonb`,
+            ),
+          )
+          .returning({ n: companiesHouseProfiles.companyNumber });
+        if (applied.length === 0) {
+          superseded++;
+          console.log(`  ${label} superseded by ch-stream — skipped`);
+          await delay(DELAY_MS);
+          continue;
+        }
+      }
+
+      if (dated.length === 0) {
+        reconciledEmpty++;
+        console.log(`  ${label} CH has no previous names — text[] cleared`);
+      } else {
+        filled++;
+        console.log(`  ${label} → ${dated.length} dated name(s)`);
+      }
+    } catch (err) {
+      // A single malformed payload / transient DB error must not crash the run.
+      errored++;
+      console.log(
+        `  ${label} ERROR (${err instanceof Error ? err.message : String(err)})`,
+      );
     }
-    const profile = outcome.data as { previous_company_names?: CHPrev };
-    const dated = toDatedPreviousNames(profile.previous_company_names);
-    if (dated.length === 0) {
-      // Our text[] had names but CH's authoritative list is empty (drift) — leave '[]'.
-      noPrev++;
-      console.log(`  ${label} no CH previous names — left '[]'`);
-      await delay(DELAY_MS);
-      continue;
-    }
-    console.log(`  ${label} → ${dated.length} dated name(s)`);
-    if (!DRY_RUN) {
-      // Dated column only; do NOT bump updatedAt — this invisible fill isn't a
-      // real profile change and shouldn't read as "updated just now" en masse.
-      await db
-        .update(companiesHouseProfiles)
-        .set({ previousCompanyNamesDated: dated })
-        .where(eq(companiesHouseProfiles.companyNumber, num));
-    }
-    filled++;
     await delay(DELAY_MS);
   }
 
   console.log(
-    `\nSummary: filled=${filled} no-prev=${noPrev} gone=${gone} errored=${errored}`,
+    `\nSummary: filled=${filled} reconciled-empty=${reconciledEmpty} superseded=${superseded} gone=${gone} errored=${errored}`,
   );
   if (slice.length > 0 && errored / slice.length > ERROR_RATE_THRESHOLD) {
     console.error(
-      `\nAbort: error rate ${((errored / slice.length) * 100).toFixed(1)}% exceeds ${ERROR_RATE_THRESHOLD * 100}% — treat as FAILED and re-run.`,
+      `\nError rate ${((errored / slice.length) * 100).toFixed(1)}% exceeds ${ERROR_RATE_THRESHOLD * 100}% — treat as FAILED and re-run.`,
     );
     process.exitCode = 1;
   }

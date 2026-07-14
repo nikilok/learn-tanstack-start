@@ -48,12 +48,15 @@ export async function fetchApi(
   path: string,
   retriesLeft = FETCH_MAX_RETRIES,
 ): Promise<FetchOutcome> {
+  // Resolve auth outside the try so a missing key fails fast rather than being
+  // caught as a "network error" and retried 3×60s.
+  const auth = authHeader();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
-      headers: { Authorization: authHeader() },
+      headers: { Authorization: auth },
       signal: controller.signal,
     });
   } catch (err) {

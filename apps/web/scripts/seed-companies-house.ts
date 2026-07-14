@@ -15,6 +15,7 @@ import {
   companiesHouseProfiles,
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
+  toDatedPreviousNames,
 } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { asc, eq, isNull, sql } from 'drizzle-orm';
@@ -204,6 +205,9 @@ for (const row of uncached) {
       previousCompanyNames:
         profile.previous_company_names?.map((p) => p.name).filter((n) => !!n) ??
         [],
+      previousCompanyNamesDated: toDatedPreviousNames(
+        profile.previous_company_names,
+      ),
       confirmationStatementLastMadeUpTo:
         profile.confirmation_statement?.last_made_up_to || null,
       updatedAt: new Date(),
@@ -227,6 +231,9 @@ for (const row of uncached) {
           profile.previous_company_names
             ?.map((p) => p.name)
             .filter((n) => !!n) ?? [],
+        previousCompanyNamesDated: toDatedPreviousNames(
+          profile.previous_company_names,
+        ),
         confirmationStatementLastMadeUpTo:
           profile.confirmation_statement?.last_made_up_to || null,
         updatedAt: new Date(),

@@ -3,6 +3,8 @@ import {
   chStreamState,
   companiesHouseProfiles,
   companiesHouseProfileTrails,
+  type DatedPreviousName,
+  sameDatedPreviousNames,
 } from '@ss/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -99,7 +101,17 @@ export async function processEvent(
     }
   }
 
-  if (trails.length === 0) return false;
+  // The dated jsonb is skipped in the diff (PG key-order false-diff), so detect a
+  // date-only change explicitly — else a pure effective_from/ceased_on fix (no
+  // other field changed → no trail) would never persist to the column.
+  const newDated = newRow.previousCompanyNamesDated as
+    | DatedPreviousName[]
+    | undefined;
+  const datedChanged =
+    newDated !== undefined &&
+    !sameDatedPreviousNames(existing.previousCompanyNamesDated ?? [], newDated);
+
+  if (trails.length === 0 && !datedChanged) return false;
 
   if (dryRun) {
     console.log(

@@ -82,12 +82,26 @@ export function toDatedPreviousNames(
     | undefined,
 ): DatedPreviousName[] {
   return (prev ?? [])
-    .filter((p) => !!p.name)
+    .filter((p) => !!p?.name) // guards null array elements, not just blank names
     .map((p) => ({
       name: p.name as string,
       effectiveFrom: p.effective_from ?? null,
       ceasedOn: p.ceased_on ?? null,
     }));
+}
+
+/** True when two dated previous-name arrays are equal (order + fields), key-order-insensitive. */
+export function sameDatedPreviousNames(
+  a: DatedPreviousName[],
+  b: DatedPreviousName[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (x, i) =>
+      x.name === b[i].name &&
+      x.effectiveFrom === b[i].effectiveFrom &&
+      x.ceasedOn === b[i].ceasedOn,
+  );
 }
 
 export const companiesHouseProfiles = pgTable(

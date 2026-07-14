@@ -967,4 +967,57 @@ describe('dated renames', () => {
     const withoutDated = curate([row({ columnName: 'postalCode' })]);
     expect(withoutDated.some((e) => e.kind === 'tracking-start')).toBe(true);
   });
+
+  test('falls back to trail-diff when dated entries yield no events (all null ceasedOn)', () => {
+    const events = changes(
+      curate(
+        [
+          row({
+            columnName: 'previousCompanyNames',
+            oldValue: '[]',
+            newValue: '["OLD NAME LTD"]',
+          }),
+        ],
+        {
+          previousCompanyNamesDated: [
+            {
+              name: 'OLD NAME LTD',
+              effectiveFrom: '2000-01-01',
+              ceasedOn: null,
+            },
+          ],
+          currentName: 'NEW NAME LTD',
+        },
+      ),
+    );
+    // Dated array non-empty but yields 0 events → trail-diff "Formerly" survives.
+    expect(events).toHaveLength(1);
+    expect(events[0].detail).toContain('Formerly');
+  });
+
+  test('chains by ceasedOn when effectiveFrom is null (total-order sort)', () => {
+    const events = changes(
+      curate([], {
+        previousCompanyNamesDated: [
+          { name: 'FIRST LTD', effectiveFrom: null, ceasedOn: '1990-01-01' },
+          { name: 'SECOND LTD', effectiveFrom: null, ceasedOn: '2000-01-01' },
+        ],
+        currentName: 'CURRENT LTD',
+      }),
+    );
+    expect(events.map((e) => e.dateISO)).toEqual(['2000-01-01', '1990-01-01']);
+    expect(events[0].from).toBe(titleCase('SECOND LTD'));
+    expect(events[0].to).toBe(titleCase('CURRENT LTD'));
+    expect(events[1].to).toBe(titleCase('SECOND LTD'));
+  });
+
+  test('keeps the truncation marker even with dated renames', () => {
+    const events = curate([], {
+      previousCompanyNamesDated: chain,
+      currentName: QUANTUM,
+      truncated: true,
+    });
+    const anchor = events.find((e) => e.kind === 'tracking-start');
+    expect(anchor?.title).toBe('Earlier changes not shown');
+  });
 });

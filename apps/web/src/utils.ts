@@ -41,7 +41,11 @@ export function slugify(str: string): string {
 }
 
 /** Humanize a hyphenated CH enum value ("voluntary-arrangement" → "Voluntary Arrangement"). */
-// Canonical key for company-name equality (case, punctuation, LTD/LIMITED).
+export function humanizeEnum(value: string | null): string {
+  return titleCase((value ?? '').replace(/-/g, ' '));
+}
+
+/** Canonical key for company-name equality (case, punctuation, LTD/LIMITED). */
 export function normalizeName(name: string): string {
   return name
     .toUpperCase()
@@ -49,10 +53,6 @@ export function normalizeName(name: string): string {
     .replace(/\bLIMITED\b/g, 'LTD')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-export function humanizeEnum(value: string | null): string {
-  return titleCase((value ?? '').replace(/-/g, ' '));
 }
 
 /**

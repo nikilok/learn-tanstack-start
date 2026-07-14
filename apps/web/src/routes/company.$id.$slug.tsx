@@ -63,6 +63,27 @@ function registeredLocation(
   );
 }
 
+/**
+ * Former Companies House names for a company, with the current name, blanks, and
+ * normalised duplicates (LTD/LIMITED, repeats) removed. Single source for both
+ * the visible "previously known as" summary and the alternateName structured
+ * data, so on-page content and JSON-LD can never diverge.
+ */
+function formerCompanyNames(
+  previousNames: string[] | undefined,
+  currentName: string,
+): string[] {
+  const seen = new Set([normalizeName(currentName)]);
+  const out: string[] = [];
+  for (const raw of previousNames ?? []) {
+    const key = normalizeName(raw);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
+}
+
 export const Route = createFileRoute('/company/$id/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
     search: ((search.search as string) || '').trim(),
@@ -178,6 +199,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
           };
           profile?: {
             company_name?: string;
+            previousNames?: string[];
             company_number?: string;
             date_of_creation?: string;
             registered_office_address?: {
@@ -226,13 +248,33 @@ export const Route = createFileRoute('/company/$id/$slug')({
     const pageDescription = `${description}.`;
     const canonicalUrl = buildCanonical(match.pathname);
 
+    // Former CH names + the HMRC "also registered as" name → schema.org
+    // alternateName, deduped, so bots resolve a search for any prior name to
+    // this page. Same source as the visible "previously known as" summary —
+    // structured data must mirror on-page content.
+    const priorNames = loaderData
+      ? formerCompanyNames(
+          loaderData.profile?.previousNames,
+          loaderData.profile?.company_name ??
+            loaderData.sponsor.organisationName,
+        ).map(titleCase)
+      : [];
+    const altSeen = new Set<string>();
+    const alternateName: string[] = [];
+    for (const alt of [registeredAs, ...priorNames]) {
+      const key = alt ? normalizeName(alt) : '';
+      if (!key || altSeen.has(key)) continue;
+      altSeen.add(key);
+      alternateName.push(alt);
+    }
+
     const jsonLd = loaderData
       ? buildCompanyJsonLd({
           name,
           legalName:
             loaderData.profile?.company_name ??
             loaderData.sponsor.organisationName,
-          alternateName: registeredAs || undefined,
+          alternateName,
           route,
           typeRating: loaderData.sponsor.typeRating,
           location,
@@ -313,17 +355,12 @@ function CompanyDetail() {
   const industry = profile?.sicDescriptions
     ?.map((s) => s.description)
     .join(', ');
-  // Former names from Companies House: drop the current name and blanks, and
-  // dedupe (normalised) so LTD/LIMITED and repeat entries collapse. Title-casing
-  // happens at the display layer (the summary sentence).
-  const seenNames = new Set([currentKey]);
-  const formerNames: string[] = [];
-  for (const raw of profile?.previousNames ?? []) {
-    const key = normalizeName(raw);
-    if (!key || seenNames.has(key)) continue;
-    seenNames.add(key);
-    formerNames.push(raw);
-  }
+  // Former names from Companies House, deduped against the current name;
+  // title-cased at the display layer (the summary sentence).
+  const formerNames = formerCompanyNames(
+    profile?.previousNames,
+    profile?.company_name ?? sponsor.organisationName,
+  );
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = ratingPhrase(sponsor.typeRating);
   const intro = `${displayName} is a licensed UK ${displayRoute} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;

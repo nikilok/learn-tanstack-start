@@ -12,7 +12,7 @@ type Address = {
 export type CompanyJsonLdInput = {
   name: string;
   legalName: string;
-  alternateName?: string;
+  alternateName?: string | string[];
   route: string;
   typeRating: string;
   location: string;
@@ -62,7 +62,16 @@ function organization(input: CompanyJsonLdInput) {
     legalName: input.legalName,
     url: input.canonicalUrl,
   };
-  if (input.alternateName) org.alternateName = input.alternateName;
+  // schema.org allows alternateName to be a single value or a list. Emit a bare
+  // string for one alias (cleaner) and an array for several; omit when empty
+  // (an empty array is truthy, so it must be length-checked, not `if`-checked).
+  const altNames = Array.isArray(input.alternateName)
+    ? input.alternateName
+    : input.alternateName
+      ? [input.alternateName]
+      : [];
+  if (altNames.length === 1) org.alternateName = altNames[0];
+  else if (altNames.length > 1) org.alternateName = altNames;
   if (input.dateOfCreation) org.foundingDate = input.dateOfCreation;
   if (input.companyNumber) {
     org.identifier = {

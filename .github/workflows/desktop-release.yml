@@ -125,7 +125,12 @@ jobs:
           exit 1
       - uses: actions/checkout@v4
         with:
-          fetch-tags: true # default checkout can't see v* tags (existence + highest-tag)
+          # fetch-tags:true is silently ignored when the ref resolves to a SHA (no --tags
+          # in the fetch), so manual-mode tag validation + the highest-tag feed guard saw
+          # ZERO tags. fetch-depth:0 fetches them reliably; filter:blob:none keeps it fast
+          # (resolve only reads refs — rev-parse / git tag -l — never file contents).
+          fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - name: Plan release
         id: plan

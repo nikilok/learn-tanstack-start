@@ -160,8 +160,9 @@ async function main() {
   const payload = JSON.stringify({
     version: VERSION,
     assets,
-    // The version upsert overwrites notes on EVERY registration (absent
-    // field -> null) — same value from all matrix jobs, so they converge.
+    // /api/releases COALESCE-preserves notes: null (an empty per-OS re-release) keeps
+    // the release's existing notes; a real value overwrites. Bump matrix jobs all send
+    // the same notes, so they still converge.
     notes: NOTES || null,
   });
   // Retry transient failures (429/5xx/network/hang) — dying here after every

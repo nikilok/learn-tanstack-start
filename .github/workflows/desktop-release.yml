@@ -458,19 +458,21 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # Linux: start with the RELIABLE targets (AppImage + deb, x64), growing to
-      # rpm/arm64 once each is proven green via a manual dispatch — the full leg has
-      # never built. Unsigned. CLI target/arch flags OVERRIDE the tag's
-      # electron-builder.yml (AppImage/deb/rpm × x64/arm64), so no config edit is needed.
-      # When you add a target that needs runner tooling (fakeroot for deb, rpm for rpm),
-      # apt-get it in this run block first — ubuntu-latest ships neither.
+      # Linux: full matrix — AppImage/deb/rpm × x64/arm64 (six artifacts, matching the
+      # mainstream Linux download set). Unsigned. CLI flags mirror the tag's
+      # electron-builder.yml. rpm needs rpmbuild (installed below — ubuntu-latest ships
+      # none); arm64 packages are cross-built on the x64 runner (electron-builder pulls
+      # the arm64 electron binary — no qemu, it only packages, doesn't compile).
+      - name: Install Linux packaging tooling
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
       - name: Build installers (linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop
         run: |
           unset CSC_LINK CSC_KEY_PASSWORD
           export CSC_IDENTITY_AUTO_DISCOVERY=false
-          bunx electron-builder --linux AppImage deb --x64 --publish never
+          bunx electron-builder --linux AppImage deb rpm --x64 --arm64 --publish never
 
       # Windows System installers FIRST (perMachine) so the per-user build below
       # writes the final latest.yml — electron-updater targets per-user installs.

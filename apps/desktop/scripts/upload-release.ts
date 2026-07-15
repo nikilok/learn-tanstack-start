@@ -4,13 +4,17 @@
  * the desktop release workflow, after `electron-builder --publish never`.
  *
  * Page installers (dmg/exe/deb/rpm/AppImage) go to a permanent per-asset GUID
- * path: downloads/<platform>/<guid>/<version>/<file>. The electron-updater feed
+ * path: downloads/<platform>/<guid>/<version>/<file>. The guid is timestamp-prefixed
+ * (build stamp + random) so re-releasing an existing version lands in a fresh,
+ * sortable folder and never overwrites prior uploads. The electron-updater feed
  * (latest*.yml, .blockmap, the universal zip, the user nsis, the AppImage) is
- * mirrored to the overwritten downloads/latest/ path.
+ * mirrored to the overwritten downloads/latest/ path — UNLESS RELEASE_SKIP_FEED=true
+ * (a re-release of a non-latest version, so the live feed must not be downgraded).
  *
  * Env: RELEASE_PLATFORM, RELEASE_VERSION, BLOB_READ_WRITE_TOKEN,
  *      DESKTOP_RELEASE_SECRET, SITE_URL (optional; default the prod domain),
- *      RELEASE_NOTES (optional markdown, rendered on /download).
+ *      RELEASE_NOTES (optional markdown, rendered on /download),
+ *      RELEASE_SKIP_FEED (optional; 'true' skips the downloads/latest/ mirror).
  */
 import { randomBytes } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
@@ -35,7 +39,17 @@ const TOKEN = requireEnv('BLOB_READ_WRITE_TOKEN');
 const SECRET = requireEnv('DESKTOP_RELEASE_SECRET');
 const SITE = process.env.SITE_URL ?? 'https://sponsorsearch.co.uk';
 const NOTES = (process.env.RELEASE_NOTES ?? '').trim();
+const SKIP_FEED = process.env.RELEASE_SKIP_FEED === 'true';
 const DIST = fileURLToPath(new URL('../dist', import.meta.url));
+
+// Compact UTC build stamp (YYYYMMDDHHMMSS) folded into each asset's guid: re-releases
+// of the same version get a fresh, sortable folder and never overwrite prior uploads.
+// The Nitro download route requires exactly 4 path segments, so the stamp can't be its
+// own segment — it rides in the guid (23 chars total, within the varchar(32) column).
+const BUILD_STAMP = new Date()
+  .toISOString()
+  .replace(/[-:T.]/g, '')
+  .slice(0, 14);
 
 // Mirrors DESKTOP_FORMATS in apps/web/src/api/desktopPlatforms.ts (a cross-package
 // import from this standalone CI script isn't worth the coupling) — keep in sync.
@@ -109,7 +123,7 @@ async function main() {
       console.error(`[upload-release] cannot parse arch from: ${file}`);
       process.exit(1);
     }
-    const guid = randomBytes(8).toString('hex');
+    const guid = `${BUILD_STAMP}-${randomBytes(4).toString('hex')}`;
     const body = await readFile(join(DIST, file));
     const path = `downloads/${PLATFORM}/${guid}/${VERSION}/${file}`;
     await put(path, body, {
@@ -202,6 +216,14 @@ async function main() {
     `[upload-release] recorded ${assets.length} ${PLATFORM} asset(s) for ${VERSION} (release ${body.releaseId})`,
   );
 
+  // Skip the overwritten update feed when re-releasing a non-latest version — the DB
+  // still records the download, but live auto-updaters must not be pointed backwards.
+  if (SKIP_FEED) {
+    console.log(
+      '[upload-release] RELEASE_SKIP_FEED=true — leaving downloads/latest/ untouched (no updater downgrade)',
+    );
+    return;
+  }
   for (const file of files) {
     if (!isFeedArtifact(file)) continue;
     const feedBody = await readFile(join(DIST, file));

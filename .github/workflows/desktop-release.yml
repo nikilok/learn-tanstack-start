@@ -11,8 +11,35 @@ on:
       - '.github/workflows/desktop-release.yml'
   workflow_dispatch:
     inputs:
+      # Manual re-release: rebuild an ALREADY-RELEASED version for a chosen set of OSes
+      # WITHOUT a semver bump — the version job is skipped and the build job checks out
+      # the existing v<version> tag. Leave unchecked for a normal semver-bump release.
+      manual:
+        description: 'Rebuild an existing version (no version bump)'
+        type: boolean
+        required: false
+        default: false
+      manual_version:
+        description: 'Existing version to rebuild, e.g. 0.1.5 (required when "Rebuild an existing version" is checked)'
+        type: string
+        required: false
+      build_mac:
+        description: 'Build macOS'
+        type: boolean
+        required: false
+        default: true
+      build_win:
+        description: 'Build Windows'
+        type: boolean
+        required: false
+        default: true
+      build_linux:
+        description: 'Build Linux'
+        type: boolean
+        required: false
+        default: false
       release_type:
-        description: 'Semver bump for this release'
+        description: 'Semver bump (bump mode only — ignored when rebuilding an existing version)'
         type: choice
         required: true
         default: patch
@@ -22,7 +49,8 @@ on:
         # archive CHANGELOG.md's Unreleased section; non-empty ⇒ override verbatim.
         # Full flow: apps/desktop/README.md. Multiline override:
         # `gh workflow run desktop-release.yml -f release_type=patch -f release_notes="$(cat notes.md)"`.
-        description: 'Release notes override (markdown, optional) — empty ships CHANGELOG.md "Unreleased"'
+        # Bump mode only — ignored when rebuilding an existing version.
+        description: 'Release notes override (markdown, optional) — empty ships CHANGELOG.md "Unreleased" (bump mode only)'
         type: string
         required: false
 
@@ -57,11 +85,100 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+  resolve:
+    # Validate the dispatch, decide bump-vs-manual, and compute the build fan-out.
+    # Fast read-only gate so a bad input fails BEFORE any bump/tag/PR happens.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }} # bump | manual
+      matrix: ${{ steps.plan.outputs.matrix }} # JSON array for the build matrix include:
+      effective_version: ${{ steps.plan.outputs.effective_version }} # manual mode only
+      skip_feed: ${{ steps.plan.outputs.skip_feed }} # 'true' | 'false'
+    steps:
+      # Bump releases squash-merge the dispatched ref into main via the version job's
+      # PR, so they MUST come from main. Manual re-releases do no bump/PR and build from
+      # an immutable tag, so they're allowed from any ref (Linux build-fix iteration).
+      - name: Refuse non-main bump dispatches
+        if: ${{ !inputs.manual && github.ref != 'refs/heads/main' }}
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          echo "::error::Semver-bump releases dispatch from main only (the bump PR squash-merges '$REF' into main). For a re-release, tick 'Rebuild an existing version'."
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true # default checkout can't see v* tags (existence + highest-tag)
+          persist-credentials: false
+      - name: Plan release
+        id: plan
+        env:
+          MANUAL: ${{ inputs.manual }}
+          MANUAL_VERSION: ${{ inputs.manual_version }}
+          BUILD_MAC: ${{ inputs.build_mac }}
+          BUILD_WIN: ${{ inputs.build_win }}
+          BUILD_LINUX: ${{ inputs.build_linux }}
+        run: |
+          set -euo pipefail
+          # OS fan-out — applies to BOTH modes; booleans render as true/false → --argjson.
+          matrix=$(jq -cn \
+            --argjson mac "$BUILD_MAC" \
+            --argjson win "$BUILD_WIN" \
+            --argjson linux "$BUILD_LINUX" \
+            '[ if $mac   then {os:"macos-latest",platform:"mac"}    else empty end,
+               if $win   then {os:"windows-latest",platform:"win"}  else empty end,
+               if $linux then {os:"ubuntu-latest",platform:"linux"} else empty end ]')
+          if [ "$(printf '%s' "$matrix" | jq 'length')" -eq 0 ]; then
+            echo "::error::Select at least one OS (build_mac / build_win / build_linux)."
+            exit 1
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+          if [ "$MANUAL" = "true" ]; then
+            ver="${MANUAL_VERSION#v}" # tolerate a typed leading 'v'
+            if [ -z "$ver" ]; then
+              echo "::error::Manual mode needs manual_version (e.g. 0.1.5)."
+              exit 1
+            fi
+            if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.].+)?$'; then
+              echo "::error::manual_version '$ver' is not a valid version."
+              exit 1
+            fi
+            if ! git rev-parse -q --verify "refs/tags/v${ver}" >/dev/null; then
+              echo "::error::Tag v${ver} does not exist — nothing to re-release."
+              exit 1
+            fi
+            # Only touch the overwritten updater feed (downloads/latest/) when this IS the
+            # newest release — rebuilding an OLD version must never downgrade live updaters.
+            highest="$(git tag -l 'v*.*.*' | sort -V | tail -1)"
+            if [ "v${ver}" = "$highest" ]; then
+              skip_feed=false
+            else
+              skip_feed=true
+              echo "::warning::v${ver} is not the latest tag ($highest) — the auto-update feed (downloads/latest/) will NOT be touched (no downgrade)."
+            fi
+            {
+              echo "mode=manual"
+              echo "effective_version=${ver}"
+              echo "skip_feed=${skip_feed}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "mode=bump"
+              echo "effective_version="
+              echo "skip_feed=false"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   version:
     # Bump apps/desktop version once on a release branch, tag that commit (the build
     # jobs check the tag out immediately), and PR the bump back to protected main.
     # Main dispatches only — the bump PR would merge any other ref into main wholesale.
-    if: github.event_name == 'workflow_dispatch'
+    # Bump mode only: a manual re-release skips this entirely and rebuilds an existing tag.
+    needs: resolve
+    if: needs.resolve.outputs.mode == 'bump'
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the release branch + tag
@@ -202,36 +319,75 @@ jobs:
           fi
 
   build:
-    # Build every variant per OS, upload to Vercel Blob, record in the DB.
-    needs: version
-    if: github.event_name == 'workflow_dispatch'
+    # Build the selected variants per OS, upload to Vercel Blob, record in the DB. Runs
+    # in BOTH modes: bump (needs the version job's fresh tag) and manual (rebuilds an
+    # existing tag with the version job skipped).
+    needs: [resolve, version]
+    # !cancelled() (not always()) so an operator Cancel during resolve/version doesn't
+    # still launch a long multi-OS build. version is skipped in manual mode, so accept
+    # skipped there while still requiring resolve to have succeeded.
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.version.result == 'success' || needs.version.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-latest
-            platform: mac
-          - os: windows-latest
-            platform: win
-          # Linux release leg parked until the mac/win pipeline is proven —
-          # re-enable by uncommenting (smoke still packages an AppImage on PRs).
-          # - os: ubuntu-latest
-          #   platform: linux
+        include: ${{ fromJson(needs.resolve.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
+      # version/notes source differs by mode: bump reads the version job's outputs;
+      # manual reads resolve's effective_version (the version job is skipped, so its
+      # outputs are empty — reading them would checkout `ref: v` and fail the upload).
+      - name: Resolve effective build params
+        id: params
+        shell: bash
+        env:
+          MODE: ${{ needs.resolve.outputs.mode }}
+          BUMP_VERSION: ${{ needs.version.outputs.version }}
+          BUMP_NOTES: ${{ needs.version.outputs.notes }}
+          MANUAL_VERSION: ${{ needs.resolve.outputs.effective_version }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "bump" ]; then
+            VER="$BUMP_VERSION"; NOTES="$BUMP_NOTES"
+          else
+            VER="$MANUAL_VERSION"; NOTES=""
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          D="NOTES_${RANDOM}${RANDOM}" # random delim: notes are arbitrary markdown
+          { echo "notes<<$D"; printf '%s\n' "$NOTES"; echo "$D"; } >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
-          ref: v${{ needs.version.outputs.version }} # the tag the version job pushed
+          ref: v${{ steps.params.outputs.version }} # the release tag (both modes)
           persist-credentials: false
+
+      # Manual mode rebuilds an OLD tag carrying that tag's OLD upload-release.ts. Overlay
+      # the CURRENT publish script (feed guard + timestamped guid) from the dispatched
+      # commit via a SECOND authenticated checkout — a raw `git fetch` is unauthenticated
+      # after persist-credentials:false and fails on this private repo. Keep
+      # upload-release.ts a single self-contained file (only @vercel/blob + node builtins)
+      # or this single-file overlay breaks against older tags.
+      - name: Fetch current publish script (manual mode)
+        if: needs.resolve.outputs.mode == 'manual'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .dispatch-head
+          sparse-checkout: apps/desktop/scripts/upload-release.ts
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Apply publish-script overlay (manual mode)
+        if: needs.resolve.outputs.mode == 'manual'
+        shell: bash
+        run: cp .dispatch-head/apps/desktop/scripts/upload-release.ts apps/desktop/scripts/upload-release.ts
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - run: bun install --frozen-lockfile
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build
 
-      # macOS (dmg arm64/x64/universal + universal zip) and Linux (AppImage/deb/rpm × arch).
-      - name: Build installers (mac / linux)
-        if: matrix.platform != 'win'
+      # macOS: dmg arm64/x64/universal + universal zip.
+      - name: Build installers (mac)
+        if: matrix.platform == 'mac'
         working-directory: apps/desktop
         # Notarize only when Apple creds exist (notarize: true would otherwise hard-fail).
         run: |
@@ -246,13 +402,27 @@ jobs:
             unset CSC_LINK CSC_KEY_PASSWORD
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
-          bunx electron-builder --${{ matrix.platform }} --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
+          bunx electron-builder --mac --publish never -c.mac.notarize=${{ secrets.APPLE_ID != '' }}
         env:
-          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Linux: start with the RELIABLE targets (AppImage + deb, x64), growing to
+      # rpm/arm64 once each is proven green via a manual dispatch — the full leg has
+      # never built. Unsigned. CLI target/arch flags OVERRIDE the tag's
+      # electron-builder.yml (AppImage/deb/rpm × x64/arm64), so no config edit is needed;
+      # missing runner tooling (fakeroot for deb, rpm for rpm) gets apt-get'd here as
+      # failures surface.
+      - name: Build installers (linux)
+        if: matrix.platform == 'linux'
+        working-directory: apps/desktop
+        run: |
+          unset CSC_LINK CSC_KEY_PASSWORD
+          export CSC_IDENTITY_AUTO_DISCOVERY=false
+          bunx electron-builder --linux AppImage deb --x64 --publish never
 
       # Windows System installers FIRST (perMachine) so the per-user build below
       # writes the final latest.yml — electron-updater targets per-user installs.
@@ -295,8 +465,10 @@ jobs:
         run: bun scripts/upload-release.ts
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
-          RELEASE_VERSION: ${{ needs.version.outputs.version }}
-          RELEASE_NOTES: ${{ needs.version.outputs.notes }}
+          RELEASE_VERSION: ${{ steps.params.outputs.version }}
+          RELEASE_NOTES: ${{ steps.params.outputs.notes }}
+          # resolve's downgrade guard: 'true' skips the downloads/latest/ feed mirror.
+          RELEASE_SKIP_FEED: ${{ needs.resolve.outputs.skip_feed }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
 
@@ -304,7 +476,7 @@ jobs:
       - name: Upload installers as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SponsorSearch-${{ matrix.platform }}-v${{ needs.version.outputs.version }}
+          name: SponsorSearch-${{ matrix.platform }}-v${{ steps.params.outputs.version }}
           path: |
             apps/desktop/dist/*.exe
             apps/desktop/dist/*.dmg

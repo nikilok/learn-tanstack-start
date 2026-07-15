@@ -89,7 +89,13 @@ export default withSecret(
         .values({ version, channel, notes })
         .onConflictDoUpdate({
           target: desktopReleases.version,
-          set: { channel, notes },
+          // COALESCE so a re-release with no notes (a per-OS rebuild — e.g. adding
+          // Linux to an existing version) preserves the release's existing notes
+          // instead of wiping them; a real notes payload still overwrites.
+          set: {
+            channel,
+            notes: sql`COALESCE(excluded.notes, ${desktopReleases.notes})`,
+          },
         })
         .returning({ id: desktopReleases.id });
 

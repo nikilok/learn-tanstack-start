@@ -1,5 +1,6 @@
 import { DESKTOP_PLATFORMS, type DesktopFormat } from '../api/desktopPlatforms';
 import type { DesktopAsset, DesktopPlatform } from '../api/releases';
+import type { Arch } from '../hooks/usePlatform';
 
 export const PLATFORM_ORDER: readonly DesktopPlatform[] = DESKTOP_PLATFORMS;
 
@@ -74,7 +75,17 @@ const RECOMMENDED: Record<DesktopPlatform, (a: DesktopAsset) => boolean> = {
 export function recommendedAsset(
   platform: DesktopPlatform,
   assets: DesktopAsset[],
+  arch?: Arch | null,
 ): DesktopAsset | null {
+  // Arch-aware: Linux's recommended format (AppImage) ships per-arch, so match the
+  // visitor's detected arch when we know it. mac (Universal) and win (x64 lead) are
+  // arch-fixed and ignore it; fall back to the platform default when no arch match.
+  if (platform === 'linux' && arch) {
+    const m = assets.find(
+      (a) => a.format.toLowerCase() === 'appimage' && a.arch === arch,
+    );
+    if (m) return m;
+  }
   return assets.find(RECOMMENDED[platform]) ?? assets[0] ?? null;
 }
 

@@ -100,6 +100,17 @@ tag (for the updater feed). `build` then:
   only when `manual_version` is the newest tag; re-releasing an older version logs a
   warning and leaves the feed alone (`RELEASE_SKIP_FEED`).
 
+### Test a build without publishing (`skip_release`)
+
+Tick **skip_release** in any mode to do a **dry-run**: it builds the selected OSes and
+uploads them as **run artifacts** (download them from the Actions run to test locally),
+but publishes **nothing** — no Blob upload, no `/api/releases` record. In bump mode it
+also **skips the version bump** (the version job doesn't run), so a test never burns a
+version or mutates `main`; it builds the dispatched commit itself. Ideal for iterating on
+the Linux build: `skip_release` + `build_linux` + `manual_version=0.1.5` builds the
+`v0.1.5` AppImage/deb and hands you the artifacts, leaving `/download` and the updater
+feed untouched.
+
 Downloads are served from `sponsorsearch.co.uk/downloads/...` (a Nitro route that
 redirects to Blob) and listed on `/download` straight from the DB — no GitHub
 Releases. Auto-update reads a **generic** electron-updater feed at `/downloads/latest/`

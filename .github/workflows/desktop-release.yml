@@ -38,6 +38,15 @@ on:
         type: boolean
         required: false
         default: false
+      skip_release:
+        # Dry-run: build the selected OSes and upload them as run artifacts, but publish
+        # NOTHING (no Blob upload, no /api/releases record) and — in bump mode — no version
+        # bump either (builds the dispatched commit instead). For testing a build before
+        # it goes live.
+        description: 'Build only — skip publishing (no Blob/registry, no bump); artifacts only'
+        type: boolean
+        required: false
+        default: false
       release_type:
         description: 'Semver bump (bump mode only — ignored when rebuilding an existing version)'
         type: choice
@@ -102,11 +111,12 @@ jobs:
       effective_version: ${{ steps.plan.outputs.effective_version }} # manual mode only
       skip_feed: ${{ steps.plan.outputs.skip_feed }} # 'true' | 'false'
     steps:
-      # Bump releases squash-merge the dispatched ref into main via the version job's
-      # PR, so they MUST come from main. Manual re-releases do no bump/PR and build from
-      # an immutable tag, so they're allowed from any ref (Linux build-fix iteration).
+      # Only a REAL bump squash-merges the dispatched ref into main via the version job's
+      # PR, so only that MUST come from main. Manual re-releases (immutable tag) and
+      # skip_release dry-runs (no bump/PR, nothing published) do no such mutation, so both
+      # are allowed from any ref (branch iteration on the Linux build fix).
       - name: Refuse non-main bump dispatches
-        if: ${{ !inputs.manual && github.ref != 'refs/heads/main' }}
+        if: ${{ !inputs.manual && !inputs.skip_release && github.ref != 'refs/heads/main' }}
         env:
           REF: ${{ github.ref_name }}
         run: |
@@ -190,9 +200,11 @@ jobs:
     # Bump apps/desktop version once on a release branch, tag that commit (the build
     # jobs check the tag out immediately), and PR the bump back to protected main.
     # Main dispatches only — the bump PR would merge any other ref into main wholesale.
-    # Bump mode only: a manual re-release skips this entirely and rebuilds an existing tag.
+    # Bump mode only, and never on a skip_release dry-run: a manual re-release OR any
+    # skip_release build skips this entirely (no bump/tag/PR) and builds an existing tag
+    # or the dispatched commit instead.
     needs: resolve
-    if: needs.resolve.outputs.mode == 'bump'
+    if: needs.resolve.outputs.mode == 'bump' && !inputs.skip_release
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the release branch + tag
@@ -352,31 +364,39 @@ jobs:
         include: ${{ fromJson(needs.resolve.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      # version/notes source differs by mode: bump reads the version job's outputs;
-      # manual reads resolve's effective_version (the version job is skipped, so its
-      # outputs are empty — reading them would checkout `ref: v` and fail the upload).
+      # version/notes/ref differ by mode: a real bump reads the version job's outputs and
+      # builds its fresh tag; a manual re-release builds the existing tag from resolve's
+      # effective_version; a skip_release bump is a dry-run that builds the dispatched
+      # commit itself (no bump happened) and publishes nothing.
       - name: Resolve effective build params
         id: params
         shell: bash
         env:
           MODE: ${{ needs.resolve.outputs.mode }}
+          SKIP_RELEASE: ${{ inputs.skip_release }}
           BUMP_VERSION: ${{ needs.version.outputs.version }}
           BUMP_NOTES: ${{ needs.version.outputs.notes }}
           MANUAL_VERSION: ${{ needs.resolve.outputs.effective_version }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "$MODE" = "bump" ]; then
-            VER="$BUMP_VERSION"; NOTES="$BUMP_NOTES"
+          if [ "$MODE" = "manual" ]; then
+            VER="$MANUAL_VERSION"; NOTES=""; REF="v$VER"
+          elif [ "$SKIP_RELEASE" = "true" ]; then
+            # bump + skip_release: version job was skipped, so there is no new tag — build
+            # the dispatched commit as a pure dry-run and never publish.
+            VER="dryrun-${SHA:0:7}"; NOTES=""; REF="$SHA"
           else
-            VER="$MANUAL_VERSION"; NOTES=""
+            VER="$BUMP_VERSION"; NOTES="$BUMP_NOTES"; REF="v$VER"
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
           D="NOTES_${RANDOM}${RANDOM}" # random delim: notes are arbitrary markdown
           { echo "notes<<$D"; printf '%s\n' "$NOTES"; echo "$D"; } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: v${{ steps.params.outputs.version }} # the release tag (both modes)
+          ref: ${{ steps.params.outputs.ref }} # release tag, or the dispatched commit on a dry-run
           persist-credentials: false
 
       # Manual mode rebuilds an OLD tag carrying that tag's OLD upload-release.ts. Overlay
@@ -386,7 +406,7 @@ jobs:
       # upload-release.ts a single self-contained file (only @vercel/blob + node builtins)
       # or this single-file overlay breaks against older tags.
       - name: Fetch current publish script (manual mode)
-        if: needs.resolve.outputs.mode == 'manual'
+        if: needs.resolve.outputs.mode == 'manual' && !inputs.skip_release
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -395,7 +415,7 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Apply publish-script overlay (manual mode)
-        if: needs.resolve.outputs.mode == 'manual'
+        if: needs.resolve.outputs.mode == 'manual' && !inputs.skip_release
         shell: bash
         run: cp .dispatch-head/apps/desktop/scripts/upload-release.ts apps/desktop/scripts/upload-release.ts
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -480,6 +500,7 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload to Blob + record release
+        if: ${{ !inputs.skip_release }}
         working-directory: apps/desktop
         run: bun scripts/upload-release.ts
         env:
@@ -490,6 +511,10 @@ jobs:
           RELEASE_SKIP_FEED: ${{ needs.resolve.outputs.skip_feed }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
           DESKTOP_RELEASE_SECRET: ${{ secrets.DESKTOP_RELEASE_SECRET }}
+
+      - name: Note dry-run (build only)
+        if: ${{ inputs.skip_release }}
+        run: echo "::notice::skip_release — built the installers and uploaded them as run artifacts only; nothing published to Blob or the release registry, and no version was bumped."
 
       # Debug copy on the Actions run (installers only), handy for the first releases.
       - name: Upload installers as artifacts

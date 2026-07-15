@@ -51,9 +51,10 @@ toggles (defaults: mac + win on, linux off). There are two modes:
   **manual_version** (e.g. `0.1.5`). No bump: the **version** job is skipped and
   **build** checks out the existing `vX.Y.Z` tag, rebuilds only the ticked OSes, and
   upserts them onto the existing release row (notes preserved). Use it to add an OS to a
-  shipped version (e.g. Linux for `0.1.5`) or reissue one platform. Allowed from **any
-  branch** (it builds an immutable tag and does no bump/PR), so you can iterate a build
-  fix without merging to `main` first. See "Re-release an existing version" below.
+  shipped version (e.g. Linux for `0.1.5`) or reissue one platform. Like a bump, a real
+  re-release **publishes to prod, so it must dispatch from `main`** — to iterate a build
+  fix from a feature branch, use **`skip_release`** (a dry-run — see below), then merge
+  and publish from `main`. See "Re-release an existing version" below.
 
 `.github/workflows/desktop-release.yml` then:
 
@@ -81,8 +82,10 @@ into the just-archived section).
 ### Re-release an existing version
 
 Tick **Rebuild an existing version**, set **manual_version** to a released version, and
-pick the OSes. `resolve` verifies the `vX.Y.Z` tag exists and whether it's the newest
-tag (for the updater feed). `build` then:
+pick the OSes — **build_mac/build_win default ON**, so to add *only* Linux to `0.1.5`
+**untick them**, or the re-release also rebuilds + re-notarizes + re-mirrors mac & win
+(functionally fine, but wasteful and it orphans their prior blobs). `resolve` verifies the
+`vX.Y.Z` tag exists and whether it's the newest tag (for the updater feed). `build` then:
 
 - Checks out the **existing tag** so the artifact reproduces that version's source, and
   **overlays the current `scripts/upload-release.ts`** from the dispatched commit (the
@@ -107,9 +110,11 @@ uploads them as **run artifacts** (download them from the Actions run to test lo
 but publishes **nothing** — no Blob upload, no `/api/releases` record. In bump mode it
 also **skips the version bump** (the version job doesn't run), so a test never burns a
 version or mutates `main`; it builds the dispatched commit itself. Ideal for iterating on
-the Linux build: `skip_release` + `build_linux` + `manual_version=0.1.5` builds the
-`v0.1.5` AppImage/deb and hands you the artifacts, leaving `/download` and the updater
-feed untouched.
+the Linux build: tick **manual** + **skip_release** + **build_linux** (untick mac/win) with
+`manual_version=0.1.5` to build the `v0.1.5` AppImage/deb and hand you the artifacts,
+leaving `/download` and the updater feed untouched. **Without `manual` ticked it stays
+bump-mode**, so the dry-run builds the dispatched commit (not the tag) and `manual_version`
+is ignored.
 
 Downloads are served from `sponsorsearch.co.uk/downloads/...` (a Nitro route that
 redirects to Blob) and listed on `/download` straight from the DB — no GitHub

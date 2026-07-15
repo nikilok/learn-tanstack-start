@@ -111,16 +111,17 @@ jobs:
       effective_version: ${{ steps.plan.outputs.effective_version }} # manual mode only
       skip_feed: ${{ steps.plan.outputs.skip_feed }} # 'true' | 'false'
     steps:
-      # Only a REAL bump squash-merges the dispatched ref into main via the version job's
-      # PR, so only that MUST come from main. Manual re-releases (immutable tag) and
-      # skip_release dry-runs (no bump/PR, nothing published) do no such mutation, so both
-      # are allowed from any ref (branch iteration on the Linux build fix).
-      - name: Refuse non-main bump dispatches
-        if: ${{ !inputs.manual && !inputs.skip_release && github.ref != 'refs/heads/main' }}
+      # Any real PUBLISH must come from reviewed main: a bump squash-merges the dispatched
+      # ref into main, and a manual re-release runs the dispatched ref's workflow + the
+      # overlaid upload-release.ts against the PROD Blob/registry/updater feed. Only
+      # skip_release DRY-RUNS (nothing published, no bump) are allowed from any branch —
+      # that's the branch-iteration path (e.g. the Linux build fix).
+      - name: Refuse non-main publish dispatches
+        if: ${{ !inputs.skip_release && github.ref != 'refs/heads/main' }}
         env:
           REF: ${{ github.ref_name }}
         run: |
-          echo "::error::Semver-bump releases dispatch from main only (the bump PR squash-merges '$REF' into main). For a re-release, tick 'Rebuild an existing version'."
+          echo "::error::Publishing releases dispatch from main only ('$REF' is not main). To test a build from a branch, tick 'skip_release' (a dry-run — artifacts only, nothing published)."
           exit 1
       - uses: actions/checkout@v4
         with:
@@ -169,7 +170,10 @@ jobs:
             # Compare against the highest STABLE tag only (bare vX.Y.Z): `sort -V`
             # misorders prerelease suffixes (v0.1.5-hotfix sorts AFTER v0.1.5), which would
             # wrongly trip the guard when re-releasing the true latest.
-            highest="$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+            # `|| true`: grep exits 1 when NO bare tag matches (a repo with only
+            # prerelease tags), which under `set -o pipefail` + `set -e` would abort this
+            # step with no diagnostic — instead let highest be empty (→ skip_feed=true).
+            highest="$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
             if [ "v${ver}" = "$highest" ]; then
               skip_feed=false
             else
@@ -452,9 +456,9 @@ jobs:
       # Linux: start with the RELIABLE targets (AppImage + deb, x64), growing to
       # rpm/arm64 once each is proven green via a manual dispatch — the full leg has
       # never built. Unsigned. CLI target/arch flags OVERRIDE the tag's
-      # electron-builder.yml (AppImage/deb/rpm × x64/arm64), so no config edit is needed;
-      # missing runner tooling (fakeroot for deb, rpm for rpm) gets apt-get'd here as
-      # failures surface.
+      # electron-builder.yml (AppImage/deb/rpm × x64/arm64), so no config edit is needed.
+      # When you add a target that needs runner tooling (fakeroot for deb, rpm for rpm),
+      # apt-get it in this run block first — ubuntu-latest ships neither.
       - name: Build installers (linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop

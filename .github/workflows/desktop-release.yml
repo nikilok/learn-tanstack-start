@@ -460,12 +460,14 @@ jobs:
 
       # Linux: full matrix — AppImage/deb/rpm × x64/arm64 (six artifacts, matching the
       # mainstream Linux download set). Unsigned. CLI flags mirror the tag's
-      # electron-builder.yml. rpm needs rpmbuild (installed below — ubuntu-latest ships
-      # none); arm64 packages are cross-built on the x64 runner (electron-builder pulls
-      # the arm64 electron binary — no qemu, it only packages, doesn't compile).
+      # electron-builder.yml. arm64 packages are cross-built on the x64 runner
+      # (electron-builder pulls the arm64 electron binary — no qemu, it only packages).
       - name: Install Linux packaging tooling
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm
+        # electron-builder's rpm target hard-needs rpmbuild. Current ubuntu-latest already
+        # ships it, so guard the install (a no-op then, avoiding apt flakiness) but
+        # self-heal if a future runner image drops it — else rpm fails cryptically.
+        run: command -v rpmbuild >/dev/null || { sudo apt-get update && sudo apt-get install -y rpm; }
       - name: Build installers (linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop

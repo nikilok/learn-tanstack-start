@@ -125,7 +125,12 @@ jobs:
           exit 1
       - uses: actions/checkout@v4
         with:
-          fetch-tags: true # default checkout can't see v* tags (existence + highest-tag)
+          # fetch-tags:true is silently ignored when the ref resolves to a SHA (no --tags
+          # in the fetch), so manual-mode tag validation + the highest-tag feed guard saw
+          # ZERO tags. fetch-depth:0 fetches them reliably; filter:blob:none keeps it fast
+          # (resolve only reads refs — rev-parse / git tag -l — never file contents).
+          fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - name: Plan release
         id: plan
@@ -453,19 +458,32 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # Linux: start with the RELIABLE targets (AppImage + deb, x64), growing to
-      # rpm/arm64 once each is proven green via a manual dispatch — the full leg has
-      # never built. Unsigned. CLI target/arch flags OVERRIDE the tag's
-      # electron-builder.yml (AppImage/deb/rpm × x64/arm64), so no config edit is needed.
-      # When you add a target that needs runner tooling (fakeroot for deb, rpm for rpm),
-      # apt-get it in this run block first — ubuntu-latest ships neither.
+      # Linux: full matrix — AppImage/deb/rpm × x64/arm64 (six artifacts, matching the
+      # mainstream Linux download set). Unsigned. CLI flags mirror the tag's
+      # electron-builder.yml. arm64 packages are cross-built on the x64 runner
+      # (electron-builder pulls the arm64 electron binary — no qemu, it only packages).
+      - name: Install Linux packaging tooling
+        if: matrix.platform == 'linux'
+        # rpm target needs rpmbuild; the hicolor icon set is generated with ImageMagick's
+        # `convert`. ubuntu-latest ships both, so guard each install (no-op then, avoiding
+        # apt flakiness) but self-heal if a future runner image drops them.
+        run: |
+          command -v rpmbuild >/dev/null || { sudo apt-get update && sudo apt-get install -y rpm; }
+          command -v convert  >/dev/null || { sudo apt-get update && sudo apt-get install -y imagemagick; }
       - name: Build installers (linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop
         run: |
           unset CSC_LINK CSC_KEY_PASSWORD
           export CSC_IDENTITY_AUTO_DISCOVERY=false
-          bunx electron-builder --linux AppImage deb --x64 --publish never
+          # electron-builder ships only the source icon's native size (1024x1024), a size
+          # desktops don't scan → generic icon. Generate the standard hicolor sizes from
+          # build/icon.png and point electron-builder at the set.
+          mkdir -p build/icons
+          for s in 16 32 48 64 128 256 512; do
+            convert build/icon.png -resize "${s}x${s}" "build/icons/${s}x${s}.png"
+          done
+          bunx electron-builder --linux AppImage deb rpm --x64 --arm64 -c.linux.icon=build/icons --publish never
 
       # Windows System installers FIRST (perMachine) so the per-user build below
       # writes the final latest.yml — electron-updater targets per-user installs.

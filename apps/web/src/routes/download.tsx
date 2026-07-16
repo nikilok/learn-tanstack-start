@@ -16,7 +16,12 @@ import { DownloadVersion } from '../components/DownloadVersion';
 import Preview from '../components/Preview';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
-import { parsePlatform } from '../hooks/usePlatform';
+import {
+  type Arch,
+  getUAData,
+  parseArch,
+  parsePlatform,
+} from '../hooks/usePlatform';
 import { buildCanonical } from '../utils/canonical';
 import { buildDownloadJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
@@ -77,6 +82,11 @@ const detectOS = createIsomorphicFn()
   .server(() => osFromUA(getRequestHeader('user-agent') ?? ''))
   .client(() => osFromUA(navigator.userAgent));
 
+/** UA-string arch — SSR-stable and correct for Firefox/Safari + all x64. Chrome's reduced UA reports Linux as x86_64 even on ARM, so Client Hints refines this post-hydration (in the component). */
+const detectArch = createIsomorphicFn()
+  .server(() => parseArch(getRequestHeader('user-agent') ?? ''))
+  .client(() => parseArch(navigator.userAgent));
+
 // Live-preview demo companies — one is picked at random per visit. Keep names
 // resolving against real sponsor rows: "JP Morgan Chase" needs the "Chase" word
 // (bare "JP Morgan" trigram-matches unrelated Morgans; the row is "JPMorgan
@@ -103,6 +113,32 @@ function Download() {
   const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
   const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
+  // Arch for the Linux hero: SSR-stable UA string first, then Client-Hints refine on
+  // Chromium (its reduced UA lies about Linux arch). No visible flash — only the href swaps.
+  const [arch, setArch] = useState<Arch | null>(detectArch);
+  useEffect(() => {
+    // Arch only steers the Linux hero (mac = Universal, win = x64) — skip it otherwise.
+    if (os !== 'linux') return;
+    const uaData = getUAData();
+    if (!uaData?.getHighEntropyValues) return;
+    let cancelled = false;
+    uaData
+      .getHighEntropyValues(['architecture', 'bitness'])
+      .then((h) => {
+        if (cancelled) return;
+        const refined: Arch | null =
+          h.architecture === 'arm' && h.bitness === '64'
+            ? 'arm64'
+            : h.architecture === 'x86' && h.bitness === '64'
+              ? 'x64'
+              : null;
+        if (refined) setArch(refined);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [os]);
   const { installable: webInstallable, install } = useInstallPrompt();
   const [inApp, setInApp] = useState(false);
   // Stable per-mount pick; never SSR-rendered, so server/client differing is fine.
@@ -124,7 +160,8 @@ function Download() {
   // The preview just needs *a* platform; the CTA needs the *user's* platform —
   // mobile/unknown (os = null) gets the mac preview but never a wrong download button.
   const heroOS = os ?? 'mac';
-  const hero = os && latest ? recommendedAsset(os, latest.assets[os]) : null;
+  const hero =
+    os && latest ? recommendedAsset(os, latest.assets[os], arch) : null;
   const cardCount = (hasDesktop ? 1 : 0) + (webInstallable ? 1 : 0);
 
   return (

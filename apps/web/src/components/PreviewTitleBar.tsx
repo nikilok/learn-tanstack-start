@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
 import { useIsDark } from '../hooks/useIsDark';
-import Logo, { LogoMark } from './Logo';
+import Logo from './Logo';
 import { getInitialMode, type ThemeMode } from './ThemeToggle';
 
 import styles from './Preview.module.css';
@@ -44,21 +44,11 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
   );
 }
 
-/** SponsorSearch round mark (Union-Jack lens) — the shared LogoMark themed like the shell's BrandMark. */
-function BrandMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 130 130" aria-hidden="true" className={className}>
-      <LogoMark navyColor="var(--tb-mark)" flagRedColor="var(--tb-mark-red)" />
-    </svg>
-  );
-}
-
 /** Centered pill showing the previewed page's cleaned title — 460px, the shell's computed width at 1280. */
 function TitlePill({ title }: { title: string }) {
   return (
-    <div className="absolute top-1/2 left-1/2 flex h-8 w-[460px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-4 backdrop-blur-sm">
-      <BrandMark className="size-4 shrink-0" />
-      <span className="min-w-0 truncate text-[13px] font-normal text-(--tb-faint)">
+    <div className="absolute top-1/2 left-1/2 flex h-8 w-[460px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-4 backdrop-blur-sm">
+      <span className="min-w-0 truncate text-[13px] font-medium text-(--tb-fg)">
         {title}
       </span>
     </div>

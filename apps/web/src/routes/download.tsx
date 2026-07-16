@@ -202,8 +202,8 @@ function Download() {
                 </a>
               ) : (
                 <p className="text-sm text-(--sea-ink-soft)">
-                  Available for macOS, Windows &amp; Linux — grab any build from the
-                  version list below.
+                  Available for macOS, Windows &amp; Linux — grab any build from
+                  the version list below.
                 </p>
               )}
             </DownloadCard>

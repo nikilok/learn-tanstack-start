@@ -16,7 +16,12 @@ import { DownloadVersion } from '../components/DownloadVersion';
 import Preview from '../components/Preview';
 import WebAppCard from '../components/WebAppCard';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
-import { type Arch, parseArch, parsePlatform } from '../hooks/usePlatform';
+import {
+  type Arch,
+  getUAData,
+  parseArch,
+  parsePlatform,
+} from '../hooks/usePlatform';
 import { buildCanonical } from '../utils/canonical';
 import { buildDownloadJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
@@ -108,24 +113,13 @@ function Download() {
   const { data: publicReleases = [] } = useQuery(desktopReleasesQueryOptions);
   const releases = owner ? (ownerView?.releases ?? []) : publicReleases;
   const os = detectOS();
-  // Arch for the Linux hero: UA-string first (SSR-stable), then refine via Client Hints
-  // on Chromium — its reduced UA lies about Linux arch (always x86_64), so an ARM64
-  // Chrome would otherwise be handed an x64 build. No visible flash: the button label is
-  // arch-less ("Download for Linux") — only its href updates.
+  // Arch for the Linux hero: SSR-stable UA string first, then Client-Hints refine on
+  // Chromium (its reduced UA lies about Linux arch). No visible flash — only the href swaps.
   const [arch, setArch] = useState<Arch | null>(detectArch);
   useEffect(() => {
-    // Arch only steers the Linux hero (mac = Universal, win = x64), so skip the
-    // Client-Hints probe for everyone else.
+    // Arch only steers the Linux hero (mac = Universal, win = x64) — skip it otherwise.
     if (os !== 'linux') return;
-    const uaData = (
-      navigator as Navigator & {
-        userAgentData?: {
-          getHighEntropyValues?: (
-            hints: string[],
-          ) => Promise<{ architecture?: string; bitness?: string }>;
-        };
-      }
-    ).userAgentData;
+    const uaData = getUAData();
     if (!uaData?.getHighEntropyValues) return;
     let cancelled = false;
     uaData

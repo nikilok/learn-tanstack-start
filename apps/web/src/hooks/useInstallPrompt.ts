@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { parsePlatform } from './usePlatform';
+import { getUAData, parsePlatform } from './usePlatform';
 
 /** Chrome's deferred install prompt — not in the standard DOM lib types. */
 interface BeforeInstallPromptEvent extends Event {
@@ -47,8 +47,7 @@ export function useInstallPrompt(): {
     // Desktop only — mobile gets the browser's own native install UI. The
     // captured prompt already limits this to Chromium that can actually install.
     const isMobile =
-      (navigator as Navigator & { userAgentData?: { mobile?: boolean } })
-        .userAgentData?.mobile ?? parsePlatform(navigator.userAgent).isMobile;
+      getUAData()?.mobile ?? parsePlatform(navigator.userAgent).isMobile;
     if (isMobile) return;
 
     const reveal = () => {

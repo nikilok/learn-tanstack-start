@@ -65,10 +65,15 @@ export function sortAssets(assets: DesktopAsset[]): DesktopAsset[] {
   );
 }
 
+// AppImage is the recommended Linux hero format (portable across distros, unlike the
+// distro-specific deb/rpm) — single-sourced so the arch-match below can't drift from it.
+const LINUX_HERO_FORMAT = 'appimage';
+
 const RECOMMENDED: Record<DesktopPlatform, (a: DesktopAsset) => boolean> = {
   mac: (a) => a.arch === 'universal',
   win: (a) => a.arch === 'x64' && a.installScope !== 'system',
-  linux: (a) => a.format.toLowerCase() === 'appimage' && a.arch === 'x64',
+  linux: (a) =>
+    a.format.toLowerCase() === LINUX_HERO_FORMAT && a.arch === 'x64',
 };
 
 /** The single variant a "Download for <OS>" hero button should point to. */
@@ -77,14 +82,16 @@ export function recommendedAsset(
   assets: DesktopAsset[],
   arch?: Arch | null,
 ): DesktopAsset | null {
-  // Arch-aware: Linux's recommended format (AppImage) ships per-arch, so match the
-  // visitor's detected arch when we know it. mac (Universal) and win (x64 lead) are
-  // arch-fixed and ignore it; fall back to the platform default when no arch match.
+  // Arch-aware Linux hero: the portable AppImage in the visitor's arch, else any
+  // same-arch package (a matching-arch .deb beats a non-runnable wrong-arch AppImage).
+  // mac (Universal) / win (x64) are arch-fixed and ignore it.
   if (platform === 'linux' && arch) {
-    const m = assets.find(
-      (a) => a.format.toLowerCase() === 'appimage' && a.arch === arch,
+    const same = assets.filter((a) => a.arch === arch);
+    const appImage = same.find(
+      (a) => a.format.toLowerCase() === LINUX_HERO_FORMAT,
     );
-    if (m) return m;
+    if (appImage) return appImage;
+    if (same.length) return sortAssets(same)[0];
   }
   return assets.find(RECOMMENDED[platform]) ?? assets[0] ?? null;
 }

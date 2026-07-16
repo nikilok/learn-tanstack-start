@@ -18,6 +18,20 @@ export function parseArch(ua: string): Arch | null {
   return null;
 }
 
+/** The non-standard `navigator.userAgentData` (Client Hints) surface we read — no lib-dom type yet. */
+export type NavigatorUAData = {
+  mobile?: boolean;
+  getHighEntropyValues?: (
+    hints: string[],
+  ) => Promise<{ architecture?: string; bitness?: string }>;
+};
+
+/** `navigator.userAgentData` (undefined off Chromium) without re-casting at each call site. Client-only. */
+export function getUAData(): NavigatorUAData | undefined {
+  return (navigator as Navigator & { userAgentData?: NavigatorUAData })
+    .userAgentData;
+}
+
 /**
  * Derive `{ platform, isMobile }` from a user-agent string via case-insensitive
  * substring checks. Unknown UAs fall back to `{ platform: 'unknown' }`.

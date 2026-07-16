@@ -17,11 +17,12 @@
  * details, and /download — chosen by route, search param, and viewport width at
  * toggle, then warped onto the live layout via the sampled anchors.
  *
- * The bloom is WebGPU-only. Where WebGPU is unavailable it falls back to a plain
- * non-directional canvas-2D dither (no bloom), and to an instant swap if neither
- * canvas works. The transition runs regardless of `prefers-reduced-motion`, but
- * the bloom's coherent radial motion is gated off for those users — they get the
- * same plain dither as the fallback.
+ * The bloom is WebGPU-only. Where WebGPU is unavailable — or its init fails, or
+ * the user prefers reduced motion — the theme just swaps instantly with no
+ * dither: a plain grain without the bloom reads as a glitch rather than an effect,
+ * and an animated grain dissolve is itself the motion `prefers-reduced-motion`
+ * opts out of. So there's deliberately no canvas-2D fallback and no reduced-motion
+ * dither; the bloom (below) only ever runs at full motion.
  */
 
 import { measureAnchors, type PageAnchors } from './measure-anchors';
@@ -39,10 +40,9 @@ declare const GPUTextureUsage: {
   readonly COPY_DST: number;
 };
 
-// Single progress timeline; the three windows + the hidden swap point within it.
+// Single progress timeline; the hidden swap point within it. The fill/cover/clear
+// windows themselves live in the WGSL shader (the only path that dithers).
 const TOTAL_MS = 1000;
-const COVER_END = 0.3; // dots finished scattering in
-const REVEAL_START = 0.7; // dots start scattering out
 const SWAP_AT = 0.5; // theme class flip, mid-morph under full cover
 // Easing applied to the whole progress timeline. Point EASING at any entry to
 // change the feel (cubic in-out / ease-in / ease-out / linear); each maps
@@ -55,13 +55,9 @@ const EASINGS = {
 };
 const EASING: (t: number) => number = EASINGS.easeOut;
 // Dot edge in CSS px — chunkier on desktop, finer on the narrow mobile layout
-// (see cellSizeCss). The canvas-2D grid is capped to ~MAX_CELLS dots so
-// large/HiDPI viewports don't overload CPU.
+// (see cellSizeCss). Passed to the WGSL shader as the dither cell size.
 const CELL_CSS_DESKTOP = 0.65;
 const CELL_CSS_MOBILE = 1;
-const MAX_CELLS = 360000;
-// Per-dot brightness jitter (±, 0–255 scale) so the fill reads as grain.
-const JITTER = 16;
 // Below this viewport width the home page uses its mobile (portrait) layout.
 const MOBILE_BREAKPOINT = 640;
 
@@ -370,21 +366,6 @@ function warpMap(
   return out;
 }
 
-/** A shuffled `[0..total)` index array (Fisher–Yates) giving a dither reveal order. */
-function shuffledOrder(total: number): Int32Array {
-  const a = new Int32Array(total);
-  for (let i = 0; i < total; i++) {
-    a[i] = i;
-  }
-  for (let i = total - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const t = a[i];
-    a[i] = a[j];
-    a[j] = t;
-  }
-  return a;
-}
-
 /** Tear down the in-flight run (stops its loop and removes its canvas). */
 function teardown(): void {
   if (current) {
@@ -513,21 +494,17 @@ async function startWebGPU(
 
   document.body.appendChild(canvas);
 
-  const reducedMotion = prefersReducedMotion();
   const data = new Float32Array(8);
   data[0] = canvas.width;
   data[1] = canvas.height;
   // data[2] = progress, written per frame in the loop.
   data[3] = cellSizeCss() * dpr;
   data[4] = toLight ? 1 : -1; // sweep direction: sunrise (+) to light, sunset (−) to dark
-  data[5] = reducedMotion ? 0 : 1; // 0 = reduced-motion plain dither, 1 = sunlight spread
-  if (!reducedMotion) {
-    // Bloom origin = the footer skyline's sun/moon. Skipped for reduced motion, whose
-    // plain dither ignores u.origin — so its layout read is avoided too.
-    const [ox, oy] = sunOrigin();
-    data[6] = ox * dpr;
-    data[7] = oy * dpr;
-  }
+  data[5] = 1; // motion always on — reduced motion swaps instantly upstream, never reaching here
+  // Bloom origin = the footer skyline's sun/moon.
+  const [ox, oy] = sunOrigin();
+  data[6] = ox * dpr;
+  data[7] = oy * dpr;
 
   let raf = 0;
   let alive = true;
@@ -586,116 +563,6 @@ async function startWebGPU(
   return true;
 }
 
-/** Run the dissolve on a 2D canvas: three incremental dither passes (fill source, repaint target, clear). */
-function startCanvas2D(
-  srcMap: number[][],
-  tgtMap: number[][],
-  swap: () => void,
-  token: number,
-): void {
-  const w = Math.ceil(window.innerWidth);
-  const h = Math.ceil(window.innerHeight);
-  const canvas = makeCanvas();
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    swap();
-    return;
-  }
-  document.body.appendChild(canvas);
-
-  // ceil (not round) so the cap term always keeps total cells <= MAX_CELLS, even
-  // when cellSizeCss() is below 1 (it no longer dominates the max() as a floor).
-  const cell = Math.max(
-    cellSizeCss(),
-    Math.ceil(Math.sqrt((w * h) / MAX_CELLS)),
-  );
-  const cols = Math.ceil(w / cell);
-  const rows = Math.ceil(h / cell);
-  const total = cols * rows;
-
-  // Per-cell static grain so a cell keeps its tone when repainted source→target.
-  const grain = new Int8Array(total);
-  for (let i = 0; i < total; i++) {
-    grain[i] = Math.round(Math.random() * 2 * JITTER) - JITTER;
-  }
-  const orderFill = shuffledOrder(total);
-  const orderMorph = shuffledOrder(total);
-  const orderClear = shuffledOrder(total);
-
-  let raf = 0;
-  let alive = true;
-  let swapped = false;
-  const cancel = () => {
-    alive = false;
-    if (raf) {
-      window.cancelAnimationFrame(raf);
-    }
-    canvas.remove();
-  };
-  current = { token, cancel, hasSwapped: () => swapped };
-
-  const paint = (idx: number, map: number[][]) => {
-    const col = idx % cols;
-    const row = (idx - col) / cols;
-    const c = sampleMap(
-      map,
-      (col * cell + cell * 0.5) / w,
-      (row * cell + cell * 0.5) / h,
-    );
-    const j = grain[idx];
-    ctx.fillStyle = `rgb(${channel(c[0] + j)},${channel(c[1] + j)},${channel(c[2] + j)})`;
-    ctx.fillRect(col * cell, row * cell, cell, cell);
-  };
-  const erase = (idx: number) => {
-    const col = idx % cols;
-    const row = (idx - col) / cols;
-    ctx.clearRect(col * cell, row * cell, cell, cell);
-  };
-
-  let iFill = 0;
-  let iMorph = 0;
-  let iClear = 0;
-  const start = performance.now();
-  const step = (now: number) => {
-    if (!alive || token !== runToken) {
-      return;
-    }
-    const elapsed = now - start;
-    const p = easedProgress(elapsed);
-    if (!swapped && p >= SWAP_AT) {
-      swap();
-      swapped = true;
-    }
-    const fillTarget = Math.floor(clamp01(p / COVER_END) * total);
-    for (; iFill < fillTarget; iFill++) {
-      paint(orderFill[iFill], srcMap);
-    }
-    const morphFrac = clamp01((p - COVER_END) / (REVEAL_START - COVER_END));
-    const morphTarget = Math.floor(morphFrac * total);
-    for (; iMorph < morphTarget; iMorph++) {
-      paint(orderMorph[iMorph], tgtMap);
-    }
-    const clearTarget = Math.floor(
-      clamp01((p - REVEAL_START) / (1 - REVEAL_START)) * total,
-    );
-    for (; iClear < clearTarget; iClear++) {
-      erase(orderClear[iClear]);
-    }
-
-    if (elapsed >= TOTAL_MS) {
-      cancel();
-      if (current && current.token === token) {
-        current = null;
-      }
-      return;
-    }
-    raf = window.requestAnimationFrame(step);
-  };
-  raf = window.requestAnimationFrame(step);
-}
-
 /** Cancel any in-flight transition and remove its overlay without starting a new one — call before a non-animated swap so a superseded run's deferred class-flip can't fire late. */
 export function cancelThemeTransition(): void {
   if (typeof window === 'undefined') {
@@ -720,6 +587,18 @@ export function runThemeTransition(swap: () => void): void {
 
   teardown();
   const token = ++runToken;
+
+  // The bloom is WebGPU-only, and its motion is the whole point. Without WebGPU,
+  // or when the user prefers reduced motion, swap the theme instantly with no
+  // dither: a plain grain without the bloom reads as a glitch (and an animated
+  // grain dissolve is itself the motion reduced-motion users opt out of), so
+  // there's deliberately no canvas-2D fallback. Bailing here also skips the
+  // matrix parse/warp below, which only the GPU path needs.
+  if (!navigator.gpu || prefersReducedMotion()) {
+    swap();
+    return;
+  }
+
   // Pick the sampled set for the current view: company details, home with an
   // active search (results), /download (with or without the PWA install
   // card), the mobile home, or the desktop home. /download on a phone keeps
@@ -758,26 +637,21 @@ export function runThemeTransition(swap: () => void): void {
     set.anchors,
     live,
   );
-  const sourceIsDark = document.documentElement.classList.contains('dark');
-  const srcMap = sourceIsDark ? darkMap : lightMap;
-  const tgtMap = sourceIsDark ? lightMap : darkMap;
   // Going dark→light is a sunrise (band rises); light→dark is a sunset (band falls).
-  const toLight = sourceIsDark;
+  const toLight = document.documentElement.classList.contains('dark');
 
-  if (navigator.gpu) {
-    startWebGPU(lightMap, darkMap, swap, token, toLight)
-      .then((handled) => {
-        if (!handled && token === runToken) {
-          startCanvas2D(srcMap, tgtMap, swap, token);
-        }
-      })
-      .catch(() => {
-        if (token === runToken) {
-          startCanvas2D(srcMap, tgtMap, swap, token);
-        }
-      });
-    return;
-  }
-
-  startCanvas2D(srcMap, tgtMap, swap, token);
+  // WebGPU init can still fail after the capability check (no adapter/device, a
+  // shader validation error). If it does, swap instantly rather than dropping to
+  // a bloom-less dither — same reasoning as the no-`navigator.gpu` bail above.
+  startWebGPU(lightMap, darkMap, swap, token, toLight)
+    .then((handled) => {
+      if (!handled && token === runToken) {
+        swap();
+      }
+    })
+    .catch(() => {
+      if (token === runToken) {
+        swap();
+      }
+    });
 }

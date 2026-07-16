@@ -401,7 +401,7 @@ function makeMatrixTexture(device: GPUDevice, map: number[][]): GPUTexture {
   return texture;
 }
 
-/** Run the dissolve on the GPU. Resolves true if it took ownership (ran or was superseded), false to signal the caller to fall back. */
+/** Run the dissolve on the GPU. Resolves true if it took ownership (ran or was superseded), false to signal the caller to swap the theme instantly (no dither). */
 async function startWebGPU(
   lightMap: number[][],
   darkMap: number[][],
@@ -443,8 +443,10 @@ async function startWebGPU(
   let pipeline: GPURenderPipeline;
   let uniform: GPUBuffer;
   let bindGroup: GPUBindGroup;
-  // WebGPU validation errors (e.g. a shader compile failure) surface through the
-  // error scope, not as exceptions — capture them so we fall back to canvas-2D.
+  // WebGPU validation errors (e.g. a shader compile failure — Chrome-on-Windows
+  // Tint is stricter than Apple's) surface through the error scope, not as
+  // exceptions — capture them so we resolve false and the caller swaps the theme
+  // instantly (no dither; there is no canvas-2D fallback).
   device.pushErrorScope('validation');
   try {
     const format = gpu.getPreferredCanvasFormat();

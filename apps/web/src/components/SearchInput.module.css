@@ -14,3 +14,20 @@
     0 0 15px 4px var(--glow-a),
     0 0 30px 8px var(--glow-b);
 }
+
+/* Spotlight scrim behind the pinned search overlay; index.tsx applies `.search-glow` by name (hence :global). */
+/* Solid `--bg-base` at the bar's top edge, fading OUT below the results and IN over the 2rem above — reads as a spotlight even with no header covering the top (desktop shell). */
+:global(.search-glow)::after {
+  content: '';
+  position: absolute;
+  inset: -2rem 0 -6rem 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0,
+    var(--bg-base) 2rem,
+    var(--bg-base) 40%,
+    transparent
+  );
+  pointer-events: none;
+  z-index: -1;
+}

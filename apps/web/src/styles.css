@@ -390,15 +390,6 @@ html[data-desktop] .footer-desktop-link {
   box-shadow: var(--shadow-ring);
 }
 
-.search-glow::after {
-  content: '';
-  position: absolute;
-  inset: 0 0 -6rem;
-  background: linear-gradient(to bottom, var(--bg-base) 30%, transparent);
-  pointer-events: none;
-  z-index: -1;
-}
-
 .glass {
   background: var(--glass-bg);
   backdrop-filter: none;

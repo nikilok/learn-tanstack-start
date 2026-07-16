@@ -464,17 +464,26 @@ jobs:
       # (electron-builder pulls the arm64 electron binary — no qemu, it only packages).
       - name: Install Linux packaging tooling
         if: matrix.platform == 'linux'
-        # electron-builder's rpm target hard-needs rpmbuild. Current ubuntu-latest already
-        # ships it, so guard the install (a no-op then, avoiding apt flakiness) but
-        # self-heal if a future runner image drops it — else rpm fails cryptically.
-        run: command -v rpmbuild >/dev/null || { sudo apt-get update && sudo apt-get install -y rpm; }
+        # rpm target needs rpmbuild; the hicolor icon set is generated with ImageMagick's
+        # `convert`. ubuntu-latest ships both, so guard each install (no-op then, avoiding
+        # apt flakiness) but self-heal if a future runner image drops them.
+        run: |
+          command -v rpmbuild >/dev/null || { sudo apt-get update && sudo apt-get install -y rpm; }
+          command -v convert  >/dev/null || { sudo apt-get update && sudo apt-get install -y imagemagick; }
       - name: Build installers (linux)
         if: matrix.platform == 'linux'
         working-directory: apps/desktop
         run: |
           unset CSC_LINK CSC_KEY_PASSWORD
           export CSC_IDENTITY_AUTO_DISCOVERY=false
-          bunx electron-builder --linux AppImage deb rpm --x64 --arm64 --publish never
+          # electron-builder ships only the source icon's native size (1024x1024), a size
+          # desktops don't scan → generic icon. Generate the standard hicolor sizes from
+          # build/icon.png and point electron-builder at the set.
+          mkdir -p build/icons
+          for s in 16 32 48 64 128 256 512; do
+            convert build/icon.png -resize "${s}x${s}" "build/icons/${s}x${s}.png"
+          done
+          bunx electron-builder --linux AppImage deb rpm --x64 --arm64 -c.linux.icon=build/icons --publish never
 
       # Windows System installers FIRST (perMachine) so the per-user build below
       # writes the final latest.yml — electron-updater targets per-user installs.

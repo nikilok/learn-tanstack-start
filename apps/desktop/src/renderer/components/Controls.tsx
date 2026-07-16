@@ -22,7 +22,7 @@ export function Controls({
   const ThemeIcon =
     themeMode === 'light' ? Sun : themeMode === 'dark' ? Moon : Monitor;
   return (
-    <div className="no-drag flex items-center gap-0.5">
+    <div className="no-drag flex items-center gap-2">
       <button
         type="button"
         aria-label="Share this page"

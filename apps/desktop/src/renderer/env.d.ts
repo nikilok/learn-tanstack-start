@@ -11,7 +11,7 @@ interface TitlebarApi {
   onTheme(cb: (t: { dark: boolean; mode: string }) => void): Unsubscribe;
   onCursor(cb: (on: boolean) => void): Unsubscribe;
   onCopied(cb: () => void): Unsubscribe;
-  command(cmd: 'toggle-theme' | 'toggle-cursor' | 'share'): void;
+  command(cmd: 'toggle-theme' | 'toggle-cursor' | 'share' | 'home'): void;
   platform: string;
   windowControl(action: 'minimize' | 'maximize' | 'close'): void;
   onMaximized(cb: (max: boolean) => void): Unsubscribe;

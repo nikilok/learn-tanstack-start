@@ -38,14 +38,18 @@ export function TitleBar() {
       {/* Left cluster: logo pill + nav pill. macOS reserves the pill's left padding for the
           native traffic lights; Windows/Linux have no lights there so it's padded normally. */}
       <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
-        <div
-          className={`flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md ${
+        <button
+          type="button"
+          aria-label="Go to home page"
+          title="Home"
+          onClick={() => command('home')}
+          className={`no-drag flex h-8 cursor-pointer items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md transition-colors hover:bg-(--tb-ctrl-hover) ${
             isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
           }`}
         >
           <Logo className="hidden h-5 w-auto sm:block" />
           <BrandMark className="size-5 sm:hidden" />
-        </div>
+        </button>
         <NavControls
           canGoBack={canGoBack}
           canGoForward={canGoForward}

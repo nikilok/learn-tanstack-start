@@ -254,9 +254,11 @@ function registerIpc(): void {
   );
 
   // Title-bar utility buttons -> the web app's existing handlers (via its preload).
-  ipcMain.on('titlebar:command', (_event, cmd: string) =>
-    siteView?.webContents.send('ss:command', cmd),
-  );
+  ipcMain.on('titlebar:command', (_event, cmd: string) => {
+    siteView?.webContents.send('ss:command', cmd);
+    // Home navigates the page; hand keyboard focus back so type-to-search works right away.
+    if (cmd === 'home') siteView?.webContents.focus();
+  });
   // The web app reports its cursor on/off so the title-bar icon can mirror it.
   ipcMain.on('ss:cursor', (_event, on: boolean) => {
     lastCursorOn = Boolean(on);

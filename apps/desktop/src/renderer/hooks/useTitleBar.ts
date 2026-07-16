@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-type Command = 'toggle-theme' | 'toggle-cursor' | 'share';
+type Command = 'toggle-theme' | 'toggle-cursor' | 'share' | 'home';
 type WindowAction = 'minimize' | 'maximize' | 'close';
 
 export interface TitleBarModel {

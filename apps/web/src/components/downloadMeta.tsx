@@ -65,9 +65,10 @@ export function sortAssets(assets: DesktopAsset[]): DesktopAsset[] {
   );
 }
 
-// AppImage is the recommended Linux hero format (portable across distros, unlike the
-// distro-specific deb/rpm) — single-sourced so the arch-match below can't drift from it.
-const LINUX_HERO_FORMAT = 'appimage';
+// .deb is the recommended Linux hero format: native on the dominant Debian/Ubuntu
+// desktops (AppImage's cross-distro edge is undercut by FUSE on modern Ubuntu). rpm +
+// AppImage stay in the card for other distros. Single-sourced so the arch-match can't drift.
+const LINUX_HERO_FORMAT = 'deb';
 
 const RECOMMENDED: Record<DesktopPlatform, (a: DesktopAsset) => boolean> = {
   mac: (a) => a.arch === 'universal',
@@ -82,15 +83,15 @@ export function recommendedAsset(
   assets: DesktopAsset[],
   arch?: Arch | null,
 ): DesktopAsset | null {
-  // Arch-aware Linux hero: the portable AppImage in the visitor's arch, else any
-  // same-arch package (a matching-arch .deb beats a non-runnable wrong-arch AppImage).
+  // Arch-aware Linux hero: the recommended format (.deb) in the visitor's arch, else any
+  // same-arch package (a matching-arch package beats a non-runnable wrong-arch one).
   // mac (Universal) / win (x64) are arch-fixed and ignore it.
   if (platform === 'linux' && arch) {
     const same = assets.filter((a) => a.arch === arch);
-    const appImage = same.find(
+    const preferred = same.find(
       (a) => a.format.toLowerCase() === LINUX_HERO_FORMAT,
     );
-    if (appImage) return appImage;
+    if (preferred) return preferred;
     if (same.length) return sortAssets(same)[0];
   }
   return assets.find(RECOMMENDED[platform]) ?? assets[0] ?? null;

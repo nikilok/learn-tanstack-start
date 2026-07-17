@@ -61,6 +61,7 @@ body {
 .tooltip {
   position: fixed;
   inset: 0;
+  -webkit-app-region: no-drag; /* the view reuses index.html's drag body; never drag from here */
   opacity: 0;
   transform: translateY(-3px);
   transition:

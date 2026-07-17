@@ -1,7 +1,9 @@
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
-/** Top-edge progressive backdrop-blur that fades content into the transparent Electron title bar on scroll (CSS scroll-timeline in styles.css). Native shell only — gated on the preload flag, so the web and /download preview never subscribe. */
+import styles from './DesktopScrollMask.module.css';
+
+/** Top-edge progressive backdrop-blur that fades content into the transparent Electron title bar on scroll (CSS scroll-timeline in the module). Native shell only — gated on the preload flag, so the web and /download preview never subscribe. */
 export default function DesktopScrollMask() {
   const [active, setActive] = useState(false);
   useEffect(() => {
@@ -16,16 +18,27 @@ function ShellScrollMask() {
   const href = useRouterState({ select: (s) => s.location.href });
   const [resetKey, setResetKey] = useState(0);
   useEffect(() => {
-    const raf = requestAnimationFrame(() => {
+    // Re-check next frame AND after a beat: the destination height can settle late (deferred
+    // content), and a page that ends up non-scrollable must reset the mask to 0.
+    const check = () => {
       const el = document.scrollingElement;
       if (el && el.scrollHeight <= window.innerHeight + 1) {
         setResetKey((k) => k + 1);
       }
-    });
-    return () => cancelAnimationFrame(raf);
+    };
+    const raf = requestAnimationFrame(check);
+    const timer = setTimeout(check, 350);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
   }, [href]);
 
   return (
-    <div key={resetKey} aria-hidden="true" className="desktop-scroll-mask" />
+    <div
+      key={resetKey}
+      aria-hidden="true"
+      className={styles.desktopScrollMask}
+    />
   );
 }

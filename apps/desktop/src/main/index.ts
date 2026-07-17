@@ -54,7 +54,6 @@ let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
 let tooltipView: WebContentsView | null = null;
-let tooltipHideTimer: ReturnType<typeof setTimeout> | undefined;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
@@ -314,7 +313,6 @@ function registerIpc(): void {
     (_event, payload: { kind: string; x: number } | null) => {
       const tip = tooltipView;
       if (!tip) return;
-      clearTimeout(tooltipHideTimer);
       if (payload) {
         const caretX = positionTooltip(
           tip,
@@ -324,10 +322,9 @@ function registerIpc(): void {
         );
         tip.webContents.send('tooltip:show', { kind: payload.kind, caretX });
       } else {
+        // Hide the view immediately: a lingering overlay over page content captures clicks.
+        tip.setVisible(false);
         tip.webContents.send('tooltip:show', null);
-        tooltipHideTimer = setTimeout(() => {
-          if (!tip.webContents.isDestroyed()) tip.setVisible(false);
-        }, 200);
       }
     },
   );
@@ -354,10 +351,9 @@ function registerIpc(): void {
 
   // A title-bar view (bar or tooltip) loaded -> send it the theme; the bar also gets its full state.
   ipcMain.on('titlebar:ready', (event) => {
-    event.sender.send('titlebar:theme', {
-      dark: lastDark,
-      mode: lastMode,
-    });
+    event.sender.send('titlebar:theme', { dark: lastDark, mode: lastMode });
+    // The rest is bar-only state; skip it when the tooltip view is the one reporting ready.
+    if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send(
       'titlebar:maximized',

@@ -1,21 +1,35 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { SHORTCUTS } from '../../shared/shortcuts';
+import type { ShortcutId } from '../../shared/shortcuts';
+
 const isMac = window.titlebar?.platform === 'darwin';
 const MOD = isMac ? '⌘' : 'Ctrl';
 const SHIFT = isMac ? '⇧' : 'Shift';
 
-// Label + keycaps per button; the keycaps mirror the bindings in keyboard-shortcuts.ts.
-const TOOLTIPS: Record<TooltipKind, { label: string; keys: string[] }> = {
-  back: { label: 'Go back', keys: [MOD, '['] },
-  forward: { label: 'Go forward', keys: [MOD, ']'] },
-  share: { label: 'Share', keys: [MOD, SHIFT, 'S'] },
-  'toggle-cursor': { label: 'Cursor', keys: [MOD, SHIFT, 'C'] },
-  'toggle-theme': { label: 'Theme', keys: [MOD, SHIFT, 'D'] },
+const LABELS: Record<TooltipKind, string> = {
+  back: 'Go back',
+  forward: 'Go forward',
+  share: 'Share',
+  'toggle-cursor': 'Cursor',
+  'toggle-theme': 'Theme',
+  home: 'Home',
 };
+
+/** Keycaps for a button from the shared shortcut config — empty when it has no shortcut (e.g. home). */
+function contentFor(kind: TooltipKind): { label: string; keys: string[] } {
+  const keys =
+    kind in SHORTCUTS
+      ? SHORTCUTS[kind as ShortcutId].keys.map((k) =>
+          k === 'mod' ? MOD : k === 'shift' ? SHIFT : k,
+        )
+      : [];
+  return { label: LABELS[kind], keys };
+}
 
 /** Root of the tooltip overlay view: renders the keycap bubble the main process positions below a hovered button. */
 export function TooltipOverlay() {
-  const [content, setContent] = useState(TOOLTIPS.back);
+  const [content, setContent] = useState(() => contentFor('back'));
   const [caretX, setCaretX] = useState(0);
   const [shown, setShown] = useState(false);
   const bubbleRef = useRef<HTMLSpanElement>(null);
@@ -27,7 +41,7 @@ export function TooltipOverlay() {
     });
     const offTip = window.titlebar.onTooltip((payload) => {
       if (payload) {
-        setContent(TOOLTIPS[payload.kind]);
+        setContent(contentFor(payload.kind));
         setCaretX(payload.caretX);
         setShown(true);
       } else {
@@ -57,11 +71,13 @@ export function TooltipOverlay() {
         style={{ left: bubbleLeft }}
       >
         <span className="tooltip-label">{content.label}</span>
-        <span className="tooltip-keys">
-          {content.keys.map((k) => (
-            <kbd key={k}>{k}</kbd>
-          ))}
-        </span>
+        {content.keys.length > 0 && (
+          <span className="tooltip-keys">
+            {content.keys.map((k) => (
+              <kbd key={k}>{k}</kbd>
+            ))}
+          </span>
+        )}
       </span>
       {/* Painted last, so it sits on top of the bubble and hides the border under it. */}
       <span className="tooltip-caret" style={{ left: caretX }} />

@@ -1,15 +1,16 @@
+import { SHORTCUTS } from '../shared/shortcuts';
+import type { ShortcutId } from '../shared/shortcuts';
+
 /** Actions the shortcuts drive; implemented in index.ts, which owns the window and views. */
 export interface ShortcutActions {
   navigate: (dir: 'back' | 'forward') => void;
   command: (cmd: string) => void;
 }
 
-// Cmd/Ctrl + Shift + <physical key> -> a utility command sent to the page (share / cursor / theme).
-const SHIFT_COMMANDS: Record<string, string> = {
-  KeyS: 'share',
-  KeyC: 'toggle-cursor',
-  KeyD: 'toggle-theme',
-};
+const BINDINGS = Object.entries(SHORTCUTS).map(([id, def]) => ({
+  id: id as ShortcutId,
+  ...def,
+}));
 
 /** Binds the app's keyboard shortcuts on each target view, so they fire whichever one holds keyboard focus. */
 export function registerKeyboardShortcuts(
@@ -18,26 +19,18 @@ export function registerKeyboardShortcuts(
 ): void {
   const isMac = process.platform === 'darwin';
   const onKey = (event: Electron.Event, input: Electron.Input): void => {
-    if (input.type !== 'keyDown' || input.alt) return;
+    // Ignore auto-repeat so a held shortcut fires once, not a burst (theme strobe / rapid back).
+    if (input.type !== 'keyDown' || input.alt || input.isAutoRepeat) return;
     const mod = isMac ? input.meta : input.control;
     if (!mod) return;
-    if (input.shift) {
-      // Cmd/Ctrl + Shift + S/C/D -> share / cursor / theme (by physical key, layout-proof).
-      const command = SHIFT_COMMANDS[input.code];
-      if (command) {
-        event.preventDefault();
-        actions.command(command);
-      }
-      return;
-    }
-    // Cmd/Ctrl + [ / ] navigate back / forward (Discord-style).
-    if (input.key === '[') {
-      event.preventDefault();
-      actions.navigate('back');
-    } else if (input.key === ']') {
-      event.preventDefault();
-      actions.navigate('forward');
-    }
+    // Match the physical key + Shift (layout-proof: [ / ] work on QWERTZ/AZERTY too).
+    const hit = BINDINGS.find(
+      (b) => b.code === input.code && b.shift === input.shift,
+    );
+    if (!hit) return;
+    event.preventDefault();
+    if (hit.id === 'back' || hit.id === 'forward') actions.navigate(hit.id);
+    else actions.command(hit.id);
   };
   for (const wc of targets) wc.on('before-input-event', onKey);
 }

@@ -28,6 +28,7 @@ export function Controls({
   return (
     <div
       className="no-drag flex items-center gap-2"
+      onMouseDown={tooltipLeave}
       onMouseLeave={tooltipLeave}
     >
       <button

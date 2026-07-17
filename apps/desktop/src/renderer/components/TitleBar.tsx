@@ -1,4 +1,5 @@
 import { useTitleBar } from '../hooks/useTitleBar';
+import { tooltipHover, tooltipLeave } from '../tooltip';
 import { Controls } from './Controls';
 import { Logo } from './Logo';
 import { NavControls } from './NavControls';
@@ -43,8 +44,10 @@ export function TitleBar() {
         <button
           type="button"
           aria-label="Go to home page"
-          title="Home"
           onClick={() => command('home')}
+          onMouseEnter={tooltipHover('home')}
+          onMouseDown={tooltipLeave}
+          onMouseLeave={tooltipLeave}
           className={`no-drag flex h-8 cursor-pointer items-center transition-opacity hover:opacity-80 ${
             isMac ? 'pr-3.5' : 'px-3.5'
           }`}

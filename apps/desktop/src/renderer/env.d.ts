@@ -5,7 +5,8 @@ type TooltipKind =
   | 'forward'
   | 'share'
   | 'toggle-cursor'
-  | 'toggle-theme';
+  | 'toggle-theme'
+  | 'home';
 
 interface TitlebarApi {
   back(): void;

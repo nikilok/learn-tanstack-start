@@ -381,50 +381,6 @@ html[data-desktop] .footer-desktop-link {
   display: none;
 }
 
-/* Electron shell only: a full-width progressive backdrop-blur across the whole
-   top header area that fades scrolled content into the transparent native title
-   bar. Mounted by DesktopScrollMask (gated on the preload flag), so it never
-   renders on the web or in the /download preview. Sits below the search pill
-   (z-50) so the pill stays crisp; hidden at the top, fades in once scrolled.
-   The linear-gradient mask makes the blur strongest across the 46px bar zone
-   then fade to nothing, so there's no hard bottom edge. */
-.desktop-scroll-mask {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 88px;
-  z-index: 40;
-  pointer-events: none;
-  opacity: 0;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    #000 0%,
-    #000 52%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
-  /* Opacity is driven by the document scroll position on the compositor (a CSS
-     scroll-timeline), NOT a JS scroll listener + time-based transition — so the
-     blur ramps in over the first few px of scroll in lockstep with the content,
-     with no perceptible lag on scroll. The `animation` shorthand must precede
-     `animation-timeline` (the shorthand resets the timeline). Electron is
-     Chromium, so scroll-timeline support is guaranteed. */
-  animation: desktop-scroll-mask-in linear both;
-  animation-timeline: scroll(root block);
-  animation-range: 0px 12px;
-}
-@keyframes desktop-scroll-mask-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 .site-footer {
   background: var(--footer-bg);
   border-top: 1px solid var(--footer-line);

@@ -152,7 +152,7 @@ export default function PreviewTitleBar({
           }`}
         >
           <Logo
-            className="h-5 w-auto"
+            className="h-7 w-auto"
             navyColor="var(--tb-mark)"
             redColor="var(--tb-mark-red)"
           />

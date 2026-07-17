@@ -47,8 +47,8 @@ export function TitleBar() {
             isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
           }`}
         >
-          <Logo className="hidden h-5 w-auto sm:block" />
-          <BrandMark className="size-5 sm:hidden" />
+          <Logo className="hidden h-7 w-auto sm:block" />
+          <BrandMark className="size-7 sm:hidden" />
         </button>
         <NavControls
           canGoBack={canGoBack}

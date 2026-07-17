@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+## v0.2.0 — 2026-07-17
+
 A polish pass on the native title bar — flatter, more keyboard-driven, and easier to read.
 
 - **Redesigned title bar** — a cleaner, flatter chrome: the pills and dividers around the logo, back/forward arrows, and page title are gone, the wordmark is larger, and the share / cursor / theme buttons now sit together at the top-right with spacing that matches the web app.

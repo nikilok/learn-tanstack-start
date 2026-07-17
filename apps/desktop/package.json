@@ -1,6 +1,6 @@
 {
   "name": "@ss/desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "SponsorSearch native desktop client — Electron thin-wrapper over the hosted site.",
   "homepage": "https://sponsorsearch.co.uk",

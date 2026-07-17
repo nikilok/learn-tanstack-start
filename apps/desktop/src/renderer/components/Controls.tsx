@@ -1,4 +1,6 @@
-import { Check, Monitor, Moon, MousePointer2, Share2, Sun } from 'lucide-react';
+import { Check, Monitor, Moon, Share2, Sun } from 'lucide-react';
+
+import { CursorIcon, CursorOffIcon } from './CursorIcons';
 
 type Command = 'toggle-theme' | 'toggle-cursor' | 'share';
 
@@ -36,10 +38,10 @@ export function Controls({
         type="button"
         aria-label={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
         title={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
-        className={`grid size-7 cursor-pointer place-items-center rounded-md text-(--tb-fg) transition-opacity hover:opacity-100 ${cursorOn ? 'opacity-[0.55]' : 'opacity-25'}`}
+        className={button}
         onClick={() => onCommand('toggle-cursor')}
       >
-        <MousePointer2 size={16} />
+        {cursorOn ? <CursorIcon /> : <CursorOffIcon />}
       </button>
       <button
         type="button"

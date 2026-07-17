@@ -1,16 +1,9 @@
-import {
-  ArrowLeft,
-  ArrowRight,
-  Monitor,
-  Moon,
-  MousePointer2,
-  Share2,
-  Sun,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, Monitor, Moon, Share2, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
 import { useIsDark } from '../hooks/useIsDark';
+import { CURSOR_PATH } from './CursorIcons';
 import Logo from './Logo';
 import { getInitialMode, type ThemeMode } from './ThemeToggle';
 
@@ -76,7 +69,15 @@ function UtilityControls() {
         <Share2 size={16} />
       </span>
       <span className={item}>
-        <MousePointer2 size={16} />
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d={CURSOR_PATH} />
+        </svg>
       </span>
       <span className={item}>
         <ThemeIcon size={16} />

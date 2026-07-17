@@ -1,15 +1,17 @@
-import { HEADER_ICON_CLASS as iconClass } from './headerControls';
-
-export const CURSOR_PATH =
+// Mirrors apps/web/src/components/CursorIcons.tsx so the title bar's cursor
+// toggle uses the same glyph as the web header — solid = on, dotted = off.
+// Sized 16px to match the other title-bar icons; themed via currentColor.
+const CURSOR_PATH =
   'M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z';
 
-/** Solid filled mouse-pointer glyph shown by `CursorToggle` when the custom cursor is on. */
+/** Solid mouse-pointer glyph — shown when the custom cursor is on. */
 export function CursorIcon() {
   return (
     <svg
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="currentColor"
-      className={iconClass}
       aria-hidden="true"
     >
       <path d={CURSOR_PATH} />
@@ -17,10 +19,12 @@ export function CursorIcon() {
   );
 }
 
-/** Dotted, unfilled mouse-pointer outline shown by `CursorToggle` when the custom cursor is off. */
+/** Dotted, unfilled mouse-pointer outline — shown when the custom cursor is off. */
 export function CursorOffIcon() {
   return (
     <svg
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -28,7 +32,6 @@ export function CursorOffIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeDasharray="2 3"
-      className={iconClass}
       aria-hidden="true"
     >
       <path d={CURSOR_PATH} />

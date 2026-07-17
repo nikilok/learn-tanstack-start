@@ -104,10 +104,8 @@ function createWindow(): void {
   const win = new BaseWindow({
     width: 1280,
     height: 860,
-    // Floor chosen so the centered title pill keeps its full width without
-    // truncating or colliding with the left cluster (it overlaps below ~640px,
-    // truncates below ~900px); the top chrome gets cramped narrower than this.
-    minWidth: 960,
+    // Floor for the flat title bar — below ~680 the centered title (--tb-pill-w) truncates away; 800 keeps a couple of words clear of the logo/nav cluster.
+    minWidth: 800,
     minHeight: 480,
     show: false,
     backgroundColor: INITIAL_BG,

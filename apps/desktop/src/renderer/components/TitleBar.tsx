@@ -1,5 +1,4 @@
 import { useTitleBar } from '../hooks/useTitleBar';
-import { BrandMark } from './BrandMark';
 import { Controls } from './Controls';
 import { Logo } from './Logo';
 import { NavControls } from './NavControls';
@@ -35,20 +34,22 @@ export function TitleBar() {
 
   return (
     <>
-      {/* Left cluster: logo pill + nav pill. macOS reserves the pill's left padding for the
-          native traffic lights; Windows/Linux have no lights there so it's padded normally. */}
-      <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
+      {/* Left cluster: logo Home button + nav arrows. macOS traffic-light gutter is padding on the cluster (a drag region), not the no-drag button — else clicks beside the lights navigate home and lose window-drag. */}
+      <div
+        className={`absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2 ${
+          isMac ? 'pl-[102px]' : ''
+        }`}
+      >
         <button
           type="button"
           aria-label="Go to home page"
           title="Home"
           onClick={() => command('home')}
           className={`no-drag flex h-8 cursor-pointer items-center transition-opacity hover:opacity-80 ${
-            isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
+            isMac ? 'pr-3.5' : 'px-3.5'
           }`}
         >
-          <Logo className="hidden h-7 w-auto sm:block" />
-          <BrandMark className="size-7 sm:hidden" />
+          <Logo className="h-7 w-auto" />
         </button>
         <NavControls
           canGoBack={canGoBack}

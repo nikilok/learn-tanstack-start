@@ -13,23 +13,17 @@
    Default is light; `.dark` (toggled from the page theme) overrides, matching the web app. */
 :root {
   --tb-fg: #1f2430;
-  --tb-faint: #7a7a7a;
-  /* subtle grey fill so the pill stands out on white */
-  --tb-box-bg: rgba(0, 0, 0, 0.05);
-  /* Translucent + tinted toward the CURRENT bg (dark-on-light here), not opaque:
-     the title bar is a separate view that gets the theme one IPC hop after the
-     site background behind it swaps, so for a frame the border is the old theme
-     over the new bg. A translucent same-direction tint blends into that new bg
-     instead of flashing a stark line. */
-  --tb-box-bd: rgba(0, 0, 0, 0.1);
-  /* min/max button hover (Windows/Linux) */
-  --tb-ctrl-hover: rgba(0, 0, 0, 0.08);
-  --tb-pill-w: min(460px, calc(100vw - 490px)); /* < sm: compact brand mark */
-  /* Right utility-cluster inset — FIXED so the share/cursor/theme icons stay frozen
-     at the right end as the window resizes, like Discord's chrome. This is a
-     deliberate divergence from the web header (which anchors them to .page-wrap and
-     drifts them inward on wide windows). 26px lands the rightmost glyph ~34px from
-     the edge (26 + the button's 8px p-2), mirroring the traffic lights' 34px inset. */
+  --tb-ctrl-hover: rgba(
+    0,
+    0,
+    0,
+    0.08
+  ); /* min/max button hover (Windows/Linux) */
+  --tb-pill-w: min(
+    460px,
+    calc(100vw - 490px)
+  ); /* centered title max-width; < sm */
+  /* Fixed inset — icons frozen at the right end (Discord-style, not page-wrap); rightmost glyph ~34px from edge. */
   --tb-controls-right: 26px;
   --tb-mark: #001c55; /* mirrors --logo-navy */
   --tb-mark-red: #c8102e; /* mirrors --logo-red */
@@ -37,19 +31,15 @@
 
 .dark {
   --tb-fg: #e7e9ee;
-  /* lighter fill so the pill lifts off the dark strip */
-  --tb-box-bg: rgba(255, 255, 255, 0.07);
-  --tb-box-bd: rgba(255, 255, 255, 0.12);
   --tb-ctrl-hover: rgba(255, 255, 255, 0.1);
   --tb-mark: #e0e7ff;
   --tb-mark-red: #f87171;
 }
 
-/* The full wordmark shows >= sm; reserve more so the centered title pill shrinks before
-   it can overlap the wider left cluster. Keep in sync with the cluster + controls widths. */
+/* >= sm reserve: widest the centered title can go while just clearing the wider left cluster (logo + nav). */
 @media (min-width: 640px) {
   :root {
-    --tb-pill-w: min(460px, calc(100vw - 640px));
+    --tb-pill-w: min(460px, calc(100vw - 660px));
   }
 }
 

@@ -1,4 +1,5 @@
 type Unsubscribe = () => void;
+type TitlebarCommand = 'toggle-theme' | 'toggle-cursor' | 'share' | 'home';
 
 interface TitlebarApi {
   back(): void;
@@ -11,7 +12,7 @@ interface TitlebarApi {
   onTheme(cb: (t: { dark: boolean; mode: string }) => void): Unsubscribe;
   onCursor(cb: (on: boolean) => void): Unsubscribe;
   onCopied(cb: () => void): Unsubscribe;
-  command(cmd: 'toggle-theme' | 'toggle-cursor' | 'share' | 'home'): void;
+  command(cmd: TitlebarCommand): void;
   platform: string;
   windowControl(action: 'minimize' | 'maximize' | 'close'): void;
   onMaximized(cb: (max: boolean) => void): Unsubscribe;

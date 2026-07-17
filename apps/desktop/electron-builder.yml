@@ -21,8 +21,8 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64, universal]
-    - target: zip # universal zip drives electron-updater on macOS (updates any arch)
-      arch: universal
+    - target: zip # per-arch zips drive electron-updater: it matches process.arch (arm64/x64), never "universal", so a universal-only zip is never picked
+      arch: [arm64, x64]
   artifactName: ${productName}-mac-${version}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false

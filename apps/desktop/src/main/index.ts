@@ -129,7 +129,7 @@ function createWindow(): void {
   const win = new BaseWindow({
     width: 1280,
     height: 860,
-    // Floor for the flat title bar — below ~680 the centered title (--tb-pill-w) truncates away; 800 keeps a couple of words clear of the logo/nav cluster.
+    // Floor for the flat title bar: keeps a usable gap between the logo/nav and utility clusters for the centered title.
     minWidth: 800,
     minHeight: 480,
     show: false,

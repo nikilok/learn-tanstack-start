@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef, useState } from 'react';
+
 import { useTitleBar } from '../hooks/useTitleBar';
 import { tooltipHover, tooltipLeave } from '../tooltip';
 import { Controls } from './Controls';
@@ -24,6 +26,33 @@ export function TitleBar() {
   } = useTitleBar();
   const isMac = platform === 'darwin';
 
+  // Center the title in the gap between the clusters (not the window): measure their inner
+  // edges so it uses all the free space and only truncates when it genuinely can't fit.
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [titleInset, setTitleInset] = useState<{
+    left: number;
+    right: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const l = leftRef.current;
+    const r = rightRef.current;
+    if (!l || !r) return;
+    const GAP = 16; // breathing room between the title and each cluster
+    const measure = (): void =>
+      setTitleInset({
+        left: Math.round(l.getBoundingClientRect().right + GAP),
+        right: Math.round(
+          window.innerWidth - r.getBoundingClientRect().left + GAP,
+        ),
+      });
+    measure();
+    const ro = new ResizeObserver(measure); // clusters are fixed-width, but stay robust
+    ro.observe(l);
+    ro.observe(r);
+    return () => ro.disconnect();
+  }, []);
+
   const controls = (
     <Controls
       themeMode={themeMode}
@@ -37,6 +66,7 @@ export function TitleBar() {
     <>
       {/* Left cluster: logo Home button + nav arrows. macOS traffic-light gutter is padding on the cluster (a drag region), not the no-drag button — else clicks beside the lights navigate home and lose window-drag. */}
       <div
+        ref={leftRef}
         className={`absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2 ${
           isMac ? 'pl-[102px]' : ''
         }`}
@@ -62,15 +92,18 @@ export function TitleBar() {
         />
       </div>
 
-      <TitlePill title={title} />
+      <TitlePill title={title} inset={titleInset} />
 
       {/* Right: utility controls. On Windows/Linux the custom window buttons sit at the corner. */}
       {isMac ? (
-        <div className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2">
+        <div
+          ref={rightRef}
+          className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2"
+        >
           {controls}
         </div>
       ) : (
-        <div className="absolute top-0 right-0 flex h-full">
+        <div ref={rightRef} className="absolute top-0 right-0 flex h-full">
           <div className="flex items-center px-2">{controls}</div>
           <WindowControls maximized={maximized} onAction={windowControl} />
         </div>

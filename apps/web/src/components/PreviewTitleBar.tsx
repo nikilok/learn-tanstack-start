@@ -43,10 +43,10 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
   );
 }
 
-/** Centered pill showing the previewed page's cleaned title — 460px, the shell's computed width at 1280. */
+/** Title centered in the gap between the clusters — the shell's measured 1280 insets (left 361, right 160). */
 function TitlePill({ title }: { title: string }) {
   return (
-    <div className="absolute top-1/2 left-1/2 flex h-8 w-[460px] -translate-x-1/2 -translate-y-1/2 items-center justify-center px-4">
+    <div className="absolute top-1/2 right-[160px] left-[361px] flex h-8 -translate-y-1/2 items-center justify-center">
       <span className="min-w-0 truncate text-[13px] font-medium text-(--tb-fg)">
         {title}
       </span>

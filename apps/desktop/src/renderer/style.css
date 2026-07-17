@@ -19,10 +19,6 @@
     0,
     0.08
   ); /* min/max button hover (Windows/Linux) */
-  --tb-pill-w: min(
-    460px,
-    calc(100vw - 490px)
-  ); /* centered title max-width; < sm */
   /* Fixed inset — icons frozen at the right end (Discord-style, not page-wrap); rightmost glyph ~34px from edge. */
   --tb-controls-right: 26px;
   --tb-mark: #001c55; /* mirrors --logo-navy */
@@ -34,13 +30,6 @@
   --tb-ctrl-hover: rgba(255, 255, 255, 0.1);
   --tb-mark: #e0e7ff;
   --tb-mark-red: #f87171;
-}
-
-/* >= sm reserve: widest the centered title can go while just clearing the wider left cluster (logo + nav). */
-@media (min-width: 640px) {
-  :root {
-    --tb-pill-w: min(460px, calc(100vw - 660px));
-  }
 }
 
 body {

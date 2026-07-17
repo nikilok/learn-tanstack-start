@@ -30,14 +30,14 @@ function TrafficLights() {
 /** Back/forward pill — mirrors the shell's NavControls; back lights up once the demo navigates. */
 function NavPill({ canGoBack }: { canGoBack: boolean }) {
   return (
-    <div className="flex h-8 items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <span
-        className={`grid h-6 w-[30px] place-items-center text-(--tb-fg) ${canGoBack ? 'opacity-[0.55]' : 'opacity-25'}`}
+        className={`grid place-items-center rounded-md p-1.5 text-(--tb-fg) ${canGoBack ? 'opacity-[0.55]' : 'opacity-25'}`}
       >
-        <ArrowLeft size={18} />
+        <ArrowLeft size={22} />
       </span>
-      <span className="grid h-6 w-[30px] place-items-center text-(--tb-fg) opacity-25">
-        <ArrowRight size={18} />
+      <span className="grid place-items-center rounded-md p-1.5 text-(--tb-fg) opacity-25">
+        <ArrowRight size={22} />
       </span>
     </div>
   );

@@ -397,7 +397,6 @@ html[data-desktop] .footer-desktop-link {
   z-index: 40;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.3s ease;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   -webkit-mask-image: linear-gradient(
@@ -407,9 +406,23 @@ html[data-desktop] .footer-desktop-link {
     transparent 100%
   );
   mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
+  /* Opacity is driven by the document scroll position on the compositor (a CSS
+     scroll-timeline), NOT a JS scroll listener + time-based transition — so the
+     blur ramps in over the first few px of scroll in lockstep with the content,
+     with no perceptible lag on scroll. The `animation` shorthand must precede
+     `animation-timeline` (the shorthand resets the timeline). Electron is
+     Chromium, so scroll-timeline support is guaranteed. */
+  animation: desktop-scroll-mask-in linear both;
+  animation-timeline: scroll(root block);
+  animation-range: 0px 12px;
 }
-.desktop-scroll-mask.is-scrolled {
-  opacity: 1;
+@keyframes desktop-scroll-mask-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .site-footer {

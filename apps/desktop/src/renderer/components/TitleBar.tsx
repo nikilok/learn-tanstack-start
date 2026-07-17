@@ -43,7 +43,7 @@ export function TitleBar() {
           aria-label="Go to home page"
           title="Home"
           onClick={() => command('home')}
-          className={`no-drag flex h-8 cursor-pointer items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md transition-colors hover:bg-(--tb-ctrl-hover) ${
+          className={`no-drag flex h-8 cursor-pointer items-center transition-opacity hover:opacity-80 ${
             isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
           }`}
         >

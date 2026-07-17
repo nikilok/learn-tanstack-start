@@ -30,13 +30,12 @@ function TrafficLights() {
 /** Back/forward pill — mirrors the shell's NavControls; back lights up once the demo navigates. */
 function NavPill({ canGoBack }: { canGoBack: boolean }) {
   return (
-    <div className="flex h-8 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
+    <div className="flex h-8 items-center gap-1.5">
       <span
         className={`grid h-6 w-[30px] place-items-center text-(--tb-fg) ${canGoBack ? 'opacity-[0.55]' : 'opacity-25'}`}
       >
         <ArrowLeft size={18} />
       </span>
-      <span className="mx-[3px] h-4 w-px shrink-0 bg-(--tb-box-bd)" />
       <span className="grid h-6 w-[30px] place-items-center text-(--tb-fg) opacity-25">
         <ArrowRight size={18} />
       </span>
@@ -140,7 +139,7 @@ export default function PreviewTitleBar({
       {isMac && <TrafficLights />}
       <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
         <div
-          className={`flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md ${
+          className={`flex h-8 items-center ${
             isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
           }`}
         >

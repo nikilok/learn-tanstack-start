@@ -381,6 +381,37 @@ html[data-desktop] .footer-desktop-link {
   display: none;
 }
 
+/* Electron shell only: a full-width progressive backdrop-blur across the whole
+   top header area that fades scrolled content into the transparent native title
+   bar. Mounted by DesktopScrollMask (gated on the preload flag), so it never
+   renders on the web or in the /download preview. Sits below the search pill
+   (z-50) so the pill stays crisp; hidden at the top, fades in once scrolled.
+   The linear-gradient mask makes the blur strongest across the 46px bar zone
+   then fade to nothing, so there's no hard bottom edge. */
+.desktop-scroll-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 88px;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 52%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
+}
+.desktop-scroll-mask.is-scrolled {
+  opacity: 1;
+}
+
 .site-footer {
   background: var(--footer-bg);
   border-top: 1px solid var(--footer-line);

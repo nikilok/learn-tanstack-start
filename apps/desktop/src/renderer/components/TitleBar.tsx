@@ -39,13 +39,18 @@ export function TitleBar() {
     const r = rightRef.current;
     if (!l || !r) return;
     const GAP = 16; // breathing room between the title and each cluster
-    const measure = (): void =>
-      setTitleInset({
-        left: Math.round(l.getBoundingClientRect().right + GAP),
-        right: Math.round(
-          window.innerWidth - r.getBoundingClientRect().left + GAP,
-        ),
-      });
+    const measure = (): void => {
+      const left = Math.round(l.getBoundingClientRect().right + GAP);
+      const right = Math.round(
+        window.innerWidth - r.getBoundingClientRect().left + GAP,
+      );
+      // Keep the same object when unchanged so React bails on the extra re-render.
+      setTitleInset((prev) =>
+        prev && prev.left === left && prev.right === right
+          ? prev
+          : { left, right },
+      );
+    };
     measure();
     const ro = new ResizeObserver(measure); // clusters are fixed-width, but stay robust
     ro.observe(l);

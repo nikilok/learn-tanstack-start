@@ -43,10 +43,17 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
   );
 }
 
-/** Title centered in the gap between the clusters — the shell's measured 1280 insets (left 361, right 160). */
-function TitlePill({ title }: { title: string }) {
+/** Title centered in the gap between the clusters — a snapshot of the shell's runtime-measured 1280
+    insets, per platform (mac clears the left traffic-light gutter; Windows/Linux clears the wider
+    right cluster of utility icons + window controls). Re-measure if the shell's clusters change. */
+function TitlePill({ title, isMac }: { title: string; isMac: boolean }) {
+  const inset = isMac
+    ? 'left-[361px] right-[160px]'
+    : 'left-[273px] right-[274px]';
   return (
-    <div className="absolute top-1/2 right-[160px] left-[361px] flex h-8 -translate-y-1/2 items-center justify-center">
+    <div
+      className={`absolute top-1/2 flex h-8 -translate-y-1/2 items-center justify-center ${inset}`}
+    >
       <span className="min-w-0 truncate text-[13px] font-medium text-(--tb-fg)">
         {title}
       </span>
@@ -159,7 +166,7 @@ export default function PreviewTitleBar({
         </div>
         <NavPill canGoBack={canGoBack} />
       </div>
-      <TitlePill title={title} />
+      <TitlePill title={title} isMac={isMac} />
       {isMac ? (
         <div className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2">
           <UtilityControls />

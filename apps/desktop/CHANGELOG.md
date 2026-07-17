@@ -8,6 +8,16 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+A polish pass on the native title bar — flatter, more keyboard-driven, and easier to read.
+
+- **Redesigned title bar** — a cleaner, flatter chrome: the pills and dividers around the logo, back/forward arrows, and page title are gone, the wordmark is larger, and the share / cursor / theme buttons now sit together at the top-right with spacing that matches the web app.
+- **Keyboard shortcuts** — get around without the mouse: `⌘[` / `⌘]` go back / forward (`Ctrl+[` / `Ctrl+]` on Windows & Linux), and `⌘⇧S` / `⌘⇧C` / `⌘⇧D` trigger Share, the custom cursor, and the theme toggle.
+- **Keycap tooltips** — hover any title-bar button to see what it does and its shortcut, drawn as little keycaps that follow your light / dark theme.
+- **Smarter page title** — the title centers in the space between the arrows and the icons, showing in full whenever it fits and shortening with an ellipsis only when it genuinely can't.
+- **Scroll blur** — page content softly blurs into the title bar as you scroll, so the two read as one continuous surface.
+- **Matching cursor button** — the custom-cursor toggle now uses the same icon as the web app (solid when on, dotted when off).
+- **Fixes** — no more border flash on the title bar when switching themes, no stray blur lingering after you return home, and clicks near the title bar land where you expect.
+
 ## v0.1.3 — 2026-07-03
 
 The first public build of the SponsorSearch desktop app.

@@ -11,8 +11,9 @@ interface ControlsProps {
   onCommand: (cmd: Command) => void;
 }
 
+// p-2 around an 18px icon = 34px hit target, matching the web header's controls.
 const button =
-  'grid size-7 cursor-pointer place-items-center rounded-md text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100';
+  'grid cursor-pointer place-items-center rounded-md p-2 text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100';
 
 /** Top-right utility buttons (share / cursor / theme) absorbed from the web header. */
 export function Controls({
@@ -32,7 +33,7 @@ export function Controls({
         className={button}
         onClick={() => onCommand('share')}
       >
-        {copied ? <Check size={16} /> : <Share2 size={16} />}
+        {copied ? <Check size={18} /> : <Share2 size={18} />}
       </button>
       <button
         type="button"
@@ -50,7 +51,7 @@ export function Controls({
         className={button}
         onClick={() => onCommand('toggle-theme')}
       >
-        <ThemeIcon size={16} />
+        <ThemeIcon size={18} />
       </button>
     </div>
   );

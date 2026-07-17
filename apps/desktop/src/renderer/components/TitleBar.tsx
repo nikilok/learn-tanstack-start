@@ -62,7 +62,7 @@ export function TitleBar() {
 
       {/* Right: utility controls. On Windows/Linux the custom window buttons sit at the corner. */}
       {isMac ? (
-        <div className="absolute top-1/2 right-5 -translate-y-1/2">
+        <div className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2">
           {controls}
         </div>
       ) : (

@@ -1,4 +1,11 @@
-import { ArrowLeft, ArrowRight, Monitor, Moon, Share2, Sun } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Monitor,
+  Moon,
+  Share2,
+  Sun,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
@@ -62,16 +69,16 @@ function UtilityControls() {
   const mode = useThemeMode();
   const ThemeIcon = mode === 'light' ? Sun : mode === 'dark' ? Moon : Monitor;
   const item =
-    'grid size-7 place-items-center rounded-md text-(--tb-fg) opacity-[0.55]';
+    'grid place-items-center rounded-md p-2 text-(--tb-fg) opacity-[0.55]';
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-2">
       <span className={item}>
-        <Share2 size={16} />
+        <Share2 size={18} />
       </span>
       <span className={item}>
         <svg
-          width="16"
-          height="16"
+          width="18"
+          height="18"
           viewBox="0 0 24 24"
           fill="currentColor"
           aria-hidden="true"
@@ -80,7 +87,7 @@ function UtilityControls() {
         </svg>
       </span>
       <span className={item}>
-        <ThemeIcon size={16} />
+        <ThemeIcon size={18} />
       </span>
     </div>
   );
@@ -154,7 +161,7 @@ export default function PreviewTitleBar({
       </div>
       <TitlePill title={title} />
       {isMac ? (
-        <div className="absolute top-1/2 right-5 -translate-y-1/2">
+        <div className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2">
           <UtilityControls />
         </div>
       ) : (

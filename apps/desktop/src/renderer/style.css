@@ -54,3 +54,84 @@ body {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Nav keycap tooltip — its own overlay view (?role=tooltip). Fixed dark chip à la Discord
+   (reads over both themes); starts hidden and fades in when main shows + fills the view. */
+.nav-tooltip {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  /* Light chip by default; `.dark` (toggled from the page theme) swaps to the dark chip. */
+  --tt-bg: #ffffff;
+  --tt-border: rgba(0, 0, 0, 0.09);
+  --tt-fg: #1f2430;
+  --tt-key-bg: #ffffff; /* mirrors the web kbd: --surface on --line */
+  --tt-key-line: #e4e5e8;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+.dark .nav-tooltip {
+  --tt-bg: #191b21;
+  --tt-border: rgba(255, 255, 255, 0.07);
+  --tt-fg: #e7e9ee;
+  --tt-key-bg: #0e1014;
+  --tt-key-line: #2f323a;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
+}
+.nav-tooltip--shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+.nav-tooltip-caret {
+  width: 10px;
+  height: 10px;
+  margin-bottom: -5px;
+  background: var(--tt-bg);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+.nav-tooltip-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--tt-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: 9px;
+  box-shadow: var(--tt-shadow);
+  color: var(--tt-fg);
+  white-space: nowrap;
+}
+.nav-tooltip-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.nav-tooltip-keys {
+  display: flex;
+  gap: 5px;
+}
+.nav-tooltip-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  background: var(--tt-key-bg);
+  border: 1px solid var(--tt-key-line);
+  border-radius: 4px;
+  box-shadow: 0 1.5px 0 var(--tt-key-line); /* web kbd's raised bottom edge */
+  color: var(--tt-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}

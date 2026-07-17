@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('titlebar', {
   onCursor: (cb: (on: boolean) => void) => subscribe('titlebar:cursor', cb),
   onCopied: (cb: () => void) => subscribe('titlebar:copied', () => cb()),
   command: (cmd: string) => ipcRenderer.send('titlebar:command', cmd),
+  // Bar view reports which arrow is hovered (+ its x); the tooltip view receives what to show.
+  hoverNav: (payload: { kind: string; x: number } | null) =>
+    ipcRenderer.send('titlebar:hover-nav', payload),
+  onNavTooltip: (cb: (payload: { kind: string } | null) => void) =>
+    subscribe('tooltip:nav', cb),
   // Window chrome: which OS we're on, the custom min/max/close actions, and maximise state.
   platform: process.platform,
   windowControl: (action: string) =>

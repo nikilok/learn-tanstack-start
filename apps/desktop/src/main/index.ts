@@ -10,7 +10,9 @@ import {
   WebContentsView,
 } from 'electron';
 
+import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
+import { createTooltipView, positionNavTooltip } from './tooltip-overlay';
 import {
   getPendingUpdateVersion,
   initAutoUpdates,
@@ -51,6 +53,8 @@ const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its the
 let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
+let tooltipView: WebContentsView | null = null;
+let tooltipHideTimer: ReturnType<typeof setTimeout> | undefined;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
@@ -85,6 +89,15 @@ function pushNavState(): void {
   });
 }
 
+/** Drives the site view's history back/forward, then hands keyboard focus back to the page. */
+function navigate(dir: 'back' | 'forward'): void {
+  const h = siteView?.webContents.navigationHistory;
+  if (!h) return;
+  if (dir === 'back' && h.canGoBack()) h.goBack();
+  else if (dir === 'forward' && h.canGoForward()) h.goForward();
+  siteView?.webContents.focus();
+}
+
 /** Strips the SEO site-name suffix so the pill shows just the meaningful title. */
 function cleanTitle(title: string): string {
   return title
@@ -96,6 +109,13 @@ function cleanTitle(title: string): string {
 /** Sends the current page title (cleaned) to the title bar pill. */
 function pushTitle(title: string): void {
   titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
+}
+
+/** Pushes the current theme to both title-bar views — the bar and the tooltip overlay. */
+function broadcastTheme(): void {
+  const payload = { dark: lastDark, mode: lastMode };
+  titleBarView?.webContents.send('titlebar:theme', payload);
+  tooltipView?.webContents.send('titlebar:theme', payload);
 }
 
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
@@ -120,6 +140,7 @@ function createWindow(): void {
       mainWindow = null;
       titleBarView = null;
       siteView = null;
+      tooltipView = null;
     }
   });
   // Keep the custom maximise/restore icon (Windows/Linux) in sync with the window state.
@@ -163,10 +184,17 @@ function createWindow(): void {
   win.contentView.addChildView(view); // site fills the window, behind…
   win.contentView.addChildView(bar); // …the transparent title bar on top
 
+  // A tiny, initially-hidden overlay above everything, positioned per-hover to show the
+  // nav keycap tooltip below the arrows (the 46px bar would otherwise clip it).
+  const tip = createTooltipView();
+  win.contentView.addChildView(tip);
+  tooltipView = tip;
+
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
+    tip.setVisible(false); // stale on resize; the next hover re-positions + shows it
   };
   layout();
   win.on('resize', layout);
@@ -188,6 +216,9 @@ function createWindow(): void {
   wc.on('did-navigate', pushNavState);
   wc.on('did-navigate-in-page', pushNavState);
   wc.on('page-title-updated', (_e, title) => pushTitle(title));
+
+  // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
+  registerKeyboardShortcuts([wc, bar.webContents], { navigate });
 
   // Hand keyboard focus to the site view (not the title bar) so typing reaches the
   // page right away — the web app's type-to-search needs the document focused.
@@ -244,10 +275,7 @@ function registerIpc(): void {
         siteView?.setBackgroundColor(color); // load placeholder; the title bar stays transparent
       }
       // Always push: the mode can change without the colour changing (e.g. dark -> auto).
-      titleBarView?.webContents.send('titlebar:theme', {
-        dark: lastDark,
-        mode: lastMode,
-      });
+      broadcastTheme();
     },
   );
 
@@ -270,14 +298,34 @@ function registerIpc(): void {
     }
   });
 
-  // Back/forward from the title bar -> drive the site view's history.
-  ipcMain.on('titlebar:nav', (_event, dir: 'back' | 'forward') => {
-    const h = siteView?.webContents.navigationHistory;
-    if (!h) return;
-    if (dir === 'back' && h.canGoBack()) h.goBack();
-    if (dir === 'forward' && h.canGoForward()) h.goForward();
-    siteView?.webContents.focus(); // return keyboard focus to the page after navigating
-  });
+  // Back/forward from the title-bar arrows -> drive the site view's history.
+  ipcMain.on('titlebar:nav', (_event, dir: 'back' | 'forward') =>
+    navigate(dir),
+  );
+
+  // Nav-arrow hover from the bar -> position + show the keycap tooltip view (fade + hide on leave).
+  ipcMain.on(
+    'titlebar:hover-nav',
+    (_event, payload: { kind: 'back' | 'forward'; x: number } | null) => {
+      const tip = tooltipView;
+      if (!tip) return;
+      clearTimeout(tooltipHideTimer);
+      if (payload) {
+        positionNavTooltip(
+          tip,
+          TITLEBAR_HEIGHT,
+          mainWindow?.getContentBounds().width ?? 0,
+          payload.x,
+        );
+        tip.webContents.send('tooltip:nav', { kind: payload.kind });
+      } else {
+        tip.webContents.send('tooltip:nav', null);
+        tooltipHideTimer = setTimeout(() => {
+          if (!tip.webContents.isDestroyed()) tip.setVisible(false);
+        }, 200);
+      }
+    },
+  );
 
   // The site's update toast -> restart into the downloaded version.
   ipcMain.on('ss:install-update', () => installPendingUpdate());
@@ -299,9 +347,9 @@ function registerIpc(): void {
     } else if (action === 'close') win.close();
   });
 
-  // Title bar finished loading -> hand it the current state.
-  ipcMain.on('titlebar:ready', () => {
-    titleBarView?.webContents.send('titlebar:theme', {
+  // A title-bar view (bar or tooltip) loaded -> send it the theme; the bar also gets its full state.
+  ipcMain.on('titlebar:ready', (event) => {
+    event.sender.send('titlebar:theme', {
       dark: lastDark,
       mode: lastMode,
     });

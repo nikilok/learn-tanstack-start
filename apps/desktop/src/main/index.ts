@@ -129,8 +129,8 @@ function createWindow(): void {
   const win = new BaseWindow({
     width: 1280,
     height: 860,
-    // Floor for the flat title bar: keeps a usable gap between the logo/nav and utility clusters for the centered title.
-    minWidth: 800,
+    // Floor: the logo/nav and utility clusters collide below ~515; 600 keeps a gap for the centered title and still allows half-screen tiling on 1280/1440 laptops.
+    minWidth: 600,
     minHeight: 480,
     show: false,
     backgroundColor: INITIAL_BG,

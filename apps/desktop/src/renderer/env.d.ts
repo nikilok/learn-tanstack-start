@@ -1,6 +1,11 @@
 type Unsubscribe = () => void;
 type TitlebarCommand = 'toggle-theme' | 'toggle-cursor' | 'share' | 'home';
-type NavTooltipKind = 'back' | 'forward';
+type TooltipKind =
+  | 'back'
+  | 'forward'
+  | 'share'
+  | 'toggle-cursor'
+  | 'toggle-theme';
 
 interface TitlebarApi {
   back(): void;
@@ -14,10 +19,10 @@ interface TitlebarApi {
   onCursor(cb: (on: boolean) => void): Unsubscribe;
   onCopied(cb: () => void): Unsubscribe;
   command(cmd: TitlebarCommand): void;
-  // Nav-arrow hover -> main (bar view); nav tooltip content <- main (tooltip view).
-  hoverNav(payload: { kind: NavTooltipKind; x: number } | null): void;
-  onNavTooltip(
-    cb: (payload: { kind: NavTooltipKind } | null) => void,
+  // Button hover -> main (bar view); tooltip content + caret offset <- main (tooltip view).
+  showTooltip(payload: { kind: TooltipKind; x: number } | null): void;
+  onTooltip(
+    cb: (payload: { kind: TooltipKind; caretX: number } | null) => void,
   ): Unsubscribe;
   platform: string;
   windowControl(action: 'minimize' | 'maximize' | 'close'): void;

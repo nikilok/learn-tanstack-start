@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import type { MouseEvent } from 'react';
+
+import { tooltipHover, tooltipLeave } from '../tooltip';
 
 interface NavControlsProps {
   canGoBack: boolean;
@@ -14,16 +15,6 @@ interface NavControlsProps {
 const button =
   'grid cursor-pointer place-items-center rounded-md p-1.5 text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100 disabled:cursor-default disabled:opacity-25';
 
-// Report the hovered arrow + its centre x so the tooltip overlay view can point at it.
-// Disabled buttons fire no mouse events, so a disabled arrow never raises a tooltip.
-function emitHover(kind: NavTooltipKind) {
-  return (e: MouseEvent<HTMLButtonElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    window.titlebar.hoverNav({ kind, x: Math.round(r.left + r.width / 2) });
-  };
-}
-const clearHover = () => window.titlebar.hoverNav(null);
-
 /** Back/forward arrows — bare (no pill); their own `no-drag` region, positioned by the left cluster in TitleBar. */
 export function NavControls({
   canGoBack,
@@ -31,15 +22,19 @@ export function NavControls({
   onBack,
   onForward,
 }: NavControlsProps) {
+  // Disabled buttons fire no mouse events, so a disabled arrow never raises a tooltip.
   return (
-    <div className="no-drag flex items-center gap-2" onMouseLeave={clearHover}>
+    <div
+      className="no-drag flex items-center gap-2"
+      onMouseLeave={tooltipLeave}
+    >
       <button
         type="button"
         aria-label="Go back"
         className={button}
         disabled={!canGoBack}
         onClick={onBack}
-        onMouseEnter={emitHover('back')}
+        onMouseEnter={tooltipHover('back')}
       >
         <ArrowLeft size={22} />
       </button>
@@ -49,7 +44,7 @@ export function NavControls({
         className={button}
         disabled={!canGoForward}
         onClick={onForward}
-        onMouseEnter={emitHover('forward')}
+        onMouseEnter={tooltipHover('forward')}
       >
         <ArrowRight size={22} />
       </button>

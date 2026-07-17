@@ -1,5 +1,6 @@
 import { Check, Monitor, Moon, Share2, Sun } from 'lucide-react';
 
+import { tooltipHover, tooltipLeave } from '../tooltip';
 import { CursorIcon, CursorOffIcon } from './CursorIcons';
 
 type Command = 'toggle-theme' | 'toggle-cursor' | 'share';
@@ -25,31 +26,34 @@ export function Controls({
   const ThemeIcon =
     themeMode === 'light' ? Sun : themeMode === 'dark' ? Moon : Monitor;
   return (
-    <div className="no-drag flex items-center gap-2">
+    <div
+      className="no-drag flex items-center gap-2"
+      onMouseLeave={tooltipLeave}
+    >
       <button
         type="button"
         aria-label="Share this page"
-        title={copied ? 'Copied to clipboard' : 'Share this page'}
         className={button}
         onClick={() => onCommand('share')}
+        onMouseEnter={tooltipHover('share')}
       >
         {copied ? <Check size={18} /> : <Share2 size={18} />}
       </button>
       <button
         type="button"
         aria-label={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
-        title={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
         className={button}
         onClick={() => onCommand('toggle-cursor')}
+        onMouseEnter={tooltipHover('toggle-cursor')}
       >
         {cursorOn ? <CursorIcon /> : <CursorOffIcon />}
       </button>
       <button
         type="button"
         aria-label="Toggle theme"
-        title={`Theme: ${themeMode}`}
         className={button}
         onClick={() => onCommand('toggle-theme')}
+        onMouseEnter={tooltipHover('toggle-theme')}
       >
         <ThemeIcon size={18} />
       </button>

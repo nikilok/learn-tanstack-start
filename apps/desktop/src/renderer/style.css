@@ -55,15 +55,12 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Nav keycap tooltip — its own overlay view (?role=tooltip). Fixed dark chip à la Discord
-   (reads over both themes); starts hidden and fades in when main shows + fills the view. */
-.nav-tooltip {
+/* Keycap tooltip — its own overlay view (?role=tooltip). Chip à la Discord, theme-aware;
+   hidden until main positions + shows the view. Caret + bubble are absolutely placed (main
+   sends the caret's x within the view) so right-edge buttons still point correctly. */
+.tooltip {
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 6px;
   opacity: 0;
   transform: translateY(-3px);
   transition:
@@ -77,7 +74,7 @@ body {
   --tt-key-line: #e4e5e8;
   --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
 }
-.dark .nav-tooltip {
+.dark .tooltip {
   --tt-bg: #191b21;
   --tt-border: rgba(255, 255, 255, 0.07);
   --tt-fg: #e7e9ee;
@@ -85,19 +82,22 @@ body {
   --tt-key-line: #2f323a;
   --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
 }
-.nav-tooltip--shown {
+.tooltip--shown {
   opacity: 1;
   transform: translateY(0);
 }
-.nav-tooltip-caret {
+.tooltip-caret {
+  position: absolute;
+  top: 6px;
   width: 10px;
   height: 10px;
-  margin-bottom: -5px;
   background: var(--tt-bg);
   border-radius: 2px;
-  transform: rotate(45deg);
+  transform: translateX(-50%) rotate(45deg);
 }
-.nav-tooltip-bubble {
+.tooltip-bubble {
+  position: absolute;
+  top: 11px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -110,15 +110,15 @@ body {
   color: var(--tt-fg);
   white-space: nowrap;
 }
-.nav-tooltip-label {
+.tooltip-label {
   font-size: 13px;
   font-weight: 600;
 }
-.nav-tooltip-keys {
+.tooltip-keys {
   display: flex;
   gap: 5px;
 }
-.nav-tooltip-keys kbd {
+.tooltip-keys kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;

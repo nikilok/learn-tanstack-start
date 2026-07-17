@@ -12,7 +12,7 @@ import {
 
 import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
-import { createTooltipView, positionNavTooltip } from './tooltip-overlay';
+import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
   getPendingUpdateVersion,
   initAutoUpdates,
@@ -96,6 +96,12 @@ function navigate(dir: 'back' | 'forward'): void {
   if (dir === 'back' && h.canGoBack()) h.goBack();
   else if (dir === 'forward' && h.canGoForward()) h.goForward();
   siteView?.webContents.focus();
+}
+
+/** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
+function sendCommand(cmd: string): void {
+  siteView?.webContents.send('ss:command', cmd);
+  if (cmd === 'home') siteView?.webContents.focus(); // type-to-search wants the page focused
 }
 
 /** Strips the SEO site-name suffix so the pill shows just the meaningful title. */
@@ -218,7 +224,10 @@ function createWindow(): void {
   wc.on('page-title-updated', (_e, title) => pushTitle(title));
 
   // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
-  registerKeyboardShortcuts([wc, bar.webContents], { navigate });
+  registerKeyboardShortcuts([wc, bar.webContents], {
+    navigate,
+    command: sendCommand,
+  });
 
   // Hand keyboard focus to the site view (not the title bar) so typing reaches the
   // page right away — the web app's type-to-search needs the document focused.
@@ -280,11 +289,7 @@ function registerIpc(): void {
   );
 
   // Title-bar utility buttons -> the web app's existing handlers (via its preload).
-  ipcMain.on('titlebar:command', (_event, cmd: string) => {
-    siteView?.webContents.send('ss:command', cmd);
-    // Home navigates the page; hand keyboard focus back so type-to-search works right away.
-    if (cmd === 'home') siteView?.webContents.focus();
-  });
+  ipcMain.on('titlebar:command', (_event, cmd: string) => sendCommand(cmd));
   // The web app reports its cursor on/off so the title-bar icon can mirror it.
   ipcMain.on('ss:cursor', (_event, on: boolean) => {
     lastCursorOn = Boolean(on);
@@ -303,23 +308,23 @@ function registerIpc(): void {
     navigate(dir),
   );
 
-  // Nav-arrow hover from the bar -> position + show the keycap tooltip view (fade + hide on leave).
+  // Button hover from the bar -> position + show the keycap tooltip view (fade + hide on leave).
   ipcMain.on(
-    'titlebar:hover-nav',
-    (_event, payload: { kind: 'back' | 'forward'; x: number } | null) => {
+    'titlebar:tooltip',
+    (_event, payload: { kind: string; x: number } | null) => {
       const tip = tooltipView;
       if (!tip) return;
       clearTimeout(tooltipHideTimer);
       if (payload) {
-        positionNavTooltip(
+        const caretX = positionTooltip(
           tip,
           TITLEBAR_HEIGHT,
           mainWindow?.getContentBounds().width ?? 0,
           payload.x,
         );
-        tip.webContents.send('tooltip:nav', { kind: payload.kind });
+        tip.webContents.send('tooltip:show', { kind: payload.kind, caretX });
       } else {
-        tip.webContents.send('tooltip:nav', null);
+        tip.webContents.send('tooltip:show', null);
         tooltipHideTimer = setTimeout(() => {
           if (!tip.webContents.isDestroyed()) tip.setVisible(false);
         }, 200);

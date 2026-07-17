@@ -1,0 +1,34 @@
+/* Compositor-driven progressive blur that fades content into the transparent Electron title
+   bar on scroll. Opacity ramps over the first 12px via a CSS scroll-timeline (no JS listener),
+   so it tracks the scroll with no lag. `animation` must precede `animation-timeline` (the
+   shorthand resets it). Electron is Chromium, so scroll-timeline support is guaranteed. */
+.desktopScrollMask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 88px;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 52%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 52%, transparent 100%);
+  animation: desktop-scroll-mask-in linear both;
+  animation-timeline: scroll(root block);
+  animation-range: 0px 12px;
+}
+@keyframes desktop-scroll-mask-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

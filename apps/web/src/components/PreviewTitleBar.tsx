@@ -3,7 +3,6 @@ import {
   ArrowRight,
   Monitor,
   Moon,
-  MousePointer2,
   Share2,
   Sun,
 } from 'lucide-react';
@@ -11,7 +10,8 @@ import { useEffect, useState } from 'react';
 
 import type { DesktopPlatform } from '../api/releases';
 import { useIsDark } from '../hooks/useIsDark';
-import Logo, { LogoMark } from './Logo';
+import { CURSOR_PATH } from './CursorIcons';
+import Logo from './Logo';
 import { getInitialMode, type ThemeMode } from './ThemeToggle';
 
 import styles from './Preview.module.css';
@@ -30,35 +30,31 @@ function TrafficLights() {
 /** Back/forward pill — mirrors the shell's NavControls; back lights up once the demo navigates. */
 function NavPill({ canGoBack }: { canGoBack: boolean }) {
   return (
-    <div className="flex h-8 items-center rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-[5px] backdrop-blur-sm">
+    <div className="flex items-center gap-2">
       <span
-        className={`grid h-6 w-[30px] place-items-center text-(--tb-fg) ${canGoBack ? 'opacity-[0.55]' : 'opacity-25'}`}
+        className={`grid place-items-center rounded-md p-1.5 text-(--tb-fg) ${canGoBack ? 'opacity-[0.55]' : 'opacity-25'}`}
       >
-        <ArrowLeft size={18} />
+        <ArrowLeft size={22} />
       </span>
-      <span className="mx-[3px] h-4 w-px shrink-0 bg-(--tb-box-bd)" />
-      <span className="grid h-6 w-[30px] place-items-center text-(--tb-fg) opacity-25">
-        <ArrowRight size={18} />
+      <span className="grid place-items-center rounded-md p-1.5 text-(--tb-fg) opacity-25">
+        <ArrowRight size={22} />
       </span>
     </div>
   );
 }
 
-/** SponsorSearch round mark (Union-Jack lens) — the shared LogoMark themed like the shell's BrandMark. */
-function BrandMark({ className }: { className?: string }) {
+/** Title centered in the gap between the clusters — a snapshot of the shell's runtime-measured 1280
+    insets, per platform (mac clears the left traffic-light gutter; Windows/Linux clears the wider
+    right cluster of utility icons + window controls). Re-measure if the shell's clusters change. */
+function TitlePill({ title, isMac }: { title: string; isMac: boolean }) {
+  const inset = isMac
+    ? 'left-[361px] right-[160px]'
+    : 'left-[273px] right-[274px]';
   return (
-    <svg viewBox="0 0 130 130" aria-hidden="true" className={className}>
-      <LogoMark navyColor="var(--tb-mark)" flagRedColor="var(--tb-mark-red)" />
-    </svg>
-  );
-}
-
-/** Centered pill showing the previewed page's cleaned title — 460px, the shell's computed width at 1280. */
-function TitlePill({ title }: { title: string }) {
-  return (
-    <div className="absolute top-1/2 left-1/2 flex h-8 w-[460px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2 rounded-full border border-(--tb-box-bd) bg-(--tb-box-bg) px-4 backdrop-blur-sm">
-      <BrandMark className="size-4 shrink-0" />
-      <span className="min-w-0 truncate text-[13px] font-normal text-(--tb-faint)">
+    <div
+      className={`absolute top-1/2 flex h-8 -translate-y-1/2 items-center justify-center ${inset}`}
+    >
+      <span className="min-w-0 truncate text-[13px] font-medium text-(--tb-fg)">
         {title}
       </span>
     </div>
@@ -80,17 +76,25 @@ function UtilityControls() {
   const mode = useThemeMode();
   const ThemeIcon = mode === 'light' ? Sun : mode === 'dark' ? Moon : Monitor;
   const item =
-    'grid size-7 place-items-center rounded-md text-(--tb-fg) opacity-[0.55]';
+    'grid place-items-center rounded-md p-2 text-(--tb-fg) opacity-[0.55]';
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-2">
       <span className={item}>
-        <Share2 size={16} />
+        <Share2 size={18} />
       </span>
       <span className={item}>
-        <MousePointer2 size={16} />
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d={CURSOR_PATH} />
+        </svg>
       </span>
       <span className={item}>
-        <ThemeIcon size={16} />
+        <ThemeIcon size={18} />
       </span>
     </div>
   );
@@ -150,21 +154,21 @@ export default function PreviewTitleBar({
       {isMac && <TrafficLights />}
       <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
         <div
-          className={`flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md ${
+          className={`flex h-8 items-center ${
             isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
           }`}
         >
           <Logo
-            className="h-5 w-auto"
+            className="h-7 w-auto"
             navyColor="var(--tb-mark)"
             redColor="var(--tb-mark-red)"
           />
         </div>
         <NavPill canGoBack={canGoBack} />
       </div>
-      <TitlePill title={title} />
+      <TitlePill title={title} isMac={isMac} />
       {isMac ? (
-        <div className="absolute top-1/2 right-5 -translate-y-1/2">
+        <div className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2">
           <UtilityControls />
         </div>
       ) : (

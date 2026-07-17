@@ -1,5 +1,7 @@
+import { useLayoutEffect, useRef, useState } from 'react';
+
 import { useTitleBar } from '../hooks/useTitleBar';
-import { BrandMark } from './BrandMark';
+import { tooltipHover, tooltipLeave } from '../tooltip';
 import { Controls } from './Controls';
 import { Logo } from './Logo';
 import { NavControls } from './NavControls';
@@ -24,6 +26,38 @@ export function TitleBar() {
   } = useTitleBar();
   const isMac = platform === 'darwin';
 
+  // Center the title in the gap between the clusters (not the window): measure their inner
+  // edges so it uses all the free space and only truncates when it genuinely can't fit.
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [titleInset, setTitleInset] = useState<{
+    left: number;
+    right: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const l = leftRef.current;
+    const r = rightRef.current;
+    if (!l || !r) return;
+    const GAP = 16; // breathing room between the title and each cluster
+    const measure = (): void => {
+      const left = Math.round(l.getBoundingClientRect().right + GAP);
+      const right = Math.round(
+        window.innerWidth - r.getBoundingClientRect().left + GAP,
+      );
+      // Keep the same object when unchanged so React bails on the extra re-render.
+      setTitleInset((prev) =>
+        prev && prev.left === left && prev.right === right
+          ? prev
+          : { left, right },
+      );
+    };
+    measure();
+    const ro = new ResizeObserver(measure); // clusters are fixed-width, but stay robust
+    ro.observe(l);
+    ro.observe(r);
+    return () => ro.disconnect();
+  }, []);
+
   const controls = (
     <Controls
       themeMode={themeMode}
@@ -35,17 +69,26 @@ export function TitleBar() {
 
   return (
     <>
-      {/* Left cluster: logo pill + nav pill. macOS reserves the pill's left padding for the
-          native traffic lights; Windows/Linux have no lights there so it's padded normally. */}
-      <div className="absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2">
-        <div
-          className={`flex h-8 items-center rounded-lg border border-(--tb-box-bd) bg-(--tb-box-bg) backdrop-blur-md ${
-            isMac ? 'pr-3.5 pl-[102px]' : 'px-3.5'
+      {/* Left cluster: logo Home button + nav arrows. macOS traffic-light gutter is padding on the cluster (a drag region), not the no-drag button — else clicks beside the lights navigate home and lose window-drag. */}
+      <div
+        ref={leftRef}
+        className={`absolute top-1/2 left-2 flex -translate-y-1/2 items-center gap-2 ${
+          isMac ? 'pl-[102px]' : ''
+        }`}
+      >
+        <button
+          type="button"
+          aria-label="Go to home page"
+          onClick={() => command('home')}
+          onMouseEnter={tooltipHover('home')}
+          onMouseDown={tooltipLeave}
+          onMouseLeave={tooltipLeave}
+          className={`no-drag flex h-8 cursor-pointer items-center transition-opacity hover:opacity-80 ${
+            isMac ? 'pr-3.5' : 'px-3.5'
           }`}
         >
-          <Logo className="hidden h-5 w-auto sm:block" />
-          <BrandMark className="size-5 sm:hidden" />
-        </div>
+          <Logo className="h-7 w-auto" />
+        </button>
         <NavControls
           canGoBack={canGoBack}
           canGoForward={canGoForward}
@@ -54,15 +97,18 @@ export function TitleBar() {
         />
       </div>
 
-      <TitlePill title={title} />
+      <TitlePill title={title} inset={titleInset} />
 
       {/* Right: utility controls. On Windows/Linux the custom window buttons sit at the corner. */}
       {isMac ? (
-        <div className="absolute top-1/2 right-5 -translate-y-1/2">
+        <div
+          ref={rightRef}
+          className="absolute top-1/2 right-(--tb-controls-right) -translate-y-1/2"
+        >
           {controls}
         </div>
       ) : (
-        <div className="absolute top-0 right-0 flex h-full">
+        <div ref={rightRef} className="absolute top-0 right-0 flex h-full">
           <div className="flex items-center px-2">{controls}</div>
           <WindowControls maximized={maximized} onAction={windowControl} />
         </div>

@@ -388,8 +388,11 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   param strands the demo unstarted.
 - **PreviewTitleBar.tsx + Preview.module.css mirror the shell chrome**
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
-  46px, traffic lights at x:34/y:16, pill w 460px). Chrome changes in
-  apps/desktop must be hand-mirrored here — including `cleanTitle` in
+  46px, traffic lights at x:34/y:16). The shell measures the title's inset from
+  its cluster edges at runtime; the preview can't, so `TitlePill` hardcodes a
+  per-platform snapshot (mac left-361/right-160, win/linux left-273/right-274) —
+  re-measure and update it if the shell's logo/nav/control sizing changes.
+  Chrome changes in apps/desktop must be hand-mirrored here — including `cleanTitle` in
   usePreviewScenario.ts, a copy of the shell's (apps/desktop/src/main/index.ts);
   keep the regexes identical. Responsive (`sm:`) variants are
   deliberately baked to the ≥sm rendering: parent-page media queries would

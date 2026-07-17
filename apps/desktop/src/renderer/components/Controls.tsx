@@ -1,4 +1,7 @@
-import { Check, Monitor, Moon, MousePointer2, Share2, Sun } from 'lucide-react';
+import { Check, Monitor, Moon, Share2, Sun } from 'lucide-react';
+
+import { tooltipHover, tooltipLeave } from '../tooltip';
+import { CursorIcon, CursorOffIcon } from './CursorIcons';
 
 type Command = 'toggle-theme' | 'toggle-cursor' | 'share';
 
@@ -9,8 +12,9 @@ interface ControlsProps {
   onCommand: (cmd: Command) => void;
 }
 
+// p-2 around an 18px icon = 34px hit target, matching the web header's controls.
 const button =
-  'grid size-7 cursor-pointer place-items-center rounded-md text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100';
+  'grid cursor-pointer place-items-center rounded-md p-2 text-(--tb-fg) opacity-[0.55] transition-opacity hover:opacity-100';
 
 /** Top-right utility buttons (share / cursor / theme) absorbed from the web header. */
 export function Controls({
@@ -22,33 +26,37 @@ export function Controls({
   const ThemeIcon =
     themeMode === 'light' ? Sun : themeMode === 'dark' ? Moon : Monitor;
   return (
-    <div className="no-drag flex items-center gap-0.5">
+    <div
+      className="no-drag flex items-center gap-2"
+      onMouseDown={tooltipLeave}
+      onMouseLeave={tooltipLeave}
+    >
       <button
         type="button"
         aria-label="Share this page"
-        title={copied ? 'Copied to clipboard' : 'Share this page'}
         className={button}
         onClick={() => onCommand('share')}
+        onMouseEnter={tooltipHover('share')}
       >
-        {copied ? <Check size={16} /> : <Share2 size={16} />}
+        {copied ? <Check size={18} /> : <Share2 size={18} />}
       </button>
       <button
         type="button"
         aria-label={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
-        title={cursorOn ? 'Custom cursor on' : 'Custom cursor off'}
-        className={`grid size-7 cursor-pointer place-items-center rounded-md text-(--tb-fg) transition-opacity hover:opacity-100 ${cursorOn ? 'opacity-[0.55]' : 'opacity-25'}`}
+        className={button}
         onClick={() => onCommand('toggle-cursor')}
+        onMouseEnter={tooltipHover('toggle-cursor')}
       >
-        <MousePointer2 size={16} />
+        {cursorOn ? <CursorIcon /> : <CursorOffIcon />}
       </button>
       <button
         type="button"
         aria-label="Toggle theme"
-        title={`Theme: ${themeMode}`}
         className={button}
         onClick={() => onCommand('toggle-theme')}
+        onMouseEnter={tooltipHover('toggle-theme')}
       >
-        <ThemeIcon size={16} />
+        <ThemeIcon size={18} />
       </button>
     </div>
   );

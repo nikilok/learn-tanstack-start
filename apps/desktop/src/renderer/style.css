@@ -13,33 +13,23 @@
    Default is light; `.dark` (toggled from the page theme) overrides, matching the web app. */
 :root {
   --tb-fg: #1f2430;
-  --tb-faint: #7a7a7a;
-  /* subtle grey fill so the pill stands out on white */
-  --tb-box-bg: rgba(0, 0, 0, 0.05);
-  --tb-box-bd: #ebebeb;
-  /* min/max button hover (Windows/Linux) */
-  --tb-ctrl-hover: rgba(0, 0, 0, 0.08);
-  --tb-pill-w: min(460px, calc(100vw - 490px)); /* < sm: compact brand mark */
+  --tb-ctrl-hover: rgba(
+    0,
+    0,
+    0,
+    0.08
+  ); /* min/max button hover (Windows/Linux) */
+  /* Fixed inset — icons frozen at the right end (Discord-style, not page-wrap); rightmost glyph ~34px from edge. */
+  --tb-controls-right: 26px;
   --tb-mark: #001c55; /* mirrors --logo-navy */
   --tb-mark-red: #c8102e; /* mirrors --logo-red */
 }
 
 .dark {
   --tb-fg: #e7e9ee;
-  /* lighter fill so the pill lifts off the dark strip */
-  --tb-box-bg: rgba(255, 255, 255, 0.07);
-  --tb-box-bd: #2a2a2a;
   --tb-ctrl-hover: rgba(255, 255, 255, 0.1);
   --tb-mark: #e0e7ff;
   --tb-mark-red: #f87171;
-}
-
-/* The full wordmark shows >= sm; reserve more so the centered title pill shrinks before
-   it can overlap the wider left cluster. Keep in sync with the cluster + controls widths. */
-@media (min-width: 640px) {
-  :root {
-    --tb-pill-w: min(460px, calc(100vw - 640px));
-  }
 }
 
 body {
@@ -52,4 +42,90 @@ body {
 }
 .no-drag {
   -webkit-app-region: no-drag;
+}
+
+/* Keycap tooltip — its own overlay view (?role=tooltip). Chip à la Discord, theme-aware;
+   hidden until main positions + shows the view. Caret + bubble are absolutely placed (main
+   sends the caret's x within the view) so right-edge buttons still point correctly. */
+.tooltip {
+  position: fixed;
+  inset: 0;
+  -webkit-app-region: no-drag; /* the view reuses index.html's drag body; never drag from here */
+  opacity: 0;
+  transform: translateY(-3px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+  /* Light chip by default; `.dark` (toggled from the page theme) swaps to the dark chip. */
+  --tt-bg: #ffffff;
+  --tt-border: rgba(0, 0, 0, 0.09);
+  --tt-fg: #1f2430;
+  --tt-key-bg: #ffffff; /* mirrors the web kbd: --surface on --line */
+  --tt-key-line: #e4e5e8;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+.dark .tooltip {
+  --tt-bg: #191b21;
+  --tt-border: rgba(255, 255, 255, 0.07);
+  --tt-fg: #e7e9ee;
+  --tt-key-bg: #0e1014;
+  --tt-key-line: #2f323a;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
+}
+.tooltip--shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+.tooltip-caret {
+  position: absolute;
+  top: 6px;
+  width: 10px;
+  height: 10px;
+  background: var(--tt-bg);
+  /* Border only the two edges that form the visible point (after the 45° turn); the lower
+     edges sit inside the bubble, so the point continues the bubble outline with no seam. */
+  border-top: 1px solid var(--tt-border);
+  border-left: 1px solid var(--tt-border);
+  border-radius: 2px 0 0 0;
+  transform: translateX(-50%) rotate(45deg);
+}
+.tooltip-bubble {
+  position: absolute;
+  top: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--tt-bg);
+  border: 1px solid var(--tt-border);
+  border-radius: 9px;
+  box-shadow: var(--tt-shadow);
+  color: var(--tt-fg);
+  white-space: nowrap;
+}
+.tooltip-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.tooltip-keys {
+  display: flex;
+  gap: 5px;
+}
+.tooltip-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  background: var(--tt-key-bg);
+  border: 1px solid var(--tt-key-line);
+  border-radius: 4px;
+  box-shadow: 0 1.5px 0 var(--tt-key-line); /* web kbd's raised bottom edge */
+  color: var(--tt-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
 }

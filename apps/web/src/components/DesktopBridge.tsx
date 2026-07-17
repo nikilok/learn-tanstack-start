@@ -43,6 +43,9 @@ export default function DesktopBridge() {
         setCustomCursorEnabled(!getCustomCursorEnabled());
       } else if (cmd === 'share') {
         share();
+      } else if (cmd === 'home') {
+        // Mirror the web header's logo link: go home and clear the search term.
+        void router.navigate({ to: '/', search: { search: '' } });
       }
     });
   }, [router]);

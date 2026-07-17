@@ -10,7 +10,9 @@ import {
   WebContentsView,
 } from 'electron';
 
+import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
+import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
   getPendingUpdateVersion,
   initAutoUpdates,
@@ -51,6 +53,7 @@ const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its the
 let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
+let tooltipView: WebContentsView | null = null;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
@@ -85,6 +88,21 @@ function pushNavState(): void {
   });
 }
 
+/** Drives the site view's history back/forward, then hands keyboard focus back to the page. */
+function navigate(dir: 'back' | 'forward'): void {
+  const h = siteView?.webContents.navigationHistory;
+  if (!h) return;
+  if (dir === 'back' && h.canGoBack()) h.goBack();
+  else if (dir === 'forward' && h.canGoForward()) h.goForward();
+  siteView?.webContents.focus();
+}
+
+/** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
+function sendCommand(cmd: string): void {
+  siteView?.webContents.send('ss:command', cmd);
+  if (cmd === 'home') siteView?.webContents.focus(); // type-to-search wants the page focused
+}
+
 /** Strips the SEO site-name suffix so the pill shows just the meaningful title. */
 function cleanTitle(title: string): string {
   return title
@@ -98,13 +116,21 @@ function pushTitle(title: string): void {
   titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
 }
 
+/** Pushes the current theme to both title-bar views — the bar and the tooltip overlay. */
+function broadcastTheme(): void {
+  const payload = { dark: lastDark, mode: lastMode };
+  titleBarView?.webContents.send('titlebar:theme', payload);
+  tooltipView?.webContents.send('titlebar:theme', payload);
+}
+
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
   const win = new BaseWindow({
     width: 1280,
     height: 860,
-    minWidth: 380,
+    // Floor for the flat title bar: keeps a usable gap between the logo/nav and utility clusters for the centered title.
+    minWidth: 800,
     minHeight: 480,
     show: false,
     backgroundColor: INITIAL_BG,
@@ -119,6 +145,7 @@ function createWindow(): void {
       mainWindow = null;
       titleBarView = null;
       siteView = null;
+      tooltipView = null;
     }
   });
   // Keep the custom maximise/restore icon (Windows/Linux) in sync with the window state.
@@ -162,10 +189,17 @@ function createWindow(): void {
   win.contentView.addChildView(view); // site fills the window, behind…
   win.contentView.addChildView(bar); // …the transparent title bar on top
 
+  // A tiny, initially-hidden overlay above everything, positioned per-hover to show the
+  // nav keycap tooltip below the arrows (the 46px bar would otherwise clip it).
+  const tip = createTooltipView();
+  win.contentView.addChildView(tip);
+  tooltipView = tip;
+
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
+    tip.setVisible(false); // stale on resize; the next hover re-positions + shows it
   };
   layout();
   win.on('resize', layout);
@@ -187,6 +221,12 @@ function createWindow(): void {
   wc.on('did-navigate', pushNavState);
   wc.on('did-navigate-in-page', pushNavState);
   wc.on('page-title-updated', (_e, title) => pushTitle(title));
+
+  // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
+  registerKeyboardShortcuts([wc, bar.webContents], {
+    navigate,
+    command: sendCommand,
+  });
 
   // Hand keyboard focus to the site view (not the title bar) so typing reaches the
   // page right away — the web app's type-to-search needs the document focused.
@@ -243,17 +283,12 @@ function registerIpc(): void {
         siteView?.setBackgroundColor(color); // load placeholder; the title bar stays transparent
       }
       // Always push: the mode can change without the colour changing (e.g. dark -> auto).
-      titleBarView?.webContents.send('titlebar:theme', {
-        dark: lastDark,
-        mode: lastMode,
-      });
+      broadcastTheme();
     },
   );
 
   // Title-bar utility buttons -> the web app's existing handlers (via its preload).
-  ipcMain.on('titlebar:command', (_event, cmd: string) =>
-    siteView?.webContents.send('ss:command', cmd),
-  );
+  ipcMain.on('titlebar:command', (_event, cmd: string) => sendCommand(cmd));
   // The web app reports its cursor on/off so the title-bar icon can mirror it.
   ipcMain.on('ss:cursor', (_event, on: boolean) => {
     lastCursorOn = Boolean(on);
@@ -267,14 +302,32 @@ function registerIpc(): void {
     }
   });
 
-  // Back/forward from the title bar -> drive the site view's history.
-  ipcMain.on('titlebar:nav', (_event, dir: 'back' | 'forward') => {
-    const h = siteView?.webContents.navigationHistory;
-    if (!h) return;
-    if (dir === 'back' && h.canGoBack()) h.goBack();
-    if (dir === 'forward' && h.canGoForward()) h.goForward();
-    siteView?.webContents.focus(); // return keyboard focus to the page after navigating
-  });
+  // Back/forward from the title-bar arrows -> drive the site view's history.
+  ipcMain.on('titlebar:nav', (_event, dir: 'back' | 'forward') =>
+    navigate(dir),
+  );
+
+  // Button hover from the bar -> position + show the keycap tooltip view (fade + hide on leave).
+  ipcMain.on(
+    'titlebar:tooltip',
+    (_event, payload: { kind: string; x: number } | null) => {
+      const tip = tooltipView;
+      if (!tip) return;
+      if (payload) {
+        const caretX = positionTooltip(
+          tip,
+          TITLEBAR_HEIGHT,
+          mainWindow?.getContentBounds().width ?? 0,
+          payload.x,
+        );
+        tip.webContents.send('tooltip:show', { kind: payload.kind, caretX });
+      } else {
+        // Hide the view immediately: a lingering overlay over page content captures clicks.
+        tip.setVisible(false);
+        tip.webContents.send('tooltip:show', null);
+      }
+    },
+  );
 
   // The site's update toast -> restart into the downloaded version.
   ipcMain.on('ss:install-update', () => installPendingUpdate());
@@ -296,12 +349,11 @@ function registerIpc(): void {
     } else if (action === 'close') win.close();
   });
 
-  // Title bar finished loading -> hand it the current state.
-  ipcMain.on('titlebar:ready', () => {
-    titleBarView?.webContents.send('titlebar:theme', {
-      dark: lastDark,
-      mode: lastMode,
-    });
+  // A title-bar view (bar or tooltip) loaded -> send it the theme; the bar also gets its full state.
+  ipcMain.on('titlebar:ready', (event) => {
+    event.sender.send('titlebar:theme', { dark: lastDark, mode: lastMode });
+    // The rest is bar-only state; skip it when the tooltip view is the one reporting ready.
+    if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send(
       'titlebar:maximized',

@@ -92,7 +92,11 @@ body {
   width: 10px;
   height: 10px;
   background: var(--tt-bg);
-  border-radius: 2px;
+  /* Border only the two edges that form the visible point (after the 45° turn); the lower
+     edges sit inside the bubble, so the point continues the bubble outline with no seam. */
+  border-top: 1px solid var(--tt-border);
+  border-left: 1px solid var(--tt-border);
+  border-radius: 2px 0 0 0;
   transform: translateX(-50%) rotate(45deg);
 }
 .tooltip-bubble {

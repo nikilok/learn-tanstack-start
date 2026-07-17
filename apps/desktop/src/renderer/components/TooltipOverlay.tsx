@@ -51,7 +51,6 @@ export function TooltipOverlay() {
 
   return (
     <div className={`tooltip${shown ? ' tooltip--shown' : ''}`}>
-      <span className="tooltip-caret" style={{ left: caretX }} />
       <span
         ref={bubbleRef}
         className="tooltip-bubble"
@@ -64,6 +63,8 @@ export function TooltipOverlay() {
           ))}
         </span>
       </span>
+      {/* Painted last, so it sits on top of the bubble and hides the border under it. */}
+      <span className="tooltip-caret" style={{ left: caretX }} />
     </div>
   );
 }

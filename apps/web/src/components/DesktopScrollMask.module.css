@@ -11,8 +11,8 @@
   z-index: 40;
   pointer-events: none;
   opacity: 0;
+  /* No -webkit- twin: the Chromium-only shell ignores -webkit-backdrop-filter, and pairing both makes the build's Lightning CSS drop the standard prop the shell needs (killing the blur). */
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,

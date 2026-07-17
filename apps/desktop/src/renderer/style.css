@@ -25,13 +25,12 @@
   /* min/max button hover (Windows/Linux) */
   --tb-ctrl-hover: rgba(0, 0, 0, 0.08);
   --tb-pill-w: min(460px, calc(100vw - 490px)); /* < sm: compact brand mark */
-  /* Right utility-cluster inset, so the share/cursor/theme glyphs line up with the
-     web header's at any matching window width. The web anchors them to .page-wrap
-     (width: min(1200px, 100vw - 2rem), centred, inside the 16px header gutter): its
-     right edge sits max(55px, 50vw - 584px) from the window edge (fixed 55px until
-     ~1264px, then grows as it centres). Subtract the button's 8px (p-2) padding to
-     get the cluster edge. Measured against the live web header; keep in lockstep. */
-  --tb-controls-right: max(47px, calc(50vw - 592px));
+  /* Right utility-cluster inset — FIXED so the share/cursor/theme icons stay frozen
+     at the right end as the window resizes, like Discord's chrome. This is a
+     deliberate divergence from the web header (which anchors them to .page-wrap and
+     drifts them inward on wide windows). 26px lands the rightmost glyph ~34px from
+     the edge (26 + the button's 8px p-2), mirroring the traffic lights' 34px inset. */
+  --tb-controls-right: 26px;
   --tb-mark: #001c55; /* mirrors --logo-navy */
   --tb-mark-red: #c8102e; /* mirrors --logo-red */
 }

@@ -14,8 +14,13 @@ contextBridge.exposeInMainWorld('ssDesktop', {
   reportCursor: (on: boolean) => ipcRenderer.send('ss:cursor', on),
   pokeTheme: () => reportTheme(), // re-report after a mode change that didn't flip the class
   copy: (text: string) => ipcRenderer.send('ss:clipboard', text),
-  onUpdateReady: (cb: (version: string) => void) => {
-    const listener = (_e: IpcRendererEvent, version: string) => cb(version);
+  onUpdateReady: (
+    cb: (update: { version: string; mode: 'install' | 'download' }) => void,
+  ) => {
+    const listener = (
+      _e: IpcRendererEvent,
+      update: { version: string; mode: 'install' | 'download' },
+    ) => cb(update);
     ipcRenderer.on('ss:update-ready', listener);
     // Announce the subscription: main re-offers a pending update to the sender,
     // so an update that landed before hydration isn't lost.

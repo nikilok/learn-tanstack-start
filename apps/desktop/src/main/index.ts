@@ -14,7 +14,7 @@ import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
 import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
-  getPendingUpdateVersion,
+  getPendingUpdate,
   initAutoUpdates,
   installPendingUpdate,
 } from './updater';
@@ -334,8 +334,8 @@ function registerIpc(): void {
   // The toast subscribed (post-hydration, any document) -> offer a pending update.
   // Pushing on load events instead would race hydration and lose the message.
   ipcMain.on('ss:update-subscribe', (event) => {
-    const version = getPendingUpdateVersion();
-    if (version) event.sender.send('ss:update-ready', version);
+    const update = getPendingUpdate();
+    if (update) event.sender.send('ss:update-ready', update);
   });
 
   // Custom window buttons (Windows/Linux) -> drive the native window.
@@ -368,8 +368,8 @@ void app.whenReady().then(() => {
   setupMenu(APP_URL);
   registerIpc();
   createWindow();
-  initAutoUpdates((version) => {
-    siteView?.webContents.send('ss:update-ready', version);
+  initAutoUpdates(APP_URL, (update) => {
+    siteView?.webContents.send('ss:update-ready', update);
   });
 
   app.on('activate', () => {

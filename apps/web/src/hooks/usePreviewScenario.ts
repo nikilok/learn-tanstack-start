@@ -340,9 +340,14 @@ export function usePreviewScenario(
         '#company-timeline-heading',
       );
       if (win && scroller && timelineHeading) {
-        const headingTop =
-          scroller.scrollTop + timelineHeading.getBoundingClientRect().top;
-        await scrollTo(() => headingTop - win.innerHeight * 0.12, 1800);
+        // Re-read the heading's live position each frame — content above it can still settle mid-scroll.
+        await scrollTo(
+          () =>
+            scroller.scrollTop +
+            timelineHeading.getBoundingClientRect().top -
+            win.innerHeight * 0.12,
+          1800,
+        );
         setShot({
           rect: toRect(timelineHeading.getBoundingClientRect()),
           padX: 150,

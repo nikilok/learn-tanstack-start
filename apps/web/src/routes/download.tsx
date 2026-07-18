@@ -87,11 +87,33 @@ const detectArch = createIsomorphicFn()
   .server(() => parseArch(getRequestHeader('user-agent') ?? ''))
   .client(() => parseArch(navigator.userAgent));
 
-// Live-preview demo companies — one is picked at random per visit. Keep names
-// resolving against real sponsor rows: "JP Morgan Chase" needs the "Chase" word
-// (bare "JP Morgan" trigram-matches unrelated Morgans; the row is "JPMorgan
-// Chase Bank, National Association", so the top-hit fallback clicks it).
-const PREVIEW_COMPANIES = ['Checkout', 'PhysicsX', 'JP Morgan Chase', 'Boeing'];
+// Live-preview demo companies — one is picked at random per visit. Each is a
+// mapped HMRC sponsor with a rich details page (a rename chain + real address
+// moves from companies_house_profile_trails) to show off the timeline, and each
+// term is verified to resolve to that exact company as the top search hit.
+// Regenerate from a trail/rename query if the set goes stale.
+const PREVIEW_COMPANIES = [
+  'KleanDrive',
+  'Ashbrookes',
+  'Original Biryaniwala',
+  'Interactive Design Institute',
+  'Klaspad',
+  'Closed Loop Medicine',
+  'Marel',
+  'MH Merchant',
+  'SPEAR-UK',
+  'MIE Solutions',
+  'Rainbow House Nursery',
+  'Sheffield Industrial Saws',
+  'Fuse Energy Supply',
+  'Carma International',
+  'Martin Tripp Associates',
+  'Xplus London',
+  'Wipro Connected Services',
+  'IDP Connect',
+  'Protected Trust Services',
+  'Beautiful Bifolds',
+];
 
 // Rolling-hills wallpapers behind the preview window (public/download/, WebP).
 const PREVIEW_WALLPAPER = {

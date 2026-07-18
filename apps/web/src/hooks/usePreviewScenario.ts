@@ -90,8 +90,8 @@ function clickLink(el: HTMLElement): void {
 /**
  * Drives the /download live preview like a user: waits for the iframed app to
  * hydrate, types the company name into the search box, lets the real results
- * stream in, clicks the matching card through to its details page, then
- * scrolls that page to the bottom so the demo ends on the full map + footer.
+ * stream in, clicks the matching card through to its details page, then reads
+ * down it — zooming in on the timeline — before pulling back on the map + footer.
  * Returns the camera shot plus the title/back state the fake title bar mirrors.
  * `ready` gates the whole scenario — the iframe mounts deferred, and refs
  * changing alone would never re-run the effect.
@@ -126,12 +126,12 @@ export function usePreviewScenario(
       }
     };
 
-    /** Eased scroll of the iframed page to its bottom — reads like a user scrolling; stops on abort. */
-    const scrollDetailsToBottom = (ms: number) =>
+    /** Eased scroll to a live target scrollTop (re-read each frame, since late map
+     * tiles / footer keep growing the page); reads like a user scrolling; stops on abort. */
+    const scrollTo = (targetFn: () => number, ms: number) =>
       new Promise<void>((resolve) => {
-        const win = frame.contentWindow;
         const scroller = doc()?.scrollingElement;
-        if (!win || !scroller) {
+        if (!scroller) {
           resolve();
           return;
         }
@@ -144,16 +144,20 @@ export function usePreviewScenario(
             resolve();
             return;
           }
-          // Re-read the target each frame: late map tiles / footer can still
-          // be growing the page while we scroll.
-          const to = scroller.scrollHeight - win.innerHeight;
           const t = Math.min(1, (now - start) / ms);
-          scroller.scrollTop = from + (to - from) * ease(t);
+          scroller.scrollTop = from + (targetFn() - from) * ease(t);
           if (t < 1) requestAnimationFrame(step);
           else resolve();
         };
         requestAnimationFrame(step);
       });
+
+    /** Live bottom of the page (scrollHeight − viewport). */
+    const pageBottom = () => {
+      const win = frame.contentWindow;
+      const scroller = doc()?.scrollingElement;
+      return win && scroller ? scroller.scrollHeight - win.innerHeight : 0;
+    };
 
     /** Best result card for `company`: exact name, then prefix, then substring, then the top hit. */
     const findCard = () => {
@@ -326,10 +330,31 @@ export function usePreviewScenario(
       }
       setShot({ rect: null, ms: 1800 });
 
-      // Once the pull-back settles, read down to the bottom of the page so the
-      // demo ends on the full map and footer, not a half-cropped map.
+      // Once the pull-back settles, guide the eye onto the timeline: scroll it into
+      // view, zoom in close to read it, then keep scrolling down (still close)
+      // before pulling all the way back on the full map + footer to end the demo.
       await sleep(2000, signal);
-      await scrollDetailsToBottom(2000);
+      const win = frame.contentWindow;
+      const scroller = doc()?.scrollingElement;
+      const timelineHeading = doc()?.querySelector<HTMLElement>(
+        '#company-timeline-heading',
+      );
+      if (win && scroller && timelineHeading) {
+        const headingTop =
+          scroller.scrollTop + timelineHeading.getBoundingClientRect().top;
+        await scrollTo(() => headingTop - win.innerHeight * 0.12, 1800);
+        setShot({
+          rect: toRect(timelineHeading.getBoundingClientRect()),
+          padX: 150,
+          padY: 200,
+          maxZ: 1.4,
+          ms: 1100,
+        });
+        await sleep(1800, signal);
+      }
+      // Keep descending — still zoomed if we zoomed — then pull all the way back.
+      await scrollTo(pageBottom, 3500);
+      setShot({ rect: null, ms: 1400 });
     }
 
     // Rejections are aborts or stalls; on a live stall, at least bring the

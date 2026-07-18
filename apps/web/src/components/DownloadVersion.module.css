@@ -1,0 +1,20 @@
+/* Blue hairline between versions — a link-blue gradient fading out at both ends, echoing the page's grid. */
+.versionDivider {
+  position: relative;
+}
+
+.versionDivider::before {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--link-blue) 50%,
+    transparent
+  );
+  opacity: 0.55;
+  pointer-events: none;
+}

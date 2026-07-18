@@ -187,6 +187,32 @@ export function formatDate(dateStr?: string | null) {
 }
 
 /**
+ * Format the gap between `date` and now as a human-readable relative string
+ * ("a few seconds ago", "5 mins ago", "3 hours ago", "2 days ago", "4 months
+ * ago", "2 years ago"). Empty string for an invalid date. Powers the footer's
+ * ingestion freshness pill and each download's release age.
+ */
+export function formatRelative(date: Date): string {
+  if (Number.isNaN(date.getTime())) return '';
+  const diffSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (diffSec < 45) return 'a few seconds ago';
+  if (diffSec < 90) return '1 min ago';
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 45) return `${diffMin} mins ago`;
+  if (diffMin < 90) return '1 hour ago';
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 22) return `${diffHr} hours ago`;
+  if (diffHr < 36) return '1 day ago';
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 26) return `${diffDay} days ago`;
+  const diffMonth = Math.round(diffDay / 30.44);
+  if (diffMonth < 12)
+    return diffMonth <= 1 ? '1 month ago' : `${diffMonth} months ago`;
+  const diffYear = Math.round(diffDay / 365.25);
+  return diffYear <= 1 ? '1 year ago' : `${diffYear} years ago`;
+}
+
+/**
  * Whether the user has requested reduced motion via the OS. Returns `false` on
  * the server (no `window`).
  */

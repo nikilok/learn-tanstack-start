@@ -1,6 +1,8 @@
 import { app, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
+import { isNewer } from './version';
+
 // Long-running apps re-check on this cadence; the launch check fires immediately.
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
@@ -51,20 +53,6 @@ function simulateUpdateValue(): string | null {
 /** True on a Linux install electron-updater can't replace in place (.deb/.rpm — no AppImage to swap; detected via the AppImage-only APPIMAGE env). */
 function isManualUpdateLinux(): boolean {
   return process.platform === 'linux' && !process.env.APPIMAGE;
-}
-
-/** Numeric x.y.z compare — true when `feed` is a higher version than `current`. Non-numeric segments fall back to 0 (not NaN, which would poison the compare); our releases are always clean x.y.z. */
-function isNewer(feed: string, current: string): boolean {
-  const f = feed.split('-')[0].split('.').map(Number);
-  const c = current.split('-')[0].split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    const fv = f[i];
-    const cv = c[i];
-    const a = typeof fv === 'number' && Number.isFinite(fv) ? fv : 0;
-    const b = typeof cv === 'number' && Number.isFinite(cv) ? cv : 0;
-    if (a !== b) return a > b;
-  }
-  return false;
 }
 
 /** deb/rpm can't self-update, so read the feed version directly and, if newer, offer a manual-download toast instead of failing silently. Sets `pending` and notifies on a hit; logs (never throws) on any miss so a stuck check is diagnosable. */

@@ -65,6 +65,9 @@ const config = defineConfig({
   optimizeDeps: {
     exclude: ['@tanstack/start-server-core'],
   },
+  build: {
+    cssMinify: 'esbuild',
+  },
 });
 
 export default config;

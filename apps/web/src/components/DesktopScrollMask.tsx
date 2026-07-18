@@ -3,11 +3,12 @@ import { useEffect, useState } from 'react';
 
 import styles from './DesktopScrollMask.module.css';
 
-/** Top-edge progressive backdrop-blur that fades content into the transparent Electron title bar on scroll (CSS scroll-timeline in the module). Native shell only — gated on the preload flag, so the web and /download preview never subscribe. */
+/** Top-edge progressive backdrop-blur that fades content into the transparent Electron title bar on scroll (CSS scroll-timeline in the module). Desktop chrome only — the native shell AND the /download preview, both of which get `data-desktop` stamped pre-paint; the plain web doesn't. */
 export default function DesktopScrollMask() {
   const [active, setActive] = useState(false);
   useEffect(() => {
-    if (window.isSponsorSearchDesktop) setActive(true); // native shell only
+    // data-desktop marks the desktop chrome (native shell OR the /download preview iframe).
+    if (document.documentElement.hasAttribute('data-desktop')) setActive(true);
   }, []);
 
   return active ? <ShellScrollMask /> : null;

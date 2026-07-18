@@ -1,6 +1,40 @@
 import { describe, expect, test } from 'bun:test';
 
-import { companySearchName } from './utils.ts';
+import { cleanTitle, companySearchName } from './utils.ts';
+
+// These cases MUST stay in lockstep with apps/desktop/src/main/site.test.ts —
+// the two cleanTitle copies mirror each other, and drift breaks the desktop preview title.
+describe('cleanTitle (web mirror of the desktop shell)', () => {
+  test('strips a pipe-separated site name (with or without .co.uk)', () => {
+    expect(cleanTitle('Acme Ltd | SponsorSearch')).toBe('Acme Ltd');
+    expect(cleanTitle('Acme Ltd | SponsorSearch.co.uk')).toBe('Acme Ltd');
+  });
+
+  test('strips hyphen / en-dash / em-dash separated site names', () => {
+    expect(cleanTitle('Acme Ltd - SponsorSearch')).toBe('Acme Ltd');
+    expect(cleanTitle('Acme Ltd – SponsorSearch')).toBe('Acme Ltd');
+    expect(cleanTitle('Acme Ltd — SponsorSearch')).toBe('Acme Ltd');
+  });
+
+  test('strips the "- UK Visa Sponsor" suffix', () => {
+    expect(cleanTitle('Acme Ltd - UK Visa Sponsor')).toBe('Acme Ltd');
+  });
+
+  test('is case-insensitive on the suffix', () => {
+    expect(cleanTitle('Acme Ltd | sponsorsearch')).toBe('Acme Ltd');
+  });
+
+  test('leaves a suffix-less title untouched (trimmed)', () => {
+    expect(cleanTitle('Just A Company')).toBe('Just A Company');
+    expect(cleanTitle('  Padded  ')).toBe('Padded');
+  });
+
+  test('only strips a trailing suffix, not a mid-title mention', () => {
+    expect(cleanTitle('SponsorSearch helps Acme Ltd')).toBe(
+      'SponsorSearch helps Acme Ltd',
+    );
+  });
+});
 
 describe('companySearchName', () => {
   test('strips trailing legal suffixes', () => {

@@ -12,9 +12,10 @@ import {
 
 import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
+import { cleanTitle, desktopUserAgent } from './site';
 import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
-  getPendingUpdateVersion,
+  getPendingUpdate,
   initAutoUpdates,
   installPendingUpdate,
 } from './updater';
@@ -66,14 +67,6 @@ function isDarkColor(hex: string): boolean {
   return 0.299 * r + 0.587 * g + 0.114 * b < 140;
 }
 
-/** Chrome-like UA with the "Electron" token stripped (so the WAF sees a normal browser) plus a desktop marker. */
-function desktopUserAgent(defaultUA: string): string {
-  const chromeUA = defaultUA
-    .replace(/ Electron\/[\d.]+/, '')
-    .replace(new RegExp(` ${app.getName()}\\/[\\d.]+`), '');
-  return `${chromeUA} SponsorSearchDesktop/${app.getVersion()}`;
-}
-
 /** Sends any off-origin http(s) link to the user's default browser. */
 function openExternal(url: string): void {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);
@@ -101,14 +94,6 @@ function navigate(dir: 'back' | 'forward'): void {
 function sendCommand(cmd: string): void {
   siteView?.webContents.send('ss:command', cmd);
   if (cmd === 'home') siteView?.webContents.focus(); // type-to-search wants the page focused
-}
-
-/** Strips the SEO site-name suffix so the pill shows just the meaningful title. */
-function cleanTitle(title: string): string {
-  return title
-    .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
-    .replace(/\s*-\s*UK Visa Sponsor\s*$/i, '')
-    .trim();
 }
 
 /** Sends the current page title (cleaned) to the title bar pill. */
@@ -205,7 +190,9 @@ function createWindow(): void {
   win.on('resize', layout);
 
   const wc = view.webContents;
-  wc.setUserAgent(desktopUserAgent(wc.getUserAgent()));
+  wc.setUserAgent(
+    desktopUserAgent(wc.getUserAgent(), app.getName(), app.getVersion()),
+  );
 
   // Same-origin navigation stays in-app; everything else opens in the browser.
   wc.on('will-navigate', (event, url) => {
@@ -334,8 +321,8 @@ function registerIpc(): void {
   // The toast subscribed (post-hydration, any document) -> offer a pending update.
   // Pushing on load events instead would race hydration and lose the message.
   ipcMain.on('ss:update-subscribe', (event) => {
-    const version = getPendingUpdateVersion();
-    if (version) event.sender.send('ss:update-ready', version);
+    const update = getPendingUpdate();
+    if (update) event.sender.send('ss:update-ready', update);
   });
 
   // Custom window buttons (Windows/Linux) -> drive the native window.
@@ -368,8 +355,8 @@ void app.whenReady().then(() => {
   setupMenu(APP_URL);
   registerIpc();
   createWindow();
-  initAutoUpdates((version) => {
-    siteView?.webContents.send('ss:update-ready', version);
+  initAutoUpdates(APP_URL, (update) => {
+    siteView?.webContents.send('ss:update-ready', update);
   });
 
   app.on('activate', () => {

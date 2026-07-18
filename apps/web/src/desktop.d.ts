@@ -1,4 +1,13 @@
 // The bridge the Electron shell's preload exposes (see apps/desktop/src/preload/index.ts).
+
+/** How the shell wants a ready update applied. */
+type DesktopUpdateMode = 'install' | 'download';
+/** A ready update from the shell. Older shells sent just the version string; newer ones send this. */
+interface DesktopUpdateInfo {
+  version: string;
+  mode: DesktopUpdateMode;
+}
+
 interface SsDesktop {
   /** Subscribe to title-bar commands; returns an unsubscribe fn. */
   onCommand(cb: (cmd: string) => void): () => void;
@@ -8,9 +17,9 @@ interface SsDesktop {
   pokeTheme(): void;
   /** Copy text via the main-process clipboard (works without a user gesture). */
   copy(text: string): void;
-  /** Subscribe to "update downloaded & ready" (fires with the new version); returns an unsubscribe fn. Optional: older shells predate it. */
-  onUpdateReady?(cb: (version: string) => void): () => void;
-  /** Quit and restart into the downloaded update. Optional: older shells predate it. */
+  /** Subscribe to a ready update; older shells send a bare version string, newer ones send { version, mode }. Returns an unsubscribe fn. Optional: older shells predate it. */
+  onUpdateReady?(cb: (update: string | DesktopUpdateInfo) => void): () => void;
+  /** Act on the ready update — restart to install, or open /download for a Linux manual update. Optional: older shells predate it. */
   installUpdate?(): void;
 }
 

@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+- **Linux update prompts** — `.deb` (Debian/Ubuntu) and `.rpm` (Fedora) installs can't update themselves in place, so SponsorSearch now checks for new releases and shows a prompt linking to the download page, instead of silently staying on an old version.
+
 ## v0.2.1 — 2026-07-17
 
 - **Fixed macOS auto-updates** — 0.2.0 couldn't install its own updates on Apple Silicon or Intel Macs (a packaging mismatch: it shipped a universal update package the updater couldn't match to your Mac's architecture). Now fixed with per-architecture packages, so updates apply cleanly again. Windows and Linux were unaffected — and if you're updating from 0.1.5 on a Mac, this also brings the full 0.2.0 title-bar refresh.

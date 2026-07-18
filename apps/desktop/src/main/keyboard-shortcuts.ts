@@ -12,6 +12,31 @@ const BINDINGS = Object.entries(SHORTCUTS).map(([id, def]) => ({
   ...def,
 }));
 
+/** The subset of Electron.Input that shortcut-matching reads — kept minimal so it's testable without an Electron event. */
+export interface ShortcutInput {
+  type: string;
+  code: string;
+  shift: boolean;
+  alt: boolean;
+  meta: boolean;
+  control: boolean;
+  isAutoRepeat: boolean;
+}
+
+/** The shortcut an input triggers, or null. Fires only on a keyDown carrying the platform modifier (⌘ on mac, Ctrl elsewhere), no Alt, not an auto-repeat, and a physical-code + Shift match (layout-proof: [ / ] work on QWERTZ/AZERTY). */
+export function matchShortcut(
+  input: ShortcutInput,
+  isMac: boolean,
+): ShortcutId | null {
+  if (input.type !== 'keyDown' || input.alt || input.isAutoRepeat) return null;
+  const mod = isMac ? input.meta : input.control;
+  if (!mod) return null;
+  const hit = BINDINGS.find(
+    (b) => b.code === input.code && b.shift === input.shift,
+  );
+  return hit ? hit.id : null;
+}
+
 /** Binds the app's keyboard shortcuts on each target view, so they fire whichever one holds keyboard focus. */
 export function registerKeyboardShortcuts(
   targets: Electron.WebContents[],
@@ -19,18 +44,11 @@ export function registerKeyboardShortcuts(
 ): void {
   const isMac = process.platform === 'darwin';
   const onKey = (event: Electron.Event, input: Electron.Input): void => {
-    // Ignore auto-repeat so a held shortcut fires once, not a burst (theme strobe / rapid back).
-    if (input.type !== 'keyDown' || input.alt || input.isAutoRepeat) return;
-    const mod = isMac ? input.meta : input.control;
-    if (!mod) return;
-    // Match the physical key + Shift (layout-proof: [ / ] work on QWERTZ/AZERTY too).
-    const hit = BINDINGS.find(
-      (b) => b.code === input.code && b.shift === input.shift,
-    );
-    if (!hit) return;
+    const id = matchShortcut(input, isMac);
+    if (!id) return;
     event.preventDefault();
-    if (hit.id === 'back' || hit.id === 'forward') actions.navigate(hit.id);
-    else actions.command(hit.id);
+    if (id === 'back' || id === 'forward') actions.navigate(id);
+    else actions.command(id);
   };
   for (const wc of targets) wc.on('before-input-event', onKey);
 }

@@ -60,7 +60,7 @@
 /* min-height:0 lets the row collapse. visibility (legacy delayed-hide — no allow-discrete, works in Safari) keeps closed content out of the a11y/tab order yet visible through the collapse. */
 .versionDivider .panel {
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   visibility: hidden;
   transition: visibility 450ms;
 }

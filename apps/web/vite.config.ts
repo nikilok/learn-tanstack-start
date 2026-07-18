@@ -65,10 +65,6 @@ const config = defineConfig({
   optimizeDeps: {
     exclude: ['@tanstack/start-server-core'],
   },
-  build: {
-    // esbuild, not Lightning CSS — Lightning CSS reorders/collapses hand-authored CSS and silently breaks it in prod-only builds (bit us on transition-behavior + backdrop-filter). Load-bearing; keep local === prod.
-    cssMinify: 'esbuild',
-  },
 });
 
 export default config;

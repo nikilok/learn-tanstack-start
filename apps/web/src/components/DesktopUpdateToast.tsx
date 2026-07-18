@@ -29,7 +29,22 @@ export default function DesktopUpdateToast() {
     });
   }, []);
 
+  const dismiss = () => {
+    if (version) window.sessionStorage.setItem(DISMISS_KEY, version);
+    setVersion(null);
+  };
+
   const isDownload = mode === 'download';
+  const Icon = isDownload ? Download : RefreshCw;
+  const label = isDownload
+    ? `Click to download v${version}`
+    : `Click to update to v${version}`;
+  const title = isDownload
+    ? `Download v${version}`
+    : `Restart to install v${version}`;
+  const aria = isDownload
+    ? `Update available — download v${version}`
+    : `Update available — restart to install v${version}`;
 
   return (
     // Persistent live region so the toast's arrival is announced to assistive tech.
@@ -40,43 +55,29 @@ export default function DesktopUpdateToast() {
         <div className="relative w-64 animate-[update-toast-in_240ms_ease-out] rounded-xl border border-(--line) bg-(--bg-base) shadow-lg transition-shadow duration-200 hover:shadow-xl">
           <button
             type="button"
-            aria-label={
-              isDownload
-                ? `Update available — download v${version}`
-                : `Update available — restart to install v${version}`
-            }
-            title={
-              isDownload
-                ? `Download v${version}`
-                : `Restart to install v${version}`
-            }
+            aria-label={aria}
+            title={title}
             className="w-full cursor-pointer rounded-xl px-4 py-3 text-left"
-            onClick={() => window.ssDesktop?.installUpdate?.()}
+            onClick={() => {
+              window.ssDesktop?.installUpdate?.();
+              // Download opens an external tab and the app keeps running, so dismiss the
+              // toast here; the install variant quits the app, making its removal moot.
+              if (isDownload) dismiss();
+            }}
           >
             <span className="block text-sm font-semibold">
               Update available
             </span>
             <span className="mt-1 flex items-center gap-2">
-              {isDownload ? (
-                <Download size={13} className="shrink-0 text-(--logo-red)" />
-              ) : (
-                <RefreshCw size={13} className="shrink-0 text-(--logo-red)" />
-              )}
-              <span className="truncate text-xs opacity-70">
-                {isDownload
-                  ? `Click to download v${version}`
-                  : `Click to update to v${version}`}
-              </span>
+              <Icon size={13} className="shrink-0 text-(--logo-red)" />
+              <span className="truncate text-xs opacity-70">{label}</span>
             </span>
           </button>
           <button
             type="button"
             aria-label="Dismiss"
             className="absolute top-3 right-4 grid size-5 cursor-pointer place-items-center rounded opacity-50 transition-opacity hover:opacity-100"
-            onClick={() => {
-              window.sessionStorage.setItem(DISMISS_KEY, version);
-              setVersion(null);
-            }}
+            onClick={dismiss}
           >
             <X size={14} />
           </button>

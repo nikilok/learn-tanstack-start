@@ -28,6 +28,14 @@ export function titleCase(str: string | null) {
     );
 }
 
+/** Strips the SEO site-name suffix so the desktop preview's title bar shows just the page name. Mirror of the shell's cleanTitle (apps/desktop/src/main/site.ts) — keep the regexes identical (both copies are covered by matching tests). */
+export function cleanTitle(title: string): string {
+  return title
+    .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
+    .replace(/\s*-\s*UK Visa Sponsor\s*$/i, '')
+    .trim();
+}
+
 /**
  * Lowercase and replace runs of non-alphanumeric characters with `-`,
  * trimming leading/trailing dashes. Used to build URL-safe path segments.

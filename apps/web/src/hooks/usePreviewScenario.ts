@@ -1,6 +1,6 @@
 import { type RefObject, useEffect, useState } from 'react';
 
-import { prefersReducedMotion } from '../utils';
+import { cleanTitle, prefersReducedMotion } from '../utils';
 import { APP_NAME } from '../utils/app-meta';
 
 /** What the scene camera should look at: an app-content rect (iframe-viewport coords) or the whole scene (`rect: null`). */
@@ -22,14 +22,6 @@ const toRect = (r: DOMRect) => ({
   width: r.width,
   height: r.height,
 });
-
-/** Strips the SEO site-name suffixes so the pill shows just the page name — mirrors the shell's cleanTitle (apps/desktop/src/main/index.ts); keep the regexes identical. */
-function cleanTitle(title: string): string {
-  return title
-    .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
-    .replace(/\s*-\s*UK Visa Sponsor\s*$/i, '')
-    .trim();
-}
 
 /** Abortable delay — rejects when the scenario tears down mid-sleep. */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

@@ -16,6 +16,8 @@ import {
 } from './downloadMeta';
 import { ReleaseNotesMarkdown } from './ReleaseNotesMarkdown';
 
+import styles from './DownloadVersion.module.css';
+
 /** Down-arrow affordance for a download row. */
 function DownloadArrow({ className }: { className?: string }) {
   return (
@@ -153,7 +155,7 @@ export function DownloadVersion({
   owner: boolean;
 }) {
   return (
-    <details open={defaultOpen} className="group border-t border-(--line)">
+    <details open={defaultOpen} className={`group ${styles.versionDivider}`}>
       <summary className="flex cursor-pointer list-none items-center gap-3 py-4 [&::-webkit-details-marker]:hidden">
         <span className="text-2xl font-medium text-(--sea-ink)">
           {release.version}

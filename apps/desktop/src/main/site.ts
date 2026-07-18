@@ -10,9 +10,12 @@ export function desktopUserAgent(
   appName: string,
   appVersion: string,
 ): string {
+  // Escape the app name before it enters a RegExp: a productName with a regex
+  // metacharacter would otherwise throw (unterminated class) or fail to strip its token.
+  const escapedName = appName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const chromeUA = defaultUA
     .replace(/ Electron\/[\d.]+/, '')
-    .replace(new RegExp(` ${appName}\\/[\\d.]+`), '');
+    .replace(new RegExp(` ${escapedName}\\/[\\d.]+`), '');
   return `${chromeUA} SponsorSearchDesktop/${appVersion}`;
 }
 

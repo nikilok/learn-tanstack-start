@@ -48,6 +48,16 @@ describe('desktopUserAgent', () => {
     expect(ua).toContain('(Macintosh; Intel Mac OS X 10_15_7)');
     expect(ua.endsWith(' SponsorSearchDesktop/0.2.1')).toBe(true);
   });
+
+  test('escapes regex metacharacters in the app name', () => {
+    // A '.' must match literally (not "any char"); a '[' must not throw an unterminated class.
+    const ua =
+      'Mozilla/5.0 (X) AppleWebKit/537.36 (KHTML, like Gecko) Spo.sor/0.2.1 Chrome/148.0 Electron/42.0 Safari/537.36';
+    expect(desktopUserAgent(ua, 'Spo.sor', '0.2.1')).toBe(
+      'Mozilla/5.0 (X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0 Safari/537.36 SponsorSearchDesktop/0.2.1',
+    );
+    expect(() => desktopUserAgent(ua, 'Spo[nsor', '0.2.1')).not.toThrow();
+  });
 });
 
 describe('cleanTitle', () => {

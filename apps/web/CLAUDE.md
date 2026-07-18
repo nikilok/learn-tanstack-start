@@ -393,8 +393,8 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   per-platform snapshot (mac left-361/right-160, win/linux left-273/right-274) —
   re-measure and update it if the shell's logo/nav/control sizing changes.
   Chrome changes in apps/desktop must be hand-mirrored here — including `cleanTitle` in
-  usePreviewScenario.ts, a copy of the shell's (apps/desktop/src/main/index.ts);
-  keep the regexes identical. Responsive (`sm:`) variants are
+  src/utils.ts, a copy of the shell's (apps/desktop/src/main/site.ts); keep the regexes
+  identical (both copies are locked by matching tests — utils.test.ts / site.test.ts). Responsive (`sm:`) variants are
   deliberately baked to the ≥sm rendering: parent-page media queries would
   otherwise restyle the chrome, while the iframe's own queries correctly use its
   1280px viewport.

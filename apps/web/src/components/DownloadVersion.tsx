@@ -7,6 +7,7 @@ import {
   ownerDesktopReleasesQueryOptions,
   setReleaseVisibility,
 } from '../api/releases';
+import { formatRelative } from '../utils';
 import {
   assetLabel,
   OsIcon,
@@ -177,6 +178,12 @@ export function DownloadVersion({
           ) : null}
           {owner ? <VisibilityButton release={release} /> : null}
         </Fragment>
+        <span
+          suppressHydrationWarning
+          className="ml-auto text-sm whitespace-nowrap text-(--sea-ink-faint)"
+        >
+          {formatRelative(new Date(release.publishedAt))}
+        </span>
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -184,7 +191,7 @@ export function DownloadVersion({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="ml-auto size-5 text-(--sea-ink-soft) transition-transform group-open:rotate-180"
+          className="size-5 text-(--sea-ink-soft) transition-transform group-open:rotate-180"
           aria-hidden="true"
         >
           <path d="m6 9 6 6 6-6" />

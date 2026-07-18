@@ -1,6 +1,4 @@
-/* Blue hairline separating each version — a link-blue gradient brightest at the
-   centre, dissolving to transparent at both ends so it reads as designed, not a
-   default border. Echoes the page's blue grid. */
+/* Blue hairline between versions — a link-blue gradient fading out at both ends, echoing the page's grid. */
 .versionDivider {
   position: relative;
 }

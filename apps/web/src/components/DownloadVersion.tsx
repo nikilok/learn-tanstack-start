@@ -197,19 +197,21 @@ export function DownloadVersion({
           <path d="m6 9 6 6 6-6" />
         </svg>
       </summary>
-      <div className="grid gap-4 pb-6 sm:grid-cols-3">
-        {PLATFORM_ORDER.map((p) => (
-          <PlatformColumn key={p} platform={p} assets={release.assets[p]} />
-        ))}
+      <div className={styles.panel}>
+        <div className="grid gap-4 pb-6 sm:grid-cols-3">
+          {PLATFORM_ORDER.map((p) => (
+            <PlatformColumn key={p} platform={p} assets={release.assets[p]} />
+          ))}
+        </div>
+        {release.notes ? (
+          <details className="pb-6">
+            <summary className="cursor-pointer text-sm text-(--link-blue)">
+              View release notes
+            </summary>
+            <ReleaseNotesMarkdown source={release.notes} />
+          </details>
+        ) : null}
       </div>
-      {release.notes ? (
-        <details className="pb-6">
-          <summary className="cursor-pointer text-sm text-(--link-blue)">
-            View release notes
-          </summary>
-          <ReleaseNotesMarkdown source={release.notes} />
-        </details>
-      ) : null}
     </details>
   );
 }

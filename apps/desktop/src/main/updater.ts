@@ -39,9 +39,17 @@ function errorDetail(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Opens the /download page in the user's browser — the Linux manual-update action. */
+/** Opens the /download page in the user's browser (the Linux manual-update action); surfaces a launch failure so a dropped promise never leaves the user with a dismissed toast and no browser. */
 function openDownloadPage(): void {
-  void shell.openExternal(downloadUrl);
+  void shell
+    .openExternal(downloadUrl)
+    .catch((err) =>
+      showDialog(
+        'error',
+        'Could not open your browser',
+        `Visit ${downloadUrl} to download the latest version.\n\n${errorDetail(err)}`,
+      ),
+    );
 }
 
 /** The dev update-simulation value ("0"/"false" count as off); returns the raw value so 'download' can pick the manual-download variant. */

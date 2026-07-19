@@ -48,6 +48,9 @@
   --surface-strong: var(--white);
   --line: var(--gray-100);
   --bg-base: var(--white);
+  /* Scrim on the scroll blur (WebHeaderBlur) — mutes saturated content passing under the
+     header enough to keep the controls legible, without the old opaque header fill. */
+  --header-scrim: rgba(255, 255, 255, 0.45);
   --link-bg-hover: var(--gray-50);
   --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
   --shadow-card:
@@ -115,6 +118,7 @@
   --surface-strong: #0a0a0a;
   --line: #2a2a2a;
   --bg-base: #0a0a0a;
+  --header-scrim: rgba(10, 10, 10, 0.45);
   --chip-bg: #111111;
   --chip-line: #2a2a2a;
   --link-bg-hover: #000000;

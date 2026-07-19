@@ -12,7 +12,7 @@ import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mountVercelToolbar } from '@vercel/toolbar/vite';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 import AppSplash from '../components/AppSplash';
 import DesktopBridge from '../components/DesktopBridge';
@@ -23,6 +23,7 @@ import Header from '../components/Header';
 import { McpTools } from '../components/McpTools';
 import NavigationProgress from '../components/NavigationProgress';
 import NotFound from '../components/NotFound';
+import PageContentTransition from '../components/PageContentTransition';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import WebHeaderBlur from '../components/WebHeaderBlur';
@@ -146,6 +147,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
  */
 function RootDocument({ children }: { children: React.ReactNode }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
+  const contentRef = useRef<HTMLDivElement>(null);
   return (
     <html lang="en-GB" suppressHydrationWarning>
       <head>
@@ -177,11 +179,14 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <DesktopScrollMask />
           <WebHeaderBlur />
           <DesktopUpdateToast />
+          <PageContentTransition contentRef={contentRef} />
           {/* flex-1 wrapper makes the footer a sticky footer: on pages shorter
               than the viewport the content grows to fill, pinning the footer to
               the bottom edge so its translucent panel never leaves a strip of
               body glow beneath it. Relies on body's min-height:100% (not vh). */}
-          <div className="flex flex-1 flex-col">{children}</div>
+          <div ref={contentRef} className="flex flex-1 flex-col">
+            {children}
+          </div>
           <Footer />
         </QueryClientProvider>
         <UnionJackCursor />

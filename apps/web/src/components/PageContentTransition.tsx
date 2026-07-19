@@ -1,22 +1,24 @@
 import { useRouterState } from '@tanstack/react-router';
 import { useLayoutEffect, useRef } from 'react';
 
-import { prefersReducedMotion } from '../utils';
+import { isDetailsPath, prefersReducedMotion } from '../utils';
 
 /**
  * Page-content transition for the browsers that can't run the real morph. On non-Chromium
  * engines `browser-init.ts` shims `document.startViewTransition` to a no-op — WebKit + Gecko
- * render `backdrop-filter` bare inside a view-transition snapshot, which glitches the frosted
- * header mid-morph. So instead of snapshotting the whole page, we animate ONLY the content
- * container (via the Web Animations API) on each real page nav: the sticky header + its blur
- * layer are siblings, never touched, so the live blur keeps rendering. Chrome/Edge keep the
- * real VT morph and skip this (no double-animation). Web-only, page-navs only (a pathname
- * change — search-param updates on `/` stay instant), reduced-motion respected.
+ * render `backdrop-filter` bare inside a view-transition snapshot, glitching the frosted header
+ * mid-morph. So instead of snapshotting the page we slide ONLY the content container via the
+ * Web Animations API: the sticky header + its blur layer are siblings, never touched, so the
+ * live blur keeps rendering. Chrome/Edge keep the real VT morph and skip this. Web-only.
  *
- * The motion is a directional slide echoing native iOS push/pop: forward (history index up)
- * enters from the right, back (index down) from the left, with a fade so the enter reads
- * cleanly over the app glow (it's enter-only — a true two-panel slide would need the outgoing
- * page's *pixels*, which is exactly the VT snapshot we can't use here).
+ * Scope + direction mirror router.tsx's resolver so the two engines stay in lockstep: we animate
+ * ONLY the home<->details pair (logo->home, /download, everything else stays instant), and the
+ * direction is intrinsic to it — into a company reads as forward (enter from the right), back to
+ * the listing as back (from the left). The empty home hero is skipped: its `.streaks` backdrop
+ * is position:fixed, so a transform on the wrapper would become its containing block and mis-place
+ * it — home animates only when it's the results list. Pure slide, no fade: the incoming page is
+ * solid over the app glow, native push/pop style (enter-only — a true two-panel slide needs the
+ * outgoing page's pixels, which is the VT snapshot we can't use here).
  */
 export default function PageContentTransition({
   contentRef,
@@ -24,24 +26,25 @@ export default function PageContentTransition({
   contentRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // TanStack's monotonic history index (same field router.tsx keys pop direction off): a lower
-  // index on a nav is provably a back traversal.
-  const index = useRouterState({
-    select: (s) =>
-      (s.location.state as { __TSR_index?: number }).__TSR_index ?? 0,
+  const search = useRouterState({
+    select: (s) => (s.location.search as { search?: string }).search ?? '',
   });
   const prevPath = useRef<string | null>(null);
-  const prevIndex = useRef(0);
   const anim = useRef<Animation | null>(null);
 
   useLayoutEffect(() => {
-    const first = prevPath.current === null;
-    const changed = prevPath.current !== pathname;
-    const back = index < prevIndex.current;
+    const from = prevPath.current;
     prevPath.current = pathname;
-    prevIndex.current = index;
+    if (from === null || from === pathname) return; // mount + search-only updates on `/`: instant
 
-    if (first || !changed) return; // initial mount + search-param updates: no animation
+    // The exact pair router.tsx morphs; direction falls straight out of it (to `/` = back).
+    const back = pathname === '/';
+    const withinPair =
+      (from === '/' && isDetailsPath(pathname)) ||
+      (isDetailsPath(from) && back);
+    if (!withinPair) return;
+    // Empty hero carries the position:fixed `.streaks` grid — never slide onto it.
+    if (back && search.length === 0) return;
 
     const root = document.documentElement;
     if (root.hasAttribute('data-desktop')) return; // native shell / preview run their own thing
@@ -52,34 +55,22 @@ export default function PageContentTransition({
     const el = contentRef.current;
     if (!el) return;
 
-    // Slide distance scales with viewport (capped) so it reads on phones and desktop alike;
-    // body has overflow-x:hidden, so the off-screen start never adds a horizontal scrollbar.
+    // Slide scales with viewport (capped); body has overflow-x:hidden so the offset adds no scrollbar.
     const dist = Math.min(Math.round(window.innerWidth * 0.22), 96);
-    const from = back ? -dist : dist;
+    const offset = back ? -dist : dist;
 
-    anim.current?.cancel(); // supersede an in-flight enter on a rapid re-nav
-    const running = el.animate(
-      [
-        { opacity: 0, transform: `translateX(${from}px)` },
-        { opacity: 1, transform: 'none' },
-      ],
-      // Back reads as "returning" — keep it snappier than the forward push.
+    anim.current?.cancel(); // supersede an in-flight slide on a rapid re-nav
+    anim.current = el.animate(
+      [{ transform: `translateX(${offset}px)` }, { transform: 'none' }],
+      // fill:backwards holds the pre-start offset; no forwards fill (end state = natural transform:none).
+      // Back reads as "returning" — keep it a touch snappier than the forward push.
       {
         duration: back ? 220 : 320,
         easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
-        fill: 'both',
+        fill: 'backwards',
       },
     );
-    anim.current = running;
-    running.finished
-      .then(() => {
-        if (anim.current === running) {
-          running.cancel(); // release fill:both once settled (final = natural state)
-          anim.current = null;
-        }
-      })
-      .catch(() => {});
-  }, [pathname, index, contentRef]);
+  }, [pathname, search, contentRef]);
 
   return null;
 }

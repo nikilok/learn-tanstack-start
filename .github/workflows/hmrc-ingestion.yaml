@@ -27,6 +27,8 @@ jobs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
     steps:
       - name: Checkout repository
+        # Skip the clone on the manual path — only find-csv (a local action) needs the repo.
+        if: github.event.inputs.csv-url == ''
         uses: actions/checkout@v4
 
       - name: Find HMRC CSV URL
@@ -53,11 +55,15 @@ jobs:
         run: |
           SOURCE_TEXT="$FIND_CSV_STDOUT"
           if [ -n "$MANUAL_CSV_URL" ]; then SOURCE_TEXT="$MANUAL_CSV_URL"; fi
-          CSV_URL=$(echo "$SOURCE_TEXT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
+          CSV_URL=$(echo "$SOURCE_TEXT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv([?#][^\s]*)?' | head -n1 || echo "")
           if [ -z "$CSV_URL" ]; then
-            echo "::error::Could not extract a valid gov.uk CSV URL (checked manual input, then AI discovery output)"
-            echo "Manual input was: $MANUAL_CSV_URL"
-            echo "Script output was: $FIND_CSV_STDOUT"
+            if [ -n "$MANUAL_CSV_URL" ]; then
+              echo "::error::Manual csv-url did not contain a valid gov.uk CSV URL — fix the link, or re-dispatch with an empty csv-url to fall back to AI discovery"
+              echo "Manual input was: $MANUAL_CSV_URL"
+            else
+              echo "::error::AI discovery output did not contain a valid gov.uk CSV URL"
+              echo "Script output was: $FIND_CSV_STDOUT"
+            fi
             exit 1
           fi
           echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"

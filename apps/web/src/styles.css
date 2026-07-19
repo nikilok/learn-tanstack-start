@@ -48,7 +48,6 @@
   --surface-strong: var(--white);
   --line: var(--gray-100);
   --bg-base: var(--white);
-  --header-bg: rgba(255, 255, 255, 0.85);
   --link-bg-hover: var(--gray-50);
   --shadow-ring: rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
   --shadow-card:
@@ -116,7 +115,6 @@
   --surface-strong: #0a0a0a;
   --line: #2a2a2a;
   --bg-base: #0a0a0a;
-  --header-bg: rgba(10, 10, 10, 0.88);
   --chip-bg: #111111;
   --chip-line: #2a2a2a;
   --link-bg-hover: #000000;
@@ -346,9 +344,11 @@ a {
   }
 }
 
+/* Clear at the top of the page so the body glow/grid reads through it (matching the
+   desktop shell's transparent title bar); the frosted backdrop fades in on scroll via
+   WebHeaderBlur. */
 .site-header {
-  background: var(--header-bg);
-  box-shadow: var(--shadow-ring);
+  background: transparent;
   transform: translateZ(0);
 }
 

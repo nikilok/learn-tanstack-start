@@ -1,0 +1,29 @@
+/* Progressive backdrop-blur that sits behind the site header on the plain web: fully
+   clear at the top of the page, fading in as content scrolls under the header. Mirrors
+   the desktop shell's title-bar blur (DesktopScrollMask). The mask gradient keeps the
+   blur full-strength across the header height and dissolves it just below, so scrolled
+   content softens into the header instead of ending on a hard edge.
+   The blur itself comes from Tailwind's `backdrop-blur-lg` utility on the element (not a
+   hand-written backdrop-filter here): the utility emits the -webkit-/standard pair Safari
+   needs and survives the prod Lightning CSS pass that collapses a hand-written pair. */
+.webHeaderBlur {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 96px;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 66%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, #000 0%, #000 66%, transparent 100%);
+}
+.webHeaderBlur[data-scrolled] {
+  opacity: 1;
+}

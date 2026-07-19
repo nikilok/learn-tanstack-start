@@ -88,6 +88,12 @@ query exists (not on the empty/hero state, where the bar is `relative` and the p
 rotates). On that empty state the cursor-positioning fix isn't needed anyway (not sticky).
 Do NOT widen this back to plain `:focus-within` and do NOT add it as a permanent inline style.
 
+**Scope: this is SearchInput-specific** — it exists solely because the GPU layer garbles
+SearchInput's *rotating placeholder*. It is NOT a blanket ban on `transform: translateZ(0)`.
+Other elements may keep it as a permanent style for legitimate sticky/GPU compositing — e.g.
+`.site-header` in `styles.css` uses it to avoid iOS-Safari sticky repaint/flicker on scroll,
+which is correct and unrelated to this rule.
+
 ## Virtual list sizing — keep in sync with CSS
 
 `HmrcResults.tsx` uses `virtual-text-layout` (`useVirtualTextLayout`) for canvas-based

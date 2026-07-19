@@ -25,6 +25,7 @@ import NavigationProgress from '../components/NavigationProgress';
 import NotFound from '../components/NotFound';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
+import WebHeaderBlur from '../components/WebHeaderBlur';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
 import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
@@ -174,6 +175,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <Header />
           <DesktopBridge />
           <DesktopScrollMask />
+          <WebHeaderBlur />
           <DesktopUpdateToast />
           {/* flex-1 wrapper makes the footer a sticky footer: on pages shorter
               than the viewport the content grows to fill, pinning the footer to

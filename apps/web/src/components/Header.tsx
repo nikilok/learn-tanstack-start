@@ -13,7 +13,7 @@ import ThemeToggle from './ThemeToggle';
  */
 export default function Header() {
   return (
-    <header className="site-header sticky top-0 z-50 px-4 backdrop-blur-xl">
+    <header className="site-header sticky top-0 z-50 px-4">
       <nav className="page-wrap flex items-center gap-x-3 py-3 sm:py-4">
         <h2 className="m-0 shrink-0">
           <Link

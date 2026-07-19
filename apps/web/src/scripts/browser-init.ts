@@ -10,6 +10,19 @@
  * include "Chrome" / "Safari" tokens in their UA strings — Edge is
  * checked first, then Firefox, then Chrome, then Safari as the final
  * fallback for true WebKit.
+ *
+ * On non-Chromium engines it ALSO neutralises `document.startViewTransition`,
+ * disabling their page morphs. Both WebKit and Gecko drop `backdrop-filter`
+ * (and fixed layers) from view-transition snapshots, so the transparent frosted
+ * header renders bare mid-morph — a clear header that "pops" to blurred once the
+ * transition ends. Only Blink (chrome/edge) is confirmed to composite
+ * backdrop-filter inside a VT snapshot, so it keeps the morph; everything else
+ * (safari, firefox, unknown) opts out — navigations are instant there and the
+ * live blurred header renders correctly. Nothing in app code calls
+ * `startViewTransition` directly — only the router (via its `viewTransition`
+ * options) — so the shim's blast radius is exactly the page morphs. The shim
+ * runs the update callback synchronously and returns a resolved, no-op
+ * transition so the router's `.finished`/`.ready` awaits still settle.
  */
 export const BROWSER_INIT_SCRIPT = `(() => {
   try {
@@ -20,5 +33,20 @@ export const BROWSER_INIT_SCRIPT = `(() => {
     else if (/chrome/i.test(ua)) browser = 'chrome';
     else if (/safari/i.test(ua)) browser = 'safari';
     document.documentElement.setAttribute('data-browser', browser);
+    if (browser !== 'chrome' && browser !== 'edge' && typeof document.startViewTransition === 'function') {
+      document.startViewTransition = function (arg) {
+        const cb = typeof arg === 'function' ? arg : arg && arg.update;
+        let result;
+        try { result = cb ? cb() : undefined; } catch (_e) {}
+        const done = Promise.resolve(result).catch(function () {});
+        return {
+          finished: done,
+          ready: done,
+          updateCallbackDone: done,
+          skipTransition: function () {},
+          types: new Set(),
+        };
+      };
+    }
   } catch (_e) {}
 })();`;

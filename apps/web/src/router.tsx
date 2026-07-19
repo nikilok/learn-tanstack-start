@@ -13,56 +13,17 @@ const supportsTypedViewTransitions =
   typeof CSS.supports === 'function' &&
   CSS.supports('selector(:active-view-transition-type(a))');
 
-// iOS edge-swipe pops already play the native slide; iOS-only (data-browser
-// covers every iOS engine, and Android/desktop gestures have no native
-// slide to double). Sampled at popstate — the resolver can run seconds
-// later behind a loader. Best effort: WebKit may swallow the touch events.
-const EDGE_TOUCH_PX = 24;
-const EDGE_POP_WINDOW_MS = 1500;
-let lastPopWasGesture = false;
-if (
-  supportsTypedViewTransitions &&
-  document.documentElement.getAttribute('data-browser') === 'safari'
-) {
-  const edgeTouchIds = new Set<number>();
-  let lastEdgeTouchAt = Number.NEGATIVE_INFINITY;
-  window.addEventListener(
-    'touchstart',
-    (e) => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const x = e.changedTouches[i].clientX;
-        // Layout-viewport width: innerWidth shrinks under pinch zoom.
-        const width = document.documentElement.clientWidth;
-        if (x <= EDGE_TOUCH_PX || x >= width - EDGE_TOUCH_PX) {
-          if (edgeTouchIds.size >= 10) edgeTouchIds.clear();
-          edgeTouchIds.add(e.changedTouches[i].identifier);
-          lastEdgeTouchAt = performance.now();
-        }
-      }
-    },
-    { capture: true, passive: true },
-  );
-  // End/cancel of an edge-started touch refreshes the window (long holds).
-  const onEdgeTouchDone = (e: TouchEvent) => {
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      if (edgeTouchIds.delete(e.changedTouches[i].identifier)) {
-        lastEdgeTouchAt = performance.now();
-      }
-    }
-  };
-  window.addEventListener('touchend', onEdgeTouchDone, {
-    capture: true,
-    passive: true,
-  });
-  window.addEventListener('touchcancel', onEdgeTouchDone, {
-    capture: true,
-    passive: true,
-  });
-  window.addEventListener('popstate', () => {
-    lastPopWasGesture =
-      performance.now() - lastEdgeTouchAt < EDGE_POP_WINDOW_MS;
-  });
-}
+// Page morphs only run on Blink. browser-init.ts neutralises
+// `document.startViewTransition` on every non-Chromium engine (WebKit + Gecko
+// can't composite backdrop-filter in a VT snapshot), so the resolver below is
+// Blink-gated — running it on Safari/Firefox is pure wasted per-pop DOM work the
+// shim discards. This also retires the old iOS edge-swipe gesture guard: it kept
+// a Safari swipe-back from double-animating a real transition, but Safari now
+// runs no app transition at all, so there is nothing to double.
+const isBlink =
+  typeof document !== 'undefined' &&
+  (document.documentElement.getAttribute('data-browser') === 'chrome' ||
+    document.documentElement.getAttribute('data-browser') === 'edge');
 
 /**
  * Resolves transition types for navigations without an explicit
@@ -81,8 +42,6 @@ function resolvePopTransitionTypes({
   toLocation: { pathname: string; state: { __TSR_index: number } };
   pathChanged: boolean;
 }): Array<string> | false {
-  const popWasGesture = lastPopWasGesture;
-  lastPopWasGesture = false;
   if (!pathChanged || !fromLocation) return false;
   const from = fromLocation.pathname;
   const to = toLocation.pathname;
@@ -90,8 +49,6 @@ function resolvePopTransitionTypes({
     (from === '/' && isDetailsPath(to)) || (isDetailsPath(from) && to === '/');
   if (!withinPair) return false;
   if (prefersReducedMotion()) return false;
-  // The native swipe animation already ran — don't animate twice.
-  if (popWasGesture) return false;
   // An error screen at a pair URL (RouteError renders in place) pops instantly.
   const oldPageMarker = isDetailsPath(from)
     ? '.page-flip-details'
@@ -153,7 +110,11 @@ export function getRouter() {
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
     context: { queryClient },
-    ...(supportsTypedViewTransitions
+    // Blink-only: browser-init.ts shims `document.startViewTransition` to a no-op on every
+    // non-Chromium engine (WebKit + Gecko can't composite backdrop-filter in a VT snapshot,
+    // which broke the frosted header mid-morph), so gating the resolver off there avoids
+    // running its per-pop DOM work for a transition that never plays.
+    ...(supportsTypedViewTransitions && isBlink
       ? { defaultViewTransition: { types: resolvePopTransitionTypes } }
       : {}),
   });

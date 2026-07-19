@@ -24,9 +24,20 @@ function BlurLayer() {
   } | null>(null);
   // While true, scroll readings near 0 are held off (see the pre-seed effect below).
   const awaitingRestore = useRef(false);
-  const isHome = useRouterState({ select: (s) => s.location.pathname === '/' });
+  // Only a *results* home (a search query present) ever has a pending scroll to restore; the
+  // empty hero home never scrolls, so gating on pathname alone would wrongly frost it whenever a
+  // stale `hmrc-scroll-y` lingers (e.g. logo → home after a scrolled results → details hop).
+  const restorableHome = useRouterState({
+    select: (s) => {
+      const q = (s.location.search as { search?: string }).search ?? '';
+      return s.location.pathname === '/' && q.length >= 3;
+    },
+  });
 
-  useEffect(() => {
+  // Driver setup as a LAYOUT effect, declared BEFORE the pre-seed, so driver.current is
+  // populated by the time the pre-seed runs on the initial mount too — this covers a
+  // reload/deep-link onto a scrolled results home, not just client back-navs.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     // Ramp to full blur over the first 12px of scroll, matching DesktopScrollMask's range.
@@ -40,8 +51,8 @@ function BlurLayer() {
     };
     const fromScroll = () => {
       if (awaitingRestore.current) {
-        // Hold the pre-seeded blur until the real restore lands; ignore the scroll-to-0 the
-        // back-nav fires first (which would otherwise clear it, then re-blur).
+        // Hold the pre-seeded blur through the back-nav's spurious scroll-to-0 until the real
+        // restore lands, then hand back to live scroll tracking.
         if (window.scrollY < 1) return;
         awaitingRestore.current = false;
       }
@@ -53,32 +64,33 @@ function BlurLayer() {
     return () => window.removeEventListener('scroll', fromScroll);
   }, []);
 
-  // Back-nav to the home/results route restores its scroll a beat AFTER render (the virtual
-  // list defers restore until it has correct row heights), so window.scrollY is momentarily 0.
-  // Without help the scroll-driven blur would read "at top → clear" and briefly reveal the full
-  // content (the guide-rail) under the transparent header before the restore jumps to the saved
-  // position — most visible on Safari, which has no page morph to mask it (see browser-init).
-  // Pre-seed the blur from the pending restore (`hmrc-scroll-y`) and hold it (awaitingRestore)
-  // through that window so the header stays frosted. The timeout reconciles to the actual scroll
-  // if the restore never comes (stranded key), so a genuinely-at-top home can't get stuck blurred.
+  // A results home restores its scroll a beat AFTER render (the virtual list defers restore
+  // until it has correct row heights), so window.scrollY is momentarily 0 and the scroll-driven
+  // blur would read "at top → clear", briefly revealing the guide-rail under the transparent
+  // header before the restore jumps to the saved position — most visible on Safari/Firefox,
+  // which have no page morph to mask it (see browser-init). Pre-seed the blur at its true target
+  // opacity from the pending restore (`hmrc-scroll-y`) and hold it through that window. Cleanup
+  // reconciles to the actual scroll so navigating away mid-hold can't strand the frost on the
+  // next page; the timeout is the same safety net if the restore never lands (stranded key).
   useLayoutEffect(() => {
-    if (!isHome || !driver.current) return;
+    if (!restorableHome || !driver.current) return;
     const pending = Number.parseInt(
       sessionStorage.getItem('hmrc-scroll-y') ?? '',
       10,
     );
     if (!(pending >= 1)) return;
     awaitingRestore.current = true;
-    driver.current.setOpacity(1);
-    const timer = setTimeout(() => {
+    driver.current.setOpacity(pending / 12);
+    const reconcile = () => {
       awaitingRestore.current = false;
       driver.current?.fromScroll();
-    }, 1500);
+    };
+    const timer = setTimeout(reconcile, 1500);
     return () => {
       clearTimeout(timer);
-      awaitingRestore.current = false;
+      reconcile();
     };
-  }, [isHome]);
+  }, [restorableHome]);
 
   return (
     <div

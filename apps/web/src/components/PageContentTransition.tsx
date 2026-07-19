@@ -63,7 +63,12 @@ export default function PageContentTransition({
         { opacity: 0, transform: `translateX(${from}px)` },
         { opacity: 1, transform: 'none' },
       ],
-      { duration: 320, easing: 'cubic-bezier(0.25, 1, 0.5, 1)', fill: 'both' },
+      // Back reads as "returning" — keep it snappier than the forward push.
+      {
+        duration: back ? 220 : 320,
+        easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+        fill: 'both',
+      },
     );
     anim.current = running;
     running.finished

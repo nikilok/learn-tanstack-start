@@ -153,9 +153,10 @@ export function getRouter() {
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
     context: { queryClient },
-    // NB: on WebKit `browser-init.ts` neutralises `document.startViewTransition`, so none of
-    // these page morphs actually run on Safari — it can't render backdrop-filter in a VT
-    // snapshot, which broke the frosted header mid-morph. Other engines animate as configured.
+    // NB: on non-Chromium engines `browser-init.ts` neutralises `document.startViewTransition`,
+    // so none of these page morphs actually run on Safari/Firefox — WebKit and Gecko can't render
+    // backdrop-filter in a VT snapshot, which broke the frosted header mid-morph. Only Blink
+    // (chrome/edge) composites it, so it animates as configured.
     ...(supportsTypedViewTransitions
       ? { defaultViewTransition: { types: resolvePopTransitionTypes } }
       : {}),

@@ -15,6 +15,10 @@ on:
         description: 'Bypass the volume floor (ingest a feed that shrank >50% since the last run)'
         type: boolean
         default: false
+      csv-url:
+        description: 'Manual CSV URL to ingest (skips AI discovery). Must be an assets.publishing.service.gov.uk/…/*.csv link — the path changes daily.'
+        type: string
+        default: ''
 
 jobs:
   discover-csv-url:
@@ -27,6 +31,9 @@ jobs:
 
       - name: Find HMRC CSV URL
         id: find-csv
+        # Skipped when a manual csv-url is dispatched — no AI call, no cost, and
+        # no dependency on the Anthropic account for a hand-fed URL.
+        if: github.event.inputs.csv-url == ''
         uses: ./.github/actions/run-playwright-script
         with:
           script-command: bun scripts/find-hmrc-csv-url.ts
@@ -36,15 +43,20 @@ jobs:
 
       - name: Extract CSV URL
         id: extract-url
-        # Discovery output reaches the shell via env, never via ${{ }} in run:
-        # — template expansion happens before bash parses, so spliced text
-        # (here: LLM-script stdout) would execute as code.
+        # Both the AI discovery output AND the manual dispatch URL reach the
+        # shell via env, never via ${{ }} in run: — template expansion happens
+        # before bash parses, so spliced text (LLM stdout or a hand-entered URL)
+        # would execute as code. A manual URL still passes the same gov.uk gate.
         env:
           FIND_CSV_STDOUT: ${{ steps.find-csv.outputs.stdout }}
+          MANUAL_CSV_URL: ${{ github.event.inputs.csv-url }}
         run: |
-          CSV_URL=$(echo "$FIND_CSV_STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
+          SOURCE_TEXT="$FIND_CSV_STDOUT"
+          if [ -n "$MANUAL_CSV_URL" ]; then SOURCE_TEXT="$MANUAL_CSV_URL"; fi
+          CSV_URL=$(echo "$SOURCE_TEXT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv' || echo "")
           if [ -z "$CSV_URL" ]; then
-            echo "::error::Could not extract CSV URL from discovery script output"
+            echo "::error::Could not extract a valid gov.uk CSV URL (checked manual input, then AI discovery output)"
+            echo "Manual input was: $MANUAL_CSV_URL"
             echo "Script output was: $FIND_CSV_STDOUT"
             exit 1
           fi

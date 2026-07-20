@@ -114,7 +114,9 @@ function webgpuFlags(): string[] {
           '--use-angle=vulkan',
           '--disable-vulkan-surface',
         ];
-  const extra = (envStr('GEMMA_CHROMIUM_FLAGS') ?? '').split(/\s+/).filter(Boolean);
+  const extra = (envStr('GEMMA_CHROMIUM_FLAGS') ?? '')
+    .split(/\s+/)
+    .filter(Boolean);
   const flags = [...platform, ...extra];
   // Chromium keeps only the LAST occurrence of a repeated switch; merge
   // --enable-features values so an extra flag can't silently drop the
@@ -165,7 +167,9 @@ async function ensureModel(): Promise<void> {
       console.log('[gemma] cached model sha256 verified');
       return;
     }
-    console.warn(`[gemma] cached model sha256 mismatch (${digest}), re-downloading`);
+    console.warn(
+      `[gemma] cached model sha256 mismatch (${digest}), re-downloading`,
+    );
     unlinkSync(MODEL_PATH);
   }
   console.log(`[gemma] model not found, downloading to ${MODEL_PATH}`);

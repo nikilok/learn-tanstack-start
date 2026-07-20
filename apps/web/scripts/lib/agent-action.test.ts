@@ -4,36 +4,45 @@ import { formatLinksForPrompt, parseAgentAction } from './agent-action';
 
 describe('parseAgentAction', () => {
   test('parses a bare JSON object', () => {
-    const action = parseAgentAction('{ "action": "done", "csvUrl": "x", "reasoning": "r" }');
+    const action = parseAgentAction(
+      '{ "action": "done", "csvUrl": "x", "reasoning": "r" }',
+    );
     expect(action.action).toBe('done');
     expect(action.csvUrl).toBe('x');
   });
 
   test('parses JSON inside a ```json fence', () => {
-    const action = parseAgentAction('```json\n{ "action": "click", "url": "/a", "reasoning": "r" }\n```');
+    const action = parseAgentAction(
+      '```json\n{ "action": "click", "url": "/a", "reasoning": "r" }\n```',
+    );
     expect(action.action).toBe('click');
     expect(action.url).toBe('/a');
   });
 
   test('finds JSON outside a fence when the fence holds no object', () => {
-    const text = 'See ```/some/link/path``` for context.\n{ "action": "click", "url": "/b", "reasoning": "r" }';
+    const text =
+      'See ```/some/link/path``` for context.\n{ "action": "click", "url": "/b", "reasoning": "r" }';
     expect(parseAgentAction(text).url).toBe('/b');
   });
 
   test('takes the first object when two are present', () => {
-    const text = '{ "action": "click", "url": "/first", "reasoning": "r" } or { "action": "done", "csvUrl": "/second", "reasoning": "r" }';
+    const text =
+      '{ "action": "click", "url": "/first", "reasoning": "r" } or { "action": "done", "csvUrl": "/second", "reasoning": "r" }';
     const action = parseAgentAction(text);
     expect(action.action).toBe('click');
     expect(action.url).toBe('/first');
   });
 
   test('skips balanced non-JSON brace groups in prose', () => {
-    const text = 'set {foo bar} then reply: { "action": "done", "csvUrl": "/c", "reasoning": "r" }';
+    const text =
+      'set {foo bar} then reply: { "action": "done", "csvUrl": "/c", "reasoning": "r" }';
     expect(parseAgentAction(text).csvUrl).toBe('/c');
   });
 
   test('handles braces and escapes inside JSON strings', () => {
-    const action = parseAgentAction('{ "action": "done", "csvUrl": "/d", "reasoning": "has { brace and \\" quote" }');
+    const action = parseAgentAction(
+      '{ "action": "done", "csvUrl": "/d", "reasoning": "has { brace and \\" quote" }',
+    );
     expect(action.reasoning).toContain('{ brace');
   });
 
@@ -61,7 +70,9 @@ describe('formatLinksForPrompt', () => {
     const parsed = JSON.parse(formatLinksForPrompt(links, 'gemma'));
     expect(parsed).toHaveLength(2);
     expect(parsed[0].href).toBe('/files/register.csv');
-    expect(parsed.some((l: { href: string }) => l.href === '/news')).toBe(false);
+    expect(parsed.some((l: { href: string }) => l.href === '/news')).toBe(
+      false,
+    );
   });
 
   test('gemma falls back to all links when nothing matches the filter', () => {

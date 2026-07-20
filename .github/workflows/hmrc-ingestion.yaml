@@ -19,16 +19,23 @@ on:
         description: 'Manual CSV URL to ingest (skips AI discovery). Must be an assets.publishing.service.gov.uk/…/*.csv link — the path changes daily.'
         type: string
         default: ''
+      provider:
+        description: 'AI discovery provider. Scheduled runs always use gemma; anthropic is kept for manual comparison runs.'
+        type: choice
+        options:
+          - gemma
+          - anthropic
+        default: gemma
 
 jobs:
-  # First attempt: local Gemma 4 on a free Apple Silicon runner (paravirtual
-  # Metal WebGPU). continue-on-error keeps any gemma failure from failing the
-  # scheduled run — the anthropic job below is the fallback.
+  # Primary (and, on schedule, only) discovery: local Gemma 4 on a free Apple
+  # Silicon runner (paravirtual Metal WebGPU). Pure-test phase: a gemma failure
+  # fails the run visibly — no silent anthropic rescue. The anthropic job below
+  # stays reachable via workflow_dispatch provider=anthropic.
   discover-csv-url-gemma:
-    if: github.event.inputs.csv-url == ''
+    if: github.event.inputs.csv-url == '' && github.event.inputs.provider != 'anthropic'
     runs-on: macos-latest
     timeout-minutes: 15
-    continue-on-error: true
     outputs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
     steps:
@@ -81,17 +88,18 @@ jobs:
         run: |
           CSV_URL=$(grep -oE 'https://assets\.publishing\.service\.gov\.uk/[^[:space:]]+\.csv([?#][^[:space:]]*)?' "$RUNNER_TEMP/gemma-out.log" | tail -n1 || echo "")
           if [ -z "$CSV_URL" ]; then
-            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL — anthropic fallback will run"
+            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL — re-dispatch with provider=anthropic or a manual csv-url"
             exit 1
           fi
           echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
           echo "Gemma found CSV URL: $CSV_URL"
 
-  # Fallback (and the manual csv-url path): runs only when gemma produced no
-  # URL — a skipped fallback on the happy path costs nothing.
+  # Anthropic discovery, kept intact but manual-only during the gemma pure-test
+  # phase: runs for provider=anthropic dispatches, and gates the manual csv-url
+  # path. Never fires on schedule.
   discover-csv-url:
     needs: discover-csv-url-gemma
-    if: always() && (github.event.inputs.csv-url != '' || needs.discover-csv-url-gemma.outputs.csv-url == '')
+    if: always() && (github.event.inputs.csv-url != '' || github.event.inputs.provider == 'anthropic')
     runs-on: ubuntu-latest
     outputs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
@@ -141,8 +149,8 @@ jobs:
 
   ingest:
     needs: [discover-csv-url-gemma, discover-csv-url]
-    # Runs when either discovery produced a URL (fallback may be skipped on the
-    # gemma happy path, hence always() + explicit output check).
+    # One of the two discovery jobs is always skipped, so needs alone can't
+    # gate this — run when either produced a URL (skipped-job outputs read '').
     if: always() && (needs.discover-csv-url-gemma.outputs.csv-url != '' || needs.discover-csv-url.outputs.csv-url != '')
     runs-on: ubuntu-latest
     permissions:
@@ -166,8 +174,8 @@ jobs:
         # POSTGRES_URL and repo-write credentials.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-          # Gemma's URL wins when present; the fallback job carries both the
-          # anthropic result and the manual csv-url path.
+          # Gemma on schedule; the anthropic job's output covers provider=
+          # anthropic dispatches and the manual csv-url path.
           CSV_URL: ${{ needs.discover-csv-url-gemma.outputs.csv-url || needs.discover-csv-url.outputs.csv-url }}
           FORCE_INGEST: ${{ github.event.inputs.force-ingest }}
           ALLOW_SHRINK: ${{ github.event.inputs.allow-shrink }}

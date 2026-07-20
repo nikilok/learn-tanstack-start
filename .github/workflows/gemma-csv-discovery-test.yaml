@@ -13,10 +13,6 @@ name: Gemma CSV Discovery (GPU experiment)
 # (e.g. a future org T4 label) without editing this file.
 
 on:
-  # workflow_dispatch only registers once the file reaches the default branch;
-  # the scoped push trigger lets the experiment run from this branch meanwhile.
-  push:
-    branches: [feat/gemma-local-ci-experiment]
   workflow_dispatch:
     inputs:
       gemma-debug:

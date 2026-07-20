@@ -19,9 +19,87 @@ on:
         description: 'Manual CSV URL to ingest (skips AI discovery). Must be an assets.publishing.service.gov.uk/…/*.csv link — the path changes daily.'
         type: string
         default: ''
+      provider:
+        description: 'AI discovery provider. Scheduled runs always use gemma; anthropic is kept for manual comparison runs.'
+        type: choice
+        options:
+          - gemma
+          - anthropic
+        default: gemma
 
 jobs:
+  # Primary (and, on schedule, only) discovery: local Gemma 4 on a free Apple
+  # Silicon runner (paravirtual Metal WebGPU). Pure-test phase: a gemma failure
+  # fails the run visibly — no silent anthropic rescue. The anthropic job below
+  # stays reachable via workflow_dispatch provider=anthropic.
+  discover-csv-url-gemma:
+    if: github.event.inputs.csv-url == '' && github.event.inputs.provider != 'anthropic'
+    runs-on: macos-latest
+    timeout-minutes: 15
+    outputs:
+      csv-url: ${{ steps.extract-url.outputs.csv-url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # Same derived key as gemma-csv-discovery-test.yaml — a model-pin bump in
+      # gemma-litert.ts rolls the key, so cache and pin can never drift.
+      - name: Restore Gemma model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Run discovery with local Gemma
+        env:
+          AI_PROVIDER: gemma
+          GEMMA_MODEL_PATH: ${{ github.workspace }}/.litert-models/gemma-4-E2B-it-web.litertlm
+        run: |
+          set -o pipefail
+          bun scripts/find-hmrc-csv-url.ts 2>&1 | tee "$RUNNER_TEMP/gemma-out.log"
+        working-directory: apps/web
+
+      - name: Save Gemma model cache
+        if: always() && steps.model-cache.outputs.cache-hit != 'true' && hashFiles('.litert-models/*.litertlm') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Extract CSV URL
+        id: extract-url
+        # BSD grep (no -P); output read from the tee'd log, never via ${{ }}.
+        run: |
+          CSV_URL=$(grep -oE 'https://assets\.publishing\.service\.gov\.uk/[^[:space:]]+\.csv([?#][^[:space:]]*)?' "$RUNNER_TEMP/gemma-out.log" | tail -n1 || echo "")
+          if [ -z "$CSV_URL" ]; then
+            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL — re-dispatch with provider=anthropic or a manual csv-url"
+            exit 1
+          fi
+          echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
+          echo "Gemma found CSV URL: $CSV_URL"
+
+  # Anthropic discovery, kept intact but manual-only during the gemma pure-test
+  # phase: runs for provider=anthropic dispatches, and gates the manual csv-url
+  # path. Never fires on schedule.
   discover-csv-url:
+    needs: discover-csv-url-gemma
+    if: always() && (github.event.inputs.csv-url != '' || github.event.inputs.provider == 'anthropic')
     runs-on: ubuntu-latest
     outputs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
@@ -70,7 +148,10 @@ jobs:
           echo "Found CSV URL: $CSV_URL"
 
   ingest:
-    needs: discover-csv-url
+    needs: [discover-csv-url-gemma, discover-csv-url]
+    # One of the two discovery jobs is always skipped, so needs alone can't
+    # gate this — run when either produced a URL (skipped-job outputs read '').
+    if: always() && (needs.discover-csv-url-gemma.outputs.csv-url != '' || needs.discover-csv-url.outputs.csv-url != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,7 +174,9 @@ jobs:
         # POSTGRES_URL and repo-write credentials.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-          CSV_URL: ${{ needs.discover-csv-url.outputs.csv-url }}
+          # Gemma on schedule; the anthropic job's output covers provider=
+          # anthropic dispatches and the manual csv-url path.
+          CSV_URL: ${{ needs.discover-csv-url-gemma.outputs.csv-url || needs.discover-csv-url.outputs.csv-url }}
           FORCE_INGEST: ${{ github.event.inputs.force-ingest }}
           ALLOW_SHRINK: ${{ github.event.inputs.allow-shrink }}
         run: |

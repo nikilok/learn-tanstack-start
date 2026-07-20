@@ -1,0 +1,101 @@
+name: Gemma CSV Discovery (GPU experiment)
+
+# Experiment: run the HMRC CSV discovery with the LOCAL Gemma 4 provider
+# (LiteRT-LM + WebGPU). Attempt log:
+# - ubuntu-latest: FAILED — LiteRT-LM's internal 5-minute future timeout fires
+#   during engine init on software WebGPU (no usable adapter on a GPU-less VM).
+# - macos-latest (current): Apple Silicon VM with a Metal-capable paravirtual
+#   GPU — same Metal/WebGPU stack that works on a real Mac, free on public
+#   repos. Does not touch the scheduled anthropic-based ingestion.
+#
+# Runs directly on the runner VM (no Playwright container) so Chromium reaches
+# the host graphics driver; GPU_RUNNER_LABEL repo variable overrides the runner
+# (e.g. a future org T4 label) without editing this file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gemma-debug:
+        description: 'Forward browser console logs (verbose)'
+        type: boolean
+        default: true
+      extra-chromium-flags:
+        description: 'Extra Chromium flags for WebGPU experiments (space-separated)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  discover-csv-url-gemma:
+    runs-on: ${{ vars.GPU_RUNNER_LABEL || 'macos-latest' }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: GPU diagnostics
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            system_profiler SPDisplaysDataType 2>/dev/null || echo "system_profiler unavailable"
+            sysctl -n machdep.cpu.brand_string hw.memsize 2>/dev/null || true
+          else
+            nvidia-smi || echo "nvidia-smi unavailable"
+            (sudo apt-get update -qq && sudo apt-get install -y -qq vulkan-tools) > /dev/null 2>&1 || true
+            vulkaninfo --summary 2>/dev/null | head -30 || echo "vulkaninfo unavailable"
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # 2GB model. The key hashes gemma-litert.ts so a model-pin bump can never
+      # drift from the cache (immutable stale entries under a hand-written key
+      # would otherwise be served forever, or block re-saving a healed model).
+      # restore/save are split so a failed experiment still primes the cache;
+      # cross-OS archive lets macOS and Linux attempts share one entry.
+      - name: Restore Gemma model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Run discovery with local Gemma
+        env:
+          AI_PROVIDER: gemma
+          GEMMA_MODEL_PATH: ${{ github.workspace }}/.litert-models/gemma-4-E2B-it-web.litertlm
+          GEMMA_DEBUG: ${{ (inputs.gemma-debug == false && '0') || '1' }}
+          GEMMA_CHROMIUM_FLAGS: ${{ inputs.extra-chromium-flags }}
+        run: |
+          set -o pipefail
+          bun scripts/find-hmrc-csv-url.ts 2>&1 | tee "$RUNNER_TEMP/gemma-out.log"
+        working-directory: apps/web
+
+      - name: Save Gemma model cache
+        if: always() && steps.model-cache.outputs.cache-hit != 'true' && hashFiles('.litert-models/*.litertlm') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Validate discovered URL
+        run: |
+          CSV_URL=$(grep -oE 'https://assets\.publishing\.service\.gov\.uk/[^[:space:]]+\.csv([?#][^[:space:]]*)?' "$RUNNER_TEMP/gemma-out.log" | tail -n1 || echo "")
+          if [ -z "$CSV_URL" ]; then
+            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL"
+            exit 1
+          fi
+          echo "Gemma found: $CSV_URL"

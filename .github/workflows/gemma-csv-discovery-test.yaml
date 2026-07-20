@@ -6,6 +6,10 @@ name: Gemma CSV Discovery (experiment)
 # scheduled anthropic-based ingestion workflow.
 
 on:
+  # workflow_dispatch only registers once the file reaches the default branch;
+  # the scoped push trigger lets the experiment run from this branch meanwhile.
+  push:
+    branches: [feat/gemma-local-ci-experiment]
   workflow_dispatch:
     inputs:
       gemma-debug:
@@ -47,7 +51,7 @@ jobs:
           extra-env: |
             AI_PROVIDER=gemma
             GEMMA_MODEL_PATH=/work/.litert-models/gemma-4-E2B-it-web.litertlm
-            GEMMA_DEBUG=${{ inputs.gemma-debug && '1' || '0' }}
+            GEMMA_DEBUG=${{ (inputs.gemma-debug == false && '0') || '1' }}
             GEMMA_CHROMIUM_FLAGS=${{ inputs.extra-chromium-flags }}
 
       - name: Validate discovered URL

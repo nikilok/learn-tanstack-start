@@ -21,7 +21,77 @@ on:
         default: ''
 
 jobs:
+  # First attempt: local Gemma 4 on a free Apple Silicon runner (paravirtual
+  # Metal WebGPU). continue-on-error keeps any gemma failure from failing the
+  # scheduled run — the anthropic job below is the fallback.
+  discover-csv-url-gemma:
+    if: github.event.inputs.csv-url == ''
+    runs-on: macos-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    outputs:
+      csv-url: ${{ steps.extract-url.outputs.csv-url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # Same derived key as gemma-csv-discovery-test.yaml — a model-pin bump in
+      # gemma-litert.ts rolls the key, so cache and pin can never drift.
+      - name: Restore Gemma model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Run discovery with local Gemma
+        env:
+          AI_PROVIDER: gemma
+          GEMMA_MODEL_PATH: ${{ github.workspace }}/.litert-models/gemma-4-E2B-it-web.litertlm
+        run: |
+          set -o pipefail
+          bun scripts/find-hmrc-csv-url.ts 2>&1 | tee "$RUNNER_TEMP/gemma-out.log"
+        working-directory: apps/web
+
+      - name: Save Gemma model cache
+        if: always() && steps.model-cache.outputs.cache-hit != 'true' && hashFiles('.litert-models/*.litertlm') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          enableCrossOsArchive: true
+
+      - name: Extract CSV URL
+        id: extract-url
+        # BSD grep (no -P); output read from the tee'd log, never via ${{ }}.
+        run: |
+          CSV_URL=$(grep -oE 'https://assets\.publishing\.service\.gov\.uk/[^[:space:]]+\.csv([?#][^[:space:]]*)?' "$RUNNER_TEMP/gemma-out.log" | tail -n1 || echo "")
+          if [ -z "$CSV_URL" ]; then
+            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL — anthropic fallback will run"
+            exit 1
+          fi
+          echo "csv-url=$CSV_URL" >> "$GITHUB_OUTPUT"
+          echo "Gemma found CSV URL: $CSV_URL"
+
+  # Fallback (and the manual csv-url path): runs only when gemma produced no
+  # URL — a skipped fallback on the happy path costs nothing.
   discover-csv-url:
+    needs: discover-csv-url-gemma
+    if: always() && (github.event.inputs.csv-url != '' || needs.discover-csv-url-gemma.outputs.csv-url == '')
     runs-on: ubuntu-latest
     outputs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
@@ -70,7 +140,10 @@ jobs:
           echo "Found CSV URL: $CSV_URL"
 
   ingest:
-    needs: discover-csv-url
+    needs: [discover-csv-url-gemma, discover-csv-url]
+    # Runs when either discovery produced a URL (fallback may be skipped on the
+    # gemma happy path, hence always() + explicit output check).
+    if: always() && (needs.discover-csv-url-gemma.outputs.csv-url != '' || needs.discover-csv-url.outputs.csv-url != '')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -93,7 +166,9 @@ jobs:
         # POSTGRES_URL and repo-write credentials.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-          CSV_URL: ${{ needs.discover-csv-url.outputs.csv-url }}
+          # Gemma's URL wins when present; the fallback job carries both the
+          # anthropic result and the manual csv-url path.
+          CSV_URL: ${{ needs.discover-csv-url-gemma.outputs.csv-url || needs.discover-csv-url.outputs.csv-url }}
           FORCE_INGEST: ${{ github.event.inputs.force-ingest }}
           ALLOW_SHRINK: ${{ github.event.inputs.allow-shrink }}
         run: |

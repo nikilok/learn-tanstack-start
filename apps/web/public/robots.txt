@@ -1,4 +1,7 @@
+# AI/agent content-usage preferences — https://contentsignals.org/
+# search=yes: index for search · ai-input=yes: allow use as grounding/RAG input · ai-train=no: not for AI model training
 User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 Allow: /
 
 # Block SEO/backlink-analysis crawlers (Semrush family, Ryte, et al.) — https://www.semrush.com/bot/

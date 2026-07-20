@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, normalize, sep } from 'node:path';
 
-import { chromium } from 'playwright';
+import { type Browser, chromium } from 'playwright';
 
 // Pinned to litert-community/gemma-4-E2B-it-litert-lm@main as of 2026-07-20
 // (revision 9262660, file lfs oid below) — bump URL revision and sha together.
@@ -86,9 +86,30 @@ function packageRoot(specifier: string, from: string): string {
   return entry.slice(0, idx);
 }
 
+/** Streams a file through sha256 and returns the hex digest. */
+async function fileSha256(path: string): Promise<string> {
+  const hasher = new Bun.CryptoHasher('sha256');
+  for await (const chunk of Bun.file(path).stream()) hasher.update(chunk);
+  return hasher.digest('hex');
+}
+
 /** Downloads the .litertlm model to MODEL_PATH when it isn't cached yet. */
 async function ensureModel(): Promise<void> {
-  if (existsSync(MODEL_PATH)) return;
+  if (existsSync(MODEL_PATH)) {
+    // Local runs trust the once-verified download (hashing 2GB costs ~6s); CI
+    // restores from actions/cache, where cache-key/revision drift or a stale
+    // entry would otherwise run silently — verify there, self-heal on mismatch.
+    const verifyExisting =
+      MODEL_SHA256 && (process.env.CI || process.env.GEMMA_VERIFY === '1');
+    if (!verifyExisting) return;
+    const digest = await fileSha256(MODEL_PATH);
+    if (digest === MODEL_SHA256) {
+      console.log('[gemma] cached model sha256 verified');
+      return;
+    }
+    console.warn(`[gemma] cached model sha256 mismatch (${digest}), re-downloading`);
+    unlinkSync(MODEL_PATH);
+  }
   console.log(`[gemma] model not found, downloading to ${MODEL_PATH}`);
   console.log(`[gemma] source: ${MODEL_URL}`);
   mkdirSync(dirname(MODEL_PATH), { recursive: true });
@@ -247,65 +268,78 @@ export async function createGemmaClient(): Promise<GemmaClient> {
   console.log(
     `[gemma] model: ${MODEL_PATH} (${(model.size / 1e9).toFixed(2)} GB)`,
   );
-  const browser = await chromium.launch({
-    headless: true,
-    args: webgpuFlags(),
-  });
-  const page = await browser.newPage();
-  page.on('pageerror', (err) => console.error('[gemma:browser]', err.message));
-  page.on('console', (msg) => {
-    // LiteRT's glog chatter (I…/W…/INFO:/WARNING: lines) lands on console.error; keep it debug-only.
-    const isGlogNoise = /^(?:INFO:|WARNING:|[IW]\d{4})/.test(msg.text());
-    if (DEBUG || (msg.type() === 'error' && !isGlogNoise)) {
-      console.log(`[gemma:browser:${msg.type()}]`, msg.text());
-    }
-  });
 
-  const t0 = performance.now();
-  await page.goto(`http://127.0.0.1:${server.port}/`, {
-    waitUntil: 'domcontentloaded',
-  });
-  await page.waitForFunction(() => 'gemmaReady' in window);
-  const { adapter, fallback } = await page.evaluate(
-    (opts) => (window as unknown as HarnessWindow).gemmaInit(opts),
-    { maxNumTokens: MAX_NUM_TOKENS },
-  );
-  console.log(
-    `[gemma] engine ready in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
-      `(WebGPU: ${adapter}${fallback ? ' — software fallback' : ''}, context: ${MAX_NUM_TOKENS} tokens)`,
-  );
+  // Any init failure past this point must reap the server (it holds the event
+  // loop open) and the browser — the caller never gets a client to stop().
+  let browser: Browser | undefined;
+  try {
+    const launched = await chromium.launch({
+      headless: true,
+      args: webgpuFlags(),
+    });
+    browser = launched;
+    const page = await launched.newPage();
+    page.on('pageerror', (err) =>
+      console.error('[gemma:browser]', err.message),
+    );
+    page.on('console', (msg) => {
+      // LiteRT's glog chatter (I…/W…/INFO:/WARNING: lines) lands on console.error; keep it debug-only.
+      const isGlogNoise = /^(?:INFO:|WARNING:|[IW]\d{4})/.test(msg.text());
+      if (DEBUG || (msg.type() === 'error' && !isGlogNoise)) {
+        console.log(`[gemma:browser:${msg.type()}]`, msg.text());
+      }
+    });
 
-  // First generation pays a one-time shader compile / weight conversion cost
-  // (~25s observed); absorb it here so per-step timings are representative.
-  const tWarm = performance.now();
-  await page.evaluate(
-    (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
-    {
-      prompt: 'Reply with exactly: OK',
-      system: 'You reply with exactly what is asked, nothing else.',
-    },
-  );
-  console.log(
-    `[gemma] warmup generation in ${((performance.now() - tWarm) / 1000).toFixed(1)}s`,
-  );
+    const t0 = performance.now();
+    await page.goto(`http://127.0.0.1:${server.port}/`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForFunction(() => 'gemmaReady' in window);
+    const { adapter, fallback } = await page.evaluate(
+      (opts) => (window as unknown as HarnessWindow).gemmaInit(opts),
+      { maxNumTokens: MAX_NUM_TOKENS },
+    );
+    console.log(
+      `[gemma] engine ready in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
+        `(WebGPU: ${adapter}${fallback ? ' — software fallback' : ''}, context: ${MAX_NUM_TOKENS} tokens)`,
+    );
 
-  return {
-    async ask(prompt, system) {
-      const result = await page.evaluate(
-        (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
-        { prompt, system },
-      );
-      const bench = result.bench;
-      const stats = bench
-        ? `prefill ${bench.lastPrefillTokenCount} tok @ ${bench.lastPrefillTokensPerSecond.toFixed(0)} tok/s, ` +
-          `decode ${bench.lastDecodeTokenCount} tok @ ${bench.lastDecodeTokensPerSecond.toFixed(1)} tok/s, ` +
-          `${(result.elapsedMs / 1000).toFixed(1)}s total`
-        : `${(result.elapsedMs / 1000).toFixed(1)}s total`;
-      return { text: result.text, stats };
-    },
-    async stop() {
-      await browser.close();
-      server.stop(true);
-    },
-  };
+    // First generation pays a one-time shader compile / weight conversion cost
+    // (~25s observed); absorb it here so per-step timings are representative.
+    const tWarm = performance.now();
+    await page.evaluate(
+      (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
+      {
+        prompt: 'Reply with exactly: OK',
+        system: 'You reply with exactly what is asked, nothing else.',
+      },
+    );
+    console.log(
+      `[gemma] warmup generation in ${((performance.now() - tWarm) / 1000).toFixed(1)}s`,
+    );
+
+    return {
+      async ask(prompt, system) {
+        const result = await page.evaluate(
+          (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
+          { prompt, system },
+        );
+        const bench = result.bench;
+        const stats = bench
+          ? `prefill ${bench.lastPrefillTokenCount} tok @ ${bench.lastPrefillTokensPerSecond.toFixed(0)} tok/s, ` +
+            `decode ${bench.lastDecodeTokenCount} tok @ ${bench.lastDecodeTokensPerSecond.toFixed(1)} tok/s, ` +
+            `${(result.elapsedMs / 1000).toFixed(1)}s total`
+          : `${(result.elapsedMs / 1000).toFixed(1)}s total`;
+        return { text: result.text, stats };
+      },
+      async stop() {
+        await launched.close();
+        server.stop(true);
+      },
+    };
+  } catch (err) {
+    await browser?.close().catch(() => {});
+    server.stop(true);
+    throw err;
+  }
 }

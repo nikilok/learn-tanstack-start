@@ -1,0 +1,65 @@
+name: Gemma CSV Discovery (experiment)
+
+# Manual experiment: run the HMRC CSV discovery with the LOCAL Gemma 4 provider
+# (LiteRT-LM + WebGPU) on a standard runner, to find out whether software WebGPU
+# (SwiftShader) is usable before paying for a GPU runner. Does not touch the
+# scheduled anthropic-based ingestion workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      gemma-debug:
+        description: 'Forward browser console logs (verbose)'
+        type: boolean
+        default: true
+      extra-chromium-flags:
+        description: 'Extra Chromium flags for WebGPU experiments (space-separated), e.g. --use-webgpu-adapter=swiftshader'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  discover-csv-url-gemma:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2GB model, keyed to the pinned HF revision in scripts/lib/gemma-litert.ts.
+      # The twice-daily ingestion schedule would keep this warm if gemma ever
+      # graduates into it (7-day retention resets on access).
+      - name: Cache Gemma model
+        uses: actions/cache@v4
+        with:
+          path: .litert-models
+          key: litert-gemma-4-E2B-it-web-9262660
+
+      - name: Run discovery with local Gemma
+        id: find-csv
+        uses: ./.github/actions/run-playwright-script
+        with:
+          script-command: bun scripts/find-hmrc-csv-url.ts
+          # Workspace is mounted at /work in the container, so the model lands in
+          # the host's .litert-models for the cache post-step to save.
+          extra-env: |
+            AI_PROVIDER=gemma
+            GEMMA_MODEL_PATH=/work/.litert-models/gemma-4-E2B-it-web.litertlm
+            GEMMA_DEBUG=${{ inputs.gemma-debug && '1' || '0' }}
+            GEMMA_CHROMIUM_FLAGS=${{ inputs.extra-chromium-flags }}
+
+      - name: Validate discovered URL
+        # LLM stdout reaches the shell via env, never via ${{ }} in run: — same
+        # injection guard as the production workflow.
+        env:
+          FIND_CSV_STDOUT: ${{ steps.find-csv.outputs.stdout }}
+        run: |
+          CSV_URL=$(echo "$FIND_CSV_STDOUT" | grep -oP 'https://assets\.publishing\.service\.gov\.uk/[^\s]+\.csv([?#][^\s]*)?' | head -n1 || echo "")
+          if [ -z "$CSV_URL" ]; then
+            echo "::error::Gemma discovery did not produce a valid gov.uk CSV URL"
+            echo "Output was: $FIND_CSV_STDOUT"
+            exit 1
+          fi
+          echo "Gemma found: $CSV_URL"

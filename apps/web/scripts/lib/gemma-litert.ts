@@ -4,17 +4,27 @@
 // page the runtime, its wasm, and the model file. No data leaves the machine.
 //
 // Env: GEMMA_MODEL_PATH (default ~/.cache/litert-lm/gemma-4-E2B-it-web.litertlm),
-//      GEMMA_MODEL_URL (HuggingFace download used when the file is missing),
-//      GEMMA_MAX_TOKENS (context budget, default 8192), GEMMA_DEBUG=1 (browser logs).
-import { existsSync, mkdirSync, renameSync } from 'node:fs';
+//      GEMMA_MODEL_URL (download used when the file is missing; overriding skips
+//      the sha256 check unless GEMMA_MODEL_SHA256 is also set),
+//      GEMMA_MAX_TOKENS (context budget, default 8192), GEMMA_DEBUG=1 (browser logs),
+//      GEMMA_CHROMIUM_FLAGS (extra space-separated Chromium args, e.g. CI GPU experiments).
+import { existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, normalize, sep } from 'node:path';
 
 import { chromium } from 'playwright';
 
-const MODEL_URL =
-  process.env.GEMMA_MODEL_URL ??
-  'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-web.litertlm';
+// Pinned to litert-community/gemma-4-E2B-it-litert-lm@main as of 2026-07-20
+// (revision 9262660, file lfs oid below) — bump URL revision and sha together.
+const DEFAULT_MODEL_URL =
+  'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/9262660a1676eed6d0c477ab1a86344430854664/gemma-4-E2B-it-web.litertlm';
+const DEFAULT_MODEL_SHA256 =
+  '3a08e8d94e23b814ae5414469c370c503813949acb8ceaa17e4ebf8a35af35b5';
+
+const MODEL_URL = process.env.GEMMA_MODEL_URL ?? DEFAULT_MODEL_URL;
+const MODEL_SHA256 =
+  process.env.GEMMA_MODEL_SHA256 ??
+  (process.env.GEMMA_MODEL_URL ? null : DEFAULT_MODEL_SHA256);
 const MODEL_PATH =
   process.env.GEMMA_MODEL_PATH ??
   join(homedir(), '.cache', 'litert-lm', 'gemma-4-E2B-it-web.litertlm');
@@ -32,7 +42,9 @@ export interface GemmaClient {
 }
 
 interface HarnessWindow {
-  gemmaInit(opts: { maxNumTokens: number }): Promise<{ adapter: string }>;
+  gemmaInit(opts: {
+    maxNumTokens: number;
+  }): Promise<{ adapter: string; fallback: boolean }>;
   gemmaAsk(args: { prompt: string; system: string }): Promise<{
     text: string;
     elapsedMs: number;
@@ -51,14 +63,17 @@ interface HarnessWindow {
 function webgpuFlags(): string[] {
   const base = ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'];
   // macOS: ANGLE Metal. Linux (e.g. a GPU CI runner): the Vulkan recipe.
-  return process.platform === 'darwin'
-    ? [...base, '--use-angle=metal']
-    : [
-        ...base,
-        '--enable-features=Vulkan',
-        '--use-angle=vulkan',
-        '--disable-vulkan-surface',
-      ];
+  const platform =
+    process.platform === 'darwin'
+      ? [...base, '--use-angle=metal']
+      : [
+          ...base,
+          '--enable-features=Vulkan',
+          '--use-angle=vulkan',
+          '--disable-vulkan-surface',
+        ];
+  const extra = (process.env.GEMMA_CHROMIUM_FLAGS ?? '').split(/\s+/).filter(Boolean);
+  return [...platform, ...extra];
 }
 
 /** Resolves an installed package's root directory from its dist entry point. */
@@ -84,10 +99,12 @@ async function ensureModel(): Promise<void> {
   const total = Number(res.headers.get('content-length') ?? 0);
   const partial = `${MODEL_PATH}.partial`;
   const writer = Bun.file(partial).writer();
+  const hasher = MODEL_SHA256 ? new Bun.CryptoHasher('sha256') : null;
   let received = 0;
   let lastPct = -10;
   for await (const chunk of res.body) {
     writer.write(chunk);
+    hasher?.update(chunk);
     received += chunk.byteLength;
     const pct = total ? Math.floor((received / total) * 100) : 0;
     if (pct >= lastPct + 10) {
@@ -98,6 +115,16 @@ async function ensureModel(): Promise<void> {
     }
   }
   await writer.end();
+  if (hasher) {
+    const digest = hasher.digest('hex');
+    if (digest !== MODEL_SHA256) {
+      unlinkSync(partial);
+      throw new Error(
+        `Model sha256 mismatch: expected ${MODEL_SHA256}, got ${digest} — refusing to use the download`,
+      );
+    }
+    console.log('[gemma] sha256 verified');
+  }
   renameSync(partial, MODEL_PATH);
   console.log(`[gemma] download complete (${(received / 1e9).toFixed(2)} GB)`);
 }
@@ -134,7 +161,10 @@ window.gemmaInit = async ({ maxNumTokens }) => {
     mainExecutorSettings: { maxNumTokens },
     benchmarkEnabled: true,
   });
-  return { adapter: [info?.vendor, info?.architecture].filter(Boolean).join(' ') };
+  return {
+    adapter: [info?.vendor, info?.architecture].filter(Boolean).join(' '),
+    fallback: adapter.isFallbackAdapter === true,
+  };
 };
 
 window.gemmaAsk = async ({ prompt, system }) => {
@@ -236,13 +266,13 @@ export async function createGemmaClient(): Promise<GemmaClient> {
     waitUntil: 'domcontentloaded',
   });
   await page.waitForFunction(() => 'gemmaReady' in window);
-  const { adapter } = await page.evaluate(
+  const { adapter, fallback } = await page.evaluate(
     (opts) => (window as unknown as HarnessWindow).gemmaInit(opts),
     { maxNumTokens: MAX_NUM_TOKENS },
   );
   console.log(
     `[gemma] engine ready in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
-      `(WebGPU: ${adapter}, context: ${MAX_NUM_TOKENS} tokens)`,
+      `(WebGPU: ${adapter}${fallback ? ' — software fallback' : ''}, context: ${MAX_NUM_TOKENS} tokens)`,
   );
 
   // First generation pays a one-time shader compile / weight conversion cost

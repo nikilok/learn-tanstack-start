@@ -14,3 +14,6 @@ src/data/sic-codes.json
 
 # Turborepo
 .turbo
+
+# Local AI model files (CI caches these via actions/cache)
+.litert-models

@@ -1,0 +1,21 @@
+# SponsorSearch
+
+> Search UK skilled worker visa sponsors. Find companies licensed to sponsor Skilled Worker visas, with sponsor licence ratings, office locations, and the visa routes each company can sponsor.
+
+SponsorSearch (Skilled Worker Sponsor Search) combines the UK government's public register of licensed visa sponsors with Companies House company data, so people seeking visa sponsorship can find and research employers able to sponsor them. All company data derives from public UK government sources; SponsorSearch adds the matching, search, and presentation.
+
+## Pages
+
+- [Search](https://sponsorsearch.co.uk/): Search the full register of licensed sponsors by company name. Also matches former (previous) company names.
+- [Company details](https://sponsorsearch.co.uk/company/): Per-company pages at `/company/{id}/{slug}` — sponsor licence rating, visa routes (e.g. Skilled Worker), location, and linked Companies House details.
+- [Download](https://sponsorsearch.co.uk/download): Desktop app for macOS, Windows, and Linux.
+- [Privacy](https://sponsorsearch.co.uk/privacy): Privacy policy.
+
+## Data
+
+- [Sitemap index](https://sponsorsearch.co.uk/sitemap.xml): Index of every company page.
+- Sources: the UK register of licensed sponsors (Worker and Temporary Worker) and Companies House. Underlying data is public UK government data.
+
+## Usage preferences
+
+- AI/agent content preferences are published in [robots.txt](https://sponsorsearch.co.uk/robots.txt) as Content-Signal directives: indexing for search and use as grounding/RAG input are allowed; use for AI model training is not.

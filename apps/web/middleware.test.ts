@@ -58,6 +58,13 @@ describe('edge middleware: agent Accept handling', () => {
     expect(overriddenAccept(res)).toBeNull();
   });
 
+  test('a non-standard Accept with text/html only as a non-leading substring is still repaired', () => {
+    // Mirrors the framework's `part.trim().startsWith(...)` check: 'application/x-text/html'
+    // is NOT served HTML by the handler, so the guard must still repair it.
+    const res = run('/', 'application/x-text/html');
+    expect(overriddenAccept(res)).toBe('application/x-text/html, text/html');
+  });
+
   test('every document response advertises llms.txt', () => {
     const link = '</llms.txt>; rel="describedby"';
     expect(run('/', 'text/markdown').headers.get('link')).toBe(link);
@@ -79,6 +86,18 @@ describe('edge middleware: routing is preserved', () => {
       expect(overriddenAccept(res)).toBeNull();
       expect(res.headers.get('link')).toBeNull();
     }
+  });
+
+  test('/download (page) is a document, but /downloads/* (installer/updater) passes through', () => {
+    // The download page gets the agent Link header...
+    expect(run('/download', 'text/html').headers.get('link')).toBe(
+      '</llms.txt>; rel="describedby"',
+    );
+    // ...while the sibling binary/updater route is untouched: no Link, no Accept repair.
+    const dl = run('/downloads/latest/mac/SponsorSearch.dmg', 'text/markdown');
+    expect(isNext(dl)).toBe(true);
+    expect(dl.headers.get('link')).toBeNull();
+    expect(overriddenAccept(dl)).toBeNull();
   });
 
   test('static assets pass through', () => {

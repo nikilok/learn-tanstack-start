@@ -5,16 +5,18 @@ import { next } from '@vercel/edge';
 const DOCUMENT_PREFIXES = [
   '/company/', // detail pages
   '/privacy', // privacy policy
-  '/download', // download page + /downloads/* installer redirects (startsWith covers both)
+  '/download', // download PAGE only — '/downloads/*' is a pass-through API route below
 ];
 
 // Server-function / Nitro API / discovery routes — passed through untouched so they
-// keep their own JSON/binary content negotiation.
+// keep their own JSON/binary content negotiation. Checked BEFORE DOCUMENT_PREFIXES so
+// the binary '/downloads/*' route isn't swallowed by the '/download' document prefix.
 const API_PREFIXES = [
   '/_server', // TanStack server functions
   '/api/releases', // Nitro desktop-release write endpoint
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy
+  '/downloads/', // Nitro installer redirects + electron-updater feed (302/binary)
   '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint
 ];
 
@@ -37,33 +39,42 @@ const STATIC_EXTENSIONS = new Set([
 // RFC 8288 discovery hint pointing agents at the site's llms.txt guide.
 const AGENT_LINK = '</llms.txt>; rel="describedby"';
 
-/**
- * Serve an SSR document route: advertise llms.txt via a Link header and repair a
- * non-HTML Accept so the render path returns HTML instead of its hardcoded 500.
- */
+/** Mirror of TanStack Start's document-handler Accept test (createStartHandler): true iff some comma-part, trimmed, starts with text/html or the wildcard media range. */
+function acceptsHtml(accept: string): boolean {
+  return accept.split(',').some((part) => {
+    const type = part.trim();
+    return type.startsWith('text/html') || type.startsWith('*/*');
+  });
+}
+
+/** Serve an SSR document route: advertise llms.txt via a Link header and repair an Accept the render path would reject (it 500s unless Accept carries text/html or the wildcard range). */
 function serveDocument(request: Request): Response {
+  const init: {
+    headers: Record<string, string>;
+    request?: { headers: Headers };
+  } = { headers: { Link: AGENT_LINK } };
+
   const accept = request.headers.get('accept');
-  // TanStack Start's document handler 500s unless Accept carries text/html or */*.
-  if (accept && !accept.includes('text/html') && !accept.includes('*/*')) {
+  if (accept && !acceptsHtml(accept)) {
     const headers = new Headers(request.headers);
     headers.set('accept', `${accept}, text/html`);
-    return next({ headers: { Link: AGENT_LINK }, request: { headers } });
+    init.request = { headers };
   }
-  return next({ headers: { Link: AGENT_LINK } });
+  return next(init);
 }
 
 export default function middleware(request: Request) {
   const { pathname } = new URL(request.url);
 
-  // Home + SSR document routes.
-  if (
-    pathname === '/' ||
-    DOCUMENT_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  )
-    return serveDocument(request);
+  // Home + SSR document routes advertise llms.txt and get the Accept repair.
+  if (pathname === '/') return serveDocument(request);
 
-  // Server-function / API / discovery routes — pass through untouched.
+  // Server-function / API / discovery routes — pass through untouched. Checked before
+  // DOCUMENT_PREFIXES so '/downloads/*' isn't caught by the '/download' prefix.
   if (API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
+
+  if (DOCUMENT_PREFIXES.some((prefix) => pathname.startsWith(prefix)))
+    return serveDocument(request);
 
   // Allow known static file types.
   const dot = pathname.lastIndexOf('.');

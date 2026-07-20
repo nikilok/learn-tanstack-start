@@ -7,7 +7,7 @@ SponsorSearch (Skilled Worker Sponsor Search) combines the UK government's publi
 ## Pages
 
 - [Search](https://sponsorsearch.co.uk/): Search the full register of licensed sponsors by company name. Also matches former (previous) company names.
-- [Company details](https://sponsorsearch.co.uk/company/): Per-company pages at `/company/{id}/{slug}` — sponsor licence rating, visa routes (e.g. Skilled Worker), location, and linked Companies House details.
+- Company details: per-company pages at `/company/{id}/{slug}` — sponsor licence rating, visa routes (e.g. Skilled Worker), location, and linked Companies House details. Individual URLs are listed in the sitemap (below).
 - [Download](https://sponsorsearch.co.uk/download): Desktop app for macOS, Windows, and Linux.
 - [Privacy](https://sponsorsearch.co.uk/privacy): Privacy policy.
 

@@ -3,7 +3,7 @@
 // a headless Chromium page driven by Playwright; a local Bun server hands the
 // page the runtime, its wasm, and the model file. No data leaves the machine.
 //
-// Env: GEMMA_MODEL_PATH (default ~/.cache/litert-lm/gemma-4-E2B-it-web.litertlm),
+// Env: GEMMA_MODEL_PATH (default ~/.cache/litert-lm/<model>-<revision>.litertlm),
 //      GEMMA_MODEL_URL (download used when the file is missing; overriding skips
 //      the sha256 check unless GEMMA_MODEL_SHA256 is also set),
 //      GEMMA_MAX_TOKENS (context budget, default 8192), GEMMA_DEBUG=1 (browser logs),
@@ -14,22 +14,64 @@ import { dirname, join, normalize, sep } from 'node:path';
 
 import { type Browser, chromium } from 'playwright';
 
+/** Reads an env var, treating unset/empty/whitespace values as undefined. */
+function envStr(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
+}
+
 // Pinned to litert-community/gemma-4-E2B-it-litert-lm@main as of 2026-07-20
-// (revision 9262660, file lfs oid below) — bump URL revision and sha together.
-const DEFAULT_MODEL_URL =
-  'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/9262660a1676eed6d0c477ab1a86344430854664/gemma-4-E2B-it-web.litertlm';
+// (file lfs oid below) — bump revision and sha together. The default cache
+// filename embeds the revision so a pin bump can't silently reuse the old
+// model, and the CI cache key hashes this file so it rolls with any bump.
+const MODEL_REVISION = '9262660a1676eed6d0c477ab1a86344430854664';
+const DEFAULT_MODEL_URL = `https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/${MODEL_REVISION}/gemma-4-E2B-it-web.litertlm`;
 const DEFAULT_MODEL_SHA256 =
   '3a08e8d94e23b814ae5414469c370c503813949acb8ceaa17e4ebf8a35af35b5';
 
-const MODEL_URL = process.env.GEMMA_MODEL_URL ?? DEFAULT_MODEL_URL;
+const MODEL_URL = envStr('GEMMA_MODEL_URL') ?? DEFAULT_MODEL_URL;
 const MODEL_SHA256 =
-  process.env.GEMMA_MODEL_SHA256 ??
-  (process.env.GEMMA_MODEL_URL ? null : DEFAULT_MODEL_SHA256);
+  envStr('GEMMA_MODEL_SHA256') ??
+  (envStr('GEMMA_MODEL_URL') ? null : DEFAULT_MODEL_SHA256);
 const MODEL_PATH =
-  process.env.GEMMA_MODEL_PATH ??
-  join(homedir(), '.cache', 'litert-lm', 'gemma-4-E2B-it-web.litertlm');
-const MAX_NUM_TOKENS = Number(process.env.GEMMA_MAX_TOKENS ?? 8192);
+  envStr('GEMMA_MODEL_PATH') ??
+  join(
+    homedir(),
+    '.cache',
+    'litert-lm',
+    `gemma-4-E2B-it-web-${MODEL_REVISION.slice(0, 7)}.litertlm`,
+  );
+const MAX_NUM_TOKENS = Number(envStr('GEMMA_MAX_TOKENS') ?? 8192);
 const DEBUG = process.env.GEMMA_DEBUG === '1';
+
+// Generation is normally seconds; the caps only exist so a wedged WebGPU
+// device fails loudly instead of hanging the script forever.
+const INIT_TIMEOUT_MS = 600_000;
+const ASK_TIMEOUT_MS = 300_000;
+
+/** Rejects with a labeled error when a promise doesn't settle in time. */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms / 1000}s`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 export interface GemmaAskResult {
   text: string;
@@ -72,8 +114,24 @@ function webgpuFlags(): string[] {
           '--use-angle=vulkan',
           '--disable-vulkan-surface',
         ];
-  const extra = (process.env.GEMMA_CHROMIUM_FLAGS ?? '').split(/\s+/).filter(Boolean);
-  return [...platform, ...extra];
+  const extra = (envStr('GEMMA_CHROMIUM_FLAGS') ?? '').split(/\s+/).filter(Boolean);
+  const flags = [...platform, ...extra];
+  // Chromium keeps only the LAST occurrence of a repeated switch; merge
+  // --enable-features values so an extra flag can't silently drop the
+  // platform's (e.g. Vulkan on Linux).
+  const features = flags.filter((f) => f.startsWith('--enable-features='));
+  if (features.length <= 1) return flags;
+  const merged = [
+    ...new Set(
+      features.flatMap((f) => f.slice('--enable-features='.length).split(',')),
+    ),
+  ]
+    .filter(Boolean)
+    .join(',');
+  return [
+    ...flags.filter((f) => !f.startsWith('--enable-features=')),
+    `--enable-features=${merged}`,
+  ];
 }
 
 /** Resolves an installed package's root directory from its dist entry point. */
@@ -191,7 +249,12 @@ window.gemmaInit = async ({ maxNumTokens }) => {
 window.gemmaAsk = async ({ prompt, system }) => {
   const conversation = await engine.createConversation({
     preface: { messages: [{ role: 'system', content: system }] },
-    sessionConfig: { samplerParams: { type: SamplerType.GREEDY } },
+    // maxOutputTokens mirrors the anthropic path's max_tokens: a greedy 2B
+    // repetition loop must fail fast, not decode the whole 8k context.
+    sessionConfig: {
+      samplerParams: { type: SamplerType.GREEDY },
+      maxOutputTokens: 1024,
+    },
   });
   try {
     const t0 = performance.now();
@@ -216,6 +279,11 @@ window.gemmaReady = true;
 
 /** Boots the local Gemma stack: model cache, asset server, WebGPU Chromium, engine. */
 export async function createGemmaClient(): Promise<GemmaClient> {
+  if (!Number.isInteger(MAX_NUM_TOKENS) || MAX_NUM_TOKENS <= 0) {
+    throw new Error(
+      `GEMMA_MAX_TOKENS must be a positive integer, got "${process.env.GEMMA_MAX_TOKENS}"`,
+    );
+  }
   await ensureModel();
 
   const coreRoot = packageRoot('@litert-lm/core', import.meta.dir);
@@ -295,9 +363,13 @@ export async function createGemmaClient(): Promise<GemmaClient> {
       waitUntil: 'domcontentloaded',
     });
     await page.waitForFunction(() => 'gemmaReady' in window);
-    const { adapter, fallback } = await page.evaluate(
-      (opts) => (window as unknown as HarnessWindow).gemmaInit(opts),
-      { maxNumTokens: MAX_NUM_TOKENS },
+    const { adapter, fallback } = await withTimeout(
+      page.evaluate(
+        (opts) => (window as unknown as HarnessWindow).gemmaInit(opts),
+        { maxNumTokens: MAX_NUM_TOKENS },
+      ),
+      INIT_TIMEOUT_MS,
+      'Gemma engine init',
     );
     console.log(
       `[gemma] engine ready in ${((performance.now() - t0) / 1000).toFixed(1)}s ` +
@@ -307,12 +379,16 @@ export async function createGemmaClient(): Promise<GemmaClient> {
     // First generation pays a one-time shader compile / weight conversion cost
     // (~25s observed); absorb it here so per-step timings are representative.
     const tWarm = performance.now();
-    await page.evaluate(
-      (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
-      {
-        prompt: 'Reply with exactly: OK',
-        system: 'You reply with exactly what is asked, nothing else.',
-      },
+    await withTimeout(
+      page.evaluate(
+        (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
+        {
+          prompt: 'Reply with exactly: OK',
+          system: 'You reply with exactly what is asked, nothing else.',
+        },
+      ),
+      INIT_TIMEOUT_MS,
+      'Gemma warmup generation',
     );
     console.log(
       `[gemma] warmup generation in ${((performance.now() - tWarm) / 1000).toFixed(1)}s`,
@@ -320,9 +396,13 @@ export async function createGemmaClient(): Promise<GemmaClient> {
 
     return {
       async ask(prompt, system) {
-        const result = await page.evaluate(
-          (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
-          { prompt, system },
+        const result = await withTimeout(
+          page.evaluate(
+            (args) => (window as unknown as HarnessWindow).gemmaAsk(args),
+            { prompt, system },
+          ),
+          ASK_TIMEOUT_MS,
+          'Gemma generation',
         );
         const bench = result.bench;
         const stats = bench

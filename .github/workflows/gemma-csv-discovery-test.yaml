@@ -59,7 +59,9 @@ jobs:
         run: bun x playwright install --with-deps chromium
         working-directory: apps/web
 
-      # 2GB model, keyed to the pinned HF revision in scripts/lib/gemma-litert.ts.
+      # 2GB model. The key hashes gemma-litert.ts so a model-pin bump can never
+      # drift from the cache (immutable stale entries under a hand-written key
+      # would otherwise be served forever, or block re-saving a healed model).
       # restore/save are split so a failed experiment still primes the cache;
       # cross-OS archive lets macOS and Linux attempts share one entry.
       - name: Restore Gemma model cache
@@ -67,7 +69,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .litert-models
-          key: litert-gemma-4-E2B-it-web-9262660
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
           enableCrossOsArchive: true
 
       - name: Run discovery with local Gemma
@@ -86,7 +88,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .litert-models
-          key: litert-gemma-4-E2B-it-web-9262660
+          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
           enableCrossOsArchive: true
 
       - name: Validate discovered URL

@@ -3,6 +3,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { chromium } from 'playwright';
 
+import {
+  type AgentAction,
+  formatLinksForPrompt,
+  parseAgentAction,
+} from './lib/agent-action';
 import { createGemmaClient, type GemmaClient } from './lib/gemma-litert';
 
 const PROVIDER = process.env.AI_PROVIDER ?? 'anthropic';
@@ -23,18 +28,6 @@ const GEMMA_SYSTEM =
 let anthropic: Anthropic | null = null;
 let gemma: GemmaClient | null = null;
 
-interface AgentAction {
-  action: 'click' | 'done';
-  url?: string;
-  csvUrl?: string;
-  reasoning: string;
-}
-
-interface PageLink {
-  text: string;
-  href: string;
-}
-
 async function extractLinks(page: import('playwright').Page) {
   return page.evaluate(() => {
     const links = Array.from(document.querySelectorAll('a[href]'));
@@ -47,34 +40,6 @@ async function extractLinks(page: import('playwright').Page) {
   });
 }
 
-/** Formats scraped links for the prompt; filtered + compact for Gemma's 8k context. */
-function formatLinksForPrompt(links: PageLink[]): string {
-  if (PROVIDER !== 'gemma') return JSON.stringify(links, null, 2);
-  const relevant = links.filter((l) =>
-    /csv|sponsor|worker|licen[cs]|register|immigration|visa|download/i.test(
-      `${l.text} ${l.href}`,
-    ),
-  );
-  const pool = (relevant.length > 0 ? relevant : links)
-    .map((l) => ({ text: l.text.slice(0, 100), href: l.href }))
-    .sort(
-      (a, b) =>
-        Number(b.href.includes('.csv')) - Number(a.href.includes('.csv')),
-    );
-  return JSON.stringify(pool.slice(0, 120));
-}
-
-/** Extracts the first JSON object from a model response, tolerating fences and prose. */
-function parseAgentAction(text: string): AgentAction {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const candidate = fenced ? fenced[1] : text;
-  const jsonMatch = candidate.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error(`${MODEL_LABEL} did not return valid JSON: ${text}`);
-  }
-  return JSON.parse(jsonMatch[0]);
-}
-
 /** Sends a prompt to the Anthropic API and returns the raw response text. */
 async function askClaude(prompt: string): Promise<string> {
   anthropic ??= new Anthropic();
@@ -84,7 +49,8 @@ async function askClaude(prompt: string): Promise<string> {
     messages: [{ role: 'user', content: prompt }],
   });
 
-  return response.content[0].type === 'text' ? response.content[0].text : '';
+  const first = response.content[0];
+  return first?.type === 'text' ? first.text : '';
 }
 
 /** Routes a prompt to the configured provider and parses its JSON decision. */
@@ -93,9 +59,9 @@ async function askModel(prompt: string): Promise<AgentAction> {
     gemma ??= await createGemmaClient();
     const { text, stats } = await gemma.ask(prompt, GEMMA_SYSTEM);
     console.log(`  [gemma] ${stats}`);
-    return parseAgentAction(text);
+    return parseAgentAction(text, MODEL_LABEL);
   }
-  return parseAgentAction(await askClaude(prompt));
+  return parseAgentAction(await askClaude(prompt), MODEL_LABEL);
 }
 
 async function main() {
@@ -119,7 +85,7 @@ async function main() {
     const searchPrompt = `You are helping find the UK gov.uk page that contains a downloadable CSV file of licensed sponsor employers (skilled workers).
 
 Here are the gov.uk search results:
-${formatLinksForPrompt(searchResults)}
+${formatLinksForPrompt(searchResults, PROVIDER)}
 
 Which result is most likely the page listing licensed sponsors where you can download the worker CSV?
 
@@ -149,7 +115,7 @@ URL: ${page.url()}
 You are looking for a direct download link to a CSV file containing the full list of licensed sponsor employers (skilled workers / temporary workers).
 
 Here are the links on this page:
-${formatLinksForPrompt(links)}
+${formatLinksForPrompt(links, PROVIDER)}
 
 If you can see a link to a CSV file for skilled/temporary workers, respond with:
 { "action": "done", "csvUrl": "<full URL of the CSV>", "reasoning": "<why this is the right file>" }
@@ -162,8 +128,10 @@ Respond with JSON only.`;
       const decision = await askModel(navPrompt);
       console.log(`${MODEL_LABEL}: ${decision.reasoning}`);
 
-      if (decision.action === 'done' && decision.csvUrl) {
-        const csvUrl = new URL(decision.csvUrl, page.url()).href;
+      // Small models sometimes put the final URL in `url` despite the schema.
+      const doneUrl = decision.csvUrl ?? decision.url;
+      if (decision.action === 'done' && doneUrl) {
+        const csvUrl = new URL(doneUrl, page.url()).href;
         console.log(`\nFound CSV URL: ${csvUrl}`);
         return csvUrl;
       }

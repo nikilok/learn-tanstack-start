@@ -187,7 +187,7 @@ export function createPlaywrightHost(): HarnessHost {
       await browser?.close().catch(() => {});
       browser = undefined;
       page = undefined;
-      server?.stop(true);
+      await server?.stop(true).catch(() => {});
       server = undefined;
     },
   };

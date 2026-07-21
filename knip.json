@@ -25,6 +25,9 @@
       "entry": ["src/setup.tsx"],
       "project": ["src/**/*.{ts,tsx}"]
     },
-    "packages/*": {}
+    "packages/*": {},
+    "packages/gemma": {
+      "ignoreDependencies": ["@litert-lm/core"]
+    }
   }
 }

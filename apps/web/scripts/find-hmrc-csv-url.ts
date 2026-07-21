@@ -1,6 +1,8 @@
 // AI_PROVIDER=anthropic (default) | gemma. The gemma provider runs Gemma 4 E2B
-// fully locally via LiteRT-LM + WebGPU in headless Chromium (lib/gemma-litert.ts).
+// fully locally via LiteRT-LM + WebGPU in headless Chromium (@ss/gemma core,
+// hosted by lib/gemma-host-playwright.ts).
 import Anthropic from '@anthropic-ai/sdk';
+import type { GemmaClient } from '@ss/gemma';
 import { chromium } from 'playwright';
 
 import {
@@ -8,7 +10,7 @@ import {
   formatLinksForPrompt,
   parseAgentAction,
 } from './lib/agent-action';
-import { createGemmaClient, type GemmaClient } from './lib/gemma-litert';
+import { createPlaywrightGemmaClient } from './lib/gemma-host-playwright';
 
 const PROVIDER = process.env.AI_PROVIDER ?? 'anthropic';
 const MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001';
@@ -56,7 +58,7 @@ async function askClaude(prompt: string): Promise<string> {
 /** Routes a prompt to the configured provider and parses its JSON decision. */
 async function askModel(prompt: string): Promise<AgentAction> {
   if (PROVIDER === 'gemma') {
-    gemma ??= await createGemmaClient();
+    gemma ??= await createPlaywrightGemmaClient();
     const { text, stats } = await gemma.ask(prompt, GEMMA_SYSTEM);
     console.log(`  [gemma] ${stats}`);
     return parseAgentAction(text, MODEL_LABEL);

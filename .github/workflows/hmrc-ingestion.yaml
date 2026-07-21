@@ -55,8 +55,8 @@ jobs:
         run: bun x playwright install --with-deps chromium
         working-directory: apps/web
 
-      # Same derived key as gemma-csv-discovery-test.yaml — a model-pin bump in
-      # gemma-litert.ts rolls the key, so cache and pin can never drift.
+      # Cache key derived from gemma-litert.ts — a model-pin bump rolls the key,
+      # so the cached model and the pin can never drift.
       - name: Restore Gemma model cache
         id: model-cache
         uses: actions/cache/restore@v4

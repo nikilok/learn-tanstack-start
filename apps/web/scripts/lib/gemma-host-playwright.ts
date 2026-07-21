@@ -9,6 +9,7 @@
 //      GEMMA_CHROMIUM_FLAGS (extra space-separated Chromium args, e.g. CI GPU experiments).
 import {
   createGemmaClient,
+  createProgressGate,
   DEFAULT_MODEL_SHA256,
   DEFAULT_MODEL_URL,
   defaultModelPath,
@@ -20,9 +21,13 @@ import {
   type HarnessHost,
   type HarnessWindow,
   litertAssetRoots,
+  mergeEnableFeatures,
   resolvePackageFilePath,
+  webgpuChromiumFlags,
 } from '@ss/gemma';
 import { type Browser, chromium, type Page } from 'playwright';
+
+import { parseStrictInt } from './script-utils';
 
 const DEBUG = process.env.GEMMA_DEBUG === '1';
 
@@ -34,12 +39,12 @@ function envStr(name: string): string | undefined {
 
 /** Builds the client config from GEMMA_* env vars. */
 function readEnvConfig(): GemmaClientConfig {
-  const maxNumTokens = Number(envStr('GEMMA_MAX_TOKENS') ?? 8192);
-  if (!Number.isInteger(maxNumTokens) || maxNumTokens <= 0) {
-    throw new Error(
-      `GEMMA_MAX_TOKENS must be a positive integer, got "${process.env.GEMMA_MAX_TOKENS}"`,
-    );
-  }
+  const rawMaxTokens = envStr('GEMMA_MAX_TOKENS');
+  // parseStrictInt rejects coercing forms ('8e3', '0x2000') with a labeled
+  // error; createGemmaClient owns the positivity check at the API boundary.
+  const maxNumTokens = rawMaxTokens
+    ? parseStrictInt(rawMaxTokens, 'GEMMA_MAX_TOKENS')
+    : 8192;
   return {
     model: {
       path: envStr('GEMMA_MODEL_PATH') ?? defaultModelPath(),
@@ -56,39 +61,16 @@ function readEnvConfig(): GemmaClientConfig {
   };
 }
 
-/** Chromium flags that expose a hardware WebGPU adapter in headless mode. */
+/** The harness WebGPU switch recipe plus GEMMA_CHROMIUM_FLAGS extras, merged. */
 function webgpuFlags(): string[] {
-  const base = ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'];
-  // macOS: ANGLE Metal. Linux (e.g. a GPU CI runner): the Vulkan recipe.
-  const platform =
-    process.platform === 'darwin'
-      ? [...base, '--use-angle=metal']
-      : [
-          ...base,
-          '--enable-features=Vulkan',
-          '--use-angle=vulkan',
-          '--disable-vulkan-surface',
-        ];
   const extra = (envStr('GEMMA_CHROMIUM_FLAGS') ?? '')
     .split(/\s+/)
     .filter(Boolean);
-  const flags = [...platform, ...extra];
-  // Chromium keeps only the LAST occurrence of a repeated switch; merge
-  // --enable-features values so an extra flag can't silently drop the
-  // platform's (e.g. Vulkan on Linux).
-  const features = flags.filter((f) => f.startsWith('--enable-features='));
-  if (features.length <= 1) return flags;
-  const merged = [
-    ...new Set(
-      features.flatMap((f) => f.slice('--enable-features='.length).split(',')),
-    ),
-  ]
-    .filter(Boolean)
-    .join(',');
-  return [
-    ...flags.filter((f) => !f.startsWith('--enable-features=')),
-    `--enable-features=${merged}`,
-  ];
+  // Merge --enable-features so an extra flag can't silently drop the platform's.
+  return mergeEnableFeatures([
+    ...webgpuChromiumFlags(process.platform),
+    ...extra,
+  ]);
 }
 
 /** Serves a file from within a package root, refusing path traversal. */
@@ -105,7 +87,7 @@ function servePackageFile(root: string, rest: string): Response {
 function startAssetServer(modelPath: string) {
   const { coreRoot, wasmUtilsRoot } = litertAssetRoots();
   const model = Bun.file(modelPath);
-  let transferLogged = -10;
+  const progress = createProgressGate();
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -121,10 +103,9 @@ function startAssetServer(modelPath: string) {
         const counter = new TransformStream<Uint8Array, Uint8Array>({
           transform(chunk, controller) {
             sent += chunk.byteLength;
-            const pct = Math.floor((sent / model.size) * 100);
-            if (pct >= transferLogged + 10) {
-              transferLogged = pct - (pct % 10);
-              console.log(`[gemma] model → browser ${transferLogged}%`);
+            const step = progress(Math.floor((sent / model.size) * 100));
+            if (step !== null) {
+              console.log(`[gemma] model → browser ${step}%`);
             }
             controller.enqueue(chunk);
           },
@@ -155,16 +136,20 @@ function startAssetServer(modelPath: string) {
 }
 
 /** HarnessHost that boots the harness in Playwright's WebGPU-enabled Chromium. */
-export function createPlaywrightHost(config: GemmaClientConfig): HarnessHost {
+export function createPlaywrightHost(): HarnessHost {
   let server: ReturnType<typeof startAssetServer>['server'] | undefined;
   let browser: Browser | undefined;
   let page: Page | undefined;
   return {
-    async load() {
-      const assets = startAssetServer(config.model.path);
+    async load(modelPath) {
+      // A second load would strand the first server/browser with no handle.
+      if (server || browser) {
+        throw new Error('Playwright Gemma host is already loaded');
+      }
+      const assets = startAssetServer(modelPath);
       server = assets.server;
       console.log(
-        `[gemma] model: ${config.model.path} (${(assets.modelSize / 1e9).toFixed(2)} GB)`,
+        `[gemma] model: ${modelPath} (${(assets.modelSize / 1e9).toFixed(2)} GB)`,
       );
       browser = await chromium.launch({ headless: true, args: webgpuFlags() });
       const opened = await browser.newPage();
@@ -211,5 +196,5 @@ export function createPlaywrightHost(config: GemmaClientConfig): HarnessHost {
 /** Env-configured Gemma client on the Playwright host (Bun scripts / CI). */
 export async function createPlaywrightGemmaClient(): Promise<GemmaClient> {
   const config = readEnvConfig();
-  return createGemmaClient(createPlaywrightHost(config), config);
+  return createGemmaClient(createPlaywrightHost(), config);
 }

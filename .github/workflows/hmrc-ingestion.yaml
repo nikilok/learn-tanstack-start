@@ -26,6 +26,14 @@ on:
           - gemma
           - anthropic
         default: gemma
+      gemma-debug:
+        description: 'Forward gemma browser console logs (verbose; for debugging failed discoveries)'
+        type: boolean
+        default: false
+      extra-chromium-flags:
+        description: 'Extra Chromium flags for the gemma WebGPU run (space-separated)'
+        type: string
+        default: ''
 
 jobs:
   # Primary (and, on schedule, only) discovery: local Gemma 4 on a free Apple
@@ -69,6 +77,9 @@ jobs:
         env:
           AI_PROVIDER: gemma
           GEMMA_MODEL_PATH: ${{ github.workspace }}/.litert-models/gemma-4-E2B-it-web.litertlm
+          # Dispatch-only debug affordances; scheduled runs get '' → defaults.
+          GEMMA_DEBUG: ${{ (inputs.gemma-debug == true && '1') || '0' }}
+          GEMMA_CHROMIUM_FLAGS: ${{ inputs.extra-chromium-flags }}
         run: |
           set -o pipefail
           bun scripts/find-hmrc-csv-url.ts 2>&1 | tee "$RUNNER_TEMP/gemma-out.log"

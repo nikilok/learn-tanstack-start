@@ -1,7 +1,7 @@
 // Runtime-agnostic orchestration: model acquisition, engine init + warmup,
 // timeouts, and per-ask stats, all over a HarnessHost supplied by the runtime
 // (Playwright in apps/web scripts today; an Electron BrowserWindow later).
-import type { GemmaAskRaw } from './harness';
+import type { GemmaAskRaw, GemmaInitResult } from './harness';
 import { ensureModel, type GemmaModelConfig } from './model';
 
 // Generation is normally seconds; the caps only exist so a wedged WebGPU
@@ -11,12 +11,10 @@ const ASK_TIMEOUT_MS = 300_000;
 
 /** What a runtime provides: a loaded harness page the core can call into. */
 export interface HarnessHost {
-  /** Serve the harness + assets and load it in a WebGPU-capable page. */
-  load(): Promise<void>;
+  /** Serve the harness + assets for the verified model file and load the page. */
+  load(modelPath: string): Promise<void>;
   /** Invoke window.gemmaInit in the page. */
-  init(opts: {
-    maxNumTokens: number;
-  }): Promise<{ adapter: string; fallback: boolean }>;
+  init(opts: { maxNumTokens: number }): Promise<GemmaInitResult>;
   /** Invoke window.gemmaAsk in the page. */
   ask(args: { prompt: string; system: string }): Promise<GemmaAskRaw>;
   /** Tear everything down; must be safe to call at any point, twice included. */
@@ -88,7 +86,8 @@ export async function createGemmaClient(
   // Any failure past this point must reap the host — the caller never gets a
   // client handle to stop().
   try {
-    await host.load();
+    // The host serves exactly the file ensureModel just verified.
+    await host.load(config.model.path);
     const t0 = performance.now();
     const { adapter, fallback } = await withTimeout(
       host.init({ maxNumTokens: config.maxNumTokens }),

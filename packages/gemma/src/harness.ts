@@ -4,11 +4,10 @@
 import { createRequire } from 'node:module';
 import { dirname, join, normalize, sep } from 'node:path';
 
-/** Benchmark + token stats returned by a single harness generation. */
+/** Benchmark stats returned by a single harness generation. */
 export interface GemmaAskRaw {
   text: string;
   elapsedMs: number;
-  tokens: number | null;
   bench: {
     lastPrefillTokensPerSecond: number;
     lastPrefillTokenCount: number;
@@ -18,16 +17,20 @@ export interface GemmaAskRaw {
   } | null;
 }
 
+/** Result of the harness's engine init: the WebGPU adapter it landed on. */
+export interface GemmaInitResult {
+  adapter: string;
+  fallback: boolean;
+}
+
 /** Functions HARNESS_HTML installs on window; hand-kept mirror of the script below. */
 export interface HarnessWindow {
-  gemmaInit(opts: {
-    maxNumTokens: number;
-  }): Promise<{ adapter: string; fallback: boolean }>;
+  gemmaInit(opts: { maxNumTokens: number }): Promise<GemmaInitResult>;
   gemmaAsk(args: { prompt: string; system: string }): Promise<GemmaAskRaw>;
 }
 
 // The serving contract every host must implement at its origin root —
-// HARNESS_HTML's importmap and module imports hardcode these paths.
+// HARNESS_HTML interpolates these paths into its importmap and module imports.
 // `model` must send content-length (the engine reads it for load progress);
 // `core`/`wasmUtils` are prefixes onto the litertAssetRoots() directories.
 export const HARNESS_ROUTES = {
@@ -38,10 +41,10 @@ export const HARNESS_ROUTES = {
 } as const;
 
 export const HARNESS_HTML = `<!doctype html>
-<title>gemma-litert harness</title>
-<script type="importmap">{"imports":{"@litertjs/wasm-utils":"/wasm-utils/dist/index.js"}}</script>
+<title>@ss/gemma harness</title>
+<script type="importmap">{"imports":{"@litertjs/wasm-utils":"${HARNESS_ROUTES.wasmUtils}dist/index.js"}}</script>
 <script type="module">
-import { Engine, SamplerType, loadLiteRtLm } from '/core/dist/index.js';
+import { Engine, SamplerType, loadLiteRtLm } from '${HARNESS_ROUTES.core}dist/index.js';
 
 let engine;
 
@@ -49,9 +52,9 @@ window.gemmaInit = async ({ maxNumTokens }) => {
   const adapter = await navigator.gpu?.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter available in this browser context');
   const info = adapter.info;
-  await loadLiteRtLm('/core/wasm/');
+  await loadLiteRtLm('${HARNESS_ROUTES.core}wasm/');
   engine = await Engine.create({
-    model: '/model',
+    model: '${HARNESS_ROUTES.model}',
     mainExecutorSettings: { maxNumTokens },
     benchmarkEnabled: true,
   });
@@ -82,8 +85,7 @@ window.gemmaAsk = async ({ prompt, system }) => {
           .map((part) => part.text)
           .join('');
     const bench = await conversation.getBenchmarkInfo().catch(() => null);
-    const tokens = await conversation.getTokenCount().catch(() => null);
-    return { text, elapsedMs, tokens, bench };
+    return { text, elapsedMs, bench };
   } finally {
     await conversation.delete();
   }
@@ -126,4 +128,35 @@ export function harnessAssetContentType(path: string): string | null {
   if (path.endsWith('.wasm')) return 'application/wasm';
   if (path.endsWith('.js')) return 'text/javascript';
   return null;
+}
+
+/** Chromium switches that expose a hardware WebGPU adapter for the harness. */
+export function webgpuChromiumFlags(platform: string): string[] {
+  const base = ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist'];
+  // macOS: ANGLE Metal. Linux (e.g. a GPU CI runner): the Vulkan recipe.
+  return platform === 'darwin'
+    ? [...base, '--use-angle=metal']
+    : [
+        ...base,
+        '--enable-features=Vulkan',
+        '--use-angle=vulkan',
+        '--disable-vulkan-surface',
+      ];
+}
+
+/** Merges repeated --enable-features switches — Chromium keeps only the last. */
+export function mergeEnableFeatures(flags: string[]): string[] {
+  const features = flags.filter((f) => f.startsWith('--enable-features='));
+  if (features.length <= 1) return flags;
+  const merged = [
+    ...new Set(
+      features.flatMap((f) => f.slice('--enable-features='.length).split(',')),
+    ),
+  ]
+    .filter(Boolean)
+    .join(',');
+  return [
+    ...flags.filter((f) => !f.startsWith('--enable-features=')),
+    `--enable-features=${merged}`,
+  ];
 }

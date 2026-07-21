@@ -12,12 +12,20 @@ export {
 } from './client';
 export {
   type GemmaAskRaw,
+  type GemmaInitResult,
   HARNESS_HTML,
   HARNESS_ROUTES,
   harnessAssetContentType,
   type HarnessWindow,
   litertAssetRoots,
+  mergeEnableFeatures,
   resolvePackageFilePath,
+  webgpuChromiumFlags,
 } from './harness';
-export { defaultModelPath, ensureModel, type GemmaModelConfig } from './model';
+export {
+  createProgressGate,
+  defaultModelPath,
+  ensureModel,
+  type GemmaModelConfig,
+} from './model';
 export { DEFAULT_MODEL_SHA256, DEFAULT_MODEL_URL } from './model-pin';

@@ -13,9 +13,11 @@ runtime supplies a `HarnessHost` adapter that owns the page.
   download/pin/verify (`ensureModel`, `src/model-pin.ts`), and client
   orchestration (`createGemmaClient(host, config)`: init, warmup, timeouts,
   stats).
-- **Hosts (per runtime)** — implement `HarnessHost` (`load`/`init`/`ask`/
-  `dispose`): serve the harness routes at an origin root, load the page in a
-  WebGPU-capable Chromium, and bridge `window.gemmaInit`/`gemmaAsk`.
+- **Hosts (per runtime)** — implement `HarnessHost`
+  (`load(modelPath)`/`init`/`ask`/`dispose`): serve the harness routes at an
+  origin root — the model path arrives via `load`, after the core has verified
+  it — load the page in a WebGPU-capable Chromium, and bridge
+  `window.gemmaInit`/`gemmaAsk`.
   - `apps/web/scripts/lib/gemma-host-playwright.ts` — Bun.serve on loopback +
     Playwright headless Chromium; used by the HMRC CSV discovery script and
     the scheduled ingestion workflow.

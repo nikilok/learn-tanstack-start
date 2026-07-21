@@ -55,14 +55,14 @@ jobs:
         run: bun x playwright install --with-deps chromium
         working-directory: apps/web
 
-      # Cache key derived from gemma-litert.ts — a model-pin bump rolls the key,
+      # Cache key hashes the @ss/gemma model pin — a pin bump rolls the key,
       # so the cached model and the pin can never drift.
       - name: Restore Gemma model cache
         id: model-cache
         uses: actions/cache/restore@v4
         with:
           path: .litert-models
-          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          key: litert-gemma-model-${{ hashFiles('packages/gemma/src/model-pin.ts') }}
           enableCrossOsArchive: true
 
       - name: Run discovery with local Gemma
@@ -79,7 +79,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .litert-models
-          key: litert-gemma-model-${{ hashFiles('apps/web/scripts/lib/gemma-litert.ts') }}
+          key: litert-gemma-model-${{ hashFiles('packages/gemma/src/model-pin.ts') }}
           enableCrossOsArchive: true
 
       - name: Extract CSV URL

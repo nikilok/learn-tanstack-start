@@ -1,0 +1,16 @@
+{
+  "name": "@ss/gemma",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@litert-lm/core": "0.14.0"
+  }
+}

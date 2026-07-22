@@ -6,6 +6,7 @@ const DOCUMENT_PREFIXES = [
   '/company/', // detail pages
   '/privacy', // privacy policy
   '/download', // download PAGE only — '/downloads/*' is a pass-through API route below
+  '/search', // AI-mode filter search page (access-gated in the route)
 ];
 
 // Server-function / Nitro API / discovery routes — passed through untouched so they

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  filtersToSearchParams,
   parseSearchFilters,
   RATINGS,
   requiresChLink,
@@ -230,6 +231,32 @@ describe('parseSearchFilters', () => {
     });
     expect(filters).toEqual({ q: 'abc' });
     expect(issues).toEqual([]);
+  });
+});
+
+describe('filtersToSearchParams', () => {
+  test('URL form round-trips through the parser as a fixpoint', () => {
+    const { filters } = parseSearchFilters({
+      route: 'skilled-worker,charity worker',
+      rating: 'premium',
+      hasMoved: true,
+      incorporatedFrom: 2015,
+      location: 'Wembley, London',
+    });
+    const urlForm = filtersToSearchParams(filters);
+    expect(urlForm).toEqual({
+      route: 'Skilled Worker,Charity Worker',
+      rating: 'A-Premium',
+      hasMoved: true,
+      incorporatedFrom: '2015-01-01',
+      location: 'Wembley, London',
+    });
+    // /search's validateSearch relies on this: re-parsing the URL form must
+    // reproduce identical state, or the router redirect-loops.
+    const reparsed = parseSearchFilters(urlForm);
+    expect(reparsed.filters).toEqual(filters);
+    expect(reparsed.issues).toEqual([]);
+    expect(filtersToSearchParams(reparsed.filters)).toEqual(urlForm);
   });
 });
 

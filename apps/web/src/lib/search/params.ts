@@ -422,6 +422,31 @@ export type ParsedSearchFilters = {
   issues: string[];
 };
 
+// URL form of SearchFilters: lists flatten to comma-joined strings, booleans
+// stay booleans. Precise keys, no index signature — a loose Record here leaks
+// into the router's merged search-param type and breaks other routes' typing.
+export type SearchUrlParams = {
+  [K in keyof SearchFilters]?: SearchFilters[K] extends boolean | undefined
+    ? boolean
+    : string;
+};
+
+/**
+ * Canonical filters → URL-friendly search params: arrays comma-join to plain
+ * strings ("route=Skilled Worker,Charity Worker"), scalars pass through. The
+ * result round-trips through parseSearchFilters unchanged, so a route using
+ * it as validateSearch output reaches a stable URL (no re-serialize redirect
+ * loops, no JSON-array URLs).
+ */
+export function filtersToSearchParams(filters: SearchFilters): SearchUrlParams {
+  const out: Record<string, string | boolean> = {};
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined) continue;
+    out[key] = Array.isArray(value) ? value.join(',') : value;
+  }
+  return out as SearchUrlParams;
+}
+
 /**
  * Validate raw filter params (URL search params, server fn input, or model
  * output) into SearchFilters. Lenient by design: invalid entries are dropped

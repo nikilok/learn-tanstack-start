@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SearchRouteImport } from './routes/search'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as DownloadRouteImport } from './routes/download'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompanyIdSlugRouteImport } from './routes/company.$id.$slug'
 
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
   '/privacy': typeof PrivacyRoute
+  '/search': typeof SearchRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
   '/privacy': typeof PrivacyRoute
+  '/search': typeof SearchRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesById {
@@ -52,25 +60,40 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
   '/privacy': typeof PrivacyRoute
+  '/search': typeof SearchRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/download' | '/privacy' | '/company/$id/$slug'
+  fullPaths: '/' | '/download' | '/privacy' | '/search' | '/company/$id/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/download' | '/privacy' | '/company/$id/$slug'
-  id: '__root__' | '/' | '/download' | '/privacy' | '/company/$id/$slug'
+  to: '/' | '/download' | '/privacy' | '/search' | '/company/$id/$slug'
+  id:
+    | '__root__'
+    | '/'
+    | '/download'
+    | '/privacy'
+    | '/search'
+    | '/company/$id/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DownloadRoute: typeof DownloadRoute
   PrivacyRoute: typeof PrivacyRoute
+  SearchRoute: typeof SearchRoute
   CompanyIdSlugRoute: typeof CompanyIdSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -106,6 +129,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DownloadRoute: DownloadRoute,
   PrivacyRoute: PrivacyRoute,
+  SearchRoute: SearchRoute,
   CompanyIdSlugRoute: CompanyIdSlugRoute,
 }
 export const routeTree = rootRouteImport

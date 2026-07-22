@@ -82,6 +82,36 @@ describe('buildFilterConditions', () => {
     ]);
   });
 
+  test('single industry word resolves via SIC descriptions', () => {
+    expect(renderOne({ industry: 'software' })).toEqual({
+      text: "c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE (sc.description ~* $1 OR strict_word_similarity($2, sc.description) > 0.55))",
+      params: ['\\msoftware', 'software'],
+    });
+  });
+
+  test('multi-word industry prefers all-words, falls back to any-word', () => {
+    const { text, params } = renderOne({ industry: 'care homes' });
+    expect(text.startsWith('c.sic_codes && (CASE WHEN EXISTS (')).toBe(true);
+    expect(text).toContain(') THEN (');
+    expect(text).toContain(') ELSE (');
+    // Stemmed word-boundary prefix (homes→home) + original word for trigram,
+    // repeated across the EXISTS/THEN/ELSE subqueries.
+    expect(params).toEqual([
+      '\\mcare',
+      'care',
+      '\\mhome',
+      'homes',
+      '\\mcare',
+      'care',
+      '\\mhome',
+      'homes',
+      '\\mcare',
+      'care',
+      '\\mhome',
+      'homes',
+    ]);
+  });
+
   test('sic codes and sections OR together in one condition', () => {
     const { text } = renderOne({ sic: ['86900'], sicSection: ['J'] });
     expect(text.startsWith('(c.sic_codes && ARRAY[$1]::text[] OR ')).toBe(true);

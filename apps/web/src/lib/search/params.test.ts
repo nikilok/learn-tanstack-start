@@ -145,6 +145,17 @@ describe('parseSearchFilters', () => {
     expect(issues).toEqual([]);
   });
 
+  test('industry collapses whitespace and needs a usable word', () => {
+    const ok = parseSearchFilters({ industry: '  care   homes ' });
+    expect(ok.filters.industry).toBe('care homes');
+    expect(ok.issues).toEqual([]);
+    const junk = parseSearchFilters({ industry: 'IT & Co' });
+    expect(junk.filters.industry).toBeUndefined();
+    expect(junk.issues).toEqual([
+      'industry: needs a word of 3+ characters — dropped',
+    ]);
+  });
+
   test('coerces boolean strings and reports junk', () => {
     const ok = parseSearchFilters({ hasMoved: 'True' });
     expect(ok.filters.hasMoved).toBe(true);
@@ -231,7 +242,8 @@ describe('requiresChLink', () => {
     ).toBe(false);
     expect(requiresChLink({ hasMoved: false })).toBe(true);
     expect(requiresChLink({ status: ['active'] })).toBe(true);
-    // sic reads c.sic_codes, so it drops unmapped sponsors too.
+    // industry/sic read c.sic_codes, so they drop unmapped sponsors too.
+    expect(requiresChLink({ industry: 'software' })).toBe(true);
     expect(requiresChLink({ sic: ['62020'] })).toBe(true);
     expect(requiresChLink({ sicSection: ['J'] })).toBe(true);
   });

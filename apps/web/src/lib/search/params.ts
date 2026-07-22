@@ -185,6 +185,7 @@ export type SearchFilters = {
   workerType?: WorkerType[];
   rating?: Rating[];
   location?: string;
+  industry?: string;
   sic?: string[];
   sicSection?: string[];
   status?: string[];
@@ -209,6 +210,8 @@ export const FILTER_DOCS = {
   rating: 'Licence rating tiers: A, A-Premium, A-SME+, B, Provisional.',
   location:
     'Town or city, matched case-insensitively against the sponsor town and registered-office locality.',
+  industry:
+    'Industry in plain words (e.g. "software", "care homes"), matched against SIC descriptions — prefer this over sic unless an exact code is known.',
   sic: 'One or more SIC 2007 codes; 5-digit preferred, a 4-digit code also matches as a class prefix.',
   sicSection: 'One or more SIC 2007 section letters A-U (see SIC_SECTIONS).',
   status: 'Companies House company status (exact values in COMPANY_STATUSES).',
@@ -230,6 +233,7 @@ export const FILTER_DOCS = {
 // Filters sourced from Companies House columns: they implicitly exclude the
 // ~9% of sponsors with no CH mapping (public bodies / no_match).
 export const CH_FILTER_KEYS = [
+  'industry',
   'sic',
   'sicSection',
   'status',
@@ -258,6 +262,11 @@ export function typeRatingsFor(
       (!workerTypes?.length || workerTypes.includes(row.workerType)) &&
       (!ratings?.length || ratings.includes(row.rating)),
   ).map((row) => row.raw);
+}
+
+/** Usable match words from an industry phrase: alphanumeric runs of 3+ chars (drops stopword-length noise). */
+export function industryWords(industry: string): string[] {
+  return industry.split(/[^a-zA-Z0-9]+/).filter((word) => word.length >= 3);
 }
 
 /** Lowercase and strip non-alphanumerics so enum matching survives model/user casing and punctuation. */
@@ -449,6 +458,15 @@ export function parseSearchFilters(
     if (location.length > 100) {
       issues.push('location: over 100 characters — dropped');
     } else filters.location = location;
+  }
+
+  const industry = scalarInput(raw.industry)?.replace(/\s+/g, ' ').trim();
+  if (industry) {
+    if (industry.length > 100) {
+      issues.push('industry: over 100 characters — dropped');
+    } else if (!industryWords(industry).length) {
+      issues.push('industry: needs a word of 3+ characters — dropped');
+    } else filters.industry = industry;
   }
 
   if (raw.sic !== undefined) {

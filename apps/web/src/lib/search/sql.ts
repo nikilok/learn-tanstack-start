@@ -1,7 +1,12 @@
 import { type SQL, sql } from 'drizzle-orm';
 
 import { ADDRESS_COLUMNS } from '../timeline/curate';
-import { type SearchFilters, SIC_SECTIONS, typeRatingsFor } from './params';
+import {
+  industryWords,
+  type SearchFilters,
+  SIC_SECTIONS,
+  typeRatingsFor,
+} from './params';
 
 // Fragments target the canonical filter-query aliases, which the /search
 // server fn's FROM clause must use:
@@ -34,6 +39,16 @@ const textArray = (values: readonly string[]): SQL =>
  */
 const addressTrailProbe = (): SQL =>
   sql`SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${inList(ADDRESS_COLUMNS)}) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%'`;
+
+/** One industry word vs a SIC description: word-boundary prefix on a naive stem (homes→home), or strict trigram similarity (strict = whole-word extents; plain word_similarity matches 'care' inside 'carpets'). */
+const industryWordPred = (word: string): SQL => {
+  const stem = word.replace(/ies$/i, 'y').replace(/^(.{3,})s$/i, '$1');
+  return sql`(sc.description ~* ${`\\m${stem}`} OR strict_word_similarity(${word}, sc.description) > 0.55)`;
+};
+
+/** Aggregate the SIC codes whose description satisfies the given predicate. */
+const industryCodes = (preds: SQL): SQL =>
+  sql`SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE ${preds}`;
 
 /** true = flag set; false = mapped company whose flag is false or unknown (NULL). */
 const chFlag = (col: SQL, value: boolean): SQL =>
@@ -96,6 +111,21 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
       // legacy 4-digit SIC-2003 codes are reachable via sic=, not sections.
       sicParts.push(
         sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(${textArray(divisions)}) AND sc.code NOT IN (${inList(SECTION_EXCLUDED_CODES)}))`,
+      );
+    }
+  }
+  if (filters.industry) {
+    const words = industryWords(filters.industry);
+    if (words.length) {
+      // Plain-language industry resolved via SIC descriptions (731 rows, bare
+      // functions fine). Prefer descriptions matching ALL words; when SIC
+      // officialese defeats that ('care homes' — no description holds both),
+      // fall back to ANY word so the filter degrades instead of zeroing out.
+      const all = sql.join(words.map(industryWordPred), sql` AND `);
+      sicParts.push(
+        words.length === 1
+          ? sql`c.sic_codes && (${industryCodes(all)})`
+          : sql`c.sic_codes && (CASE WHEN EXISTS (SELECT 1 FROM sic_codes sc WHERE ${sql.join(words.map(industryWordPred), sql` AND `)}) THEN (${industryCodes(sql.join(words.map(industryWordPred), sql` AND `))}) ELSE (${industryCodes(sql.join(words.map(industryWordPred), sql` OR `))}) END)`,
       );
     }
   }

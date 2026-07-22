@@ -6,7 +6,10 @@ name: Phase 5 Sweep — Tier 1 (no_match)
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    # Off-hour minute + ~4h spacing from the other tiers: the shared
+    # phase5-sweep group keeps only ONE pending run, so clustered on-the-hour
+    # crons let a late-arriving tier evict a queued one. First/heaviest tier.
+    - cron: '17 1 * * *'
   workflow_dispatch:
     inputs:
       max-rows:

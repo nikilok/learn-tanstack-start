@@ -36,6 +36,12 @@ export const hmrcSkilledWorkers = pgTable(
       'gin',
       sql`${table.organisationName} gin_trgm_ops`,
     ),
+    index('idx_hmrc_type_rating').on(table.typeRating),
+    // lower(): the feed's town casing is dirty (LONDON/London); /search matches case-insensitively.
+    index('idx_hmrc_town_city_lower').using(
+      'btree',
+      sql`lower(${table.townCity})`,
+    ),
   ],
 );
 
@@ -148,6 +154,11 @@ export const companiesHouseProfiles = pgTable(
     index('idx_ch_sic_codes').using('gin', table.sicCodes),
     index('idx_ch_jurisdiction').on(table.jurisdiction),
     index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
+    index('idx_ch_date_of_creation').on(table.dateOfCreation),
+    index('idx_ch_locality_lower').using(
+      'btree',
+      sql`lower(${table.locality})`,
+    ),
   ],
 );
 
@@ -269,6 +280,12 @@ export const companiesHouseProfileTrails = pgTable(
   (table) => [
     index('idx_ch_trail_company_number').on(table.companyNumber),
     index('idx_ch_trail_created_at').on(table.createdAt),
+    // /search hasMoved probe; IN list = timeline ADDRESS_COLUMNS (curate.ts) + lib/search/sql.ts — keep in lockstep.
+    index('idx_ch_trail_address_change')
+      .on(table.companyNumber)
+      .where(
+        sql`${table.columnName} IN ('addressLine1', 'addressLine2', 'locality', 'region', 'postalCode', 'country')`,
+      ),
   ],
 );
 

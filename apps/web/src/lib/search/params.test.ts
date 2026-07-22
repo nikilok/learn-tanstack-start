@@ -1,0 +1,175 @@
+import { describe, expect, test } from 'bun:test';
+
+import {
+  parseSearchFilters,
+  RATINGS,
+  requiresChLink,
+  TYPE_RATING_ROWS,
+  typeRatingsFor,
+  WORKER_TYPES,
+} from './params';
+
+describe('parseSearchFilters', () => {
+  test('parses a full valid param set with lenient spellings', () => {
+    const { filters, issues } = parseSearchFilters({
+      q: ' Tesco ',
+      route: 'skilled-worker,Charity Worker',
+      workerType: 'temporary',
+      rating: ['a', 'sme+'],
+      location: '  Milton   Keynes ',
+      sic: ['62020', '62012'],
+      sicSection: 'j',
+      status: 'Active',
+      companyType: 'LTD',
+      incorporatedFrom: 2015,
+      incorporatedTo: '2020-06-30',
+      accountsOverdue: 'false',
+      hasCharges: true,
+      hasRenamed: 'true',
+      hasMoved: false,
+      sort: 'Relevance',
+      order: 'DESC',
+    });
+    expect(issues).toEqual([]);
+    expect(filters).toEqual({
+      q: 'Tesco',
+      route: ['Skilled Worker', 'Charity Worker'],
+      workerType: ['Temporary Worker'],
+      rating: ['A', 'A-SME+'],
+      location: 'Milton Keynes',
+      sic: ['62020', '62012'],
+      sicSection: ['J'],
+      status: ['active'],
+      companyType: ['ltd'],
+      incorporatedFrom: '2015-01-01',
+      incorporatedTo: '2020-06-30',
+      accountsOverdue: false,
+      hasCharges: true,
+      hasRenamed: true,
+      hasMoved: false,
+      sort: 'relevance',
+      order: 'desc',
+    });
+  });
+
+  test('drops a short q with an issue; blank q is silently absent', () => {
+    const short = parseSearchFilters({ q: 'ab' });
+    expect(short.filters.q).toBeUndefined();
+    expect(short.issues).toEqual(['q: needs at least 3 characters — dropped']);
+    const blank = parseSearchFilters({ q: '   ' });
+    expect(blank.filters).toEqual({});
+    expect(blank.issues).toEqual([]);
+  });
+
+  test('drops unknown enum values, keeps valid ones, dedupes', () => {
+    const { filters, issues } = parseSearchFilters({
+      route: 'Skilled Worker,Space Cadet,skilled worker',
+    });
+    expect(filters.route).toEqual(['Skilled Worker']);
+    expect(issues).toEqual(['route: unknown value "Space Cadet" — dropped']);
+    const none = parseSearchFilters({ route: 'Space Cadet' });
+    expect(none.filters.route).toBeUndefined();
+  });
+
+  test('expands bare years and swaps a reversed range', () => {
+    const { filters, issues } = parseSearchFilters({
+      incorporatedFrom: '2020',
+      incorporatedTo: '2015',
+    });
+    expect(filters.incorporatedFrom).toBe('2015-12-31');
+    expect(filters.incorporatedTo).toBe('2020-01-01');
+    expect(issues).toEqual([
+      'incorporatedFrom/incorporatedTo: reversed range — swapped',
+    ]);
+  });
+
+  test('rejects impossible calendar dates', () => {
+    const { filters, issues } = parseSearchFilters({
+      incorporatedFrom: '2015-02-30',
+    });
+    expect(filters.incorporatedFrom).toBeUndefined();
+    expect(issues).toEqual([
+      'incorporatedFrom: invalid date "2015-02-30" — dropped',
+    ]);
+  });
+
+  test('drops relevance sort without q, keeps it with q', () => {
+    const dropped = parseSearchFilters({ sort: 'relevance' });
+    expect(dropped.filters.sort).toBeUndefined();
+    expect(dropped.issues).toEqual(['sort: relevance requires q — dropped']);
+    const kept = parseSearchFilters({ q: 'abc', sort: 'relevance' });
+    expect(kept.filters.sort).toBe('relevance');
+    expect(parseSearchFilters({ sort: 'name' }).filters.sort).toBe('name');
+  });
+
+  test('coerces boolean strings and reports junk', () => {
+    const ok = parseSearchFilters({ hasMoved: 'True' });
+    expect(ok.filters.hasMoved).toBe(true);
+    const junk = parseSearchFilters({ accountsOverdue: 'yes' });
+    expect(junk.filters.accountsOverdue).toBeUndefined();
+    expect(junk.issues).toEqual([
+      'accountsOverdue: expected true/false — dropped',
+    ]);
+  });
+
+  test('validates sic codes individually', () => {
+    const { filters, issues } = parseSearchFilters({
+      sic: '62020, 999, potato',
+    });
+    expect(filters.sic).toEqual(['62020']);
+    expect(issues).toEqual([
+      'sic: invalid code "999" — dropped',
+      'sic: invalid code "potato" — dropped',
+    ]);
+  });
+
+  test('ignores unknown keys silently', () => {
+    const { filters, issues } = parseSearchFilters({
+      q: 'abc',
+      offset: 50,
+      foo: 'bar',
+    });
+    expect(filters).toEqual({ q: 'abc' });
+    expect(issues).toEqual([]);
+  });
+});
+
+describe('typeRatingsFor', () => {
+  test('facets intersect and map to raw feed values', () => {
+    expect(typeRatingsFor(['Worker'])).toHaveLength(5);
+    expect(typeRatingsFor(undefined, ['A-SME+'])).toEqual([
+      'Worker (A (SME+))',
+      'Temporary Worker (A (SME+))',
+    ]);
+    // Pin the feed's trailing space — an IN-list equality depends on it.
+    expect(typeRatingsFor(['Worker'], ['Provisional'])).toEqual([
+      'Worker (UK Expansion Worker: Provisional )',
+    ]);
+  });
+
+  test('an impossible combination yields no raw values', () => {
+    expect(typeRatingsFor(['Temporary Worker'], ['Provisional'])).toEqual([]);
+  });
+
+  test('rows cover every canonical facet value', () => {
+    expect(new Set(TYPE_RATING_ROWS.map((r) => r.workerType))).toEqual(
+      new Set(WORKER_TYPES),
+    );
+    expect(new Set(TYPE_RATING_ROWS.map((r) => r.rating))).toEqual(
+      new Set(RATINGS),
+    );
+    expect(new Set(TYPE_RATING_ROWS.map((r) => r.raw)).size).toBe(
+      TYPE_RATING_ROWS.length,
+    );
+  });
+});
+
+describe('requiresChLink', () => {
+  test('true only for Companies-House-sourced filters', () => {
+    expect(
+      requiresChLink({ route: ['Skilled Worker'], location: 'London' }),
+    ).toBe(false);
+    expect(requiresChLink({ hasMoved: false })).toBe(true);
+    expect(requiresChLink({ status: ['active'] })).toBe(true);
+  });
+});

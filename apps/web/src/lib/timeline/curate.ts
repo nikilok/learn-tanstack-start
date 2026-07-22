@@ -18,7 +18,9 @@ import type {
 // First trail row ever written by ch-stream in production.
 export const TRACKING_SINCE = '2026-04-14';
 
-const ADDRESS_COLUMNS = [
+// Also the /search hasMoved definition (lib/search/sql.ts) and the partial
+// index predicate in @ss/db schema.ts — keep the three in lockstep.
+export const ADDRESS_COLUMNS = [
   'addressLine1',
   'addressLine2',
   'locality',

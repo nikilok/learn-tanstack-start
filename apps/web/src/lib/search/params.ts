@@ -209,15 +209,18 @@ export const FILTER_DOCS = {
   rating: 'Licence rating tiers: A, A-Premium, A-SME+, B, Provisional.',
   location:
     'Town or city, matched case-insensitively against the sponsor town and registered-office locality.',
-  sic: 'One or more 4-5 digit SIC 2007 codes.',
+  sic: 'One or more SIC 2007 codes; 5-digit preferred, a 4-digit code also matches as a class prefix.',
   sicSection: 'One or more SIC 2007 section letters A-U (see SIC_SECTIONS).',
   status: 'Companies House company status (exact values in COMPANY_STATUSES).',
   companyType: 'Companies House company type (exact values in COMPANY_TYPES).',
   incorporatedFrom: 'Earliest incorporation date, YYYY-MM-DD or YYYY.',
   incorporatedTo: 'Latest incorporation date, YYYY-MM-DD or YYYY.',
-  accountsOverdue: 'true = annual accounts are currently overdue.',
-  hasCharges: 'true = company has registered charges (secured borrowing).',
-  hasInsolvencyHistory: 'true = company has insolvency history.',
+  accountsOverdue:
+    'true = annual accounts currently overdue; false = not overdue or unknown.',
+  hasCharges:
+    'true = has registered charges (secured borrowing); false = none or unknown.',
+  hasInsolvencyHistory:
+    'true = has insolvency history; false = none or unknown.',
   hasRenamed: 'true = company has at least one previous name.',
   hasMoved: 'true = registered address changed since tracking began (2026-04).',
   sort: 'relevance (requires q), name, or incorporated.',
@@ -227,6 +230,8 @@ export const FILTER_DOCS = {
 // Filters sourced from Companies House columns: they implicitly exclude the
 // ~9% of sponsors with no CH mapping (public bodies / no_match).
 export const CH_FILTER_KEYS = [
+  'sic',
+  'sicSection',
   'status',
   'companyType',
   'incorporatedFrom',
@@ -260,24 +265,36 @@ function normKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-/** Coerce a scalar param (string or finite number) to string. */
+// Bounds keeping hostile inputs from ballooning bind params or the issues echo.
+const MAX_LIST_ITEMS = 50;
+const MAX_ISSUES = 25;
+
+/** Coerce a scalar param (string, finite number, or first array element) to string. */
 function scalarInput(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  const v = Array.isArray(value) ? value[0] : value;
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
   return undefined;
 }
 
-/** Coerce a multi-value param (array or comma-separated string) to trimmed non-empty strings. */
-function listInput(value: unknown): string[] {
-  const items = Array.isArray(value)
-    ? value
-    : typeof value === 'string'
-      ? [value]
-      : [];
-  return items
-    .flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
+/** Coerce a multi-value param (array or comma-separated string; numbers allowed) to trimmed non-empty strings, capped at MAX_LIST_ITEMS. */
+function listInput(key: string, value: unknown, issues: string[]): string[] {
+  const items = Array.isArray(value) ? value : [value];
+  const all = items
+    .flatMap((item) =>
+      typeof item === 'string'
+        ? item.split(',')
+        : typeof item === 'number' && Number.isFinite(item)
+          ? [String(item)]
+          : [],
+    )
     .map((item) => item.trim())
     .filter(Boolean);
+  if (all.length > MAX_LIST_ITEMS) {
+    issues.push(`${key}: more than ${MAX_LIST_ITEMS} values — extras dropped`);
+    return all.slice(0, MAX_LIST_ITEMS);
+  }
+  return all;
 }
 
 // Extra normKey spellings the canonical lists don't produce themselves.
@@ -306,8 +323,13 @@ function canonEnumList<T extends string>(
 ): T[] | undefined {
   const byKey = new Map(canonical.map((c) => [normKey(c), c]));
   const out: T[] = [];
-  for (const item of listInput(value)) {
-    const canon = byKey.get(normKey(item)) ?? aliases?.[normKey(item)];
+  for (const item of listInput(key, value, issues)) {
+    // hasOwn: a plain-record lookup would accept prototype keys ('constructor').
+    const canon =
+      byKey.get(normKey(item)) ??
+      (aliases && Object.hasOwn(aliases, normKey(item))
+        ? aliases[normKey(item)]
+        : undefined);
     if (!canon) {
       issues.push(`${key}: unknown value "${item}" — dropped`);
       continue;
@@ -345,8 +367,9 @@ function boolInput(
   return undefined;
 }
 
-/** True when the string is a real calendar date (rejects e.g. 2015-02-30). */
+/** True when the string is a real calendar date (rejects 2015-02-30, and year 0000 which JS Date has but Postgres doesn't). */
 function isRealDate(iso: string): boolean {
+  if (iso.startsWith('0000')) return false;
   const t = new Date(`${iso}T00:00:00Z`);
   return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === iso;
 }
@@ -360,7 +383,9 @@ function dateInput(
 ): string | undefined {
   const s = scalarInput(value)?.trim();
   if (!s) return undefined;
-  if (/^\d{4}$/.test(s)) return edge === 'from' ? `${s}-01-01` : `${s}-12-31`;
+  if (/^\d{4}$/.test(s) && s !== '0000') {
+    return edge === 'from' ? `${s}-01-01` : `${s}-12-31`;
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s) && isRealDate(s)) return s;
   issues.push(`${key}: invalid date "${s}" — dropped`);
   return undefined;
@@ -387,7 +412,14 @@ export function parseSearchFilters(
   const q = scalarInput(raw.q)?.trim();
   if (q) {
     if (q.length < 3) issues.push('q: needs at least 3 characters — dropped');
-    else filters.q = q.slice(0, 100);
+    else {
+      // Code-point slice: a code-unit slice could split a surrogate pair.
+      const chars = [...q];
+      if (chars.length > 100) {
+        filters.q = chars.slice(0, 100).join('');
+        issues.push('q: over 100 characters — truncated');
+      } else filters.q = q;
+    }
   }
 
   if (raw.route !== undefined) {
@@ -420,7 +452,7 @@ export function parseSearchFilters(
   }
 
   if (raw.sic !== undefined) {
-    const codes = listInput(raw.sic).filter((code) => {
+    const codes = listInput('sic', raw.sic, issues).filter((code) => {
       const ok = /^\d{4,5}$/.test(code);
       if (!ok) issues.push(`sic: invalid code "${code}" — dropped`);
       return ok;
@@ -453,31 +485,28 @@ export function parseSearchFilters(
     );
   }
 
+  const rawFrom = scalarInput(raw.incorporatedFrom)?.trim();
+  const rawTo = scalarInput(raw.incorporatedTo)?.trim();
   if (raw.incorporatedFrom !== undefined) {
     filters.incorporatedFrom = dateInput(
       'incorporatedFrom',
-      raw.incorporatedFrom,
+      rawFrom,
       'from',
       issues,
     );
   }
   if (raw.incorporatedTo !== undefined) {
-    filters.incorporatedTo = dateInput(
-      'incorporatedTo',
-      raw.incorporatedTo,
-      'to',
-      issues,
-    );
+    filters.incorporatedTo = dateInput('incorporatedTo', rawTo, 'to', issues);
   }
   if (
     filters.incorporatedFrom &&
     filters.incorporatedTo &&
     filters.incorporatedFrom > filters.incorporatedTo
   ) {
-    [filters.incorporatedFrom, filters.incorporatedTo] = [
-      filters.incorporatedTo,
-      filters.incorporatedFrom,
-    ];
+    // Re-expand from the raw inputs so reversed bare years land on the intended
+    // outer edges (2020→2015 must become 2015-01-01..2020-12-31, not the inverse).
+    filters.incorporatedFrom = dateInput('incorporatedFrom', rawTo, 'from', []);
+    filters.incorporatedTo = dateInput('incorporatedTo', rawFrom, 'to', []);
     issues.push('incorporatedFrom/incorporatedTo: reversed range — swapped');
   }
 
@@ -499,6 +528,10 @@ export function parseSearchFilters(
   }
   if (raw.order !== undefined) {
     filters.order = canonEnum('order', raw.order, SORT_ORDERS, issues);
+  }
+
+  if (issues.length > MAX_ISSUES) {
+    issues.splice(MAX_ISSUES, issues.length, '…additional issues dropped');
   }
 
   return { filters, issues };

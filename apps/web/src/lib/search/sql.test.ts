@@ -44,26 +44,42 @@ describe('buildFilterConditions', () => {
     ).toEqual({ text: 'false', params: [] });
   });
 
-  test('location matches sponsor town OR CH locality, case-insensitively', () => {
+  test('location segment-matches comma composites across town and locality', () => {
     expect(renderOne({ location: 'London' })).toEqual({
-      text: '(lower(h.town_city) = lower($1) OR lower(c.locality) = lower($2))',
-      params: ['London', 'London'],
+      text: "EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, c.locality)), ',')) AS loc(seg) WHERE btrim(loc.seg) = lower($1))",
+      params: ['London'],
     });
   });
 
-  test('sic codes use an array-overlap against the GIN index', () => {
+  test('5-digit sic codes use an array-overlap against the GIN index', () => {
     expect(renderOne({ sic: ['62020', '62012'] })).toEqual({
       text: 'c.sic_codes && ARRAY[$1, $2]::text[]',
       params: ['62020', '62012'],
     });
   });
 
-  test('sic sections expand to divisions via the lookup table', () => {
+  test('4-digit sic codes also expand as SIC-2007 class prefixes', () => {
+    expect(renderOne({ sic: ['6202'] })).toEqual({
+      text: "(c.sic_codes && ARRAY[$1]::text[] OR c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 4) = ANY(ARRAY[$2]::text[])))",
+      params: ['6202', '6202'],
+    });
+  });
+
+  test('sic sections expand to divisions, excluding CH placeholder codes', () => {
     const { text, params } = renderOne({ sicSection: ['J'] });
     expect(text).toBe(
-      "c.sic_codes && (SELECT coalesce(array_agg(sc.code), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(ARRAY[$1, $2, $3, $4, $5, $6]::text[]))",
+      "c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(ARRAY[$1, $2, $3, $4, $5, $6]::text[]) AND sc.code NOT IN ($7, $8))",
     );
-    expect(params).toEqual(['58', '59', '60', '61', '62', '63']);
+    expect(params).toEqual([
+      '58',
+      '59',
+      '60',
+      '61',
+      '62',
+      '63',
+      '98000',
+      '99999',
+    ]);
   });
 
   test('sic codes and sections OR together in one condition', () => {
@@ -83,14 +99,18 @@ describe('buildFilterConditions', () => {
     });
   });
 
-  test('boolean flags bind directly', () => {
+  test('boolean flags: true matches set rows, false includes unknown (NULL)', () => {
     expect(renderOne({ accountsOverdue: true })).toEqual({
-      text: 'c.accounts_overdue = $1',
-      params: [true],
+      text: 'c.accounts_overdue = true',
+      params: [],
     });
     expect(renderOne({ hasCharges: false })).toEqual({
-      text: 'c.has_charges = $1',
-      params: [false],
+      text: '(c.company_number IS NOT NULL AND c.has_charges IS NOT TRUE)',
+      params: [],
+    });
+    expect(renderOne({ hasInsolvencyHistory: false })).toEqual({
+      text: '(c.company_number IS NOT NULL AND c.has_insolvency_history IS NOT TRUE)',
+      params: [],
     });
   });
 
@@ -103,10 +123,10 @@ describe('buildFilterConditions', () => {
     );
   });
 
-  test('hasMoved probes address-change trail rows', () => {
+  test('hasMoved probes real address changes only', () => {
     const { text, params } = renderOne({ hasMoved: true });
     expect(text).toBe(
-      'EXISTS (SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN ($1, $2, $3, $4, $5, $6))',
+      "EXISTS (SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN ($1, $2, $3, $4, $5, $6) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%')",
     );
     expect(params).toEqual([...ADDRESS_COLUMNS]);
   });

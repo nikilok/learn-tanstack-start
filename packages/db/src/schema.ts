@@ -37,11 +37,6 @@ export const hmrcSkilledWorkers = pgTable(
       sql`${table.organisationName} gin_trgm_ops`,
     ),
     index('idx_hmrc_type_rating').on(table.typeRating),
-    // lower(): the feed's town casing is dirty (LONDON/London); /search matches case-insensitively.
-    index('idx_hmrc_town_city_lower').using(
-      'btree',
-      sql`lower(${table.townCity})`,
-    ),
   ],
 );
 
@@ -155,10 +150,6 @@ export const companiesHouseProfiles = pgTable(
     index('idx_ch_jurisdiction').on(table.jurisdiction),
     index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
     index('idx_ch_date_of_creation').on(table.dateOfCreation),
-    index('idx_ch_locality_lower').using(
-      'btree',
-      sql`lower(${table.locality})`,
-    ),
   ],
 );
 

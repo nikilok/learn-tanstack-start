@@ -11,6 +11,10 @@ import { type SearchFilters, SIC_SECTIONS, typeRatingsFor } from './params';
 // CH-sourced conditions (c.*) evaluate NULL for unmapped sponsors, so those
 // rows drop out of any CH filter implicitly (see CH_FILTER_KEYS in params.ts).
 
+// CH registry-convenience codes (dormant 99999, residents-property 98000) that
+// would drown sections U/T; both stay reachable via explicit sic= codes.
+const SECTION_EXCLUDED_CODES = ['98000', '99999'];
+
 /** Comma-joined bound params for an IN list. */
 const inList = (values: readonly string[]): SQL =>
   sql.join(
@@ -22,9 +26,20 @@ const inList = (values: readonly string[]): SQL =>
 const textArray = (values: readonly string[]): SQL =>
   sql`ARRAY[${inList(values)}]::text[]`;
 
-/** Correlated trail probe shared by both hasMoved branches. */
+/**
+ * Correlated trail probe shared by both hasMoved branches. Approximates the
+ * timeline's move semantics (curate.ts): both sides present and different,
+ * and neither side the CH default-address dispute placeholder. Same-value
+ * cross-column shuffles can't be composed in SQL and still count — rare.
+ */
 const addressTrailProbe = (): SQL =>
-  sql`SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${inList(ADDRESS_COLUMNS)})`;
+  sql`SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${inList(ADDRESS_COLUMNS)}) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%'`;
+
+/** true = flag set; false = mapped company whose flag is false or unknown (NULL). */
+const chFlag = (col: SQL, value: boolean): SQL =>
+  value
+    ? sql`${col} = true`
+    : sql`(c.company_number IS NOT NULL AND ${col} IS NOT TRUE)`;
 
 /**
  * Build one WHERE fragment per active filter. `q`, `sort`, and `order` are
@@ -47,14 +62,26 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
   }
 
   if (filters.location) {
+    // Segment match over both sources: town_city holds comma composites
+    // ('Wembley, London') that plain equality can never reach. Runs as a
+    // post-join filter by design — a cross-relation OR can't be index-served
+    // and the tables are small (~141k rows).
     conds.push(
-      sql`(lower(h.town_city) = lower(${filters.location}) OR lower(c.locality) = lower(${filters.location}))`,
+      sql`EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, c.locality)), ',')) AS loc(seg) WHERE btrim(loc.seg) = lower(${filters.location}))`,
     );
   }
 
   const sicParts: SQL[] = [];
   if (filters.sic?.length) {
     sicParts.push(sql`c.sic_codes && ${textArray(filters.sic)}`);
+    // Stored codes are 5-digit SIC-2007 (plus a few legacy SIC-2003 values the
+    // exact overlap above catches); expand 4-digit input as a 2007 class prefix.
+    const classCodes = filters.sic.filter((code) => code.length === 4);
+    if (classCodes.length) {
+      sicParts.push(
+        sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 4) = ANY(${textArray(classCodes)}))`,
+      );
+    }
   }
   if (filters.sicSection?.length) {
     const divisions = [
@@ -65,8 +92,10 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
       ),
     ];
     if (divisions.length) {
+      // Sections resolve through the SIC-2007 lookup only; profiles holding
+      // legacy 4-digit SIC-2003 codes are reachable via sic=, not sections.
       sicParts.push(
-        sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(${textArray(divisions)}))`,
+        sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(${textArray(divisions)}) AND sc.code NOT IN (${inList(SECTION_EXCLUDED_CODES)}))`,
       );
     }
   }
@@ -93,13 +122,15 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
   }
 
   if (filters.accountsOverdue !== undefined) {
-    conds.push(sql`c.accounts_overdue = ${filters.accountsOverdue}`);
+    conds.push(chFlag(sql`c.accounts_overdue`, filters.accountsOverdue));
   }
   if (filters.hasCharges !== undefined) {
-    conds.push(sql`c.has_charges = ${filters.hasCharges}`);
+    conds.push(chFlag(sql`c.has_charges`, filters.hasCharges));
   }
   if (filters.hasInsolvencyHistory !== undefined) {
-    conds.push(sql`c.has_insolvency_history = ${filters.hasInsolvencyHistory}`);
+    conds.push(
+      chFlag(sql`c.has_insolvency_history`, filters.hasInsolvencyHistory),
+    );
   }
 
   if (filters.hasRenamed !== undefined) {

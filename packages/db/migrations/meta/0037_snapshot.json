@@ -1,5 +1,5 @@
 {
-  "id": "a4df1a39-2cdd-417f-a7b2-5af23fab5529",
+  "id": "58b55c5f-c6b6-4292-b33b-81bb543eac1b",
   "prevId": "a0c2977e-23ab-473f-bc70-dc28bb7c5ff5",
   "version": "7",
   "dialect": "postgresql",
@@ -472,21 +472,6 @@
               "expression": "date_of_creation",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_ch_locality_lower": {
-          "name": "idx_ch_locality_lower",
-          "columns": [
-            {
-              "expression": "lower(\"locality\")",
-              "asc": true,
-              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -1276,21 +1261,6 @@
               "expression": "type_rating",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_hmrc_town_city_lower": {
-          "name": "idx_hmrc_town_city_lower",
-          "columns": [
-            {
-              "expression": "lower(\"town_city\")",
-              "asc": true,
-              "isExpression": true,
               "nulls": "last"
             }
           ],

@@ -61,6 +61,12 @@ describe('parseSearchFilters', () => {
     expect(blank.issues).toEqual([]);
   });
 
+  test('truncates an over-long q at 100 code points with an issue', () => {
+    const long = parseSearchFilters({ q: `${'a'.repeat(99)}💥end` });
+    expect(long.filters.q).toBe(`${'a'.repeat(99)}💥`);
+    expect(long.issues).toEqual(['q: over 100 characters — truncated']);
+  });
+
   test('drops unknown enum values, keeps valid ones, dedupes', () => {
     const { filters, issues } = parseSearchFilters({
       route: 'Skilled Worker,Space Cadet,skilled worker',
@@ -71,25 +77,50 @@ describe('parseSearchFilters', () => {
     expect(none.filters.route).toBeUndefined();
   });
 
-  test('expands bare years and swaps a reversed range', () => {
+  test('rejects prototype-chain keys in alias lookups', () => {
+    const { filters, issues } = parseSearchFilters({ rating: 'constructor' });
+    expect(filters.rating).toBeUndefined();
+    expect(issues).toEqual(['rating: unknown value "constructor" — dropped']);
+    const wt = parseSearchFilters({ workerType: 'toString' });
+    expect(wt.filters.workerType).toBeUndefined();
+    expect(wt.issues).toEqual([
+      'workerType: unknown value "toString" — dropped',
+    ]);
+  });
+
+  test('expands bare years and swaps a reversed range onto its outer edges', () => {
     const { filters, issues } = parseSearchFilters({
       incorporatedFrom: '2020',
       incorporatedTo: '2015',
     });
-    expect(filters.incorporatedFrom).toBe('2015-12-31');
-    expect(filters.incorporatedTo).toBe('2020-01-01');
+    expect(filters.incorporatedFrom).toBe('2015-01-01');
+    expect(filters.incorporatedTo).toBe('2020-12-31');
     expect(issues).toEqual([
       'incorporatedFrom/incorporatedTo: reversed range — swapped',
     ]);
+    const mixed = parseSearchFilters({
+      incorporatedFrom: '2020-06-15',
+      incorporatedTo: '2015',
+    });
+    expect(mixed.filters.incorporatedFrom).toBe('2015-01-01');
+    expect(mixed.filters.incorporatedTo).toBe('2020-06-15');
   });
 
-  test('rejects impossible calendar dates', () => {
-    const { filters, issues } = parseSearchFilters({
-      incorporatedFrom: '2015-02-30',
-    });
-    expect(filters.incorporatedFrom).toBeUndefined();
-    expect(issues).toEqual([
+  test('rejects impossible calendar dates and year 0000', () => {
+    const bad = parseSearchFilters({ incorporatedFrom: '2015-02-30' });
+    expect(bad.filters.incorporatedFrom).toBeUndefined();
+    expect(bad.issues).toEqual([
       'incorporatedFrom: invalid date "2015-02-30" — dropped',
+    ]);
+    const yearZero = parseSearchFilters({ incorporatedFrom: '0000' });
+    expect(yearZero.filters.incorporatedFrom).toBeUndefined();
+    expect(yearZero.issues).toEqual([
+      'incorporatedFrom: invalid date "0000" — dropped',
+    ]);
+    const dateZero = parseSearchFilters({ incorporatedTo: '0000-01-01' });
+    expect(dateZero.filters.incorporatedTo).toBeUndefined();
+    expect(dateZero.issues).toEqual([
+      'incorporatedTo: invalid date "0000-01-01" — dropped',
     ]);
   });
 
@@ -102,6 +133,18 @@ describe('parseSearchFilters', () => {
     expect(parseSearchFilters({ sort: 'name' }).filters.sort).toBe('name');
   });
 
+  test('accepts the first element when a scalar param arrives as an array', () => {
+    const { filters, issues } = parseSearchFilters({
+      sort: ['incorporated'],
+      order: ['asc'],
+      location: ['Leeds'],
+    });
+    expect(filters.sort).toBe('incorporated');
+    expect(filters.order).toBe('asc');
+    expect(filters.location).toBe('Leeds');
+    expect(issues).toEqual([]);
+  });
+
   test('coerces boolean strings and reports junk', () => {
     const ok = parseSearchFilters({ hasMoved: 'True' });
     expect(ok.filters.hasMoved).toBe(true);
@@ -112,7 +155,7 @@ describe('parseSearchFilters', () => {
     ]);
   });
 
-  test('validates sic codes individually', () => {
+  test('validates sic codes individually and accepts numeric entries', () => {
     const { filters, issues } = parseSearchFilters({
       sic: '62020, 999, potato',
     });
@@ -121,6 +164,23 @@ describe('parseSearchFilters', () => {
       'sic: invalid code "999" — dropped',
       'sic: invalid code "potato" — dropped',
     ]);
+    const numeric = parseSearchFilters({ sic: 62020 });
+    expect(numeric.filters.sic).toEqual(['62020']);
+    expect(numeric.issues).toEqual([]);
+    const mixed = parseSearchFilters({ sic: [62020, '62012'] });
+    expect(mixed.filters.sic).toEqual(['62020', '62012']);
+  });
+
+  test('caps list params and the issues echo', () => {
+    const codes = Array.from({ length: 60 }, (_, i) => String(10000 + i));
+    const { filters, issues } = parseSearchFilters({ sic: codes });
+    expect(filters.sic).toHaveLength(50);
+    expect(issues).toEqual(['sic: more than 50 values — extras dropped']);
+    const junk = parseSearchFilters({
+      route: Array.from({ length: 40 }, (_, i) => `junk${i}`).join(','),
+    });
+    expect(junk.issues).toHaveLength(26);
+    expect(junk.issues.at(-1)).toBe('…additional issues dropped');
   });
 
   test('ignores unknown keys silently', () => {
@@ -171,5 +231,8 @@ describe('requiresChLink', () => {
     ).toBe(false);
     expect(requiresChLink({ hasMoved: false })).toBe(true);
     expect(requiresChLink({ status: ['active'] })).toBe(true);
+    // sic reads c.sic_codes, so it drops unmapped sponsors too.
+    expect(requiresChLink({ sic: ['62020'] })).toBe(true);
+    expect(requiresChLink({ sicSection: ['J'] })).toBe(true);
   });
 });

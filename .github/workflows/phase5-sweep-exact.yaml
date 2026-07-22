@@ -7,7 +7,8 @@ name: Phase 5 Sweep — Tier 3 (exact)
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    # ~4h after Tier 2, off the hour — see no_match sweep for the spacing rationale.
+    - cron: '47 9 * * *'
   workflow_dispatch:
     inputs:
       max-rows:

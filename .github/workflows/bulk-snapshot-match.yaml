@@ -12,7 +12,7 @@ name: Bulk Snapshot Match
 
 on:
   schedule:
-    - cron: '0 12 3 * *'
+    - cron: '19 12 3 * *'
   workflow_dispatch:
     inputs:
       max-verifications:

@@ -75,6 +75,23 @@ describe('parseSearchFilters', () => {
     expect(issues).toEqual(['route: unknown value "Space Cadet" — dropped']);
     const none = parseSearchFilters({ route: 'Space Cadet' });
     expect(none.filters.route).toBeUndefined();
+    // No phantom own-property either — Object.entries consumers must see nothing.
+    expect('route' in none.filters).toBe(false);
+  });
+
+  test('clips long values echoed in issue messages', () => {
+    const { issues } = parseSearchFilters({ sort: 'x'.repeat(100) });
+    expect(issues).toEqual([
+      `sort: unknown value "${'x'.repeat(40)}…" — dropped`,
+    ]);
+  });
+
+  test('null or non-object input parses as no filters', () => {
+    expect(parseSearchFilters(null)).toEqual({ filters: {}, issues: [] });
+    expect(parseSearchFilters(undefined)).toEqual({ filters: {}, issues: [] });
+    expect(parseSearchFilters('junk').issues).toEqual([
+      'input: expected an object of filter params — ignored',
+    ]);
   });
 
   test('rejects prototype-chain keys in alias lookups', () => {
@@ -143,20 +160,28 @@ describe('parseSearchFilters', () => {
     expect(filters.order).toBe('asc');
     expect(filters.location).toBe('Leeds');
     expect(issues).toEqual([]);
-  });
-
-  test('industry collapses whitespace and needs a usable word', () => {
-    const ok = parseSearchFilters({ industry: '  care   homes ' });
-    expect(ok.filters.industry).toBe('care homes');
-    expect(ok.issues).toEqual([]);
-    const junk = parseSearchFilters({ industry: 'IT & Co' });
-    expect(junk.filters.industry).toBeUndefined();
-    expect(junk.issues).toEqual([
-      'industry: needs a word of 3+ characters — dropped',
+    // Dropped extras are reported, not silently discarded.
+    const multi = parseSearchFilters({ location: ['Leeds', 'London'] });
+    expect(multi.filters.location).toBe('Leeds');
+    expect(multi.issues).toEqual([
+      'location: multiple values — using the first',
     ]);
   });
 
-  test('coerces boolean strings and reports junk', () => {
+  test('industry collapses whitespace and needs a distinctive word', () => {
+    const ok = parseSearchFilters({ industry: '  care   homes ' });
+    expect(ok.filters.industry).toBe('care homes');
+    expect(ok.issues).toEqual([]);
+    for (const junkInput of ['IT & Co', 'and the other']) {
+      const junk = parseSearchFilters({ industry: junkInput });
+      expect(junk.filters.industry).toBeUndefined();
+      expect(junk.issues).toEqual([
+        'industry: needs a distinctive word of 3+ characters — dropped',
+      ]);
+    }
+  });
+
+  test('coerces boolean strings and reports junk; null/empty means unset', () => {
     const ok = parseSearchFilters({ hasMoved: 'True' });
     expect(ok.filters.hasMoved).toBe(true);
     const junk = parseSearchFilters({ accountsOverdue: 'yes' });
@@ -164,6 +189,9 @@ describe('parseSearchFilters', () => {
     expect(junk.issues).toEqual([
       'accountsOverdue: expected true/false — dropped',
     ]);
+    const unset = parseSearchFilters({ hasMoved: null, hasCharges: '' });
+    expect(unset.filters).toEqual({});
+    expect(unset.issues).toEqual([]);
   });
 
   test('validates sic codes individually and accepts numeric entries', () => {

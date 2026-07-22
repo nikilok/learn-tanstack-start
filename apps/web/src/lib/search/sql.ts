@@ -1,6 +1,6 @@
+import { ADDRESS_COLUMNS } from '@ss/db/constants';
 import { type SQL, sql } from 'drizzle-orm';
 
-import { ADDRESS_COLUMNS } from '../timeline/curate';
 import {
   industryWords,
   type SearchFilters,
@@ -42,7 +42,12 @@ const addressTrailProbe = (): SQL =>
 
 /** One industry word vs a SIC description: word-boundary prefix on a naive stem (homes→home), or strict trigram similarity (strict = whole-word extents; plain word_similarity matches 'care' inside 'carpets'). */
 const industryWordPred = (word: string): SQL => {
-  const stem = word.replace(/ies$/i, 'y').replace(/^(.{3,})s$/i, '$1');
+  // ies→y only on long words ('industries'→'industry'); short ones take the
+  // plain s-strip ('ties'→'tie', never 'ty' — a 2-char stem prefix over-matches).
+  const stem = (word.length >= 7 ? word.replace(/ies$/i, 'y') : word).replace(
+    /^(.{3,})s$/i,
+    '$1',
+  );
   return sql`(sc.description ~* ${`\\m${stem}`} OR strict_word_similarity(${word}, sc.description) > 0.55)`;
 };
 
@@ -77,21 +82,25 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
   }
 
   if (filters.location) {
-    // Segment match over both sources: town_city holds comma composites
-    // ('Wembley, London') that plain equality can never reach. Runs as a
-    // post-join filter by design — a cross-relation OR can't be index-served
-    // and the tables are small (~141k rows).
+    // Segment-vs-segment match, whitespace-normalized on the stored side:
+    // towns hold comma composites ('Wembley, London') and stray double spaces,
+    // and the input may be composite too. Sources mirror the listing card
+    // (town_city + COALESCE(locality, address_line_2)). Runs as a post-join
+    // filter by design — a cross-relation OR can't be index-served and the
+    // tables are small (~141k rows).
     conds.push(
-      sql`EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, c.locality)), ',')) AS loc(seg) WHERE btrim(loc.seg) = lower(${filters.location}))`,
+      sql`EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, COALESCE(c.locality, c.address_line_2))), ',')) AS stored(seg), unnest(string_to_array(lower(${filters.location}), ',')) AS given(seg) WHERE replace(replace(btrim(stored.seg), '  ', ' '), '  ', ' ') = btrim(given.seg) AND btrim(given.seg) <> '')`,
     );
   }
 
   const sicParts: SQL[] = [];
   if (filters.sic?.length) {
-    sicParts.push(sql`c.sic_codes && ${textArray(filters.sic)}`);
-    // Stored codes are 5-digit SIC-2007 (plus a few legacy SIC-2003 values the
-    // exact overlap above catches); expand 4-digit input as a 2007 class prefix.
+    // 4-digit input is ambiguous: a legacy SIC-2003 value (exact match), a
+    // 2007 class (prefix expansion below), or a 5-digit code whose leading
+    // zero a JSON number dropped — so the exact set also tries the 0-pad.
     const classCodes = filters.sic.filter((code) => code.length === 4);
+    const exact = [...filters.sic, ...classCodes.map((code) => `0${code}`)];
+    sicParts.push(sql`c.sic_codes && ${textArray(exact)}`);
     if (classCodes.length) {
       sicParts.push(
         sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 4) = ANY(${textArray(classCodes)}))`,
@@ -121,11 +130,14 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
       // functions fine). Prefer descriptions matching ALL words; when SIC
       // officialese defeats that ('care homes' — no description holds both),
       // fall back to ANY word so the filter degrades instead of zeroing out.
+      // Re-embedding a fragment renders fresh param slots each time, so `all`
+      // can safely appear in both the EXISTS probe and the THEN aggregation.
       const all = sql.join(words.map(industryWordPred), sql` AND `);
+      const any = sql.join(words.map(industryWordPred), sql` OR `);
       sicParts.push(
         words.length === 1
           ? sql`c.sic_codes && (${industryCodes(all)})`
-          : sql`c.sic_codes && (CASE WHEN EXISTS (SELECT 1 FROM sic_codes sc WHERE ${sql.join(words.map(industryWordPred), sql` AND `)}) THEN (${industryCodes(sql.join(words.map(industryWordPred), sql` AND `))}) ELSE (${industryCodes(sql.join(words.map(industryWordPred), sql` OR `))}) END)`,
+          : sql`c.sic_codes && (CASE WHEN EXISTS (SELECT 1 FROM sic_codes sc WHERE ${all}) THEN (${industryCodes(all)}) ELSE (${industryCodes(any)}) END)`,
       );
     }
   }

@@ -4,25 +4,13 @@
 // Enum values verified against prod 2026-07-22 — refresh after ingestion
 // introduces new ones.
 
-export const KNOWN_ROUTES = [
-  'Charity Worker',
-  'Creative Worker',
-  'Global Business Mobility: Graduate Trainee',
-  'Global Business Mobility: Secondment Worker',
-  'Global Business Mobility: Senior or Specialist Worker',
-  'Global Business Mobility: Service Supplier',
-  'Global Business Mobility: UK Expansion Worker',
-  'Government Authorised Exchange',
-  'International Agreement',
-  'International Sportsperson',
-  'Intra Company Transfers (ICT)',
-  'Intra-company Routes',
-  'Religious Worker',
-  'Scale-up',
-  'Seasonal Worker',
-  'Skilled Worker',
-  'Tier 2 Ministers of Religion',
-] as const;
+import { type HmrcRoute, ROUTE_TYPE_COMPAT } from '../phase5/route-type-compat';
+
+// Route vocabulary derives from the phase5 compat registry so /search and the
+// mapping pipeline can't drift apart.
+export const KNOWN_ROUTES: readonly HmrcRoute[] = (
+  Object.keys(ROUTE_TYPE_COMPAT) as HmrcRoute[]
+).sort();
 
 export const WORKER_TYPES = ['Worker', 'Temporary Worker'] as const;
 export type WorkerType = (typeof WORKER_TYPES)[number];
@@ -264,9 +252,24 @@ export function typeRatingsFor(
   ).map((row) => row.raw);
 }
 
-/** Usable match words from an industry phrase: alphanumeric runs of 3+ chars (drops stopword-length noise). */
+// Glue words with no industry signal — '\mand' alone matches 316/731 SIC
+// descriptions, so admitting them makes the any-word fallback a near-no-op.
+const INDUSTRY_STOPWORDS = new Set([
+  'and',
+  'the',
+  'for',
+  'with',
+  'from',
+  'other',
+]);
+
+/** Usable match words from an industry phrase: alphanumeric runs of 3+ chars, minus glue words. */
 export function industryWords(industry: string): string[] {
-  return industry.split(/[^a-zA-Z0-9]+/).filter((word) => word.length >= 3);
+  return industry
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(
+      (word) => word.length >= 3 && !INDUSTRY_STOPWORDS.has(word.toLowerCase()),
+    );
 }
 
 /** Lowercase and strip non-alphanumerics so enum matching survives model/user casing and punctuation. */
@@ -278,8 +281,20 @@ function normKey(value: string): string {
 const MAX_LIST_ITEMS = 50;
 const MAX_ISSUES = 25;
 
-/** Coerce a scalar param (string, finite number, or first array element) to string. */
-function scalarInput(value: unknown): string | undefined {
+/** Truncate a value for safe echoing inside an issue message. */
+function clip(value: string): string {
+  return value.length > 40 ? `${value.slice(0, 40)}…` : value;
+}
+
+/** Coerce a scalar param (string, finite number, or first array element) to string; dropped extra array elements are reported. */
+function scalarInput(
+  key: string,
+  value: unknown,
+  issues: string[],
+): string | undefined {
+  if (Array.isArray(value) && value.length > 1) {
+    issues.push(`${key}: multiple values — using the first`);
+  }
   const v = Array.isArray(value) ? value[0] : value;
   if (typeof v === 'string') return v;
   if (typeof v === 'number' && Number.isFinite(v)) return String(v);
@@ -330,17 +345,17 @@ function canonEnumList<T extends string>(
   issues: string[],
   aliases?: Record<string, T>,
 ): T[] | undefined {
-  const byKey = new Map(canonical.map((c) => [normKey(c), c]));
+  // Aliases seed first so canonical spellings win any normKey collision; a Map
+  // lookup also can't be fooled by prototype keys ('constructor').
+  const byKey = new Map<string, T>([
+    ...Object.entries(aliases ?? {}),
+    ...canonical.map((c): [string, T] => [normKey(c), c]),
+  ]);
   const out: T[] = [];
   for (const item of listInput(key, value, issues)) {
-    // hasOwn: a plain-record lookup would accept prototype keys ('constructor').
-    const canon =
-      byKey.get(normKey(item)) ??
-      (aliases && Object.hasOwn(aliases, normKey(item))
-        ? aliases[normKey(item)]
-        : undefined);
+    const canon = byKey.get(normKey(item));
     if (!canon) {
-      issues.push(`${key}: unknown value "${item}" — dropped`);
+      issues.push(`${key}: unknown value "${clip(item)}" — dropped`);
       continue;
     }
     if (!out.includes(canon)) out.push(canon);
@@ -355,21 +370,23 @@ function canonEnum<T extends string>(
   canonical: readonly T[],
   issues: string[],
 ): T | undefined {
-  const s = scalarInput(value)?.trim();
+  const s = scalarInput(key, value, issues)?.trim();
   if (!s) return undefined;
   const canon = canonical.find((c) => normKey(c) === normKey(s));
-  if (!canon) issues.push(`${key}: unknown value "${s}" — dropped`);
+  if (!canon) issues.push(`${key}: unknown value "${clip(s)}" — dropped`);
   return canon;
 }
 
-/** Parse a boolean param (boolean or "true"/"false"); junk is dropped with an issue. */
+/** Parse a boolean param (boolean or "true"/"false"); null/empty means unset, other junk is dropped with an issue. */
 function boolInput(
   key: string,
   value: unknown,
   issues: string[],
 ): boolean | undefined {
+  if (value == null) return undefined;
   if (typeof value === 'boolean') return value;
-  const s = scalarInput(value)?.trim().toLowerCase();
+  const s = scalarInput(key, value, issues)?.trim().toLowerCase();
+  if (!s) return undefined;
   if (s === 'true') return true;
   if (s === 'false') return false;
   issues.push(`${key}: expected true/false — dropped`);
@@ -390,13 +407,13 @@ function dateInput(
   edge: 'from' | 'to',
   issues: string[],
 ): string | undefined {
-  const s = scalarInput(value)?.trim();
+  const s = scalarInput(key, value, issues)?.trim();
   if (!s) return undefined;
   if (/^\d{4}$/.test(s) && s !== '0000') {
     return edge === 'from' ? `${s}-01-01` : `${s}-12-31`;
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(s) && isRealDate(s)) return s;
-  issues.push(`${key}: invalid date "${s}" — dropped`);
+  issues.push(`${key}: invalid date "${clip(s)}" — dropped`);
   return undefined;
 }
 
@@ -406,19 +423,31 @@ export type ParsedSearchFilters = {
 };
 
 /**
- * Validate a raw param record (URL search params, server fn input, or model
+ * Validate raw filter params (URL search params, server fn input, or model
  * output) into SearchFilters. Lenient by design: invalid entries are dropped
  * and reported in `issues` rather than rejecting the whole request, so a
  * partially-wrong model emission still produces a usable query. Unknown keys
- * are ignored.
+ * are ignored; null/non-object input parses as no filters.
  */
-export function parseSearchFilters(
-  raw: Record<string, unknown>,
-): ParsedSearchFilters {
+export function parseSearchFilters(input: unknown): ParsedSearchFilters {
   const issues: string[] = [];
   const filters: SearchFilters = {};
+  const raw: Record<string, unknown> =
+    input !== null && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  if (input != null && raw !== input) {
+    issues.push('input: expected an object of filter params — ignored');
+  }
+  /** Assign only when defined so no-op parses leave no phantom keys. */
+  const set = <K extends keyof SearchFilters>(
+    key: K,
+    value: SearchFilters[K] | undefined,
+  ): void => {
+    if (value !== undefined) filters[key] = value;
+  };
 
-  const q = scalarInput(raw.q)?.trim();
+  const q = scalarInput('q', raw.q, issues)?.trim();
   if (q) {
     if (q.length < 3) issues.push('q: needs at least 3 characters — dropped');
     else {
@@ -432,89 +461,100 @@ export function parseSearchFilters(
   }
 
   if (raw.route !== undefined) {
-    filters.route = canonEnumList('route', raw.route, KNOWN_ROUTES, issues);
+    set('route', canonEnumList('route', raw.route, KNOWN_ROUTES, issues));
   }
   if (raw.workerType !== undefined) {
-    filters.workerType = canonEnumList(
+    set(
       'workerType',
-      raw.workerType,
-      WORKER_TYPES,
-      issues,
-      WORKER_TYPE_ALIASES,
+      canonEnumList(
+        'workerType',
+        raw.workerType,
+        WORKER_TYPES,
+        issues,
+        WORKER_TYPE_ALIASES,
+      ),
     );
   }
   if (raw.rating !== undefined) {
-    filters.rating = canonEnumList(
+    set(
       'rating',
-      raw.rating,
-      RATINGS,
-      issues,
-      RATING_ALIASES,
+      canonEnumList('rating', raw.rating, RATINGS, issues, RATING_ALIASES),
     );
   }
 
-  const location = scalarInput(raw.location)?.replace(/\s+/g, ' ').trim();
+  const location = scalarInput('location', raw.location, issues)
+    ?.replace(/\s+/g, ' ')
+    .trim();
   if (location) {
     if (location.length > 100) {
       issues.push('location: over 100 characters — dropped');
     } else filters.location = location;
   }
 
-  const industry = scalarInput(raw.industry)?.replace(/\s+/g, ' ').trim();
+  const industry = scalarInput('industry', raw.industry, issues)
+    ?.replace(/\s+/g, ' ')
+    .trim();
   if (industry) {
     if (industry.length > 100) {
       issues.push('industry: over 100 characters — dropped');
     } else if (!industryWords(industry).length) {
-      issues.push('industry: needs a word of 3+ characters — dropped');
+      issues.push(
+        'industry: needs a distinctive word of 3+ characters — dropped',
+      );
     } else filters.industry = industry;
   }
 
   if (raw.sic !== undefined) {
     const codes = listInput('sic', raw.sic, issues).filter((code) => {
       const ok = /^\d{4,5}$/.test(code);
-      if (!ok) issues.push(`sic: invalid code "${code}" — dropped`);
+      if (!ok) issues.push(`sic: invalid code "${clip(code)}" — dropped`);
       return ok;
     });
     if (codes.length) filters.sic = [...new Set(codes)];
   }
   if (raw.sicSection !== undefined) {
-    filters.sicSection = canonEnumList(
+    set(
       'sicSection',
-      raw.sicSection,
-      Object.keys(SIC_SECTIONS),
-      issues,
+      canonEnumList(
+        'sicSection',
+        raw.sicSection,
+        Object.keys(SIC_SECTIONS),
+        issues,
+      ),
     );
   }
 
   if (raw.status !== undefined) {
-    filters.status = canonEnumList(
+    set(
       'status',
-      raw.status,
-      COMPANY_STATUSES,
-      issues,
+      canonEnumList('status', raw.status, COMPANY_STATUSES, issues),
     );
   }
   if (raw.companyType !== undefined) {
-    filters.companyType = canonEnumList(
+    set(
       'companyType',
-      raw.companyType,
-      COMPANY_TYPES,
-      issues,
+      canonEnumList('companyType', raw.companyType, COMPANY_TYPES, issues),
     );
   }
 
-  const rawFrom = scalarInput(raw.incorporatedFrom)?.trim();
-  const rawTo = scalarInput(raw.incorporatedTo)?.trim();
+  const rawFrom = scalarInput(
+    'incorporatedFrom',
+    raw.incorporatedFrom,
+    issues,
+  )?.trim();
+  const rawTo = scalarInput(
+    'incorporatedTo',
+    raw.incorporatedTo,
+    issues,
+  )?.trim();
   if (raw.incorporatedFrom !== undefined) {
-    filters.incorporatedFrom = dateInput(
+    set(
       'incorporatedFrom',
-      rawFrom,
-      'from',
-      issues,
+      dateInput('incorporatedFrom', rawFrom, 'from', issues),
     );
   }
   if (raw.incorporatedTo !== undefined) {
-    filters.incorporatedTo = dateInput('incorporatedTo', rawTo, 'to', issues);
+    set('incorporatedTo', dateInput('incorporatedTo', rawTo, 'to', issues));
   }
   if (
     filters.incorporatedFrom &&
@@ -535,7 +575,7 @@ export function parseSearchFilters(
     'hasRenamed',
     'hasMoved',
   ] as const) {
-    if (raw[key] !== undefined) filters[key] = boolInput(key, raw[key], issues);
+    if (raw[key] !== undefined) set(key, boolInput(key, raw[key], issues));
   }
 
   if (raw.sort !== undefined) {
@@ -545,7 +585,7 @@ export function parseSearchFilters(
     } else if (sort) filters.sort = sort;
   }
   if (raw.order !== undefined) {
-    filters.order = canonEnum('order', raw.order, SORT_ORDERS, issues);
+    set('order', canonEnum('order', raw.order, SORT_ORDERS, issues));
   }
 
   if (issues.length > MAX_ISSUES) {

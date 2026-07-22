@@ -16,6 +16,8 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
+import { ADDRESS_COLUMNS } from './constants';
+
 export const hmrcSkilledWorkers = pgTable(
   'hmrc_skilled_workers',
   {
@@ -271,11 +273,13 @@ export const companiesHouseProfileTrails = pgTable(
   (table) => [
     index('idx_ch_trail_company_number').on(table.companyNumber),
     index('idx_ch_trail_created_at').on(table.createdAt),
-    // /search hasMoved probe; IN list = timeline ADDRESS_COLUMNS (curate.ts) + lib/search/sql.ts — keep in lockstep.
+    // /search hasMoved probe; predicate derives from the shared ADDRESS_COLUMNS.
     index('idx_ch_trail_address_change')
       .on(table.companyNumber)
       .where(
-        sql`${table.columnName} IN ('addressLine1', 'addressLine2', 'locality', 'region', 'postalCode', 'country')`,
+        sql`${table.columnName} IN (${sql.raw(
+          ADDRESS_COLUMNS.map((c) => `'${c}'`).join(', '),
+        )})`,
       ),
   ],
 );

@@ -1,17 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 
+import { ADDRESS_COLUMNS } from '@ss/db/constants';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 
-import { ADDRESS_COLUMNS } from '../timeline/curate';
 import { buildFilterConditions, combineFilterConditions } from './sql';
 
 const dialect = new PgDialect();
 
-/** Render a fragment to whitespace-normalized SQL text + bound params. */
+/** Render a fragment to SQL text + bound params, collapsing only line breaks (intra-literal spacing like '  ' must survive). */
 function render(fragment: SQL): { text: string; params: unknown[] } {
   const query = dialect.sqlToQuery(fragment);
-  return { text: query.sql.replace(/\s+/g, ' ').trim(), params: query.params };
+  return {
+    text: query.sql.replace(/\s*\n\s*/g, ' ').trim(),
+    params: query.params,
+  };
 }
 
 /** Build, assert exactly one condition, and render it. */
@@ -44,10 +47,10 @@ describe('buildFilterConditions', () => {
     ).toEqual({ text: 'false', params: [] });
   });
 
-  test('location segment-matches comma composites across town and locality', () => {
-    expect(renderOne({ location: 'London' })).toEqual({
-      text: "EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, c.locality)), ',')) AS loc(seg) WHERE btrim(loc.seg) = lower($1))",
-      params: ['London'],
+  test('location segment-matches composites, both sides, display-aligned', () => {
+    expect(renderOne({ location: 'Wembley, London' })).toEqual({
+      text: "EXISTS (SELECT 1 FROM unnest(string_to_array(lower(concat_ws(',', h.town_city, COALESCE(c.locality, c.address_line_2))), ',')) AS stored(seg), unnest(string_to_array(lower($1), ',')) AS given(seg) WHERE replace(replace(btrim(stored.seg), '  ', ' '), '  ', ' ') = btrim(given.seg) AND btrim(given.seg) <> '')",
+      params: ['Wembley, London'],
     });
   });
 
@@ -58,10 +61,10 @@ describe('buildFilterConditions', () => {
     });
   });
 
-  test('4-digit sic codes also expand as SIC-2007 class prefixes', () => {
+  test('4-digit sic codes try the 0-pad and expand as class prefixes', () => {
     expect(renderOne({ sic: ['6202'] })).toEqual({
-      text: "(c.sic_codes && ARRAY[$1]::text[] OR c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 4) = ANY(ARRAY[$2]::text[])))",
-      params: ['6202', '6202'],
+      text: "(c.sic_codes && ARRAY[$1, $2]::text[] OR c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 4) = ANY(ARRAY[$3]::text[])))",
+      params: ['6202', '06202', '6202'],
     });
   });
 
@@ -87,6 +90,18 @@ describe('buildFilterConditions', () => {
       text: "c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE (sc.description ~* $1 OR strict_word_similarity($2, sc.description) > 0.55))",
       params: ['\\msoftware', 'software'],
     });
+  });
+
+  test('short plurals stem to whole words, never 2-char prefixes', () => {
+    expect(renderOne({ industry: 'ties' }).params).toEqual(['\\mtie', 'ties']);
+    expect(renderOne({ industry: 'movies' }).params).toEqual([
+      '\\mmovie',
+      'movies',
+    ]);
+    expect(renderOne({ industry: 'industries' }).params).toEqual([
+      '\\mindustry',
+      'industries',
+    ]);
   });
 
   test('multi-word industry prefers all-words, falls back to any-word', () => {

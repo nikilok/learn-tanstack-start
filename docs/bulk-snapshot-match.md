@@ -63,7 +63,7 @@ snapshot-row adaptation.
 ## Operations
 
 - Workflow: `.github/workflows/bulk-snapshot-match.yaml` — monthly on the
-  3rd at 12:00 UTC (the snapshot publishes in the first days of the month;
+  3rd at 12:19 UTC (the snapshot publishes in the first days of the month;
   midday avoids the nightly sweep window and the shared `phase5-sweep`
   concurrency group serialises against the tiers). ~450MB download, ~2.6GB
   unpacked on the runner, nothing bulky written to Neon.

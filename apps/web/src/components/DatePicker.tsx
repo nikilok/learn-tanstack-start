@@ -117,6 +117,12 @@ export default function DatePicker({
   const onKeyDown = (e: React.KeyboardEvent) => {
     // Modifier combos belong to page-level shortcuts (⌘+Enter, ⌘+digit).
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Backspace/Delete clears the picked date, open or closed.
+    if ((e.key === 'Backspace' || e.key === 'Delete') && value) {
+      e.preventDefault();
+      clear();
+      return;
+    }
     if (!open) {
       if (['Enter', ' ', 'ArrowDown'].includes(e.key)) {
         e.preventDefault();
@@ -315,6 +321,9 @@ export default function DatePicker({
                   className="cursor-pointer border-none bg-transparent p-0 text-xs text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
                 >
                   Clear
+                  <kbd className="ml-1.5 hidden font-sans text-[11px] pointer-fine:inline">
+                    ⌫
+                  </kbd>
                 </button>
               </div>
             </>

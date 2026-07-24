@@ -4,6 +4,7 @@ import {
   Monitor,
   Moon,
   Share2,
+  SlidersHorizontal,
   Sun,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -48,8 +49,8 @@ function NavPill({ canGoBack }: { canGoBack: boolean }) {
     right cluster of utility icons + window controls). Re-measure if the shell's clusters change. */
 function TitlePill({ title, isMac }: { title: string; isMac: boolean }) {
   const inset = isMac
-    ? 'left-[361px] right-[160px]'
-    : 'left-[273px] right-[274px]';
+    ? 'left-[361px] right-[202px]'
+    : 'left-[273px] right-[316px]';
   return (
     <div
       className={`absolute top-1/2 flex h-8 -translate-y-1/2 items-center justify-center ${inset}`}
@@ -79,6 +80,9 @@ function UtilityControls() {
     'grid place-items-center rounded-md p-2 text-(--tb-fg) opacity-[0.55]';
   return (
     <div className="flex items-center gap-2">
+      <span className={item}>
+        <SlidersHorizontal size={18} />
+      </span>
       <span className={item}>
         <Share2 size={18} />
       </span>

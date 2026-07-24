@@ -57,6 +57,7 @@ let siteView: WebContentsView | null = null;
 let tooltipView: WebContentsView | null = null;
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
+let lastFilterCount = 0; // active filters, badged on the title-bar icon
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
@@ -93,7 +94,8 @@ function navigate(dir: 'back' | 'forward'): void {
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
   siteView?.webContents.send('ss:command', cmd);
-  if (cmd === 'home') siteView?.webContents.focus(); // type-to-search wants the page focused
+  // Navigation commands hand focus to the page (type-to-search, form controls).
+  if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
 }
 
 /** Sends the current page title (cleaned) to the title bar pill. */
@@ -281,6 +283,11 @@ function registerIpc(): void {
     lastCursorOn = Boolean(on);
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
   });
+  // The web app reports its active filter count so the title-bar icon can badge it.
+  ipcMain.on('ss:filters', (_event, count: number) => {
+    lastFilterCount = Math.max(0, Math.trunc(Number(count) || 0));
+    titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
+  });
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {
@@ -342,6 +349,7 @@ function registerIpc(): void {
     // The rest is bar-only state; skip it when the tooltip view is the one reporting ready.
     if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
+    titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
     titleBarView?.webContents.send(
       'titlebar:maximized',
       mainWindow?.isMaximized() ?? false,

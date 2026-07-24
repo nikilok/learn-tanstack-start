@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+- **Filter the register from the title bar** — a new sliders button (next to Share) opens SponsorSearch's filters: visa routes, licence ratings, cities, industries, incorporation dates, company status and health signals. Your choices stick until you reset them, and a small badge on the icon counts the filters currently shaping your list — kept in sync wherever you are in the app.
+- **`⌘⇧F` for filters** — open the filters page without reaching for the mouse (`Ctrl+Shift+F` on Windows & Linux; hover the button for the keycap tooltip). The page itself is fully keyboard-drivable from there: `⌘1`–`⌘9` jump straight to a section, `⌘↵` applies, `R` resets, and `Esc` takes you back to where you were.
 - **Linux update prompts** — `.deb` (Debian/Ubuntu) and `.rpm` (Fedora) installs can't update themselves in place, so SponsorSearch now checks for new releases and shows a prompt linking to the download page, instead of silently staying on an old version.
 
 ## v0.2.1 — 2026-07-17

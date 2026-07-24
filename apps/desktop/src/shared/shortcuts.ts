@@ -6,7 +6,8 @@ export type ShortcutId =
   | 'forward'
   | 'share'
   | 'toggle-cursor'
-  | 'toggle-theme';
+  | 'toggle-theme'
+  | 'filters';
 
 export interface ShortcutDef {
   /** Physical KeyboardEvent.code the handler matches (layout-independent). */
@@ -23,4 +24,5 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDef> = {
   share: { code: 'KeyS', shift: true, keys: ['mod', 'shift', 'S'] },
   'toggle-cursor': { code: 'KeyC', shift: true, keys: ['mod', 'shift', 'C'] },
   'toggle-theme': { code: 'KeyD', shift: true, keys: ['mod', 'shift', 'D'] },
+  filters: { code: 'KeyF', shift: true, keys: ['mod', 'shift', 'F'] },
 };

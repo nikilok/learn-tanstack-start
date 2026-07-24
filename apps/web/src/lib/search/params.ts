@@ -100,6 +100,40 @@ export const COMPANY_TYPES = [
   'unregistered-company',
 ] as const;
 
+// Top sponsor towns by licence count (prod 2026-07-24), for the /filters
+// checkbox group. The location param itself accepts ANY town — these are just
+// the curated picks. Refresh occasionally after ingestion.
+export const KNOWN_CITIES = [
+  'Aberdeen',
+  'Belfast',
+  'Birmingham',
+  'Bolton',
+  'Bradford',
+  'Bristol',
+  'Cambridge',
+  'Cardiff',
+  'Coventry',
+  'Croydon',
+  'Edinburgh',
+  'Glasgow',
+  'Harrow',
+  'Ilford',
+  'Leeds',
+  'Leicester',
+  'Liverpool',
+  'London',
+  'Luton',
+  'Manchester',
+  'Milton Keynes',
+  'Newcastle Upon Tyne',
+  'Nottingham',
+  'Oxford',
+  'Reading',
+  'Sheffield',
+  'Slough',
+  'Southampton',
+] as const;
+
 /** Zero-padded 2-digit division strings for an inclusive range. */
 const divs = (from: number, to: number): string[] =>
   Array.from({ length: to - from + 1 }, (_, i) =>

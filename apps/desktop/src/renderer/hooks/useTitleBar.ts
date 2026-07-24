@@ -8,6 +8,7 @@ export interface TitleBarModel {
   title: string;
   themeMode: string;
   cursorOn: boolean;
+  filterCount: number;
   copied: boolean;
   platform: string;
   maximized: boolean;
@@ -24,6 +25,7 @@ export function useTitleBar(): TitleBarModel {
   const [dark, setDark] = useState(true);
   const [themeMode, setThemeMode] = useState('auto');
   const [cursorOn, setCursorOn] = useState(true);
+  const [filterCount, setFilterCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const [maximized, setMaximized] = useState(false);
 
@@ -37,6 +39,7 @@ export function useTitleBar(): TitleBarModel {
       setThemeMode(t.mode);
     });
     const offCursor = window.titlebar.onCursor(setCursorOn);
+    const offFilters = window.titlebar.onFilters(setFilterCount);
     let copiedTimer: ReturnType<typeof setTimeout> | undefined;
     const offCopied = window.titlebar.onCopied(() => {
       clearTimeout(copiedTimer);
@@ -51,6 +54,7 @@ export function useTitleBar(): TitleBarModel {
       offTitle();
       offTheme();
       offCursor();
+      offFilters();
       offCopied();
       offMax();
     };
@@ -67,6 +71,7 @@ export function useTitleBar(): TitleBarModel {
     title,
     themeMode,
     cursorOn,
+    filterCount,
     copied,
     platform: window.titlebar.platform,
     maximized,

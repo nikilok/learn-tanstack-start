@@ -1,0 +1,88 @@
+/* Shared accordion recipe (same as DownloadVersion's version disclosure):
+   hairline divider that wipes blue on open, and a grid-rows ::details-content
+   ease — cross-browser, since Safari won't discretely transition
+   content-visibility; the content stays rendered and the row animates. */
+.item {
+  position: relative;
+}
+
+.item::before,
+.item::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Gray base — fades out on open so the blue reads clean. */
+.item::before {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--sea-ink-soft) 50%,
+    transparent
+  );
+  transition: opacity 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.item[open]::before {
+  opacity: 0;
+}
+
+/* Blue accent — clipped to the centre, revealed outward on open. */
+.item::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--link-blue) 50%,
+    transparent
+  );
+  clip-path: inset(0 50% 0 50%);
+  transition: clip-path 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.item[open]::after {
+  clip-path: inset(0 0 0 0);
+}
+
+.item::details-content {
+  display: grid;
+  grid-template-rows: 0fr;
+  content-visibility: visible;
+  transition: grid-template-rows 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.item[open]::details-content {
+  grid-template-rows: 1fr;
+}
+
+/* min-height:0 lets the row collapse; visibility (legacy delayed-hide) keeps
+   closed content out of the a11y/tab order yet visible through the collapse. */
+.item .panel {
+  min-height: 0;
+  overflow: clip;
+  visibility: hidden;
+  transition: visibility 450ms;
+}
+
+.item[open] .panel {
+  visibility: visible;
+}
+
+/* Once the open transition settles the component swaps this class in, so
+   popover children (selects, date pickers) can escape the clip. */
+.item[open] .panelOpen {
+  overflow: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item::before,
+  .item::after,
+  .item::details-content,
+  .item .panel {
+    transition: none;
+  }
+}

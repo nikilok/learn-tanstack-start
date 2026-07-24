@@ -16,6 +16,7 @@ export function TitleBar() {
     title,
     themeMode,
     cursorOn,
+    filterCount,
     copied,
     platform,
     maximized,
@@ -62,6 +63,7 @@ export function TitleBar() {
     <Controls
       themeMode={themeMode}
       cursorOn={cursorOn}
+      filterCount={filterCount}
       copied={copied}
       onCommand={command}
     />

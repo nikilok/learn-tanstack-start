@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('ssDesktop', {
     return () => ipcRenderer.removeListener('ss:command', listener);
   },
   reportCursor: (on: boolean) => ipcRenderer.send('ss:cursor', on),
+  reportFilters: (count: number) => ipcRenderer.send('ss:filters', count),
   pokeTheme: () => reportTheme(), // re-report after a mode change that didn't flip the class
   copy: (text: string) => ipcRenderer.send('ss:clipboard', text),
   onUpdateReady: (

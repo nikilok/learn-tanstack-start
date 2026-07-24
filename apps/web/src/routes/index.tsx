@@ -8,13 +8,22 @@ import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
+import { searchFiltered } from '../api/filterSearch';
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
+import { filterSearchKey, useFilterSearch } from '../hooks/useFilterSearch';
+import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
+import {
+  filtersToSearchParams,
+  parseSearchFilters,
+  type SearchUrlParams,
+} from '../lib/search/params';
+import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
 
 const getPlatformInfo = createIsomorphicFn()
@@ -22,11 +31,20 @@ const getPlatformInfo = createIsomorphicFn()
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
 export const Route = createFileRoute('/')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    search: ((search.search as string) || '').trim(),
-  }),
+  // The name term (`search`) plus the URL-form filter params from /filters.
+  // `q` is stripped: on this surface the name term only comes from `search`.
+  validateSearch: (search: Record<string, unknown>) => {
+    const { filters } = parseSearchFilters({ ...search, q: undefined });
+    return {
+      search: ((search.search as string) || '').trim(),
+      ...filtersToSearchParams(filters),
+    };
+  },
   search: {
-    middlewares: [stripSearchParams({ search: '' })],
+    // Value-strip of a REQUIRED key: runtime-supported (and long-standing
+    // behavior here), but PickOptional-typed to optional keys only — the
+    // filter params joining the schema surfaced that, hence the cast.
+    middlewares: [stripSearchParams({ search: '' } as never)],
   },
   head: ({ match }) => ({
     links: [
@@ -37,15 +55,29 @@ export const Route = createFileRoute('/')({
     ],
   }),
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
-  loaderDeps: ({ search: { search } }) => ({ search }),
+  loaderDeps: ({ search }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
-    const { search } = deps as { search: string };
+    const { search: term, ...urlFilters } = (
+      deps as { search: { search: string } & SearchUrlParams }
+    ).search;
     if (typeof window !== 'undefined') return;
-    if (search.length >= 3) {
+    if (Object.keys(urlFilters).length > 0) {
+      // Filter mode: with or without a name term, the filter endpoint serves
+      // the listing. Key/params must mirror useFilterSearch exactly.
+      const { filters } = parseSearchFilters({
+        ...urlFilters,
+        q: term.length >= 3 ? term : undefined,
+      });
+      queryClient.prefetchInfiniteQuery({
+        queryKey: ['filter-search', filterSearchKey(filters)],
+        queryFn: () => searchFiltered({ data: { params: filters, offset: 0 } }),
+        initialPageParam: 0,
+      });
+    } else if (term.length >= 3) {
       // Don't await — let the query stream in while the shell renders
       queryClient.prefetchInfiniteQuery({
-        queryKey: ['hmrc-search', search],
-        queryFn: () => searchHmrc({ data: { query: search, offset: 0 } }),
+        queryKey: ['hmrc-search', term],
+        queryFn: () => searchHmrc({ data: { query: term, offset: 0 } }),
         initialPageParam: 0,
       });
     }
@@ -60,7 +92,10 @@ export const Route = createFileRoute('/')({
  * `navigate({ replace: true })` so history isn't spammed on each keystroke.
  */
 function Home() {
-  const { search } = Route.useSearch();
+  const { search, ...urlFilters } = Route.useSearch();
+  const hasFilters = Object.values(urlFilters).some(
+    (value) => value !== undefined,
+  );
   // Live input value (updates on every keystroke); the `search` URL param is
   // debounced 450ms, so we gate the hero on this to hide it instantly on type.
   const [liveQuery, setLiveQuery] = useState(search);
@@ -81,9 +116,38 @@ function Home() {
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
 
+  // Both data sources stay mounted; only one is live. No filters → the
+  // classic name search exactly as before ('' disables it via the >=3 gate).
+  // Any filter → the filter endpoint serves the listing, with the typed term
+  // passed through as `q` once it reaches 3 chars.
+  const classic = useHmrcSearch(hasFilters ? '' : search);
+  const filtered = useFilterSearch(
+    { ...urlFilters, q: search.length >= 3 ? search : undefined },
+    { enabled: hasFilters },
+  );
+  const resultsData = hasFilters ? filtered : classic;
+
+  // Applied filters are durable: the URL is authoritative when it carries
+  // them (and refreshes the store), but navs that only carry the name term —
+  // details back-links, the header logo — get the stored set re-applied.
+  // The only way OUT of filter mode is /filters' Reset, which empties the
+  // store.
+  const urlFiltersKey = JSON.stringify(urlFilters);
+  useEffect(() => {
+    if (hasFilters) {
+      storeFilters(JSON.parse(urlFiltersKey) as Record<string, unknown>);
+      return;
+    }
+    const stored = loadStoredFilters();
+    if (stored) {
+      navigate({ to: '/', search: { search, ...stored }, replace: true });
+    }
+  }, [hasFilters, urlFiltersKey, search, navigate]);
+
   // Empty state: the hero is shown and the search bar scrolls away with the
-  // page (not sticky). It only sticks once a query exists.
-  const heroVisible = liveQuery.length === 0 && search.length === 0;
+  // page (not sticky). It only sticks once a query or filter set exists.
+  const heroVisible =
+    liveQuery.length === 0 && search.length === 0 && !hasFilters;
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -93,7 +157,7 @@ function Home() {
           {!platformInfo.isMobile && (
             <span
               style={{
-                opacity: search.length >= 3 ? 1 : 0,
+                opacity: hasFilters || search.length >= 3 ? 1 : 0,
                 transition: 'opacity 250ms ease',
                 pointerEvents: 'none',
                 color: 'var(--kicker)',
@@ -132,7 +196,8 @@ function Home() {
               navTimerRef.current = setTimeout(() => {
                 navigate({
                   to: '/',
-                  search: { search: value },
+                  // Functional update: typing must not wipe active filters.
+                  search: (prev) => ({ ...prev, search: value }),
                   replace: true,
                 });
               }, 450);
@@ -148,7 +213,11 @@ function Home() {
 
         <div className="page-flip-listing">
           <Suspense fallback={<SkeletonCards />}>
-            <HmrcResults search={search} />
+            <HmrcResults
+              search={search}
+              filtersActive={hasFilters}
+              data={resultsData}
+            />
           </Suspense>
         </div>
       </section>

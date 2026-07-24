@@ -4,7 +4,6 @@ import {
   hmrcSkilledWorkers,
   sicCodes,
 } from '@ss/db';
-import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { type SQL, sql } from 'drizzle-orm';
 
@@ -12,7 +11,6 @@ import { db } from '../db.server';
 import { buildNameMatchers } from '../lib/search/name-match';
 import { parseSearchFilters, type SortKey } from '../lib/search/params';
 import { buildFilterConditions } from '../lib/search/sql';
-import { isOwnerRequest } from '../owner.server';
 import { SHORT_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
 const PAGE_SIZE = 50;
@@ -35,26 +33,8 @@ export type FilterSearchRow = {
 };
 
 /**
- * Access gate for the /search page: owners always; every visitor on
- * non-production builds (local validation). Per-viewer — must never be
- * edge-cached.
- */
-export const getSearchAccess = createServerFn().handler(async () => {
-  setRpcCacheControl('private, no-store');
-  const allowed =
-    process.env.NODE_ENV !== 'production' || (await isOwnerRequest());
-  return { allowed };
-});
-
-/** React Query options for the /search access gate; resolved once per session. */
-export const searchAccessQueryOptions = queryOptions({
-  queryKey: ['search-access'],
-  queryFn: () => getSearchAccess(),
-  staleTime: Number.POSITIVE_INFINITY,
-});
-
-/**
- * Server fn behind /search: filter-capable sponsor listing with an optional
+ * Server fn behind the native filter capability: filter-capable sponsor
+ * listing with an optional
  * fuzzy name term. Input parses leniently through the registry — invalid
  * entries drop into `issues`, echoed in the response for the caller's
  * correction loop (Phase B model, UI). `q` matches current organisation

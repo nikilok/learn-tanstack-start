@@ -46,7 +46,7 @@ export default function Accordion({
       onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
       className={`group scroll-mt-24 ${styles.item}`}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-3 py-4 [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-3 py-5 sm:py-4 [&::-webkit-details-marker]:hidden">
         <span className="island-kicker">{title}</span>
         {shortcut && (
           <kbd className="hidden font-sans text-[11px] pointer-fine:inline">
@@ -69,7 +69,7 @@ export default function Accordion({
         </span>
       </summary>
       <div className={`${styles.panel} ${settled ? styles.panelOpen : ''}`}>
-        <div className="pt-1 pb-6">{children}</div>
+        <div className="pt-1 pb-8 sm:pb-6">{children}</div>
       </div>
     </details>
   );

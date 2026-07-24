@@ -581,7 +581,7 @@ function FiltersPage() {
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Companies incorporated between these dates.
               </p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                 <DatePicker
                   placeholder="From"
                   value={draft.incorporatedFrom || undefined}
@@ -600,7 +600,7 @@ function FiltersPage() {
           {section(
             'signals',
             'Signals',
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-x-8">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-3">
               <TriState
                 label="Accounts overdue"
                 value={draft.accountsOverdue}

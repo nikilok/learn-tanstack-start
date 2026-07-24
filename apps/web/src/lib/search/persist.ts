@@ -8,8 +8,11 @@ const STORAGE_KEY = 'ss-filters';
 
 /** Persisted filter set re-validated through the registry; null when absent, empty, or corrupt. */
 export function loadStoredFilters(): SearchUrlParams | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
+    // The access itself must sit inside the try: with site data blocked,
+    // even touching `localStorage` throws (Chromium SecurityError), and on
+    // the server it's an undeclared ReferenceError — a `typeof` guard shields
+    // neither.
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const params = filtersToSearchParams(
@@ -23,7 +26,6 @@ export function loadStoredFilters(): SearchUrlParams | null {
 
 /** Persist an applied filter set; an empty set clears the store. */
 export function storeFilters(params: Record<string, unknown>): void {
-  if (typeof localStorage === 'undefined') return;
   try {
     const clean = filtersToSearchParams(parseSearchFilters(params).filters);
     if (Object.keys(clean).length) {

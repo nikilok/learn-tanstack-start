@@ -12,8 +12,8 @@ export function filterSearchKey(filters: SearchFilters): string {
  * Hook wrapping `searchFiltered` in an infinite query. Takes raw URL-form
  * params (the home route's filter state plus q), parses them to canonical
  * filters for a stable cache key, and sends the canonical form. An empty
- * filter set is the browse-everything directory. Exposes `total` and the
- * server's `issues` echo from page 0.
+ * filter set is the browse-everything directory. Exposes the server's
+ * `issues` echo from page 0.
  */
 export function useFilterSearch(
   params: Record<string, unknown>,
@@ -37,7 +37,6 @@ export function useFilterSearch(
 
   return {
     results: data?.pages.flatMap((page) => page.rows) ?? [],
-    total: data?.pages[0]?.total ?? null,
     issues: data?.pages[0]?.issues ?? [],
     isLoading: enabled && isLoading,
     hasMore: hasNextPage ?? false,

@@ -54,8 +54,10 @@ const firstColumn = (y: number, m: number) =>
  * Custom calendar date picker matching the Select's language: a pill trigger
  * opening a glass popover. Clicking the month label switches to a year grid
  * (incorporation dates span two centuries — stepping months doesn't scale).
- * Keyboard on the trigger: Enter/Space opens, arrows move a day (±1/±7),
- * Enter picks, Escape closes. Emits YYYY-MM-DD or undefined (Clear).
+ * Keyboard: Enter/Space opens, arrows move a day (±1/±7), Enter picks,
+ * Escape closes. Handled on the ROOT, not the trigger, so keys still work
+ * (and Escape stays consumed) after a click moves focus to a month arrow or
+ * year cell inside the popover. Emits YYYY-MM-DD or undefined (Clear).
  */
 export default function DatePicker({
   value,
@@ -86,6 +88,7 @@ export default function DatePicker({
   const [active, setActive] = useState<Ymd>(selected ?? today);
   const [yearPage, setYearPage] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -142,6 +145,8 @@ export default function DatePicker({
     if (e.key === 'Escape') {
       e.preventDefault();
       setOpen(false);
+      // Focus may sit on a popover-internal button about to unmount.
+      triggerRef.current?.focus();
       return;
     }
     if (e.key === 'Tab') {
@@ -188,15 +193,15 @@ export default function DatePicker({
   const isActiveDay = (d: number) => active.d === d;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative" onKeyDown={onKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={value ? `${placeholder}: ${value}` : placeholder}
         onClick={() => (open ? setOpen(false) : openPicker())}
-        onKeyDown={onKeyDown}
         className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-(--sea-ink)/15 bg-transparent px-4 py-2 text-sm transition hover:border-(--sea-ink)/40 disabled:cursor-default disabled:opacity-40 disabled:hover:border-(--sea-ink)/15"
       >
         <span className="flex min-w-0 items-center gap-2">

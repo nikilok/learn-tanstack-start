@@ -5,6 +5,7 @@ import {
   parseSearchFilters,
   RATINGS,
   requiresChLink,
+  searchTermInput,
   TYPE_RATING_ROWS,
   typeRatingsFor,
   WORKER_TYPES,
@@ -249,7 +250,9 @@ describe('filtersToSearchParams', () => {
       rating: 'A-Premium',
       hasMoved: true,
       incorporatedFrom: '2015-01-01',
-      location: 'Wembley, London',
+      // Comma form canonicalizes (no space): /filters splits and re-joins town
+      // lists on ',', and the two must agree or the page opens dirty.
+      location: 'Wembley,London',
     });
     // /search's validateSearch relies on this: re-parsing the URL form must
     // reproduce identical state, or the router redirect-loops.
@@ -301,5 +304,30 @@ describe('requiresChLink', () => {
     expect(requiresChLink({ industry: 'software' })).toBe(true);
     expect(requiresChLink({ sic: ['62020'] })).toBe(true);
     expect(requiresChLink({ sicSection: ['J'] })).toBe(true);
+  });
+});
+
+describe('searchTermInput', () => {
+  test('keeps strings, stringifies router-coerced numbers, drops the rest', () => {
+    expect(searchTermInput('  Tesco ')).toBe('Tesco');
+    // The router's search parser coerces `?search=2024` to a number and
+    // `?search=true` to a boolean; validateSearch must not crash on either.
+    expect(searchTermInput(2024)).toBe('2024');
+    expect(searchTermInput(true)).toBe('');
+    expect(searchTermInput(['a', 'b'])).toBe('');
+    expect(searchTermInput(undefined)).toBe('');
+    expect(searchTermInput(Number.NaN)).toBe('');
+  });
+});
+
+describe('location canonical form', () => {
+  test('town lists normalize to bare commas in both directions', () => {
+    const { filters } = parseSearchFilters({ location: ' Wembley ,  London ' });
+    expect(filters.location).toBe('Wembley,London');
+    expect(filtersToSearchParams(filters).location).toBe('Wembley,London');
+    // Stray separators collapse rather than producing empty segments.
+    expect(parseSearchFilters({ location: ',Leeds,,' }).filters.location).toBe(
+      'Leeds',
+    );
   });
 });

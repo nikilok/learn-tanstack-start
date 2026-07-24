@@ -252,6 +252,22 @@ export const FILTER_DOCS = {
   order: 'asc or desc.',
 } as const satisfies Record<keyof SearchFilters, string>;
 
+// Distinct filter dimensions the registry accepts — the name term and sort
+// controls aren't filters. Surfaced on the home hero, so it self-updates as
+// the registry grows.
+export const FILTER_DIMENSION_COUNT = Object.keys(FILTER_DOCS).filter(
+  (key) => !['q', 'sort', 'order'].includes(key),
+).length;
+
+/** Name-term input off the URL: the router's parser coerces bare digits to numbers (`?search=2024`), so stringify those; anything else non-string is dropped. */
+export function searchTermInput(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return '';
+}
+
 // Filters sourced from Companies House columns: they implicitly exclude the
 // ~9% of sponsors with no CH mapping (public bodies / no_match).
 export const CH_FILTER_KEYS = [
@@ -541,9 +557,15 @@ export function parseSearchFilters(input: unknown): ParsedSearchFilters {
     );
   }
 
+  // Canonical comma form (no spaces around separators): /filters splits and
+  // re-joins town lists on ',', so the parse must land on that same form or a
+  // "Wembley, London" URL opens the page already dirty.
   const location = scalarInput('location', raw.location, issues)
     ?.replace(/\s+/g, ' ')
-    .trim();
+    .split(',')
+    .map((town) => town.trim())
+    .filter(Boolean)
+    .join(',');
   if (location) {
     if (location.length > 100) {
       issues.push('location: over 100 characters — dropped');

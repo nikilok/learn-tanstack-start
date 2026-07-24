@@ -130,9 +130,69 @@
   }
 }
 
+/*
+ * Filter-capability broadcast: a centred chip row under the stat — the live
+ * dimension count in a dashed pill (the /filters Apply-badge motif) followed
+ * by the facet names — the whole row one link to /filters. Enters on the
+ * subline's curve, a beat later.
+ */
+.filtersLink {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  max-width: 30rem;
+  margin: 1.4rem auto 0;
+  text-decoration: none;
+  opacity: 0;
+  transform: translateY(0.4em);
+  animation: hero-sub-in 0.6s 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.filtersCount {
+  border: 1px dashed color-mix(in srgb, var(--link-blue) 60%, transparent);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--link-blue);
+  white-space: nowrap;
+}
+
+.facet {
+  border: 1px solid color-mix(in srgb, var(--sea-ink) 14%, transparent);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--sea-ink-soft);
+  white-space: nowrap;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.filtersLink:hover .facet {
+  border-color: color-mix(in srgb, var(--sea-ink) 32%, transparent);
+  color: var(--sea-ink);
+}
+
+.filtersGo {
+  font-size: 0.8rem;
+  color: var(--sea-ink-soft);
+  transition: transform 150ms ease;
+}
+
+.filtersLink:hover .filtersGo {
+  transform: translateX(3px);
+  color: var(--sea-ink);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .figure,
-  .subline {
+  .subline,
+  .filtersLink {
     opacity: 1;
     transform: none;
     animation: none;
@@ -140,5 +200,9 @@
 
   .streaks {
     animation: none;
+  }
+
+  .filtersLink:hover .filtersGo {
+    transform: none;
   }
 }

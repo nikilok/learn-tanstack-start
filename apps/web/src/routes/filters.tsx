@@ -22,6 +22,7 @@ import {
   parseSearchFilters,
   RATINGS,
   type SearchFilters,
+  searchTermInput,
   SIC_SECTIONS,
   WORKER_TYPES,
 } from '../lib/search/params';
@@ -38,7 +39,7 @@ export const Route = createFileRoute('/filters')({
   // Same URL form as home: the name term plus filter params, so the form
   // opens pre-filled with whatever the listing currently applies.
   validateSearch: (search: Record<string, unknown>) => {
-    const term = ((search.search as string) || '').trim();
+    const term = searchTermInput(search.search);
     const { filters } = parseSearchFilters({ ...search, q: undefined });
     return {
       ...(term ? { search: term } : {}),
@@ -125,8 +126,13 @@ function draftFromFilters(filters: SearchFilters): Draft {
   };
 }
 
-/** Re-validate a draft into canonical filters via the registry. */
-function filtersFromDraft(draft: Draft): SearchFilters {
+/**
+ * Re-validate a draft through the registry. Returns the full parse — filters
+ * AND issues, so the form can surface dropped input instead of eating it.
+ * The `satisfies` pins this literal to the registry: a future filter key
+ * fails the build here instead of being silently stripped by Apply.
+ */
+function filtersFromDraft(draft: Draft) {
   return parseSearchFilters({
     route: draft.route,
     workerType: draft.workerType,
@@ -146,7 +152,7 @@ function filtersFromDraft(draft: Draft): SearchFilters {
     hasMoved: draft.hasMoved,
     sort: draft.sort || undefined,
     order: draft.order || undefined,
-  }).filters;
+  } satisfies Record<Exclude<keyof SearchFilters, 'q'>, unknown>);
 }
 
 /** Order-insensitive identity of a filter set, for dirty-state comparison. */
@@ -185,8 +191,20 @@ const SECTION_KEYS = {
     'hasMoved',
   ],
   sort: ['sort', 'order'],
-} as const;
-type SectionId = keyof typeof SECTION_KEYS;
+} as const satisfies Record<
+  string,
+  readonly (keyof Omit<SearchFilters, 'q'>)[]
+>;
+// Compile-time coverage: every registry key (bar q) must belong to a section,
+// or it would be invisible here and silently stripped by Apply. A missing key
+// collapses SectionId into an error tuple, failing every use below.
+type UnsectionedKey = Exclude<
+  keyof SearchFilters,
+  'q' | (typeof SECTION_KEYS)[keyof typeof SECTION_KEYS][number]
+>;
+type SectionId = [UnsectionedKey] extends [never]
+  ? keyof typeof SECTION_KEYS
+  : ['unsectioned registry keys', UnsectionedKey];
 // Declaration order doubles as the ⌥1…⌥9 jump order.
 const SECTION_ORDER = Object.keys(SECTION_KEYS) as SectionId[];
 
@@ -288,9 +306,13 @@ function FiltersPage() {
   // baseline follows: a prefilled set is the currently-applied state, not a
   // pending change.
   const urlFiltersKey = JSON.stringify(initialFilters);
+  const dirtyRef = useRef(false);
   useEffect(() => {
     const urlFilters = JSON.parse(urlFiltersKey) as Record<string, unknown>;
     if (Object.keys(urlFilters).length > 0) return;
+    // Re-entering /filters (header icon, ⌘⇧F) re-runs this — unapplied edits
+    // win over the stored set; only an untouched form prefills.
+    if (dirtyRef.current) return;
     const stored = loadStoredFilters();
     if (stored) {
       const filters = parseSearchFilters(stored).filters;
@@ -300,10 +322,14 @@ function FiltersPage() {
     }
   }, [urlFiltersKey]);
 
-  const applied = useMemo(() => filtersFromDraft(draft), [draft]);
+  const { filters: applied, issues: draftIssues } = useMemo(
+    () => filtersFromDraft(draft),
+    [draft],
+  );
   const urlForm = filtersToSearchParams(applied);
   const activeCount = Object.keys(urlForm).length;
   const dirty = filtersKey(applied) !== baselineKey;
+  dirtyRef.current = dirty;
   /** A section's live contribution to the active-filter total. */
   const sectionCount = (id: SectionId) =>
     SECTION_KEYS[id].filter((key) => key in urlForm).length;
@@ -381,14 +407,15 @@ function FiltersPage() {
   // the modifier makes intent unambiguous. (⌘/Ctrl+digit is deliberately NOT
   // used: browsers reserve it for tab switching. The digit is matched by
   // physical code because macOS Option substitutes characters.) R resets and
-  // Esc cancels, but those defer to focused interactive elements (typing
-  // keeps its meaning) and to popovers that already handled the key (Select
-  // / DatePicker Escapes set defaultPrevented).
+  // Esc cancels; those defer only to text-entry contexts (checkboxes don't
+  // type) and to popovers that already handled the key — Select / DatePicker
+  // listen on their root, so Escapes from anywhere inside them arrive here
+  // with defaultPrevented set.
   const actionsRef = useRef({ apply, cancel, clearAll, dirty, jumpToSection });
   actionsRef.current = { apply, cancel, clearAll, dirty, jumpToSection };
   useEffect(() => {
-    const TYPING = 'input, textarea, select, [contenteditable]';
-    const INTERACTIVE = `a, button, summary, ${TYPING}`;
+    const TYPING =
+      'input:not([type="checkbox"]), textarea, select, [contenteditable]';
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const current = actionsRef.current;
@@ -408,12 +435,11 @@ function FiltersPage() {
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const target = e.target as HTMLElement;
+      if (target.closest(TYPING)) return;
       if (e.key === 'Escape') {
-        if (target.closest(TYPING)) return;
         e.preventDefault();
         current.cancel();
       } else if (e.key === 'r' || e.key === 'R') {
-        if (target.closest(INTERACTIVE)) return;
         e.preventDefault();
         current.clearAll();
       }
@@ -493,7 +519,16 @@ function FiltersPage() {
                 Matches the sponsor’s town or its registered office.
               </p>
               <CheckGroup
-                options={KNOWN_CITIES.map((city) => ({
+                // The param accepts ANY town (URL edits, the future model) —
+                // ones outside the curated list surface as extra ticked
+                // options at the top, so they're visible and removable.
+                options={[
+                  ...draft.location.filter(
+                    (town) =>
+                      !(KNOWN_CITIES as readonly string[]).includes(town),
+                  ),
+                  ...KNOWN_CITIES,
+                ].map((city) => ({
                   value: city,
                   label: city,
                 }))}
@@ -668,6 +703,17 @@ function FiltersPage() {
             </div>,
           )}
         </div>
+
+        {draftIssues.length > 0 && (
+          <div className="mt-6 text-xs text-(--sea-ink-soft)">
+            <p className="m-0 mb-1 font-medium">Some input was ignored</p>
+            <ul className="m-0 list-none space-y-1 p-0">
+              {draftIssues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* Floating pill (same recipe as the details page's back-to-search pill:

@@ -40,4 +40,27 @@ describe('filter persistence', () => {
     store.set('ss-filters', JSON.stringify({ rating: 'discontinued-tier' }));
     expect(loadStoredFilters()).toBeNull();
   });
+
+  test('a throwing storage accessor degrades to null, not a crash', () => {
+    // Chromium with site data blocked throws SecurityError on the ACCESS
+    // itself — `typeof localStorage` evaluates the getter, so only a
+    // try-wrapped access survives. Simulate with a throwing global getter.
+    const original = globalThis.localStorage;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('SecurityError: storage is disabled');
+      },
+    });
+    try {
+      expect(loadStoredFilters()).toBeNull();
+      expect(() => storeFilters({ route: 'Skilled Worker' })).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: original,
+        writable: true,
+      });
+    }
+  });
 });

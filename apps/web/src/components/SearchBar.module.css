@@ -1,0 +1,25 @@
+/*
+ * Empty-pill caret: filter mode keeps the search pill available with nothing
+ * typed — a blinking I-beam inside the pill says "click to type" the way a
+ * focused text field would.
+ */
+.caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1em;
+  border-radius: 1px;
+  background: currentcolor;
+  animation: caret-blink 1.1s steps(1) infinite;
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}

@@ -6,6 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import type { HmrcRow } from '../api/hmrc';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
+import { loadStoredFilters } from '../lib/search/persist';
 import {
   formatLocation,
   hasWebGpu,
@@ -236,7 +237,11 @@ export default function HmrcResults({
   const hasRows = results.length > 0;
   useEffect(() => {
     const canRestore = queryActive && (isLoading || hasRows);
-    if (!canRestore) sessionStorage.removeItem('hmrc-scroll-y');
+    // A stored filter set means a bare full-load mount is about to rehydrate
+    // into filter mode (index.tsx) — its restore is pending, not stranded.
+    if (!canRestore && !loadStoredFilters()) {
+      sessionStorage.removeItem('hmrc-scroll-y');
+    }
   }, [queryActive, isLoading, hasRows]);
 
   useEffect(() => {

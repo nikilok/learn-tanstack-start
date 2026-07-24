@@ -39,8 +39,6 @@ export type FilterSearchRow = {
  * entries drop into `issues`, echoed in the response for the caller's
  * correction loop (Phase B model, UI). `q` matches current organisation
  * names only; the home search remains the deep previous-name surface.
- * `total` counts the full filtered set via a window aggregate (null only on
- * an empty page past the first, where it is unknowable in one query).
  * Response depends only on input, so it edge-caches for 5 minutes.
  */
 export const searchFiltered = createServerFn()
@@ -49,10 +47,13 @@ export const searchFiltered = createServerFn()
   )
   .handler(async ({ data: { params, offset } }) => {
     const { filters, issues } = parseSearchFilters(params);
-    const safeOffset = Math.min(
-      Math.max(0, Math.trunc(Number(offset) || 0)),
-      MAX_OFFSET,
-    );
+    const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+    if (safeOffset > MAX_OFFSET) {
+      // Terminal empty page: clamping and re-serving page 200 would feed the
+      // infinite query identical pages forever (hasMore never goes false).
+      setRpcCacheControl(SHORT_EDGE_CACHE);
+      return { rows: [] as FilterSearchRow[], hasMore: false, issues };
+    }
     console.log(
       `[Filter Search] keys=${Object.keys(filters).join(',') || 'none'} offset=${safeOffset}`,
     );
@@ -94,8 +95,7 @@ export const searchFiltered = createServerFn()
              NULL::text AS "matchedPreviousName",
              c.company_status AS "companyStatus",
              c.date_of_creation AS "incorporatedOn",
-             (SELECT sc.description FROM ${sicCodes} sc WHERE sc.code = c.sic_codes[1]) AS "sicPrimary",
-             count(*) OVER ()::int AS "total"
+             (SELECT sc.description FROM ${sicCodes} sc WHERE sc.code = c.sic_codes[1]) AS "sicPrimary"
       FROM ${hmrcSkilledWorkers} h
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
       LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
@@ -103,14 +103,11 @@ export const searchFiltered = createServerFn()
       ORDER BY ${orderBy}
       LIMIT ${PAGE_SIZE + 1} OFFSET ${safeOffset}
     `);
-    const raw = result.rows as (FilterSearchRow & { total: number })[];
+    const raw = result.rows as FilterSearchRow[];
 
     const hasMore = raw.length > PAGE_SIZE;
-    const rows: FilterSearchRow[] = raw
-      .slice(0, PAGE_SIZE)
-      .map(({ total: _total, ...row }) => row);
-    const total = raw[0]?.total ?? (safeOffset === 0 ? 0 : null);
+    const rows = raw.slice(0, PAGE_SIZE);
 
     setRpcCacheControl(SHORT_EDGE_CACHE);
-    return { rows, hasMore, total, issues };
+    return { rows, hasMore, issues };
   });

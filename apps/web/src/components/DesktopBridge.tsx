@@ -9,6 +9,7 @@ import {
 import type { SearchUrlParams } from '../lib/search/params';
 import { loadStoredFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
+import { countActiveFilters } from './FiltersButton';
 import { cycleTheme, refreshTheme } from './ThemeToggle';
 
 // Let the OS appearance repaint settle before the GPU transition, else they compete and it stutters.
@@ -73,13 +74,10 @@ export default function DesktopBridge() {
   useEffect(() => {
     const api = window.ssDesktop;
     if (!api?.reportFilters) return; // web mode, or an older shell
-    const current =
+    const count =
       location.pathname === '/'
-        ? (location.search as Record<string, unknown>)
-        : ((loadStoredFilters() ?? {}) as Record<string, unknown>);
-    const count = Object.keys(current).filter(
-      (key) => key !== 'search' && current[key] !== undefined,
-    ).length;
+        ? countActiveFilters(location.search as Record<string, unknown>)
+        : Object.keys(loadStoredFilters() ?? {}).length;
     api.reportFilters(count);
   }, [location]);
 

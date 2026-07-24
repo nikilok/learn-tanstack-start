@@ -2,9 +2,22 @@ import { Link, useLocation } from '@tanstack/react-router';
 import { SlidersHorizontal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import type { SearchUrlParams } from '../lib/search/params';
+import {
+  filtersToSearchParams,
+  parseSearchFilters,
+  type SearchUrlParams,
+} from '../lib/search/params';
 import { loadStoredFilters } from '../lib/search/persist';
 import { HEADER_CONTROL_CLASS, HEADER_ICON_CLASS } from './headerControls';
+
+/** Registry-validated count of active filters in a raw search-param object — raw URL keys the registry drops must not badge. */
+export function countActiveFilters(params: Record<string, unknown>): number {
+  return Object.keys(
+    filtersToSearchParams(
+      parseSearchFilters({ ...params, q: undefined }).filters,
+    ),
+  ).length;
+}
 
 /**
  * Header action linking to the /filters page, badged with the number of
@@ -18,9 +31,7 @@ export default function FiltersButton() {
   const location = useLocation();
   const onHome = location.pathname === '/';
   const current = (onHome ? location.search : {}) as Record<string, unknown>;
-  const urlCount = Object.keys(current).filter(
-    (key) => key !== 'search' && current[key] !== undefined,
-  ).length;
+  const urlCount = countActiveFilters(current);
   const [storedCount, setStoredCount] = useState(0);
   useEffect(() => {
     setStoredCount(Object.keys(loadStoredFilters() ?? {}).length);

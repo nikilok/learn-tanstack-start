@@ -21,6 +21,7 @@ import { useSearchPill } from '../hooks/useSearchPill';
 import {
   filtersToSearchParams,
   parseSearchFilters,
+  searchTermInput,
   type SearchUrlParams,
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
@@ -30,13 +31,28 @@ const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
+// The first mount after SSR must render exactly the server HTML (which cannot
+// read localStorage); every later SPA mount is free to read it synchronously.
+let hydrationDone = false;
+
+// What a bare mount renders while the rehydrate effect below re-applies the
+// stored filters: a loading frame, so the classic hook neither fires a
+// spurious name search nor lets a pending scroll restore be discarded.
+const PENDING_FILTER_DATA = {
+  results: [],
+  isLoading: true,
+  hasMore: false,
+  loadingMore: false,
+  fetchMore: () => {},
+};
+
 export const Route = createFileRoute('/')({
   // The name term (`search`) plus the URL-form filter params from /filters.
   // `q` is stripped: on this surface the name term only comes from `search`.
   validateSearch: (search: Record<string, unknown>) => {
     const { filters } = parseSearchFilters({ ...search, q: undefined });
     return {
-      search: ((search.search as string) || '').trim(),
+      search: searchTermInput(search.search),
       ...filtersToSearchParams(filters),
     };
   },
@@ -116,16 +132,33 @@ function Home() {
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
 
+  // A bare-URL SPA mount (details back-link, header logo) with a stored
+  // filter set is about to rehydrate into filter mode — known synchronously,
+  // so the transient render never runs the classic search. False on the
+  // hydration mount by construction (hydrationDone), so server HTML matches.
+  const [pendingStoredFilters, setPendingStoredFilters] = useState(
+    () => hydrationDone && !hasFilters && loadStoredFilters() != null,
+  );
+  useEffect(() => {
+    hydrationDone = true;
+  }, []);
+
   // Both data sources stay mounted; only one is live. No filters → the
   // classic name search exactly as before ('' disables it via the >=3 gate).
   // Any filter → the filter endpoint serves the listing, with the typed term
   // passed through as `q` once it reaches 3 chars.
-  const classic = useHmrcSearch(hasFilters ? '' : search);
+  const classic = useHmrcSearch(
+    hasFilters || pendingStoredFilters ? '' : search,
+  );
   const filtered = useFilterSearch(
     { ...urlFilters, q: search.length >= 3 ? search : undefined },
     { enabled: hasFilters },
   );
-  const resultsData = hasFilters ? filtered : classic;
+  const resultsData = hasFilters
+    ? filtered
+    : pendingStoredFilters
+      ? PENDING_FILTER_DATA
+      : classic;
 
   // Applied filters are durable: the URL is authoritative when it carries
   // them (and refreshes the store), but navs that only carry the name term —
@@ -141,13 +174,24 @@ function Home() {
     const stored = loadStoredFilters();
     if (stored) {
       navigate({ to: '/', search: { search, ...stored }, replace: true });
+    } else {
+      // Nothing to rehydrate (e.g. cleared in another tab) — release the
+      // pending frame so the classic path takes over.
+      setPendingStoredFilters(false);
     }
   }, [hasFilters, urlFiltersKey, search, navigate]);
 
   // Empty state: the hero is shown and the search bar scrolls away with the
   // page (not sticky). It only sticks once a query or filter set exists.
   const heroVisible =
-    liveQuery.length === 0 && search.length === 0 && !hasFilters;
+    liveQuery.length === 0 &&
+    search.length === 0 &&
+    !hasFilters &&
+    !pendingStoredFilters;
+  // data-search-pinned gates SearchInput's translateZ cursor fix and must
+  // track a typed query ONLY: stamped with an empty input (nameless filter
+  // mode) it garbles the rotating placeholder on iOS Safari (see CLAUDE.md).
+  const hasQueryText = liveQuery.length > 0 || search.length > 0;
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -173,7 +217,7 @@ function Home() {
         <div ref={sentinelRef} className="pointer-events-none mt-6" />
         <div
           data-sticky-search
-          data-search-pinned={heroVisible ? undefined : ''}
+          data-search-pinned={hasQueryText ? '' : undefined}
           className={`pointer-events-none z-40 -mx-4 px-4 ${
             heroVisible
               ? 'relative pb-4'
@@ -187,6 +231,7 @@ function Home() {
             isStuck={isStuck}
             ready={ready}
             pillClicked={pillClicked}
+            filtersActive={hasFilters || pendingStoredFilters}
             inputRef={inputRef}
             platform={platformInfo.platform}
             isMobile={platformInfo.isMobile}
@@ -215,7 +260,7 @@ function Home() {
           <Suspense fallback={<SkeletonCards />}>
             <HmrcResults
               search={search}
-              filtersActive={hasFilters}
+              filtersActive={hasFilters || pendingStoredFilters}
               data={resultsData}
             />
           </Suspense>

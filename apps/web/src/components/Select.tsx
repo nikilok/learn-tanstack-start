@@ -8,7 +8,10 @@ export type SelectOption = { value: string; label: string };
  * the site's tokens (native <select> popups can't be). Keyboard: Enter/Space/
  * arrows open, arrows move, Enter picks, Escape closes; outside pointerdown
  * closes. Focus stays on the trigger (activedescendant pattern), so there's
- * no tab trap.
+ * no tab trap. Keys are handled on the ROOT, not the trigger: a click on a
+ * popover-internal button moves focus there, and its keys must still close /
+ * navigate the popover (and mark Escape handled) rather than fall through to
+ * page-level shortcuts.
  */
 export default function Select({
   value,
@@ -26,6 +29,7 @@ export default function Select({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const selectedIndex = options.findIndex((opt) => opt.value === value);
 
@@ -60,6 +64,8 @@ export default function Select({
     if (e.key === 'Escape') {
       e.preventDefault();
       setOpen(false);
+      // Focus may sit on a popover-internal button about to unmount.
+      triggerRef.current?.focus();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setActiveIndex((i) => Math.min(options.length - 1, i + 1));
@@ -76,8 +82,9 @@ export default function Select({
   };
 
   return (
-    <div ref={rootRef} className="relative w-fit">
+    <div ref={rootRef} className="relative w-fit" onKeyDown={onKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -87,7 +94,6 @@ export default function Select({
         }
         aria-label={ariaLabel}
         onClick={() => (open ? setOpen(false) : openList())}
-        onKeyDown={onKeyDown}
         className={`flex cursor-pointer items-center gap-1.5 rounded-full border border-(--sea-ink)/15 bg-transparent py-1.5 pr-3 pl-4 text-sm text-(--sea-ink) transition hover:border-(--sea-ink)/40 ${triggerClassName}`}
       >
         {options[selectedIndex]?.label ?? value}

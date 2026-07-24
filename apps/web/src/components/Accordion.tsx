@@ -16,6 +16,7 @@ export default function Accordion({
   title,
   shortcut,
   count = 0,
+  confirmed = false,
   open,
   onToggle,
   children,
@@ -25,6 +26,8 @@ export default function Accordion({
   /** Keyboard hint rendered as a kbd chip next to the title (e.g. "⌘1"). */
   shortcut?: string;
   count?: number;
+  /** Count pill state: applied-and-live (solid red, header-badge style) vs pending draft (dashed). */
+  confirmed?: boolean;
   open: boolean;
   onToggle: (open: boolean) => void;
   children: React.ReactNode;
@@ -62,8 +65,12 @@ export default function Accordion({
         <span className="ml-auto flex items-center gap-3">
           {count > 0 && (
             <span
-              aria-label={`${count} active`}
-              className="flex h-5 min-w-5 items-center justify-center rounded-full border border-dashed border-(--sea-ink)/50 px-1 text-[11px] leading-none font-semibold text-(--sea-ink)"
+              aria-label={`${count} ${confirmed ? 'applied' : 'pending'}`}
+              className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
+                confirmed
+                  ? 'border-none bg-(--logo-red) text-white shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)]'
+                  : 'border border-dashed border-(--sea-ink)/50 text-(--sea-ink)'
+              }`}
             >
               {count}
             </span>

@@ -302,10 +302,11 @@ function FiltersPage() {
   const [draft, setDraft] = useState<Draft>(() =>
     draftFromFilters(parseSearchFilters(initialFilters).filters),
   );
-  // What the page opened with — Apply only means something when the draft
-  // differs from this.
-  const [baselineKey, setBaselineKey] = useState(() =>
-    filtersKey(parseSearchFilters(initialFilters).filters),
+  // What the page opened with (the currently-applied set) — Apply only means
+  // something when the draft differs from this, and the section pills compare
+  // their slice against it to show applied (solid red) vs pending (dashed).
+  const [baseline, setBaseline] = useState<SearchFilters>(
+    () => parseSearchFilters(initialFilters).filters,
   );
   // Sections with a choice open by default; the rest stay closed.
   const [openSections, setOpenSections] = useState<Record<SectionId, boolean>>(
@@ -329,7 +330,7 @@ function FiltersPage() {
     if (stored) {
       const filters = parseSearchFilters(stored).filters;
       setDraft(draftFromFilters(filters));
-      setBaselineKey(filtersKey(filters));
+      setBaseline(filters);
       setOpenSections(openSectionsFor(filters));
     }
   }, [urlFiltersKey]);
@@ -340,11 +341,23 @@ function FiltersPage() {
   );
   const urlForm = filtersToSearchParams(applied);
   const activeCount = Object.keys(urlForm).length;
-  const dirty = filtersKey(applied) !== baselineKey;
+  const dirty = filtersKey(applied) !== filtersKey(baseline);
   dirtyRef.current = dirty;
   /** A section's live contribution to the active-filter total. */
   const sectionCount = (id: SectionId) =>
     SECTION_KEYS[id].filter((key) => key in urlForm).length;
+  /** One section's slice of a filter set, canonically keyed for comparison. */
+  const sectionSliceKey = (filters: SearchFilters, id: SectionId) =>
+    filtersKey(
+      Object.fromEntries(
+        Object.entries(filters).filter(([key]) =>
+          (SECTION_KEYS[id] as readonly string[]).includes(key),
+        ),
+      ) as SearchFilters,
+    );
+  /** True when a section's draft matches the applied baseline (pill goes solid red). */
+  const sectionConfirmed = (id: SectionId) =>
+    sectionSliceKey(applied, id) === sectionSliceKey(baseline, id);
 
   // Glass only while the pill overlays scrollable content; at the page end it
   // rests as plain controls (same sentinel pattern as the details back button).
@@ -468,6 +481,7 @@ function FiltersPage() {
       title={title}
       shortcut={`${jumpKey}${SECTION_ORDER.indexOf(id) + 1}`}
       count={sectionCount(id)}
+      confirmed={sectionConfirmed(id)}
       open={openSections[id]}
       onToggle={(next) => setOpenSections((s) => ({ ...s, [id]: next }))}
     >
@@ -774,7 +788,13 @@ function FiltersPage() {
               <kbd className="font-sans text-xs">↵</kbd>
             </span>
             {activeCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full border border-dashed border-(--bg-base)/70 bg-transparent px-1 text-[11px] leading-none font-semibold text-(--bg-base)">
+              <span
+                className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
+                  dirty
+                    ? 'border border-dashed border-(--bg-base)/70 bg-transparent text-(--bg-base)'
+                    : 'border-none bg-(--logo-red) text-white shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)]'
+                }`}
+              >
                 {activeCount}
               </span>
             )}

@@ -331,7 +331,13 @@ export default function HmrcResults({
                 type="button"
                 onClick={() => {
                   storeFilters({});
-                  void router.navigate({ to: '/', search: { search } });
+                  void router
+                    .navigate({ to: '/', search: { search } })
+                    .then(() => {
+                      // Land in the normal starting state (see /filters' apply).
+                      window.scrollTo(0, 0);
+                      requestAnimationFrame(() => window.scrollTo(0, 0));
+                    });
                 }}
                 className="cursor-pointer rounded-full border-none bg-(--sea-ink) px-5 py-2 text-sm font-medium text-(--bg-base) shadow-md transition hover:opacity-90"
               >

@@ -35,6 +35,15 @@ const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
+// Apply/Reset land on home in its normal starting state. The form's scroll
+// otherwise survives the push (clamped against the listing's transient
+// height, i.e. a random-looking offset); the rAF repeat pins it through the
+// post-render frame where restoration or late content growth could re-shift.
+function landAtTop() {
+  window.scrollTo(0, 0);
+  requestAnimationFrame(() => window.scrollTo(0, 0));
+}
+
 export const Route = createFileRoute('/filters')({
   // Same URL form as home: the name term plus filter params, so the form
   // opens pre-filled with whatever the listing currently applies.
@@ -368,13 +377,15 @@ function FiltersPage() {
     // Persist (or clear, when empty) before navigating — home treats the
     // store as the durable copy the URL rehydrates from.
     storeFilters(params);
-    navigate({ to: '/', search: { search: term, ...params } });
+    void navigate({ to: '/', search: { search: term, ...params } }).then(
+      landAtTop,
+    );
   };
 
   // One-tap exit: empty the store and land on the classic home immediately.
   const clearAll = () => {
     storeFilters({});
-    navigate({ to: '/', search: { search: term } });
+    void navigate({ to: '/', search: { search: term } }).then(landAtTop);
   };
 
   // Cancel = go back to wherever the user came from (the filter icon is in

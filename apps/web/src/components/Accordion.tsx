@@ -43,7 +43,13 @@ export default function Accordion({
     <details
       id={id}
       open={open}
-      onToggle={(e) => onToggle((e.target as HTMLDetailsElement).open)}
+      onToggle={(e) => {
+        // React simulates bubbling for `toggle`, so a nested <details> in
+        // the panel (Industry's SIC sub-sections) would close this whole
+        // section. Only this element's own toggles count.
+        if (e.target !== e.currentTarget) return;
+        onToggle((e.target as HTMLDetailsElement).open);
+      }}
       className={`group scroll-mt-24 ${styles.item}`}
     >
       <summary className="flex cursor-pointer list-none items-center gap-3 py-5 [&::-webkit-details-marker]:hidden">

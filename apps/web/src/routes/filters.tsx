@@ -584,11 +584,24 @@ function FiltersPage() {
                 <DatePicker
                   placeholder="From"
                   value={draft.incorporatedFrom || undefined}
-                  onChange={(v) => setText('incorporatedFrom', v ?? '')}
+                  onChange={(v) =>
+                    setDraft((d) => ({
+                      ...d,
+                      incorporatedFrom: v ?? '',
+                      // To depends on From: clear it when From is cleared or
+                      // moves past it, so the range can never invert.
+                      incorporatedTo:
+                        v && d.incorporatedTo && d.incorporatedTo >= v
+                          ? d.incorporatedTo
+                          : '',
+                    }))
+                  }
                 />
                 <DatePicker
                   placeholder="To"
                   align="right"
+                  min={draft.incorporatedFrom || undefined}
+                  disabled={!draft.incorporatedFrom && !draft.incorporatedTo}
                   value={draft.incorporatedTo || undefined}
                   onChange={(v) => setText('incorporatedTo', v ?? '')}
                 />

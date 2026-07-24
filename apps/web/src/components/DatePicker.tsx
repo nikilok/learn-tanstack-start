@@ -62,13 +62,21 @@ export default function DatePicker({
   onChange,
   placeholder,
   align = 'left',
+  min,
+  disabled = false,
 }: {
   value: string | undefined;
   onChange: (value: string | undefined) => void;
   placeholder: string;
   align?: 'left' | 'right';
+  /** Earliest selectable date (YYYY-MM-DD); earlier days render disabled. */
+  min?: string;
+  /** Disables the trigger entirely (e.g. a To picker before From exists). */
+  disabled?: boolean;
 }) {
   const selected = parseIso(value);
+  const minDate = parseIso(min);
+  const isBeforeMin = (date: Ymd) => (min ? toIso(date) < min : false);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'days' | 'years'>('days');
   const today = (() => {
@@ -89,7 +97,8 @@ export default function DatePicker({
   }, [open]);
 
   const openPicker = () => {
-    const seed = parseIso(value) ?? today;
+    const seed =
+      parseIso(value) ?? (minDate && isBeforeMin(today) ? minDate : today);
     setActive(seed);
     setYearPage(Math.floor((seed.y - MIN_YEAR) / YEARS_PER_PAGE));
     setView('days');
@@ -152,12 +161,14 @@ export default function DatePicker({
     if (view === 'days' && dayDelta !== 0) {
       e.preventDefault();
       const next = shiftDays(active, dayDelta);
-      if (next.y >= MIN_YEAR && next.y <= MAX_YEAR) setActive(next);
+      if (next.y >= MIN_YEAR && next.y <= MAX_YEAR && !isBeforeMin(next)) {
+        setActive(next);
+      }
       return;
     }
     if (e.key === 'Enter' && view === 'days') {
       e.preventDefault();
-      choose(active);
+      if (!isBeforeMin(active)) choose(active);
     }
   };
 
@@ -180,12 +191,13 @@ export default function DatePicker({
     <div ref={rootRef} className="relative">
       <button
         type="button"
+        disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={value ? `${placeholder}: ${value}` : placeholder}
         onClick={() => (open ? setOpen(false) : openPicker())}
         onKeyDown={onKeyDown}
-        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-(--sea-ink)/15 bg-transparent px-4 py-2 text-sm transition hover:border-(--sea-ink)/40"
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-(--sea-ink)/15 bg-transparent px-4 py-2 text-sm transition hover:border-(--sea-ink)/40 disabled:cursor-default disabled:opacity-40 disabled:hover:border-(--sea-ink)/15"
       >
         <span className="flex min-w-0 items-center gap-2">
           <CalendarDays
@@ -261,6 +273,7 @@ export default function DatePicker({
                   key={y}
                   type="button"
                   tabIndex={-1}
+                  disabled={minDate ? y < minDate.y : false}
                   onClick={() => {
                     setActive((a) => ({
                       y,
@@ -269,7 +282,7 @@ export default function DatePicker({
                     }));
                     setView('days');
                   }}
-                  className={`cursor-pointer rounded-lg border-none px-2 py-1.5 text-sm transition ${
+                  className={`cursor-pointer rounded-lg border-none px-2 py-1.5 text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent ${
                     y === active.y
                       ? 'bg-(--link-blue) text-white'
                       : 'bg-transparent text-(--sea-ink) hover:bg-(--link-bg-hover)'
@@ -298,10 +311,11 @@ export default function DatePicker({
                     key={d}
                     type="button"
                     tabIndex={-1}
+                    disabled={isBeforeMin({ y: active.y, m: active.m, d })}
                     aria-label={`${d} ${MONTHS[active.m]} ${active.y}`}
                     aria-current={isSelected(d) ? 'date' : undefined}
                     onClick={() => choose({ y: active.y, m: active.m, d })}
-                    className={`flex size-8 cursor-pointer items-center justify-center justify-self-center rounded-full border-none text-sm transition ${
+                    className={`flex size-8 cursor-pointer items-center justify-center justify-self-center rounded-full border-none text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent ${
                       isSelected(d)
                         ? 'bg-(--link-blue) text-white'
                         : isActiveDay(d)

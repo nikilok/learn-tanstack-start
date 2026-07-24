@@ -151,12 +151,12 @@
 }
 
 .filtersCount {
-  border: 1px dashed color-mix(in srgb, var(--link-blue) 60%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--sea-ink) 22%, transparent);
   border-radius: 999px;
   padding: 0.2rem 0.65rem;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--link-blue);
+  color: var(--sea-ink-soft);
   white-space: nowrap;
 }
 
@@ -173,7 +173,15 @@
     border-color 150ms ease;
 }
 
-.filtersLink:hover .facet {
+/* Frosted backdrop lifts the pill text off the angled grid streaks; unprefixed backdrop-filter only, else the prod Lightning CSS pass drops it and kills the blur in Chromium. */
+.filtersCount,
+.facet {
+  background: color-mix(in srgb, var(--bg-base) 60%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.filtersLink:hover .facet,
+.filtersLink:hover .filtersCount {
   border-color: color-mix(in srgb, var(--sea-ink) 32%, transparent);
   color: var(--sea-ink);
 }

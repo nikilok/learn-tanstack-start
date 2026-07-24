@@ -16,7 +16,9 @@ export default function Checkbox({
   label: React.ReactNode;
 }) {
   return (
-    <label className="group flex cursor-pointer items-center gap-2.5 py-1 text-sm text-(--sea-ink)">
+    // py-3 below sm lifts the tap target to 44px (Apple HIG); the whole
+    // label is the hit area, so padding beats gap for fat-thumb accuracy.
+    <label className="group flex cursor-pointer items-center gap-2.5 py-3 text-sm text-(--sea-ink) sm:py-1">
       <input
         type="checkbox"
         checked={checked}

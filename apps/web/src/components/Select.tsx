@@ -94,7 +94,7 @@ export default function Select({
         }
         aria-label={ariaLabel}
         onClick={() => (open ? setOpen(false) : openList())}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-full border border-(--sea-ink)/15 bg-transparent py-1.5 pr-3 pl-4 text-sm text-(--sea-ink) transition hover:border-(--sea-ink)/40 ${triggerClassName}`}
+        className={`flex cursor-pointer items-center gap-1.5 rounded-full border border-(--sea-ink)/15 bg-transparent py-3 pr-3 pl-4 text-sm text-(--sea-ink) transition hover:border-(--sea-ink)/40 sm:py-1.5 ${triggerClassName}`}
       >
         {options[selectedIndex]?.label ?? value}
         <ChevronDown
@@ -103,40 +103,59 @@ export default function Select({
         />
       </button>
       {open && (
-        <ul
-          id={listId}
-          role="listbox"
-          className="glass absolute top-full left-0 z-30 m-0 mt-1.5 w-max min-w-full list-none rounded-2xl p-1.5 backdrop-blur-md!"
-        >
-          {options.map((opt, index) => (
-            <li
-              key={opt.value}
-              id={`${listId}-${index}`}
-              role="option"
-              aria-selected={opt.value === value}
-            >
-              <button
-                type="button"
-                tabIndex={-1}
-                onPointerEnter={() => setActiveIndex(index)}
-                onClick={() => choose(opt.value)}
-                className={`flex w-full cursor-pointer items-center justify-between gap-4 rounded-xl border-none px-3 py-1.5 text-left text-sm text-(--sea-ink) transition ${
-                  index === activeIndex
-                    ? 'bg-(--link-bg-hover)'
-                    : 'bg-transparent'
-                }`}
+        <>
+          {/* Below sm the listbox is a centered modal (same treatment as the
+              DatePicker) — tapping the scrim closes; it sits inside rootRef,
+              so the document-level outside-pointerdown can't. */}
+          <div
+            className="fixed inset-0 z-[60] bg-black/40 sm:hidden"
+            aria-hidden
+            onPointerDown={() => setOpen(false)}
+          />
+          <ul
+            id={listId}
+            role="listbox"
+            className="glass fixed inset-x-4 top-1/2 z-[70] m-0 max-h-[min(90vh,30rem)] -translate-y-1/2 list-none overflow-y-auto rounded-2xl p-2 backdrop-blur-md! sm:absolute sm:inset-x-auto sm:top-full sm:left-0 sm:z-30 sm:mt-1.5 sm:max-h-none sm:w-max sm:min-w-full sm:translate-y-0 sm:overflow-visible sm:p-1.5"
+          >
+            {/* Modal form floats free of its trigger, so name the control. */}
+            {ariaLabel && (
+              <li
+                aria-hidden
+                className="px-3 pt-1.5 pb-2 text-xs font-medium text-(--sea-ink-soft) sm:hidden"
               >
-                {opt.label}
-                {opt.value === value && (
-                  <Check
-                    className="size-3.5 shrink-0 text-(--sea-ink-soft)"
-                    aria-hidden
-                  />
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+                {ariaLabel}
+              </li>
+            )}
+            {options.map((opt, index) => (
+              <li
+                key={opt.value}
+                id={`${listId}-${index}`}
+                role="option"
+                aria-selected={opt.value === value}
+              >
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onPointerEnter={() => setActiveIndex(index)}
+                  onClick={() => choose(opt.value)}
+                  className={`flex w-full cursor-pointer items-center justify-between gap-4 rounded-xl border-none px-3 py-3 text-left text-sm text-(--sea-ink) transition sm:py-1.5 ${
+                    index === activeIndex
+                      ? 'bg-(--link-bg-hover)'
+                      : 'bg-transparent'
+                  }`}
+                >
+                  {opt.label}
+                  {opt.value === value && (
+                    <Check
+                      className="size-3.5 shrink-0 text-(--sea-ink-soft)"
+                      aria-hidden
+                    />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

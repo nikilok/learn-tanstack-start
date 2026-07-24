@@ -170,10 +170,12 @@ describe('buildFilterConditions', () => {
 
   test('hasMoved probes real address changes only', () => {
     const { text, params } = renderOne({ hasMoved: true });
+    // Column list must render as LITERALS: the partial index's predicate is
+    // only provable against constants, not bound params.
     expect(text).toBe(
-      "EXISTS (SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN ($1, $2, $3, $4, $5, $6) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%')",
+      `EXISTS (SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${ADDRESS_COLUMNS.map((c) => `'${c}'`).join(', ')}) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%')`,
     );
-    expect(params).toEqual([...ADDRESS_COLUMNS]);
+    expect(params).toEqual([]);
   });
 
   test('hasMoved=false guards the CH link so unmapped sponsors stay excluded', () => {

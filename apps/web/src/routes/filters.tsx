@@ -177,8 +177,11 @@ function filtersKey(filters: SearchFilters): string {
   );
 }
 
+// text-base below sm: iOS Safari auto-zooms the page when a focused input's
+// font-size is under 16px, shoving the layout; 16px on touch widths stops it.
+// py-2.5 below sm lifts the tap target to 44px (Apple HIG).
 const INPUT_CLASS =
-  'w-full rounded-lg border border-(--sea-ink)/15 bg-transparent px-3 py-2 text-sm text-(--sea-ink) placeholder:text-(--sea-ink-soft)';
+  'w-full rounded-lg border border-(--sea-ink)/15 bg-transparent px-3 py-2.5 text-base text-(--sea-ink) placeholder:text-(--sea-ink-soft) sm:py-2 sm:text-sm';
 
 // Accordion section → the URL params it contributes. Pill counts and
 // default-open both derive from this, so the pills always sum to the Apply
@@ -564,8 +567,9 @@ function FiltersPage() {
                 value={draft.industry}
                 onChange={(e) => setText('industry', e.target.value)}
               />
+              {/* Summaries pad to 44px tap targets below sm (full-width hit area). */}
               <details className="mt-3">
-                <summary className="cursor-pointer text-sm text-(--link-blue)">
+                <summary className="cursor-pointer py-3 text-sm text-(--link-blue) sm:py-0">
                   Broad sectors (SIC sections)
                 </summary>
                 <div className="mt-3">
@@ -579,7 +583,7 @@ function FiltersPage() {
                 </div>
               </details>
               <details className="mt-2">
-                <summary className="cursor-pointer text-sm text-(--link-blue)">
+                <summary className="cursor-pointer py-3 text-sm text-(--link-blue) sm:py-0">
                   Exact SIC codes
                 </summary>
                 <input

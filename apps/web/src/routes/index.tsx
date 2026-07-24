@@ -18,6 +18,7 @@ import { filterSearchKey, useFilterSearch } from '../hooks/useFilterSearch';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
+import { hydrationDone } from '../lib/hydration';
 import {
   filtersToSearchParams,
   parseSearchFilters,
@@ -30,10 +31,6 @@ import { buildCanonical } from '../utils/canonical';
 const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
-
-// The first mount after SSR must render exactly the server HTML (which cannot
-// read localStorage); every later SPA mount is free to read it synchronously.
-let hydrationDone = false;
 
 // What a bare mount renders while the rehydrate effect below re-applies the
 // stored filters: a loading frame, so the classic hook neither fires a
@@ -137,11 +134,8 @@ function Home() {
   // so the transient render never runs the classic search. False on the
   // hydration mount by construction (hydrationDone), so server HTML matches.
   const [pendingStoredFilters, setPendingStoredFilters] = useState(
-    () => hydrationDone && !hasFilters && loadStoredFilters() != null,
+    () => hydrationDone() && !hasFilters && loadStoredFilters() != null,
   );
-  useEffect(() => {
-    hydrationDone = true;
-  }, []);
 
   // Both data sources stay mounted; only one is live. No filters → the
   // classic name search exactly as before ('' disables it via the >=3 gate).

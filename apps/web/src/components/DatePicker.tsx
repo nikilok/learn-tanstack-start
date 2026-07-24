@@ -53,11 +53,15 @@ const firstColumn = (y: number, m: number) =>
 /**
  * Custom calendar date picker matching the Select's language: a pill trigger
  * opening a glass popover. Clicking the month label switches to a year grid
- * (incorporation dates span two centuries — stepping months doesn't scale).
- * Keyboard: Enter/Space opens, arrows move a day (±1/±7), Enter picks,
- * Escape closes. Handled on the ROOT, not the trigger, so keys still work
- * (and Escape stays consumed) after a click moves focus to a month arrow or
- * year cell inside the popover. Emits YYYY-MM-DD or undefined (Clear).
+ * (incorporation dates span two centuries — stepping months doesn't scale;
+ * the keyboard equivalent is PageUp/PageDown for months and Shift+PageUp/
+ * PageDown for whole years, and once the year grid is open arrows move a
+ * year (±1/±4), Enter picks, PageUp/PageDown page it). Keyboard in the day
+ * view: Enter/Space opens, arrows move a day (±1/±7), Enter picks, Escape
+ * closes (from the year grid it first steps back to days). Handled on the
+ * ROOT, not the trigger, so keys still work (and Escape stays consumed)
+ * after a click moves focus to a month arrow or year cell inside the
+ * popover. Emits YYYY-MM-DD or undefined (Clear).
  */
 export default function DatePicker({
   value,
@@ -144,6 +148,10 @@ export default function DatePicker({
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      if (view === 'years') {
+        setView('days');
+        return;
+      }
       setOpen(false);
       // Focus may sit on a popover-internal button about to unmount.
       triggerRef.current?.focus();
@@ -151,6 +159,49 @@ export default function DatePicker({
     }
     if (e.key === 'Tab') {
       setOpen(false);
+      return;
+    }
+    if (e.key === 'PageUp' || e.key === 'PageDown') {
+      e.preventDefault();
+      const dir = e.key === 'PageUp' ? -1 : 1;
+      if (view === 'years') {
+        setYearPage((p) =>
+          dir < 0
+            ? Math.max(0, p - 1)
+            : yearsStart + YEARS_PER_PAGE <= MAX_YEAR
+              ? p + 1
+              : p,
+        );
+      } else {
+        // Shift jumps a whole year — the keyboard path across two centuries.
+        stepMonth(dir * (e.shiftKey ? 12 : 1));
+      }
+      return;
+    }
+    if (view === 'years') {
+      const yearDelta =
+        e.key === 'ArrowLeft'
+          ? -1
+          : e.key === 'ArrowRight'
+            ? 1
+            : e.key === 'ArrowUp'
+              ? -4
+              : e.key === 'ArrowDown'
+                ? 4
+                : 0;
+      if (yearDelta !== 0) {
+        e.preventDefault();
+        const floor = Math.max(MIN_YEAR, minDate?.y ?? MIN_YEAR);
+        const y = Math.min(MAX_YEAR, Math.max(floor, active.y + yearDelta));
+        setActive((a) => ({ y, m: a.m, d: Math.min(a.d, dayCount(y, a.m)) }));
+        // Keep the visible 16-year page tracking the active year.
+        setYearPage(Math.floor((y - MIN_YEAR) / YEARS_PER_PAGE));
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        setView('days');
+      }
       return;
     }
     const dayDelta =
@@ -163,7 +214,7 @@ export default function DatePicker({
             : e.key === 'ArrowDown'
               ? 7
               : 0;
-    if (view === 'days' && dayDelta !== 0) {
+    if (dayDelta !== 0) {
       e.preventDefault();
       const next = shiftDays(active, dayDelta);
       if (next.y >= MIN_YEAR && next.y <= MAX_YEAR && !isBeforeMin(next)) {
@@ -171,7 +222,7 @@ export default function DatePicker({
       }
       return;
     }
-    if (e.key === 'Enter' && view === 'days') {
+    if (e.key === 'Enter') {
       e.preventDefault();
       if (!isBeforeMin(active)) choose(active);
     }
@@ -202,7 +253,7 @@ export default function DatePicker({
         aria-expanded={open}
         aria-label={value ? `${placeholder}: ${value}` : placeholder}
         onClick={() => (open ? setOpen(false) : openPicker())}
-        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-(--sea-ink)/15 bg-transparent px-4 py-2 text-sm transition hover:border-(--sea-ink)/40 disabled:cursor-default disabled:opacity-40 disabled:hover:border-(--sea-ink)/15"
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-full border border-(--sea-ink)/15 bg-transparent px-4 py-3 text-sm transition hover:border-(--sea-ink)/40 disabled:cursor-default disabled:opacity-40 disabled:hover:border-(--sea-ink)/15 sm:py-2"
       >
         <span className="flex min-w-0 items-center gap-2">
           <CalendarDays
@@ -223,131 +274,142 @@ export default function DatePicker({
         />
       </button>
       {open && (
-        <div
-          role="dialog"
-          aria-label={`${placeholder} date`}
-          className={`glass absolute top-full z-30 mt-1.5 w-max rounded-2xl p-3 backdrop-blur-md! ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label="Previous"
-              onClick={() =>
-                view === 'days'
-                  ? stepMonth(-1)
-                  : setYearPage((p) => Math.max(0, p - 1))
-              }
-              className="flex size-7 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
-            >
-              <ChevronLeft className="size-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={() => setView(view === 'days' ? 'years' : 'days')}
-              className="cursor-pointer rounded-full border-none bg-transparent px-3 py-1 text-sm font-medium text-(--sea-ink) transition hover:bg-(--link-bg-hover)"
-            >
-              {view === 'days'
-                ? `${MONTHS[active.m]} ${active.y}`
-                : `${yearsStart}–${Math.min(yearsStart + YEARS_PER_PAGE - 1, MAX_YEAR)}`}
-            </button>
-            <button
-              type="button"
-              tabIndex={-1}
-              aria-label="Next"
-              onClick={() =>
-                view === 'days'
-                  ? stepMonth(1)
-                  : setYearPage((p) =>
-                      yearsStart + YEARS_PER_PAGE <= MAX_YEAR ? p + 1 : p,
-                    )
-              }
-              className="flex size-7 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink)"
-            >
-              <ChevronRight className="size-4" aria-hidden />
-            </button>
-          </div>
-
-          {view === 'years' ? (
-            <div className="mt-2 grid grid-cols-4 gap-1">
-              {years.map((y) => (
-                <button
-                  key={y}
-                  type="button"
-                  tabIndex={-1}
-                  disabled={minDate ? y < minDate.y : false}
-                  onClick={() => {
-                    setActive((a) => ({
-                      y,
-                      m: a.m,
-                      d: Math.min(a.d, dayCount(y, a.m)),
-                    }));
-                    setView('days');
-                  }}
-                  className={`cursor-pointer rounded-lg border-none px-2 py-1.5 text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent ${
-                    y === active.y
-                      ? 'bg-(--link-blue) text-white'
-                      : 'bg-transparent text-(--sea-ink) hover:bg-(--link-bg-hover)'
-                  }`}
-                >
-                  {y}
-                </button>
-              ))}
+        <>
+          {/* Below sm the calendar is a centered modal — a corner-anchored
+              popover under a mid-page trigger is unusable under a thumb.
+              Tapping the scrim closes (it sits inside rootRef, so the
+              document-level outside-pointerdown can't). */}
+          <div
+            className="fixed inset-0 z-[60] bg-black/40 sm:hidden"
+            aria-hidden
+            onPointerDown={() => setOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-label={`${placeholder} date`}
+            className={`glass fixed inset-x-4 top-1/2 z-[70] max-h-[min(90vh,30rem)] -translate-y-1/2 overflow-y-auto rounded-2xl p-4 backdrop-blur-md! sm:absolute sm:inset-x-auto sm:top-full sm:z-30 sm:mt-1.5 sm:max-h-none sm:w-max sm:translate-y-0 sm:overflow-visible sm:p-3 ${
+              align === 'right' ? 'sm:right-0' : 'sm:left-0'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="Previous"
+                onClick={() =>
+                  view === 'days'
+                    ? stepMonth(-1)
+                    : setYearPage((p) => Math.max(0, p - 1))
+                }
+                className="flex size-9 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:size-7"
+              >
+                <ChevronLeft className="size-4" aria-hidden />
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setView(view === 'days' ? 'years' : 'days')}
+                className="cursor-pointer rounded-full border-none bg-transparent px-4 py-2 text-sm font-medium text-(--sea-ink) transition hover:bg-(--link-bg-hover) sm:px-3 sm:py-1"
+              >
+                {view === 'days'
+                  ? `${MONTHS[active.m]} ${active.y}`
+                  : `${yearsStart}–${Math.min(yearsStart + YEARS_PER_PAGE - 1, MAX_YEAR)}`}
+              </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label="Next"
+                onClick={() =>
+                  view === 'days'
+                    ? stepMonth(1)
+                    : setYearPage((p) =>
+                        yearsStart + YEARS_PER_PAGE <= MAX_YEAR ? p + 1 : p,
+                      )
+                }
+                className="flex size-9 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-(--sea-ink-soft) transition hover:bg-(--link-bg-hover) hover:text-(--sea-ink) sm:size-7"
+              >
+                <ChevronRight className="size-4" aria-hidden />
+              </button>
             </div>
-          ) : (
-            <>
-              <div className="mt-2 grid grid-cols-7 gap-y-0.5 text-center">
-                {WEEKDAYS.map((wd) => (
-                  <span
-                    key={wd}
-                    className="text-xs font-medium text-(--sea-ink-soft)"
-                  >
-                    {wd}
-                  </span>
-                ))}
-                {Array.from({ length: blanks }, (_, i) => (
-                  <span key={`blank-${i}`} />
-                ))}
-                {days.map((d) => (
+
+            {view === 'years' ? (
+              <div className="mt-2 grid grid-cols-4 gap-1">
+                {years.map((y) => (
                   <button
-                    key={d}
+                    key={y}
                     type="button"
                     tabIndex={-1}
-                    disabled={isBeforeMin({ y: active.y, m: active.m, d })}
-                    aria-label={`${d} ${MONTHS[active.m]} ${active.y}`}
-                    aria-current={isSelected(d) ? 'date' : undefined}
-                    onClick={() => choose({ y: active.y, m: active.m, d })}
-                    className={`flex size-8 cursor-pointer items-center justify-center justify-self-center rounded-full border-none text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent ${
-                      isSelected(d)
+                    disabled={minDate ? y < minDate.y : false}
+                    onClick={() => {
+                      setActive((a) => ({
+                        y,
+                        m: a.m,
+                        d: Math.min(a.d, dayCount(y, a.m)),
+                      }));
+                      setView('days');
+                    }}
+                    className={`cursor-pointer rounded-lg border-none px-2 py-2.5 text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent sm:py-1.5 ${
+                      y === active.y
                         ? 'bg-(--link-blue) text-white'
-                        : isActiveDay(d)
-                          ? 'bg-(--link-bg-hover) text-(--sea-ink)'
-                          : 'bg-transparent text-(--sea-ink) hover:bg-(--link-bg-hover)'
+                        : 'bg-transparent text-(--sea-ink) hover:bg-(--link-bg-hover)'
                     }`}
                   >
-                    {d}
+                    {y}
                   </button>
                 ))}
               </div>
-              <div className="mt-2 flex justify-end border-t border-(--sea-ink)/10 pt-2">
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={clear}
-                  className="cursor-pointer border-none bg-transparent p-0 text-xs text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
-                >
-                  Clear
-                  <kbd className="ml-1.5 hidden font-sans text-[11px] pointer-fine:inline">
-                    ⌫
-                  </kbd>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                <div className="mt-2 grid grid-cols-7 gap-y-0.5 text-center">
+                  {WEEKDAYS.map((wd) => (
+                    <span
+                      key={wd}
+                      className="text-xs font-medium text-(--sea-ink-soft)"
+                    >
+                      {wd}
+                    </span>
+                  ))}
+                  {Array.from({ length: blanks }, (_, i) => (
+                    <span key={`blank-${i}`} />
+                  ))}
+                  {days.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      tabIndex={-1}
+                      disabled={isBeforeMin({ y: active.y, m: active.m, d })}
+                      aria-label={`${d} ${MONTHS[active.m]} ${active.y}`}
+                      aria-current={isSelected(d) ? 'date' : undefined}
+                      onClick={() => choose({ y: active.y, m: active.m, d })}
+                      className={`flex size-10 cursor-pointer items-center justify-center justify-self-center rounded-full border-none text-sm transition disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent sm:size-8 ${
+                        isSelected(d)
+                          ? 'bg-(--link-blue) text-white'
+                          : isActiveDay(d)
+                            ? 'bg-(--link-bg-hover) text-(--sea-ink)'
+                            : 'bg-transparent text-(--sea-ink) hover:bg-(--link-bg-hover)'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-end border-t border-(--sea-ink)/10 pt-2">
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={clear}
+                    className="cursor-pointer border-none bg-transparent px-1 py-2 text-xs text-(--sea-ink-soft) transition hover:text-(--sea-ink) sm:p-0"
+                  >
+                    Clear
+                    <kbd className="ml-1.5 hidden font-sans text-[11px] pointer-fine:inline">
+                      ⌫
+                    </kbd>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

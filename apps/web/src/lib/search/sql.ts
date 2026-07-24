@@ -38,7 +38,10 @@ const textArray = (values: readonly string[]): SQL =>
  * cross-column shuffles can't be composed in SQL and still count — rare.
  */
 const addressTrailProbe = (): SQL =>
-  sql`SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${inList(ADDRESS_COLUMNS)}) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%'`;
+  // Literal column list (not bound params): it mirrors idx_ch_trail_address_change's
+  // partial predicate, which the planner can only prove against constants. Safe to
+  // raw — ADDRESS_COLUMNS is a compile-time constant, never user input.
+  sql`SELECT 1 FROM companies_house_profile_trails t WHERE t.company_number = c.company_number AND t.column_name IN (${sql.raw(ADDRESS_COLUMNS.map((c) => `'${c}'`).join(', '))}) AND t.old_value IS NOT NULL AND t.new_value IS NOT NULL AND t.old_value <> t.new_value AND t.old_value NOT ILIKE '%companies house default address%' AND t.new_value NOT ILIKE '%companies house default address%'`;
 
 /** One industry word vs a SIC description: word-boundary prefix on a naive stem (homes→home), or strict trigram similarity (strict = whole-word extents; plain word_similarity matches 'care' inside 'carpets'). */
 const industryWordPred = (word: string): SQL => {

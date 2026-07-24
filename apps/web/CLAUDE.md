@@ -32,7 +32,9 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   (e.g. `0.6`, HiDPI/zoom) floors to `0` on read — persisting it would stamp the
   hide with nothing the reader (or restore) will honor.
 - **`HmrcResults` discards a stranded key on non-restoring mounts**: a `useEffect`
-  keyed on `[queryActive, isLoading, results.length]` `removeItem`s `hmrc-scroll-y`
+  keyed on `[queryActive, isLoading, hasRows]` (`hasRows = results.length > 0` —
+  it fires on empty↔non-empty transitions, not every length change)
+  `removeItem`s `hmrc-scroll-y`
   unless `queryActive && (isLoading || results.length > 0)` — and, since filters,
   only when `loadStoredFilters()` is empty: a stored filter set means the bare
   mount is about to rehydrate into filter mode (index.tsx), whose listing will

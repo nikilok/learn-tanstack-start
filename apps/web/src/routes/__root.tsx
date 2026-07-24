@@ -27,6 +27,7 @@ import PageContentTransition from '../components/PageContentTransition';
 import RouteError from '../components/RouteError';
 import UnionJackCursor from '../components/UnionJackCursor';
 import WebHeaderBlur from '../components/WebHeaderBlur';
+import { markHydrationDone } from '../lib/hydration';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
 import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
@@ -148,6 +149,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootDocument({ children }: { children: React.ReactNode }) {
   const queryClient = Route.useRouteContext({ select: (c) => c.queryClient });
   const contentRef = useRef<HTMLDivElement>(null);
+  // App-wide hydration marker: route components use it to tell the SSR
+  // hydration mount (server HTML parity required) from later SPA mounts,
+  // regardless of which route rendered first.
+  useEffect(() => {
+    markHydrationDone();
+  }, []);
   return (
     <html lang="en-GB" suppressHydrationWarning>
       <head>

@@ -2,7 +2,12 @@ import type { ShortcutId } from '../shared/shortcuts';
 
 declare global {
   type Unsubscribe = () => void;
-  type TitlebarCommand = 'toggle-theme' | 'toggle-cursor' | 'share' | 'home';
+  type TitlebarCommand =
+    | 'toggle-theme'
+    | 'toggle-cursor'
+    | 'share'
+    | 'home'
+    | 'filters';
   // Any button that can raise a tooltip: every shortcut, plus the shortcut-less logo (home).
   type TooltipKind = ShortcutId | 'home';
 
@@ -16,6 +21,7 @@ declare global {
     onTitle(cb: (t: string) => void): Unsubscribe;
     onTheme(cb: (t: { dark: boolean; mode: string }) => void): Unsubscribe;
     onCursor(cb: (on: boolean) => void): Unsubscribe;
+    onFilters(cb: (count: number) => void): Unsubscribe;
     onCopied(cb: () => void): Unsubscribe;
     command(cmd: TitlebarCommand): void;
     // Button hover -> main (bar view); tooltip content + caret offset <- main (tooltip view).

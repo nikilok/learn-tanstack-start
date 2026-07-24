@@ -32,12 +32,19 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   (e.g. `0.6`, HiDPI/zoom) floors to `0` on read — persisting it would stamp the
   hide with nothing the reader (or restore) will honor.
 - **`HmrcResults` discards a stranded key on non-restoring mounts**: a `useEffect`
-  keyed on `[search, isLoading, results.length]` `removeItem`s `hmrc-scroll-y`
-  unless `search.length >= 3 && (isLoading || results.length > 0)`. This closes the
+  keyed on `[queryActive, isLoading, hasRows]` (`hasRows = results.length > 0` —
+  it fires on empty↔non-empty transitions, not every length change)
+  `removeItem`s `hmrc-scroll-y`
+  unless `queryActive && (isLoading || results.length > 0)` — and, since filters,
+  only when `loadStoredFilters()` is empty: a stored filter set means the bare
+  mount is about to rehydrate into filter mode (index.tsx), whose listing will
+  consume the key, so discarding would lose the back-nav scroll. This closes the
   permanent-hide where *any* truthy stale value lands on the empty/short/zero-result
-  home with no consumer. Its guard is shaped to preserve the key through a genuine
-  pending restore (loading, or rows present), so it never races the restore effect —
-  do NOT widen it to drop the `isLoading ||` disjunct or add `ready` to its deps.
+  home with no consumer (a filter-mode zero-result listing still consumes the key —
+  the restore effect runs on `ready` regardless of rows). Its guard is shaped to
+  preserve the key through a genuine pending restore, so it never races the restore
+  effect — do NOT widen it to drop the `isLoading ||` disjunct or add `ready` to its
+  deps.
 - **Attribute is cleared on `isStuck=true` via `useLayoutEffect`**: by then React's
   inline `opacity:0` is in place, so dropping the CSS gate is safe.
 - **The safety-net poll clears on "restore done AND not pill", NOT `scrollY === 0`**:
@@ -389,7 +396,7 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   (apps/desktop/src/renderer components + style.css tokens; window 1280×860, bar
   46px, traffic lights at x:34/y:16). The shell measures the title's inset from
   its cluster edges at runtime; the preview can't, so `TitlePill` hardcodes a
-  per-platform snapshot (mac left-361/right-160, win/linux left-273/right-274) —
+  per-platform snapshot (mac left-361/right-202, win/linux left-273/right-316) —
   re-measure and update it if the shell's logo/nav/control sizing changes.
   Chrome changes in apps/desktop must be hand-mirrored here — including `cleanTitle` in
   src/utils.ts, a copy of the shell's (apps/desktop/src/main/site.ts); keep the regexes

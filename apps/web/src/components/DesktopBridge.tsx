@@ -1,4 +1,4 @@
-import { useRouter } from '@tanstack/react-router';
+import { useLocation, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
 
 import {
@@ -6,7 +6,10 @@ import {
   setCustomCursorEnabled,
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
+import type { SearchUrlParams } from '../lib/search/params';
+import { loadStoredFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
+import { countActiveFilters } from './FiltersButton';
 import { cycleTheme, refreshTheme } from './ThemeToggle';
 
 // Let the OS appearance repaint settle before the GPU transition, else they compete and it stutters.
@@ -46,6 +49,16 @@ export default function DesktopBridge() {
       } else if (cmd === 'home') {
         // Mirror the web header's logo link: go home and clear the search term.
         void router.navigate({ to: '/', search: { search: '' } });
+      } else if (cmd === 'filters') {
+        // Mirror the web header's filters icon: carry home's params so the
+        // form opens pre-filled; elsewhere it prefills from the stored set.
+        const { pathname, search } = router.state.location;
+        void router.navigate({
+          to: '/filters',
+          search: (pathname === '/' ? search : {}) as SearchUrlParams & {
+            search?: string;
+          },
+        });
       }
     });
   }, [router]);
@@ -54,6 +67,19 @@ export default function DesktopBridge() {
   useEffect(() => {
     window.ssDesktop?.reportCursor(cursorOn);
   }, [cursorOn]);
+
+  // Mirror the active-filter count to the title-bar badge — same accounting
+  // as the web header's FiltersButton: home URL wins, the stored set elsewhere.
+  const location = useLocation();
+  useEffect(() => {
+    const api = window.ssDesktop;
+    if (!api?.reportFilters) return; // web mode, or an older shell
+    const count =
+      location.pathname === '/'
+        ? countActiveFilters(location.search as Record<string, unknown>)
+        : Object.keys(loadStoredFilters() ?? {}).length;
+    api.reportFilters(count);
+  }, [location]);
 
   // In `auto` mode the desktop follows OS appearance itself (the hidden web ThemeToggle is stale).
   useEffect(() => {

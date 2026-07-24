@@ -1,4 +1,5 @@
 import type { DatedPreviousName } from '@ss/db';
+import { ADDRESS_COLUMNS } from '@ss/db/constants';
 
 import { STATUS_TONES, type Tone } from '../../components/StatusBadge';
 import {
@@ -17,15 +18,6 @@ import type {
 
 // First trail row ever written by ch-stream in production.
 export const TRACKING_SINCE = '2026-04-14';
-
-const ADDRESS_COLUMNS = [
-  'addressLine1',
-  'addressLine2',
-  'locality',
-  'region',
-  'postalCode',
-  'country',
-] as const;
 
 const ACCOUNTS_COLUMNS = [
   'accountsLastMadeUpTo',

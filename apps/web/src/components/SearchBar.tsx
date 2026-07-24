@@ -7,19 +7,25 @@ import { isDesktopPreview } from '../utils/desktop-preview';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
 
+import styles from './SearchBar.module.css';
+
 /**
  * Search UI that swaps between an inline input and a compact header pill as the
  * user scrolls. The pill is portaled into `#header-pill-portal` so it visually
  * lives in the sticky header while staying owned by this component. Hides the
  * input until `ready` to avoid first-paint flashes, and auto-dismisses the
  * expanded input on deliberate scroll (>100px from the anchor) while the pill
- * is clicked open.
+ * is clicked open. In filter mode the pill also shows with an EMPTY search —
+ * scrolling a nameless filtered listing collapses the input to a pill with a
+ * blinking I-beam, so a phrase can still be typed on top of the filters
+ * (classic mode never reaches stuck-while-empty: that state is the hero page).
  */
 export default function SearchBar({
   search,
   isStuck,
   ready,
   pillClicked,
+  filtersActive = false,
   inputRef,
   platform,
   isMobile,
@@ -31,6 +37,7 @@ export default function SearchBar({
   isStuck: boolean;
   ready: boolean;
   pillClicked: boolean;
+  filtersActive?: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   platform: Platform;
   isMobile: boolean;
@@ -38,7 +45,7 @@ export default function SearchBar({
   onPillClick: () => void;
   onBlur: () => void;
 }) {
-  const showPill = isStuck && !pillClicked && !!search;
+  const showPill = isStuck && !pillClicked && (!!search || filtersActive);
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
   const placeholder = useRotatingPlaceholder(shortcut, !!search);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
@@ -111,10 +118,18 @@ export default function SearchBar({
             <button
               type="button"
               onClick={onPillClick}
-              aria-label={`Edit search for ${search}`}
+              aria-label={
+                search
+                  ? `Edit search for ${search}`
+                  : 'Search within the filtered list'
+              }
               className="inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3.5 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none"
             >
-              <span className="truncate">{search}</span>
+              {search ? (
+                <span className="truncate">{search}</span>
+              ) : (
+                <span className={styles.caret} aria-hidden="true" />
+              )}
               <SearchIcon className="h-3 w-3 shrink-0 opacity-60" />
             </button>
           </div>,

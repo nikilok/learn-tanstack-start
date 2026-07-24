@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as FiltersRouteImport } from './routes/filters'
 import { Route as DownloadRouteImport } from './routes/download'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompanyIdSlugRouteImport } from './routes/company.$id.$slug'
@@ -17,6 +18,11 @@ import { Route as CompanyIdSlugRouteImport } from './routes/company.$id.$slug'
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FiltersRoute = FiltersRouteImport.update({
+  id: '/filters',
+  path: '/filters',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DownloadRoute = DownloadRouteImport.update({
@@ -38,12 +44,14 @@ const CompanyIdSlugRoute = CompanyIdSlugRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
+  '/filters': typeof FiltersRoute
   '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
+  '/filters': typeof FiltersRoute
   '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
@@ -51,20 +59,28 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/download': typeof DownloadRoute
+  '/filters': typeof FiltersRoute
   '/privacy': typeof PrivacyRoute
   '/company/$id/$slug': typeof CompanyIdSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/download' | '/privacy' | '/company/$id/$slug'
+  fullPaths: '/' | '/download' | '/filters' | '/privacy' | '/company/$id/$slug'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/download' | '/privacy' | '/company/$id/$slug'
-  id: '__root__' | '/' | '/download' | '/privacy' | '/company/$id/$slug'
+  to: '/' | '/download' | '/filters' | '/privacy' | '/company/$id/$slug'
+  id:
+    | '__root__'
+    | '/'
+    | '/download'
+    | '/filters'
+    | '/privacy'
+    | '/company/$id/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DownloadRoute: typeof DownloadRoute
+  FiltersRoute: typeof FiltersRoute
   PrivacyRoute: typeof PrivacyRoute
   CompanyIdSlugRoute: typeof CompanyIdSlugRoute
 }
@@ -76,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/privacy'
       fullPath: '/privacy'
       preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/filters': {
+      id: '/filters'
+      path: '/filters'
+      fullPath: '/filters'
+      preLoaderRoute: typeof FiltersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/download': {
@@ -105,6 +128,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DownloadRoute: DownloadRoute,
+  FiltersRoute: FiltersRoute,
   PrivacyRoute: PrivacyRoute,
   CompanyIdSlugRoute: CompanyIdSlugRoute,
 }

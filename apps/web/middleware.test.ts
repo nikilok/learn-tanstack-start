@@ -100,6 +100,14 @@ describe('edge middleware: routing is preserved', () => {
     expect(overriddenAccept(dl)).toBeNull();
   });
 
+  test('/filters (page) is served as a document', () => {
+    expect(run('/filters', 'text/html').headers.get('link')).toBe(
+      '</llms.txt>; rel="describedby"',
+    );
+    const res = run('/filters', 'text/markdown');
+    expect(overriddenAccept(res)).toBe('text/markdown, text/html');
+  });
+
   test('static assets pass through', () => {
     expect(isNext(run('/favicon.ico'))).toBe(true);
     expect(isNext(run('/llms.txt'))).toBe(true);

@@ -16,6 +16,8 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
+import { ADDRESS_COLUMNS } from './constants';
+
 export const hmrcSkilledWorkers = pgTable(
   'hmrc_skilled_workers',
   {
@@ -36,6 +38,7 @@ export const hmrcSkilledWorkers = pgTable(
       'gin',
       sql`${table.organisationName} gin_trgm_ops`,
     ),
+    index('idx_hmrc_type_rating').on(table.typeRating),
   ],
 );
 
@@ -148,6 +151,7 @@ export const companiesHouseProfiles = pgTable(
     index('idx_ch_sic_codes').using('gin', table.sicCodes),
     index('idx_ch_jurisdiction').on(table.jurisdiction),
     index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
+    index('idx_ch_date_of_creation').on(table.dateOfCreation),
   ],
 );
 
@@ -269,6 +273,14 @@ export const companiesHouseProfileTrails = pgTable(
   (table) => [
     index('idx_ch_trail_company_number').on(table.companyNumber),
     index('idx_ch_trail_created_at').on(table.createdAt),
+    // /search hasMoved probe; predicate derives from the shared ADDRESS_COLUMNS.
+    index('idx_ch_trail_address_change')
+      .on(table.companyNumber)
+      .where(
+        sql`${table.columnName} IN (${sql.raw(
+          ADDRESS_COLUMNS.map((c) => `'${c}'`).join(', '),
+        )})`,
+      ),
   ],
 );
 

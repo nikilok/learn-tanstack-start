@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./constants": "./src/constants.ts"
   },
   "scripts": {
     "lint": "oxlint",

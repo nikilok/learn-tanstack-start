@@ -6,9 +6,10 @@ import {
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { asc, eq, type SQL, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
+import { buildNameMatchers } from '../lib/search/name-match';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
@@ -43,13 +44,9 @@ type SearchHit = {
  * empty page when the query is under 3 chars. `hasMore` is derived by
  * over-fetching one row past `PAGE_SIZE`.
  *
- * Match predicates pair an index-served trigram OPERATOR with a function
- * recheck (`<%` + word_similarity, `%` + similarity): the operators let the
- * GIN trigram indexes BitmapOr the candidate set (~20x faster than the bare
- * function calls, which can never use an index), while the rechecks pin the
- * exact thresholds against downward GUC drift. NOT immune upward: a pg_trgm
- * GUC raised above 0.6/0.5 becomes the binding filter and silently shrinks
- * results. Keep both halves.
+ * Match predicates come from buildNameMatchers (lib/search/name-match):
+ * index-served trigram operators paired with threshold rechecks — see its
+ * doc before touching either half.
  */
 export const searchHmrc = createServerFn()
   .inputValidator(
@@ -58,21 +55,7 @@ export const searchHmrc = createServerFn()
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
-    const regexEscaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const wordBoundaryPattern = `\\m${regexEscaped}`;
-    const prefixPattern = `^${regexEscaped}`;
-    /** Index-served fuzzy match (operator + threshold recheck) for a name column. */
-    const fuzzyMatch = (col: SQL) => sql`(
-      ${col} ~* ${wordBoundaryPattern}
-      OR (${query} <% ${col} AND word_similarity(${query}, ${col}) > 0.6)
-      OR (${col} % ${query} AND similarity(${query}, ${col}) > 0.5)
-    )`;
-    /** Ranking CASE for a name column: prefix > word-boundary > similarity. */
-    const scoreCase = (col: SQL) => sql`CASE
-      WHEN ${col} ~* ${prefixPattern} THEN 2.0 + word_similarity(${query}, ${col})
-      WHEN ${col} ~* ${wordBoundaryPattern} THEN 1.0 + word_similarity(${query}, ${col})
-      ELSE word_similarity(${query}, ${col})
-    END`;
+    const { fuzzyMatch, scoreCase } = buildNameMatchers(query);
     const prevName = sql`pn.name`;
     const orgName = sql`h.organisation_name`;
 

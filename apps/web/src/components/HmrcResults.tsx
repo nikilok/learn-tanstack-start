@@ -4,8 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 
-import { useHmrcSearch } from '../hooks/useHmrcSearch';
+import type { HmrcRow } from '../api/hmrc';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
+import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
   formatLocation,
   hasWebGpu,
@@ -25,17 +26,39 @@ const NAME_LINE_CENTER = 20;
 // edge that the rest of the page aligns to.
 const RAIL_X = -16;
 
+// Paged result data the parent supplies — the shape both useHmrcSearch and
+// useFilterSearch return, so the list renders either source identically.
+export type SponsorResultsData = {
+  results: HmrcRow[];
+  isLoading: boolean;
+  hasMore: boolean;
+  loadingMore: boolean;
+  fetchMore: () => void;
+};
+
 /**
- * Virtualized list of HMRC sponsor rows for the given search query. Gates
- * rendering on data/fonts/width readiness (canvas-based height estimation via
- * `virtual-text-layout`) to avoid layout shift, triggers infinite-scroll fetches
- * near the end of the window, and wires up sessionStorage scroll restoration.
- * Returns `null` for empty input, a hint for short queries, skeletons while
- * loading, and a "no matches" message when the query yields zero rows.
+ * Virtualized list of HMRC sponsor rows. The parent owns data fetching (name
+ * search or the filter endpoint) and passes the paged rows in. Gates rendering
+ * on data/fonts/width readiness (canvas-based height estimation via
+ * `virtual-text-layout`) to avoid layout shift, triggers infinite-scroll
+ * fetches near the end of the window, and wires up sessionStorage scroll
+ * restoration. With no active filters it returns `null` for empty input and a
+ * hint for short queries; `filtersActive` lifts both gates so a nameless
+ * filtered browse still lists rows.
  */
-export default function HmrcResults({ search }: { search: string }) {
-  const { results, isLoading, hasMore, loadingMore, fetchMore } =
-    useHmrcSearch(search);
+export default function HmrcResults({
+  search,
+  filtersActive = false,
+  data,
+}: {
+  search: string;
+  filtersActive?: boolean;
+  data: SponsorResultsData;
+}) {
+  const { results, isLoading, hasMore, loadingMore, fetchMore } = data;
+  // A query is "active" when it can produce rows: a 3+ char term, or any
+  // filter set (which may browse namelessly).
+  const queryActive = filtersActive || search.length >= 3;
   const listRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   // `activeId` only gets set when the user clicks a card on this very
@@ -213,9 +236,13 @@ export default function HmrcResults({ search }: { search: string }) {
   // the restore effect above stays its sole consumer and the back-nav race holds.
   const hasRows = results.length > 0;
   useEffect(() => {
-    const canRestore = search.length >= 3 && (isLoading || hasRows);
-    if (!canRestore) sessionStorage.removeItem('hmrc-scroll-y');
-  }, [search, isLoading, hasRows]);
+    const canRestore = queryActive && (isLoading || hasRows);
+    // A stored filter set means a bare full-load mount is about to rehydrate
+    // into filter mode (index.tsx) — its restore is pending, not stranded.
+    if (!canRestore && !loadStoredFilters()) {
+      sessionStorage.removeItem('hmrc-scroll-y');
+    }
+  }, [queryActive, isLoading, hasRows]);
 
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
@@ -247,14 +274,12 @@ export default function HmrcResults({ search }: { search: string }) {
   // setup) on every committed term. `wasEmptyRef` remembers that the prior settled
   // state was empty, so a refine FROM empty keeps the scene up instead of flashing
   // skeletons; it resets once results arrive or the query drops below 3 chars.
-  const confirmedEmpty =
-    !isLoading && search.length >= 3 && results.length === 0;
+  const confirmedEmpty = !isLoading && queryActive && results.length === 0;
   const wasEmptyRef = useRef(false);
   useEffect(() => {
     if (confirmedEmpty) wasEmptyRef.current = true;
-    else if (results.length > 0 || search.length < 3)
-      wasEmptyRef.current = false;
-  }, [confirmedEmpty, results.length, search]);
+    else if (results.length > 0 || !queryActive) wasEmptyRef.current = false;
+  }, [confirmedEmpty, results.length, queryActive]);
   // The loading disjunct keeps the WebGPU hole mounted across refine-loads (no zoom
   // replay). It's gated on hasWebGpu() because without a hole there's nothing to preserve
   // — keeping the (message-gated-off) scene up would just show a blank layer, so a
@@ -262,9 +287,9 @@ export default function HmrcResults({ search }: { search: string }) {
   const showScene =
     confirmedEmpty || (isLoading && wasEmptyRef.current && hasWebGpu());
 
-  if (search.length === 0) return null;
+  if (!filtersActive && search.length === 0) return null;
 
-  if (search.length < 3) {
+  if (!filtersActive && search.length < 3) {
     return (
       <p className="mt-4 text-sm text-(--sea-ink-soft)">
         Type at least 3 characters to search...
@@ -281,7 +306,7 @@ export default function HmrcResults({ search }: { search: string }) {
       <>
         <BlackHole fullscreen className="z-0" />
         {confirmedEmpty && (
-          <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
+          <div className="relative z-10 mt-12 flex flex-col items-center gap-3 px-4 sm:mt-16">
             {/* Frosted surface scrim so the message stays readable over the bright
                 disk — on mobile the hole fills the screen, so the text always sits on
                 it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
@@ -292,8 +317,33 @@ export default function HmrcResults({ search }: { search: string }) {
                   'color-mix(in srgb, var(--surface) 85%, transparent)',
               }}
             >
-              No organisations found matching &ldquo;{search}&rdquo;
+              {!filtersActive
+                ? `No organisations found matching “${search}”`
+                : search.length >= 3
+                  ? `No organisations found matching “${search}” with your filters`
+                  : 'No organisations match these filters'}
             </p>
+            {/* Users forget filters are on — offer the exit right where the dead
+                end happens. Same semantics as /filters' Reset: empty the store,
+                keep the typed term, land on the classic listing. */}
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={() => {
+                  storeFilters({});
+                  void router
+                    .navigate({ to: '/', search: { search } })
+                    .then(() => {
+                      // Land in the normal starting state (see /filters' apply).
+                      window.scrollTo(0, 0);
+                      requestAnimationFrame(() => window.scrollTo(0, 0));
+                    });
+                }}
+                className="cursor-pointer rounded-full border-none bg-(--sea-ink) px-5 py-2 text-sm font-medium text-(--bg-base) shadow-md transition hover:opacity-90"
+              >
+                Reset filters
+              </button>
+            )}
           </div>
         )}
         {/* Hidden width-measurement div (same px-4 as the list) so `ready` is set during

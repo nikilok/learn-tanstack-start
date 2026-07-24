@@ -14,6 +14,7 @@ const LABELS: Record<TooltipKind, string> = {
   'toggle-cursor': 'Cursor',
   'toggle-theme': 'Theme',
   home: 'Home',
+  filters: 'Filters',
 };
 
 /** Keycaps for a button from the shared shortcut config — empty when it has no shortcut (e.g. home). */

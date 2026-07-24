@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('titlebar', {
   onTheme: (cb: (t: { dark: boolean; mode: string }) => void) =>
     subscribe('titlebar:theme', cb),
   onCursor: (cb: (on: boolean) => void) => subscribe('titlebar:cursor', cb),
+  onFilters: (cb: (count: number) => void) => subscribe('titlebar:filters', cb),
   onCopied: (cb: () => void) => subscribe('titlebar:copied', () => cb()),
   command: (cmd: string) => ipcRenderer.send('titlebar:command', cmd),
   // Bar view reports which button is hovered (+ its x); the tooltip view receives what + where to show.

@@ -6,7 +6,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import type { HmrcRow } from '../api/hmrc';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
-import { loadStoredFilters } from '../lib/search/persist';
+import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
   formatLocation,
   hasWebGpu,
@@ -306,7 +306,7 @@ export default function HmrcResults({
       <>
         <BlackHole fullscreen className="z-0" />
         {confirmedEmpty && (
-          <div className="relative z-10 mt-12 flex justify-center px-4 sm:mt-16">
+          <div className="relative z-10 mt-12 flex flex-col items-center gap-3 px-4 sm:mt-16">
             {/* Frosted surface scrim so the message stays readable over the bright
                 disk — on mobile the hole fills the screen, so the text always sits on
                 it. `--surface` + `--sea-ink` keep normal page contrast in both themes. */}
@@ -317,10 +317,27 @@ export default function HmrcResults({
                   'color-mix(in srgb, var(--surface) 85%, transparent)',
               }}
             >
-              {search.length >= 3
+              {!filtersActive
                 ? `No organisations found matching “${search}”`
-                : 'No organisations match these filters'}
+                : search.length >= 3
+                  ? `No organisations found matching “${search}” with your filters`
+                  : 'No organisations match these filters'}
             </p>
+            {/* Users forget filters are on — offer the exit right where the dead
+                end happens. Same semantics as /filters' Reset: empty the store,
+                keep the typed term, land on the classic listing. */}
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={() => {
+                  storeFilters({});
+                  void router.navigate({ to: '/', search: { search } });
+                }}
+                className="cursor-pointer rounded-full border-none bg-(--sea-ink) px-5 py-2 text-sm font-medium text-(--bg-base) shadow-md transition hover:opacity-90"
+              >
+                Reset filters
+              </button>
+            )}
           </div>
         )}
         {/* Hidden width-measurement div (same px-4 as the list) so `ready` is set during

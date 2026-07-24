@@ -48,7 +48,7 @@ export default function Select({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    // Modifier combos belong to page-level shortcuts (⌘+Enter, ⌘+digit).
+    // Modifier combos belong to page-level shortcuts (⌘+Enter, ⌥+digit).
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (!open) {
       if (['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(e.key)) {

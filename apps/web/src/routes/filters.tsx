@@ -187,7 +187,7 @@ const SECTION_KEYS = {
   sort: ['sort', 'order'],
 } as const;
 type SectionId = keyof typeof SECTION_KEYS;
-// Declaration order doubles as the ⌘1…⌘9 jump order.
+// Declaration order doubles as the ⌥1…⌥9 jump order.
 const SECTION_ORDER = Object.keys(SECTION_KEYS) as SectionId[];
 
 /** Which sections hold a choice in the given filter set (their default-open state). */
@@ -266,6 +266,8 @@ function FiltersPage() {
   const { search: term = '', ...initialFilters } = initial;
   const { platformInfo } = Route.useRouteContext();
   const modKey = platformInfo.platform === 'mac' ? '⌘' : 'Ctrl';
+  // Section jumps use Option/Alt: ⌘/Ctrl+digit is browser tab-switching.
+  const jumpKey = platformInfo.platform === 'mac' ? '⌥' : 'Alt+';
   const navigate = useNavigate();
   const [draft, setDraft] = useState<Draft>(() =>
     draftFromFilters(parseSearchFilters(initialFilters).filters),
@@ -359,7 +361,7 @@ function FiltersPage() {
     else navigate({ to: '/', search: { search: term, ...initialFilters } });
   };
 
-  // ⌘/Ctrl+1…9 jumps to a section: opens it, scrolls it into view, and hands
+  // ⌥/Alt+1…9 jumps to a section: opens it, scrolls it into view, and hands
   // focus to its first control so filtering continues keyboard-only.
   const jumpToSection = (id: SectionId) => {
     setOpenSections((s) => ({ ...s, [id]: true }));
@@ -374,12 +376,14 @@ function FiltersPage() {
     }, 60);
   };
 
-  // Page shortcuts: ⌘/Ctrl+Enter applies (when dirty) and ⌘/Ctrl+1…9 jumps
-  // to a section — both from ANYWHERE, even with a checkbox or input focused;
-  // the modifier makes intent unambiguous. R resets and Esc cancels, but
-  // those defer to focused interactive elements (typing keeps its meaning)
-  // and to popovers that already handled the key (Select / DatePicker
-  // Escapes set defaultPrevented).
+  // Page shortcuts: ⌘/Ctrl+Enter applies (when dirty) and ⌥/Alt+1…9 jumps to
+  // a section — both from ANYWHERE, even with a checkbox or input focused;
+  // the modifier makes intent unambiguous. (⌘/Ctrl+digit is deliberately NOT
+  // used: browsers reserve it for tab switching. The digit is matched by
+  // physical code because macOS Option substitutes characters.) R resets and
+  // Esc cancels, but those defer to focused interactive elements (typing
+  // keeps its meaning) and to popovers that already handled the key (Select
+  // / DatePicker Escapes set defaultPrevented).
   const actionsRef = useRef({ apply, cancel, clearAll, dirty, jumpToSection });
   actionsRef.current = { apply, cancel, clearAll, dirty, jumpToSection };
   useEffect(() => {
@@ -394,14 +398,9 @@ function FiltersPage() {
         current.apply();
         return;
       }
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.altKey &&
-        !e.shiftKey &&
-        e.key >= '1' &&
-        e.key <= '9'
-      ) {
-        const id = SECTION_ORDER[Number(e.key) - 1];
+      const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code)?.[1];
+      if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && digit) {
+        const id = SECTION_ORDER[Number(digit) - 1];
         if (!id) return;
         e.preventDefault();
         current.jumpToSection(id);
@@ -427,7 +426,7 @@ function FiltersPage() {
     <Accordion
       id={`filter-section-${id}`}
       title={title}
-      shortcut={`${modKey === '⌘' ? '⌘' : 'Ctrl+'}${SECTION_ORDER.indexOf(id) + 1}`}
+      shortcut={`${jumpKey}${SECTION_ORDER.indexOf(id) + 1}`}
       count={sectionCount(id)}
       open={openSections[id]}
       onToggle={(next) => setOpenSections((s) => ({ ...s, [id]: next }))}

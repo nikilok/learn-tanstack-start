@@ -1,5 +1,10 @@
 // Single source of truth for the title-bar shortcuts, shared across the main/renderer boundary:
 // the main handler binds `code`+`shift`, the tooltip overlay renders `keys` as keycaps.
+//
+// The web header mirrors this table in apps/web/src/components/headerShortcuts.ts. Keep the
+// two in step — except `toggle-theme`, which the web binds to mod+shift+L because browsers
+// reserve mod+shift+D for "Bookmark All Tabs" (nothing to reserve it here). Web also drops
+// back/forward, which browsers already provide.
 
 export type ShortcutId =
   | 'back'

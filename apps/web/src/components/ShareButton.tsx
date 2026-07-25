@@ -1,8 +1,11 @@
 import { useRouter } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
+import { useShortcut } from '../hooks/useShortcut';
 import { buildCanonical } from '../utils/canonical';
 import { HEADER_CONTROL_CLASS } from './headerControls';
+import { ariaKeyShortcuts } from './headerShortcuts';
+import HeaderTooltip from './HeaderTooltip';
 import ShareIcon from './ShareIcon';
 
 // Stable so the tooltip doesn't allocate a new style object each render; both
@@ -57,17 +60,32 @@ export default function ShareButton() {
     }
   }
 
+  // The keydown is a user gesture, so the share sheet / clipboard write is allowed.
+  useShortcut('share', () => {
+    void handleShare();
+  });
+
   return (
     <div className="relative flex">
-      <button
-        type="button"
-        onClick={handleShare}
-        aria-label="Share this page"
-        title="Share this page"
-        className={HEADER_CONTROL_CLASS}
+      {/* The chip and the "Copied" toast share the slot under the button — after a
+          copy the pointer is still on the button, so the chip yields to the toast. */}
+      <HeaderTooltip
+        label="Share"
+        shortcut="share"
+        align="end"
+        suppressed={copied}
+        className="inline-flex"
       >
-        <ShareIcon />
-      </button>
+        <button
+          type="button"
+          onClick={handleShare}
+          aria-label="Share this page"
+          aria-keyshortcuts={ariaKeyShortcuts('share')}
+          className={HEADER_CONTROL_CLASS}
+        >
+          <ShareIcon />
+        </button>
+      </HeaderTooltip>
       {/* Always mounted so the live region announces the copy; non-interactive so it never eats taps below. */}
       <span
         role="status"

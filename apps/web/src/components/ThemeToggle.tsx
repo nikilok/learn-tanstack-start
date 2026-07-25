@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 
+import { useShortcut } from '../hooks/useShortcut';
 import { THEME_COLORS } from '../theme';
 import { cancelThemeTransition, runThemeTransition } from '../theme-transition';
 import { HEADER_CONTROL_CLASS } from './headerControls';
+import { ariaKeyShortcuts } from './headerShortcuts';
+import HeaderTooltip from './HeaderTooltip';
 import { MonitorIcon, MoonIcon, SunIcon } from './ThemeIcons';
 
 export type ThemeMode = 'light' | 'dark' | 'auto';
@@ -120,22 +123,31 @@ export default function ThemeToggle() {
     setMode(cycleTheme());
   }
 
+  useShortcut('toggle-theme', toggleMode);
+
   const label =
     mode === 'auto'
       ? 'Theme mode: auto (system). Click to switch to light mode.'
       : `Theme mode: ${mode}. Click to switch mode.`;
 
   return (
-    <button
-      type="button"
-      onClick={toggleMode}
-      aria-label={label}
-      title={label}
-      className={HEADER_CONTROL_CLASS}
+    <HeaderTooltip
+      label="Theme"
+      shortcut="toggle-theme"
+      align="end"
+      className="inline-flex"
     >
-      {mode === 'light' && <SunIcon />}
-      {mode === 'dark' && <MoonIcon />}
-      {mode === 'auto' && <MonitorIcon />}
-    </button>
+      <button
+        type="button"
+        onClick={toggleMode}
+        aria-label={label}
+        aria-keyshortcuts={ariaKeyShortcuts('toggle-theme')}
+        className={HEADER_CONTROL_CLASS}
+      >
+        {mode === 'light' && <SunIcon />}
+        {mode === 'dark' && <MoonIcon />}
+        {mode === 'auto' && <MonitorIcon />}
+      </button>
+    </HeaderTooltip>
   );
 }

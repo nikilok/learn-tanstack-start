@@ -2,8 +2,11 @@ import {
   setCustomCursorEnabled,
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
+import { useShortcut } from '../hooks/useShortcut';
 import { CursorIcon, CursorOffIcon } from './CursorIcons';
 import { HEADER_CONTROL_CLASS } from './headerControls';
+import { ariaKeyShortcuts } from './headerShortcuts';
+import HeaderTooltip from './HeaderTooltip';
 
 /**
  * On/off toggle for the custom Union-Jack cursor, shown only on pointer-fine
@@ -21,15 +24,26 @@ export default function CursorToggle() {
     ? 'Custom cursor on. Click to turn it off.'
     : 'Custom cursor off. Click to turn it on.';
 
+  useShortcut('toggle-cursor', () => setCustomCursorEnabled(!enabled));
+
   return (
-    <button
-      type="button"
-      onClick={() => setCustomCursorEnabled(!enabled)}
-      aria-label={label}
-      title={label}
-      className={`${HEADER_CONTROL_CLASS} hidden pointer-fine:inline-flex`}
+    // The pointer-fine gate sits on the wrapper, not the button: a displayed
+    // wrapper around a hidden button would still take a slot in the header's flex gap.
+    <HeaderTooltip
+      label="Cursor"
+      shortcut="toggle-cursor"
+      align="end"
+      className="hidden pointer-fine:inline-flex"
     >
-      {enabled ? <CursorIcon /> : <CursorOffIcon />}
-    </button>
+      <button
+        type="button"
+        onClick={() => setCustomCursorEnabled(!enabled)}
+        aria-label={label}
+        aria-keyshortcuts={ariaKeyShortcuts('toggle-cursor')}
+        className={HEADER_CONTROL_CLASS}
+      >
+        {enabled ? <CursorIcon /> : <CursorOffIcon />}
+      </button>
+    </HeaderTooltip>
   );
 }

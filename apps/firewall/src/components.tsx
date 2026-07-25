@@ -4,7 +4,7 @@ import { Box, Text } from 'ink';
 
 import { actionColor } from './actions';
 import type { Item } from './client';
-import type { ReportData } from './report-data';
+import type { DistRow, ReportData } from './report-data';
 
 export type Phase =
   | 'loading'
@@ -37,12 +37,38 @@ function barColor(value: number, limit?: number): string {
   return r >= 0.8 ? 'red' : r >= 0.5 ? 'yellow' : 'green';
 }
 
-/** Header for a distribution: the rate-limit ceiling, IP count, and the busiest IP as a % of the limit. */
+/** Configured ceilings and IP count: `limit 300/min · sust 1000/10m · 178 IPs`. */
 function distHeader(d: ReportData['distributions'][number]): string {
   const ips = `${d.ips}${d.capped ? '+' : ''} IP${d.ips === 1 ? '' : 's'}`;
-  if (!d.limit) return `${ips} · max ${(d.max ?? 0).toFixed(2)}/min`;
-  const peak = (((d.max ?? 0) / d.limit) * 100).toFixed(1);
-  return `limit ${d.limit}/min · ${ips} · peak ${peak}%`;
+  const parts: string[] = [];
+  if (d.limit) parts.push(`limit ${d.limit}/min`);
+  if (d.sustainedLimit) parts.push(`sust ${d.sustainedLimit}/10m`);
+  parts.push(ips);
+  return parts.join(' · ');
+}
+
+/** Measured worst case against those ceilings, and how many windows were sampled to find it — stated because peak/min is a floor over the sampled windows, not an exhaustive maximum. */
+function distPeaks(d: ReportData['distributions'][number]): string {
+  const pct = (v: number, lim?: number) =>
+    lim ? ` (${((v / lim) * 100).toFixed(0)}%)` : '';
+  const min = `${d.maxPeakMin ?? 0}/min${pct(d.maxPeakMin ?? 0, d.limit)}`;
+  const ten = `${d.maxPeak10m ?? 0}/10m${pct(d.maxPeak10m ?? 0, d.sustainedLimit)}`;
+  const n = d.sampledWindows ?? 0;
+  const how = d.exact ? 'exact' : 'floor'; // floor = the round cap stopped the search early
+  return `peak ${min} · ${ten} · ${how}, ${n} window${n === 1 ? '' : 's'} zoomed`;
+}
+
+/** One IP's line: `  99/min   227/10m  1.2.3.4`. Unresolved bursts are never printed as a bare number: `108+` means at least that much was observed, `<=63` means it was never opened up but provably cannot exceed that (refining it would not have changed the leader). */
+function distRow(r: DistRow): string {
+  const ten = `${String(r.peak10m).padStart(5)}/10m`;
+  const min = !r.sampled
+    ? '—'
+    : r.peakMinExact
+      ? String(r.peakMin)
+      : r.peakMin > 0
+        ? `${r.peakMin}+`
+        : `<=${r.peakMinBound}`;
+  return `${min.padStart(6)}/min ${ten}  ${r.ip}`;
 }
 
 /** One-line tally of apply outcomes for the done screen. */
@@ -201,12 +227,15 @@ export function ReportView({
               <Text dimColor wrap="truncate">
                 {distHeader(d)}
               </Text>
+              <Text dimColor wrap="truncate">
+                {distPeaks(d)}
+              </Text>
               {(d.rows ?? []).slice(0, 6).map((r) => (
                 <Box key={r.ip}>
-                  <Text color={barColor(r.perMin, d.limit)}>
-                    {`${usageBar(r.perMin, d.max ?? 0)} `}
+                  <Text color={barColor(r.peakMin, d.limit)}>
+                    {`${usageBar(r.peakMin, d.maxPeakMin ?? 0)} `}
                   </Text>
-                  <Text wrap="truncate">{`${r.perMin.toFixed(2)}/min  ${r.ip}`}</Text>
+                  <Text wrap="truncate">{distRow(r)}</Text>
                 </Box>
               ))}
               {(d.rows ?? []).length > 6 && (

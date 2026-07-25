@@ -73,7 +73,6 @@ export default function ShareButton() {
       <HeaderTooltip
         label="Share"
         shortcut="share"
-        align="end"
         suppressed={copied}
         className="inline-flex"
       >

@@ -56,12 +56,7 @@ export default function FiltersButton() {
   });
 
   return (
-    <HeaderTooltip
-      label="Filters"
-      shortcut="filters"
-      align="end"
-      className="inline-flex"
-    >
+    <HeaderTooltip label="Filters" shortcut="filters" className="inline-flex">
       <Link
         to="/filters"
         search={current as SearchUrlParams & { search?: string }}

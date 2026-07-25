@@ -136,7 +136,6 @@ export default function ThemeToggle() {
     <HeaderTooltip
       label="Theme"
       shortcut="toggle-theme"
-      align="end"
       className="inline-flex"
     >
       <button

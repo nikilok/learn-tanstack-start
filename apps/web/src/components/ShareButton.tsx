@@ -69,13 +69,10 @@ export default function ShareButton() {
 
   return (
     <div className="relative flex">
-      {/* The pointer is still on the button after a copy, so the chip yields to the toast.
-          Pinned end-aligned to keep their right edges shared — a centred chip would hand
-          over to a toast 31px to its left. */}
+      {/* Chip yields to the toast after a copy. Centred like its neighbours by choice — the toast stays right-aligned, so the hand-over shifts sideways. */}
       <HeaderTooltip
         label="Share"
         shortcut="share"
-        align="end"
         suppressed={copied}
         className="inline-flex"
       >

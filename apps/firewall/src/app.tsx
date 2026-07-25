@@ -1,5 +1,5 @@
 // The interactive rule-manager TUI: a stateful Ink container wiring the data layer
-// (client.ts) to the presentational components (components.tsx) and the report (report-data.ts).
+// (client.ts, report-data.ts) to the presentational components in ./components.
 
 import {
   type DOMElement,
@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import {
+  type ApplyStatus,
   type Item,
   applyItem,
   fetchLive,
@@ -21,7 +22,8 @@ import {
   teamId,
   token,
 } from './client';
-import { type Phase, ReportView, Row, summaryLine } from './components';
+import { ReportView } from './components/report-view';
+import { type Phase, Row, summaryLine } from './components/rule-list';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { errMsg } from './util';
@@ -35,12 +37,19 @@ export function App() {
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState('');
+  // Last apply's outcome; cleared by the next edit so it can't describe stale state.
+  const [applied, setApplied] = useState<{
+    summary: string;
+    ok: boolean;
+  } | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [reportError, setReportError] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
   const [reportOpen, setReportOpen] = useState(false); // report pane visible on the right
   const [focus, setFocus] = useState<'editor' | 'report'>('editor');
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
+  // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
+  const cancelApply = useRef(false);
   const loadingReport = useRef(false); // dedupe concurrent report fetches
   const [reportScroll, setReportScroll] = useState(0);
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
@@ -86,13 +95,21 @@ export function App() {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
     }
     let anyError = false;
+    let cancelled = false;
+    const statuses: ApplyStatus[] = [];
     for (let i = 0; i < snapshot.length; i++) {
+      // Checked between rules, never mid-request, so a quit can't leave one rule half-written.
+      if (cancelApply.current) {
+        cancelled = true;
+        break;
+      }
       setItems((prev) =>
         prev.map((it, j) => (j === i ? { ...it, status: 'applying' } : it)),
       );
       try {
         const res = await applyItem(snapshot[i], ids);
         if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
+        statuses.push(res.status);
         setItems((prev) =>
           prev.map((it, j) =>
             j === i ? { ...it, status: res.status, detail: res.detail } : it,
@@ -100,6 +117,7 @@ export function App() {
         );
       } catch (e) {
         anyError = true;
+        statuses.push('error');
         const detail = errMsg(e);
         setItems((prev) =>
           prev.map((it, j) =>
@@ -108,8 +126,16 @@ export function App() {
         );
       }
     }
-    if (anyError) process.exitCode = 1;
-    setPhase('done');
+    // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
+    process.exitCode = anyError ? 1 : 0;
+    applying.current = false;
+    if (cancelled) {
+      exit(); // deferred to here so no write is still in flight
+      return;
+    }
+    // Back to the editor, not a terminal screen — an apply is a step in a session.
+    setApplied({ summary: summaryLine(statuses), ok: !anyError });
+    setPhase('select');
   };
 
   /** Fetch the firewall report for the side pane; dedupes concurrent loads and keeps the prior result visible while refreshing. */
@@ -129,15 +155,24 @@ export function App() {
     }
   };
 
-  /** Cycle the highlighted rule's action in the given direction. */
-  const cycleCursorAction = (dir: 1 | -1) =>
+  /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
+  const editCursorItem = (change: (it: Item) => Item) => {
+    setApplied(null);
     setItems((prev) =>
       prev.map((it, j) =>
         j === cursor
-          ? { ...it, action: cycleAction(it.rule, it.action, dir) }
+          ? { ...change(it), status: 'idle', detail: undefined }
           : it,
       ),
     );
+  };
+
+  /** Cycle the highlighted rule's action in the given direction. */
+  const cycleCursorAction = (dir: 1 | -1) =>
+    editCursorItem((it) => ({
+      ...it,
+      action: cycleAction(it.rule, it.action, dir),
+    }));
 
   useInput((input, key) => {
     if (focus === 'report') {
@@ -162,11 +197,7 @@ export function App() {
         setMenuCursor(Math.max(0, opts.indexOf(items[cursor].action)));
         setPhase('action');
       } else if (input === ' ')
-        setItems((prev) =>
-          prev.map((it, j) =>
-            j === cursor ? { ...it, active: !it.active } : it,
-          ),
-        );
+        editCursorItem((it) => ({ ...it, active: !it.active }));
       else if (input === 'r') {
         setReportOpen(true);
         setFocus('report');
@@ -174,6 +205,7 @@ export function App() {
       } else if (input === 'a') {
         if (applying.current) return;
         applying.current = true;
+        cancelApply.current = false; // a prior cancelled run must not abort this one
         setPhase('applying');
         void applyAll(items);
       } else if (input === 'q' || key.escape) exit();
@@ -185,13 +217,14 @@ export function App() {
         setMenuCursor((m) => Math.min(opts.length - 1, m + 1));
       else if (key.return) {
         const chosen = opts[menuCursor];
-        setItems((prev) =>
-          prev.map((it, j) => (j === cursor ? { ...it, action: chosen } : it)),
-        );
+        editCursorItem((it) => ({ ...it, action: chosen }));
         setPhase('select');
       } else if (key.escape || key.leftArrow) setPhase('select');
       else if (input === 'q') exit();
-    } else if (phase === 'done' || phase === 'fatal') {
+    } else if (phase === 'applying') {
+      // Request cancellation; applyAll exits once it has stopped cleanly.
+      if (input === 'q') cancelApply.current = true;
+    } else if (phase === 'fatal') {
       if (input === 'q' || key.return || key.escape) exit();
     }
   });
@@ -231,11 +264,19 @@ export function App() {
           ))}
         </Box>
         {phase === 'select' && (
-          <Text dimColor>
-            ↑/↓ move · ←/→ action · enter menu · space on/off · r report
-            {reportLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
-            {items.length} on)
-          </Text>
+          <Box flexDirection="column">
+            {applied && (
+              <Text color={applied.ok ? 'green' : 'red'}>
+                {applied.ok ? '✔' : '✖'} applied — {applied.summary} · keep
+                editing, or q to quit
+              </Text>
+            )}
+            <Text dimColor>
+              ↑/↓ move · ←/→ action · enter menu · space on/off · r report
+              {reportLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}
+              /{items.length} on)
+            </Text>
+          </Box>
         )}
         {phase === 'action' && target && (
           <Box flexDirection="column">
@@ -259,12 +300,8 @@ export function App() {
             <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
           </Box>
         )}
-        {phase === 'applying' && <Text color="yellow">applying…</Text>}
-        {phase === 'done' && (
-          <Box flexDirection="column">
-            <Text color="green">Done — {summaryLine(items)}.</Text>
-            <Text dimColor>q to quit</Text>
-          </Box>
+        {phase === 'applying' && (
+          <Text color="yellow">applying… · q stops after the current rule</Text>
         )}
       </Box>
       {reportOpen && (

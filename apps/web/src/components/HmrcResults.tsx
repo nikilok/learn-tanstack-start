@@ -323,9 +323,9 @@ export default function HmrcResults({
                   ? `No organisations found matching “${search}” with your filters`
                   : 'No organisations match these filters'}
             </p>
-            {/* Users forget filters are on — offer the exit right where the dead
-                end happens. Same semantics as /filters' Reset: empty the store,
-                keep the typed term, land on the classic listing. */}
+            {/* Users forget filters are on — offer the exit right where the dead end happens.
+                Same semantics AND styling as /filters' Reset, minus its `R` keycap: this
+                surface is type-to-search, so a bare letter belongs to the input. */}
             {filtersActive && (
               <button
                 type="button"
@@ -339,7 +339,7 @@ export default function HmrcResults({
                       requestAnimationFrame(() => window.scrollTo(0, 0));
                     });
                 }}
-                className="cursor-pointer rounded-full border-none bg-(--sea-ink) px-5 py-2 text-sm font-medium text-(--bg-base) shadow-md transition hover:opacity-90"
+                className="cursor-pointer rounded-full border-none bg-(--logo-red) px-4 py-2 text-sm font-medium text-(--bg-base) shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)] transition hover:opacity-90"
               >
                 Reset filters
               </button>

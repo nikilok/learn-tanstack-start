@@ -22,8 +22,9 @@ import {
   teamId,
   token,
 } from './client';
-import { type Phase, ReportView, Row, summaryLine } from './components';
 import { type ReportData, fetchReport } from './report-data';
+import { ReportView } from './report-view';
+import { type Phase, Row, summaryLine } from './rule-list';
 import { dryRun } from './rules';
 import { errMsg } from './util';
 

@@ -36,37 +36,41 @@ export default function HeaderTooltip({
   const wrapRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
 
-  // Centre the bubble on the trigger, clamped inside the viewport — the shell's geometry,
-  // which keeps the caret on the button while edge controls stay fully on screen. CSS alone
-  // can't clamp, so this writes a delta from the right-aligned fallback the stylesheet uses
-  // (safe pre-hydration: every trigger sits near an edge, so right-aligned never overflows).
+  // Centre the bubble on the trigger like the shell does, but only where it fits: otherwise
+  // it stays end-aligned (right edge on the trigger's), which never runs off screen. That
+  // end-aligned position is the stylesheet's default, so `--tip-x: 0` IS the fallback — and
+  // it's what renders pre-hydration. The caret is CSS-centred on the trigger either way.
   useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const bubble = bubbleRef.current;
+    if (!wrap || !bubble) return;
+
     const place = () => {
-      const wrap = wrapRef.current;
-      const bubble = bubbleRef.current;
-      if (!wrap || !bubble) return;
       const trigger = wrap.getBoundingClientRect();
       const width = bubble.offsetWidth;
+      // clientWidth, not innerWidth: `body { overflow-x: hidden }` clips at the content
+      // box, so a classic scrollbar's width is not space the bubble can use.
+      const limit = document.documentElement.clientWidth;
       const centred = trigger.left + trigger.width / 2 - width / 2;
-      const clamped = Math.min(
-        Math.max(centred, EDGE_PAD),
-        window.innerWidth - width - EDGE_PAD,
-      );
+      const fits = centred >= EDGE_PAD && centred + width <= limit - EDGE_PAD;
       wrap.style.setProperty(
         '--tip-x',
-        `${Math.round(clamped - (trigger.right - width))}px`,
+        fits ? `${Math.round(centred - (trigger.right - width))}px` : '0px',
       );
     };
     place();
-    // Geist lands after mount and remeasures the bubble; without this the offset is
-    // computed against the fallback font's width and stays stale.
-    let live = true;
-    void document.fonts?.ready.then(() => {
-      if (live) place();
-    });
+    // Both measured boxes, because either can change without a window resize: the bubble
+    // when Geist replaces the fallback font, the wrapper when the cursor control goes from
+    // `display:none` to shown as a fine pointer appears (measuring it at 0 gives a bogus
+    // offset that nothing else would correct). `--tip-x` only drives `translate`, so
+    // re-placing can't resize either box and feed the observer.
+    const observer = new ResizeObserver(place);
+    observer.observe(wrap);
+    observer.observe(bubble);
+    // A viewport resize that leaves both boxes untouched still moves the clamp.
     window.addEventListener('resize', place);
     return () => {
-      live = false;
+      observer.disconnect();
       window.removeEventListener('resize', place);
     };
     // Keycaps arrive at hydration and widen the bubble, so re-place when they do.

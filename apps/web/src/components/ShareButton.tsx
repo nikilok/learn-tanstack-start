@@ -1,6 +1,7 @@
 import { useRouter } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
+import { useIsMac } from '../hooks/useIsMac';
 import { useShortcut } from '../hooks/useShortcut';
 import { buildCanonical } from '../utils/canonical';
 import { HEADER_CONTROL_CLASS } from './headerControls';
@@ -22,6 +23,7 @@ const TOOLTIP_BLUR = {
  */
 export default function ShareButton() {
   const [copied, setCopied] = useState(false);
+  const isMac = useIsMac();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Read the URL lazily at click time (no nav-time re-render); router is the source of truth.
   const router = useRouter();
@@ -67,8 +69,7 @@ export default function ShareButton() {
 
   return (
     <div className="relative flex">
-      {/* The chip and the "Copied" toast share the slot under the button — after a
-          copy the pointer is still on the button, so the chip yields to the toast. */}
+      {/* The pointer is still on the button after a copy, so the chip yields to the toast. */}
       <HeaderTooltip
         label="Share"
         shortcut="share"
@@ -80,7 +81,7 @@ export default function ShareButton() {
           type="button"
           onClick={handleShare}
           aria-label="Share this page"
-          aria-keyshortcuts={ariaKeyShortcuts('share')}
+          aria-keyshortcuts={ariaKeyShortcuts('share', isMac)}
           className={HEADER_CONTROL_CLASS}
         >
           <ShareIcon />

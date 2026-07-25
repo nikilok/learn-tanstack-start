@@ -15,13 +15,10 @@ export function isMacClient(): boolean {
   return cached;
 }
 
-/**
- * Whether the visitor is on macOS, resolved on the client only. The server
- * snapshot is always `false`: the header renders into edge-cached documents
- * (`/company/**`), so a UA-derived glyph baked into SSR HTML would be served to
- * the next visitor on another platform. Consumers must be able to take the
- * post-hydration flip — the keycaps can, being invisible until hover.
- */
-export function useIsMac(): boolean {
-  return useSyncExternalStore(subscribe, isMacClient, () => false);
+/** The server snapshot: platform unknown, never a guess. */
+const unknown = () => null;
+
+/** macOS, or `null` pre-hydration. Client-only: the header lands in edge-cached `/company/**` docs, so SSR must not bake a UA-derived glyph. `null` not `false` — CSS hover reveals the chip before hydration. */
+export function useIsMac(): boolean | null {
+  return useSyncExternalStore(subscribe, isMacClient, unknown);
 }

@@ -1,15 +1,12 @@
-/* Keycap chip for the header controls — mirrors the desktop shell's title-bar tooltip
-   (`.tooltip` in apps/desktop/src/renderer/style.css), re-tokenised to the web theme.
-   Keep the two in step so both surfaces read as the same control. */
+/* Keycap chip for the header controls — mirrors the shell's title-bar tooltip
+   (`.tooltip` in apps/desktop/src/renderer/style.css), re-tokenised to the web theme. */
 
-/* No `display` here on purpose: Tailwind's utilities are layered, so an unlayered
-   `display` would beat a `hidden`/`inline-flex` class at the call site. Callers
-   pass their own display utility. */
+/* No `display`: unlayered CSS-module rules beat Tailwind's layered `hidden`/`inline-flex` at the call site. */
 .wrap {
   position: relative;
 }
 
-/* Spans exactly the trigger, so the caret centres on it whatever its width. */
+/* Spans the trigger so the caret centres on it; `visibility` keeps the text out of find-in-page and select-all. */
 .tip {
   position: absolute;
   top: 100%;
@@ -17,23 +14,35 @@
   left: 0;
   z-index: 1;
   opacity: 0;
+  visibility: hidden;
   transform: translateY(-3px);
   transition:
     opacity 140ms ease,
-    transform 140ms ease;
+    transform 140ms ease,
+    visibility 0s linear 140ms;
   pointer-events: none;
 }
 
 /* Keyboard focus reveals the chip on any device — it's how the shortcut is found. */
 .wrap:has(:focus-visible) .tip:not(.suppressed) {
   opacity: 1;
+  visibility: visible;
   transform: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 0s;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .wrap:hover .tip:not(.suppressed) {
     opacity: 1;
+    visibility: visible;
     transform: none;
+    transition:
+      opacity 140ms ease,
+      transform 140ms ease,
+      visibility 0s;
   }
 }
 
@@ -58,8 +67,7 @@
   transform: translateX(-50%);
 }
 
-/* Right-hand cluster: hang the bubble off the trigger's right edge so it grows
-   inward and can't run off screen (the body clips horizontal overflow). */
+/* Right-hand cluster: hang off the trigger's right edge so it grows inward, never off screen. */
 .end {
   right: 0;
 }
@@ -91,8 +99,7 @@
   box-shadow: 0 1.5px 0 var(--chip-line);
 }
 
-/* Painted after the bubble so it covers the border under the point, leaving no seam:
-   only the two edges that form the visible point after the 45° turn are drawn. */
+/* Painted after the bubble so it covers the border under the point, leaving no seam. */
 .caret {
   position: absolute;
   top: 6px;
@@ -109,6 +116,5 @@
 @media (prefers-reduced-motion: reduce) {
   .tip {
     transform: none;
-    transition: opacity 140ms ease;
   }
 }

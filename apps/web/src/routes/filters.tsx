@@ -771,10 +771,7 @@ function FiltersPage() {
             footerStuck ? 'glass rounded-full pr-2 pl-2 backdrop-blur-md!' : ''
           }`}
         >
-          {/* Fills brand-red once there's a set to clear, mirroring the glow on
-              Apply's applied-count badge; disabled (and the R shortcut inert)
-              otherwise. The pill geometry is constant so the row never reflows
-              as filters come and go — only the fill moves. */}
+          {/* Brand-red once there's a set to clear (else disabled, R inert); geometry is constant so the row never reflows. */}
           <button
             type="button"
             onClick={clearAll}

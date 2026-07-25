@@ -2,6 +2,7 @@ import {
   setCustomCursorEnabled,
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
+import { useIsMac } from '../hooks/useIsMac';
 import { useShortcut } from '../hooks/useShortcut';
 import { CursorIcon, CursorOffIcon } from './CursorIcons';
 import { HEADER_CONTROL_CLASS } from './headerControls';
@@ -19,16 +20,20 @@ import HeaderTooltip from './HeaderTooltip';
  */
 export default function CursorToggle() {
   const enabled = useCustomCursorEnabled();
+  const isMac = useIsMac();
 
   const label = enabled
     ? 'Custom cursor on. Click to turn it off.'
     : 'Custom cursor off. Click to turn it on.';
 
-  useShortcut('toggle-cursor', () => setCustomCursorEnabled(!enabled));
+  useShortcut('toggle-cursor', () => {
+    // Matches the button's CSS gate — on a coarse pointer it's display:none, so a keyboard flip would strand the preference.
+    if (!window.matchMedia('(pointer: fine)').matches) return;
+    setCustomCursorEnabled(!enabled);
+  });
 
   return (
-    // The pointer-fine gate sits on the wrapper, not the button: a displayed
-    // wrapper around a hidden button would still take a slot in the header's flex gap.
+    // Gate the wrapper, not the button: a wrapper around a hidden button still takes a flex-gap slot.
     <HeaderTooltip
       label="Cursor"
       shortcut="toggle-cursor"
@@ -39,7 +44,7 @@ export default function CursorToggle() {
         type="button"
         onClick={() => setCustomCursorEnabled(!enabled)}
         aria-label={label}
-        aria-keyshortcuts={ariaKeyShortcuts('toggle-cursor')}
+        aria-keyshortcuts={ariaKeyShortcuts('toggle-cursor', isMac)}
         className={HEADER_CONTROL_CLASS}
       >
         {enabled ? <CursorIcon /> : <CursorOffIcon />}

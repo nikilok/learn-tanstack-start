@@ -20,10 +20,8 @@ interface HeaderTooltipProps {
 }
 
 /**
- * Wraps a header control in a hover/focus keycap chip, mirroring the desktop
- * shell's title-bar tooltip so both surfaces teach the same shortcuts. Marked
- * `aria-hidden` — the control's `aria-label` and `aria-keyshortcuts` already
- * carry this to assistive tech.
+ * Wraps a header control in a hover/focus keycap chip, mirroring the shell's title-bar
+ * tooltip. `aria-hidden` — the control's own `aria-label`/`aria-keyshortcuts` carry this.
  */
 export default function HeaderTooltip({
   label,

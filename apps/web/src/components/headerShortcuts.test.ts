@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+// The shell's own table, imported so parity is enforced rather than asserted from a copy.
+import { SHORTCUTS as SHELL } from '../../../desktop/src/shared/shortcuts.ts';
 import {
   ariaKeyShortcuts,
   keycaps,
@@ -12,38 +14,26 @@ import {
 function key(overrides: Partial<ShortcutKeyInput>): ShortcutKeyInput {
   return {
     code: '',
+    key: '',
     shiftKey: false,
     altKey: false,
     metaKey: false,
     ctrlKey: false,
-    repeat: false,
     ...overrides,
   };
 }
 
-// Locks the table against the desktop shell's copy in
-// apps/desktop/src/shared/shortcuts.ts — if that changes, this fails and the web
-// header's tooltips stop lying about the keys.
 describe('SHORTCUTS parity with the desktop shell', () => {
-  test('binds the shell accelerators', () => {
-    expect(SHORTCUTS.share).toEqual({
-      code: 'KeyS',
-      shift: true,
-      keys: ['mod', 'shift', 'S'],
-    });
-    expect(SHORTCUTS['toggle-cursor']).toEqual({
-      code: 'KeyC',
-      shift: true,
-      keys: ['mod', 'shift', 'C'],
-    });
-    expect(SHORTCUTS.filters).toEqual({
-      code: 'KeyF',
-      shift: true,
-      keys: ['mod', 'shift', 'F'],
-    });
-  });
+  // Rebinding either table breaks this, so the two surfaces can't teach different keys.
+  test.each(['share', 'toggle-cursor', 'filters'] as const)(
+    '%s matches the shell entry exactly',
+    (id) => {
+      expect(SHORTCUTS[id]).toEqual(SHELL[id]);
+    },
+  );
 
-  test('diverges on theme — the shell’s mod+shift+D is "Bookmark All Tabs" here', () => {
+  test('theme diverges — the shell’s mod+shift+D is "Bookmark All Tabs" in a browser', () => {
+    expect(SHELL['toggle-theme'].code).toBe('KeyD');
     expect(SHORTCUTS['toggle-theme']).toEqual({
       code: 'KeyL',
       shift: true,
@@ -51,7 +41,9 @@ describe('SHORTCUTS parity with the desktop shell', () => {
     });
   });
 
-  test('omits back/forward — the browser binds mod+[ / mod+] natively', () => {
+  test('back/forward are dropped — the browser binds mod+[ / mod+] natively', () => {
+    expect(SHELL.back).toBeDefined();
+    expect(SHELL.forward).toBeDefined();
     expect(Object.keys(SHORTCUTS).sort()).toEqual([
       'filters',
       'share',
@@ -65,7 +57,7 @@ describe('matchesShortcut', () => {
   test('⌘⇧F fires filters on macOS', () => {
     expect(
       matchesShortcut(
-        key({ code: 'KeyF', metaKey: true, shiftKey: true }),
+        key({ code: 'KeyF', key: 'F', metaKey: true, shiftKey: true }),
         'filters',
         true,
       ),
@@ -75,7 +67,7 @@ describe('matchesShortcut', () => {
   test('Ctrl+Shift+F fires filters off macOS', () => {
     expect(
       matchesShortcut(
-        key({ code: 'KeyF', ctrlKey: true, shiftKey: true }),
+        key({ code: 'KeyF', key: 'F', ctrlKey: true, shiftKey: true }),
         'filters',
         false,
       ),
@@ -85,14 +77,14 @@ describe('matchesShortcut', () => {
   test('the other platform’s modifier does not fire', () => {
     expect(
       matchesShortcut(
-        key({ code: 'KeyF', ctrlKey: true, shiftKey: true }),
+        key({ code: 'KeyF', key: 'F', ctrlKey: true, shiftKey: true }),
         'filters',
         true,
       ),
     ).toBe(false);
     expect(
       matchesShortcut(
-        key({ code: 'KeyF', metaKey: true, shiftKey: true }),
+        key({ code: 'KeyF', key: 'F', metaKey: true, shiftKey: true }),
         'filters',
         false,
       ),
@@ -101,42 +93,68 @@ describe('matchesShortcut', () => {
 
   test('a bare modifier without Shift does not fire', () => {
     expect(
-      matchesShortcut(key({ code: 'KeyF', metaKey: true }), 'filters', true),
-    ).toBe(false);
-  });
-
-  test('Alt is excluded — it changes the character and carries AltGr', () => {
-    expect(
       matchesShortcut(
-        key({ code: 'KeyF', metaKey: true, shiftKey: true, altKey: true }),
+        key({ code: 'KeyF', key: 'f', metaKey: true }),
         'filters',
         true,
       ),
     ).toBe(false);
   });
 
-  test('auto-repeat does not re-fire a held combo', () => {
+  test('Alt is excluded — it changes the character and carries AltGr', () => {
     expect(
       matchesShortcut(
-        key({ code: 'KeyL', metaKey: true, shiftKey: true, repeat: true }),
-        'toggle-theme',
+        key({
+          code: 'KeyF',
+          key: 'F',
+          metaKey: true,
+          shiftKey: true,
+          altKey: true,
+        }),
+        'filters',
         true,
       ),
     ).toBe(false);
   });
 
-  test('matches the physical code, so layout never shifts the binding', () => {
-    // Same combo, but a layout where KeyS produces something else entirely.
+  // Auto-repeat is the caller's business: useShortcut still preventDefaults a repeat so
+  // the browser's own binding for the chord never runs, then skips the handler.
+  test('a repeat still matches, so the caller can cancel it', () => {
     expect(
       matchesShortcut(
-        key({ code: 'KeyS', metaKey: true, shiftKey: true }),
+        key({ code: 'KeyL', key: 'L', metaKey: true, shiftKey: true }),
+        'toggle-theme',
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  test('the physical key position fires even where it types another letter', () => {
+    // Dvorak: physical KeyS types 'o'.
+    expect(
+      matchesShortcut(
+        key({ code: 'KeyS', key: 'O', metaKey: true, shiftKey: true }),
         'share',
         true,
       ),
     ).toBe(true);
+  });
+
+  test('the advertised letter fires wherever it lives on the layout', () => {
+    // Dvorak: 'S' is typed by physical KeyO — the chip says ⌘⇧S, so ⌘⇧S must work.
     expect(
       matchesShortcut(
-        key({ code: 'KeyO', metaKey: true, shiftKey: true }),
+        key({ code: 'KeyO', key: 'S', metaKey: true, shiftKey: true }),
+        'share',
+        true,
+      ),
+    ).toBe(true);
+  });
+
+  test('an unrelated chord fires nothing', () => {
+    expect(
+      matchesShortcut(
+        key({ code: 'KeyQ', key: 'Q', metaKey: true, shiftKey: true }),
         'share',
         true,
       ),
@@ -149,13 +167,19 @@ describe('keycaps', () => {
     expect(keycaps('filters', true)).toEqual(['⌘', '⇧', 'F']);
     expect(keycaps('filters', false)).toEqual(['Ctrl', 'Shift', 'F']);
   });
+
+  test('nothing before the platform is known — SSR must not guess', () => {
+    expect(keycaps('filters', null)).toEqual([]);
+  });
 });
 
 describe('ariaKeyShortcuts', () => {
-  test('lists both platform spellings, so the value never varies by UA', () => {
-    expect(ariaKeyShortcuts('filters')).toBe('Meta+Shift+F Control+Shift+F');
-    expect(ariaKeyShortcuts('toggle-cursor')).toBe(
-      'Meta+Shift+C Control+Shift+C',
-    );
+  test('names only the modifier the matcher actually accepts', () => {
+    expect(ariaKeyShortcuts('filters', true)).toBe('Meta+Shift+F');
+    expect(ariaKeyShortcuts('filters', false)).toBe('Control+Shift+F');
+  });
+
+  test('absent before the platform is known, so no false shortcut is announced', () => {
+    expect(ariaKeyShortcuts('toggle-cursor', null)).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from '@tanstack/react-router';
 import { SlidersHorizontal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { useIsMac } from '../hooks/useIsMac';
 import { useShortcut } from '../hooks/useShortcut';
 import {
   filtersToSearchParams,
@@ -44,7 +45,10 @@ export default function FiltersButton() {
 
   // Same destination as the link — the shortcut belongs to the control that owns it.
   const navigate = useNavigate();
+  const isMac = useIsMac();
   useShortcut('filters', () => {
+    // Already here: `current` is {} off home, so navigating would strip the URL's filters.
+    if (location.pathname === '/filters') return;
     void navigate({
       to: '/filters',
       search: current as SearchUrlParams & { search?: string },
@@ -62,7 +66,7 @@ export default function FiltersButton() {
         to="/filters"
         search={current as SearchUrlParams & { search?: string }}
         aria-label={label}
-        aria-keyshortcuts={ariaKeyShortcuts('filters')}
+        aria-keyshortcuts={ariaKeyShortcuts('filters', isMac)}
         className={`${HEADER_CONTROL_CLASS} relative inline-flex no-underline`}
       >
         <SlidersHorizontal className={HEADER_ICON_CLASS} aria-hidden />

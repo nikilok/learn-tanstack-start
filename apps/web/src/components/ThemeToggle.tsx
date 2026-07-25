@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useIsMac } from '../hooks/useIsMac';
 import { useShortcut } from '../hooks/useShortcut';
 import { THEME_COLORS } from '../theme';
 import { cancelThemeTransition, runThemeTransition } from '../theme-transition';
@@ -93,6 +94,7 @@ export function refreshTheme(): void {
  */
 export default function ThemeToggle() {
   const [mode, setMode] = useState<ThemeMode>('auto');
+  const isMac = useIsMac();
 
   useEffect(() => {
     const initialMode = getInitialMode();
@@ -141,7 +143,7 @@ export default function ThemeToggle() {
         type="button"
         onClick={toggleMode}
         aria-label={label}
-        aria-keyshortcuts={ariaKeyShortcuts('toggle-theme')}
+        aria-keyshortcuts={ariaKeyShortcuts('toggle-theme', isMac)}
         className={HEADER_CONTROL_CLASS}
       >
         {mode === 'light' && <SunIcon />}

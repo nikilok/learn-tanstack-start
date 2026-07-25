@@ -1,23 +1,10 @@
-// Keyboard shortcuts for the header controls, mirroring the desktop shell's table
-// (apps/desktop/src/shared/shortcuts.ts) so both surfaces teach the same keys — the
-// two copies are locked by matching tests (headerShortcuts.test.ts /
-// apps/desktop/src/main/keyboard-shortcuts.test.ts). Change one, change the other,
-// except where noted below.
-//
-// Two deliberate divergences from the shell, both because a browser owns the key
-// and Electron doesn't:
-// - `back`/`forward` (mod+[ / mod+]) are absent: browsers already bind those to
-//   history natively, so the web has parity without any code — and intercepting
-//   them would replace real history with a same-origin-only copy.
-// - `toggle-theme` is mod+shift+L, not the shell's mod+shift+D: every major browser
-//   binds mod+shift+D to "Bookmark All Tabs", a menu accelerator the page cannot
-//   cancel, so the keydown never arrives. (mod+shift+L is in turn Safari's
-//   show-sidebar on macOS — the one platform where this control loses its key.)
+// Mirrors the shell's table (apps/desktop/src/shared/shortcuts.ts), which headerShortcuts.test.ts imports to enforce parity.
+// Diverges only where a browser owns the key: back/forward dropped (browsers bind mod+[ / mod+]), theme on L not D ("Bookmark All Tabs").
 
 export type ShortcutId = 'share' | 'toggle-cursor' | 'toggle-theme' | 'filters';
 
 export interface ShortcutDef {
-  /** Physical KeyboardEvent.code the handler matches (layout-independent). */
+  /** Physical KeyboardEvent.code the handler matches. */
   code: string;
   /** Whether Shift must be held. */
   shift: boolean;
@@ -35,27 +22,34 @@ export const SHORTCUTS: Record<ShortcutId, ShortcutDef> = {
 /** The subset of `KeyboardEvent` the matcher reads — structural so it's testable without a DOM. */
 export interface ShortcutKeyInput {
   code: string;
+  key: string;
   shiftKey: boolean;
   altKey: boolean;
   metaKey: boolean;
   ctrlKey: boolean;
-  repeat: boolean;
 }
 
-/** Does this keydown fire `id` on this platform? Mirrors the shell's main-process matcher. */
+/** The advertised letter — what the chip and `aria-keyshortcuts` name. */
+function letterOf(def: ShortcutDef): string {
+  return def.keys[def.keys.length - 1] ?? '';
+}
+
+/** Does this keydown fire `id`? Matches physical `code` OR the advertised letter, so the chip never lies on non-QWERTY. Repeats match — the caller cancels them. */
 export function matchesShortcut(
   e: ShortcutKeyInput,
   id: ShortcutId,
   isMac: boolean,
 ): boolean {
-  if (e.altKey || e.repeat) return false;
+  if (e.altKey) return false;
   const mod = isMac ? e.metaKey : e.ctrlKey;
   const def = SHORTCUTS[id];
-  return mod && e.shiftKey === def.shift && e.code === def.code;
+  if (!mod || e.shiftKey !== def.shift) return false;
+  return e.code === def.code || e.key.toUpperCase() === letterOf(def);
 }
 
-/** Keycap glyphs for the tooltip — `⌘⇧F` on macOS, `Ctrl Shift F` everywhere else. */
-export function keycaps(id: ShortcutId, isMac: boolean): string[] {
+/** Keycap glyphs for the tooltip; empty until the platform is known (see `useIsMac`). */
+export function keycaps(id: ShortcutId, isMac: boolean | null): string[] {
+  if (isMac === null) return [];
   return SHORTCUTS[id].keys.map((k) => {
     if (k === 'mod') return isMac ? '⌘' : 'Ctrl';
     if (k === 'shift') return isMac ? '⇧' : 'Shift';
@@ -63,14 +57,12 @@ export function keycaps(id: ShortcutId, isMac: boolean): string[] {
   });
 }
 
-/**
- * Both platform spellings for `aria-keyshortcuts`, which takes a space-separated
- * list of alternatives. Deliberately platform-blind: the header renders into
- * edge-cached documents (`/company/**`), so nothing here may vary by user agent.
- */
-export function ariaKeyShortcuts(id: ShortcutId): string {
+/** `aria-keyshortcuts` for the platform actually matched; undefined until it's known. */
+export function ariaKeyShortcuts(
+  id: ShortcutId,
+  isMac: boolean | null,
+): string | undefined {
+  if (isMac === null) return undefined;
   const def = SHORTCUTS[id];
-  const tail = def.keys.filter((k) => k !== 'mod' && k !== 'shift').join('+');
-  const shift = def.shift ? 'Shift+' : '';
-  return `Meta+${shift}${tail} Control+${shift}${tail}`;
+  return `${isMac ? 'Meta' : 'Control'}+${def.shift ? 'Shift+' : ''}${letterOf(def)}`;
 }

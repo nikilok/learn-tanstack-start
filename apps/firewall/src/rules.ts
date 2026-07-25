@@ -44,22 +44,26 @@ function envLimit(name: string): number {
   );
 }
 
+/** Read an OPTIONAL ceiling (FW_*_LIMIT), returning null when unset so the caller omits just that rule. Unlike envLimit this must NOT throw — a missing var would crash the whole apply (taking down every rule) instead of dropping one. */
+function optionalLimit(name: string): number | null {
+  const v = Number(process.env[name]);
+  if (Number.isInteger(v) && v > 0) return v;
+  return dryRun ? 0 : null; // dry-run lists rule names only; real ceilings not needed
+}
+
 const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
-// Opt-in: the downloads rule syncs only once FW_DOWNLOADS_LIMIT is provisioned.
-// Unlike the other ceilings this must NOT throw when unset — a missing var would
-// crash the whole apply (taking down every rule), not just omit this one rule.
-const rawDownloadsLimit = Number(process.env.FW_DOWNLOADS_LIMIT);
-const DOWNLOADS_LIMIT: number | null =
-  Number.isInteger(rawDownloadsLimit) && rawDownloadsLimit > 0
-    ? rawDownloadsLimit
-    : dryRun
-      ? 0
-      : null;
+// Opt-in ceilings: each rule syncs only once its var is provisioned.
+const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
+const SERVERFN_SUSTAINED_LIMIT = optionalLimit('FW_SERVERFN_SUSTAINED_LIMIT');
+const SEARCH_SUSTAINED_LIMIT = optionalLimit('FW_SEARCH_SUSTAINED_LIMIT');
 
-/** Build a per-key fixed-window (60s) rate-limit rule, observe-mode unless `action` overrides it. */
+// Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
+const SUSTAINED_WINDOW = 600;
+
+/** Build a per-key fixed-window rate-limit rule (60s unless `window` overrides), observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
   name: string;
   description: string;
@@ -67,6 +71,7 @@ function rateLimitRule(opts: {
   limit: number;
   keys: string[];
   actionDuration: string;
+  window?: number;
   action?: RateLimitAction;
 }): Rule {
   return {
@@ -79,7 +84,7 @@ function rateLimitRule(opts: {
         action: 'rate_limit',
         rateLimit: {
           algo: 'fixed_window',
-          window: 60,
+          window: opts.window ?? 60,
           limit: opts.limit,
           keys: opts.keys,
           action: opts.action ?? OBSERVE,
@@ -88,6 +93,14 @@ function rateLimitRule(opts: {
       },
     },
   };
+}
+
+/** Wrap a rate-limit rule in the opt-in pattern: [] when its ceiling is unprovisioned, so a missing env var drops just this rule. */
+function optionalRateLimitRule(
+  limit: number | null,
+  opts: Omit<Parameters<typeof rateLimitRule>[0], 'limit'>,
+): Rule[] {
+  return limit === null ? [] : [rateLimitRule({ ...opts, limit })];
 }
 
 /** Build a header-gated path bypass — a trusted non-browser server-to-server caller exempted from the managed Bot Protection challenge it can't solve. Matching on header PRESENCE (not value) keeps the secret out of firewall config; the endpoint's timing-safe secret check stays the real auth gate. */
@@ -115,6 +128,7 @@ function bypassRule(opts: {
 
 // Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
 // missing var drops just this rule instead of throwing the whole apply at import.
+// Bespoke shape (OR-ed condition groups), so it can't use optionalRateLimitRule.
 const downloadsRules: Rule[] =
   DOWNLOADS_LIMIT === null
     ? []
@@ -125,7 +139,7 @@ const downloadsRules: Rule[] =
           // with a cryptic "action should be equal to constant"). The Range-
           // request rationale for excluding latest/ lives in the code comment below.
           description:
-            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/) — curbs curl-loop amplification of the desktop_downloads counter; /downloads/latest/ (the updater feed) is intentionally NOT matched. Phase 1: log.',
+            'Per-IP rate limit on versioned desktop installer downloads (/downloads/{mac,win,linux}/) — curbs curl-loop amplification of the desktop_downloads counter; /downloads/latest/ (the updater feed) is intentionally NOT matched. Short block on trip.',
           active: true,
           // Positive per-platform prefixes as OR-ed condition groups — NOT a
           // negated "/downloads/ AND NOT /downloads/latest/", which Vercel's API
@@ -159,13 +173,15 @@ const downloadsRules: Rule[] =
                 keys: ['ip'],
                 action: OBSERVE,
               },
-              actionDuration: '1h',
+              // A single installer fetch can issue several Range requests, so a
+              // legitimate download must never cost an hour of lockout.
+              actionDuration: '15m',
             },
           },
         },
       ];
 
-/** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot doesn't hit these paths, so SEO is untouched. Limits are observe-mode starting points; calibrate from Firewall → Traffic before enforcing. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
+/** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot's own rate sits far under every ceiling, so SEO is untouched. Ceilings are calibrated against measured peak per-IP burst and 10-minute volume (see the two-tier note below), not guessed. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
   bypassRule({
@@ -182,26 +198,57 @@ export const rules: Rule[] = [
     path: '/api/releases',
     headerKey: 'x-desktop-release-secret',
   }),
+  // Two tiers per expensive path. BURST (60s) is sized several times above the
+  // busiest observed real browser session, so a heavy human never trips it; a
+  // short actionDuration keeps any false positive cheap. SUSTAINED (10m) holds
+  // the flat-rate ceiling: humans burst then idle, scrapers run level, so paced
+  // enumeration that ducks under the burst tier is caught here instead. Raising
+  // burst alone would just hand a scraper more throughput — the pair is the point.
   rateLimitRule({
     name: 'rl-serverfn-ip',
     description:
-      'Per-IP rate limit on server-fn RPCs (searchHmrc + detail lookups). Phase 1: log.',
+      'Per-IP BURST ceiling (60s) on server-fn RPCs (searchHmrc + detail lookups). Sized several times above the busiest real browser session so heavy users are never blocked; paced scraping is caught by rl-serverfn-ip-sustained instead. Short block on trip.',
     conditions: [{ type: 'path', op: 'pre', value: '/_serverFn' }],
     limit: SERVERFN_LIMIT,
     keys: ['ip'],
+    actionDuration: '10m',
+  }),
+  ...optionalRateLimitRule(SERVERFN_SUSTAINED_LIMIT, {
+    name: 'rl-serverfn-ip-sustained',
+    description:
+      'Per-IP SUSTAINED ceiling (10m window, Vercel Pro max) on server-fn RPCs. Holds flat-rate throughput at the pre-burst-raise level: a real session bursts then idles and stays far under, while level-rate enumeration trips it. Deny + 1h.',
+    conditions: [{ type: 'path', op: 'pre', value: '/_serverFn' }],
+    keys: ['ip'],
+    window: SUSTAINED_WINDOW,
     actionDuration: '1h',
+    // Enforces on insert (not OBSERVE): it carries the enforcement the widened
+    // burst tier gives up, so shipping it in log mode would be a net loosening.
+    action: 'deny',
   }),
   rateLimitRule({
     name: 'rl-ssr-search-ip',
     description:
-      'Per-IP rate limit on SSR search enumeration (/?search=). Phase 1: log.',
+      'Per-IP BURST ceiling (60s) on SSR search enumeration (/?search=). Well above real browsing (tab restores, rapid refinement); sustained enumeration is caught by rl-ssr-search-ip-sustained. Short block on trip.',
     conditions: [
       { type: 'path', op: 'eq', value: '/' },
       { type: 'query', op: 'ex', key: 'search' },
     ],
     limit: SEARCH_LIMIT,
     keys: ['ip'],
+    actionDuration: '10m',
+  }),
+  ...optionalRateLimitRule(SEARCH_SUSTAINED_LIMIT, {
+    name: 'rl-ssr-search-ip-sustained',
+    description:
+      'Per-IP SUSTAINED ceiling (10m window) on SSR search enumeration (/?search=) — catches level-rate result enumeration that ducks under the 60s burst ceiling. Deny + 1h.',
+    conditions: [
+      { type: 'path', op: 'eq', value: '/' },
+      { type: 'query', op: 'ex', key: 'search' },
+    ],
+    keys: ['ip'],
+    window: SUSTAINED_WINDOW,
     actionDuration: '1h',
+    action: 'deny', // see rl-serverfn-ip-sustained
   }),
   rateLimitRule({
     name: 'rl-tiles-ip',

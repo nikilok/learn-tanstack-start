@@ -1,5 +1,5 @@
 // The interactive rule-manager TUI: a stateful Ink container wiring the data layer
-// (client.ts) to the presentational components (components.tsx) and the report (report-data.ts).
+// (client.ts, report-data.ts) to the presentational components in ./components.
 
 import {
   type DOMElement,
@@ -22,9 +22,9 @@ import {
   teamId,
   token,
 } from './client';
+import { ReportView } from './components/report-view';
+import { type Phase, Row, summaryLine } from './components/rule-list';
 import { type ReportData, fetchReport } from './report-data';
-import { ReportView } from './report-view';
-import { type Phase, Row, summaryLine } from './rule-list';
 import { dryRun } from './rules';
 import { errMsg } from './util';
 
@@ -37,8 +37,7 @@ export function App() {
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState('');
-  // Outcome of the most recent apply, kept on screen while the session continues. Cleared by
-  // the next edit, so it can never describe a state the rules no longer match.
+  // Last apply's outcome; cleared by the next edit so it can't describe stale state.
   const [applied, setApplied] = useState<{
     summary: string;
     ok: boolean;
@@ -49,9 +48,7 @@ export function App() {
   const [reportOpen, setReportOpen] = useState(false); // report pane visible on the right
   const [focus, setFocus] = useState<'editor' | 'report'>('editor');
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
-  // Quit requested mid-apply. Ink's exit() only unmounts the UI — the apply loop would keep
-  // writing rules to Vercel with nothing on screen — so 'q' sets this instead and the loop
-  // stops at the next rule boundary, then exits. Never abandons a half-written single rule.
+  // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
   const loadingReport = useRef(false); // dedupe concurrent report fetches
   const [reportScroll, setReportScroll] = useState(0);
@@ -132,15 +129,11 @@ export function App() {
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
     process.exitCode = anyError ? 1 : 0;
     applying.current = false;
-    // A quit requested mid-apply waits for this point, so the exit happens with no writes
-    // still in flight — the rules already applied stay applied, the rest were never touched.
     if (cancelled) {
-      exit();
+      exit(); // deferred to here so no write is still in flight
       return;
     }
-    // Back to the editor rather than a terminal screen — an apply is a step in a session
-    // (tune, apply, check the report, tune again), not the end of one. Releasing the
-    // re-entrancy guard is what makes a second 'a' possible at all.
+    // Back to the editor, not a terminal screen — an apply is a step in a session.
     setApplied({ summary: summaryLine(statuses), ok: !anyError });
     setPhase('select');
   };
@@ -162,7 +155,7 @@ export function App() {
     }
   };
 
-  /** Apply an edit to the highlighted rule, clearing the stale apply state it invalidates: the row drops back to showing its description (so an edited-but-unapplied rule is distinguishable from an applied one) and the summary banner goes. */
+  /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
   const editCursorItem = (change: (it: Item) => Item) => {
     setApplied(null);
     setItems((prev) =>
@@ -229,8 +222,7 @@ export function App() {
       } else if (key.escape || key.leftArrow) setPhase('select');
       else if (input === 'q') exit();
     } else if (phase === 'applying') {
-      // Request cancellation rather than exiting here: exit() would unmount the UI and leave
-      // applyAll writing rules to Vercel unobserved. applyAll exits once it stops cleanly.
+      // Request cancellation; applyAll exits once it has stopped cleanly.
       if (input === 'q') cancelApply.current = true;
     } else if (phase === 'fatal') {
       if (input === 'q' || key.return || key.escape) exit();

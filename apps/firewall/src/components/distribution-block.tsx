@@ -1,10 +1,8 @@
-// One path's per-IP peak distribution: the block plus its own row. DistLine stays here rather
-// than in its own file because it is the block's row, not a reusable component — the same
-// reason Row and RowTail live together in rule-list.tsx.
+// One path's per-IP peak distribution: the block plus its own row (DistLine has one caller).
 
 import { Box, Text } from 'ink';
 
-import type { DistRow, Distribution } from './report-data';
+import type { DistRow, Distribution } from '../report-data';
 import {
   barColor,
   distHeader,

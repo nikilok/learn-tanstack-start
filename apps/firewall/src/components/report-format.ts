@@ -1,13 +1,11 @@
-// Pure formatters for the report pane — numbers and state in, strings and colour names out.
-// Deliberately free of JSX and Ink so the calibration-critical bits (what a bar means, when a
-// row turns red, how an unresolved peak is written) can be reasoned about and tested without
-// rendering anything.
+// Pure formatters for the report pane — numbers in, strings and colour names out.
+// Free of JSX/Ink so the calibration rules are testable without rendering.
 
-import type { DistRow, Distribution } from './report-data';
+import type { DistRow, Distribution } from '../report-data';
 
 const BAR_W = 10;
 
-/** A bar whose fill is `value` relative to `peak` (the busiest IP in the list), so the heaviest IP reads as full and lighter IPs scale down — making the distribution visible even when everyone is far under the limit. */
+/** A bar filled relative to the busiest IP, so the spread stays visible even when all are far under the limit. */
 export function usageBar(value: number, peak: number): string {
   const filled =
     peak > 0
@@ -16,7 +14,7 @@ export function usageBar(value: number, peak: number): string {
   return `[${'█'.repeat(filled)}${'░'.repeat(BAR_W - filled)}]`;
 }
 
-/** Bar colour by proximity to whichever ceiling the IP is nearest — burst OR sustained: green safe · yellow watch · red near/over; neutral cyan when neither is configured. Colouring on burst alone would paint a flat scraper green while it sits at 180% of the sustained ceiling, which is the one client the sustained rule exists to catch. */
+/** Colour by proximity to the NEAREST ceiling, burst or sustained: green safe, yellow watch, red near/over, cyan unknown. */
 export function barColor(
   r: DistRow,
   limit?: number,
@@ -51,7 +49,7 @@ export function distHeader(d: Distribution): string {
   return parts.join(' · ');
 }
 
-/** Measured worst case against those ceilings, plus what the claim actually covers: `exact`/`floor` applies only to the top-N IPs by volume that were measured, never to every IP on the path, and an unmeasured low-volume client could always have burst higher. */
+/** Measured worst case, and what the claim covers — `exact`/`floor` applies only to the measured top-N IPs. */
 export function distPeaks(d: Distribution): string {
   const pct = (v: number, lim?: number) =>
     lim ? ` (${((v / lim) * 100).toFixed(0)}%)` : '';
@@ -62,7 +60,7 @@ export function distPeaks(d: Distribution): string {
   return `peak ${min} · ${ten} · ${how} over top ${d.measuredIps ?? 0} IPs, ${n} window${n === 1 ? '' : 's'} zoomed`;
 }
 
-/** One IP's line: `  99/min   227/10m   917  1.2.3.4`. Unresolved bursts are never printed as a bare number: `108+` means at least that much was observed, `<=63` means it was never opened up but provably cannot exceed that (refining it would not have changed the leader), and an unmeasured IP dashes BOTH peak columns — a bare `0/10m` reads as a measurement. The trailing total is whole-window volume, the signal that exposes slow wide enumeration whose per-minute and per-10-minute figures both look ordinary. */
+/** One IP's line: `99/min 227/10m 917 1.2.3.4`. `108+` = at least; `<=63` = unresolved upper bound; `—` = unmeasured. */
 export function distRowText(r: DistRow): string {
   const tail = `${compact(r.total).padStart(6)}  ${r.ip}`;
   if (!r.sampled)

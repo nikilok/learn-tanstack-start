@@ -46,7 +46,7 @@ function envLimit(name: string): number {
   );
 }
 
-/** An OPTIONAL ceiling (FW_*_LIMIT), null when unset so the caller omits just that rule. Unlike envLimit this must NOT throw — a missing var would crash the whole apply (taking down every rule) instead of dropping one. */
+/** An OPTIONAL ceiling (FW_*_LIMIT), null when unset so the caller drops just that rule instead of failing the whole apply. */
 function optionalLimit(name: string): number | null {
   const v = envCeiling(name);
   if (v !== undefined) return v;
@@ -57,11 +57,8 @@ const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
-// REQUIRED, not opt-in: the burst ceilings above are set several times higher than real
-// browser traffic only because these hold the flat-rate line. If a missing var merely
-// dropped its rule, an apply would quietly ship the widened burst tier with the control
-// that justified widening it absent — a pure loosening whose only trace is one missing row
-// in the output. Throwing aborts the whole apply instead, which changes nothing in prod.
+// REQUIRED: the widened burst tiers above are only safe because these hold the flat-rate
+// line, so a missing var must abort the apply rather than silently ship burst-only.
 const SERVERFN_SUSTAINED_LIMIT = envLimit('FW_SERVERFN_SUSTAINED_LIMIT');
 const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
 // Opt-in: no burst tier depends on this one, so a missing var drops just this rule.
@@ -180,7 +177,7 @@ const downloadsRules: Rule[] =
         },
       ];
 
-/** Custom WAF rules scoped to SponsorSearch's real expensive paths (search RPC, SSR search, tile proxy) — complements the managed Bot Protection ruleset. Googlebot's own rate sits far under every ceiling, so SEO is untouched. Ceilings are calibrated against measured peak per-IP burst and 10-minute volume (see the two-tier note below), not guessed. NOTE: this set is upsert-only — renaming/removing a rule here orphans the old live rule; delete it in the dashboard. */
+/** Custom WAF rules for the expensive paths (search RPC, SSR search, tile proxy); ceilings are calibrated from measured peaks, not guessed. Upsert-only — renaming a rule orphans the live one, so delete that in the dashboard. */
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
   bypassRule({
@@ -197,12 +194,8 @@ export const rules: Rule[] = [
     path: '/api/releases',
     headerKey: 'x-desktop-release-secret',
   }),
-  // Two tiers per expensive path. BURST (60s) is sized several times above the
-  // busiest observed real browser session, so a heavy human never trips it; a
-  // short actionDuration keeps any false positive cheap. SUSTAINED (10m) holds
-  // the flat-rate ceiling: humans burst then idle, scrapers run level, so paced
-  // enumeration that ducks under the burst tier is caught here instead. Raising
-  // burst alone would just hand a scraper more throughput — the pair is the point.
+  // Two tiers per path: BURST (60s) sized well above a real session so humans never trip it,
+  // SUSTAINED (10m) holding the flat rate. Humans burst then idle; scrapers run level.
   rateLimitRule({
     name: 'rl-serverfn-ip',
     description:
@@ -221,8 +214,7 @@ export const rules: Rule[] = [
     keys: ['ip'],
     window: SUSTAINED_WINDOW,
     actionDuration: '1h',
-    // Enforces on insert (not OBSERVE): it carries the enforcement the widened
-    // burst tier gives up, so shipping it in log mode would be a net loosening.
+    // Enforces on insert: log mode would make the widened burst tier a net loosening.
     action: 'deny',
   }),
   rateLimitRule({

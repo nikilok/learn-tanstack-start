@@ -1,12 +1,11 @@
-// The report pane's composition root — what appears, in what order, and the not-yet-loaded
-// states. Each section's rendering lives in its own module (count-list, distribution-block),
-// and the formatting they share in report-format.
+// The report pane's composition root — what appears, in what order, and the pre-data states.
+// Section rendering lives in count-list / distribution-block, shared formatting in report-format.
 
 import { Box, Text } from 'ink';
 
+import type { ReportData } from '../report-data';
 import { CountList } from './count-list';
 import { DistributionBlock } from './distribution-block';
-import type { ReportData } from './report-data';
 
 /** Trim an ISO timestamp to `YYYY-MM-DD HH:MM` for the window header. */
 const fmt = (iso: string) => iso.slice(0, 16).replace('T', ' ');

@@ -1,18 +1,6 @@
-// Data layer for the firewall report: fetches Vercel observability metrics and returns
-// structured data, rendered by the TUI's report pane (components.tsx ReportView, opened with 'r').
-// Window is the last ~6 days including today so far (the free `observability_chart_free` tier
-// caps startTime at 7).
-//
-// Peaks, not averages. A rate limit is a ceiling on a 60s (or 600s) window, so dividing a
-// 6-day total by the window is meaningless — it reported ~0.1/min for an IP whose real peak
-// was 99/min, which is how a 100/min ceiling came to look safe while it was blocking humans.
-// Instead, per path: rank IPs with one hourly query, pull a 10-MINUTE series for the top few
-// across the whole window (that series IS the sustained figure, aligned exactly as a
-// fixed_window rule counts), then resolve peak/min by opening the busiest 10-minute buckets
-// at minute granularity. A bucket of C requests cannot hold a minute above C, so the search
-// stops as soon as every unopened bucket is too small to matter — the reported maximum is
-// proven rather than sampled, and the pane says so ('exact' vs 'floor'), scoped to the IPs
-// actually measured.
+// Data layer for the firewall report: per-path peak per-IP traffic, rendered by report-view.
+// Reports measured PEAKS, never window averages — a rate limit is a ceiling on a 60s/600s
+// window. Window is the last ~6 days (`observability_chart_free` caps startTime at 7).
 
 import { envCeiling, errMsg } from './util';
 
@@ -26,10 +14,7 @@ type Ctx = {
   endTime: string;
 };
 
-// Bursts are located with 10-MINUTE buckets, not hourly ones: hourly volume does not reveal
-// a one-minute spike (an IP whose true peak was 108/min sat in an unremarkable hour and read
-// as 61/min), whereas a 108-request minute necessarily puts >=108 in its 10-minute bucket.
-// That bound also makes the search EXACT rather than a sample — see refinePeaks.
+// Bursts are located with 10-minute buckets, not hourly: hourly volume hides a one-minute spike.
 const PEAK_IPS = 6; // IPs measured — matches the 6 rows the pane renders
 const PEAK_WINDOWS = 8; // most windows zoomed in one round (a round is one parallel batch)
 const ZOOM_ROUNDS = 5; // refinement rounds before settling for the best found so far
@@ -69,7 +54,7 @@ export type ReportData = {
   distributions: Distribution[];
 };
 
-/** `fetch` AND the body read bounded by one abort timeout, so a stalled connection surfaces as an error instead of hanging the report pane on "Loading…" forever. The body must be consumed inside the timeout: `await fetch` settles at response HEADERS, so clearing the timer around the fetch alone leaves a stalled body stream with no deadline at all — the pane would hang on "Loading…" with the refresh key inert. Generous by design: a 6-day grouped query normally takes ~3-5s but spikes while other report queries are in flight, and aborting one drops a whole panel. */
+/** `fetch` AND the body read under one abort timeout — `await fetch` settles at headers, so timing only the fetch leaves a stalled body with no deadline. */
 async function fetchWithTimeout(
   input: string,
   init: RequestInit,
@@ -85,19 +70,13 @@ async function fetchWithTimeout(
   }
 }
 
-// One shared gate for every observability call. The limiter has to be global: fetchDist runs
-// several at a time AND each refinePeaks fans out its own batch, so a per-call-site cap
-// multiplies (2 x 6 = 12 in flight) past what the API tolerates — and the resulting 429s used
-// to surface as unmeasured buckets rather than as errors.
+// Global, not per-call-site: nested pools would multiply into 12 in flight and 429.
 let inFlight = 0;
 const waiting: (() => void)[] = [];
 
 /** Run `fn` with at most MAX_CONCURRENT observability calls in flight process-wide. */
 async function gated<T>(fn: () => Promise<T>): Promise<T> {
-  // `while`, not `if`: resolving a waiter only QUEUES its continuation, so between the
-  // release and that continuation running, a fresh caller can observe the decremented
-  // count and take the slot. Re-checking on wake stops the two from both proceeding and
-  // overshooting the cap — which would produce exactly the 429s this gate exists to avoid.
+  // `while`, not `if`: a woken waiter must re-check, or a fresh caller steals the freed slot.
   while (inFlight >= MAX_CONCURRENT)
     await new Promise<void>((resolve) => waiting.push(resolve));
   inFlight++;
@@ -109,7 +88,7 @@ async function gated<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** POST the dashboard observability endpoint (entitlement-free `observability_chart_free` reason), retrying transient 5xx/429. Defaults to hourly buckets over the whole report window; `granularity`/`startTime`/`endTime` override that for minute-level zooms. */
+/** POST the dashboard observability endpoint, retrying transient 5xx/429. Hourly buckets over the whole window unless overridden. */
 async function metrics(
   ctx: Ctx,
   groupBy: string[],
@@ -148,11 +127,8 @@ async function metrics(
         ),
       );
     } catch (e) {
-      // A timeout/network failure throws before any response, so it can't be handled by
-      // the status check below — retry it too, or one slow query silently drops a panel.
-      // Only ONE such retry: a hung connection costs the full timeout each time, and the
-      // report chains these calls, so extra attempts turn a bad link into a pane that
-      // sits on "Loading…" for many minutes with no way to cancel.
+      // Throws before any response, so the status check below can't retry it. Only ONE
+      // retry: each attempt costs the full timeout and the report chains these calls.
       if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
@@ -226,7 +202,7 @@ async function pool<T>(
 
 type Bucket = { t: string; c: number };
 
-/** Group per-bucket rows into a chronological series per IP. The API returns every bucket (zeros included) for every group it returns, so each series is contiguous and safe to run a rolling window over. */
+/** Group per-bucket rows into a chronological series per IP. The API zero-fills, so each series is contiguous. */
 function seriesByIp(resp: { data?: Row[] }): Map<string, Bucket[]> {
   const byIp = new Map<string, Bucket[]>();
   for (const r of resp.data ?? []) {
@@ -253,7 +229,7 @@ type Peaks = {
   windows: number; // 10-min windows actually zoomed
 };
 
-/** Resolve the true peak/min by zooming 10-minute buckets in descending order. A bucket of C requests cannot contain a minute above C, so a bucket is only worth opening if C beats both that IP's best so far AND the best found across all IPs — the latter is what makes this cheap, since a flat crawler's buckets (high volume, low per-minute) are dismissed outright instead of being refined toward a number nobody acts on. The reported maximum is therefore proven, while quieter IPs may resolve only to an upper bound, which they report as such. Rounds are batched (one query serves every listed IP in that window) and capped so a pathological profile still terminates. */
+/** Resolve the true peak/min by opening 10-minute buckets in descending order. A bucket of C cannot hold a minute above C, so one is only worth opening if C beats that IP's best AND the global best — which prunes flat crawlers outright. Quieter IPs may resolve only to an upper bound. */
 async function refinePeaks(
   ctx: Ctx,
   ipFilter: string,
@@ -261,21 +237,14 @@ async function refinePeaks(
   listed: string[],
 ): Promise<Peaks> {
   const peakMin = new Map(listed.map((ip) => [ip, 0]));
-  // peak10m is the max ALIGNED 10-minute bucket, full stop — it covers the whole window
-  // (so it is exact, not a sample) and matches how a fixed_window rule counts. Mixing in a
-  // rolling span from the zoomed windows would report two different numbers for the same
-  // traffic depending on whether that bucket happened to win a zoom nomination, and would
-  // compare a rolling figure against a ceiling the WAF applies to aligned windows.
+  // Max ALIGNED 10-min bucket — whole-window, and the unit a fixed_window rule counts in.
   const peak10m = new Map(
     listed.map((ip) => [
       ip,
       Math.max(0, ...(tenMin.get(ip) ?? []).map((b) => b.c)),
     ]),
   );
-  // `zoomed` = buckets actually MEASURED. A bucket whose query failed goes only into
-  // `attempted`, so it is never re-nominated but still counts against the upper bound —
-  // marking it examined would let a 429 masquerade as proof and report a peak from a
-  // bucket nobody ever opened.
+  // `zoomed` = measured; a failed zoom lands only in `attempted` so it still bounds the peak.
   const zoomed = new Set<string>();
   const attempted = new Set<string>();
   let windows = 0;
@@ -289,8 +258,7 @@ async function refinePeaks(
 
   for (let round = 0; round < ZOOM_ROUNDS; round++) {
     const globalBest = Math.max(0, ...peakMin.values());
-    // Each IP nominates its biggest un-attempted bucket that could still beat both its own
-    // best and the global best; no nominations means the maximum is proven.
+    // No nominations = every remaining bucket is too small to beat the best, so it is proven.
     const want: string[] = [];
     for (const ip of listed) {
       const bar = Math.max(peakMin.get(ip) ?? 0, globalBest);
@@ -306,8 +274,7 @@ async function refinePeaks(
       stamps.map((stamp) => async () => {
         const w = new Date(stamp);
         if (Number.isNaN(w.getTime())) return null;
-        // Exactly the bucket: a 1-minute bucket never straddles a 10-minute boundary, so
-        // padding would only enlarge the response without tightening any bound.
+        // No padding: a 1-minute bucket never straddles a 10-minute boundary.
         const from = w;
         const to = new Date(w.getTime() + 10 * 60_000);
         try {
@@ -354,7 +321,7 @@ async function refinePeaks(
   return { peakMin, peak10m, bound, windows };
 }
 
-/** Fetch one path's per-IP peak burst profile. Three stages: hourly totals to rank IPs, a full-window 10-minute series for those IPs (exact sustained-tier volume, and the map used to locate bursts), then minute-granularity zooms into the busiest 10-minute windows for the true peak/min. Returns a skipped/empty marker instead of throwing. */
+/** One path's per-IP peak profile: hourly totals rank the IPs, a 10-minute series gives sustained volume and locates bursts, then minute zooms resolve peak/min. Returns a skip marker instead of throwing. */
 async function fetchDist(
   ctx: Ctx,
   label: string,
@@ -378,9 +345,7 @@ async function fetchDist(
     .filter(safeIp);
   if (!listed.length)
     return { ...base, ips: totals.length, sampledWindows: 0, rows: [] };
-  // Narrowing to the listed IPs is what makes fine granularity affordable: 10-minute
-  // buckets across the whole window are ~860 per IP, versus hundreds of thousands if
-  // every IP came back.
+  // Narrowing to these IPs is what makes whole-window 10-minute granularity affordable.
   const ipFilter = `${filter} and clientIp in (${listed.map((ip) => `'${ip}'`).join(',')})`;
 
   let tenMin: Map<string, Bucket[]>;
@@ -393,10 +358,7 @@ async function fetchDist(
       }),
     );
   } catch (e) {
-    // Every peak derives from this series, so its failure must surface as a skip. Falling
-    // through with an empty map would leave nothing to nominate, and the all-zero result
-    // would then satisfy the exactness test — rendering a confident "peak 0/min · exact"
-    // for a path that was never measured at all.
+    // Must skip, not fall through: all-zero peaks would otherwise render as a confident "exact".
     return { ...base, ips: totals.length, skipped: `peaks: ${errMsg(e)}` };
   }
 
@@ -408,8 +370,7 @@ async function fetchDist(
     return {
       ip,
       total,
-      // Measured iff the 10-minute series covered this IP; without it peaks are unknown
-      // rather than zero, and the pane shows a dash instead of an innocent-looking 0.
+      // Unknown, not zero — the pane dashes these rather than showing an innocent 0.
       sampled: (tenMin.get(ip)?.length ?? 0) > 0,
       peakMin,
       peakMinExact: peakMinBound <= peakMin,
@@ -417,10 +378,7 @@ async function fetchDist(
       peak10m: peaks.peak10m.get(ip) ?? 0,
     };
   });
-  // Rank by whichever ceiling the IP is closest to, so a steady heavy user (high 10-minute
-  // volume, unremarkable per-minute) isn't buried under a spikier but harmless one. Ranks on
-  // the MEASURED burst, not the upper bound, so the order matches the column as displayed;
-  // an IP left unresolved was, by construction, one that could not beat the leader anyway.
+  // Rank by the nearest ceiling, so a steady heavy user isn't buried under a spikier one.
   const pressure = (r: DistRow) =>
     limit || sustainedLimit
       ? Math.max(
@@ -435,16 +393,10 @@ async function fetchDist(
     ...base,
     capped: totals.length >= 500, // tail beyond 500 groups is dropped by the API
     ips: totals.length,
-    // Only the top PEAK_IPS by whole-window volume are measured, so `exact` is a claim about
-    // THEM, not about every IP on the path — a low-volume client that burst once and went
-    // quiet is outside the measured set entirely. The pane names the measured count so the
-    // headline is not read as a site-wide maximum. Unsampled rows are excluded from BOTH the
-    // count and the claim: their peaks are unknown, and an unknown that defaults to 0 would
-    // otherwise satisfy the exactness test and inflate the count with rows nobody measured.
+    // Only measured IPs count — an unknown peak defaulting to 0 would pass the exactness test.
     measuredIps: rows.filter((r) => r.sampled).length,
     sampledWindows: peaks.windows,
-    // The headline is the maximum across measured IPs when nothing left unresolved among
-    // them could have exceeded it — and when every listed IP was measured at all.
+    // True maximum only if nothing unresolved could have exceeded it.
     exact: rows.every(
       (r) => r.sampled && (r.peakMinExact || r.peakMinBound <= maxPeakMin),
     ),
@@ -491,9 +443,7 @@ export async function fetchReport(creds: {
     byRuleError = errMsg(e);
   }
 
-  // Fetched deep (not just the ~60 shown) because the /_serverFn distribution below builds
-  // its filter from this list: a truncated list silently drops the quieter fn paths from
-  // every IP's measured rate, understating them against a ceiling that counts all of them.
+  // Fetched deep, not just the ~60 shown: the /_serverFn filter below is built from this list.
   let allPaths: { path: string; count: number }[] = [];
   let topPathsError: string | undefined;
   try {
@@ -507,10 +457,7 @@ export async function fetchReport(creds: {
   }
   const topPaths = allPaths.slice(0, 60); // the pane's list stays a top-60 view
 
-  // Each rate-limited path's ceilings (FW_*_LIMIT = 60s burst, FW_*_SUSTAINED_LIMIT = 600s)
-  // — the bars and percentages in the report compare measured peaks against these. Read via
-  // the same envCeiling the rule builder uses, so the pane can't draw a ceiling the rules
-  // would have rejected (its old local parser accepted non-integers that rules.ts refuses).
+  // Ceilings the bars compare against; same envCeiling the rule builder uses, so they agree.
   const serverfnLimit = envCeiling('FW_SERVERFN_LIMIT');
   const serverfnSustained = envCeiling('FW_SERVERFN_SUSTAINED_LIMIT');
   const tilesLimit = envCeiling('FW_TILES_LIMIT');
@@ -518,18 +465,12 @@ export async function fetchReport(creds: {
   const searchSustained = envCeiling('FW_SEARCH_SUSTAINED_LIMIT');
   const downloadsLimit = envCeiling('FW_DOWNLOADS_LIMIT');
 
-  // The `like` filter is rejected by this API and route '/__server' lumps every SSR page in
-  // with the RPCs, so /_serverFn is matched as an explicit `in (…)` set of the fn paths seen
-  // in this window. It must be ALL of them, not just the busiest: rl-serverfn-ip counts the
-  // whole /_serverFn prefix, so sampling one hash would understate every IP against its
-  // ceiling. Paths are interpolated into the filter DSL, so restrict to safe chars.
+  // No `like` filter and '/__server' lumps in every SSR page, so match an explicit path set —
+  // ALL fn paths, since the rule counts the whole prefix. Interpolated, so safe chars only.
   const serverFnPaths = allPaths
     .map((p) => p.path)
     .filter((p) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p));
-  // 500 groups is the API's hard cap, so a site with more distinct paths than that (every
-  // /company/<slug> competes for a slot) can push quieter fn hashes out of the list
-  // entirely. Say so rather than letting "(N fns)" imply the set is complete — a missing
-  // hash understates every IP against a ceiling that counts the whole prefix.
+  // 500 groups is the API cap, so /company/<slug> paths can crowd out fn hashes — say so.
   const pathsTruncated = allPaths.length >= 500;
   const serverFnDist = (): Promise<Distribution> =>
     serverFnPaths.length
@@ -548,8 +489,7 @@ export async function fetchReport(creds: {
             'no safe /_serverFn/* path in top paths (the top-paths query may have failed)',
         });
 
-  // Concurrent: each distribution costs an hourly query plus a handful of minute-level zooms,
-  // so serialising all four would make the pane take ~4x as long to first render.
+  // Concurrent, or the pane takes ~4x as long to first render.
   const distributions = await pool<Distribution>(
     [
       serverFnDist,
@@ -560,12 +500,8 @@ export async function fetchReport(creds: {
           "route eq '/api/tiles/[theme]/[z]/[x]/[y]'",
           tilesLimit,
         ),
-      // There is no query-string dimension in this API, so `/` is the closest available
-      // proxy for the rule's `/` AND ?search= condition — it is a strict SUPERSET. Plain
-      // homepage views inflate the 10-minute figure far more than the per-minute one
-      // (they accumulate steadily across 600s, which is exactly the level-rate shape the
-      // sustained tier discriminates on), so the label warns against sizing the sustained
-      // ceiling from it directly.
+      // No query-string dimension exists, so `/` is a strict SUPERSET of what the rule counts;
+      // the label warns that its 10-minute figure over-reads.
       () =>
         fetchDist(
           ctx,

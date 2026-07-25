@@ -1,4 +1,4 @@
-/** Read a firewall ceiling (FW_*_LIMIT) from the env, or undefined when absent/invalid. Single source of what counts as a valid ceiling: the rule builder turns this into a throw or an omitted rule, and the report turns it into a bar to measure against — if those disagreed, the pane would draw a ceiling the rules never enforced. */
+/** Read a firewall ceiling (FW_*_LIMIT) from the env, or undefined when absent/invalid. Shared so the rules and the report agree on what is valid. */
 export function envCeiling(name: string): number | undefined {
   const v = Number(process.env[name]);
   return Number.isInteger(v) && v > 0 ? v : undefined;

@@ -55,10 +55,15 @@ const SERVERFN_LIMIT = envLimit('FW_SERVERFN_LIMIT');
 const SEARCH_LIMIT = envLimit('FW_SEARCH_LIMIT');
 const TILES_LIMIT = envLimit('FW_TILES_LIMIT');
 const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
-// Opt-in ceilings: each rule syncs only once its var is provisioned.
+// REQUIRED, not opt-in: the burst ceilings above are set several times higher than real
+// browser traffic only because these hold the flat-rate line. If a missing var merely
+// dropped its rule, an apply would quietly ship the widened burst tier with the control
+// that justified widening it absent — a pure loosening whose only trace is one missing row
+// in the output. Throwing aborts the whole apply instead, which changes nothing in prod.
+const SERVERFN_SUSTAINED_LIMIT = envLimit('FW_SERVERFN_SUSTAINED_LIMIT');
+const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
+// Opt-in: no burst tier depends on this one, so a missing var drops just this rule.
 const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
-const SERVERFN_SUSTAINED_LIMIT = optionalLimit('FW_SERVERFN_SUSTAINED_LIMIT');
-const SEARCH_SUSTAINED_LIMIT = optionalLimit('FW_SEARCH_SUSTAINED_LIMIT');
 
 // Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
 const SUSTAINED_WINDOW = 600;
@@ -95,14 +100,6 @@ function rateLimitRule(opts: {
   };
 }
 
-/** Wrap a rate-limit rule in the opt-in pattern: [] when its ceiling is unprovisioned, so a missing env var drops just this rule. */
-function optionalRateLimitRule(
-  limit: number | null,
-  opts: Omit<Parameters<typeof rateLimitRule>[0], 'limit'>,
-): Rule[] {
-  return limit === null ? [] : [rateLimitRule({ ...opts, limit })];
-}
-
 /** Build a header-gated path bypass — a trusted non-browser server-to-server caller exempted from the managed Bot Protection challenge it can't solve. Matching on header PRESENCE (not value) keeps the secret out of firewall config; the endpoint's timing-safe secret check stays the real auth gate. */
 function bypassRule(opts: {
   name: string;
@@ -128,7 +125,7 @@ function bypassRule(opts: {
 
 // Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
 // missing var drops just this rule instead of throwing the whole apply at import.
-// Bespoke shape (OR-ed condition groups), so it can't use optionalRateLimitRule.
+// Bespoke shape (OR-ed condition groups), so it can't use rateLimitRule.
 const downloadsRules: Rule[] =
   DOWNLOADS_LIMIT === null
     ? []
@@ -213,8 +210,9 @@ export const rules: Rule[] = [
     keys: ['ip'],
     actionDuration: '10m',
   }),
-  ...optionalRateLimitRule(SERVERFN_SUSTAINED_LIMIT, {
+  rateLimitRule({
     name: 'rl-serverfn-ip-sustained',
+    limit: SERVERFN_SUSTAINED_LIMIT,
     description:
       'Per-IP SUSTAINED ceiling (10m window, Vercel Pro max) on server-fn RPCs. Holds flat-rate throughput at the pre-burst-raise level: a real session bursts then idles and stays far under, while level-rate enumeration trips it. Deny + 1h.',
     conditions: [{ type: 'path', op: 'pre', value: '/_serverFn' }],
@@ -237,8 +235,9 @@ export const rules: Rule[] = [
     keys: ['ip'],
     actionDuration: '10m',
   }),
-  ...optionalRateLimitRule(SEARCH_SUSTAINED_LIMIT, {
+  rateLimitRule({
     name: 'rl-ssr-search-ip-sustained',
+    limit: SEARCH_SUSTAINED_LIMIT,
     description:
       'Per-IP SUSTAINED ceiling (10m window) on SSR search enumeration (/?search=) — catches level-rate result enumeration that ducks under the 60s burst ceiling. Deny + 1h.',
     conditions: [

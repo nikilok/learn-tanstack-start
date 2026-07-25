@@ -3,16 +3,12 @@
 import { Box, Text } from 'ink';
 
 import { actionColor } from './actions';
-import type { Item } from './client';
+import type { ApplyStatus, Item } from './client';
 import type { DistRow, ReportData } from './report-data';
 
-export type Phase =
-  | 'loading'
-  | 'select'
-  | 'action'
-  | 'applying'
-  | 'done'
-  | 'fatal';
+// No terminal 'done' phase: applying returns to 'select' so the session continues, and only
+// 'q' ends it. 'fatal' stays terminal because there is no config loaded to work with.
+export type Phase = 'loading' | 'select' | 'action' | 'applying' | 'fatal';
 
 /** Truncate a string to `n` chars with a trailing ellipsis. */
 function truncate(s: string, n: number): string {
@@ -30,11 +26,23 @@ function usageBar(value: number, peak: number): string {
   return `[${'█'.repeat(filled)}${'░'.repeat(BAR_W - filled)}]`;
 }
 
-/** Bar colour by proximity to the rate limit: green safe · yellow watch · red near/over; neutral cyan when no limit is configured. */
-function barColor(value: number, limit?: number): string {
-  if (!limit || limit <= 0) return 'cyan';
-  const r = value / limit;
-  return r >= 0.8 ? 'red' : r >= 0.5 ? 'yellow' : 'green';
+/** Bar colour by proximity to whichever ceiling the IP is nearest — burst OR sustained: green safe · yellow watch · red near/over; neutral cyan when neither is configured. Colouring on burst alone would paint a flat scraper green while it sits at 180% of the sustained ceiling, which is the one client the sustained rule exists to catch. */
+function barColor(r: DistRow, limit?: number, sustainedLimit?: number): string {
+  if (!limit && !sustainedLimit) return 'cyan';
+  const ratio = Math.max(
+    limit ? r.peakMin / limit : 0,
+    sustainedLimit ? r.peak10m / sustainedLimit : 0,
+  );
+  return ratio >= 0.8 ? 'red' : ratio >= 0.5 ? 'yellow' : 'green';
+}
+
+/** Compact request count: 1234 → `1.2k`. Keeps the whole-window volume column narrow. */
+function compact(n: number): string {
+  return n >= 10000
+    ? `${Math.round(n / 1000)}k`
+    : n >= 1000
+      ? `${(n / 1000).toFixed(1)}k`
+      : String(n);
 }
 
 /** Configured ceilings and IP count: `limit 300/min · sust 1000/10m · 178 IPs`. */
@@ -47,7 +55,7 @@ function distHeader(d: ReportData['distributions'][number]): string {
   return parts.join(' · ');
 }
 
-/** Measured worst case against those ceilings, and how many windows were sampled to find it — stated because peak/min is a floor over the sampled windows, not an exhaustive maximum. */
+/** Measured worst case against those ceilings, plus what the claim actually covers: `exact`/`floor` applies only to the top-N IPs by volume that were measured, never to every IP on the path, and an unmeasured low-volume client could always have burst higher. */
 function distPeaks(d: ReportData['distributions'][number]): string {
   const pct = (v: number, lim?: number) =>
     lim ? ` (${((v / lim) * 100).toFixed(0)}%)` : '';
@@ -55,25 +63,24 @@ function distPeaks(d: ReportData['distributions'][number]): string {
   const ten = `${d.maxPeak10m ?? 0}/10m${pct(d.maxPeak10m ?? 0, d.sustainedLimit)}`;
   const n = d.sampledWindows ?? 0;
   const how = d.exact ? 'exact' : 'floor'; // floor = the round cap stopped the search early
-  return `peak ${min} · ${ten} · ${how}, ${n} window${n === 1 ? '' : 's'} zoomed`;
+  return `peak ${min} · ${ten} · ${how} over top ${d.measuredIps ?? 0} IPs, ${n} window${n === 1 ? '' : 's'} zoomed`;
 }
 
-/** One IP's line: `  99/min   227/10m  1.2.3.4`. Unresolved bursts are never printed as a bare number: `108+` means at least that much was observed, `<=63` means it was never opened up but provably cannot exceed that (refining it would not have changed the leader). */
+/** One IP's line: `  99/min   227/10m   917  1.2.3.4`. Unresolved bursts are never printed as a bare number: `108+` means at least that much was observed, `<=63` means it was never opened up but provably cannot exceed that (refining it would not have changed the leader), and an unmeasured IP dashes BOTH peak columns — a bare `0/10m` reads as a measurement. The trailing total is whole-window volume, the signal that exposes slow wide enumeration whose per-minute and per-10-minute figures both look ordinary. */
 function distRow(r: DistRow): string {
-  const ten = `${String(r.peak10m).padStart(5)}/10m`;
-  const min = !r.sampled
-    ? '—'
-    : r.peakMinExact
-      ? String(r.peakMin)
-      : r.peakMin > 0
-        ? `${r.peakMin}+`
-        : `<=${r.peakMinBound}`;
-  return `${min.padStart(6)}/min ${ten}  ${r.ip}`;
+  if (!r.sampled)
+    return `${'—'.padStart(6)}/min ${'—'.padStart(5)}/10m ${compact(r.total).padStart(6)}  ${r.ip}`;
+  const min = r.peakMinExact
+    ? String(r.peakMin)
+    : r.peakMin > 0
+      ? `${r.peakMin}+`
+      : `<=${r.peakMinBound}`;
+  return `${min.padStart(6)}/min ${String(r.peak10m).padStart(5)}/10m ${compact(r.total).padStart(6)}  ${r.ip}`;
 }
 
-/** One-line tally of apply outcomes for the done screen. */
-export function summaryLine(items: Item[]): string {
-  const n = (s: Item['status']) => items.filter((it) => it.status === s).length;
+/** One-line tally of apply outcomes. Takes the statuses the apply actually produced, not the items — the snapshot handed to applyAll predates its own updates, so counting from it would always read 'idle'. */
+export function summaryLine(statuses: ApplyStatus[]): string {
+  const n = (s: ApplyStatus) => statuses.filter((x) => x === s).length;
   const parts: string[] = [];
   if (n('overwrote')) parts.push(`${n('overwrote')} overwrote`);
   if (n('inserted')) parts.push(`${n('inserted')} inserted`);
@@ -81,9 +88,9 @@ export function summaryLine(items: Item[]): string {
   return parts.join(', ') || 'no changes';
 }
 
-/** The right-hand side of a rule row: its description while selecting, its apply status otherwise. */
+/** The right-hand side of a rule row: its apply status once it has one (which outlives the apply, so the outcome stays readable while the session continues), otherwise its description. A row edited since the last apply is reset to idle and shows its description again, marking it unapplied. */
 function RowTail({ item, phase }: { item: Item; phase: Phase }) {
-  if (phase === 'select' || phase === 'action')
+  if (phase !== 'applying' && item.status === 'idle')
     return <Text dimColor>{truncate(item.rule.description, 50)}</Text>;
   const suffix = item.detail ? ` (${item.detail})` : '';
   switch (item.status) {
@@ -232,7 +239,7 @@ export function ReportView({
               </Text>
               {(d.rows ?? []).slice(0, 6).map((r) => (
                 <Box key={r.ip}>
-                  <Text color={barColor(r.peakMin, d.limit)}>
+                  <Text color={barColor(r, d.limit, d.sustainedLimit)}>
                     {`${usageBar(r.peakMin, d.maxPeakMin ?? 0)} `}
                   </Text>
                   <Text wrap="truncate">{distRow(r)}</Text>

@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import {
+  type ApplyStatus,
   type Item,
   applyItem,
   fetchLive,
@@ -35,6 +36,12 @@ export function App() {
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
   const [error, setError] = useState('');
+  // Outcome of the most recent apply, kept on screen while the session continues. Cleared by
+  // the next edit, so it can never describe a state the rules no longer match.
+  const [applied, setApplied] = useState<{
+    summary: string;
+    ok: boolean;
+  } | null>(null);
   const [report, setReport] = useState<ReportData | null>(null);
   const [reportError, setReportError] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
@@ -86,6 +93,7 @@ export function App() {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
     }
     let anyError = false;
+    const statuses: ApplyStatus[] = [];
     for (let i = 0; i < snapshot.length; i++) {
       setItems((prev) =>
         prev.map((it, j) => (j === i ? { ...it, status: 'applying' } : it)),
@@ -93,6 +101,7 @@ export function App() {
       try {
         const res = await applyItem(snapshot[i], ids);
         if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
+        statuses.push(res.status);
         setItems((prev) =>
           prev.map((it, j) =>
             j === i ? { ...it, status: res.status, detail: res.detail } : it,
@@ -100,6 +109,7 @@ export function App() {
         );
       } catch (e) {
         anyError = true;
+        statuses.push('error');
         const detail = errMsg(e);
         setItems((prev) =>
           prev.map((it, j) =>
@@ -108,8 +118,14 @@ export function App() {
         );
       }
     }
-    if (anyError) process.exitCode = 1;
-    setPhase('done');
+    // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
+    process.exitCode = anyError ? 1 : 0;
+    // Back to the editor rather than a terminal screen — an apply is a step in a session
+    // (tune, apply, check the report, tune again), not the end of one. Releasing the
+    // re-entrancy guard is what makes a second 'a' possible at all.
+    applying.current = false;
+    setApplied({ summary: summaryLine(statuses), ok: !anyError });
+    setPhase('select');
   };
 
   /** Fetch the firewall report for the side pane; dedupes concurrent loads and keeps the prior result visible while refreshing. */
@@ -129,15 +145,24 @@ export function App() {
     }
   };
 
-  /** Cycle the highlighted rule's action in the given direction. */
-  const cycleCursorAction = (dir: 1 | -1) =>
+  /** Apply an edit to the highlighted rule, clearing the stale apply state it invalidates: the row drops back to showing its description (so an edited-but-unapplied rule is distinguishable from an applied one) and the summary banner goes. */
+  const editCursorItem = (change: (it: Item) => Item) => {
+    setApplied(null);
     setItems((prev) =>
       prev.map((it, j) =>
         j === cursor
-          ? { ...it, action: cycleAction(it.rule, it.action, dir) }
+          ? { ...change(it), status: 'idle', detail: undefined }
           : it,
       ),
     );
+  };
+
+  /** Cycle the highlighted rule's action in the given direction. */
+  const cycleCursorAction = (dir: 1 | -1) =>
+    editCursorItem((it) => ({
+      ...it,
+      action: cycleAction(it.rule, it.action, dir),
+    }));
 
   useInput((input, key) => {
     if (focus === 'report') {
@@ -162,11 +187,7 @@ export function App() {
         setMenuCursor(Math.max(0, opts.indexOf(items[cursor].action)));
         setPhase('action');
       } else if (input === ' ')
-        setItems((prev) =>
-          prev.map((it, j) =>
-            j === cursor ? { ...it, active: !it.active } : it,
-          ),
-        );
+        editCursorItem((it) => ({ ...it, active: !it.active }));
       else if (input === 'r') {
         setReportOpen(true);
         setFocus('report');
@@ -185,13 +206,13 @@ export function App() {
         setMenuCursor((m) => Math.min(opts.length - 1, m + 1));
       else if (key.return) {
         const chosen = opts[menuCursor];
-        setItems((prev) =>
-          prev.map((it, j) => (j === cursor ? { ...it, action: chosen } : it)),
-        );
+        editCursorItem((it) => ({ ...it, action: chosen }));
         setPhase('select');
       } else if (key.escape || key.leftArrow) setPhase('select');
       else if (input === 'q') exit();
-    } else if (phase === 'done' || phase === 'fatal') {
+    } else if (phase === 'applying') {
+      if (input === 'q') exit(); // escape hatch; edits stay blocked mid-apply
+    } else if (phase === 'fatal') {
       if (input === 'q' || key.return || key.escape) exit();
     }
   });
@@ -231,11 +252,19 @@ export function App() {
           ))}
         </Box>
         {phase === 'select' && (
-          <Text dimColor>
-            ↑/↓ move · ←/→ action · enter menu · space on/off · r report
-            {reportLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
-            {items.length} on)
-          </Text>
+          <Box flexDirection="column">
+            {applied && (
+              <Text color={applied.ok ? 'green' : 'red'}>
+                {applied.ok ? '✔' : '✖'} applied — {applied.summary} · keep
+                editing, or q to quit
+              </Text>
+            )}
+            <Text dimColor>
+              ↑/↓ move · ←/→ action · enter menu · space on/off · r report
+              {reportLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}
+              /{items.length} on)
+            </Text>
+          </Box>
         )}
         {phase === 'action' && target && (
           <Box flexDirection="column">
@@ -259,13 +288,7 @@ export function App() {
             <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
           </Box>
         )}
-        {phase === 'applying' && <Text color="yellow">applying…</Text>}
-        {phase === 'done' && (
-          <Box flexDirection="column">
-            <Text color="green">Done — {summaryLine(items)}.</Text>
-            <Text dimColor>q to quit</Text>
-          </Box>
-        )}
+        {phase === 'applying' && <Text color="yellow">applying… · q quit</Text>}
       </Box>
       {reportOpen && (
         <Box

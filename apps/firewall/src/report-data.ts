@@ -30,7 +30,6 @@ type Ctx = {
 const PEAK_IPS = 6; // IPs measured — matches the 6 rows the pane renders
 const PEAK_WINDOWS = 8; // most windows zoomed in one round (a round is one parallel batch)
 const ZOOM_ROUNDS = 5; // refinement rounds before settling for the best found so far
-const ZOOM_PAD_MIN = 9; // pad each side so a 10-min span straddling a bucket edge is seen whole
 const MAX_CONCURRENT = 6; // simultaneous observability calls (they 429 if fanned out wide)
 
 export type DistRow = {
@@ -50,8 +49,9 @@ type Distribution = {
   empty?: boolean; // no traffic
   capped?: boolean; // hit the 500-group API cap, so IPs is partial
   sampledWindows?: number; // 10-min windows zoomed to minute granularity
-  exact?: boolean; // peak/min proven maximal; false = best found before the round cap (a floor)
-  ips?: number;
+  exact?: boolean; // peak/min proven maximal ACROSS THE MEASURED IPs; false = a floor
+  ips?: number; // distinct IPs on this path in the window
+  measuredIps?: number; // how many of them had peaks resolved (the top PEAK_IPS by volume)
   maxPeakMin?: number; // busiest IP's peak 60s burst
   maxPeak10m?: number; // busiest IP's peak 10-minute volume
   rows?: DistRow[]; // top IPs, busiest first
@@ -66,18 +66,39 @@ export type ReportData = {
   distributions: Distribution[];
 };
 
-/** `fetch` bounded by an abort timeout so a stalled connection surfaces as an error instead of hanging the report pane on "Loading…" forever. Generous by design: a 6-day grouped query normally takes ~3-5s but spikes well past 15s while other report queries are in flight, and aborting one drops a whole panel. */
+/** `fetch` AND the body read bounded by one abort timeout, so a stalled connection surfaces as an error instead of hanging the report pane on "Loading…" forever. The body must be consumed inside the timeout: `await fetch` settles at response HEADERS, so clearing the timer around the fetch alone leaves a stalled body stream with no deadline at all — the pane would hang on "Loading…" with the refresh key inert. Generous by design: a 6-day grouped query normally takes ~3-5s but spikes while other report queries are in flight, and aborting one drops a whole panel. */
 async function fetchWithTimeout(
   input: string,
   init: RequestInit,
-  timeoutMs = 45000,
-): Promise<Response> {
+  timeoutMs = 30000,
+): Promise<{ ok: boolean; status: number; text: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    const res = await fetch(input, { ...init, signal: controller.signal });
+    return { ok: res.ok, status: res.status, text: await res.text() };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// One shared gate for every observability call. The limiter has to be global: fetchDist runs
+// several at a time AND each refinePeaks fans out its own batch, so a per-call-site cap
+// multiplies (2 x 6 = 12 in flight) past what the API tolerates — and the resulting 429s used
+// to surface as unmeasured buckets rather than as errors.
+let inFlight = 0;
+const waiting: (() => void)[] = [];
+
+/** Run `fn` with at most MAX_CONCURRENT observability calls in flight process-wide. */
+async function gated<T>(fn: () => Promise<T>): Promise<T> {
+  if (inFlight >= MAX_CONCURRENT)
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  inFlight++;
+  try {
+    return await fn();
+  } finally {
+    inFlight--;
+    waiting.shift()?.();
   }
 }
 
@@ -111,23 +132,29 @@ async function metrics(
     limit: opts.limit ?? 500, // hard max
   });
   for (let attempt = 1; ; attempt++) {
-    let res: Response;
+    let res: { ok: boolean; status: number; text: string };
     try {
-      res = await fetchWithTimeout(
-        `https://vercel.com/api/observability/metrics?${ctx.qs}`,
-        { method: 'POST', headers: ctx.headers, body },
+      res = await gated(() =>
+        fetchWithTimeout(
+          `https://vercel.com/api/observability/metrics?${ctx.qs}`,
+          { method: 'POST', headers: ctx.headers, body },
+        ),
       );
     } catch (e) {
       // A timeout/network failure throws before any response, so it can't be handled by
       // the status check below — retry it too, or one slow query silently drops a panel.
-      if (attempt < 3) {
+      // Only ONE such retry: a hung connection costs the full timeout each time, and the
+      // report chains these calls, so extra attempts turn a bad link into a pane that
+      // sits on "Loading…" for many minutes with no way to cancel.
+      if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 2000 * attempt));
         continue;
       }
       throw new Error(`metrics request failed: ${errMsg(e)}`);
     }
-    if (res.ok) return res.json() as Promise<{ data?: Row[]; summary?: Row[] }>;
-    const detail = `metrics ${res.status}: ${(await res.text()).slice(0, 160)}`;
+    if (res.ok)
+      return JSON.parse(res.text) as { data?: Row[]; summary?: Row[] };
+    const detail = `metrics ${res.status}: ${res.text.slice(0, 160)}`;
     if ((res.status >= 500 || res.status === 429) && attempt < 3) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
       continue;
@@ -143,7 +170,9 @@ async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
     { headers: ctx.headers },
   );
   if (!res.ok) return new Map();
-  const cfg = (await res.json()) as { rules?: { id: string; name: string }[] };
+  const cfg = JSON.parse(res.text) as {
+    rules?: { id: string; name: string }[];
+  };
   return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
 }
 
@@ -210,18 +239,6 @@ function safeIp(ip: string): boolean {
   return /^[0-9a-fA-F.:]{3,45}$/.test(ip);
 }
 
-/** Largest sum of `w` consecutive buckets (the busiest rolling window), or the largest single bucket when w is 1. */
-function maxRolling(buckets: number[], w: number): number {
-  let best = 0;
-  let cur = 0;
-  for (let i = 0; i < buckets.length; i++) {
-    cur += buckets[i];
-    if (i >= w) cur -= buckets[i - w];
-    if (cur > best) best = cur;
-  }
-  return best;
-}
-
 type Peaks = {
   peakMin: Map<string, number>;
   peak10m: Map<string, number>;
@@ -237,19 +254,26 @@ async function refinePeaks(
   listed: string[],
 ): Promise<Peaks> {
   const peakMin = new Map(listed.map((ip) => [ip, 0]));
-  // Aligned 10-minute buckets span the WHOLE window and mirror how a fixed_window rule
-  // counts, so they seed the sustained figure; zooms can only raise it (a rolling span
-  // crossing a bucket edge beats any single aligned bucket).
+  // peak10m is the max ALIGNED 10-minute bucket, full stop — it covers the whole window
+  // (so it is exact, not a sample) and matches how a fixed_window rule counts. Mixing in a
+  // rolling span from the zoomed windows would report two different numbers for the same
+  // traffic depending on whether that bucket happened to win a zoom nomination, and would
+  // compare a rolling figure against a ceiling the WAF applies to aligned windows.
   const peak10m = new Map(
     listed.map((ip) => [
       ip,
       Math.max(0, ...(tenMin.get(ip) ?? []).map((b) => b.c)),
     ]),
   );
+  // `zoomed` = buckets actually MEASURED. A bucket whose query failed goes only into
+  // `attempted`, so it is never re-nominated but still counts against the upper bound —
+  // marking it examined would let a 429 masquerade as proof and report a peak from a
+  // bucket nobody ever opened.
   const zoomed = new Set<string>();
+  const attempted = new Set<string>();
   let windows = 0;
 
-  /** Biggest un-zoomed bucket left for an IP — the ceiling on any minute still unexamined. */
+  /** Biggest unmeasured bucket left for an IP — the ceiling on any minute still unexamined. */
   const remaining = (ip: string) =>
     Math.max(
       0,
@@ -258,14 +282,15 @@ async function refinePeaks(
 
   for (let round = 0; round < ZOOM_ROUNDS; round++) {
     const globalBest = Math.max(0, ...peakMin.values());
-    // Each IP nominates its biggest un-zoomed bucket that could still beat both its own
+    // Each IP nominates its biggest un-attempted bucket that could still beat both its own
     // best and the global best; no nominations means the maximum is proven.
     const want: string[] = [];
     for (const ip of listed) {
       const bar = Math.max(peakMin.get(ip) ?? 0, globalBest);
       let pick: Bucket | undefined;
       for (const b of tenMin.get(ip) ?? [])
-        if (!zoomed.has(b.t) && b.c > bar && (!pick || b.c > pick.c)) pick = b;
+        if (!attempted.has(b.t) && b.c > bar && (!pick || b.c > pick.c))
+          pick = b;
       if (pick && !want.includes(pick.t)) want.push(pick.t);
     }
     if (!want.length) break;
@@ -274,8 +299,10 @@ async function refinePeaks(
       stamps.map((stamp) => async () => {
         const w = new Date(stamp);
         if (Number.isNaN(w.getTime())) return null;
-        const from = new Date(w.getTime() - ZOOM_PAD_MIN * 60_000);
-        const to = new Date(w.getTime() + (10 + ZOOM_PAD_MIN) * 60_000);
+        // Exactly the bucket: a 1-minute bucket never straddles a 10-minute boundary, so
+        // padding would only enlarge the response without tightening any bound.
+        const from = w;
+        const to = new Date(w.getTime() + 10 * 60_000);
         try {
           return seriesByIp(
             await metrics(ctx, ['clientIp'], {
@@ -292,15 +319,22 @@ async function refinePeaks(
       }),
       MAX_CONCURRENT,
     );
-    for (const stamp of stamps) zoomed.add(stamp);
-    windows += stamps.length;
+    // pool() preserves order, so results[i] is the outcome of stamps[i].
+    stamps.forEach((stamp, i) => {
+      attempted.add(stamp);
+      if (results[i]) {
+        zoomed.add(stamp);
+        windows++;
+      }
+    });
     for (const res of results) {
       if (!res) continue;
       for (const [ip, series] of res) {
         if (!peakMin.has(ip)) continue;
-        const counts = series.map((b) => b.c);
-        peakMin.set(ip, Math.max(peakMin.get(ip) ?? 0, maxRolling(counts, 1)));
-        peak10m.set(ip, Math.max(peak10m.get(ip) ?? 0, maxRolling(counts, 10)));
+        peakMin.set(
+          ip,
+          Math.max(peakMin.get(ip) ?? 0, ...series.map((b) => b.c)),
+        );
       }
     }
   }
@@ -342,7 +376,7 @@ async function fetchDist(
   // every IP came back.
   const ipFilter = `${filter} and clientIp in (${listed.map((ip) => `'${ip}'`).join(',')})`;
 
-  let tenMin = new Map<string, Bucket[]>();
+  let tenMin: Map<string, Bucket[]>;
   try {
     tenMin = seriesByIp(
       await metrics(ctx, ['clientIp'], {
@@ -351,8 +385,12 @@ async function fetchDist(
         granularity: { minutes: 10 },
       }),
     );
-  } catch {
-    // Fall through with no windows: rows still carry totals, peaks just read as unmeasured.
+  } catch (e) {
+    // Every peak derives from this series, so its failure must surface as a skip. Falling
+    // through with an empty map would leave nothing to nominate, and the all-zero result
+    // would then satisfy the exactness test — rendering a confident "peak 0/min · exact"
+    // for a path that was never measured at all.
+    return { ...base, ips: totals.length, skipped: `peaks: ${errMsg(e)}` };
   }
 
   const peaks = await refinePeaks(ctx, ipFilter, tenMin, listed);
@@ -390,8 +428,14 @@ async function fetchDist(
     ...base,
     capped: totals.length >= 500, // tail beyond 500 groups is dropped by the API
     ips: totals.length,
+    // Only the top PEAK_IPS by whole-window volume are measured, so `exact` is a claim about
+    // THEM, not about every IP on the path — a low-volume client that burst once and went
+    // quiet is outside the measured set entirely. The pane names the measured count so the
+    // headline is not read as a site-wide maximum.
+    measuredIps: rows.length,
     sampledWindows: peaks.windows,
-    // The headline is the true maximum when nothing left unresolved could have exceeded it.
+    // The headline is the maximum across measured IPs when nothing left unresolved among
+    // them could have exceeded it.
     exact: rows.every((r) => r.peakMinExact || r.peakMinBound <= maxPeakMin),
     maxPeakMin,
     maxPeak10m: Math.max(0, ...rows.map((r) => r.peak10m)),
@@ -473,11 +517,16 @@ export async function fetchReport(creds: {
   const serverFnPaths = allPaths
     .map((p) => p.path)
     .filter((p) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p));
+  // 500 groups is the API's hard cap, so a site with more distinct paths than that (every
+  // /company/<slug> competes for a slot) can push quieter fn hashes out of the list
+  // entirely. Say so rather than letting "(N fns)" imply the set is complete — a missing
+  // hash understates every IP against a ceiling that counts the whole prefix.
+  const pathsTruncated = allPaths.length >= 500;
   const serverFnDist = (): Promise<Distribution> =>
     serverFnPaths.length
       ? fetchDist(
           ctx,
-          `/_serverFn (${serverFnPaths.length} fns)`,
+          `/_serverFn (${serverFnPaths.length} fns${pathsTruncated ? ', path list truncated' : ''})`,
           `requestPath in (${serverFnPaths.map((p) => `'${p}'`).join(',')})`,
           serverfnLimit,
           serverfnSustained,
@@ -502,10 +551,16 @@ export async function fetchReport(creds: {
           "route eq '/api/tiles/[theme]/[z]/[x]/[y]'",
           tilesLimit,
         ),
+      // There is no query-string dimension in this API, so `/` is the closest available
+      // proxy for the rule's `/` AND ?search= condition — it is a strict SUPERSET. Plain
+      // homepage views inflate the 10-minute figure far more than the per-minute one
+      // (they accumulate steadily across 600s, which is exactly the level-rate shape the
+      // sustained tier discriminates on), so the label warns against sizing the sustained
+      // ceiling from it directly.
       () =>
         fetchDist(
           ctx,
-          '/ home (SSR search upper bound)',
+          '/ home — ALL home traffic, rule sees only ?search= (10m over-reads)',
           "requestPath eq '/'",
           searchLimit,
           searchSustained,

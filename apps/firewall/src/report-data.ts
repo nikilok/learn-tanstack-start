@@ -6,12 +6,15 @@
 // Peaks, not averages. A rate limit is a ceiling on a 60s (or 600s) window, so dividing a
 // 6-day total by the window is meaningless — it reported ~0.1/min for an IP whose real peak
 // was 99/min, which is how a 100/min ceiling came to look safe while it was blocking humans.
-// Instead: one hourly query yields every IP's hourly series (the API returns all buckets for
-// all returned groups), then the busiest hours are re-queried at minute granularity to get a
-// true peak/min and peak/10min. Peaks are therefore a FLOOR — only the sampled hours are
-// examined — which the pane states rather than implying exactness.
+// Instead, per path: rank IPs with one hourly query, pull a 10-MINUTE series for the top few
+// across the whole window (that series IS the sustained figure, aligned exactly as a
+// fixed_window rule counts), then resolve peak/min by opening the busiest 10-minute buckets
+// at minute granularity. A bucket of C requests cannot hold a minute above C, so the search
+// stops as soon as every unopened bucket is too small to matter — the reported maximum is
+// proven rather than sampled, and the pane says so ('exact' vs 'floor'), scoped to the IPs
+// actually measured.
 
-import { errMsg } from './util';
+import { envCeiling, errMsg } from './util';
 
 type Row = Record<string, unknown>;
 type Ctx = {
@@ -39,7 +42,7 @@ export type DistRow = {
   peakMin: number; // busiest single 60s bucket found
   peakMinExact: boolean; // false when refinement stopped early — peakMin is then only a floor
   peakMinBound: number; // proven upper bound on peak/min; equals peakMin when exact
-  peak10m: number; // busiest rolling 10-minute span found
+  peak10m: number; // busiest ALIGNED 10-minute bucket (whole window, so exact — not rolling)
 };
 type Distribution = {
   label: string;
@@ -91,7 +94,11 @@ const waiting: (() => void)[] = [];
 
 /** Run `fn` with at most MAX_CONCURRENT observability calls in flight process-wide. */
 async function gated<T>(fn: () => Promise<T>): Promise<T> {
-  if (inFlight >= MAX_CONCURRENT)
+  // `while`, not `if`: resolving a waiter only QUEUES its continuation, so between the
+  // release and that continuation running, a fresh caller can observe the decremented
+  // count and take the slot. Re-checking on wake stops the two from both proceeding and
+  // overshooting the cap — which would produce exactly the 429s this gate exists to avoid.
+  while (inFlight >= MAX_CONCURRENT)
     await new Promise<void>((resolve) => waiting.push(resolve));
   inFlight++;
   try {
@@ -431,12 +438,16 @@ async function fetchDist(
     // Only the top PEAK_IPS by whole-window volume are measured, so `exact` is a claim about
     // THEM, not about every IP on the path — a low-volume client that burst once and went
     // quiet is outside the measured set entirely. The pane names the measured count so the
-    // headline is not read as a site-wide maximum.
-    measuredIps: rows.length,
+    // headline is not read as a site-wide maximum. Unsampled rows are excluded from BOTH the
+    // count and the claim: their peaks are unknown, and an unknown that defaults to 0 would
+    // otherwise satisfy the exactness test and inflate the count with rows nobody measured.
+    measuredIps: rows.filter((r) => r.sampled).length,
     sampledWindows: peaks.windows,
     // The headline is the maximum across measured IPs when nothing left unresolved among
-    // them could have exceeded it.
-    exact: rows.every((r) => r.peakMinExact || r.peakMinBound <= maxPeakMin),
+    // them could have exceeded it — and when every listed IP was measured at all.
+    exact: rows.every(
+      (r) => r.sampled && (r.peakMinExact || r.peakMinBound <= maxPeakMin),
+    ),
     maxPeakMin,
     maxPeak10m: Math.max(0, ...rows.map((r) => r.peak10m)),
     rows,
@@ -497,17 +508,15 @@ export async function fetchReport(creds: {
   const topPaths = allPaths.slice(0, 60); // the pane's list stays a top-60 view
 
   // Each rate-limited path's ceilings (FW_*_LIMIT = 60s burst, FW_*_SUSTAINED_LIMIT = 600s)
-  // — the bars and percentages in the report compare measured peaks against these.
-  const ceiling = (v: string | undefined): number | undefined => {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : undefined;
-  };
-  const serverfnLimit = ceiling(process.env.FW_SERVERFN_LIMIT);
-  const serverfnSustained = ceiling(process.env.FW_SERVERFN_SUSTAINED_LIMIT);
-  const tilesLimit = ceiling(process.env.FW_TILES_LIMIT);
-  const searchLimit = ceiling(process.env.FW_SEARCH_LIMIT);
-  const searchSustained = ceiling(process.env.FW_SEARCH_SUSTAINED_LIMIT);
-  const downloadsLimit = ceiling(process.env.FW_DOWNLOADS_LIMIT);
+  // — the bars and percentages in the report compare measured peaks against these. Read via
+  // the same envCeiling the rule builder uses, so the pane can't draw a ceiling the rules
+  // would have rejected (its old local parser accepted non-integers that rules.ts refuses).
+  const serverfnLimit = envCeiling('FW_SERVERFN_LIMIT');
+  const serverfnSustained = envCeiling('FW_SERVERFN_SUSTAINED_LIMIT');
+  const tilesLimit = envCeiling('FW_TILES_LIMIT');
+  const searchLimit = envCeiling('FW_SEARCH_LIMIT');
+  const searchSustained = envCeiling('FW_SEARCH_SUSTAINED_LIMIT');
+  const downloadsLimit = envCeiling('FW_DOWNLOADS_LIMIT');
 
   // The `like` filter is rejected by this API and route '/__server' lumps every SSR page in
   // with the RPCs, so /_serverFn is matched as an explicit `in (…)` set of the fn paths seen

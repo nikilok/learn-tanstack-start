@@ -28,7 +28,9 @@ function usageBar(value: number, peak: number): string {
 
 /** Bar colour by proximity to whichever ceiling the IP is nearest — burst OR sustained: green safe · yellow watch · red near/over; neutral cyan when neither is configured. Colouring on burst alone would paint a flat scraper green while it sits at 180% of the sustained ceiling, which is the one client the sustained rule exists to catch. */
 function barColor(r: DistRow, limit?: number, sustainedLimit?: number): string {
-  if (!limit && !sustainedLimit) return 'cyan';
+  // An unmeasured row's peaks are 0 only because nothing was measured; green would be a
+  // safety claim about a row we know nothing about. Neutral, matching its dashed columns.
+  if (!r.sampled || (!limit && !sustainedLimit)) return 'cyan';
   const ratio = Math.max(
     limit ? r.peakMin / limit : 0,
     sustainedLimit ? r.peak10m / sustainedLimit : 0,

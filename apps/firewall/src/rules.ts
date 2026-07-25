@@ -1,5 +1,7 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
+import { envCeiling } from './util';
+
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
 export type ActionChoice = 'log' | 'challenge' | 'deny' | 'bypass'; // a rule's switchable mitigate action
 type Condition = {
@@ -34,20 +36,20 @@ const OBSERVE: RateLimitAction = 'log';
 export const dryRun =
   process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
 
-/** Read a positive-integer ceiling from the env (FW_*_LIMIT) — kept in .env.local, never the repo, so public code doesn't reveal the thresholds. Returns a placeholder in dry-run, which only lists rule names. */
+/** A REQUIRED ceiling (FW_*_LIMIT) — kept in .env.local, never the repo, so public code doesn't reveal the thresholds. Returns a placeholder in dry-run, which only lists rule names. */
 function envLimit(name: string): number {
-  const v = Number(process.env[name]);
-  if (Number.isInteger(v) && v > 0) return v;
+  const v = envCeiling(name);
+  if (v !== undefined) return v;
   if (dryRun) return 0; // dry-run lists rule names only; real ceilings not needed
   throw new Error(
     `${name} must be a positive integer (set it in .env.local) — firewall ceilings are kept out of the repo`,
   );
 }
 
-/** Read an OPTIONAL ceiling (FW_*_LIMIT), returning null when unset so the caller omits just that rule. Unlike envLimit this must NOT throw — a missing var would crash the whole apply (taking down every rule) instead of dropping one. */
+/** An OPTIONAL ceiling (FW_*_LIMIT), null when unset so the caller omits just that rule. Unlike envLimit this must NOT throw — a missing var would crash the whole apply (taking down every rule) instead of dropping one. */
 function optionalLimit(name: string): number | null {
-  const v = Number(process.env[name]);
-  if (Number.isInteger(v) && v > 0) return v;
+  const v = envCeiling(name);
+  if (v !== undefined) return v;
   return dryRun ? 0 : null; // dry-run lists rule names only; real ceilings not needed
 }
 

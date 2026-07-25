@@ -48,6 +48,10 @@ export function App() {
   const [reportOpen, setReportOpen] = useState(false); // report pane visible on the right
   const [focus, setFocus] = useState<'editor' | 'report'>('editor');
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
+  // Quit requested mid-apply. Ink's exit() only unmounts the UI — the apply loop would keep
+  // writing rules to Vercel with nothing on screen — so 'q' sets this instead and the loop
+  // stops at the next rule boundary, then exits. Never abandons a half-written single rule.
+  const cancelApply = useRef(false);
   const loadingReport = useRef(false); // dedupe concurrent report fetches
   const [reportScroll, setReportScroll] = useState(0);
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
@@ -93,8 +97,14 @@ export function App() {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
     }
     let anyError = false;
+    let cancelled = false;
     const statuses: ApplyStatus[] = [];
     for (let i = 0; i < snapshot.length; i++) {
+      // Checked between rules, never mid-request, so a quit can't leave one rule half-written.
+      if (cancelApply.current) {
+        cancelled = true;
+        break;
+      }
       setItems((prev) =>
         prev.map((it, j) => (j === i ? { ...it, status: 'applying' } : it)),
       );
@@ -120,10 +130,16 @@ export function App() {
     }
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
     process.exitCode = anyError ? 1 : 0;
+    applying.current = false;
+    // A quit requested mid-apply waits for this point, so the exit happens with no writes
+    // still in flight — the rules already applied stay applied, the rest were never touched.
+    if (cancelled) {
+      exit();
+      return;
+    }
     // Back to the editor rather than a terminal screen — an apply is a step in a session
     // (tune, apply, check the report, tune again), not the end of one. Releasing the
     // re-entrancy guard is what makes a second 'a' possible at all.
-    applying.current = false;
     setApplied({ summary: summaryLine(statuses), ok: !anyError });
     setPhase('select');
   };
@@ -195,6 +211,7 @@ export function App() {
       } else if (input === 'a') {
         if (applying.current) return;
         applying.current = true;
+        cancelApply.current = false; // a prior cancelled run must not abort this one
         setPhase('applying');
         void applyAll(items);
       } else if (input === 'q' || key.escape) exit();
@@ -211,7 +228,9 @@ export function App() {
       } else if (key.escape || key.leftArrow) setPhase('select');
       else if (input === 'q') exit();
     } else if (phase === 'applying') {
-      if (input === 'q') exit(); // escape hatch; edits stay blocked mid-apply
+      // Request cancellation rather than exiting here: exit() would unmount the UI and leave
+      // applyAll writing rules to Vercel unobserved. applyAll exits once it stops cleanly.
+      if (input === 'q') cancelApply.current = true;
     } else if (phase === 'fatal') {
       if (input === 'q' || key.return || key.escape) exit();
     }
@@ -288,7 +307,9 @@ export function App() {
             <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
           </Box>
         )}
-        {phase === 'applying' && <Text color="yellow">applying… · q quit</Text>}
+        {phase === 'applying' && (
+          <Text color="yellow">applying… · q stops after the current rule</Text>
+        )}
       </Box>
       {reportOpen && (
         <Box

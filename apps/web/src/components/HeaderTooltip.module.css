@@ -65,12 +65,9 @@
   }
 }
 
-/* Right-aligned is the pre-hydration fallback; `--tip-x` shifts it to centred-and-clamped. */
 .bubble {
   position: absolute;
   top: 11px;
-  right: 0;
-  translate: var(--tip-x, 0) 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -82,6 +79,18 @@
   border: 1px solid var(--tt-border);
   border-radius: 9px;
   box-shadow: var(--tt-shadow);
+}
+
+/* Alignment is pure CSS so it is exact and correct before JS runs; the component only
+   picks which class applies. Centred puts the caret dead centre; end-aligned hangs the
+   bubble off the trigger's right edge, which never runs off screen. */
+.center {
+  left: 50%;
+  translate: -50% 0;
+}
+
+.end {
+  right: 0;
 }
 
 .label {
@@ -106,7 +115,6 @@
   border: 1px solid var(--tt-key-line);
   border-radius: 4px;
   box-shadow: 0 1.5px 0 var(--tt-key-line);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   font-weight: 500;
   line-height: 1;

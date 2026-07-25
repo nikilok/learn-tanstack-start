@@ -1,11 +1,11 @@
-import { type ReactNode, useLayoutEffect, useRef } from 'react';
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 
 import { useIsMac } from '../hooks/useIsMac';
 import { keycaps, type ShortcutId } from './headerShortcuts';
 
 import styles from './HeaderTooltip.module.css';
 
-/** Keep the bubble this far inside the viewport when the trigger sits near an edge. */
+/** Keep the bubble this far inside the viewport before falling back to end-aligned. */
 const EDGE_PAD = 8;
 
 interface HeaderTooltipProps {
@@ -13,6 +13,13 @@ interface HeaderTooltipProps {
   label: string;
   /** Shortcut whose keycaps sit under the label — omitted for controls without one. */
   shortcut?: ShortcutId;
+  /**
+   * `auto` centres on the trigger where that fits and falls back to end-aligned; the fixed
+   * modes never measure. Both are plain CSS, so every mode renders correctly before JS runs.
+   * Use `center` for a trigger wider than its bubble (end-aligning one detaches the caret)
+   * and `end` where something else must share the bubble's edge.
+   */
+  align?: 'auto' | 'center' | 'end';
   /** Hide the chip while something else owns the slot below the button. */
   suppressed?: boolean;
   /** Display utility for the wrapper — the module deliberately sets none. */
@@ -27,6 +34,7 @@ interface HeaderTooltipProps {
 export default function HeaderTooltip({
   label,
   shortcut,
+  align = 'auto',
   suppressed = false,
   className,
   children,
@@ -35,46 +43,52 @@ export default function HeaderTooltip({
   const keys = shortcut ? keycaps(shortcut, isMac) : [];
   const wrapRef = useRef<HTMLSpanElement>(null);
   const bubbleRef = useRef<HTMLSpanElement>(null);
+  // End-aligned until measured, matching the stylesheet — so SSR, no-JS and the first
+  // client render all agree. Fixed modes are their own answer and never change.
+  const [centred, setCentred] = useState(align === 'center');
 
-  // Centre the bubble on the trigger like the shell does, but only where it fits: otherwise
-  // it stays end-aligned (right edge on the trigger's), which never runs off screen. That
-  // end-aligned position is the stylesheet's default, so `--tip-x: 0` IS the fallback — and
-  // it's what renders pre-hydration. The caret is CSS-centred on the trigger either way.
   useLayoutEffect(() => {
+    if (align !== 'auto') return;
     const wrap = wrapRef.current;
     const bubble = bubbleRef.current;
     if (!wrap || !bubble) return;
 
-    const place = () => {
+    const measure = () => {
       const trigger = wrap.getBoundingClientRect();
       const width = bubble.offsetWidth;
       // clientWidth, not innerWidth: `body { overflow-x: hidden }` clips at the content
       // box, so a classic scrollbar's width is not space the bubble can use.
       const limit = document.documentElement.clientWidth;
-      const centred = trigger.left + trigger.width / 2 - width / 2;
-      const fits = centred >= EDGE_PAD && centred + width <= limit - EDGE_PAD;
-      wrap.style.setProperty(
-        '--tip-x',
-        fits ? `${Math.round(centred - (trigger.right - width))}px` : '0px',
-      );
+      const left = trigger.left + trigger.width / 2 - width / 2;
+      setCentred(left >= EDGE_PAD && left + width <= limit - EDGE_PAD);
     };
-    place();
+    measure();
+
+    // Coalesce to one read per frame — a drag-resize otherwise interleaves a forced layout
+    // per tooltip per tick (the pattern CompanyTimeline uses for the same reason).
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measure();
+      });
+    };
+
     // Both measured boxes, because either can change without a window resize: the bubble
-    // when Geist replaces the fallback font, the wrapper when the cursor control goes from
-    // `display:none` to shown as a fine pointer appears (measuring it at 0 gives a bogus
-    // offset that nothing else would correct). `--tip-x` only drives `translate`, so
-    // re-placing can't resize either box and feed the observer.
-    const observer = new ResizeObserver(place);
+    // when Geist replaces the fallback font or the keycaps mount, the wrapper when the
+    // cursor control goes from `display:none` to shown as a fine pointer appears.
+    const observer = new ResizeObserver(schedule);
     observer.observe(wrap);
     observer.observe(bubble);
-    // A viewport resize that leaves both boxes untouched still moves the clamp.
-    window.addEventListener('resize', place);
+    // A viewport resize that leaves both boxes untouched still moves the limit.
+    window.addEventListener('resize', schedule);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener('resize', place);
+      window.removeEventListener('resize', schedule);
     };
-    // Keycaps arrive at hydration and widen the bubble, so re-place when they do.
-  }, [keys.length, label]);
+  }, [align]);
 
   return (
     <span ref={wrapRef} className={`${styles.wrap} ${className}`}>
@@ -83,7 +97,10 @@ export default function HeaderTooltip({
         aria-hidden
         className={`${styles.tip}${suppressed ? ` ${styles.suppressed}` : ''}`}
       >
-        <span ref={bubbleRef} className={styles.bubble}>
+        <span
+          ref={bubbleRef}
+          className={`${styles.bubble} ${centred ? styles.center : styles.end}`}
+        >
           <span className={styles.label}>{label}</span>
           {keys.length > 0 && (
             <span className={styles.keys}>

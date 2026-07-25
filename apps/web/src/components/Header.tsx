@@ -18,8 +18,9 @@ export default function Header() {
     <header className="site-header sticky top-0 z-50 px-4">
       <nav className="page-wrap flex items-center gap-x-3 py-3 sm:py-4">
         <h2 className="m-0 shrink-0">
-          {/* Label-only chip: the shell's logo has no shortcut either. */}
-          <HeaderTooltip label="Home" className="inline-flex">
+          {/* Label-only chip (the shell's logo has no shortcut either). Fixed centre: the
+              wordmark is far wider than its bubble, so end-aligning detaches the caret. */}
+          <HeaderTooltip label="Home" align="center" className="inline-flex">
             <Link
               to="/"
               search={{ search: '' }}

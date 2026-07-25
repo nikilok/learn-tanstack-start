@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import CursorToggle from './CursorToggle';
 import DownloadButton from './DownloadButton';
 import FiltersButton from './FiltersButton';
+import HeaderTooltip from './HeaderTooltip';
 import Logo from './Logo';
 import ShareButton from './ShareButton';
 import ThemeToggle from './ThemeToggle';
@@ -17,13 +18,16 @@ export default function Header() {
     <header className="site-header sticky top-0 z-50 px-4">
       <nav className="page-wrap flex items-center gap-x-3 py-3 sm:py-4">
         <h2 className="m-0 shrink-0">
-          <Link
-            to="/"
-            search={{ search: '' }}
-            className="inline-flex items-center rounded-md px-3 py-1.5 no-underline transition hover:bg-(--link-bg-hover)"
-          >
-            <Logo className="h-6 sm:h-8" />
-          </Link>
+          {/* Label-only chip: the shell's logo has no shortcut either. */}
+          <HeaderTooltip label="Home" className="inline-flex">
+            <Link
+              to="/"
+              search={{ search: '' }}
+              className="inline-flex items-center rounded-md px-3 py-1.5 no-underline transition hover:bg-(--link-bg-hover)"
+            >
+              <Logo className="h-6 sm:h-8" />
+            </Link>
+          </HeaderTooltip>
         </h2>
 
         <div id="header-pill-portal" className="ml-auto min-w-0 sm:ml-0" />

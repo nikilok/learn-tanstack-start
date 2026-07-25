@@ -1,5 +1,6 @@
 // Single source of truth for the title-bar shortcuts, shared across the main/renderer boundary:
 // the main handler binds `code`+`shift`, the tooltip overlay renders `keys` as keycaps.
+// Mirrored by apps/web/src/components/headerShortcuts.ts (which imports this to test parity); the web diverges only on toggle-theme and drops back/forward.
 
 export type ShortcutId =
   | 'back'

@@ -438,8 +438,23 @@ function FiltersPage() {
   // type) and to popovers that already handled the key — Select / DatePicker
   // listen on their root, so Escapes from anywhere inside them arrive here
   // with defaultPrevented set.
-  const actionsRef = useRef({ apply, cancel, clearAll, dirty, jumpToSection });
-  actionsRef.current = { apply, cancel, clearAll, dirty, jumpToSection };
+  const resettable = activeCount > 0;
+  const actionsRef = useRef({
+    apply,
+    cancel,
+    clearAll,
+    dirty,
+    jumpToSection,
+    resettable,
+  });
+  actionsRef.current = {
+    apply,
+    cancel,
+    clearAll,
+    dirty,
+    jumpToSection,
+    resettable,
+  };
   useEffect(() => {
     const TYPING =
       'input:not([type="checkbox"]), textarea, select, [contenteditable]';
@@ -467,6 +482,8 @@ function FiltersPage() {
         e.preventDefault();
         current.cancel();
       } else if (e.key === 'r' || e.key === 'R') {
+        // Same gate as the button's `disabled` — nothing set, nothing to reset.
+        if (!current.resettable) return;
         e.preventDefault();
         current.clearAll();
       }
@@ -751,13 +768,19 @@ function FiltersPage() {
       <div className="pointer-events-none sticky bottom-4 z-10 mt-10">
         <div
           className={`pointer-events-auto mx-auto flex w-fit items-center gap-5 py-2 ${
-            footerStuck ? 'glass rounded-full pr-2 pl-6 backdrop-blur-md!' : ''
+            footerStuck ? 'glass rounded-full pr-2 pl-2 backdrop-blur-md!' : ''
           }`}
         >
+          {/* Brand-red once there's a set to clear (else disabled, R inert); geometry is constant so the row never reflows. */}
           <button
             type="button"
             onClick={clearAll}
-            className="cursor-pointer border-none bg-transparent p-0 text-sm text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+            disabled={activeCount === 0}
+            className={`rounded-full border-none px-4 py-2 text-sm font-medium transition ${
+              activeCount > 0
+                ? 'cursor-pointer bg-(--logo-red) text-(--bg-base) shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)] hover:opacity-90'
+                : 'cursor-default bg-transparent text-(--sea-ink-faint)'
+            }`}
           >
             Reset
             <kbd className="ml-1.5 hidden font-sans text-xs pointer-fine:inline">
@@ -778,26 +801,26 @@ function FiltersPage() {
             type="button"
             onClick={apply}
             disabled={!dirty}
-            className={`flex cursor-pointer items-center gap-2 rounded-full border-none bg-(--sea-ink) py-2 pl-5 text-sm font-medium text-(--bg-base) transition hover:opacity-90 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40 ${
-              activeCount > 0 ? 'pr-3' : 'pr-5'
-            }`}
+            className="flex cursor-pointer items-center gap-2 rounded-full border-none bg-(--sea-ink) py-2 pr-3 pl-5 text-sm font-medium text-(--bg-base) transition hover:opacity-90 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40"
           >
             Apply
             <span className="hidden items-center gap-1 pointer-fine:inline-flex">
               <kbd className="font-sans text-xs">{modKey}</kbd>
               <kbd className="font-sans text-xs">↵</kbd>
             </span>
-            {activeCount > 0 && (
-              <span
-                className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
-                  dirty
+            {/* Slot is always laid out (`invisible` at zero, which also keeps the "0" out of
+                the a11y tree) so the badge appearing can't widen the pill and slide the bar. */}
+            <span
+              className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
+                activeCount === 0
+                  ? 'invisible'
+                  : dirty
                     ? 'border border-dashed border-(--bg-base)/70 bg-transparent text-(--bg-base)'
                     : 'border-none bg-(--logo-red) text-white shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)]'
-                }`}
-              >
-                {activeCount}
-              </span>
-            )}
+              }`}
+            >
+              {activeCount}
+            </span>
           </button>
         </div>
       </div>

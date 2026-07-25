@@ -124,6 +124,13 @@ function Home() {
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Drop a pending debounce on unmount: it navigates with `replace: true`, so firing after a nav away replaces THAT entry.
+  useEffect(
+    () => () => {
+      if (navTimerRef.current) clearTimeout(navTimerRef.current);
+    },
+    [],
+  );
   const sentinelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =

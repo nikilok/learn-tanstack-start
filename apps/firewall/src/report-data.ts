@@ -44,7 +44,7 @@ export type DistRow = {
   peakMinBound: number; // proven upper bound on peak/min; equals peakMin when exact
   peak10m: number; // busiest ALIGNED 10-minute bucket (whole window, so exact — not rolling)
 };
-type Distribution = {
+export type Distribution = {
   label: string;
   limit?: number; // 60s burst ceiling (FW_*_LIMIT), if configured — bars render against it
   sustainedLimit?: number; // 600s sustained ceiling (FW_*_SUSTAINED_LIMIT), if configured

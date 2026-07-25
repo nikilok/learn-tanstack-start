@@ -69,7 +69,9 @@ export default function ShareButton() {
 
   return (
     <div className="relative flex">
-      {/* The pointer is still on the button after a copy, so the chip yields to the toast. */}
+      {/* The pointer is still on the button after a copy, so the chip yields to the toast.
+          Pinned end-aligned to keep their right edges shared — a centred chip would hand
+          over to a toast 31px to its left. */}
       <HeaderTooltip
         label="Share"
         shortcut="share"

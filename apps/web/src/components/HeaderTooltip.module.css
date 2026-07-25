@@ -1,5 +1,8 @@
-/* Keycap chip for the header controls — mirrors the shell's title-bar tooltip
-   (`.tooltip` in apps/desktop/src/renderer/style.css), re-tokenised to the web theme. */
+/* Keycap chip for the header controls. Values are a straight port of the shell's title-bar
+   tooltip (`.tooltip` in apps/desktop/src/renderer/style.css) — the two must look identical,
+   so the chip keeps its own tokens rather than the page's card tokens. In particular the
+   shadow is a plain drop shadow: --shadow-card's `0 0 0 1px` ring would paint a hairline
+   straight across the caret and read as a seam. */
 
 /* No `display`: unlayered CSS-module rules beat Tailwind's layered `hidden`/`inline-flex` at the call site. */
 .wrap {
@@ -21,6 +24,22 @@
     transform 140ms ease,
     visibility 0s linear 140ms;
   pointer-events: none;
+
+  --tt-bg: #ffffff;
+  --tt-border: rgba(0, 0, 0, 0.09);
+  --tt-fg: #1f2430;
+  --tt-key-bg: #ffffff;
+  --tt-key-line: #e4e5e8;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+
+:global(.dark) .tip {
+  --tt-bg: #191b21;
+  --tt-border: rgba(255, 255, 255, 0.07);
+  --tt-fg: #e7e9ee;
+  --tt-key-bg: #0e1014;
+  --tt-key-line: #2f323a;
+  --tt-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
 }
 
 /* Keyboard focus reveals the chip on any device — it's how the shortcut is found. */
@@ -54,20 +73,22 @@
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  color: var(--sea-ink);
+  color: var(--tt-fg);
   white-space: nowrap;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--tt-bg);
+  border: 1px solid var(--tt-border);
   border-radius: 9px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--tt-shadow);
 }
 
+/* Alignment is pure CSS so it is exact and correct before JS runs; the component only
+   picks which class applies. Centred puts the caret dead centre; end-aligned hangs the
+   bubble off the trigger's right edge, which never runs off screen. */
 .center {
   left: 50%;
-  transform: translateX(-50%);
+  translate: -50% 0;
 }
 
-/* Right-hand cluster: hang off the trigger's right edge so it grows inward, never off screen. */
 .end {
   right: 0;
 }
@@ -75,7 +96,6 @@
 .label {
   font-size: 13px;
   font-weight: 600;
-  line-height: 1;
 }
 
 .keys {
@@ -83,7 +103,6 @@
   gap: 5px;
 }
 
-/* Tinted off the bubble, which shares the base `kbd`'s --surface background. */
 .keys kbd {
   display: inline-flex;
   align-items: center;
@@ -91,24 +110,27 @@
   min-width: 20px;
   height: 20px;
   padding: 0 5px;
+  color: var(--tt-fg);
+  background: var(--tt-key-bg);
+  border: 1px solid var(--tt-key-line);
+  border-radius: 4px;
+  box-shadow: 0 1.5px 0 var(--tt-key-line);
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
-  background: var(--chip-bg);
-  border-color: var(--chip-line);
-  box-shadow: 0 1.5px 0 var(--chip-line);
 }
 
-/* Painted after the bubble so it covers the border under the point, leaving no seam. */
+/* Painted after the bubble so it covers the border under the point: only the two edges that
+   form the visible point after the 45° turn are drawn, so the outline continues with no seam. */
 .caret {
   position: absolute;
   top: 6px;
   left: 50%;
-  width: 9px;
-  height: 9px;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-  border-left: 1px solid var(--line);
+  width: 10px;
+  height: 10px;
+  background: var(--tt-bg);
+  border-top: 1px solid var(--tt-border);
+  border-left: 1px solid var(--tt-border);
   border-radius: 2px 0 0 0;
   transform: translateX(-50%) rotate(45deg);
 }

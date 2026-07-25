@@ -37,7 +37,6 @@ export default function CursorToggle() {
     <HeaderTooltip
       label="Cursor"
       shortcut="toggle-cursor"
-      align="end"
       className="hidden pointer-fine:inline-flex"
     >
       <button

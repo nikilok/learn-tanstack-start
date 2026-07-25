@@ -438,8 +438,23 @@ function FiltersPage() {
   // type) and to popovers that already handled the key — Select / DatePicker
   // listen on their root, so Escapes from anywhere inside them arrive here
   // with defaultPrevented set.
-  const actionsRef = useRef({ apply, cancel, clearAll, dirty, jumpToSection });
-  actionsRef.current = { apply, cancel, clearAll, dirty, jumpToSection };
+  const resettable = activeCount > 0;
+  const actionsRef = useRef({
+    apply,
+    cancel,
+    clearAll,
+    dirty,
+    jumpToSection,
+    resettable,
+  });
+  actionsRef.current = {
+    apply,
+    cancel,
+    clearAll,
+    dirty,
+    jumpToSection,
+    resettable,
+  };
   useEffect(() => {
     const TYPING =
       'input:not([type="checkbox"]), textarea, select, [contenteditable]';
@@ -467,6 +482,8 @@ function FiltersPage() {
         e.preventDefault();
         current.cancel();
       } else if (e.key === 'r' || e.key === 'R') {
+        // Same gate as the button's `disabled` — nothing set, nothing to reset.
+        if (!current.resettable) return;
         e.preventDefault();
         current.clearAll();
       }
@@ -751,13 +768,22 @@ function FiltersPage() {
       <div className="pointer-events-none sticky bottom-4 z-10 mt-10">
         <div
           className={`pointer-events-auto mx-auto flex w-fit items-center gap-5 py-2 ${
-            footerStuck ? 'glass rounded-full pr-2 pl-6 backdrop-blur-md!' : ''
+            footerStuck ? 'glass rounded-full pr-2 pl-2 backdrop-blur-md!' : ''
           }`}
         >
+          {/* Fills brand-red once there's a set to clear, mirroring the glow on
+              Apply's applied-count badge; disabled (and the R shortcut inert)
+              otherwise. The pill geometry is constant so the row never reflows
+              as filters come and go — only the fill moves. */}
           <button
             type="button"
             onClick={clearAll}
-            className="cursor-pointer border-none bg-transparent p-0 text-sm text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+            disabled={activeCount === 0}
+            className={`rounded-full border-none px-4 py-2 text-sm font-medium transition ${
+              activeCount > 0
+                ? 'cursor-pointer bg-(--logo-red) text-(--bg-base) shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)] hover:opacity-90'
+                : 'cursor-default bg-transparent text-(--sea-ink-faint)'
+            }`}
           >
             Reset
             <kbd className="ml-1.5 hidden font-sans text-xs pointer-fine:inline">

@@ -171,7 +171,10 @@ function top(
 }
 
 /** Run tasks with bounded concurrency, so one report refresh can't fan out into dozens of simultaneous observability calls (which get 429'd). */
-async function pool<T>(tasks: (() => Promise<T>)[], size: number): Promise<T[]> {
+async function pool<T>(
+  tasks: (() => Promise<T>)[],
+  size: number,
+): Promise<T[]> {
   const out = new Array<T>(tasks.length);
   let next = 0;
   await Promise.all(
@@ -198,8 +201,7 @@ function seriesByIp(resp: { data?: Row[] }): Map<string, Bucket[]> {
     if (list) list.push({ t, c: cnt(r) });
     else byIp.set(ip, [{ t, c: cnt(r) }]);
   }
-  for (const list of byIp.values())
-    list.sort((a, b) => a.t.localeCompare(b.t)); // ISO strings sort chronologically
+  for (const list of byIp.values()) list.sort((a, b) => a.t.localeCompare(b.t)); // ISO strings sort chronologically
   return byIp;
 }
 

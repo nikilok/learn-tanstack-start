@@ -801,26 +801,26 @@ function FiltersPage() {
             type="button"
             onClick={apply}
             disabled={!dirty}
-            className={`flex cursor-pointer items-center gap-2 rounded-full border-none bg-(--sea-ink) py-2 pl-5 text-sm font-medium text-(--bg-base) transition hover:opacity-90 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40 ${
-              activeCount > 0 ? 'pr-3' : 'pr-5'
-            }`}
+            className="flex cursor-pointer items-center gap-2 rounded-full border-none bg-(--sea-ink) py-2 pr-3 pl-5 text-sm font-medium text-(--bg-base) transition hover:opacity-90 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40"
           >
             Apply
             <span className="hidden items-center gap-1 pointer-fine:inline-flex">
               <kbd className="font-sans text-xs">{modKey}</kbd>
               <kbd className="font-sans text-xs">↵</kbd>
             </span>
-            {activeCount > 0 && (
-              <span
-                className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
-                  dirty
+            {/* Slot is always laid out (`invisible` at zero, which also keeps the "0" out of
+                the a11y tree) so the badge appearing can't widen the pill and slide the bar. */}
+            <span
+              className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] leading-none font-semibold ${
+                activeCount === 0
+                  ? 'invisible'
+                  : dirty
                     ? 'border border-dashed border-(--bg-base)/70 bg-transparent text-(--bg-base)'
                     : 'border-none bg-(--logo-red) text-white shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)]'
-                }`}
-              >
-                {activeCount}
-              </span>
-            )}
+              }`}
+            >
+              {activeCount}
+            </span>
           </button>
         </div>
       </div>

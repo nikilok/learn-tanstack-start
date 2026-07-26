@@ -1,7 +1,11 @@
 import { type RefObject, useEffect, useState } from 'react';
 
 import { cleanTitle, prefersReducedMotion } from '../utils';
-import { APP_NAME } from '../utils/app-meta';
+import { APP_NAME, APP_TITLE } from '../utils/app-meta';
+
+// The home document title as the title bar would render it — the details-title
+// poll must not mistake it (still current mid-navigation) for a page title.
+const HOME_TITLE_CLEANED = cleanTitle(APP_TITLE);
 
 /** What the scene camera should look at: an app-content rect (iframe-viewport coords) or the whole scene (`rect: null`). */
 export interface PreviewShot {
@@ -307,7 +311,11 @@ export function usePreviewScenario(
         () => {
           const t = doc()?.title;
           const cleaned = t ? cleanTitle(t) : '';
-          return cleaned && cleaned !== APP_NAME ? cleaned : null;
+          return cleaned &&
+            cleaned !== APP_NAME &&
+            cleaned !== HOME_TITLE_CLEANED
+            ? cleaned
+            : null;
         },
         { intervalMs: 300, timeoutMs: 5_000, signal },
       );

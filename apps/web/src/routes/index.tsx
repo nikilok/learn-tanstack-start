@@ -27,6 +27,8 @@ import {
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
+import { buildWebsiteJsonLd } from '../utils/jsonld';
+import { jsonLdMeta } from '../utils/seo';
 
 const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
@@ -60,6 +62,9 @@ export const Route = createFileRoute('/')({
     middlewares: [stripSearchParams({ search: '' } as never)],
   },
   head: ({ match }) => ({
+    // Title/description inherit from __root; the WebSite block only belongs on
+    // the home document — search engines read site name + aliases from it.
+    meta: jsonLdMeta(buildWebsiteJsonLd(buildCanonical('/'))),
     links: [
       {
         rel: 'canonical',
@@ -197,8 +202,13 @@ function Home() {
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
+        {/* The page's only h1 — the visual hero is the stat h2 in HeroText. */}
+        <h1 className="sr-only">
+          UK Sponsor Search — find licensed Skilled Worker visa sponsors in the
+          UK
+        </h1>
         <p className="island-kicker mb-3">
-          Search UK companies
+          Search UK sponsors
           {!platformInfo.isMobile && (
             <span
               style={{

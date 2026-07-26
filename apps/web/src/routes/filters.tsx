@@ -58,9 +58,10 @@ export const Route = createFileRoute('/filters')({
   // Canonical is always the bare /filters (match.pathname carries no params),
   // so filtered URL variants never index as near-duplicates.
   head: ({ match }) => {
-    const pageTitle = 'SponsorSearch . Filter UK Visa Sponsors';
+    const pageTitle =
+      'SponsorSearch . Advanced Filters for the UK Sponsorship List';
     const pageDescription =
-      'Filter every UK licensed visa sponsor by route, licence rating, city, industry, incorporation date and company status. Tick what matters and browse the matching companies instantly.';
+      'Browse the UK sponsorship list with advanced filters: visa route, licence rating, city, industry, company status, incorporation date and change signals.';
     const canonicalUrl = buildCanonical(match.pathname);
     return buildSeoHead({
       title: pageTitle,
@@ -73,6 +74,29 @@ export const Route = createFileRoute('/filters')({
           name: pageTitle,
           description: pageDescription,
           url: canonicalUrl,
+        },
+        // Mirrors the page's eight filter sections (HeroText FACETS granularity)
+        // with fuller labels for crawlers and AI assistants.
+        {
+          '@context': 'https://schema.org',
+          '@type': 'ItemList',
+          name: 'Sponsor filter dimensions',
+          description:
+            'Ways the UK sponsorship list can be filtered on SponsorSearch.',
+          itemListElement: [
+            'Visa route',
+            'Sponsor licence rating and worker type',
+            'City or town',
+            'Industry or SIC code',
+            'Company status',
+            'Company type',
+            'Incorporation date',
+            'Change signals: renames, office moves, charges, insolvency, overdue accounts',
+          ].map((name, position) => ({
+            '@type': 'ListItem',
+            position: position + 1,
+            name,
+          })),
         },
       ],
     });
@@ -509,13 +533,16 @@ function FiltersPage() {
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-10 sm:py-16">
       <section className="mx-auto max-w-2xl pb-6">
-        <h1 className="island-kicker mb-3">Refine the sponsor list</h1>
+        <h1 className="island-kicker mb-3">Filter the UK sponsor list</h1>
         <p className="mt-2 text-sm text-(--sea-ink-soft)">
-          Open a section, tick what matters and hit Apply. The home page then
-          shows every sponsor that matches, and you can still type a company
-          name on top. Your choices stick around until you reset them. One
-          caveat: filters that rely on Companies House data leave out the few
-          sponsors we can’t match to a registered company, mostly public bodies.
+          Filter by visa route, licence rating, city, industry, company status
+          or incorporation date, then layer on change signals like renames,
+          office moves, charges or insolvency history. Open a section, tick what
+          matters and hit Apply. The home page then shows every sponsor that
+          matches, and you can still type a company name on top. Your choices
+          stick around until you reset them. One caveat: filters that rely on
+          Companies House data leave out the few sponsors we can’t match to a
+          registered company, mostly public bodies.
         </p>
 
         <div className="mt-6">

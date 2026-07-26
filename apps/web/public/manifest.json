@@ -1,7 +1,7 @@
 {
   "name": "Skilled Worker Sponsor Search",
   "short_name": "SponsorSearch",
-  "description": "Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.",
+  "description": "Free UK sponsor search — every licensed Skilled Worker visa sponsor in the UK. Filter the Home Office register by city, industry, visa route or rating.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

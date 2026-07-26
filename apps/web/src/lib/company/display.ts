@@ -4,9 +4,15 @@ import {
   skilledWorkerFirst,
   titleCase,
 } from '../../utils';
-import { ratingPhrase } from '../../utils/jsonld';
 import { ratingPriorityFirst } from '../search/params';
-import { type LicenceRow, ratingLabel, routeLicences } from './licences';
+import {
+  type LicenceRow,
+  licencesVary,
+  ratingLabel,
+  ratingPhrase,
+  ratingTiersDiffer,
+  routeLicences,
+} from './licences';
 
 // Grammatical "A, B and C" joiner for the routes and former-names sentences.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
@@ -119,16 +125,9 @@ export function deriveCompanyDisplay({
       (l) =>
         `${l.ratings.map(ratingLabel).join(' and ')} for ${titleCase(l.route)}`,
     ),
-    // TWO distinct questions, previously conflated into one flag:
-    // `licencesVary` — do the raw register values differ at all? Drives whether
-    // to enumerate the pairs, so a Worker vs Temporary Worker split is shown.
-    licencesVary:
-      new Set(routeLicenceList.map((l) => l.ratings.join('|'))).size > 1,
-    // `ratingTiersDiffer` — do the RATING TIERS differ? Only this may claim the
-    // rating "differs by route"; asserting it for a company that is A-rated
-    // throughout published a false distinction on ~3,289 pages.
-    ratingTiersDiffer:
-      new Set(routeLicenceList.map((l) => ratingPhrase(l.ratings))).size > 1,
+    // Both from lib/company/licences, the same functions the FAQ JSON-LD uses.
+    licencesVary: licencesVary(routeLicenceList),
+    ratingTiersDiffer: ratingTiersDiffer(routeLicenceList),
     location: registeredLocation(profile?.registered_office_address),
     industry: profile?.sicDescriptions
       ?.map((sic) => sic.description)

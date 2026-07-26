@@ -3,7 +3,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   cardLicence,
   type LicenceRow,
+  licencesVary,
   poolForPrimary,
+  ratingPhrase,
+  ratingTiersDiffer,
   routeLicences,
 } from './licences.ts';
 
@@ -176,5 +179,71 @@ describe('poolForPrimary — a namesake slug never leaks another entity', () => 
 
   test('handles an empty pool', () => {
     expect(poolForPrimary([])).toEqual([]);
+  });
+});
+
+describe('licencesVary vs ratingTiersDiffer — one rule, two questions', () => {
+  const worker = { ratings: ['Worker (A rating)'] };
+  const tempWorker = { ratings: ['Temporary Worker (A rating)'] };
+  const bRated = { ratings: ['Worker (B rating)'] };
+
+  test('a Worker vs Temporary Worker split VARIES but does not differ in tier', () => {
+    // Both are A-rated. Claiming the RATING differs here was false on ~3,289
+    // pages; the licence-TYPE distinction is still real and worth showing.
+    expect(licencesVary([worker, tempWorker])).toBe(true);
+    expect(ratingTiersDiffer([worker, tempWorker])).toBe(false);
+  });
+
+  test('an A vs B split both varies and differs in tier', () => {
+    expect(licencesVary([worker, bRated])).toBe(true);
+    expect(ratingTiersDiffer([worker, bRated])).toBe(true);
+  });
+
+  test('identical ratings across routes do neither', () => {
+    expect(licencesVary([worker, worker])).toBe(false);
+    expect(ratingTiersDiffer([worker, worker])).toBe(false);
+  });
+
+  test('a single licence does neither', () => {
+    expect(licencesVary([worker])).toBe(false);
+    expect(ratingTiersDiffer([worker])).toBe(false);
+  });
+});
+
+describe('ratingPhrase', () => {
+  test('maps each registry tier to prose', () => {
+    expect(ratingPhrase('Worker (A rating)')).toBe('A-rated');
+    expect(ratingPhrase('Temporary Worker (B rating)')).toBe('B-rated');
+    expect(ratingPhrase('Worker (A (Premium))')).toBe('A-rated (Premium)');
+    expect(ratingPhrase('Worker (A (SME+))')).toBe('A-rated (SME+)');
+  });
+
+  test('never leaks the raw feed string for a known tier', () => {
+    // This value carries a trailing space that is real in the feed.
+    const provisional = ratingPhrase(
+      'Worker (UK Expansion Worker: Provisional )',
+    );
+    expect(provisional).toBe('provisionally rated');
+    expect(provisional).not.toContain('(');
+  });
+
+  test('dedupes tiers that phrase identically', () => {
+    expect(
+      ratingPhrase(['Worker (A rating)', 'Temporary Worker (A rating)']),
+    ).toBe('A-rated');
+  });
+
+  test('joins several distinct tiers grammatically, without a double "and"', () => {
+    const phrase = ratingPhrase([
+      'Worker (A rating)',
+      'Worker (B rating)',
+      'Worker (A (Premium))',
+    ]);
+    expect(phrase).toBe('A-rated, B-rated and A-rated (Premium)');
+    expect(phrase).not.toContain('and and');
+  });
+
+  test('falls back to the trimmed input for an unrecognised form', () => {
+    expect(ratingPhrase('Worker (Z rating) ')).toBe('Worker (Z rating)');
   });
 });

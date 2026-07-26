@@ -1,5 +1,9 @@
-import { ratingLabel } from '../lib/company/licences';
-import { TYPE_RATING_ROWS } from '../lib/search/params';
+import {
+  licencesVary,
+  ratingLabel,
+  ratingPhrase,
+  ratingTiersDiffer,
+} from '../lib/company/licences';
 import { FILTER_SECTIONS } from '../lib/search/sections';
 import { APP_DESCRIPTION, APP_NAME, APP_SHORT_NAME } from './app-meta';
 
@@ -32,34 +36,6 @@ export type CompanyJsonLdInput = {
 
 // Grammatical joiner for multi-item phrases ("A-rated, B-rated and X").
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
-
-// Prose form of each rating tier in the registry, so an unparsed feed string
-// never reaches visible copy (the raw values carry parentheses and, for the
-// provisional tier, a trailing space that is real in the feed).
-const TIER_PHRASES: Record<string, string> = {
-  A: 'A-rated',
-  'A-Premium': 'A-rated (Premium)',
-  'A-SME+': 'A-rated (SME+)',
-  B: 'B-rated',
-  Provisional: 'provisionally rated',
-};
-const RAW_TO_PHRASE = new Map(
-  TYPE_RATING_ROWS.map((row) => [row.raw, TIER_PHRASES[row.rating]]),
-);
-
-/** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more raw HMRC rating strings, deduped and grammatically joined. The single implementation for every surface. */
-export function ratingPhrase(rating: string | string[]): string {
-  const items = Array.isArray(rating) ? rating : [rating];
-  const phrases = items.map((item) => {
-    const known = RAW_TO_PHRASE.get(item);
-    if (known) return known;
-    // Unknown form (the feed adds tiers between ingests): parse the letter if
-    // we can, else fall back to the trimmed raw string.
-    const m = item.match(/\(([AB])\s+rating\)/i);
-    return m ? `${m[1].toUpperCase()}-rated` : item.trim();
-  });
-  return listFormatter.format([...new Set(phrases.filter(Boolean))]);
-}
 
 /** Build a schema.org PostalAddress from a Companies House registered-office address; returns null when no usable fields exist. */
 function postalAddress(address: Address | null | undefined) {
@@ -159,22 +135,17 @@ function faqPage(input: CompanyJsonLdInput) {
   const perRoute = licences.map(
     (l) => `${l.ratings.map(ratingLabel).join(' and ')} for ${l.route}`,
   );
-  // Enumerate the pairs whenever the raw values vary (a Worker vs Temporary
-  // Worker split is worth showing) …
-  const licencesVary =
-    new Set(licences.map((l) => l.ratings.join('|'))).size > 1;
-  // … but only claim the RATING "differs by route" when the tiers actually
-  // differ. Asserting it for an A-rated-throughout company published a false
-  // distinction on ~3,289 pages.
-  const tiersDiffer =
-    new Set(licences.map((l) => ratingPhrase(l.ratings))).size > 1;
+  // Both flags come from lib/company/licences — the SAME functions the page
+  // copy uses, so the visible text and this structured data cannot drift.
+  const varies = licencesVary(licences);
+  const tiersDiffer = ratingTiersDiffer(licences);
   const locationPhrase = location ? ` in ${location}` : '';
   const based = location
     ? `${name} is based${locationPhrase}, United Kingdom.`
     : `${name} is based in the United Kingdom.`;
   // Singular vs plural matters here: the answer is read aloud by assistants,
   // and "holds a X, Y and Z visa sponsor licence" reads as one malformed name.
-  const licenceSentence = licencesVary
+  const licenceSentence = varies
     ? `${name}'s UK Home Office sponsor licences are ${listFormatter.format(perRoute)}.`
     : licences.length > 1
       ? `${name} holds UK Home Office sponsor licences for ${routeList} visas.`

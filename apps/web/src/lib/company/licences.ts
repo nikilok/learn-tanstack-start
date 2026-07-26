@@ -1,5 +1,5 @@
 import { skilledWorkerFirst, titleCase } from '../../utils';
-import { ratingPriorityFirst } from '../search/params';
+import { ratingPriorityFirst, TYPE_RATING_ROWS } from '../search/params';
 
 /** A real (route, rating) pair from ONE licence row — never reassembled from separately-sorted route and rating lists. */
 export type LicencePair = { route: string; rating: string };
@@ -44,6 +44,59 @@ export function poolForPrimary<T extends { companyNumber: string | null }>(
 // poolForPrimary splits them by company number here, and the ingest gives them
 // their own suffixed slugs. Unmapped pools stay whole — under-splitting shows
 // a real sponsor's real licences, over-splitting hides them.
+
+// Grammatical joiner for multi-item rating phrases.
+const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
+
+// Prose form of each rating tier in the registry, so an unparsed feed string
+// never reaches visible copy (the raw values carry parentheses and, for the
+// provisional tier, a trailing space that is real in the feed).
+const TIER_PHRASES: Record<string, string> = {
+  A: 'A-rated',
+  'A-Premium': 'A-rated (Premium)',
+  'A-SME+': 'A-rated (SME+)',
+  B: 'B-rated',
+  Provisional: 'provisionally rated',
+};
+const RAW_TO_PHRASE = new Map(
+  TYPE_RATING_ROWS.map((row) => [row.raw, TIER_PHRASES[row.rating]]),
+);
+
+/** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more raw HMRC rating strings, deduped and grammatically joined. The single implementation for every surface. */
+export function ratingPhrase(rating: string | string[]): string {
+  const items = Array.isArray(rating) ? rating : [rating];
+  const phrases = items.map((item) => {
+    const known = RAW_TO_PHRASE.get(item);
+    if (known) return known;
+    // Unknown form (the feed adds tiers between ingests): parse the letter if
+    // we can, else fall back to the trimmed raw string.
+    const m = item.match(/\(([AB])\s+rating\)/i);
+    return m ? `${m[1].toUpperCase()}-rated` : item.trim();
+  });
+  return listFormatter.format([...new Set(phrases.filter(Boolean))]);
+}
+
+/**
+ * Do the RAW register values vary across routes? Drives whether to spell the
+ * route↔rating pairs out, so a Worker vs Temporary Worker split is still shown
+ * even though both phrase as "A-rated".
+ */
+export function licencesVary(licences: { ratings: string[] }[]): boolean {
+  return new Set(licences.map((l) => l.ratings.join('|'))).size > 1;
+}
+
+/**
+ * Do the rating TIERS differ across routes? ONLY this may claim the rating
+ * "differs by route" — asserting it for a company that is A-rated throughout
+ * published a false distinction on ~3,289 pages.
+ *
+ * Both flags live here, not at each call site: the page copy and the FAQ
+ * JSON-LD must agree, and two copies of one rule is the defect class this
+ * module exists to prevent.
+ */
+export function ratingTiersDiffer(licences: { ratings: string[] }[]): boolean {
+  return new Set(licences.map((l) => ratingPhrase(l.ratings))).size > 1;
+}
 
 /** Display form of a raw register rating: title-cased and trimmed (the provisional tier carries a stray trailing space in the feed). The ONE label used by page prose, badges and FAQ text, so the visible copy and the structured data never disagree on casing. */
 export function ratingLabel(raw: string): string {

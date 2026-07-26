@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildCompanyJsonLd, ratingPhrase } from './jsonld.ts';
+import { buildCompanyJsonLd } from './jsonld.ts';
 
 // The machine-readable layer has to carry the route↔rating pairing too. An
 // answer that lists routes and ratings separately is read positionally by
@@ -155,43 +155,5 @@ describe('FAQ answers state the pairing when ratings differ', () => {
     expect(answers['Which visa routes can Acme Ltd sponsor?']).toBe(
       'Acme Ltd holds a Skilled Worker visa sponsor licence with the UK Home Office.',
     );
-  });
-});
-
-describe('ratingPhrase', () => {
-  test('maps each registry tier to prose', () => {
-    expect(ratingPhrase('Worker (A rating)')).toBe('A-rated');
-    expect(ratingPhrase('Temporary Worker (B rating)')).toBe('B-rated');
-    expect(ratingPhrase('Worker (A (Premium))')).toBe('A-rated (Premium)');
-    expect(ratingPhrase('Worker (A (SME+))')).toBe('A-rated (SME+)');
-  });
-
-  test('never leaks the raw feed string for a known tier', () => {
-    // This value carries a trailing space that is real in the feed.
-    const provisional = ratingPhrase(
-      'Worker (UK Expansion Worker: Provisional )',
-    );
-    expect(provisional).toBe('provisionally rated');
-    expect(provisional).not.toContain('(');
-  });
-
-  test('dedupes tiers that phrase identically', () => {
-    expect(
-      ratingPhrase(['Worker (A rating)', 'Temporary Worker (A rating)']),
-    ).toBe('A-rated');
-  });
-
-  test('joins several distinct tiers grammatically, without a double "and"', () => {
-    const phrase = ratingPhrase([
-      'Worker (A rating)',
-      'Worker (B rating)',
-      'Worker (A (Premium))',
-    ]);
-    expect(phrase).toBe('A-rated, B-rated and A-rated (Premium)');
-    expect(phrase).not.toContain('and and');
-  });
-
-  test('falls back to the trimmed input for an unrecognised form', () => {
-    expect(ratingPhrase('Worker (Z rating) ')).toBe('Worker (Z rating)');
   });
 });

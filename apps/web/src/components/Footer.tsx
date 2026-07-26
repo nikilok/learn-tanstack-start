@@ -69,11 +69,6 @@ export default function Footer() {
           </a>
         </div>
 
-        <p className="m-0 max-w-md text-xs text-(--sea-ink-faint)">
-          The UK sponsor search. Every licensed visa sponsor on the Home Office
-          register.
-        </p>
-
         <div className="flex flex-col items-center gap-2">
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-(--sea-ink-soft)">
             <span>Made in London</span>

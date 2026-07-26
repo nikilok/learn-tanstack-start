@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+- **Cleaner home title** — the title bar now reads "UK Sponsor Search" on the home page instead of echoing the website's full SEO title, matching the site's new branding.
+
 ## v0.3.0 — 2026-07-24
 
 - **Filter the register from the title bar** — a new sliders button (next to Share) opens SponsorSearch's filters: visa routes, licence ratings, cities, industries, incorporation dates, company status and health signals. Your choices stick until you reset them, and a small badge on the icon counts the filters currently shaping your list — kept in sync wherever you are in the app.

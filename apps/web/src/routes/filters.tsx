@@ -27,8 +27,10 @@ import {
   WORKER_TYPES,
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+import { FILTER_SECTIONS } from '../lib/search/sections';
 import { humanizeEnum, prefersReducedMotion } from '../utils';
 import { buildCanonical } from '../utils/canonical';
+import { buildFiltersJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
 
 const getPlatformInfo = createIsomorphicFn()
@@ -58,23 +60,20 @@ export const Route = createFileRoute('/filters')({
   // Canonical is always the bare /filters (match.pathname carries no params),
   // so filtered URL variants never index as near-duplicates.
   head: ({ match }) => {
-    const pageTitle = 'SponsorSearch . Filter UK Visa Sponsors';
+    const pageTitle =
+      'SponsorSearch . Advanced Filters for the UK Sponsorship List';
     const pageDescription =
-      'Filter every UK licensed visa sponsor by route, licence rating, city, industry, incorporation date and company status. Tick what matters and browse the matching companies instantly.';
+      'Browse the UK sponsorship list with advanced filters: visa route, licence rating, city, industry, company status, incorporation date and change signals.';
     const canonicalUrl = buildCanonical(match.pathname);
     return buildSeoHead({
       title: pageTitle,
       description: pageDescription,
       canonicalUrl,
-      jsonLd: [
-        {
-          '@context': 'https://schema.org',
-          '@type': 'WebPage',
-          name: pageTitle,
-          description: pageDescription,
-          url: canonicalUrl,
-        },
-      ],
+      jsonLd: buildFiltersJsonLd({
+        title: pageTitle,
+        description: pageDescription,
+        canonicalUrl,
+      }),
     });
   },
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
@@ -217,8 +216,12 @@ type UnsectionedKey = Exclude<
 type SectionId = [UnsectionedKey] extends [never]
   ? keyof typeof SECTION_KEYS
   : ['unsectioned registry keys', UnsectionedKey];
-// Declaration order doubles as the ⌥1…⌥9 jump order.
-const SECTION_ORDER = Object.keys(SECTION_KEYS) as SectionId[];
+// Declaration order (from the shared display list) doubles as the ⌥1…⌥9 jump order.
+const SECTION_ORDER = FILTER_SECTIONS.map((s) => s.id satisfies SectionId);
+// Indexing with SectionId compile-fails if a section lacks a FILTER_SECTIONS entry.
+const SECTION_TITLES = Object.fromEntries(
+  FILTER_SECTIONS.map((s) => [s.id, s.title]),
+) as Record<(typeof FILTER_SECTIONS)[number]['id'], string>;
 
 /** Which sections hold a choice in the given filter set (their default-open state). */
 function openSectionsFor(filters: SearchFilters): Record<SectionId, boolean> {
@@ -492,10 +495,10 @@ function FiltersPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const section = (id: SectionId, title: string, body: React.ReactNode) => (
+  const section = (id: SectionId, body: React.ReactNode) => (
     <Accordion
       id={`filter-section-${id}`}
-      title={title}
+      title={SECTION_TITLES[id]}
       shortcut={`${jumpKey}${SECTION_ORDER.indexOf(id) + 1}`}
       count={sectionCount(id)}
       confirmed={sectionConfirmed(id)}
@@ -509,19 +512,21 @@ function FiltersPage() {
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-10 sm:py-16">
       <section className="mx-auto max-w-2xl pb-6">
-        <h1 className="island-kicker mb-3">Refine the sponsor list</h1>
+        <h1 className="island-kicker mb-3">Filter the UK sponsor list</h1>
         <p className="mt-2 text-sm text-(--sea-ink-soft)">
-          Open a section, tick what matters and hit Apply. The home page then
-          shows every sponsor that matches, and you can still type a company
-          name on top. Your choices stick around until you reset them. One
-          caveat: filters that rely on Companies House data leave out the few
-          sponsors we can’t match to a registered company, mostly public bodies.
+          Filter by visa route, licence rating, city, industry, company status
+          or incorporation date, then layer on change signals like renames,
+          office moves, charges or insolvency history. Open a section, tick what
+          matters and hit Apply. The home page then shows every sponsor that
+          matches, and you can still type a company name on top. Your choices
+          stick around until you reset them. One caveat: filters that rely on
+          Companies House data leave out the few sponsors we can’t match to a
+          registered company, mostly public bodies.
         </p>
 
         <div className="mt-6">
           {section(
             'route',
-            'Visa route',
             <CheckGroup
               options={KNOWN_ROUTES.map((r) => ({ value: r, label: r }))}
               selected={draft.route}
@@ -531,7 +536,6 @@ function FiltersPage() {
 
           {section(
             'licence',
-            'Licence',
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-medium text-(--sea-ink-soft)">
@@ -558,7 +562,6 @@ function FiltersPage() {
 
           {section(
             'location',
-            'Location',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Matches the sponsor’s town or its registered office.
@@ -585,7 +588,6 @@ function FiltersPage() {
 
           {section(
             'industry',
-            'Industry',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Describe the industry in plain words, like software, care homes
@@ -630,7 +632,6 @@ function FiltersPage() {
 
           {section(
             'status',
-            'Company status',
             <CheckGroup
               options={COMPANY_STATUSES.map((s) => ({
                 value: s,
@@ -643,7 +644,6 @@ function FiltersPage() {
 
           {section(
             'companyType',
-            'Company type',
             <CheckGroup
               options={COMPANY_TYPES.map((t) => ({
                 value: t,
@@ -656,7 +656,6 @@ function FiltersPage() {
 
           {section(
             'incorporated',
-            'Incorporated',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Companies incorporated between these dates.
@@ -692,7 +691,6 @@ function FiltersPage() {
 
           {section(
             'signals',
-            'Signals',
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
               <TriState
                 label="Accounts overdue"
@@ -724,7 +722,6 @@ function FiltersPage() {
 
           {section(
             'sort',
-            'Sort',
             <div className="flex flex-wrap items-center gap-3">
               <Select
                 ariaLabel="Sort by"

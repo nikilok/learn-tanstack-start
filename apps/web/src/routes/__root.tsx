@@ -34,7 +34,7 @@ import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
-import { APP_NAME, APP_SHORT_NAME } from '../utils/app-meta';
+import { APP_DESCRIPTION, APP_SHORT_NAME, APP_TITLE } from '../utils/app-meta';
 import { isDesktopPreview } from '../utils/desktop-preview';
 
 import appCss from '../styles.css?url';
@@ -42,9 +42,6 @@ import appCss from '../styles.css?url';
 /** Drops analytics/vitals events fired inside the /download live-preview iframes so demo runs don't pollute stats. */
 const dropPreviewEvents = <E,>(event: E): E | null =>
   isDesktopPreview() ? null : event;
-const APP_DESCRIPTION =
-  'Search UK skilled worker visa sponsors. Find companies licensed to sponsor skilled worker visas with ratings, locations, and visa routes.';
-
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   {
     errorComponent: RouteError,
@@ -59,14 +56,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           content: 'width=device-width, initial-scale=1, viewport-fit=cover',
         },
         {
-          title: APP_NAME,
+          title: APP_TITLE,
         },
         {
           name: 'description',
           content: APP_DESCRIPTION,
         },
         { property: 'og:type', content: 'website' },
-        { property: 'og:title', content: APP_NAME },
+        { property: 'og:locale', content: 'en_GB' },
+        { property: 'og:title', content: APP_TITLE },
         {
           property: 'og:description',
           content: APP_DESCRIPTION,
@@ -83,7 +81,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         { property: 'og:url', content: 'https://sponsorsearch.co.uk' },
         { property: 'og:site_name', content: APP_SHORT_NAME },
         { name: 'twitter:card', content: 'summary_large_image' },
-        { name: 'twitter:title', content: APP_NAME },
+        { name: 'twitter:title', content: APP_TITLE },
         {
           name: 'twitter:description',
           content: APP_DESCRIPTION,

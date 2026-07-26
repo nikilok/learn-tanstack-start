@@ -1,12 +1,13 @@
 # SponsorSearch
 
-> Search UK skilled worker visa sponsors. Find companies licensed to sponsor Skilled Worker visas, with sponsor licence ratings, office locations, and the visa routes each company can sponsor.
+> Free UK sponsor search. Find every company licensed to sponsor Skilled Worker visas in the UK, with sponsor licence ratings, office locations, and the visa routes each company can sponsor.
 
-SponsorSearch (Skilled Worker Sponsor Search) combines the UK government's public register of licensed visa sponsors with Companies House company data, so people seeking visa sponsorship can find and research employers able to sponsor them. All company data derives from public UK government sources; SponsorSearch adds the matching, search, and presentation.
+SponsorSearch (also known as UK Sponsor Search, Sponsor Search UK, UK Visa Sponsor Search, or Skilled Worker Sponsor Search) combines the UK government's public register of licensed visa sponsors with Companies House company data, so people seeking visa sponsorship can find and research employers able to sponsor them. All company data derives from public UK government sources; SponsorSearch adds the matching, search, and presentation.
 
 ## Pages
 
 - [Search](https://sponsorsearch.co.uk/): Search the full register of licensed sponsors by company name. Also matches former (previous) company names.
+- [Filters](https://sponsorsearch.co.uk/filters): Advanced filters over the UK sponsorship list: visa route, sponsor licence rating, city, industry or SIC code, company status and type, incorporation date, and change signals (renames, office moves, charges, insolvency, overdue accounts).
 - Company details: per-company pages at `/company/{id}/{slug}` — sponsor licence rating, visa routes (e.g. Skilled Worker), location, and linked Companies House details. Individual URLs are listed in the sitemap (below).
 - [Download](https://sponsorsearch.co.uk/download): Desktop app for macOS, Windows, and Linux.
 - [Privacy](https://sponsorsearch.co.uk/privacy): Privacy policy.

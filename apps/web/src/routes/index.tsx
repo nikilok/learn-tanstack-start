@@ -27,10 +27,16 @@ import {
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
+import { buildWebsiteJsonLd } from '../utils/jsonld';
+import { jsonLdMeta } from '../utils/seo';
 
 const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
+
+// Home-only head bits, static so they build once: the canonical URL plus the WebSite name/alias schema search engines read site identity from.
+const HOME_CANONICAL = buildCanonical('/');
+const WEBSITE_JSONLD_META = jsonLdMeta(buildWebsiteJsonLd(HOME_CANONICAL));
 
 // What a bare mount renders while the rehydrate effect below re-applies the
 // stored filters: a loading frame, so the classic hook neither fires a
@@ -59,13 +65,9 @@ export const Route = createFileRoute('/')({
     // filter params joining the schema surfaced that, hence the cast.
     middlewares: [stripSearchParams({ search: '' } as never)],
   },
-  head: ({ match }) => ({
-    links: [
-      {
-        rel: 'canonical',
-        href: buildCanonical(match.pathname),
-      },
-    ],
+  head: () => ({
+    meta: WEBSITE_JSONLD_META,
+    links: [{ rel: 'canonical', href: HOME_CANONICAL }],
   }),
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search }) => ({ search }),
@@ -197,8 +199,13 @@ function Home() {
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
       <section className="mx-auto max-w-2xl">
+        {/* The page's only h1 — the visual hero is the stat h2 in HeroText. */}
+        <h1 className="sr-only">
+          UK Sponsor Search — find licensed Skilled Worker visa sponsors in the
+          UK
+        </h1>
         <p className="island-kicker mb-3">
-          Search UK companies
+          Search UK sponsors
           {!platformInfo.isMobile && (
             <span
               style={{

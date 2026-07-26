@@ -76,6 +76,15 @@ describe('cleanTitle', () => {
     expect(cleanTitle('Acme Ltd - UK Visa Sponsor')).toBe('Acme Ltd');
   });
 
+  test('strips the home title tagline down to the brand phrase', () => {
+    expect(cleanTitle('UK Sponsor Search . Skilled Worker Visa Sponsors')).toBe(
+      'UK Sponsor Search',
+    );
+    expect(cleanTitle('UK Sponsor Search — Skilled Worker Visa Sponsors')).toBe(
+      'UK Sponsor Search',
+    );
+  });
+
   test('is case-insensitive on the suffix', () => {
     expect(cleanTitle('Acme Ltd | sponsorsearch')).toBe('Acme Ltd');
   });

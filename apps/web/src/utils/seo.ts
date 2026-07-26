@@ -1,3 +1,10 @@
+/** Meta entries emitting each schema as its own <script type="application/ld+json"> tag. 'script:ld+json' is supported at runtime but not exposed in the framework's meta types, hence the cast. */
+export function jsonLdMeta(schemas: object[]) {
+  return schemas.map(
+    (schema) => ({ 'script:ld+json': schema }) as unknown as { name: string },
+  );
+}
+
 /** Build a page's SEO head — title, matching description, the og:/twitter: overrides that share that copy, any JSON-LD blocks, and the canonical link. Site-wide tags (og:image, og:site_name, twitter:card, PWA) stay in __root and are inherited. */
 export function buildSeoHead(input: {
   title: string;
@@ -15,11 +22,7 @@ export function buildSeoHead(input: {
       { name: 'twitter:title', content: input.title },
       { name: 'twitter:description', content: input.description },
       { name: 'twitter:url', content: input.canonicalUrl },
-      // 'script:ld+json' is supported at runtime but not exposed in the framework's meta types.
-      ...(input.jsonLd ?? []).map(
-        (schema) =>
-          ({ 'script:ld+json': schema }) as unknown as { name: string },
-      ),
+      ...jsonLdMeta(input.jsonLd ?? []),
     ],
     links: [{ rel: 'canonical', href: input.canonicalUrl }],
   };

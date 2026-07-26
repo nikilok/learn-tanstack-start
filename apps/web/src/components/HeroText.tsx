@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import { FILTER_DIMENSION_COUNT } from '../lib/search/params';
+import { FILTER_SECTIONS } from '../lib/search/sections';
 import Odometer from './Odometer';
 
 import styles from './HeroText.module.css';
@@ -18,17 +19,10 @@ import styles from './HeroText.module.css';
 // client nav or a failed fetch). The real figure is above this, so "<n>K+" stays true.
 const FALLBACK_THOUSANDS = 100;
 
-// Mirrors /filters' section titles (minus Sort, which isn't a filter).
-const FACETS = [
-  'Visa route',
-  'Licence',
-  'Location',
-  'Industry',
-  'Company status',
-  'Company type',
-  'Incorporated',
-  'Signals',
-];
+// /filters' section titles; Sort (schemaLabel null) isn't a filter.
+const FACETS = FILTER_SECTIONS.filter((s) => s.schemaLabel !== null).map(
+  (s) => s.title,
+);
 
 export default function HeroText({ count }: { count?: number }) {
   // Whole thousands, floored, so "<n>K+" is always a truthful lower bound of the

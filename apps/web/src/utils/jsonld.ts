@@ -1,4 +1,5 @@
-import { APP_SHORT_NAME } from './app-meta';
+import { FILTER_SECTIONS } from '../lib/search/sections';
+import { APP_DESCRIPTION, APP_NAME, APP_SHORT_NAME } from './app-meta';
 
 type Address = {
   address_line_1?: string;
@@ -156,6 +157,65 @@ function faqPage(input: CompanyJsonLdInput) {
 /** Compose the three JSON-LD blocks (Organization, BreadcrumbList, FAQPage) for a company detail page. Each block is independently emitted as its own <script type="application/ld+json"> tag. */
 export function buildCompanyJsonLd(input: CompanyJsonLdInput) {
   return [organization(input), breadcrumbList(input), faqPage(input)];
+}
+
+/** Build the home page's WebSite schema — canonical site name plus the word-order variants searchers type as alternateName, and the site-search action. This is the block search engines read site name/aliases from. */
+export function buildWebsiteJsonLd(homeUrl: string) {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      name: APP_SHORT_NAME,
+      alternateName: [
+        'UK Sponsor Search',
+        'Sponsor Search UK',
+        APP_NAME,
+        'UK Visa Sponsor Search',
+      ],
+      url: homeUrl,
+      description: APP_DESCRIPTION,
+      inLanguage: 'en-GB',
+      potentialAction: {
+        '@type': 'SearchAction',
+        target: {
+          '@type': 'EntryPoint',
+          urlTemplate: `${homeUrl}?search={search_term_string}`,
+        },
+        'query-input': 'required name=search_term_string',
+      },
+    },
+  ];
+}
+
+/** Compose the /filters page JSON-LD — a WebPage block plus an ItemList naming each filter dimension (from FILTER_SECTIONS) for crawlers and AI assistants. */
+export function buildFiltersJsonLd(input: {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+}) {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'WebPage',
+      name: input.title,
+      description: input.description,
+      url: input.canonicalUrl,
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'ItemList',
+      name: 'Sponsor filter dimensions',
+      description:
+        'Ways the UK sponsorship list can be filtered on SponsorSearch.',
+      itemListElement: FILTER_SECTIONS.flatMap((section) =>
+        section.schemaLabel ? [section.schemaLabel] : [],
+      ).map((name, position) => ({
+        '@type': 'ListItem',
+        position: position + 1,
+        name,
+      })),
+    },
+  ];
 }
 
 /** Build a SoftwareApplication schema for the /download page — a free macOS & Windows desktop app. Static (no per-release version data), so it's safe to emit on every render. */

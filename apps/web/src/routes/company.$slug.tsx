@@ -29,6 +29,11 @@ import LinkedInLogo from '../components/LinkedInLogo';
 import RatingIcon from '../components/RatingIcon';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
+import {
+  identitySafeLicences,
+  type RouteLicence,
+  routeLicences,
+} from '../lib/company/licences';
 import { ratingPriorityFirst, searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
@@ -97,25 +102,6 @@ function distinctRatings(licences: { typeRating: string }[]): string[] {
   return ratingPriorityFirst([...new Set(licences.map((l) => l.typeRating))]);
 }
 
-/** One licence: a visa route with the rating(s) actually held on THAT route. */
-type RouteLicence = { route: string; ratings: string[] };
-
-/** Group a company's licence rows into route → its own rating(s), in display priority order. Separate route and rating lists would let a reader pair the wrong two. */
-function routeLicences(
-  licences: { typeRating: string; route: string }[],
-): RouteLicence[] {
-  const byRoute = new Map<string, Set<string>>();
-  for (const { route, typeRating } of licences) {
-    const set = byRoute.get(route) ?? new Set<string>();
-    set.add(typeRating);
-    byRoute.set(route, set);
-  }
-  return skilledWorkerFirst([...byRoute.keys()]).map((route) => ({
-    route,
-    ratings: ratingPriorityFirst([...(byRoute.get(route) ?? [])]),
-  }));
-}
-
 /**
  * One enclosed row per licence: the visa route and the rating held on THAT
  * route. A real <dl> so the pairing is machine-readable — each route is the
@@ -182,22 +168,10 @@ type CompanyDisplayInput = {
 function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
   // licences[0] is the primary org by construction (rows arrive primary-first).
   const primaryOrg = sponsor.licences[0]?.organisationName ?? '';
-  const primaryKey = normalizeName(primaryOrg);
-  // An UNMAPPED pool can hold genuinely distinct legal entities whose names
-  // slugify alike ("SK & Associates Ltd" vs "SK Associates Ltd"), and with no
-  // company number there is nothing to tell them apart. Routes, ratings,
-  // licence numbers and aliases are all identity-bearing claims, so in that
-  // case publish only the primary org's own rows rather than attributing
-  // another company's licences — and its licence number — to this one.
-  const ambiguousPool =
-    sponsor.licences[0]?.companyNumber == null &&
-    new Set(sponsor.licences.map((l) => normalizeName(l.organisationName)))
-      .size > 1;
-  const licences = ambiguousPool
-    ? sponsor.licences.filter(
-        (l) => normalizeName(l.organisationName) === primaryKey,
-      )
-    : sponsor.licences;
+  // Drops a distinct unmapped namesake's rows (unit-tested in
+  // lib/company/licences) so its routes, ratings, licence numbers and name
+  // are never published as this company's.
+  const licences = identitySafeLicences(sponsor.licences);
   const rawName = profile?.company_name ?? primaryOrg;
   const currentKey = normalizeName(rawName);
   // Set AFTER titleCase: case-variant HMRC rows of the same alias must not

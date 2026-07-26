@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
+import { poolForPrimary } from '../lib/company/licences';
 import { buildNameMatchers } from '../lib/search/name-match';
 import { slugify } from '../utils';
 import {
@@ -105,12 +106,15 @@ export const searchHmrc = createServerFn()
                -- company's case/punctuation-variant register rows (314 slugs
                -- today, all variants of ONE company) into a single result
                -- instead of near-identical cards that all open the same page.
-               -- The display name is elected exactly as the page elects its
-               -- primary — mapped first, then alphabetical — so the card and
-               -- the page it links to agree, and the outer mapping join still
-               -- finds a company number for the location columns.
+               -- The display name is elected exactly as getHmrcCompanyBySlug
+               -- elects the page's primary — mapped first, then LOWEST COMPANY
+               -- NUMBER, then name. Keep these two orderings identical: drop
+               -- the company_number key here and a slug pooling two mapped
+               -- companies shows one entity's name on the card and the other's
+               -- data on the page it opens.
                (array_agg(h.organisation_name ORDER BY
-                  (mm.company_number IS NULL) ASC, h.organisation_name ASC
+                  (mm.company_number IS NULL) ASC, mm.company_number ASC,
+                  h.organisation_name ASC
                 ))[1] AS organisation_name,
                h.name_slug,
                -- Licence rows merge per company: one result per (org, slug),
@@ -267,15 +271,9 @@ export const getHmrcCompanyBySlug = createServerFn()
       // Long edge cache: slug pages only change via ingest, and the
       // post-ingest sitemap deploy purges the edge.
       setRpcCacheControl(LONG_EDGE_CACHE);
-      // Namesake guard: pool only the primary company's rows — same
-      // company_number, or unmapped rows (name-keyed, indistinguishable). A
-      // DIFFERENT mapped company sharing the slug is a distinct legal entity
-      // and must not leak its licences/name into this page.
-      const primaryCompany = rows[0].companyNumber;
-      const licences = rows.filter(
-        (r) => r.companyNumber === primaryCompany || r.companyNumber === null,
-      );
-      return { kind: 'found', nameSlug: slug, licences };
+      // Namesake guard (unit-tested in lib/company/licences): pool only the
+      // primary company's rows, never a different mapped entity's.
+      return { kind: 'found', nameSlug: slug, licences: poolForPrimary(rows) };
     }
 
     // Rename/alias fallback: an unknown slug resolves through the company

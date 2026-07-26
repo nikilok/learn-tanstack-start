@@ -4,6 +4,7 @@ import {
   filtersToSearchParams,
   parseSearchFilters,
   RATINGS,
+  ratingPriorityFirst,
   requiresChLink,
   searchTermInput,
   TYPE_RATING_ROWS,
@@ -329,5 +330,46 @@ describe('location canonical form', () => {
     expect(parseSearchFilters({ location: ',Leeds,,' }).filters.location).toBe(
       'Leeds',
     );
+  });
+});
+
+// The single rating-priority policy, shared by the listing card's icon and the
+// detail page's badge order. Two ad-hoc orderings previously disagreed, so a
+// company showed an A icon in results and led with its B licence on the page.
+describe('ratingPriorityFirst', () => {
+  test('orders by registry tier, best first', () => {
+    expect(
+      ratingPriorityFirst([
+        'Temporary Worker (B rating)',
+        'Worker (A (Premium))',
+        'Worker (A rating)',
+      ]),
+    ).toEqual([
+      'Worker (A rating)',
+      'Worker (A (Premium))',
+      'Temporary Worker (B rating)',
+    ]);
+  });
+
+  test('recognises A-tier variants a bare "(a rating)" test would miss', () => {
+    // The old ad-hoc regex matched only "(A rating)", so a company holding
+    // A-Premium plus B led with the B licence.
+    expect(
+      ratingPriorityFirst(['Worker (B rating)', 'Worker (A (SME+))'])[0],
+    ).toBe('Worker (A (SME+))');
+  });
+
+  test('sorts unknown forms last but keeps them', () => {
+    const sorted = ratingPriorityFirst([
+      'Worker (Z rating)',
+      'Worker (B rating)',
+    ]);
+    expect(sorted).toEqual(['Worker (B rating)', 'Worker (Z rating)']);
+  });
+
+  test('is a pure function — the input array is not mutated', () => {
+    const input = ['Worker (B rating)', 'Worker (A rating)'];
+    ratingPriorityFirst(input);
+    expect(input).toEqual(['Worker (B rating)', 'Worker (A rating)']);
   });
 });

@@ -224,7 +224,10 @@ export function McpTools() {
           // same licence.
           const orgKey = top.organisationName.toLowerCase();
           const pool = company?.kind === 'found' ? company.licences : [];
-          const numbers = new Set(pool.map((l) => l.companyNumber));
+          // `!= null` catches undefined too: a payload shape that simply omits
+          // companyNumber would otherwise pass a `!has(null)` check and bypass
+          // the namesake guard entirely.
+          const numbers = new Set(pool.map((l) => l.companyNumber ?? null));
           const oneEntity = numbers.size === 1 && !numbers.has(null);
           const pooled = oneEntity
             ? pool

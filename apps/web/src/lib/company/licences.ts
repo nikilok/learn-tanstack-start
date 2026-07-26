@@ -1,4 +1,4 @@
-import { normalizeName, skilledWorkerFirst } from '../../utils';
+import { skilledWorkerFirst, titleCase } from '../../utils';
 import { ratingPriorityFirst } from '../search/params';
 
 /** A real (route, rating) pair from ONE licence row — never reassembled from separately-sorted route and rating lists. */
@@ -33,23 +33,21 @@ export function poolForPrimary<T extends { companyNumber: string | null }>(
   );
 }
 
-/**
- * An UNMAPPED pool can hold genuinely distinct legal entities whose names
- * slugify alike ("SK & Associates Ltd" vs "SK Associates Ltd"), with no company
- * number to tell them apart. Routes, ratings, licence numbers and aliases are
- * all identity-bearing claims, so publish only the primary org's rows there.
- */
-export function identitySafeLicences<
-  T extends { organisationName: string; companyNumber: string | null },
->(licences: T[]): T[] {
-  const primary = licences[0];
-  if (!primary || primary.companyNumber != null) return licences;
-  const names = new Set(licences.map((l) => normalizeName(l.organisationName)));
-  if (names.size <= 1) return licences;
-  const primaryKey = normalizeName(primary.organisationName);
-  return licences.filter(
-    (l) => normalizeName(l.organisationName) === primaryKey,
-  );
+// NOTE — there is deliberately no name-based "is this the same entity?" filter
+// for unmapped pools. Rows share a slug precisely because their names slugify
+// alike, and no normalisation can separate a spacing variant of ONE body
+// ("University of Leeds (Human Resources)" vs "University of Leeds(Human
+// Resources)" — one org, 4 routes) from two genuinely distinct companies
+// ("SK & Associates Ltd" vs "SK Associates Ltd"). A guard keyed on
+// normalizeName was tried and silently deleted 3 of the university's 4 real
+// visa routes in production. Distinct MAPPED entities are separated properly:
+// poolForPrimary splits them by company number here, and the ingest gives them
+// their own suffixed slugs. Unmapped pools stay whole — under-splitting shows
+// a real sponsor's real licences, over-splitting hides them.
+
+/** Display form of a raw register rating: title-cased and trimmed (the provisional tier carries a stray trailing space in the feed). The ONE label used by page prose, badges and FAQ text, so the visible copy and the structured data never disagree on casing. */
+export function ratingLabel(raw: string): string {
+  return titleCase(raw.trim());
 }
 
 /** Group licence rows into route → its own rating(s), in display priority order. Two separate route and rating lists would let a reader (or a crawler) pair the wrong two. */

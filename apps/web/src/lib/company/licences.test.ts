@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   cardLicence,
-  identitySafeLicences,
   type LicenceRow,
   poolForPrimary,
   routeLicences,
@@ -177,47 +176,5 @@ describe('poolForPrimary — a namesake slug never leaks another entity', () => 
 
   test('handles an empty pool', () => {
     expect(poolForPrimary([])).toEqual([]);
-  });
-});
-
-describe('identitySafeLicences — unmapped namesakes stay separate', () => {
-  test('drops a distinct unmapped entity’s rows from the primary’s page', () => {
-    const safe = identitySafeLicences([
-      row({ organisationName: 'Phoenix Consulting Ltd', companyNumber: null }),
-      row({
-        organisationName: 'Phoenix Consulting (UK)',
-        companyNumber: null,
-        sponsorLicenceNumber: 'OTHER-CO-LICENCE',
-      }),
-    ]);
-    expect(safe).toHaveLength(1);
-    // The other entity's licence number is a verifiable identifier; publishing
-    // it under this company's heading was the bug.
-    expect(safe[0].sponsorLicenceNumber).toBeNull();
-  });
-
-  test('keeps case/punctuation variants of ONE unmapped name', () => {
-    expect(
-      identitySafeLicences([
-        row({ organisationName: 'ACME LTD', companyNumber: null }),
-        row({
-          organisationName: 'Acme Ltd',
-          companyNumber: null,
-          route: 'Creative Worker',
-        }),
-      ]),
-    ).toHaveLength(2);
-  });
-
-  test('leaves a mapped pool untouched — poolForPrimary already vouched for it', () => {
-    const mapped = [
-      row({ organisationName: 'ACME LTD' }),
-      row({ organisationName: 'Acme Trading Ltd', route: 'Creative Worker' }),
-    ];
-    expect(identitySafeLicences(mapped)).toHaveLength(2);
-  });
-
-  test('handles an empty pool', () => {
-    expect(identitySafeLicences([])).toEqual([]);
   });
 });

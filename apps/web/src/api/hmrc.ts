@@ -309,13 +309,25 @@ export const getHmrcCompanyBySlug = createServerFn()
         SELECT cur.organisation_name
         FROM ${hmrcCompanyMapping} cur
         WHERE cur.company_number = upper(substring(${slug} from '[^-]+$'))
-          -- Shape guard: only a slug whose BASE is itself a live slug can be
-          -- one of our minted base-plus-company-number suffixes. Without it,
-          -- the ~3.3k org names that embed a registration number (and any
-          -- typo'd URL ending in one) would 301 to an unrelated company.
-          AND EXISTS (
-            SELECT 1 FROM ${hmrcSkilledWorkers} hb
-            WHERE hb.name_slug = substring(${slug} from '^(.*)-[^-]+$')
+          -- Shape guard: a slug is only one of our minted
+          -- base-plus-company-number suffixes if EITHER its base is still a
+          -- live slug (the usual case — the other namesake still holds it) OR
+          -- this company still holds a slug carrying the same suffix (it
+          -- renamed but is still disambiguated). Without a guard, the ~3.3k org
+          -- names that embed a registration number — and any typo'd URL ending
+          -- in one — would 301 to an unrelated company.
+          AND (
+            EXISTS (
+              SELECT 1 FROM ${hmrcSkilledWorkers} hb
+              WHERE hb.name_slug = substring(${slug} from '^(.*)-[^-]+$')
+            )
+            OR EXISTS (
+              SELECT 1 FROM ${hmrcSkilledWorkers} hs
+              JOIN ${hmrcCompanyMapping} ms
+                ON ms.organisation_name = hs.organisation_name
+              WHERE ms.company_number = cur.company_number
+                AND hs.name_slug LIKE '%-' || lower(cur.company_number)
+            )
           )
       )
       -- Closest sibling, not the alphabetically-first one: when a company

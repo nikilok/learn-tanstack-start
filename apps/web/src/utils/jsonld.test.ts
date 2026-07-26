@@ -75,15 +75,18 @@ describe('FAQ answers state the pairing when ratings differ', () => {
       buildCompanyJsonLd({ ...base, licences: MIXED }),
     );
     const rating = answers["What is Acme Ltd's sponsor licence rating?"];
-    expect(rating).toContain('Worker (B rating) for Skilled Worker');
+    // Title-cased: prose everywhere uses ratingLabel, so the page copy and the
+    // structured data cannot disagree on casing.
+    expect(rating).toContain('Worker (B Rating) for Skilled Worker');
     expect(rating).toContain(
-      'Worker (A rating) for Global Business Mobility: Senior or Specialist Worker',
+      'Worker (A Rating) for Global Business Mobility: Senior or Specialist Worker',
     );
   });
 
-  test('a Worker vs Temporary Worker split still counts as differing', () => {
-    // Both are "A-rated"; only the raw values differ, and that distinction is
-    // real — the shorthand used to collapse them and suppress the pairing.
+  test('a Worker vs Temporary Worker split shows in the ROUTES answer, not as a rating difference', () => {
+    // Both licences are A-rated, so claiming the rating "differs by route"
+    // would be false — it was, on ~3,289 pages. The licence-TYPE distinction
+    // is real though, so it belongs in the routes answer.
     const answers = faqAnswers(
       buildCompanyJsonLd({
         ...base,
@@ -96,9 +99,12 @@ describe('FAQ answers state the pairing when ratings differ', () => {
         ],
       }),
     );
-    const rating = answers["What is Acme Ltd's sponsor licence rating?"];
-    expect(rating).toContain('Worker (A rating) for Skilled Worker');
-    expect(rating).toContain('Temporary Worker (A rating) for Creative Worker');
+    expect(answers["What is Acme Ltd's sponsor licence rating?"]).toBe(
+      'Acme Ltd holds A-rated sponsor status on the UK Home Office register.',
+    );
+    const routes = answers['Which visa routes can Acme Ltd sponsor?'];
+    expect(routes).toContain('Worker (A Rating) for Skilled Worker');
+    expect(routes).toContain('Temporary Worker (A Rating) for Creative Worker');
   });
 
   test('keeps the short phrasing when every route shares one rating', () => {

@@ -1,3 +1,4 @@
+import { ratingLabel } from '../lib/company/licences';
 import { TYPE_RATING_ROWS } from '../lib/search/params';
 import { FILTER_SECTIONS } from '../lib/search/sections';
 import { APP_DESCRIPTION, APP_NAME, APP_SHORT_NAME } from './app-meta';
@@ -156,22 +157,29 @@ function faqPage(input: CompanyJsonLdInput) {
   // separately is read positionally and inverted. Raw, not the "A-rated"
   // shorthand, which loses the Worker vs Temporary Worker licence type.
   const perRoute = licences.map(
-    (l) => `${l.ratings.join(' and ')} for ${l.route}`,
+    (l) => `${l.ratings.map(ratingLabel).join(' and ')} for ${l.route}`,
   );
-  const ratingsDiffer =
+  // Enumerate the pairs whenever the raw values vary (a Worker vs Temporary
+  // Worker split is worth showing) …
+  const licencesVary =
     new Set(licences.map((l) => l.ratings.join('|'))).size > 1;
+  // … but only claim the RATING "differs by route" when the tiers actually
+  // differ. Asserting it for an A-rated-throughout company published a false
+  // distinction on ~3,289 pages.
+  const tiersDiffer =
+    new Set(licences.map((l) => ratingPhrase(l.ratings))).size > 1;
   const locationPhrase = location ? ` in ${location}` : '';
   const based = location
     ? `${name} is based${locationPhrase}, United Kingdom.`
     : `${name} is based in the United Kingdom.`;
   // Singular vs plural matters here: the answer is read aloud by assistants,
   // and "holds a X, Y and Z visa sponsor licence" reads as one malformed name.
-  const licenceSentence = ratingsDiffer
+  const licenceSentence = licencesVary
     ? `${name}'s UK Home Office sponsor licences are ${listFormatter.format(perRoute)}.`
     : licences.length > 1
       ? `${name} holds UK Home Office sponsor licences for ${routeList} visas.`
       : `${name} holds a ${routeList} visa sponsor licence with the UK Home Office.`;
-  const ratingAnswer = ratingsDiffer
+  const ratingAnswer = tiersDiffer
     ? `${name}'s sponsor licence rating differs by route: it is ${listFormatter.format(perRoute)}.`
     : `${name} holds ${rating} sponsor status on the UK Home Office register.`;
 

@@ -30,77 +30,25 @@ import RatingIcon from '../components/RatingIcon';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
 import {
-  identitySafeLicences,
-  type RouteLicence,
-  routeLicences,
-} from '../lib/company/licences';
-import { ratingPriorityFirst, searchTermInput } from '../lib/search/params';
+  type CompanyDisplayInput,
+  deriveCompanyDisplay,
+} from '../lib/company/display';
+import type { RouteLicence } from '../lib/company/licences';
+import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
   formatDate,
-  formatLocation,
   humanizeEnum,
-  normalizeName,
-  skilledWorkerFirst,
   stampPageFlip,
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
-import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
+import { buildCompanyJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
 
 // Grammatical "A, B and C" joiner for the routes and former-names sentences.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
-
-/**
- * Display location for a CH registered-office address. Mirrors searchHmrc's
- * COALESCE(locality, address_line_2) + region so the detail page agrees with
- * the listing card on whether a sponsor has a location.
- */
-function registeredLocation(
-  address?: {
-    address_line_2?: string;
-    locality?: string;
-    region?: string;
-  } | null,
-) {
-  return formatLocation(
-    address?.locality ?? address?.address_line_2,
-    address?.region,
-  );
-}
-
-/**
- * Former Companies House names for a company, with the current name, blanks, and
- * normalised duplicates (LTD/LIMITED, repeats) removed. Single source for both
- * the visible "previously known as" summary and the alternateName structured
- * data, so on-page content and JSON-LD can never diverge.
- */
-function formerCompanyNames(
-  previousNames: string[] | undefined,
-  currentName: string,
-): string[] {
-  const seen = new Set([normalizeName(currentName)]);
-  const out: string[] = [];
-  for (const raw of previousNames ?? []) {
-    const key = normalizeName(raw);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(raw);
-  }
-  return out;
-}
-
-/** Distinct visa routes of a company's licence rows, in shared display priority order. */
-function distinctRoutes(licences: { route: string }[]): string[] {
-  return skilledWorkerFirst([...new Set(licences.map((l) => l.route))]);
-}
-
-/** Distinct licence ratings of a company's licence rows, in shared best-tier-first priority order (same policy as the listing card's icon). */
-function distinctRatings(licences: { typeRating: string }[]): string[] {
-  return ratingPriorityFirst([...new Set(licences.map((l) => l.typeRating))]);
-}
 
 /**
  * One enclosed row per licence: the visa route and the rating held on THAT
@@ -133,93 +81,6 @@ function LicenceStack({ items }: { items: RouteLicence[] }) {
       ))}
     </dl>
   );
-}
-
-// The loader-data slice head() and the component both derive from — the ONE
-// hand-written copy of this shape (head casts match.loaderData to it).
-type CompanyDisplayInput = {
-  sponsor: {
-    licences: {
-      organisationName: string;
-      companyNumber: string | null;
-      typeRating: string;
-      route: string;
-      sponsorLicenceNumber: string | null;
-    }[];
-  };
-  profile?: {
-    company_name?: string;
-    previousNames?: string[];
-    company_number?: string;
-    date_of_creation?: string;
-    registered_office_address?: {
-      address_line_1?: string;
-      address_line_2?: string;
-      locality?: string;
-      region?: string;
-      postal_code?: string;
-      country?: string;
-    } | null;
-    sicDescriptions?: { code: string; description: string }[];
-  } | null;
-};
-
-/** Shared head()/component derivations — one source, so page copy, meta description, and JSON-LD can never drift. */
-function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
-  // licences[0] is the primary org by construction (rows arrive primary-first).
-  const primaryOrg = sponsor.licences[0]?.organisationName ?? '';
-  // Drops a distinct unmapped namesake's rows (unit-tested in
-  // lib/company/licences) so its routes, ratings, licence numbers and name
-  // are never published as this company's.
-  const licences = identitySafeLicences(sponsor.licences);
-  const rawName = profile?.company_name ?? primaryOrg;
-  const currentKey = normalizeName(rawName);
-  // Set AFTER titleCase: case-variant HMRC rows of the same alias must not
-  // render twice ("…as Acme Support Ltd and Acme Support Ltd").
-  const registeredNames = [
-    ...new Set(licences.map((l) => titleCase(l.organisationName))),
-  ].filter((alias) => normalizeName(alias) !== currentKey);
-  const routes = distinctRoutes(licences);
-  const ratings = distinctRatings(licences);
-  const routeLicenceList = routeLicences(licences);
-  return {
-    primaryOrg,
-    rawName,
-    // Identity-safe licence rows — the component must read licence numbers
-    // from these, never from the raw pool.
-    licences,
-    formerNames: formerCompanyNames(profile?.previousNames, rawName),
-    name: titleCase(rawName),
-    registeredNames,
-    registeredAs: registeredNames.length
-      ? listFormatter.format(registeredNames)
-      : '',
-    routes,
-    routesText: listFormatter.format(routes.map(titleCase)),
-    // Route → its own rating(s); the display pairs from this, never from the
-    // two independent lists.
-    routeLicences: routeLicenceList,
-    ratings,
-    ratingText: ratingPhrase(ratings),
-    // "Worker (A Rating) for Skilled Worker" per licence. The RAW register
-    // wording, not the "A-rated" shorthand: that shorthand collapses
-    // "Worker (A rating)" and "Temporary Worker (A rating)" into one phrase,
-    // losing the licence type. Prose listing routes and ratings separately is
-    // read positionally (by people and crawlers alike) and inverts when they
-    // differ, so this spells the pair out.
-    licencePhrases: routeLicenceList.map(
-      (l) =>
-        `${l.ratings.map(titleCase).join(' and ')} for ${titleCase(l.route)}`,
-    ),
-    // Compares RAW ratings, so a Worker/Temporary Worker split still counts as
-    // a difference worth spelling out even though both are "A-rated".
-    ratingsDiffer:
-      new Set(routeLicenceList.map((l) => l.ratings.join('|'))).size > 1,
-    location: registeredLocation(profile?.registered_office_address),
-    industry: profile?.sicDescriptions
-      ?.map((sic) => sic.description)
-      .join(', '),
-  };
 }
 
 export const Route = createFileRoute('/company/$slug')({
@@ -454,7 +315,7 @@ function CompanyDetail() {
   // When the ratings differ by route, the summary must say WHICH is which —
   // "A-rated and B-rated sponsor status" leaves a reader (or an LLM quoting
   // this page) to guess, and guessing by order is wrong half the time.
-  const rating = display.ratingsDiffer
+  const rating = display.licencesVary
     ? listFormatter.format(display.licencePhrases)
     : display.ratingText;
   // Shared by both card slots (no-profile card and the CH profile card).
@@ -483,8 +344,11 @@ function CompanyDetail() {
   // Worker … sponsor status" is not a sentence, and cramming the pairs into
   // the clause is what made the aggregate phrasing tempting in the first place.
   const locationClause = displayLocation ? ` based in ${displayLocation}` : '';
-  const intro = display.ratingsDiffer
-    ? `${displayName} is a licensed UK ${routesText} visa sponsor${locationClause}. Its UK Home Office sponsor licences are ${rating}.`
+  // ONE enumeration per paragraph. When the licences vary, the pair list is
+  // the enumeration and the opening sentence stays generic; otherwise the
+  // opening sentence carries the route list and the pair list is skipped.
+  const intro = display.licencesVary
+    ? `${displayName} is a licensed UK visa sponsor${locationClause}. Its UK Home Office sponsor licences are ${rating}.`
     : `${displayName} is a licensed UK ${routesText} visa sponsor${locationClause}, holding ${rating} sponsor status on the UK Home Office register.`;
   let background = '';
   if (incorporated && industry) {
@@ -494,7 +358,11 @@ function CompanyDetail() {
   } else if (industry) {
     background = `The company operates in ${industry}.`;
   }
-  const outro = `${displayName} can sponsor international workers for the UK ${routesText} ${routes.length > 1 ? 'visa routes' : 'visa'} under its current Home Office licence.`;
+  // Deliberately does NOT repeat the route list — the paragraph already
+  // enumerated it once, in whichever sentence carried it.
+  const outro = display.licencesVary
+    ? `${displayName} can sponsor international workers on ${routes.length > 1 ? 'these routes' : 'this route'} under its current Home Office licence.`
+    : `${displayName} can sponsor international workers for the UK ${routesText} ${routes.length > 1 ? 'visa routes' : 'visa'} under its current Home Office licence.`;
   const registered = alsoRegisteredAs
     ? `It appears on the UK Home Office sponsor register as ${alsoRegisteredAs}.`
     : '';

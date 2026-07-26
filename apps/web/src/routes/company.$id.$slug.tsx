@@ -26,11 +26,28 @@ export const Route = createFileRoute('/company/$id/$slug')({
   },
   loader: async ({ params, location }) => {
     const search = (location.search as { search?: string }).search ?? '';
-    // A lookup failure must still redirect: the slug is already in the URL, so
-    // a DB blip should not crash-screen the entire indexed legacy corpus.
-    const target = await getSlugForHash({ data: { hash: params.id } }).catch(
-      () => null,
-    );
+    // Redirect to the slug already in the URL. Used whenever a lookup FAILS:
+    // "the database is unreachable" must never be answered with 404, which
+    // Googlebot reads as gone and drops — a blip would deindex the whole
+    // legacy corpus mid-recovery. Short-cached so it is re-resolved soon.
+    const redirectToUrlSlug = () =>
+      redirect({
+        to: '/company/$slug',
+        params: { slug: params.slug },
+        search: { search },
+        statusCode: 301,
+        headers: { 'Cache-Control': SHORT_EDGE_CACHE },
+      });
+
+    // A REJECTION and a null result mean different things and must not collapse
+    // into one branch: null is "this hash is gone" (a real answer), a rejection
+    // is "we could not ask".
+    let target: { nameSlug: string } | null = null;
+    try {
+      target = await getSlugForHash({ data: { hash: params.id } });
+    } catch {
+      throw redirectToUrlSlug();
+    }
     if (target) {
       // Static search value — SSR redirects must not use a functional `search`.
       // Hash-resolved 301s inherit the /company/** routeRule's long cache: the
@@ -47,9 +64,12 @@ export const Route = createFileRoute('/company/$id/$slug')({
     // (directly or via the rename fallback), so a dead legacy URL 404s instead
     // of permanently redirecting crawlers into a 404. Short-cached — a later
     // ingest can revive either side.
-    const echoed = await getHmrcCompanyBySlug({
-      data: { slug: params.slug },
-    }).catch(() => null);
+    let echoed: { nameSlug: string } | null = null;
+    try {
+      echoed = await getHmrcCompanyBySlug({ data: { slug: params.slug } });
+    } catch {
+      throw redirectToUrlSlug();
+    }
     if (!echoed) {
       setSsrCacheControl(SHORT_EDGE_CACHE);
       throw notFound();

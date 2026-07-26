@@ -136,8 +136,12 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
     routes,
     routesText: listFormatter.format(routes.map(titleCase)),
     ratings,
-    // Per-rating phrases; tiers ratingPhrase can't parse pass through verbatim.
-    ratingText: ratings.map((rating) => ratingPhrase(rating)).join(' and '),
+    // Per-rating phrases, deduped AFTER phrasing — 'Worker (A rating)' and
+    // 'Temporary Worker (A rating)' both phrase to "A-rated" and must not
+    // read "A-rated and A-rated". Unparseable tiers pass through verbatim.
+    ratingText: [
+      ...new Set(ratings.map((rating) => ratingPhrase(rating))),
+    ].join(' and '),
     location: registeredLocation(profile?.registered_office_address),
     industry: profile?.sicDescriptions
       ?.map((sic) => sic.description)

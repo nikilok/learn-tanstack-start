@@ -27,7 +27,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, and sponsor rating. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Results are merged per company: each returns the company name, location, every visa route it can sponsor (comma-separated in visaRoutes), and its sponsor licence rating or ratings. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -199,26 +199,35 @@ export function McpTools() {
           }
 
           const top = exactRow ?? hmrcResult.rows[0];
+          // The slug fetch settles independently: its failure must not sink
+          // the profile — the fallback below covers exactly that case.
           const [profile, company] = await Promise.all([
             queryClient.ensureQueryData(
               companyProfileQueryOptions(top.organisationName),
             ),
-            queryClient.ensureQueryData(
-              hmrcCompanyBySlugQueryOptions(top.nameSlug),
-            ),
+            queryClient
+              .ensureQueryData(hmrcCompanyBySlugQueryOptions(top.nameSlug))
+              .catch(() => null),
           ]);
 
           // Slug-keyed fetch pools case-variant duplicate rows and keeps the
-          // per-licence route↔rating pairing the search aggregate loses.
+          // per-licence route↔rating pairing the search aggregate loses. Only
+          // trusted when it describes top's org — a namesake slug can resolve
+          // to a different legal entity's licences. Fallback pairing: a single
+          // distinct rating applies to every route; several stay unpaired.
           const sponsorship =
-            company?.kind === 'found'
+            company?.kind === 'found' &&
+            company.orgNames.includes(top.organisationName)
               ? company.licences.map((licence) => ({
                   visaRoute: titleCase(licence.route),
                   rating: titleCase(licence.typeRating),
                 }))
               : top.routes.map((route) => ({
                   visaRoute: titleCase(route),
-                  rating: null as string | null,
+                  rating:
+                    top.typeRatings.length === 1
+                      ? titleCase(top.typeRatings[0])
+                      : null,
                 }));
 
           const details = {

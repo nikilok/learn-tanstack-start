@@ -6,7 +6,7 @@ import {
 } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { buildNameMatchers } from '../lib/search/name-match';
@@ -167,14 +167,11 @@ export type CompanyLicence = {
   sponsorLicenceNumber: string | null;
 };
 
+// `licences` is the single source of truth: the primary org is
+// licences[0].organisationName (rows arrive primary-first) and aliases derive
+// from the distinct org names — no separate scalar fields to drift.
 export type CompanyBySlug =
-  | {
-      kind: 'found';
-      organisationName: string;
-      orgNames: string[];
-      nameSlug: string;
-      licences: CompanyLicence[];
-    }
+  | { kind: 'found'; nameSlug: string; licences: CompanyLicence[] }
   | { kind: 'moved'; nameSlug: string };
 
 // SQL analogue of utils.ts slugify. Identical for ASCII; Unicode full case
@@ -197,9 +194,11 @@ const slugifySql = (expr: ReturnType<typeof sql>) =>
 export const getHmrcCompanyBySlug = createServerFn()
   .inputValidator((input: unknown) => input as { slug: string })
   .handler(async ({ data }): Promise<CompanyBySlug | null> => {
-    // Normalise URL-ish input (case variants, encoded spaces) to slug form;
+    // Type-guard BEFORE slugify: the RPC payload is caller-controlled and a
+    // non-string must be a null miss, not a .toLowerCase() 500. Then
+    // normalise URL-ish input (case variants, encoded spaces) to slug form;
     // the loader 301s when the request differs from the canonical slug.
-    const slug = slugify(data.slug ?? '');
+    const slug = typeof data?.slug === 'string' ? slugify(data.slug) : '';
     if (!/^[a-z0-9-]{1,255}$/.test(slug)) return null;
     const found = await db.execute(sql`
       SELECT h.hash AS "slugId",
@@ -235,14 +234,7 @@ export const getHmrcCompanyBySlug = createServerFn()
           (r) => r.companyNumber === primaryCompany || r.companyNumber === null,
         )
         .map(({ companyNumber: _companyNumber, ...licence }) => licence);
-      const orgNames = [...new Set(licences.map((l) => l.organisationName))];
-      return {
-        kind: 'found',
-        organisationName: licences[0].organisationName,
-        orgNames,
-        nameSlug: slug,
-        licences,
-      };
+      return { kind: 'found', nameSlug: slug, licences };
     }
 
     // Rename/alias fallback: an unknown slug resolves through the company
@@ -295,6 +287,66 @@ export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
     queryFn: () => getHmrcCompanyBySlug({ data: { slug } }),
     staleTime: (query) =>
       query.state.data?.kind === 'found' ? Number.POSITIVE_INFINITY : 0,
+  });
+
+/**
+ * TRANSITIONAL — delete after the next release cycle. Pre-deploy client
+ * bundles still call this RPC (its id derives from this file + export name)
+ * from the old /company/$id/$slug loader; without it every card click in an
+ * open tab errors until a hard reload. Serves the old row shape from current
+ * data; canonicalSlugId === slugId (the group was 1:1 by construction).
+ */
+export const getHmrcBySlugId = createServerFn()
+  .inputValidator((input: unknown) => input as { slugId: string })
+  .handler(async ({ data }) => {
+    const slugId = typeof data?.slugId === 'string' ? data.slugId : '';
+    const found = await db.execute(sql`
+      SELECT h.hash AS "slugId",
+             h.hash AS "canonicalSlugId",
+             h.organisation_name AS "organisationName",
+             h.name_slug AS "nameSlug",
+             h.type_rating AS "typeRating",
+             h.route AS "route",
+             (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
+                          THEN min(l.sponsor_licence_number) END
+              FROM hmrc_sponsor_licences l
+              WHERE l.organisation_name = h.organisation_name
+                AND l.type_rating = h.type_rating
+                AND l.route = h.route) AS "sponsorLicenceNumber"
+      FROM ${hmrcSkilledWorkers} h
+      WHERE h.hash = ${slugId}
+      LIMIT 1
+    `);
+    const row =
+      (found.rows[0] as unknown as
+        | {
+            slugId: string;
+            canonicalSlugId: string;
+            organisationName: string;
+            nameSlug: string;
+            typeRating: string;
+            route: string;
+            sponsorLicenceNumber: string | null;
+          }
+        | undefined) ?? null;
+    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
+    return row;
+  });
+
+/** TRANSITIONAL — delete after the next release cycle. Old-bundle slug fallback; returns the minimal rows the old /company/$id/$slug loader consumed. */
+export const getHmrcBySlug = createServerFn()
+  .inputValidator((input: unknown) => input as { slug: string })
+  .handler(async ({ data }) => {
+    const slug = typeof data?.slug === 'string' ? data.slug : '';
+    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
+    return db
+      .select({
+        slugId: hmrcSkilledWorkers.hash,
+        organisationName: hmrcSkilledWorkers.organisationName,
+      })
+      .from(hmrcSkilledWorkers)
+      .where(eq(hmrcSkilledWorkers.nameSlug, slug))
+      .orderBy(asc(hmrcSkilledWorkers.hash));
   });
 
 /**

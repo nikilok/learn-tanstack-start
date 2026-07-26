@@ -214,10 +214,13 @@ export function McpTools() {
           // per-licence route↔rating pairing the search aggregate loses. Only
           // trusted when it describes top's org — a namesake slug can resolve
           // to a different legal entity's licences. Fallback pairing: a single
-          // distinct rating applies to every route; several stay unpaired.
+          // distinct rating applies to every route; several stay unpaired
+          // (the top-level `ratings` field below always carries the full set).
           const sponsorship =
             company?.kind === 'found' &&
-            company.orgNames.includes(top.organisationName)
+            company.licences.some(
+              (licence) => licence.organisationName === top.organisationName,
+            )
               ? company.licences.map((licence) => ({
                   visaRoute: titleCase(licence.route),
                   rating: titleCase(licence.typeRating),
@@ -234,6 +237,8 @@ export function McpTools() {
             name: titleCase(top.organisationName),
             location: formatLocation(top.locality, top.region) || null,
             sponsorship,
+            // Full rating set, independent of whether pairing succeeded above.
+            ratings: top.typeRatings.map(titleCase),
             companiesHouse: profile
               ? {
                   companyNumber: profile.company_number,

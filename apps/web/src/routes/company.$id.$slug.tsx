@@ -6,6 +6,7 @@ import {
 
 import { SHORT_EDGE_CACHE } from '../api/cache-headers';
 import { getSlugForHash } from '../api/hmrc';
+import { searchTermInput } from '../lib/search/params';
 
 /**
  * Legacy hash-URL shim: /company/$id/$slug 301s to the slug-only page. The
@@ -14,8 +15,10 @@ import { getSlugForHash } from '../api/hmrc';
  * through the rename fallback or 404s.
  */
 export const Route = createFileRoute('/company/$id/$slug')({
+  // searchTermInput: the router JSON-parses ?search=365 into a NUMBER — a raw
+  // string cast + .trim() throws before the loader can 301.
   validateSearch: (search: Record<string, unknown>) => ({
-    search: ((search.search as string) || '').trim(),
+    search: searchTermInput(search.search),
   }),
   search: {
     middlewares: [stripSearchParams({ search: '' })],

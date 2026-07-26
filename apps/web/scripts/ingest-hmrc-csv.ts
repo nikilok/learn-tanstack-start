@@ -281,6 +281,40 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
   );
 }
 
+// Step 5.5: Disambiguate namesake slugs. Distinct legal entities whose names
+// slugify identically must not share a URL: within each colliding slug, the
+// company with the lowest company_number keeps the base slug and every other
+// MAPPED company gets a stable `-{company_number}` suffix (company numbers
+// never change, so suffixes survive re-ingests). Unmapped orgs keep the base
+// slug and pool with it — mirroring the page's namesake guard in api/hmrc.ts.
+// left() guards the varchar(255) cap; the suffix keeps truncated slugs unique.
+console.log('Disambiguating namesake slugs...');
+const disambiguated = (await sql`
+  WITH mapped AS (
+    SELECT DISTINCT st."organisation_name", st."name_slug", m."company_number"
+    FROM "hmrc_skilled_workers_staging" st
+    JOIN "hmrc_company_mapping" m ON m."organisation_name" = st."organisation_name"
+    WHERE m."company_number" IS NOT NULL
+  ),
+  keepers AS (
+    SELECT "name_slug", min("company_number") AS keeper
+    FROM mapped
+    GROUP BY "name_slug"
+    HAVING count(DISTINCT "company_number") > 1
+  )
+  UPDATE "hmrc_skilled_workers_staging" st
+  SET "name_slug" = left(st."name_slug", 254 - length(mp."company_number")) || '-' || lower(mp."company_number")
+  FROM mapped mp
+  JOIN keepers k ON k."name_slug" = mp."name_slug"
+  WHERE st."organisation_name" = mp."organisation_name"
+    AND st."name_slug" = mp."name_slug"
+    AND mp."company_number" <> k."keeper"
+  RETURNING st."organisation_name"
+`) as { organisation_name: string }[];
+console.log(
+  `  ${disambiguated.length} rows suffixed across namesake collisions`,
+);
+
 // Step 6: Build indexes on staging table
 console.log('Building indexes on staging table...');
 await Promise.all([

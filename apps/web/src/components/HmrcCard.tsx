@@ -3,7 +3,12 @@ import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
 import { TYPE_RATING_ROWS } from '../lib/search/params';
-import { formatLocation, previousNameText, titleCase } from '../utils';
+import {
+  formatLocation,
+  previousNameText,
+  skilledWorkerFirst,
+  titleCase,
+} from '../utils';
 import RatingIcon from './RatingIcon';
 
 // Raw rating strings whose tier is A-class (A / A-Premium / A-SME+), from the
@@ -39,12 +44,11 @@ export default function HmrcCard({
 }) {
   const location = formatLocation(row.locality, row.region);
   const previousName = previousNameText(row.matchedPreviousName);
-  // Merged card: icon from the best rating, chip leads with Skilled Worker.
+  // Merged card: icon from the best rating; the chip leads with the same
+  // route-priority policy the detail page uses (skilledWorkerFirst).
   const primaryRating =
     row.typeRatings.find((r) => A_TIER_RATINGS.has(r)) ?? row.typeRatings[0];
-  const chipRoute = row.routes.includes('Skilled Worker')
-    ? 'Skilled Worker'
-    : row.routes[0];
+  const chipRoute = skilledWorkerFirst(row.routes)[0];
   return (
     <Link
       to="/company/$slug"
@@ -52,6 +56,9 @@ export default function HmrcCard({
         slug: row.nameSlug,
       }}
       search={{ search }}
+      // Row identity for the pop-transition resolver: namesake cards can
+      // share an href, and the last-clicked slugId disambiguates the morph.
+      data-slug-id={row.slugId}
       viewTransition={{ types: ['forward'] }}
       className="relative -mx-4 block px-4 py-2 no-underline"
       style={{

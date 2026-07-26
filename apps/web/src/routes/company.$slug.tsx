@@ -28,6 +28,7 @@ import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
+import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
@@ -35,6 +36,7 @@ import {
   formatLocation,
   humanizeEnum,
   normalizeName,
+  skilledWorkerFirst,
   stampPageFlip,
   titleCase,
 } from '../utils';
@@ -84,15 +86,9 @@ function formerCompanyNames(
   return out;
 }
 
-/** Distinct visa routes of a company's licence rows, Skilled Worker first, then alphabetical. */
+/** Distinct visa routes of a company's licence rows, in shared display priority order. */
 function distinctRoutes(licences: { route: string }[]): string[] {
-  return [...new Set(licences.map((l) => l.route))].sort((a, b) =>
-    a === 'Skilled Worker'
-      ? -1
-      : b === 'Skilled Worker'
-        ? 1
-        : a.localeCompare(b),
-  );
+  return skilledWorkerFirst([...new Set(licences.map((l) => l.route))]);
 }
 
 /** Distinct licence ratings of a company's licence rows, in stable order. */
@@ -100,19 +96,24 @@ function distinctRatings(licences: { typeRating: string }[]): string[] {
   return [...new Set(licences.map((l) => l.typeRating))].sort();
 }
 
-// The sponsor/profile slice both head() and the component derive from.
+// The loader-data slice head() and the component both derive from — the ONE
+// hand-written copy of this shape (head casts match.loaderData to it).
 type CompanyDisplayInput = {
   sponsor: {
-    organisationName: string;
-    orgNames: string[];
-    licences: { typeRating: string; route: string }[];
+    licences: { organisationName: string; typeRating: string; route: string }[];
   };
   profile?: {
     company_name?: string;
+    previousNames?: string[];
+    company_number?: string;
+    date_of_creation?: string;
     registered_office_address?: {
+      address_line_1?: string;
       address_line_2?: string;
       locality?: string;
       region?: string;
+      postal_code?: string;
+      country?: string;
     } | null;
     sicDescriptions?: { code: string; description: string }[];
   } | null;
@@ -120,14 +121,19 @@ type CompanyDisplayInput = {
 
 /** Shared head()/component derivations — one source, so page copy, meta description, and JSON-LD can never drift. */
 function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
-  const rawName = profile?.company_name ?? sponsor.organisationName;
+  // licences[0] is the primary org by construction (rows arrive primary-first).
+  const primaryOrg = sponsor.licences[0]?.organisationName ?? '';
+  const rawName = profile?.company_name ?? primaryOrg;
   const currentKey = normalizeName(rawName);
-  const registeredNames = sponsor.orgNames
-    .map(titleCase)
-    .filter((alias) => normalizeName(alias) !== currentKey);
+  // Set AFTER titleCase: case-variant HMRC rows of the same alias must not
+  // render twice ("…as Acme Support Ltd and Acme Support Ltd").
+  const registeredNames = [
+    ...new Set(sponsor.licences.map((l) => titleCase(l.organisationName))),
+  ].filter((alias) => normalizeName(alias) !== currentKey);
   const routes = distinctRoutes(sponsor.licences);
   const ratings = distinctRatings(sponsor.licences);
   return {
+    primaryOrg,
     name: titleCase(rawName),
     registeredNames,
     registeredAs: registeredNames.length
@@ -136,12 +142,7 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
     routes,
     routesText: listFormatter.format(routes.map(titleCase)),
     ratings,
-    // Per-rating phrases, deduped AFTER phrasing — 'Worker (A rating)' and
-    // 'Temporary Worker (A rating)' both phrase to "A-rated" and must not
-    // read "A-rated and A-rated". Unparseable tiers pass through verbatim.
-    ratingText: [
-      ...new Set(ratings.map((rating) => ratingPhrase(rating))),
-    ].join(' and '),
+    ratingText: ratingPhrase(ratings),
     location: registeredLocation(profile?.registered_office_address),
     industry: profile?.sicDescriptions
       ?.map((sic) => sic.description)
@@ -150,16 +151,24 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
 }
 
 export const Route = createFileRoute('/company/$slug')({
+  // searchTermInput: the router JSON-parses ?search=365 into a NUMBER — a raw
+  // string cast + .trim() throws on URLs the app itself mints.
   validateSearch: (search: Record<string, unknown>) => ({
-    search: ((search.search as string) || '').trim(),
+    search: searchTermInput(search.search),
   }),
   search: {
     middlewares: [stripSearchParams({ search: '' })],
   },
   loader: async ({ params, location, context: { queryClient } }) => {
-    const company = await queryClient.ensureQueryData(
-      hmrcCompanyBySlugQueryOptions(params.slug),
-    );
+    const options = hmrcCompanyBySlugQueryOptions(params.slug);
+    let company = await queryClient.ensureQueryData(options);
+    // ensureQueryData never refetches cached non-undefined data, so a
+    // session-cached miss (null/'moved') must be re-resolved explicitly — an
+    // ingest can reinstate or re-rename the slug mid-session. fetchQuery
+    // honours the staleTime fn: non-found results are always stale.
+    if (!import.meta.env.SSR && (!company || company.kind !== 'found')) {
+      company = await queryClient.fetchQuery(options);
+    }
 
     if (!company) {
       // Best effort: keep the 404 document short-lived at the edge (a
@@ -170,47 +179,39 @@ export const Route = createFileRoute('/company/$slug')({
       throw notFound();
     }
 
-    if (company.kind === 'moved') {
-      if (import.meta.env.SSR) {
-        // Old slug (rename resolved via mapping/previous names): 301 to the
-        // current slug. SHORT-cached via the redirect's own headers
-        // (setSsrCacheControl does not survive onto thrown redirects) —
-        // slug→slug redirects can invert on a rename flip-flop, and the
-        // /company/** routeRule's 30-day s-maxage would otherwise pin one
-        // side of the loop at the edge. Static search value — SSR redirects
-        // must not use a functional `search`.
-        throw redirect({
-          to: '/company/$slug',
-          params: { slug: company.nameSlug },
-          search: {
-            search: (location.search as { search?: string }).search ?? '',
-          },
-          statusCode: 301,
-          headers: { 'Cache-Control': SHORT_EDGE_CACHE },
-        });
-      }
-      // Client navs read RQ/edge caches that can be stale after a rename
-      // revert — redirecting on them can ping-pong two slugs forever. A full
-      // load resolves the 301 server-side; the rare client hit just 404s.
-      throw notFound();
-    }
-
-    // Canonicalise slug variants (SSR only): the fn slug-normalises its input,
-    // so /company/Acme-Ltd resolves — but must 301, never serve 200 there.
-    if (import.meta.env.SSR && company.nameSlug !== params.slug) {
-      throw redirect({
+    // One canonical 301 for rename-moved slugs and slug variants alike.
+    // SHORT-cached via the redirect's own headers (setSsrCacheControl does
+    // not survive onto thrown redirects): slug→slug redirects can invert on
+    // a rename flip-flop, and the /company/** routeRule's 30-day s-maxage
+    // would otherwise pin one side of the loop at the edge. Static search
+    // value — SSR redirects must not use a functional `search`.
+    const redirectToCanonical = (slug: string) =>
+      redirect({
         to: '/company/$slug',
-        params: { slug: company.nameSlug },
+        params: { slug },
         search: {
           search: (location.search as { search?: string }).search ?? '',
         },
         statusCode: 301,
         headers: { 'Cache-Control': SHORT_EDGE_CACHE },
       });
+
+    if (company.kind === 'moved') {
+      // SSR only: client navs read RQ/edge caches that can be stale after a
+      // rename revert — redirecting on them can ping-pong two slugs. A full
+      // load resolves the 301 server-side; the rare client hit just 404s.
+      if (import.meta.env.SSR) throw redirectToCanonical(company.nameSlug);
+      throw notFound();
+    }
+
+    // Canonicalise slug variants (SSR only): the fn slug-normalises its input,
+    // so /company/Acme-Ltd resolves — but must 301, never serve 200 there.
+    if (import.meta.env.SSR && company.nameSlug !== params.slug) {
+      throw redirectToCanonical(company.nameSlug);
     }
 
     const profile = await queryClient.ensureQueryData(
-      companyProfileQueryOptions(company.organisationName),
+      companyProfileQueryOptions(company.licences[0].organisationName),
     );
 
     // Timeline is auxiliary — a transient failure must not take down the page.
@@ -240,30 +241,8 @@ export const Route = createFileRoute('/company/$slug')({
     return { sponsor: company, profile, timeline };
   },
   head: ({ match }) => {
-    const loaderData = match.loaderData as
-      | {
-          sponsor: {
-            organisationName: string;
-            orgNames: string[];
-            licences: { typeRating: string; route: string }[];
-          };
-          profile?: {
-            company_name?: string;
-            previousNames?: string[];
-            company_number?: string;
-            date_of_creation?: string;
-            registered_office_address?: {
-              address_line_1?: string;
-              address_line_2?: string;
-              locality?: string;
-              region?: string;
-              postal_code?: string;
-              country?: string;
-            };
-            sicDescriptions?: { code: string; description: string }[];
-          } | null;
-        }
-      | undefined;
+    // Same shape the loader returns; CompanyDisplayInput is the one written copy.
+    const loaderData = match.loaderData as CompanyDisplayInput | undefined;
 
     // Lead with the Companies House current name; HMRC may hold a stale former name.
     const display = loaderData ? deriveCompanyDisplay(loaderData) : null;
@@ -295,35 +274,34 @@ export const Route = createFileRoute('/company/$slug')({
     // data mirrors the on-page copy. Exact-dedup only, NOT normalised: when the
     // HMRC and CH forms differ ("Acme Ltd" vs "Acme Limited") the page shows
     // both, so both belong here; normalising would drop one the copy renders.
-    const priorNames = loaderData
-      ? formerCompanyNames(
-          loaderData.profile?.previousNames,
-          loaderData.profile?.company_name ??
-            loaderData.sponsor.organisationName,
-        ).map(titleCase)
-      : [];
+    const priorNames =
+      loaderData && display
+        ? formerCompanyNames(
+            loaderData.profile?.previousNames,
+            loaderData.profile?.company_name ?? display.primaryOrg,
+          ).map(titleCase)
+        : [];
     const alternateName = [...registeredNames, ...priorNames].filter(
       (alt, i, all) => all.indexOf(alt) === i,
     );
 
-    const jsonLd = loaderData
-      ? buildCompanyJsonLd({
-          name,
-          legalName:
-            loaderData.profile?.company_name ??
-            loaderData.sponsor.organisationName,
-          alternateName,
-          route: routesText,
-          typeRating: display?.ratingText ?? '',
-          location,
-          industry,
-          companyNumber: loaderData.profile?.company_number,
-          dateOfCreation: loaderData.profile?.date_of_creation,
-          address: loaderData.profile?.registered_office_address,
-          canonicalUrl,
-          homeUrl: buildCanonical('/'),
-        })
-      : [];
+    const jsonLd =
+      loaderData && display
+        ? buildCompanyJsonLd({
+            name,
+            legalName: loaderData.profile?.company_name ?? display.primaryOrg,
+            alternateName,
+            route: routesText,
+            typeRating: display.ratings,
+            location,
+            industry,
+            companyNumber: loaderData.profile?.company_number,
+            dateOfCreation: loaderData.profile?.date_of_creation,
+            address: loaderData.profile?.registered_office_address,
+            canonicalUrl,
+            homeUrl: buildCanonical('/'),
+          })
+        : [];
 
     return buildSeoHead({
       title: pageTitle,
@@ -381,7 +359,8 @@ function CompanyDetail() {
   const searchQuery = encodeURIComponent(companySearchName(displayName));
   const alsoRegisteredAs = display.registeredAs || null;
   const ratingsText = ratings.map(titleCase).join(', ');
-  // Surface the licence number only when the rows agree on exactly one.
+  // Every distinct licence number — a company can hold one per licence row
+  // (105 slugs do); all render, stacked when several.
   const licenceNumbers = [
     ...new Set(
       sponsor.licences
@@ -389,18 +368,38 @@ function CompanyDetail() {
         .filter((n): n is string => Boolean(n)),
     ),
   ];
-  const sponsorLicenceNumber =
-    licenceNumbers.length === 1 ? licenceNumbers[0] : null;
   const displayLocation = display.location;
   const industry = display.industry;
   // Former names from Companies House, deduped against the current name;
   // title-cased at the display layer (the summary sentence).
   const formerNames = formerCompanyNames(
     profile?.previousNames,
-    profile?.company_name ?? sponsor.organisationName,
+    profile?.company_name ?? display.primaryOrg,
   );
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = display.ratingText;
+  // Shared by both card slots (no-profile card and the CH profile card).
+  const licenceNumberField = licenceNumbers.length > 0 && (
+    <DetailField
+      label={
+        licenceNumbers.length > 1
+          ? 'Sponsor Licence Nos.'
+          : 'Sponsor Licence No.'
+      }
+      literal
+      value={
+        licenceNumbers.length > 1 ? (
+          <span className="flex flex-col gap-0.5">
+            {licenceNumbers.map((n) => (
+              <span key={n}>{n}</span>
+            ))}
+          </span>
+        ) : (
+          licenceNumbers[0]
+        )
+      }
+    />
+  );
   const intro = `${displayName} is a licensed UK ${routesText} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
   let background = '';
   if (incorporated && industry) {
@@ -479,11 +478,19 @@ function CompanyDetail() {
               )}
               <DetailField
                 label={ratings.length > 1 ? 'Ratings' : 'Rating'}
+                valueClassName={ratings.length > 1 ? 'mt-1.5' : undefined}
                 value={
                   ratings.length > 1 ? (
-                    <span className="flex flex-col gap-0.5">
+                    // Badge stack matching the Visa Routes pills, so multiple
+                    // ratings read as separate licences at a glance.
+                    <span className="flex flex-col items-start gap-1.5">
                       {ratings.map((r) => (
-                        <span key={r}>{titleCase(r)}</span>
+                        <span
+                          key={r}
+                          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
+                        >
+                          {titleCase(r)}
+                        </span>
                       ))}
                     </span>
                   ) : (
@@ -492,13 +499,7 @@ function CompanyDetail() {
                 }
               />
               {/* No CH mapping → no second section, so surface the licence here instead. */}
-              {!profile && sponsorLicenceNumber && (
-                <DetailField
-                  label="Sponsor Licence No."
-                  value={sponsorLicenceNumber}
-                  literal
-                />
-              )}
+              {!profile && licenceNumberField}
             </dl>
           </div>
 
@@ -536,13 +537,7 @@ function CompanyDetail() {
                   />
                 )}
 
-                {sponsorLicenceNumber && (
-                  <DetailField
-                    label="Sponsor Licence No."
-                    value={sponsorLicenceNumber}
-                    literal
-                  />
-                )}
+                {licenceNumberField}
 
                 {formatAddress(profile.registered_office_address) && (
                   <DetailField

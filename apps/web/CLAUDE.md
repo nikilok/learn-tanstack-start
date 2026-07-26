@@ -262,7 +262,7 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   `scripts/browser-init.ts`. Generic mechanism — add `html[data-browser="chrome"] { … }`
   rules in `transitions.css` for future per-browser tweaks.
 - Forward navigation passes `viewTransition={{ types: ['forward'] }}` on the `Link` in
-  `HmrcCard`; back navigation passes `['back']` on the back link in `company.$id.$slug.tsx`.
+  `HmrcCard`; back navigation passes `['back']` on the back link in `company.$slug.tsx`.
   Other navigations (e.g. search-param updates) deliberately do NOT pass `viewTransition`.
 - Browser back/forward pops animate via `defaultViewTransition` in `router.tsx`
   (`resolvePopTransitionTypes`): home ↔ details pops only — everything else returns
@@ -303,7 +303,7 @@ logic doesn't tangle with base tokens, utilities, and component styles.
   on iOS 18.0/18.1 the transition runs untyped, typed selectors match nothing, and Safari
   silently falls back to the UA cross-fade. Current stamp sites: `HmrcCard` onClick (via
   `onActivate` in `HmrcResults`), and the Esc handler + back `Link` in
-  `company.$id.$slug.tsx`. The attribute is re-stamped by every such nav and inert between
+  `company.$slug.tsx`. The attribute is re-stamped by every such nav and inert between
   transitions, so it needs no cleanup. Chrome-only rules may keep the typed pseudo-class.
 
 ## /download owner gating — cross-file invariants

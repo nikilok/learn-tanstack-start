@@ -188,8 +188,8 @@ export default function HmrcResults({
     if (!row) return;
     const timer = setTimeout(() => {
       router.preloadRoute({
-        to: '/company/$id/$slug',
-        params: { id: row.slugId, slug: row.nameSlug },
+        to: '/company/$slug',
+        params: { slug: row.nameSlug },
         search: { search },
       });
     }, 150);

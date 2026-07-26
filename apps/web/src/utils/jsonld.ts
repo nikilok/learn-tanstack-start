@@ -25,16 +25,17 @@ export type CompanyJsonLdInput = {
   homeUrl: string;
 };
 
-/** Extract the bare rating letter (A/B) from HMRC's "Worker (A rating)" format; null when the format is unexpected. */
-function extractRatingLetter(rating: string): string | null {
-  const m = rating.match(/\(([AB])\s+rating\)/i);
-  return m ? m[1].toUpperCase() : null;
-}
-
-/** Render a natural-language rating phrase ("A-rated" / "B-rated") with a verbatim fallback when the letter can't be parsed. */
+/** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more HMRC "Worker (A rating)" strings, with a verbatim fallback when no letter parses. */
 export function ratingPhrase(rating: string): string {
-  const letter = extractRatingLetter(rating);
-  return letter ? `${letter}-rated` : rating;
+  const letters = [
+    ...new Set(
+      [...rating.matchAll(/\(([AB])\s+rating\)/gi)].map((m) =>
+        m[1].toUpperCase(),
+      ),
+    ),
+  ];
+  if (letters.length === 0) return rating;
+  return letters.map((letter) => `${letter}-rated`).join(' and ');
 }
 
 /** Build a schema.org PostalAddress from a Companies House registered-office address; returns null when no usable fields exist. */
@@ -131,7 +132,7 @@ function faqPage(input: CompanyJsonLdInput) {
       },
       {
         '@type': 'Question',
-        name: `What visa route is ${name} licensed for?`,
+        name: `Which visa routes can ${name} sponsor?`,
         acceptedAnswer: {
           '@type': 'Answer',
           text: `${name} holds a ${route} visa sponsor licence with the UK Home Office.`,

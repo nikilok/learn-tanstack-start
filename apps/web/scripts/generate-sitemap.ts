@@ -16,8 +16,9 @@ const OUT_DIR = join(import.meta.dirname, '..', 'public');
 
 /**
  * Regenerate the full sitemap set: index, static-pages file, and paginated
- * company sitemaps. URLs use `name_slug`; `<lastmod>` is sourced via the
- * HMRC → mapping → CH profile chain and omitted when the row has no profile.
+ * company sitemaps. One URL per `name_slug` (licence rows and namesake orgs
+ * merge into one page); `<lastmod>` is the newest CH profile update across
+ * the slug's orgs and omitted when none has a profile.
  */
 async function generate() {
   console.log('Generating sitemap...');
@@ -29,17 +30,12 @@ async function generate() {
     console.log(`Deleted old ${file}`);
   }
 
-  // Single pass over all rows; LEFT JOIN keeps HMRC entries without a CH match.
-  // One URL per (org, rating, route) group. With hash = org|rating|route the
-  // min(hash) grouping is 1:1 — kept for resilience if the hash inputs ever
-  // change again; siblings would 301 to it, so only min(hash) belongs here.
-  // updatedAt is constant per org (mapping PK is organisation_name), so adding
-  // it to GROUP BY never splits a group — it just keeps drizzle's Date mapping.
-  const allRows = await db
+  // Single pass; LEFT JOIN keeps HMRC entries without a CH match. Slug order
+  // keeps page membership stable between regenerations.
+  const ordered = await db
     .select({
-      hash: sql<string>`min(${hmrcSkilledWorkers.hash})`,
       nameSlug: hmrcSkilledWorkers.nameSlug,
-      updatedAt: companiesHouseProfiles.updatedAt,
+      updatedAt: sql<string | null>`max(${companiesHouseProfiles.updatedAt})`,
     })
     .from(hmrcSkilledWorkers)
     .leftJoin(
@@ -56,22 +52,8 @@ async function generate() {
         hmrcCompanyMapping.companyNumber,
       ),
     )
-    .groupBy(
-      hmrcSkilledWorkers.organisationName,
-      hmrcSkilledWorkers.nameSlug,
-      hmrcSkilledWorkers.typeRating,
-      hmrcSkilledWorkers.route,
-      companiesHouseProfiles.updatedAt,
-    )
-    .orderBy(sql`min(${hmrcSkilledWorkers.hash})`);
-
-  const entries = new Map(
-    allRows.map((row) => [
-      row.hash,
-      { nameSlug: row.nameSlug, updatedAt: row.updatedAt },
-    ]),
-  );
-  const ordered = Array.from(entries.entries());
+    .groupBy(hmrcSkilledWorkers.nameSlug)
+    .orderBy(hmrcSkilledWorkers.nameSlug);
 
   console.log(`Total companies: ${ordered.length}`);
   const totalPages = Math.ceil(ordered.length / URLS_PER_SITEMAP);
@@ -113,7 +95,7 @@ ${Array.from(
   await Bun.write(join(OUT_DIR, 'sitemap-0.xml'), sitemap0);
   console.log('Written sitemap-0.xml (static pages)');
 
-  // Generate company sitemaps from the prebuilt Map
+  // Generate company sitemaps
   for (let page = 1; page <= totalPages; page++) {
     const offset = (page - 1) * URLS_PER_SITEMAP;
     const batch = ordered.slice(offset, offset + URLS_PER_SITEMAP);
@@ -121,12 +103,15 @@ ${Array.from(
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${batch
-  .map(([hash, { nameSlug, updatedAt }]) => {
-    const lastmod = updatedAt
-      ? `\n    <lastmod>${updatedAt.toISOString()}</lastmod>`
-      : '';
+  .map(({ nameSlug, updatedAt }) => {
+    // max() comes back as a raw string via the driver; normalise through Date.
+    const parsed = updatedAt ? new Date(updatedAt) : null;
+    const lastmod =
+      parsed && !Number.isNaN(parsed.getTime())
+        ? `\n    <lastmod>${parsed.toISOString()}</lastmod>`
+        : '';
     return `  <url>
-    <loc>${BASE_URL}/company/${hash}/${nameSlug}</loc>${lastmod}
+    <loc>${BASE_URL}/company/${nameSlug}</loc>${lastmod}
   </url>`;
   })
   .join('\n')}

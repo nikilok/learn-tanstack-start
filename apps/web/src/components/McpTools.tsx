@@ -83,8 +83,8 @@ export function McpTools() {
               ? { previousName: titleCase(row.matchedPreviousName) }
               : {}),
             location: formatLocation(row.locality, row.region),
-            visaRoute: titleCase(row.route),
-            rating: titleCase(row.typeRating),
+            visaRoutes: row.routes.map(titleCase).join(', '),
+            rating: row.typeRatings.map(titleCase).join(', '),
           }));
 
           return {
@@ -200,16 +200,12 @@ export function McpTools() {
             companyProfileQueryOptions(top.organisationName),
           );
 
-          const sponsorship = hmrcResult.rows
-            .filter(
-              (row) =>
-                row.organisationName.toLowerCase() ===
-                top.organisationName.toLowerCase(),
-            )
-            .map((row) => ({
-              visaRoute: titleCase(row.route),
-              rating: titleCase(row.typeRating),
-            }));
+          // Licence rows are merged per company, so the top row already
+          // carries every route and rating for the sponsor.
+          const sponsorship = {
+            visaRoutes: top.routes.map(titleCase),
+            ratings: top.typeRatings.map(titleCase),
+          };
 
           const details = {
             name: titleCase(top.organisationName),

@@ -766,8 +766,9 @@ function FiltersPage() {
           .glass zeroes backdrop-filter, backdrop-blur-md! re-enables it). The
           glass body only shows while overlaying content; at rest it's plain. */}
       <div className="pointer-events-none sticky bottom-4 z-10 mt-10">
+        {/* Wider gap <sm: keycaps are hidden there, so the row is compact and reads cramped at gap-5. */}
         <div
-          className={`pointer-events-auto mx-auto flex w-fit items-center gap-5 py-2 ${
+          className={`pointer-events-auto mx-auto flex w-fit items-center gap-7 py-2 sm:gap-5 ${
             footerStuck ? 'glass rounded-full pr-2 pl-2 backdrop-blur-md!' : ''
           }`}
         >

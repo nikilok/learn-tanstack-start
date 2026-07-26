@@ -25,6 +25,7 @@ export type FilterSearchRow = {
   region: string | null;
   typeRatings: string[];
   routes: string[];
+  licences: { route: string; rating: string }[];
   score: number;
   matchedPreviousName: string | null;
   companyStatus: string | null;
@@ -96,6 +97,10 @@ export const searchFiltered = createServerFn()
              c.region AS "region",
              array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS "typeRatings",
              array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS "routes",
+             -- The PAIRED rows: anything showing a route and rating together
+             -- must read them from here, not from the two sorted lists above.
+             array_to_json(array_agg(DISTINCT jsonb_build_object(
+               'route', h.route, 'rating', h.type_rating))) AS "licences",
              -- Transitional scalars for pre-deploy bundles (server fns outlive
              -- the client across a deploy) — drop after the next release cycle.
              -- Hash-ordered so both come from ONE row: a real (route, rating)

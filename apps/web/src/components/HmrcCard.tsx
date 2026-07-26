@@ -36,10 +36,24 @@ export default function HmrcCard({
 }) {
   const location = formatLocation(row.locality, row.region);
   const previousName = previousNameText(row.matchedPreviousName);
-  // Merged card: icon and chip lead with the same shared priority policies
-  // the detail page uses (ratingPriorityFirst / skilledWorkerFirst).
-  const primaryRating = ratingPriorityFirst(row.typeRatings)[0];
-  const chipRoute = skilledWorkerFirst(row.routes)[0];
+  // Defensive: an edge-cached payload minted before `licences` shipped has
+  // none of these arrays — degrade instead of throwing the whole listing.
+  const routes = row.routes ?? [];
+  const licences = row.licences ?? [];
+  // The chip's route leads by shared policy; the icon then shows THAT route's
+  // own rating. Reading the rating from its own sorted list would advertise a
+  // (route, rating) pair the company does not hold — e.g. an A-rated GBM
+  // licence beside a B-rated Skilled Worker chip.
+  // '' fallbacks keep the always-present rating/chip slots rendered (the
+  // virtual list's fixedHeight assumes both) instead of throwing on an
+  // unexpected payload — RatingIcon's local titleCase has no null guard.
+  const chipRoute = skilledWorkerFirst(routes)[0] ?? '';
+  const primaryRating =
+    ratingPriorityFirst(
+      licences.filter((l) => l.route === chipRoute).map((l) => l.rating),
+    )[0] ??
+    ratingPriorityFirst(row.typeRatings ?? [])[0] ??
+    '';
   return (
     <Link
       to="/company/$slug"
@@ -104,7 +118,7 @@ export default function HmrcCard({
         )}
         <span className="max-w-full shrink-0 truncate rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs whitespace-nowrap text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset">
           {titleCase(chipRoute)}
-          {row.routes.length > 1 ? ` +${row.routes.length - 1}` : ''}
+          {routes.length > 1 ? ` +${routes.length - 1}` : ''}
         </span>
       </div>
     </Link>

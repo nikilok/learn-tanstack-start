@@ -76,7 +76,15 @@ function resolvePopTransitionTypes({
     // slugId (data-slug-id, saved by HmrcCard's click) takes precedence; the
     // href condition stays attached so a stale id can't hijack the morph.
     const escaped = CSS.escape(to);
-    const activeId = sessionStorage.getItem('hmrc-active-id');
+    // router-core calls this resolver with no try/catch, before the navigation
+    // commits — a storage SecurityError (embedded, cookies blocked) would
+    // strand the nav entirely, so a failed read just costs the morph.
+    let activeId: string | null = null;
+    try {
+      activeId = sessionStorage.getItem('hmrc-active-id');
+    } catch {
+      activeId = null;
+    }
     const idSelector = activeId
       ? `[data-slug-id="${CSS.escape(activeId)}"]`
       : null;

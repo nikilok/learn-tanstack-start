@@ -26,6 +26,7 @@ import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
+import RatingIcon from '../components/RatingIcon';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
 import { ratingPriorityFirst, searchTermInput } from '../lib/search/params';
@@ -96,16 +97,44 @@ function distinctRatings(licences: { typeRating: string }[]): string[] {
   return ratingPriorityFirst([...new Set(licences.map((l) => l.typeRating))]);
 }
 
-/** Vertically stacked chip badges — the one styling shared by the Visa Routes and Ratings fields. */
-function BadgeStack({ items }: { items: string[] }) {
+/** One licence: a visa route with the rating(s) actually held on THAT route. */
+type RouteLicence = { route: string; ratings: string[] };
+
+/** Group a company's licence rows into route → its own rating(s), in display priority order. Separate route and rating lists would let a reader pair the wrong two. */
+function routeLicences(
+  licences: { typeRating: string; route: string }[],
+): RouteLicence[] {
+  const byRoute = new Map<string, Set<string>>();
+  for (const { route, typeRating } of licences) {
+    const set = byRoute.get(route) ?? new Set<string>();
+    set.add(typeRating);
+    byRoute.set(route, set);
+  }
+  return skilledWorkerFirst([...byRoute.keys()]).map((route) => ({
+    route,
+    ratings: ratingPriorityFirst([...(byRoute.get(route) ?? [])]),
+  }));
+}
+
+/** One enclosed block per licence: the visa route and the rating held on THAT route. Rendering them as free-floating siblings lets a narrow viewport wrap the rating onto its own line, where it reads as belonging to the next route — the same mis-pairing two parallel columns cause. The shared background is what guarantees the association at every width. */
+function LicenceStack({ items }: { items: RouteLicence[] }) {
   return (
-    <span className="flex flex-col items-start gap-1.5">
-      {items.map((item) => (
+    <span className="flex flex-col gap-1.5">
+      {items.map(({ route, ratings }) => (
         <span
-          key={item}
-          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
+          key={route}
+          className="flex flex-col gap-0.5 rounded-md bg-(--card-row-bg) px-2.5 py-1.5 ring-1 ring-(--card-row-line) ring-inset sm:flex-row sm:items-center sm:justify-between sm:gap-x-4"
         >
-          {item}
+          <span className="font-mono text-xs break-words text-(--sea-ink-soft)">
+            {titleCase(route)}
+          </span>
+          {/* Right-aligned on desktop so ratings form their own column: run
+              inline against the route and the two read as one sentence. */}
+          <span className="flex shrink-0 flex-wrap items-center gap-x-3 sm:justify-end">
+            {ratings.map((rating) => (
+              <RatingIcon key={rating} rating={rating} />
+            ))}
+          </span>
         </span>
       ))}
     </span>
@@ -116,7 +145,13 @@ function BadgeStack({ items }: { items: string[] }) {
 // hand-written copy of this shape (head casts match.loaderData to it).
 type CompanyDisplayInput = {
   sponsor: {
-    licences: { organisationName: string; typeRating: string; route: string }[];
+    licences: {
+      organisationName: string;
+      companyNumber: string | null;
+      typeRating: string;
+      route: string;
+      sponsorLicenceNumber: string | null;
+    }[];
   };
   profile?: {
     company_name?: string;
@@ -139,18 +174,37 @@ type CompanyDisplayInput = {
 function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
   // licences[0] is the primary org by construction (rows arrive primary-first).
   const primaryOrg = sponsor.licences[0]?.organisationName ?? '';
+  const primaryKey = normalizeName(primaryOrg);
+  // An UNMAPPED pool can hold genuinely distinct legal entities whose names
+  // slugify alike ("SK & Associates Ltd" vs "SK Associates Ltd"), and with no
+  // company number there is nothing to tell them apart. Routes, ratings,
+  // licence numbers and aliases are all identity-bearing claims, so in that
+  // case publish only the primary org's own rows rather than attributing
+  // another company's licences — and its licence number — to this one.
+  const ambiguousPool =
+    sponsor.licences[0]?.companyNumber == null &&
+    new Set(sponsor.licences.map((l) => normalizeName(l.organisationName)))
+      .size > 1;
+  const licences = ambiguousPool
+    ? sponsor.licences.filter(
+        (l) => normalizeName(l.organisationName) === primaryKey,
+      )
+    : sponsor.licences;
   const rawName = profile?.company_name ?? primaryOrg;
   const currentKey = normalizeName(rawName);
   // Set AFTER titleCase: case-variant HMRC rows of the same alias must not
   // render twice ("…as Acme Support Ltd and Acme Support Ltd").
   const registeredNames = [
-    ...new Set(sponsor.licences.map((l) => titleCase(l.organisationName))),
+    ...new Set(licences.map((l) => titleCase(l.organisationName))),
   ].filter((alias) => normalizeName(alias) !== currentKey);
-  const routes = distinctRoutes(sponsor.licences);
-  const ratings = distinctRatings(sponsor.licences);
+  const routes = distinctRoutes(licences);
+  const ratings = distinctRatings(licences);
   return {
     primaryOrg,
     rawName,
+    // Identity-safe licence rows — the component must read licence numbers
+    // from these, never from the raw pool.
+    licences,
     formerNames: formerCompanyNames(profile?.previousNames, rawName),
     name: titleCase(rawName),
     registeredNames,
@@ -159,6 +213,9 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
       : '',
     routes,
     routesText: listFormatter.format(routes.map(titleCase)),
+    // Route → its own rating(s); the display pairs from this, never from the
+    // two independent lists.
+    routeLicences: routeLicences(licences),
     ratings,
     ratingText: ratingPhrase(ratings),
     location: registeredLocation(profile?.registered_office_address),
@@ -269,14 +326,16 @@ export const Route = createFileRoute('/company/$slug')({
     const registeredAs = display?.registeredAs ?? '';
     const location = display?.location ?? '';
     const industry = display?.industry;
-    const routesText = display?.routes.length
-      ? display.routesText
-      : 'Skilled Worker';
+    const routes = display?.routes ?? [];
+    // Same >2 collapse the visible H1 uses: spelling out six route names blows
+    // past the SERP snippet limit and pushes the location out of the snippet.
+    const sponsorPhrase =
+      routes.length > 2
+        ? `Licensed UK visa sponsor across ${routes.length} routes`
+        : `Licensed UK ${display?.routesText || 'Skilled Worker'} visa sponsor`;
     const description = [
       industry ? `${name} — ${industry}` : name,
-      location
-        ? `Licensed UK ${routesText} visa sponsor in ${location}`
-        : `Licensed UK ${routesText} visa sponsor`,
+      location ? `${sponsorPhrase} in ${location}` : sponsorPhrase,
       registeredAs ? `Also registered as ${registeredAs}` : '',
     ]
       .filter(Boolean)
@@ -303,7 +362,8 @@ export const Route = createFileRoute('/company/$slug')({
             name,
             legalName: display.rawName,
             alternateName,
-            route: routesText,
+            // Real array, not a joined phrase: the FAQ answers need the count.
+            routes: routes.map(titleCase),
             typeRating: display.ratings,
             location,
             industry,
@@ -366,16 +426,23 @@ function CompanyDetail() {
 
   // Shared derivations — the same values head() feeds the meta/JSON-LD from.
   const display = deriveCompanyDisplay({ sponsor, profile });
-  const { name: displayName, routes, routesText, ratings } = display;
+  const {
+    name: displayName,
+    routes,
+    routesText,
+    ratings,
+    routeLicences: licences,
+  } = display;
   // Noise-stripped query so external searches land on the right company.
   const searchQuery = encodeURIComponent(companySearchName(displayName));
   const alsoRegisteredAs = display.registeredAs || null;
   const ratingsText = ratings.map(titleCase).join(', ');
   // Every distinct licence number — a company can hold one per licence row
-  // (105 slugs do); all render, stacked when several.
+  // (105 slugs do); all render, stacked when several. Sourced from the
+  // identity-safe set so an unmapped namesake's number is never shown here.
   const licenceNumbers = [
     ...new Set(
-      sponsor.licences
+      display.licences
         .map((l) => l.sponsorLicenceNumber)
         .filter((n): n is string => Boolean(n)),
     ),
@@ -462,28 +529,27 @@ function CompanyDetail() {
                   valueClassName="mt-1"
                 />
               )}
-              {routes.length === 1 ? (
-                <DetailField label="Visa Route" value={titleCase(routes[0])} />
+              {/* Single licence: no pairing to confuse, so keep the compact
+                  two-cell layout. Several: one field pairing each route with
+                  the rating held ON that route — as two adjacent columns a
+                  reader pairs them by eye, and a company can be A-rated on one
+                  route and B-rated on another. */}
+              {licences.length === 1 ? (
+                <>
+                  <DetailField
+                    label="Visa Route"
+                    value={titleCase(licences[0].route)}
+                  />
+                  <DetailField label="Rating" value={ratingsText} />
+                </>
               ) : (
                 <DetailField
-                  label="Visa Routes"
-                  // Badges stack vertically in a normal grid cell (Ratings
-                  // stays alongside); long route names wrap inside the badge.
+                  label="Visa Routes & Ratings"
+                  className="col-span-2 sm:col-span-4"
                   valueClassName="mt-1.5"
-                  value={<BadgeStack items={routes.map(titleCase)} />}
+                  value={<LicenceStack items={licences} />}
                 />
               )}
-              <DetailField
-                label={ratings.length > 1 ? 'Ratings' : 'Rating'}
-                valueClassName={ratings.length > 1 ? 'mt-1.5' : undefined}
-                value={
-                  ratings.length > 1 ? (
-                    <BadgeStack items={ratings.map(titleCase)} />
-                  ) : (
-                    ratingsText
-                  )
-                }
-              />
               {/* No CH mapping → no second section, so surface the licence here instead. */}
               {!profile && licenceNumberField}
             </dl>

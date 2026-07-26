@@ -27,7 +27,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Results are merged per company: each returns the company name, location, every visa route it can sponsor (comma-separated in visaRoutes), and its sponsor licence rating or ratings. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Results are merged per company: each returns the company name, location, and a `licences` array in which every entry pairs one visa route with the sponsor licence rating held for THAT route (a company can hold different ratings on different routes, so never mix a rating from one entry with a route from another). A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -86,8 +86,12 @@ export function McpTools() {
               ? { previousName: titleCase(row.matchedPreviousName) }
               : {}),
             location: formatLocation(row.locality, row.region),
-            visaRoutes: row.routes.map(titleCase).join(', '),
-            rating: row.typeRatings.map(titleCase).join(', '),
+            // Paired, never two independent lists: a route and a rating shown
+            // together must come from the same licence row.
+            licences: (row.licences ?? []).map((licence) => ({
+              visaRoute: titleCase(licence.route),
+              rating: titleCase(licence.rating),
+            })),
           }));
 
           return {
@@ -210,21 +214,21 @@ export function McpTools() {
               .catch(() => null),
           ]);
 
-          // Slug-keyed fetch keeps the per-licence route↔rating pairing the
-          // search aggregate loses. Licences filter to top's org string
-          // case-insensitively — pooling its case-variant duplicate rows but
-          // never a punctuation-variant namesake ENTITY's — and dedupe by
-          // pair (variant rows repeat the same licence). Fallback pairing: a
-          // single distinct rating applies to every route; several stay
-          // unpaired (the `ratings` field always carries the full set).
+          // The slug fetch keeps the per-licence route↔rating pairing the
+          // search aggregate loses. When every pooled row carries one non-null
+          // company number the server already vouched they are ONE entity, so
+          // take them all — that pools the company's case/punctuation-variant
+          // register rows, which a name-string match would drop. Otherwise
+          // (unmapped rows, which may be distinct namesake entities) fall back
+          // to the exact org string. Deduped by pair: variant rows repeat the
+          // same licence.
           const orgKey = top.organisationName.toLowerCase();
-          const pooled =
-            company?.kind === 'found'
-              ? company.licences.filter(
-                  (licence) =>
-                    licence.organisationName.toLowerCase() === orgKey,
-                )
-              : [];
+          const pool = company?.kind === 'found' ? company.licences : [];
+          const numbers = new Set(pool.map((l) => l.companyNumber));
+          const oneEntity = numbers.size === 1 && !numbers.has(null);
+          const pooled = oneEntity
+            ? pool
+            : pool.filter((l) => l.organisationName.toLowerCase() === orgKey);
           const sponsorship =
             pooled.length > 0
               ? [
@@ -238,13 +242,20 @@ export function McpTools() {
                     ]),
                   ).values(),
                 ]
-              : top.routes.map((route) => ({
-                  visaRoute: titleCase(route),
-                  rating:
-                    top.typeRatings.length === 1
-                      ? titleCase(top.typeRatings[0])
-                      : null,
-                }));
+              : // No pooled rows (slug fetch failed): fall back to the search
+                // row's own paired licences before the unpaired lists.
+                (top.licences ?? []).length > 0
+                ? (top.licences ?? []).map((licence) => ({
+                    visaRoute: titleCase(licence.route),
+                    rating: titleCase(licence.rating),
+                  }))
+                : top.routes.map((route) => ({
+                    visaRoute: titleCase(route),
+                    rating:
+                      top.typeRatings.length === 1
+                        ? titleCase(top.typeRatings[0])
+                        : null,
+                  }));
 
           const details = {
             name: titleCase(top.organisationName),

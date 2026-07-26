@@ -28,7 +28,7 @@ import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
-import { searchTermInput } from '../lib/search/params';
+import { ratingPriorityFirst, searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
@@ -91,9 +91,25 @@ function distinctRoutes(licences: { route: string }[]): string[] {
   return skilledWorkerFirst([...new Set(licences.map((l) => l.route))]);
 }
 
-/** Distinct licence ratings of a company's licence rows, in stable order. */
+/** Distinct licence ratings of a company's licence rows, in shared best-tier-first priority order (same policy as the listing card's icon). */
 function distinctRatings(licences: { typeRating: string }[]): string[] {
-  return [...new Set(licences.map((l) => l.typeRating))].sort();
+  return ratingPriorityFirst([...new Set(licences.map((l) => l.typeRating))]);
+}
+
+/** Vertically stacked chip badges — the one styling shared by the Visa Routes and Ratings fields. */
+function BadgeStack({ items }: { items: string[] }) {
+  return (
+    <span className="flex flex-col items-start gap-1.5">
+      {items.map((item) => (
+        <span
+          key={item}
+          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
+        >
+          {item}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 // The loader-data slice head() and the component both derive from — the ONE
@@ -134,6 +150,8 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
   const ratings = distinctRatings(sponsor.licences);
   return {
     primaryOrg,
+    rawName,
+    formerNames: formerCompanyNames(profile?.previousNames, rawName),
     name: titleCase(rawName),
     registeredNames,
     registeredAs: registeredNames.length
@@ -161,14 +179,14 @@ export const Route = createFileRoute('/company/$slug')({
   },
   loader: async ({ params, location, context: { queryClient } }) => {
     const options = hmrcCompanyBySlugQueryOptions(params.slug);
-    let company = await queryClient.ensureQueryData(options);
-    // ensureQueryData never refetches cached non-undefined data, so a
-    // session-cached miss (null/'moved') must be re-resolved explicitly — an
-    // ingest can reinstate or re-rename the slug mid-session. fetchQuery
-    // honours the staleTime fn: non-found results are always stale.
-    if (!import.meta.env.SSR && (!company || company.kind !== 'found')) {
-      company = await queryClient.fetchQuery(options);
-    }
+    // SSR: per-request cache → ensure. Client: fetchQuery ALONE — via the
+    // staleTime fn a cached 'found' returns with no fetch, while a cached
+    // miss (null/'moved') is always stale and re-resolves in exactly one
+    // fetch (ensureQueryData would return the cached miss without ever
+    // refetching; ensure-then-fetch would double-fetch uncached misses).
+    const company = import.meta.env.SSR
+      ? await queryClient.ensureQueryData(options)
+      : await queryClient.fetchQuery(options);
 
     if (!company) {
       // Best effort: keep the 404 document short-lived at the edge (a
@@ -274,13 +292,7 @@ export const Route = createFileRoute('/company/$slug')({
     // data mirrors the on-page copy. Exact-dedup only, NOT normalised: when the
     // HMRC and CH forms differ ("Acme Ltd" vs "Acme Limited") the page shows
     // both, so both belong here; normalising would drop one the copy renders.
-    const priorNames =
-      loaderData && display
-        ? formerCompanyNames(
-            loaderData.profile?.previousNames,
-            loaderData.profile?.company_name ?? display.primaryOrg,
-          ).map(titleCase)
-        : [];
+    const priorNames = display ? display.formerNames.map(titleCase) : [];
     const alternateName = [...registeredNames, ...priorNames].filter(
       (alt, i, all) => all.indexOf(alt) === i,
     );
@@ -289,7 +301,7 @@ export const Route = createFileRoute('/company/$slug')({
       loaderData && display
         ? buildCompanyJsonLd({
             name,
-            legalName: loaderData.profile?.company_name ?? display.primaryOrg,
+            legalName: display.rawName,
             alternateName,
             route: routesText,
             typeRating: display.ratings,
@@ -370,12 +382,8 @@ function CompanyDetail() {
   ];
   const displayLocation = display.location;
   const industry = display.industry;
-  // Former names from Companies House, deduped against the current name;
-  // title-cased at the display layer (the summary sentence).
-  const formerNames = formerCompanyNames(
-    profile?.previousNames,
-    profile?.company_name ?? display.primaryOrg,
-  );
+  // Former names from Companies House (derived once, shared with head()).
+  const formerNames = display.formerNames;
   const incorporated = formatDate(profile?.date_of_creation);
   const rating = display.ratingText;
   // Shared by both card slots (no-profile card and the CH profile card).
@@ -462,18 +470,7 @@ function CompanyDetail() {
                   // Badges stack vertically in a normal grid cell (Ratings
                   // stays alongside); long route names wrap inside the badge.
                   valueClassName="mt-1.5"
-                  value={
-                    <span className="flex flex-col items-start gap-1.5">
-                      {routes.map((route) => (
-                        <span
-                          key={route}
-                          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
-                        >
-                          {titleCase(route)}
-                        </span>
-                      ))}
-                    </span>
-                  }
+                  value={<BadgeStack items={routes.map(titleCase)} />}
                 />
               )}
               <DetailField
@@ -481,18 +478,7 @@ function CompanyDetail() {
                 valueClassName={ratings.length > 1 ? 'mt-1.5' : undefined}
                 value={
                   ratings.length > 1 ? (
-                    // Badge stack matching the Visa Routes pills, so multiple
-                    // ratings read as separate licences at a glance.
-                    <span className="flex flex-col items-start gap-1.5">
-                      {ratings.map((r) => (
-                        <span
-                          key={r}
-                          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
-                        >
-                          {titleCase(r)}
-                        </span>
-                      ))}
-                    </span>
+                    <BadgeStack items={ratings.map(titleCase)} />
                   ) : (
                     ratingsText
                   )

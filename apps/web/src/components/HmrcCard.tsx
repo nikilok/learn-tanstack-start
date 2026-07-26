@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
-import { TYPE_RATING_ROWS } from '../lib/search/params';
+import { ratingPriorityFirst } from '../lib/search/params';
 import {
   formatLocation,
   previousNameText,
@@ -10,14 +10,6 @@ import {
   titleCase,
 } from '../utils';
 import RatingIcon from './RatingIcon';
-
-// Raw rating strings whose tier is A-class (A / A-Premium / A-SME+), from the
-// canonical rating registry — not another ad-hoc rating regex.
-const A_TIER_RATINGS = new Set(
-  TYPE_RATING_ROWS.filter((row) => row.rating.startsWith('A')).map(
-    (row) => row.raw,
-  ),
-);
 
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
@@ -44,10 +36,9 @@ export default function HmrcCard({
 }) {
   const location = formatLocation(row.locality, row.region);
   const previousName = previousNameText(row.matchedPreviousName);
-  // Merged card: icon from the best rating; the chip leads with the same
-  // route-priority policy the detail page uses (skilledWorkerFirst).
-  const primaryRating =
-    row.typeRatings.find((r) => A_TIER_RATINGS.has(r)) ?? row.typeRatings[0];
+  // Merged card: icon and chip lead with the same shared priority policies
+  // the detail page uses (ratingPriorityFirst / skilledWorkerFirst).
+  const primaryRating = ratingPriorityFirst(row.typeRatings)[0];
   const chipRoute = skilledWorkerFirst(row.routes)[0];
   return (
     <Link

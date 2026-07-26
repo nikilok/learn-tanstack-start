@@ -4,6 +4,7 @@ import {
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
 } from '@ss/db';
+import { slugifiedSqlText } from '@ss/db/constants';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { asc, eq, sql } from 'drizzle-orm';
@@ -102,6 +103,11 @@ export const searchHmrc = createServerFn()
                -- hands back JS arrays regardless of its text[] type parsers.
                array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS routes,
                array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS type_ratings,
+               -- Transitional scalars must be ONE row's real pair (both aggs
+               -- hash-ordered → same row), never independently-sorted heads,
+               -- which can fabricate a (route, rating) no licence holds.
+               (array_agg(h.route ORDER BY h.hash))[1] AS legacy_route,
+               (array_agg(h.type_rating ORDER BY h.hash))[1] AS legacy_type_rating,
                -- Gate the current-name score on a real direct match (the flag is
                -- free at WHERE time): for prev-name-only rows scoreCase is
                -- sub-threshold word_similarity noise that would suppress the
@@ -115,6 +121,7 @@ export const searchHmrc = createServerFn()
       ),
       g AS (
         SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
+               legacy_route, legacy_type_rating,
                GREATEST(org_score, coalesce(prev_score, 0)) AS score,
                coalesce(prev_score, 0) > org_score AS prev_won,
                CASE WHEN coalesce(prev_score, 0) > org_score
@@ -137,8 +144,8 @@ export const searchHmrc = createServerFn()
              g.routes AS "routes",
              -- Transitional scalars for pre-deploy bundles (server fns outlive
              -- the client across a deploy) — drop after the next release cycle.
-             g.type_ratings->>0 AS "typeRating",
-             g.routes->>0 AS "route",
+             g.legacy_type_rating AS "typeRating",
+             g.legacy_route AS "route",
              g.score AS "score",
              g.matched_previous_name AS "matchedPreviousName"
       FROM g
@@ -174,13 +181,12 @@ export type CompanyBySlug =
   | { kind: 'found'; nameSlug: string; licences: CompanyLicence[] }
   | { kind: 'moved'; nameSlug: string };
 
-// SQL analogue of utils.ts slugify. Identical for ASCII; Unicode full case
-// mapping can diverge (JS 'İ' → 'i' + combining dot → extra dash, PG → 'i'),
-// so a rare legacy slug misses the fallback and 404s instead of 301ing.
-// Expression-indexed (0038) on all three fallback tables — keep the index
-// expressions in lockstep with this fragment or the planner reverts to scans.
-const slugifySql = (expr: ReturnType<typeof sql>) =>
-  sql`btrim(regexp_replace(lower(${expr}), '[^a-z0-9]+', '-', 'g'), '-')`;
+// SQL analogue of utils.ts slugify, built from the @ss/db shared text so the
+// 0038 expression indexes (schema.ts) and these WHERE clauses can never drift.
+// Identical to JS slugify for ASCII; Unicode full case mapping can diverge
+// (JS 'İ' → 'i' + combining dot → extra dash, PG → 'i'), so a rare legacy
+// slug misses the fallback and 404s instead of 301ing.
+const slugifySql = (expr: string) => sql.raw(slugifiedSqlText(expr));
 
 /**
  * Server fn returning the full company page group for a `name_slug`: every
@@ -239,12 +245,15 @@ export const getHmrcCompanyBySlug = createServerFn()
 
     // Rename/alias fallback: an unknown slug resolves through the company
     // number — a stale mapping row (HMRC feed renames leave the old org name
-    // mapped), a CH previous name, or the CURRENT CH name (the page displays
-    // it, so hand-built links use its form: "…-limited" vs HMRC's "…-ltd") —
-    // to any current org on the same company. Misses and hits both cache
-    // short: unknown slugs can be revived by later ingests.
+    // mapped), a CH previous name, the CURRENT CH name (the page displays it,
+    // so hand-built links use its form: "…-limited" vs HMRC's "…-ltd"), or a
+    // company-number tail (disambiguated `-{number}` slugs, which no slugified
+    // NAME can ever equal after that company renames) — to any current org on
+    // the same company. Misses and hits both cache short: unknown slugs can
+    // be revived by later ingests.
     // MATERIALIZED fences candidate resolution (index probes on the 0038
-    // slugified expression indexes) from the h2 join, and min() replaces
+    // slugified expression indexes; the tail branch probes
+    // idx_mapping_company_number) from the h2 join, and min() replaces
     // ORDER BY+LIMIT so an empty candidate set never walks the slug index —
     // miss and hit paths both run in well under a millisecond.
     const moved = await db.execute(sql`
@@ -252,17 +261,21 @@ export const getHmrcCompanyBySlug = createServerFn()
         SELECT cur.organisation_name
         FROM ${hmrcCompanyMapping} stale
         JOIN ${hmrcCompanyMapping} cur ON cur.company_number = stale.company_number
-        WHERE ${slugifySql(sql`stale.organisation_name`)} = ${slug}
+        WHERE ${slugifySql('stale.organisation_name')} = ${slug}
         UNION
         SELECT cur.organisation_name
         FROM ${chPreviousNames} pn
         JOIN ${hmrcCompanyMapping} cur ON cur.company_number = pn.company_number
-        WHERE ${slugifySql(sql`pn.name`)} = ${slug}
+        WHERE ${slugifySql('pn.name')} = ${slug}
         UNION
         SELECT cur.organisation_name
         FROM ${companiesHouseProfiles} c
         JOIN ${hmrcCompanyMapping} cur ON cur.company_number = c.company_number
-        WHERE ${slugifySql(sql`c.company_name`)} = ${slug}
+        WHERE ${slugifySql('c.company_name')} = ${slug}
+        UNION
+        SELECT cur.organisation_name
+        FROM ${hmrcCompanyMapping} cur
+        WHERE cur.company_number = upper(substring(${slug} from '[^-]+$'))
       )
       SELECT min(h2.name_slug) AS "nameSlug"
       FROM cand
@@ -355,7 +368,9 @@ export const getHmrcBySlug = createServerFn()
  */
 export const getSlugForHash = createServerFn()
   .inputValidator((input: unknown) => input as { hash: string })
-  .handler(async ({ data: { hash } }) => {
+  .handler(async ({ data }) => {
+    // Caller-controlled payload: a malformed shape is a null miss, not a 500.
+    const hash = typeof data?.hash === 'string' ? data.hash : '';
     const [row] = await db
       .select({ nameSlug: hmrcSkilledWorkers.nameSlug })
       .from(hmrcSkilledWorkers)

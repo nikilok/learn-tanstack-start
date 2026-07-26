@@ -26,6 +26,11 @@ export type CompanyJsonLdInput = {
   homeUrl: string;
 };
 
+// Grammatical joiner for multi-tier phrases ("A-rated, B-rated and X").
+const ratingListFormatter = new Intl.ListFormat('en-GB', {
+  type: 'conjunction',
+});
+
 /** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more HMRC rating strings; items with no parseable letter pass through verbatim. The single dedupe-and-join implementation for every surface. */
 export function ratingPhrase(rating: string | string[]): string {
   const items = Array.isArray(rating) ? rating : [rating];
@@ -33,7 +38,7 @@ export function ratingPhrase(rating: string | string[]): string {
     const m = item.match(/\(([AB])\s+rating\)/i);
     return m ? `${m[1].toUpperCase()}-rated` : item;
   });
-  return [...new Set(phrases)].join(' and ');
+  return ratingListFormatter.format([...new Set(phrases)]);
 }
 
 /** Build a schema.org PostalAddress from a Companies House registered-office address; returns null when no usable fields exist. */

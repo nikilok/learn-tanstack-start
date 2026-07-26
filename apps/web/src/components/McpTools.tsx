@@ -210,21 +210,34 @@ export function McpTools() {
               .catch(() => null),
           ]);
 
-          // Slug-keyed fetch pools case-variant duplicate rows and keeps the
-          // per-licence route↔rating pairing the search aggregate loses. Only
-          // trusted when it describes top's org — a namesake slug can resolve
-          // to a different legal entity's licences. Fallback pairing: a single
-          // distinct rating applies to every route; several stay unpaired
-          // (the top-level `ratings` field below always carries the full set).
+          // Slug-keyed fetch keeps the per-licence route↔rating pairing the
+          // search aggregate loses. Licences filter to top's org string
+          // case-insensitively — pooling its case-variant duplicate rows but
+          // never a punctuation-variant namesake ENTITY's — and dedupe by
+          // pair (variant rows repeat the same licence). Fallback pairing: a
+          // single distinct rating applies to every route; several stay
+          // unpaired (the `ratings` field always carries the full set).
+          const orgKey = top.organisationName.toLowerCase();
+          const pooled =
+            company?.kind === 'found'
+              ? company.licences.filter(
+                  (licence) =>
+                    licence.organisationName.toLowerCase() === orgKey,
+                )
+              : [];
           const sponsorship =
-            company?.kind === 'found' &&
-            company.licences.some(
-              (licence) => licence.organisationName === top.organisationName,
-            )
-              ? company.licences.map((licence) => ({
-                  visaRoute: titleCase(licence.route),
-                  rating: titleCase(licence.typeRating),
-                }))
+            pooled.length > 0
+              ? [
+                  ...new Map(
+                    pooled.map((licence) => [
+                      `${licence.route}|${licence.typeRating}`,
+                      {
+                        visaRoute: titleCase(licence.route),
+                        rating: titleCase(licence.typeRating),
+                      },
+                    ]),
+                  ).values(),
+                ]
               : top.routes.map((route) => ({
                   visaRoute: titleCase(route),
                   rating:

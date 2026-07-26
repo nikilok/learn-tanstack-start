@@ -98,8 +98,10 @@ export const searchFiltered = createServerFn()
              array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS "routes",
              -- Transitional scalars for pre-deploy bundles (server fns outlive
              -- the client across a deploy) — drop after the next release cycle.
-             (array_agg(DISTINCT h.type_rating ORDER BY h.type_rating))[1] AS "typeRating",
-             (array_agg(DISTINCT h.route ORDER BY h.route))[1] AS "route",
+             -- Hash-ordered so both come from ONE row: a real (route, rating)
+             -- pair, never independently-sorted heads fabricating one.
+             (array_agg(h.type_rating ORDER BY h.hash))[1] AS "typeRating",
+             (array_agg(h.route ORDER BY h.hash))[1] AS "route",
              ${scoreExpr} AS "score",
              NULL::text AS "matchedPreviousName",
              c.company_status AS "companyStatus",

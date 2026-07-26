@@ -3,7 +3,10 @@ import { useEffect } from 'react';
 import '@mcp-b/global';
 
 import { companyProfileQueryOptions } from '../api/companiesHouse';
-import { searchHmrcQueryOptions } from '../api/hmrc';
+import {
+  hmrcCompanyBySlugQueryOptions,
+  searchHmrcQueryOptions,
+} from '../api/hmrc';
 import { formatLocation, titleCase } from '../utils';
 
 /**
@@ -24,7 +27,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'search_uk_visa_sponsors',
       description:
-        'Search for UK companies licensed to sponsor skilled worker visas. Returns company name, location, visa route, and sponsor rating. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
+        'Search for UK companies licensed to sponsor skilled worker visas. Results are merged per company: each returns the company name, location, every visa route it can sponsor (comma-separated in visaRoutes), and its sponsor licence rating or ratings. A result may match a company’s previous registered name rather than its current one; when that happens, previousName holds the old name that matched the query.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -83,8 +86,8 @@ export function McpTools() {
               ? { previousName: titleCase(row.matchedPreviousName) }
               : {}),
             location: formatLocation(row.locality, row.region),
-            visaRoute: titleCase(row.route),
-            rating: titleCase(row.typeRating),
+            visaRoutes: row.routes.map(titleCase).join(', '),
+            rating: row.typeRatings.map(titleCase).join(', '),
           }));
 
           return {
@@ -196,25 +199,59 @@ export function McpTools() {
           }
 
           const top = exactRow ?? hmrcResult.rows[0];
-          const profile = await queryClient.ensureQueryData(
-            companyProfileQueryOptions(top.organisationName),
-          );
+          // The slug fetch settles independently: its failure must not sink
+          // the profile — the fallback below covers exactly that case.
+          const [profile, company] = await Promise.all([
+            queryClient.ensureQueryData(
+              companyProfileQueryOptions(top.organisationName),
+            ),
+            queryClient
+              .ensureQueryData(hmrcCompanyBySlugQueryOptions(top.nameSlug))
+              .catch(() => null),
+          ]);
 
-          const sponsorship = hmrcResult.rows
-            .filter(
-              (row) =>
-                row.organisationName.toLowerCase() ===
-                top.organisationName.toLowerCase(),
-            )
-            .map((row) => ({
-              visaRoute: titleCase(row.route),
-              rating: titleCase(row.typeRating),
-            }));
+          // Slug-keyed fetch keeps the per-licence route↔rating pairing the
+          // search aggregate loses. Licences filter to top's org string
+          // case-insensitively — pooling its case-variant duplicate rows but
+          // never a punctuation-variant namesake ENTITY's — and dedupe by
+          // pair (variant rows repeat the same licence). Fallback pairing: a
+          // single distinct rating applies to every route; several stay
+          // unpaired (the `ratings` field always carries the full set).
+          const orgKey = top.organisationName.toLowerCase();
+          const pooled =
+            company?.kind === 'found'
+              ? company.licences.filter(
+                  (licence) =>
+                    licence.organisationName.toLowerCase() === orgKey,
+                )
+              : [];
+          const sponsorship =
+            pooled.length > 0
+              ? [
+                  ...new Map(
+                    pooled.map((licence) => [
+                      `${licence.route}|${licence.typeRating}`,
+                      {
+                        visaRoute: titleCase(licence.route),
+                        rating: titleCase(licence.typeRating),
+                      },
+                    ]),
+                  ).values(),
+                ]
+              : top.routes.map((route) => ({
+                  visaRoute: titleCase(route),
+                  rating:
+                    top.typeRatings.length === 1
+                      ? titleCase(top.typeRatings[0])
+                      : null,
+                }));
 
           const details = {
             name: titleCase(top.organisationName),
             location: formatLocation(top.locality, top.region) || null,
             sponsorship,
+            // Full rating set, independent of whether pairing succeeded above.
+            ratings: top.typeRatings.map(titleCase),
             companiesHouse: profile
               ? {
                   companyNumber: profile.company_number,

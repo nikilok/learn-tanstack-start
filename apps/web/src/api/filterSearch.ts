@@ -23,8 +23,8 @@ export type FilterSearchRow = {
   nameSlug: string;
   locality: string | null;
   region: string | null;
-  typeRating: string;
-  route: string;
+  typeRatings: string[];
+  routes: string[];
   score: number;
   matchedPreviousName: string | null;
   companyStatus: string | null;
@@ -75,22 +75,33 @@ export const searchFiltered = createServerFn()
     const order =
       filters.order ?? (sortKey === 'incorporated' ? 'desc' : 'asc');
     const dir = order === 'desc' ? sql`DESC` : sql`ASC`;
-    // h.hash tail: ties must order identically across OFFSET pages.
+    // min(h.hash) tail: ties must order identically across OFFSET pages.
     const orderBy =
       sortKey === 'relevance'
-        ? sql`score DESC, h.organisation_name ASC, h.hash ASC`
+        ? sql`score DESC, h.organisation_name ASC, min(h.hash) ASC`
         : sortKey === 'incorporated'
-          ? sql`c.date_of_creation ${dir} NULLS LAST, h.organisation_name ASC, h.hash ASC`
-          : sql`h.organisation_name ${dir}, h.hash ASC`;
+          ? sql`c.date_of_creation ${dir} NULLS LAST, h.organisation_name ASC, min(h.hash) ASC`
+          : sql`h.organisation_name ${dir}, min(h.hash) ASC`;
 
+    // Licence rows merge per company (org, slug): routes/ratings aggregate,
+    // and route/rating filters shape the aggregate — the chip reflects the
+    // rows that matched. c.* columns are grouped via c.company_number (PK →
+    // functional dependency); array_to_json so the driver always hands back
+    // JS arrays regardless of its text[] type parsers.
     const result = await db.execute(sql`
-      SELECT h.hash AS "slugId",
+      SELECT min(h.hash) AS "slugId",
              h.organisation_name AS "organisationName",
              h.name_slug AS "nameSlug",
              COALESCE(c.locality, c.address_line_2) AS "locality",
              c.region AS "region",
-             h.type_rating AS "typeRating",
-             h.route AS "route",
+             array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS "typeRatings",
+             array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS "routes",
+             -- Transitional scalars for pre-deploy bundles (server fns outlive
+             -- the client across a deploy) — drop after the next release cycle.
+             -- Hash-ordered so both come from ONE row: a real (route, rating)
+             -- pair, never independently-sorted heads fabricating one.
+             (array_agg(h.type_rating ORDER BY h.hash))[1] AS "typeRating",
+             (array_agg(h.route ORDER BY h.hash))[1] AS "route",
              ${scoreExpr} AS "score",
              NULL::text AS "matchedPreviousName",
              c.company_status AS "companyStatus",
@@ -100,6 +111,7 @@ export const searchFiltered = createServerFn()
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
       LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
       ${where}
+      GROUP BY h.organisation_name, h.name_slug, c.company_number
       ORDER BY ${orderBy}
       LIMIT ${PAGE_SIZE + 1} OFFSET ${safeOffset}
     `);

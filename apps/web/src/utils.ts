@@ -49,6 +49,17 @@ export function slugify(str: string): string {
     .replace(/^-|-$/g, '');
 }
 
+/** Order visa routes for display: Skilled Worker first, then alphabetical — the single route-priority policy shared by listing chips and detail pages. */
+export function skilledWorkerFirst(routes: string[]): string[] {
+  return [...routes].sort((a, b) =>
+    a === 'Skilled Worker'
+      ? -1
+      : b === 'Skilled Worker'
+        ? 1
+        : a.localeCompare(b),
+  );
+}
+
 /** Humanize a hyphenated CH enum value ("voluntary-arrangement" → "Voluntary Arrangement"). */
 export function humanizeEnum(value: string | null): string {
   return titleCase((value ?? '').replace(/-/g, ' '));

@@ -190,7 +190,10 @@ for (const [i, r] of records.entries()) {
   const hash = computeHash(hashInput);
   // slugify can expand certain Unicode ('İ' → 'i' + combining mark → extra
   // dash), so a ≤255 org name can still overflow name_slug varchar(255).
-  const nameSlug = slugify(orgName) || hash;
+  // The no-alphanumerics fallback must itself be a slugify FIXED POINT
+  // (slug-only lookups normalise the URL through slugify first) — a raw
+  // base64url hash (uppercase/underscores) would be permanently unreachable.
+  const nameSlug = slugify(orgName) || slugify(`org-${hash}`);
   if (nameSlug.length > 255) {
     invalidRows.push(
       `row ${rowNum} ("${orgName}"): name_slug exceeds 255 chars (${nameSlug.length})`,
@@ -280,6 +283,82 @@ for (let i = 0; i < dedupedRows.length; i += BATCH_SIZE) {
     `  Inserted ${Math.min(i + BATCH_SIZE, dedupedRows.length)}/${dedupedRows.length}`,
   );
 }
+
+// Step 5.5: Disambiguate namesake slugs. Distinct legal entities whose names
+// slugify identically must not share a URL: within each colliding slug, one
+// company keeps the base slug and every other MAPPED company gets a stable
+// `-{company_number}` suffix. Slug ownership is STICKY across ingests — a
+// company that held a slug (base or suffixed) in the live table keeps it, so
+// collision-set changes (keeper delisted, new namesake mapped) never flip an
+// indexed URL onto a different legal entity; min(company_number) only breaks
+// ties for brand-new collisions. Unmapped orgs keep the base slug and pool
+// with it — mirroring the page's namesake guard in api/hmrc.ts. rtrim+left
+// guard the varchar(255) cap without minting '--' (never a slugify fixed
+// point). A renamed company's base slug changes, so its old suffix stops
+// sticking by design — the rename fallback covers the old URL instead.
+console.log('Disambiguating namesake slugs...');
+const stickied = (await sql`
+  WITH mapped AS (
+    SELECT DISTINCT st."organisation_name", st."name_slug", m."company_number"
+    FROM "hmrc_skilled_workers_staging" st
+    JOIN "hmrc_company_mapping" m ON m."organisation_name" = st."organisation_name"
+    WHERE m."company_number" IS NOT NULL
+  ),
+  prior AS (
+    SELECT DISTINCT m."company_number", h."name_slug"
+    FROM "hmrc_skilled_workers" h
+    JOIN "hmrc_company_mapping" m ON m."organisation_name" = h."organisation_name"
+    WHERE m."company_number" IS NOT NULL
+  )
+  UPDATE "hmrc_skilled_workers_staging" st
+  SET "name_slug" = p."name_slug"
+  FROM mapped mp
+  JOIN prior p ON p."company_number" = mp."company_number"
+  WHERE st."organisation_name" = mp."organisation_name"
+    AND st."name_slug" = mp."name_slug"
+    AND p."name_slug" = rtrim(left(st."name_slug", 254 - length(mp."company_number")), '-') || '-' || lower(mp."company_number")
+  RETURNING st."organisation_name"
+`) as { organisation_name: string }[];
+const disambiguated = (await sql`
+  WITH mapped AS (
+    SELECT DISTINCT st."organisation_name", st."name_slug", m."company_number"
+    FROM "hmrc_skilled_workers_staging" st
+    JOIN "hmrc_company_mapping" m ON m."organisation_name" = st."organisation_name"
+    WHERE m."company_number" IS NOT NULL
+  ),
+  prior AS (
+    SELECT DISTINCT m."company_number", h."name_slug"
+    FROM "hmrc_skilled_workers" h
+    JOIN "hmrc_company_mapping" m ON m."organisation_name" = h."organisation_name"
+    WHERE m."company_number" IS NOT NULL
+  ),
+  keepers AS (
+    SELECT mp."name_slug",
+           coalesce(
+             (SELECT p."company_number"
+              FROM prior p
+              JOIN mapped mp2 ON mp2."company_number" = p."company_number"
+                             AND mp2."name_slug" = mp."name_slug"
+              WHERE p."name_slug" = mp."name_slug"
+              LIMIT 1),
+             min(mp."company_number")
+           ) AS keeper
+    FROM mapped mp
+    GROUP BY mp."name_slug"
+    HAVING count(DISTINCT mp."company_number") > 1
+  )
+  UPDATE "hmrc_skilled_workers_staging" st
+  SET "name_slug" = rtrim(left(st."name_slug", 254 - length(mp."company_number")), '-') || '-' || lower(mp."company_number")
+  FROM mapped mp
+  JOIN keepers k ON k."name_slug" = mp."name_slug"
+  WHERE st."organisation_name" = mp."organisation_name"
+    AND st."name_slug" = mp."name_slug"
+    AND mp."company_number" <> k."keeper"
+  RETURNING st."organisation_name"
+`) as { organisation_name: string }[];
+console.log(
+  `  ${stickied.length} prior suffixes re-applied, ${disambiguated.length} rows newly suffixed`,
+);
 
 // Step 6: Build indexes on staging table
 console.log('Building indexes on staging table...');

@@ -15,7 +15,8 @@ export type CompanyJsonLdInput = {
   legalName: string;
   alternateName?: string | string[];
   route: string;
-  typeRating: string;
+  // Raw HMRC rating string(s); faqPage phrases them via ratingPhrase.
+  typeRating: string | string[];
   location: string;
   industry?: string;
   companyNumber?: string;
@@ -25,16 +26,19 @@ export type CompanyJsonLdInput = {
   homeUrl: string;
 };
 
-/** Extract the bare rating letter (A/B) from HMRC's "Worker (A rating)" format; null when the format is unexpected. */
-function extractRatingLetter(rating: string): string | null {
-  const m = rating.match(/\(([AB])\s+rating\)/i);
-  return m ? m[1].toUpperCase() : null;
-}
+// Grammatical joiner for multi-tier phrases ("A-rated, B-rated and X").
+const ratingListFormatter = new Intl.ListFormat('en-GB', {
+  type: 'conjunction',
+});
 
-/** Render a natural-language rating phrase ("A-rated" / "B-rated") with a verbatim fallback when the letter can't be parsed. */
-export function ratingPhrase(rating: string): string {
-  const letter = extractRatingLetter(rating);
-  return letter ? `${letter}-rated` : rating;
+/** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more HMRC rating strings; items with no parseable letter pass through verbatim. The single dedupe-and-join implementation for every surface. */
+export function ratingPhrase(rating: string | string[]): string {
+  const items = Array.isArray(rating) ? rating : [rating];
+  const phrases = items.map((item) => {
+    const m = item.match(/\(([AB])\s+rating\)/i);
+    return m ? `${m[1].toUpperCase()}-rated` : item;
+  });
+  return ratingListFormatter.format([...new Set(phrases)]);
 }
 
 /** Build a schema.org PostalAddress from a Companies House registered-office address; returns null when no usable fields exist. */
@@ -131,7 +135,7 @@ function faqPage(input: CompanyJsonLdInput) {
       },
       {
         '@type': 'Question',
-        name: `What visa route is ${name} licensed for?`,
+        name: `Which visa routes can ${name} sponsor?`,
         acceptedAnswer: {
           '@type': 'Answer',
           text: `${name} holds a ${route} visa sponsor licence with the UK Home Office.`,

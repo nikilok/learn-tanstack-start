@@ -69,9 +69,26 @@ function resolvePopTransitionTypes({
     // Re-arm the click morph via a direct DOM write (must land before the
     // OLD snapshot capture; the node unmounts with the nav) — see CLAUDE.md.
     // CSS.escape guards decoded quotes; encoded hrefs then simply not match.
-    const anchor = document.querySelector<HTMLElement>(
-      `.page-flip-listing a[href^="${CSS.escape(to)}"]`,
-    );
+    // Exact-or-query match, NOT a bare prefix: slug-only pathnames can be
+    // strict prefixes of another card's href (/company/360-energy vs
+    // /company/360-energy-n-i-limited), which would morph the wrong card.
+    // Same-slug namesake cards even share an href, so the last-clicked card's
+    // slugId (data-slug-id, saved by HmrcCard's click) takes precedence; the
+    // href condition stays attached so a stale id can't hijack the morph.
+    const escaped = CSS.escape(to);
+    const activeId = sessionStorage.getItem('hmrc-active-id');
+    const idSelector = activeId
+      ? `[data-slug-id="${CSS.escape(activeId)}"]`
+      : null;
+    const anchor =
+      (idSelector
+        ? document.querySelector<HTMLElement>(
+            `.page-flip-listing a${idSelector}[href="${escaped}"], .page-flip-listing a${idSelector}[href^="${escaped}?"]`,
+          )
+        : null) ??
+      document.querySelector<HTMLElement>(
+        `.page-flip-listing a[href="${escaped}"], .page-flip-listing a[href^="${escaped}?"]`,
+      );
     if (anchor) {
       // Only when actually in view: overscan keeps off-viewport rows mounted,
       // and a morph from an off-screen bbox streaks and covers the header.

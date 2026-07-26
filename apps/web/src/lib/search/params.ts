@@ -62,6 +62,18 @@ export const TYPE_RATING_ROWS: {
   },
 ];
 
+/** Order raw rating strings best-tier-first (RATINGS order: A tiers, B, Provisional), unknown forms last, alphabetical within a tier — the single rating-priority policy for listing cards and detail pages. */
+export function ratingPriorityFirst(ratings: string[]): string[] {
+  const tierOf = new Map(
+    TYPE_RATING_ROWS.map((row) => [row.raw, RATINGS.indexOf(row.rating)]),
+  );
+  return [...ratings].sort((a, b) => {
+    const ta = tierOf.get(a) ?? RATINGS.length;
+    const tb = tierOf.get(b) ?? RATINGS.length;
+    return ta === tb ? a.localeCompare(b) : ta - tb;
+  });
+}
+
 export const COMPANY_STATUSES = [
   'active',
   'administration',

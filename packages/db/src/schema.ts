@@ -16,7 +16,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { ADDRESS_COLUMNS } from './constants';
+import { ADDRESS_COLUMNS, slugifiedSqlText } from './constants';
 
 export const hmrcSkilledWorkers = pgTable(
   'hmrc_skilled_workers',
@@ -152,6 +152,11 @@ export const companiesHouseProfiles = pgTable(
     index('idx_ch_jurisdiction').on(table.jurisdiction),
     index('idx_ch_previous_names').using('gin', table.previousCompanyNames),
     index('idx_ch_date_of_creation').on(table.dateOfCreation),
+    // Slugified-name probe for the company-page rename fallback.
+    index('idx_ch_profiles_name_slugified').using(
+      'btree',
+      sql.raw(slugifiedSqlText('"company_name"')),
+    ),
   ],
 );
 
@@ -175,6 +180,11 @@ export const chPreviousNames = pgTable(
       'gin',
       sql`${table.name} gin_trgm_ops`,
     ),
+    // Slugified-name probe for the company-page rename fallback.
+    index('idx_ch_prev_names_slugified').using(
+      'btree',
+      sql.raw(slugifiedSqlText('"name"')),
+    ),
   ],
 );
 
@@ -195,6 +205,11 @@ export const hmrcCompanyMapping = pgTable(
       table.verifiedAt.asc().nullsFirst(),
     ),
     index('idx_mapping_company_number').on(table.companyNumber),
+    // Slugified-name probe for the company-page rename fallback.
+    index('idx_mapping_org_slugified').using(
+      'btree',
+      sql.raw(slugifiedSqlText('"organisation_name"')),
+    ),
   ],
 );
 

@@ -4,12 +4,14 @@ import {
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
 } from '@ss/db';
+import { slugifiedSqlText } from '@ss/db/constants';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { buildNameMatchers } from '../lib/search/name-match';
+import { slugify } from '../utils';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
@@ -24,8 +26,8 @@ type SearchHit = {
   nameSlug: string;
   locality: string | null;
   region: string | null;
-  typeRating: string;
-  route: string;
+  typeRatings: string[];
+  routes: string[];
   score: number;
   matchedPreviousName: string | null;
 };
@@ -96,8 +98,16 @@ export const searchHmrc = createServerFn()
         SELECT min(h.hash) AS slug_id,
                h.organisation_name,
                h.name_slug,
-               h.type_rating,
-               h.route,
+               -- Licence rows merge per company: one result per (org, slug),
+               -- routes/ratings aggregated. array_to_json so the driver always
+               -- hands back JS arrays regardless of its text[] type parsers.
+               array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS routes,
+               array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS type_ratings,
+               -- Transitional scalars must be ONE row's real pair (both aggs
+               -- hash-ordered → same row), never independently-sorted heads,
+               -- which can fabricate a (route, rating) no licence holds.
+               (array_agg(h.route ORDER BY h.hash))[1] AS legacy_route,
+               (array_agg(h.type_rating ORDER BY h.hash))[1] AS legacy_type_rating,
                -- Gate the current-name score on a real direct match (the flag is
                -- free at WHERE time): for prev-name-only rows scoreCase is
                -- sub-threshold word_similarity noise that would suppress the
@@ -107,10 +117,11 @@ export const searchHmrc = createServerFn()
                pm.prev_score
         FROM hits h
         LEFT JOIN pm ON pm.organisation_name = h.organisation_name
-        GROUP BY h.organisation_name, h.name_slug, h.type_rating, h.route, pm.matched_name, pm.prev_score
+        GROUP BY h.organisation_name, h.name_slug, pm.matched_name, pm.prev_score
       ),
       g AS (
-        SELECT slug_id, organisation_name, name_slug, type_rating, route,
+        SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
+               legacy_route, legacy_type_rating,
                GREATEST(org_score, coalesce(prev_score, 0)) AS score,
                coalesce(prev_score, 0) > org_score AS prev_won,
                CASE WHEN coalesce(prev_score, 0) > org_score
@@ -129,8 +140,12 @@ export const searchHmrc = createServerFn()
              g.name_slug AS "nameSlug",
              COALESCE(c.locality, c.address_line_2) AS "locality",
              c.region AS "region",
-             g.type_rating AS "typeRating",
-             g.route AS "route",
+             g.type_ratings AS "typeRatings",
+             g.routes AS "routes",
+             -- Transitional scalars for pre-deploy bundles (server fns outlive
+             -- the client across a deploy) — drop after the next release cycle.
+             g.legacy_type_rating AS "typeRating",
+             g.legacy_route AS "route",
              g.score AS "score",
              g.matched_previous_name AS "matchedPreviousName"
       FROM g
@@ -149,70 +164,221 @@ export const searchHmrc = createServerFn()
     };
   });
 
+// One licence row of a company page: a (rating, route) pair plus the
+// snapshot licence number when the triple maps to exactly one.
+export type CompanyLicence = {
+  slugId: string;
+  organisationName: string;
+  typeRating: string;
+  route: string;
+  sponsorLicenceNumber: string | null;
+};
+
+// `licences` is the single source of truth: the primary org is
+// licences[0].organisationName (rows arrive primary-first) and aliases derive
+// from the distinct org names — no separate scalar fields to drift.
+export type CompanyBySlug =
+  | { kind: 'found'; nameSlug: string; licences: CompanyLicence[] }
+  | { kind: 'moved'; nameSlug: string };
+
+// SQL analogue of utils.ts slugify, built from the @ss/db shared text so the
+// 0038 expression indexes (schema.ts) and these WHERE clauses can never drift.
+// Identical to JS slugify for ASCII; Unicode full case mapping can diverge
+// (JS 'İ' → 'i' + combining dot → extra dash, PG → 'i'), so a rare legacy
+// slug misses the fallback and 404s instead of 301ing.
+const slugifySql = (expr: string) => sql.raw(slugifiedSqlText(expr));
+
 /**
- * Server fn returning a single `hmrc_skilled_workers` row keyed by its stable
- * `hash` slug id. Returns `null` when no matching row exists. Also returns the
- * group canonical: with hash = org|rating|route the (org, rating, route) group
- * is 1:1 and `canonicalSlugId` equals `slugId` — kept for resilience if the
- * hash inputs ever change again; the loader 301s any siblings to it. Joins the
- * 2026-06-09 `hmrc_sponsor_licences` snapshot on the same triple for the org's
- * sponsor licence number, surfaced only when that match is unambiguous.
+ * Server fn returning the full company page group for a `name_slug`: every
+ * licence row sharing the slug (multi-route companies merge into one page),
+ * ordered so the primary org (mapped to a CH company first, then
+ * alphabetically) leads. When the slug matches nothing current, falls back to
+ * rename resolution — the slugified form of stale mapping org names and CH
+ * previous names — and returns `moved` with the current slug for a 301.
+ * Returns `null` for a genuinely unknown slug.
  */
-const getHmrcBySlugId = createServerFn()
-  .inputValidator((input: unknown) => input as { slugId: string })
-  .handler(async ({ data: { slugId } }) => {
-    const groupFilter = sql`
-      h2.organisation_name = ${hmrcSkilledWorkers.organisationName}
-      AND h2.type_rating = ${hmrcSkilledWorkers.typeRating}
-      AND h2.route = ${hmrcSkilledWorkers.route}`;
-    // Own fragment, not inlined: inside a projection subquery drizzle renders these refs bare, colliding with l.* (→ always null).
-    const licFilter = sql`
-      l.organisation_name = ${hmrcSkilledWorkers.organisationName}
-      AND l.type_rating = ${hmrcSkilledWorkers.typeRating}
-      AND l.route = ${hmrcSkilledWorkers.route}`;
-    const [row] = await db
-      .select({
-        slugId: hmrcSkilledWorkers.hash,
-        canonicalSlugId: sql<string>`(
-          SELECT min(h2.hash) FROM hmrc_skilled_workers h2 WHERE ${groupFilter}
-        )`,
-        organisationName: hmrcSkilledWorkers.organisationName,
-        // The loader 301s slug mismatches onto this (renames leave stale-slug
-        // URLs serving 200 with a self-referential canonical otherwise)
-        nameSlug: hmrcSkilledWorkers.nameSlug,
-        typeRating: hmrcSkilledWorkers.typeRating,
-        route: hmrcSkilledWorkers.route,
-        // Snapshot licence #, index-probed by org; null unless (org,rating,route) maps to exactly one (~0.6% hold two).
-        sponsorLicenceNumber: sql<string | null>`(
-          SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
-                      THEN min(l.sponsor_licence_number) END
-          FROM hmrc_sponsor_licences l WHERE ${licFilter}
-        )`,
-      })
-      .from(hmrcSkilledWorkers)
-      .where(eq(hmrcSkilledWorkers.hash, slugId))
-      .limit(1);
+export const getHmrcCompanyBySlug = createServerFn()
+  .inputValidator((input: unknown) => input as { slug: string })
+  .handler(async ({ data }): Promise<CompanyBySlug | null> => {
+    // Type-guard BEFORE slugify: the RPC payload is caller-controlled and a
+    // non-string must be a null miss, not a .toLowerCase() 500. Then
+    // normalise URL-ish input (case variants, encoded spaces) to slug form;
+    // the loader 301s when the request differs from the canonical slug.
+    const slug = typeof data?.slug === 'string' ? slugify(data.slug) : '';
+    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return null;
+    const found = await db.execute(sql`
+      SELECT h.hash AS "slugId",
+             h.organisation_name AS "organisationName",
+             h.type_rating AS "typeRating",
+             h.route AS "route",
+             m.company_number AS "companyNumber",
+             (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
+                          THEN min(l.sponsor_licence_number) END
+              FROM hmrc_sponsor_licences l
+              WHERE l.organisation_name = h.organisation_name
+                AND l.type_rating = h.type_rating
+                AND l.route = h.route) AS "sponsorLicenceNumber"
+      FROM ${hmrcSkilledWorkers} h
+      LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
+      WHERE h.name_slug = ${slug}
+      ORDER BY (m.company_number IS NULL) ASC, h.organisation_name ASC, h.hash ASC
+    `);
+    const rows = found.rows as unknown as (CompanyLicence & {
+      companyNumber: string | null;
+    })[];
+    if (rows.length > 0) {
+      // Long edge cache: slug pages only change via ingest, and the
+      // post-ingest sitemap deploy purges the edge.
+      setRpcCacheControl(LONG_EDGE_CACHE);
+      // Namesake guard: pool only the primary company's rows — same
+      // company_number, or unmapped rows (name-keyed, indistinguishable). A
+      // DIFFERENT mapped company sharing the slug is a distinct legal entity
+      // and must not leak its licences/name into this page.
+      const primaryCompany = rows[0].companyNumber;
+      const licences = rows
+        .filter(
+          (r) => r.companyNumber === primaryCompany || r.companyNumber === null,
+        )
+        .map(({ companyNumber: _companyNumber, ...licence }) => licence);
+      return { kind: 'found', nameSlug: slug, licences };
+    }
 
-    // Found rows cache long: the hash is content-based (org|rating|route), so
-    // data behind it only changes via ingest, and the post-ingest sitemap
-    // deploy purges the edge. Nulls cache short — a sponsor can be reinstated
-    // under the same hash, and a 30-day-cached null would 301-loop the
-    // revived URL against itself.
-    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
-
-    return row ?? null;
+    // Rename/alias fallback: an unknown slug resolves through the company
+    // number — a stale mapping row (HMRC feed renames leave the old org name
+    // mapped), a CH previous name, the CURRENT CH name (the page displays it,
+    // so hand-built links use its form: "…-limited" vs HMRC's "…-ltd"), or a
+    // company-number tail (disambiguated `-{number}` slugs, which no slugified
+    // NAME can ever equal after that company renames) — to any current org on
+    // the same company. Misses and hits both cache short: unknown slugs can
+    // be revived by later ingests.
+    // MATERIALIZED fences candidate resolution (index probes on the 0038
+    // slugified expression indexes; the tail branch probes
+    // idx_mapping_company_number) from the h2 join, and min() replaces
+    // ORDER BY+LIMIT so an empty candidate set never walks the slug index —
+    // miss and hit paths both run in well under a millisecond.
+    const moved = await db.execute(sql`
+      WITH cand AS MATERIALIZED (
+        SELECT cur.organisation_name
+        FROM ${hmrcCompanyMapping} stale
+        JOIN ${hmrcCompanyMapping} cur ON cur.company_number = stale.company_number
+        WHERE ${slugifySql('stale.organisation_name')} = ${slug}
+        UNION
+        SELECT cur.organisation_name
+        FROM ${chPreviousNames} pn
+        JOIN ${hmrcCompanyMapping} cur ON cur.company_number = pn.company_number
+        WHERE ${slugifySql('pn.name')} = ${slug}
+        UNION
+        SELECT cur.organisation_name
+        FROM ${companiesHouseProfiles} c
+        JOIN ${hmrcCompanyMapping} cur ON cur.company_number = c.company_number
+        WHERE ${slugifySql('c.company_name')} = ${slug}
+        UNION
+        SELECT cur.organisation_name
+        FROM ${hmrcCompanyMapping} cur
+        WHERE cur.company_number = upper(substring(${slug} from '[^-]+$'))
+      )
+      SELECT min(h2.name_slug) AS "nameSlug"
+      FROM cand
+      JOIN ${hmrcSkilledWorkers} h2 ON h2.organisation_name = cand.organisation_name
+    `);
+    setRpcCacheControl(SHORT_EDGE_CACHE);
+    const target = (moved.rows as { nameSlug: string | null }[])[0];
+    return target?.nameSlug
+      ? { kind: 'moved', nameSlug: target.nameSlug }
+      : null;
   });
 
 /**
- * React Query options for `getHmrcBySlugId`. `staleTime: Infinity` since the
- * slug id is a content hash — same id always maps to the same row data, so
- * once cached on the client it never needs to be refetched for this session.
+ * React Query options for `getHmrcCompanyBySlug`. Found pages pin for the
+ * session (licence data only changes via ingest); moved/null results stay
+ * stale so a rename revert or reinstated sponsor is re-resolved on the next
+ * navigation instead of a cached miss 404ing/redirecting all session.
  */
-export const hmrcBySlugIdQueryOptions = (slugId: string) =>
+export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
   queryOptions({
-    queryKey: ['hmrc-by-slug-id', slugId],
-    queryFn: () => getHmrcBySlugId({ data: { slugId } }),
-    staleTime: Number.POSITIVE_INFINITY,
+    queryKey: ['hmrc-company-by-slug', slug],
+    queryFn: () => getHmrcCompanyBySlug({ data: { slug } }),
+    staleTime: (query) =>
+      query.state.data?.kind === 'found' ? Number.POSITIVE_INFINITY : 0,
+  });
+
+/**
+ * TRANSITIONAL — delete after the next release cycle. Pre-deploy client
+ * bundles still call this RPC (its id derives from this file + export name)
+ * from the old /company/$id/$slug loader; without it every card click in an
+ * open tab errors until a hard reload. Serves the old row shape from current
+ * data; canonicalSlugId === slugId (the group was 1:1 by construction).
+ */
+export const getHmrcBySlugId = createServerFn()
+  .inputValidator((input: unknown) => input as { slugId: string })
+  .handler(async ({ data }) => {
+    const slugId = typeof data?.slugId === 'string' ? data.slugId : '';
+    const found = await db.execute(sql`
+      SELECT h.hash AS "slugId",
+             h.hash AS "canonicalSlugId",
+             h.organisation_name AS "organisationName",
+             h.name_slug AS "nameSlug",
+             h.type_rating AS "typeRating",
+             h.route AS "route",
+             (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
+                          THEN min(l.sponsor_licence_number) END
+              FROM hmrc_sponsor_licences l
+              WHERE l.organisation_name = h.organisation_name
+                AND l.type_rating = h.type_rating
+                AND l.route = h.route) AS "sponsorLicenceNumber"
+      FROM ${hmrcSkilledWorkers} h
+      WHERE h.hash = ${slugId}
+      LIMIT 1
+    `);
+    const row =
+      (found.rows[0] as unknown as
+        | {
+            slugId: string;
+            canonicalSlugId: string;
+            organisationName: string;
+            nameSlug: string;
+            typeRating: string;
+            route: string;
+            sponsorLicenceNumber: string | null;
+          }
+        | undefined) ?? null;
+    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
+    return row;
+  });
+
+/** TRANSITIONAL — delete after the next release cycle. Old-bundle slug fallback; returns the minimal rows the old /company/$id/$slug loader consumed. */
+export const getHmrcBySlug = createServerFn()
+  .inputValidator((input: unknown) => input as { slug: string })
+  .handler(async ({ data }) => {
+    const slug = typeof data?.slug === 'string' ? data.slug : '';
+    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
+    return db
+      .select({
+        slugId: hmrcSkilledWorkers.hash,
+        organisationName: hmrcSkilledWorkers.organisationName,
+      })
+      .from(hmrcSkilledWorkers)
+      .where(eq(hmrcSkilledWorkers.nameSlug, slug))
+      .orderBy(asc(hmrcSkilledWorkers.hash));
+  });
+
+/**
+ * Server fn resolving a legacy hash id to its row's current `name_slug`, for
+ * the /company/$id/$slug 301 shim. Null when the hash left the register.
+ */
+export const getSlugForHash = createServerFn()
+  .inputValidator((input: unknown) => input as { hash: string })
+  .handler(async ({ data }) => {
+    // Caller-controlled payload: a malformed shape is a null miss, not a 500.
+    const hash = typeof data?.hash === 'string' ? data.hash : '';
+    const [row] = await db
+      .select({ nameSlug: hmrcSkilledWorkers.nameSlug })
+      .from(hmrcSkilledWorkers)
+      .where(eq(hmrcSkilledWorkers.hash, hash))
+      .limit(1);
+    // Nulls cache short: a sponsor can be reinstated under the same hash.
+    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
+    return row ?? null;
   });
 
 /** Server fn returning the count of distinct sponsor organisations. Edge-cached on the /_serverFn/ RPC path (client fetch); only changes on ingestion. */
@@ -232,34 +398,6 @@ export const sponsorCountQueryOptions = queryOptions({
   queryFn: () => getSponsorCount(),
   staleTime: Number.POSITIVE_INFINITY,
 });
-
-/**
- * Server fn returning `hmrc_skilled_workers` rows whose `name_slug` matches
- * the given slug. Fallback for stale `/company/$id/$slug` URLs: when the hash
- * lookup 404s, the loader 301s to the slug's first row — and also scans the
- * matches for the requested hash itself, which detects a stale cached null
- * (sponsor reinstated under the same hash). Uncapped: rows are per
- * (org, rating, route) and namesake slugs pool orgs, so any cap could hide
- * the requested hash from the containment scan; rows per slug are naturally
- * tiny (max 8 across 126k slugs).
- * Ordered by hash so the multi-match 301 always picks the same canonical row.
- * Not wrapped in queryOptions — only the loader calls it, and the redirect
- * moves the user off this page so there's no second reader for the result.
- */
-export const getHmrcBySlug = createServerFn()
-  .inputValidator((input: unknown) => input as { slug: string })
-  .handler(async ({ data: { slug } }) => {
-    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
-    const rows = await db
-      .select({
-        slugId: hmrcSkilledWorkers.hash,
-        organisationName: hmrcSkilledWorkers.organisationName,
-      })
-      .from(hmrcSkilledWorkers)
-      .where(eq(hmrcSkilledWorkers.nameSlug, slug))
-      .orderBy(asc(hmrcSkilledWorkers.hash));
-    return rows;
-  });
 
 /**
  * React Query options for a single-page `searchHmrc` call. Separate cache

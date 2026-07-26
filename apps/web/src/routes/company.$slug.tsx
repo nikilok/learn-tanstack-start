@@ -116,28 +116,36 @@ function routeLicences(
   }));
 }
 
-/** One enclosed block per licence: the visa route and the rating held on THAT route. Rendering them as free-floating siblings lets a narrow viewport wrap the rating onto its own line, where it reads as belonging to the next route — the same mis-pairing two parallel columns cause. The shared background is what guarantees the association at every width. */
+/**
+ * One enclosed row per licence: the visa route and the rating held on THAT
+ * route. A real <dl> so the pairing is machine-readable — each route is the
+ * term and its rating the definition, which crawlers, assistants and screen
+ * readers all resolve. Presentationally the shared background carries the same
+ * association for sighted users: rendered as free-floating siblings, a narrow
+ * viewport wraps the rating onto its own line where it reads as belonging to
+ * the next route, the same mis-pairing two parallel columns cause.
+ */
 function LicenceStack({ items }: { items: RouteLicence[] }) {
   return (
-    <span className="flex flex-col gap-1.5">
+    <dl className="flex flex-col gap-1.5">
       {items.map(({ route, ratings }) => (
-        <span
+        <div
           key={route}
           className="flex flex-col gap-0.5 rounded-md bg-(--card-row-bg) px-2.5 py-1.5 ring-1 ring-(--card-row-line) ring-inset sm:flex-row sm:items-center sm:justify-between sm:gap-x-4"
         >
-          <span className="font-mono text-xs break-words text-(--sea-ink-soft)">
+          <dt className="font-mono text-xs break-words text-(--sea-ink-soft)">
             {titleCase(route)}
-          </span>
+          </dt>
           {/* Right-aligned on desktop so ratings form their own column: run
               inline against the route and the two read as one sentence. */}
-          <span className="flex shrink-0 flex-wrap items-center gap-x-3 sm:justify-end">
+          <dd className="flex shrink-0 flex-wrap items-center gap-x-3 sm:justify-end">
             {ratings.map((rating) => (
               <RatingIcon key={rating} rating={rating} />
             ))}
-          </span>
-        </span>
+          </dd>
+        </div>
       ))}
-    </span>
+    </dl>
   );
 }
 
@@ -199,6 +207,7 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
   ].filter((alias) => normalizeName(alias) !== currentKey);
   const routes = distinctRoutes(licences);
   const ratings = distinctRatings(licences);
+  const routeLicenceList = routeLicences(licences);
   return {
     primaryOrg,
     rawName,
@@ -215,9 +224,23 @@ function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
     routesText: listFormatter.format(routes.map(titleCase)),
     // Route → its own rating(s); the display pairs from this, never from the
     // two independent lists.
-    routeLicences: routeLicences(licences),
+    routeLicences: routeLicenceList,
     ratings,
     ratingText: ratingPhrase(ratings),
+    // "Worker (A Rating) for Skilled Worker" per licence. The RAW register
+    // wording, not the "A-rated" shorthand: that shorthand collapses
+    // "Worker (A rating)" and "Temporary Worker (A rating)" into one phrase,
+    // losing the licence type. Prose listing routes and ratings separately is
+    // read positionally (by people and crawlers alike) and inverts when they
+    // differ, so this spells the pair out.
+    licencePhrases: routeLicenceList.map(
+      (l) =>
+        `${l.ratings.map(titleCase).join(' and ')} for ${titleCase(l.route)}`,
+    ),
+    // Compares RAW ratings, so a Worker/Temporary Worker split still counts as
+    // a difference worth spelling out even though both are "A-rated".
+    ratingsDiffer:
+      new Set(routeLicenceList.map((l) => l.ratings.join('|'))).size > 1,
     location: registeredLocation(profile?.registered_office_address),
     industry: profile?.sicDescriptions
       ?.map((sic) => sic.description)
@@ -362,9 +385,11 @@ export const Route = createFileRoute('/company/$slug')({
             name,
             legalName: display.rawName,
             alternateName,
-            // Real array, not a joined phrase: the FAQ answers need the count.
-            routes: routes.map(titleCase),
-            typeRating: display.ratings,
+            // Paired route→rating, not two flat lists: see CompanyJsonLdInput.
+            licences: display.routeLicences.map((l) => ({
+              route: titleCase(l.route),
+              ratings: l.ratings,
+            })),
             location,
             industry,
             companyNumber: loaderData.profile?.company_number,
@@ -452,7 +477,12 @@ function CompanyDetail() {
   // Former names from Companies House (derived once, shared with head()).
   const formerNames = display.formerNames;
   const incorporated = formatDate(profile?.date_of_creation);
-  const rating = display.ratingText;
+  // When the ratings differ by route, the summary must say WHICH is which —
+  // "A-rated and B-rated sponsor status" leaves a reader (or an LLM quoting
+  // this page) to guess, and guessing by order is wrong half the time.
+  const rating = display.ratingsDiffer
+    ? listFormatter.format(display.licencePhrases)
+    : display.ratingText;
   // Shared by both card slots (no-profile card and the CH profile card).
   const licenceNumberField = licenceNumbers.length > 0 && (
     <DetailField
@@ -475,7 +505,13 @@ function CompanyDetail() {
       }
     />
   );
-  const intro = `${displayName} is a licensed UK ${routesText} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
+  // Mixed ratings need their own sentence — "holding B-rated for Skilled
+  // Worker … sponsor status" is not a sentence, and cramming the pairs into
+  // the clause is what made the aggregate phrasing tempting in the first place.
+  const locationClause = displayLocation ? ` based in ${displayLocation}` : '';
+  const intro = display.ratingsDiffer
+    ? `${displayName} is a licensed UK ${routesText} visa sponsor${locationClause}. Its UK Home Office sponsor licences are ${rating}.`
+    : `${displayName} is a licensed UK ${routesText} visa sponsor${locationClause}, holding ${rating} sponsor status on the UK Home Office register.`;
   let background = '';
   if (incorporated && industry) {
     background = `The company was incorporated on ${incorporated} and operates in ${industry}.`;

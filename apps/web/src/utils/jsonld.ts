@@ -15,12 +15,11 @@ export type CompanyJsonLdInput = {
   name: string;
   legalName: string;
   alternateName?: string | string[];
-  // Every visa route the company can sponsor, already display-cased. An array,
-  // not a pre-joined phrase: the FAQ answers need the count to pick singular
-  // vs plural wording.
-  routes: string[];
-  // Raw HMRC rating string(s); faqPage phrases them via ratingPhrase.
-  typeRating: string | string[];
+  // Each visa route with the RAW rating(s) held on that route. Pairs, never two
+  // parallel lists: a crawler or LLM given a route list and a rating list pairs
+  // them positionally, which is wrong whenever the ratings differ (a company
+  // can be B-rated on Skilled Worker and A-rated on another route).
+  licences: { route: string; ratings: string[] }[];
   location: string;
   industry?: string;
   companyNumber?: string;
@@ -107,6 +106,21 @@ function organization(input: CompanyJsonLdInput) {
   }
   const address = postalAddress(input.address);
   if (address) org.address = address;
+  // One credential per licence — the machine-readable form of the route↔rating
+  // pairing. Each object binds ONE route to the rating held on it, so a
+  // consumer can never mis-associate them the way two flat lists invite.
+  if (input.licences.length > 0) {
+    org.hasCredential = input.licences.map((licence) => ({
+      '@type': 'EducationalOccupationalCredential',
+      name: `${licence.route} sponsor licence`,
+      // Raw register wording, not the prose phrasing — this is the data field.
+      credentialCategory: licence.ratings.join(', '),
+      recognizedBy: {
+        '@type': 'GovernmentOrganization',
+        name: 'UK Home Office',
+      },
+    }));
+  }
   return org;
 }
 
@@ -134,19 +148,32 @@ function breadcrumbList(input: CompanyJsonLdInput) {
 
 /** Build a FAQPage block answering the four most common sponsor queries; each answer pulls only from data we already loaded. */
 function faqPage(input: CompanyJsonLdInput) {
-  const { name, routes, typeRating, location } = input;
-  const rating = ratingPhrase(typeRating);
-  const routeList = listFormatter.format(routes);
+  const { name, licences, location } = input;
+  const routeList = listFormatter.format(licences.map((l) => l.route));
+  const rating = ratingPhrase(licences.flatMap((l) => l.ratings));
+  // "Worker (A rating) for Skilled Worker" — the pairing spelled out in the
+  // register's own wording, because an answer listing routes and ratings
+  // separately is read positionally and inverted. Raw, not the "A-rated"
+  // shorthand, which loses the Worker vs Temporary Worker licence type.
+  const perRoute = licences.map(
+    (l) => `${l.ratings.join(' and ')} for ${l.route}`,
+  );
+  const ratingsDiffer =
+    new Set(licences.map((l) => l.ratings.join('|'))).size > 1;
   const locationPhrase = location ? ` in ${location}` : '';
   const based = location
     ? `${name} is based${locationPhrase}, United Kingdom.`
     : `${name} is based in the United Kingdom.`;
   // Singular vs plural matters here: the answer is read aloud by assistants,
   // and "holds a X, Y and Z visa sponsor licence" reads as one malformed name.
-  const licenceSentence =
-    routes.length > 1
+  const licenceSentence = ratingsDiffer
+    ? `${name}'s UK Home Office sponsor licences are ${listFormatter.format(perRoute)}.`
+    : licences.length > 1
       ? `${name} holds UK Home Office sponsor licences for ${routeList} visas.`
       : `${name} holds a ${routeList} visa sponsor licence with the UK Home Office.`;
+  const ratingAnswer = ratingsDiffer
+    ? `${name}'s sponsor licence rating differs by route: it is ${listFormatter.format(perRoute)}.`
+    : `${name} holds ${rating} sponsor status on the UK Home Office register.`;
 
   return {
     '@context': 'https://schema.org',
@@ -173,10 +200,7 @@ function faqPage(input: CompanyJsonLdInput) {
       {
         '@type': 'Question',
         name: `What is ${name}'s sponsor licence rating?`,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: `${name} holds ${rating} sponsor status on the UK Home Office register.`,
-        },
+        acceptedAnswer: { '@type': 'Answer', text: ratingAnswer },
       },
     ],
   };

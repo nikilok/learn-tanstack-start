@@ -2,8 +2,17 @@ import { Link } from '@tanstack/react-router';
 import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
+import { TYPE_RATING_ROWS } from '../lib/search/params';
 import { formatLocation, previousNameText, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
+
+// Raw rating strings whose tier is A-class (A / A-Premium / A-SME+), from the
+// canonical rating registry — not another ad-hoc rating regex.
+const A_TIER_RATINGS = new Set(
+  TYPE_RATING_ROWS.filter((row) => row.rating.startsWith('A')).map(
+    (row) => row.raw,
+  ),
+);
 
 /**
  * Single HMRC sponsor result card, rendered as a link into the company detail
@@ -32,7 +41,7 @@ export default function HmrcCard({
   const previousName = previousNameText(row.matchedPreviousName);
   // Merged card: icon from the best rating, chip leads with Skilled Worker.
   const primaryRating =
-    row.typeRatings.find((r) => /\(a rating\)/i.test(r)) ?? row.typeRatings[0];
+    row.typeRatings.find((r) => A_TIER_RATINGS.has(r)) ?? row.typeRatings[0];
   const chipRoute = row.routes.includes('Skilled Worker')
     ? 'Skilled Worker'
     : row.routes[0];

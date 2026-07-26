@@ -69,8 +69,12 @@ function resolvePopTransitionTypes({
     // Re-arm the click morph via a direct DOM write (must land before the
     // OLD snapshot capture; the node unmounts with the nav) — see CLAUDE.md.
     // CSS.escape guards decoded quotes; encoded hrefs then simply not match.
+    // Exact-or-query match, NOT a bare prefix: slug-only pathnames can be
+    // strict prefixes of another card's href (/company/360-energy vs
+    // /company/360-energy-n-i-limited), which would morph the wrong card.
+    const escaped = CSS.escape(to);
     const anchor = document.querySelector<HTMLElement>(
-      `.page-flip-listing a[href^="${CSS.escape(to)}"]`,
+      `.page-flip-listing a[href="${escaped}"], .page-flip-listing a[href^="${escaped}?"]`,
     );
     if (anchor) {
       // Only when actually in view: overscan keeps off-viewport rows mounted,

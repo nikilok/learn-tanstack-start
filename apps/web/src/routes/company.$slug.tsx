@@ -100,6 +100,51 @@ function distinctRatings(licences: { typeRating: string }[]): string[] {
   return [...new Set(licences.map((l) => l.typeRating))].sort();
 }
 
+// The sponsor/profile slice both head() and the component derive from.
+type CompanyDisplayInput = {
+  sponsor: {
+    organisationName: string;
+    orgNames: string[];
+    licences: { typeRating: string; route: string }[];
+  };
+  profile?: {
+    company_name?: string;
+    registered_office_address?: {
+      address_line_2?: string;
+      locality?: string;
+      region?: string;
+    } | null;
+    sicDescriptions?: { code: string; description: string }[];
+  } | null;
+};
+
+/** Shared head()/component derivations — one source, so page copy, meta description, and JSON-LD can never drift. */
+function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
+  const rawName = profile?.company_name ?? sponsor.organisationName;
+  const currentKey = normalizeName(rawName);
+  const registeredNames = sponsor.orgNames
+    .map(titleCase)
+    .filter((alias) => normalizeName(alias) !== currentKey);
+  const routes = distinctRoutes(sponsor.licences);
+  const ratings = distinctRatings(sponsor.licences);
+  return {
+    name: titleCase(rawName),
+    registeredNames,
+    registeredAs: registeredNames.length
+      ? listFormatter.format(registeredNames)
+      : '',
+    routes,
+    routesText: listFormatter.format(routes.map(titleCase)),
+    ratings,
+    // Per-rating phrases; tiers ratingPhrase can't parse pass through verbatim.
+    ratingText: ratings.map((rating) => ratingPhrase(rating)).join(' and '),
+    location: registeredLocation(profile?.registered_office_address),
+    industry: profile?.sicDescriptions
+      ?.map((sic) => sic.description)
+      .join(', '),
+  };
+}
+
 export const Route = createFileRoute('/company/$slug')({
   validateSearch: (search: Record<string, unknown>) => ({
     search: ((search.search as string) || '').trim(),
@@ -122,9 +167,33 @@ export const Route = createFileRoute('/company/$slug')({
     }
 
     if (company.kind === 'moved') {
-      // Old slug (rename resolved via mapping/previous names): 301 to the
-      // current slug. Static search value — SSR redirects must not use a
-      // functional `search`.
+      if (import.meta.env.SSR) {
+        // Old slug (rename resolved via mapping/previous names): 301 to the
+        // current slug. SHORT-cached via the redirect's own headers
+        // (setSsrCacheControl does not survive onto thrown redirects) —
+        // slug→slug redirects can invert on a rename flip-flop, and the
+        // /company/** routeRule's 30-day s-maxage would otherwise pin one
+        // side of the loop at the edge. Static search value — SSR redirects
+        // must not use a functional `search`.
+        throw redirect({
+          to: '/company/$slug',
+          params: { slug: company.nameSlug },
+          search: {
+            search: (location.search as { search?: string }).search ?? '',
+          },
+          statusCode: 301,
+          headers: { 'Cache-Control': SHORT_EDGE_CACHE },
+        });
+      }
+      // Client navs read RQ/edge caches that can be stale after a rename
+      // revert — redirecting on them can ping-pong two slugs forever. A full
+      // load resolves the 301 server-side; the rare client hit just 404s.
+      throw notFound();
+    }
+
+    // Canonicalise slug variants (SSR only): the fn slug-normalises its input,
+    // so /company/Acme-Ltd resolves — but must 301, never serve 200 there.
+    if (import.meta.env.SSR && company.nameSlug !== params.slug) {
       throw redirect({
         to: '/company/$slug',
         params: { slug: company.nameSlug },
@@ -132,6 +201,7 @@ export const Route = createFileRoute('/company/$slug')({
           search: (location.search as { search?: string }).search ?? '',
         },
         statusCode: 301,
+        headers: { 'Cache-Control': SHORT_EDGE_CACHE },
       });
     }
 
@@ -192,32 +262,15 @@ export const Route = createFileRoute('/company/$slug')({
       | undefined;
 
     // Lead with the Companies House current name; HMRC may hold a stale former name.
-    const name = loaderData
-      ? titleCase(
-          loaderData.profile?.company_name ??
-            loaderData.sponsor.organisationName,
-        )
-      : 'Company Details';
-    const currentKey = normalizeName(name);
-    const registeredNames = loaderData
-      ? loaderData.sponsor.orgNames
-          .map(titleCase)
-          .filter((alias) => normalizeName(alias) !== currentKey)
-      : [];
-    const registeredAs = registeredNames.length
-      ? listFormatter.format(registeredNames)
-      : '';
-    const location = loaderData
-      ? registeredLocation(loaderData.profile?.registered_office_address)
-      : '';
-    const industry = loaderData?.profile?.sicDescriptions
-      ?.map((sic) => sic.description)
-      .join(', ');
-    const routes = distinctRoutes(loaderData?.sponsor.licences ?? []);
-    const routesText = routes.length
-      ? listFormatter.format(routes.map(titleCase))
+    const display = loaderData ? deriveCompanyDisplay(loaderData) : null;
+    const name = display?.name ?? 'Company Details';
+    const registeredNames = display?.registeredNames ?? [];
+    const registeredAs = display?.registeredAs ?? '';
+    const location = display?.location ?? '';
+    const industry = display?.industry;
+    const routesText = display?.routes.length
+      ? display.routesText
       : 'Skilled Worker';
-    const ratings = distinctRatings(loaderData?.sponsor.licences ?? []);
     const description = [
       industry ? `${name} — ${industry}` : name,
       location
@@ -257,7 +310,7 @@ export const Route = createFileRoute('/company/$slug')({
             loaderData.sponsor.organisationName,
           alternateName,
           route: routesText,
-          typeRating: ratings.join(' and '),
+          typeRating: display?.ratingText ?? '',
           location,
           industry,
           companyNumber: loaderData.profile?.company_number,
@@ -317,24 +370,12 @@ function CompanyDetail() {
     return () => observer.disconnect();
   }, []);
 
-  // Lead with the Companies House current name; HMRC may hold a stale former name.
-  const displayName = profile?.company_name
-    ? titleCase(profile.company_name)
-    : titleCase(sponsor.organisationName);
+  // Shared derivations — the same values head() feeds the meta/JSON-LD from.
+  const display = deriveCompanyDisplay({ sponsor, profile });
+  const { name: displayName, routes, routesText, ratings } = display;
   // Noise-stripped query so external searches land on the right company.
   const searchQuery = encodeURIComponent(companySearchName(displayName));
-  const currentKey = normalizeName(
-    profile?.company_name ?? sponsor.organisationName,
-  );
-  const registeredNames = sponsor.orgNames
-    .map(titleCase)
-    .filter((alias) => normalizeName(alias) !== currentKey);
-  const alsoRegisteredAs = registeredNames.length
-    ? listFormatter.format(registeredNames)
-    : null;
-  const routes = distinctRoutes(sponsor.licences);
-  const routesText = listFormatter.format(routes.map(titleCase));
-  const ratings = distinctRatings(sponsor.licences);
+  const alsoRegisteredAs = display.registeredAs || null;
   const ratingsText = ratings.map(titleCase).join(', ');
   // Surface the licence number only when the rows agree on exactly one.
   const licenceNumbers = [
@@ -346,12 +387,8 @@ function CompanyDetail() {
   ];
   const sponsorLicenceNumber =
     licenceNumbers.length === 1 ? licenceNumbers[0] : null;
-  const displayLocation = registeredLocation(
-    profile?.registered_office_address,
-  );
-  const industry = profile?.sicDescriptions
-    ?.map((s) => s.description)
-    .join(', ');
+  const displayLocation = display.location;
+  const industry = display.industry;
   // Former names from Companies House, deduped against the current name;
   // title-cased at the display layer (the summary sentence).
   const formerNames = formerCompanyNames(
@@ -359,7 +396,7 @@ function CompanyDetail() {
     profile?.company_name ?? sponsor.organisationName,
   );
   const incorporated = formatDate(profile?.date_of_creation);
-  const rating = ratingPhrase(ratings.join(' and '));
+  const rating = display.ratingText;
   const intro = `${displayName} is a licensed UK ${routesText} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
   let background = '';
   if (incorporated && industry) {

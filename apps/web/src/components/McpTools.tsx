@@ -3,7 +3,10 @@ import { useEffect } from 'react';
 import '@mcp-b/global';
 
 import { companyProfileQueryOptions } from '../api/companiesHouse';
-import { searchHmrcQueryOptions } from '../api/hmrc';
+import {
+  hmrcCompanyBySlugQueryOptions,
+  searchHmrcQueryOptions,
+} from '../api/hmrc';
 import { formatLocation, titleCase } from '../utils';
 
 /**
@@ -196,16 +199,27 @@ export function McpTools() {
           }
 
           const top = exactRow ?? hmrcResult.rows[0];
-          const profile = await queryClient.ensureQueryData(
-            companyProfileQueryOptions(top.organisationName),
-          );
+          const [profile, company] = await Promise.all([
+            queryClient.ensureQueryData(
+              companyProfileQueryOptions(top.organisationName),
+            ),
+            queryClient.ensureQueryData(
+              hmrcCompanyBySlugQueryOptions(top.nameSlug),
+            ),
+          ]);
 
-          // Licence rows are merged per company, so the top row already
-          // carries every route and rating for the sponsor.
-          const sponsorship = {
-            visaRoutes: top.routes.map(titleCase),
-            ratings: top.typeRatings.map(titleCase),
-          };
+          // Slug-keyed fetch pools case-variant duplicate rows and keeps the
+          // per-licence route↔rating pairing the search aggregate loses.
+          const sponsorship =
+            company?.kind === 'found'
+              ? company.licences.map((licence) => ({
+                  visaRoute: titleCase(licence.route),
+                  rating: titleCase(licence.typeRating),
+                }))
+              : top.routes.map((route) => ({
+                  visaRoute: titleCase(route),
+                  rating: null as string | null,
+                }));
 
           const details = {
             name: titleCase(top.organisationName),

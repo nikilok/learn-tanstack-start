@@ -104,8 +104,15 @@ ${Array.from(
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${batch
   .map(({ nameSlug, updatedAt }) => {
-    // max() comes back as a raw string via the driver; normalise through Date.
-    const parsed = updatedAt ? new Date(updatedAt) : null;
+    // max() comes back as a raw tz-less string via the driver; the column is
+    // UTC, so pin it (mirroring drizzle's decoder) or Date parses local time.
+    const parsed = updatedAt
+      ? new Date(
+          /(?:z|[+-]\d\d(?::?\d\d)?)$/i.test(updatedAt)
+            ? updatedAt
+            : `${updatedAt}+0000`,
+        )
+      : null;
     const lastmod =
       parsed && !Number.isNaN(parsed.getTime())
         ? `\n    <lastmod>${parsed.toISOString()}</lastmod>`

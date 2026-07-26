@@ -10,6 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { buildNameMatchers } from '../lib/search/name-match';
+import { slugify } from '../utils';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
@@ -134,6 +135,10 @@ export const searchHmrc = createServerFn()
              c.region AS "region",
              g.type_ratings AS "typeRatings",
              g.routes AS "routes",
+             -- Transitional scalars for pre-deploy bundles (server fns outlive
+             -- the client across a deploy) — drop after the next release cycle.
+             g.type_ratings->>0 AS "typeRating",
+             g.routes->>0 AS "route",
              g.score AS "score",
              g.matched_previous_name AS "matchedPreviousName"
       FROM g
@@ -172,7 +177,11 @@ export type CompanyBySlug =
     }
   | { kind: 'moved'; nameSlug: string };
 
-// SQL twin of utils.ts slugify — keep the two transforms identical.
+// SQL analogue of utils.ts slugify. Identical for ASCII; Unicode full case
+// mapping can diverge (JS 'İ' → 'i' + combining dot → extra dash, PG → 'i'),
+// so a rare legacy slug misses the fallback and 404s instead of 301ing.
+// Expression-indexed (0038) on all three fallback tables — keep the index
+// expressions in lockstep with this fragment or the planner reverts to scans.
 const slugifySql = (expr: ReturnType<typeof sql>) =>
   sql`btrim(regexp_replace(lower(${expr}), '[^a-z0-9]+', '-', 'g'), '-')`;
 
@@ -187,13 +196,17 @@ const slugifySql = (expr: ReturnType<typeof sql>) =>
  */
 export const getHmrcCompanyBySlug = createServerFn()
   .inputValidator((input: unknown) => input as { slug: string })
-  .handler(async ({ data: { slug } }): Promise<CompanyBySlug | null> => {
+  .handler(async ({ data }): Promise<CompanyBySlug | null> => {
+    // Normalise URL-ish input (case variants, encoded spaces) to slug form;
+    // the loader 301s when the request differs from the canonical slug.
+    const slug = slugify(data.slug ?? '');
     if (!/^[a-z0-9-]{1,255}$/.test(slug)) return null;
     const found = await db.execute(sql`
       SELECT h.hash AS "slugId",
              h.organisation_name AS "organisationName",
              h.type_rating AS "typeRating",
              h.route AS "route",
+             m.company_number AS "companyNumber",
              (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
                           THEN min(l.sponsor_licence_number) END
               FROM hmrc_sponsor_licences l
@@ -205,11 +218,23 @@ export const getHmrcCompanyBySlug = createServerFn()
       WHERE h.name_slug = ${slug}
       ORDER BY (m.company_number IS NULL) ASC, h.organisation_name ASC, h.hash ASC
     `);
-    const licences = found.rows as unknown as CompanyLicence[];
-    if (licences.length > 0) {
+    const rows = found.rows as unknown as (CompanyLicence & {
+      companyNumber: string | null;
+    })[];
+    if (rows.length > 0) {
       // Long edge cache: slug pages only change via ingest, and the
       // post-ingest sitemap deploy purges the edge.
       setRpcCacheControl(LONG_EDGE_CACHE);
+      // Namesake guard: pool only the primary company's rows — same
+      // company_number, or unmapped rows (name-keyed, indistinguishable). A
+      // DIFFERENT mapped company sharing the slug is a distinct legal entity
+      // and must not leak its licences/name into this page.
+      const primaryCompany = rows[0].companyNumber;
+      const licences = rows
+        .filter(
+          (r) => r.companyNumber === primaryCompany || r.companyNumber === null,
+        )
+        .map(({ companyNumber: _companyNumber, ...licence }) => licence);
       const orgNames = [...new Set(licences.map((l) => l.organisationName))];
       return {
         kind: 'found',
@@ -226,9 +251,12 @@ export const getHmrcCompanyBySlug = createServerFn()
     // it, so hand-built links use its form: "…-limited" vs HMRC's "…-ltd") —
     // to any current org on the same company. Misses and hits both cache
     // short: unknown slugs can be revived by later ingests.
+    // MATERIALIZED fences candidate resolution (index probes on the 0038
+    // slugified expression indexes) from the h2 join, and min() replaces
+    // ORDER BY+LIMIT so an empty candidate set never walks the slug index —
+    // miss and hit paths both run in well under a millisecond.
     const moved = await db.execute(sql`
-      SELECT h2.name_slug AS "nameSlug"
-      FROM (
+      WITH cand AS MATERIALIZED (
         SELECT cur.organisation_name
         FROM ${hmrcCompanyMapping} stale
         JOIN ${hmrcCompanyMapping} cur ON cur.company_number = stale.company_number
@@ -243,26 +271,30 @@ export const getHmrcCompanyBySlug = createServerFn()
         FROM ${companiesHouseProfiles} c
         JOIN ${hmrcCompanyMapping} cur ON cur.company_number = c.company_number
         WHERE ${slugifySql(sql`c.company_name`)} = ${slug}
-      ) cand
+      )
+      SELECT min(h2.name_slug) AS "nameSlug"
+      FROM cand
       JOIN ${hmrcSkilledWorkers} h2 ON h2.organisation_name = cand.organisation_name
-      ORDER BY h2.name_slug ASC
-      LIMIT 1
     `);
     setRpcCacheControl(SHORT_EDGE_CACHE);
-    const target = (moved.rows as { nameSlug: string }[])[0];
-    return target ? { kind: 'moved', nameSlug: target.nameSlug } : null;
+    const target = (moved.rows as { nameSlug: string | null }[])[0];
+    return target?.nameSlug
+      ? { kind: 'moved', nameSlug: target.nameSlug }
+      : null;
   });
 
 /**
- * React Query options for `getHmrcCompanyBySlug`. `staleTime: Infinity` —
- * licence data only changes via ingest, so within a session the same slug
- * never needs a refetch.
+ * React Query options for `getHmrcCompanyBySlug`. Found pages pin for the
+ * session (licence data only changes via ingest); moved/null results stay
+ * stale so a rename revert or reinstated sponsor is re-resolved on the next
+ * navigation instead of a cached miss 404ing/redirecting all session.
  */
 export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
   queryOptions({
     queryKey: ['hmrc-company-by-slug', slug],
     queryFn: () => getHmrcCompanyBySlug({ data: { slug } }),
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: (query) =>
+      query.state.data?.kind === 'found' ? Number.POSITIVE_INFINITY : 0,
   });
 
 /**

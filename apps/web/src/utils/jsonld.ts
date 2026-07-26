@@ -1,3 +1,9 @@
+import {
+  licencesVary,
+  ratingLabel,
+  ratingPhrase,
+  ratingTiersDiffer,
+} from '../lib/company/licences';
 import { FILTER_SECTIONS } from '../lib/search/sections';
 import { APP_DESCRIPTION, APP_NAME, APP_SHORT_NAME } from './app-meta';
 
@@ -14,9 +20,11 @@ export type CompanyJsonLdInput = {
   name: string;
   legalName: string;
   alternateName?: string | string[];
-  route: string;
-  // Raw HMRC rating string(s); faqPage phrases them via ratingPhrase.
-  typeRating: string | string[];
+  // Each visa route with the RAW rating(s) held on that route. Pairs, never two
+  // parallel lists: a crawler or LLM given a route list and a rating list pairs
+  // them positionally, which is wrong whenever the ratings differ (a company
+  // can be B-rated on Skilled Worker and A-rated on another route).
+  licences: { route: string; ratings: string[] }[];
   location: string;
   industry?: string;
   companyNumber?: string;
@@ -26,20 +34,8 @@ export type CompanyJsonLdInput = {
   homeUrl: string;
 };
 
-// Grammatical joiner for multi-tier phrases ("A-rated, B-rated and X").
-const ratingListFormatter = new Intl.ListFormat('en-GB', {
-  type: 'conjunction',
-});
-
-/** Render a natural-language rating phrase ("A-rated", "A-rated and B-rated") from one or more HMRC rating strings; items with no parseable letter pass through verbatim. The single dedupe-and-join implementation for every surface. */
-export function ratingPhrase(rating: string | string[]): string {
-  const items = Array.isArray(rating) ? rating : [rating];
-  const phrases = items.map((item) => {
-    const m = item.match(/\(([AB])\s+rating\)/i);
-    return m ? `${m[1].toUpperCase()}-rated` : item;
-  });
-  return ratingListFormatter.format([...new Set(phrases)]);
-}
+// Grammatical joiner for multi-item phrases ("A-rated, B-rated and X").
+const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
 
 /** Build a schema.org PostalAddress from a Companies House registered-office address; returns null when no usable fields exist. */
 function postalAddress(address: Address | null | undefined) {
@@ -87,6 +83,21 @@ function organization(input: CompanyJsonLdInput) {
   }
   const address = postalAddress(input.address);
   if (address) org.address = address;
+  // One credential per licence — the machine-readable form of the route↔rating
+  // pairing. Each object binds ONE route to the rating held on it, so a
+  // consumer can never mis-associate them the way two flat lists invite.
+  if (input.licences.length > 0) {
+    org.hasCredential = input.licences.map((licence) => ({
+      '@type': 'EducationalOccupationalCredential',
+      name: `${licence.route} sponsor licence`,
+      // Raw register wording, not the prose phrasing — this is the data field.
+      credentialCategory: licence.ratings.join(', '),
+      recognizedBy: {
+        '@type': 'GovernmentOrganization',
+        name: 'UK Home Office',
+      },
+    }));
+  }
   return org;
 }
 
@@ -114,12 +125,34 @@ function breadcrumbList(input: CompanyJsonLdInput) {
 
 /** Build a FAQPage block answering the four most common sponsor queries; each answer pulls only from data we already loaded. */
 function faqPage(input: CompanyJsonLdInput) {
-  const { name, route, typeRating, location } = input;
-  const rating = ratingPhrase(typeRating);
+  const { name, licences, location } = input;
+  const routeList = listFormatter.format(licences.map((l) => l.route));
+  const rating = ratingPhrase(licences.flatMap((l) => l.ratings));
+  // "Worker (A rating) for Skilled Worker" — the pairing spelled out in the
+  // register's own wording, because an answer listing routes and ratings
+  // separately is read positionally and inverted. Raw, not the "A-rated"
+  // shorthand, which loses the Worker vs Temporary Worker licence type.
+  const perRoute = licences.map(
+    (l) => `${l.ratings.map(ratingLabel).join(' and ')} for ${l.route}`,
+  );
+  // Both flags come from lib/company/licences — the SAME functions the page
+  // copy uses, so the visible text and this structured data cannot drift.
+  const varies = licencesVary(licences);
+  const tiersDiffer = ratingTiersDiffer(licences);
   const locationPhrase = location ? ` in ${location}` : '';
   const based = location
     ? `${name} is based${locationPhrase}, United Kingdom.`
     : `${name} is based in the United Kingdom.`;
+  // Singular vs plural matters here: the answer is read aloud by assistants,
+  // and "holds a X, Y and Z visa sponsor licence" reads as one malformed name.
+  const licenceSentence = varies
+    ? `${name}'s UK Home Office sponsor licences are ${listFormatter.format(perRoute)}.`
+    : licences.length > 1
+      ? `${name} holds UK Home Office sponsor licences for ${routeList} visas.`
+      : `${name} holds a ${routeList} visa sponsor licence with the UK Home Office.`;
+  const ratingAnswer = tiersDiffer
+    ? `${name}'s sponsor licence rating differs by route: it is ${listFormatter.format(perRoute)}.`
+    : `${name} holds ${rating} sponsor status on the UK Home Office register.`;
 
   return {
     '@context': 'https://schema.org',
@@ -130,16 +163,13 @@ function faqPage(input: CompanyJsonLdInput) {
         name: `Is ${name} a UK visa sponsor?`,
         acceptedAnswer: {
           '@type': 'Answer',
-          text: `Yes. ${name} is a licensed UK ${route} visa sponsor on the Home Office register of licensed sponsors${locationPhrase ? `,${locationPhrase}` : ''}.`,
+          text: `Yes. ${name} is a licensed UK ${routeList} visa sponsor on the Home Office register of licensed sponsors${locationPhrase ? `,${locationPhrase}` : ''}.`,
         },
       },
       {
         '@type': 'Question',
         name: `Which visa routes can ${name} sponsor?`,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: `${name} holds a ${route} visa sponsor licence with the UK Home Office.`,
-        },
+        acceptedAnswer: { '@type': 'Answer', text: licenceSentence },
       },
       {
         '@type': 'Question',
@@ -149,10 +179,7 @@ function faqPage(input: CompanyJsonLdInput) {
       {
         '@type': 'Question',
         name: `What is ${name}'s sponsor licence rating?`,
-        acceptedAnswer: {
-          '@type': 'Answer',
-          text: `${name} holds ${rating} sponsor status on the UK Home Office register.`,
-        },
+        acceptedAnswer: { '@type': 'Answer', text: ratingAnswer },
       },
     ],
   };

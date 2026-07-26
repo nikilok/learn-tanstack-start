@@ -2,13 +2,8 @@ import { Link } from '@tanstack/react-router';
 import { MapPin } from 'lucide-react';
 
 import type { HmrcRow } from '../api/hmrc';
-import { ratingPriorityFirst } from '../lib/search/params';
-import {
-  formatLocation,
-  previousNameText,
-  skilledWorkerFirst,
-  titleCase,
-} from '../utils';
+import { cardLicence } from '../lib/company/licences';
+import { formatLocation, previousNameText, titleCase } from '../utils';
 import RatingIcon from './RatingIcon';
 
 /**
@@ -36,10 +31,9 @@ export default function HmrcCard({
 }) {
   const location = formatLocation(row.locality, row.region);
   const previousName = previousNameText(row.matchedPreviousName);
-  // Merged card: icon and chip lead with the same shared priority policies
-  // the detail page uses (ratingPriorityFirst / skilledWorkerFirst).
-  const primaryRating = ratingPriorityFirst(row.typeRatings)[0];
-  const chipRoute = skilledWorkerFirst(row.routes)[0];
+  // Route/rating selection lives in lib/company/licences (unit-tested): the
+  // rating shown MUST belong to the route on the chip beside it.
+  const { chipRoute, rating: primaryRating, extraRoutes } = cardLicence(row);
   return (
     <Link
       to="/company/$slug"
@@ -104,7 +98,7 @@ export default function HmrcCard({
         )}
         <span className="max-w-full shrink-0 truncate rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs whitespace-nowrap text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset">
           {titleCase(chipRoute)}
-          {row.routes.length > 1 ? ` +${row.routes.length - 1}` : ''}
+          {extraRoutes > 0 ? ` +${extraRoutes}` : ''}
         </span>
       </div>
     </Link>

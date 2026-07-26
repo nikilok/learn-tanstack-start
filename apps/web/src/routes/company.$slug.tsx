@@ -26,146 +26,61 @@ import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
 import GoogleLogo from '../components/GoogleLogo';
 import GovUkLogo from '../components/GovUkLogo';
 import LinkedInLogo from '../components/LinkedInLogo';
+import RatingIcon from '../components/RatingIcon';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
-import { ratingPriorityFirst, searchTermInput } from '../lib/search/params';
+import {
+  type CompanyDisplayInput,
+  deriveCompanyDisplay,
+} from '../lib/company/display';
+import type { RouteLicence } from '../lib/company/licences';
+import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
   formatDate,
-  formatLocation,
   humanizeEnum,
-  normalizeName,
-  skilledWorkerFirst,
   stampPageFlip,
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
-import { buildCompanyJsonLd, ratingPhrase } from '../utils/jsonld';
+import { buildCompanyJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
 
 // Grammatical "A, B and C" joiner for the routes and former-names sentences.
 const listFormatter = new Intl.ListFormat('en-GB', { type: 'conjunction' });
 
 /**
- * Display location for a CH registered-office address. Mirrors searchHmrc's
- * COALESCE(locality, address_line_2) + region so the detail page agrees with
- * the listing card on whether a sponsor has a location.
+ * One enclosed row per licence: the visa route and the rating held on THAT
+ * route. A real <dl> so the pairing is machine-readable — each route is the
+ * term and its rating the definition, which crawlers, assistants and screen
+ * readers all resolve. Presentationally the shared background carries the same
+ * association for sighted users: rendered as free-floating siblings, a narrow
+ * viewport wraps the rating onto its own line where it reads as belonging to
+ * the next route, the same mis-pairing two parallel columns cause.
  */
-function registeredLocation(
-  address?: {
-    address_line_2?: string;
-    locality?: string;
-    region?: string;
-  } | null,
-) {
-  return formatLocation(
-    address?.locality ?? address?.address_line_2,
-    address?.region,
-  );
-}
-
-/**
- * Former Companies House names for a company, with the current name, blanks, and
- * normalised duplicates (LTD/LIMITED, repeats) removed. Single source for both
- * the visible "previously known as" summary and the alternateName structured
- * data, so on-page content and JSON-LD can never diverge.
- */
-function formerCompanyNames(
-  previousNames: string[] | undefined,
-  currentName: string,
-): string[] {
-  const seen = new Set([normalizeName(currentName)]);
-  const out: string[] = [];
-  for (const raw of previousNames ?? []) {
-    const key = normalizeName(raw);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(raw);
-  }
-  return out;
-}
-
-/** Distinct visa routes of a company's licence rows, in shared display priority order. */
-function distinctRoutes(licences: { route: string }[]): string[] {
-  return skilledWorkerFirst([...new Set(licences.map((l) => l.route))]);
-}
-
-/** Distinct licence ratings of a company's licence rows, in shared best-tier-first priority order (same policy as the listing card's icon). */
-function distinctRatings(licences: { typeRating: string }[]): string[] {
-  return ratingPriorityFirst([...new Set(licences.map((l) => l.typeRating))]);
-}
-
-/** Vertically stacked chip badges — the one styling shared by the Visa Routes and Ratings fields. */
-function BadgeStack({ items }: { items: string[] }) {
+function LicenceStack({ items }: { items: RouteLicence[] }) {
   return (
-    <span className="flex flex-col items-start gap-1.5">
-      {items.map((item) => (
-        <span
-          key={item}
-          className="rounded-md bg-(--chip-bg) px-2 py-0.5 font-mono text-xs text-(--sea-ink-soft) ring-1 ring-(--chip-line) ring-inset"
+    <dl className="flex flex-col gap-1.5">
+      {items.map(({ route, ratings }) => (
+        <div
+          key={route}
+          className="flex flex-col gap-0.5 rounded-md bg-(--card-row-bg) px-2.5 py-1.5 ring-1 ring-(--card-row-line) ring-inset sm:flex-row sm:items-center sm:justify-between sm:gap-x-4"
         >
-          {item}
-        </span>
+          <dt className="font-mono text-xs break-words text-(--sea-ink-soft)">
+            {titleCase(route)}
+          </dt>
+          {/* Right-aligned on desktop so ratings form their own column: run
+              inline against the route and the two read as one sentence. */}
+          <dd className="flex shrink-0 flex-wrap items-center gap-x-3 sm:justify-end">
+            {ratings.map((rating) => (
+              <RatingIcon key={rating} rating={rating} />
+            ))}
+          </dd>
+        </div>
       ))}
-    </span>
+    </dl>
   );
-}
-
-// The loader-data slice head() and the component both derive from — the ONE
-// hand-written copy of this shape (head casts match.loaderData to it).
-type CompanyDisplayInput = {
-  sponsor: {
-    licences: { organisationName: string; typeRating: string; route: string }[];
-  };
-  profile?: {
-    company_name?: string;
-    previousNames?: string[];
-    company_number?: string;
-    date_of_creation?: string;
-    registered_office_address?: {
-      address_line_1?: string;
-      address_line_2?: string;
-      locality?: string;
-      region?: string;
-      postal_code?: string;
-      country?: string;
-    } | null;
-    sicDescriptions?: { code: string; description: string }[];
-  } | null;
-};
-
-/** Shared head()/component derivations — one source, so page copy, meta description, and JSON-LD can never drift. */
-function deriveCompanyDisplay({ sponsor, profile }: CompanyDisplayInput) {
-  // licences[0] is the primary org by construction (rows arrive primary-first).
-  const primaryOrg = sponsor.licences[0]?.organisationName ?? '';
-  const rawName = profile?.company_name ?? primaryOrg;
-  const currentKey = normalizeName(rawName);
-  // Set AFTER titleCase: case-variant HMRC rows of the same alias must not
-  // render twice ("…as Acme Support Ltd and Acme Support Ltd").
-  const registeredNames = [
-    ...new Set(sponsor.licences.map((l) => titleCase(l.organisationName))),
-  ].filter((alias) => normalizeName(alias) !== currentKey);
-  const routes = distinctRoutes(sponsor.licences);
-  const ratings = distinctRatings(sponsor.licences);
-  return {
-    primaryOrg,
-    rawName,
-    formerNames: formerCompanyNames(profile?.previousNames, rawName),
-    name: titleCase(rawName),
-    registeredNames,
-    registeredAs: registeredNames.length
-      ? listFormatter.format(registeredNames)
-      : '',
-    routes,
-    routesText: listFormatter.format(routes.map(titleCase)),
-    ratings,
-    ratingText: ratingPhrase(ratings),
-    location: registeredLocation(profile?.registered_office_address),
-    industry: profile?.sicDescriptions
-      ?.map((sic) => sic.description)
-      .join(', '),
-  };
 }
 
 export const Route = createFileRoute('/company/$slug')({
@@ -269,14 +184,16 @@ export const Route = createFileRoute('/company/$slug')({
     const registeredAs = display?.registeredAs ?? '';
     const location = display?.location ?? '';
     const industry = display?.industry;
-    const routesText = display?.routes.length
-      ? display.routesText
-      : 'Skilled Worker';
+    const routes = display?.routes ?? [];
+    // Same >2 collapse the visible H1 uses: spelling out six route names blows
+    // past the SERP snippet limit and pushes the location out of the snippet.
+    const sponsorPhrase =
+      routes.length > 2
+        ? `Licensed UK visa sponsor across ${routes.length} routes`
+        : `Licensed UK ${display?.routesText || 'Skilled Worker'} visa sponsor`;
     const description = [
       industry ? `${name} — ${industry}` : name,
-      location
-        ? `Licensed UK ${routesText} visa sponsor in ${location}`
-        : `Licensed UK ${routesText} visa sponsor`,
+      location ? `${sponsorPhrase} in ${location}` : sponsorPhrase,
       registeredAs ? `Also registered as ${registeredAs}` : '',
     ]
       .filter(Boolean)
@@ -303,8 +220,11 @@ export const Route = createFileRoute('/company/$slug')({
             name,
             legalName: display.rawName,
             alternateName,
-            route: routesText,
-            typeRating: display.ratings,
+            // Paired route→rating, not two flat lists: see CompanyJsonLdInput.
+            licences: display.routeLicences.map((l) => ({
+              route: titleCase(l.route),
+              ratings: l.ratings,
+            })),
             location,
             industry,
             companyNumber: loaderData.profile?.company_number,
@@ -366,16 +286,23 @@ function CompanyDetail() {
 
   // Shared derivations — the same values head() feeds the meta/JSON-LD from.
   const display = deriveCompanyDisplay({ sponsor, profile });
-  const { name: displayName, routes, routesText, ratings } = display;
+  const {
+    name: displayName,
+    routes,
+    routesText,
+    ratings,
+    routeLicences: licences,
+  } = display;
   // Noise-stripped query so external searches land on the right company.
   const searchQuery = encodeURIComponent(companySearchName(displayName));
   const alsoRegisteredAs = display.registeredAs || null;
   const ratingsText = ratings.map(titleCase).join(', ');
   // Every distinct licence number — a company can hold one per licence row
-  // (105 slugs do); all render, stacked when several.
+  // (105 slugs do); all render, stacked when several. Sourced from the
+  // identity-safe set so an unmapped namesake's number is never shown here.
   const licenceNumbers = [
     ...new Set(
-      sponsor.licences
+      display.licences
         .map((l) => l.sponsorLicenceNumber)
         .filter((n): n is string => Boolean(n)),
     ),
@@ -385,7 +312,12 @@ function CompanyDetail() {
   // Former names from Companies House (derived once, shared with head()).
   const formerNames = display.formerNames;
   const incorporated = formatDate(profile?.date_of_creation);
-  const rating = display.ratingText;
+  // When the ratings differ by route, the summary must say WHICH is which —
+  // "A-rated and B-rated sponsor status" leaves a reader (or an LLM quoting
+  // this page) to guess, and guessing by order is wrong half the time.
+  const rating = display.licencesVary
+    ? listFormatter.format(display.licencePhrases)
+    : display.ratingText;
   // Shared by both card slots (no-profile card and the CH profile card).
   const licenceNumberField = licenceNumbers.length > 0 && (
     <DetailField
@@ -408,7 +340,16 @@ function CompanyDetail() {
       }
     />
   );
-  const intro = `${displayName} is a licensed UK ${routesText} visa sponsor${displayLocation ? ` based in ${displayLocation}` : ''}, holding ${rating} sponsor status on the UK Home Office register.`;
+  // Mixed ratings need their own sentence — "holding B-rated for Skilled
+  // Worker … sponsor status" is not a sentence, and cramming the pairs into
+  // the clause is what made the aggregate phrasing tempting in the first place.
+  const locationClause = displayLocation ? ` based in ${displayLocation}` : '';
+  // ONE enumeration per paragraph. When the licences vary, the pair list is
+  // the enumeration and the opening sentence stays generic; otherwise the
+  // opening sentence carries the route list and the pair list is skipped.
+  const intro = display.licencesVary
+    ? `${displayName} is a licensed UK visa sponsor${locationClause}. Its UK Home Office sponsor licences are ${rating}.`
+    : `${displayName} is a licensed UK ${routesText} visa sponsor${locationClause}, holding ${rating} sponsor status on the UK Home Office register.`;
   let background = '';
   if (incorporated && industry) {
     background = `The company was incorporated on ${incorporated} and operates in ${industry}.`;
@@ -417,7 +358,11 @@ function CompanyDetail() {
   } else if (industry) {
     background = `The company operates in ${industry}.`;
   }
-  const outro = `${displayName} can sponsor international workers for the UK ${routesText} ${routes.length > 1 ? 'visa routes' : 'visa'} under its current Home Office licence.`;
+  // Deliberately does NOT repeat the route list — the paragraph already
+  // enumerated it once, in whichever sentence carried it.
+  const outro = display.licencesVary
+    ? `${displayName} can sponsor international workers on ${routes.length > 1 ? 'these routes' : 'this route'} under its current Home Office licence.`
+    : `${displayName} can sponsor international workers for the UK ${routesText} ${routes.length > 1 ? 'visa routes' : 'visa'} under its current Home Office licence.`;
   const registered = alsoRegisteredAs
     ? `It appears on the UK Home Office sponsor register as ${alsoRegisteredAs}.`
     : '';
@@ -462,28 +407,27 @@ function CompanyDetail() {
                   valueClassName="mt-1"
                 />
               )}
-              {routes.length === 1 ? (
-                <DetailField label="Visa Route" value={titleCase(routes[0])} />
+              {/* Single licence: no pairing to confuse, so keep the compact
+                  two-cell layout. Several: one field pairing each route with
+                  the rating held ON that route — as two adjacent columns a
+                  reader pairs them by eye, and a company can be A-rated on one
+                  route and B-rated on another. */}
+              {licences.length === 1 ? (
+                <>
+                  <DetailField
+                    label="Visa Route"
+                    value={titleCase(licences[0].route)}
+                  />
+                  <DetailField label="Rating" value={ratingsText} />
+                </>
               ) : (
                 <DetailField
-                  label="Visa Routes"
-                  // Badges stack vertically in a normal grid cell (Ratings
-                  // stays alongside); long route names wrap inside the badge.
+                  label="Visa Routes & Ratings"
+                  className="col-span-2 sm:col-span-4"
                   valueClassName="mt-1.5"
-                  value={<BadgeStack items={routes.map(titleCase)} />}
+                  value={<LicenceStack items={licences} />}
                 />
               )}
-              <DetailField
-                label={ratings.length > 1 ? 'Ratings' : 'Rating'}
-                valueClassName={ratings.length > 1 ? 'mt-1.5' : undefined}
-                value={
-                  ratings.length > 1 ? (
-                    <BadgeStack items={ratings.map(titleCase)} />
-                  ) : (
-                    ratingsText
-                  )
-                }
-              />
               {/* No CH mapping → no second section, so surface the licence here instead. */}
               {!profile && licenceNumberField}
             </dl>

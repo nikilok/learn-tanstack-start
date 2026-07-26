@@ -1,5 +1,37 @@
 # Project Notes
 
+## Testing — complex logic ships with tests
+
+Anything with non-obvious rules gets unit tests, so a change in one place cannot
+silently break another. This is not aspirational: the slug-URL migration shipped
+a live wrong-data bug (a card showing an A rating beside a B-rated licence) while
+all 372 existing tests stayed green, because none of them covered that feature.
+
+- **Extract before testing.** Logic inline in a React component or a route file
+  is untestable in practice — nothing can import it without rendering. Move it to
+  a pure module (`src/lib/company/licences.ts` is the pattern) and have the
+  component call that, so the shipping code *is* the tested code.
+- **Encode the real failure.** Name the actual production case in the test
+  (Platinum Equity holds a B-rated Skilled Worker licence and an A-rated GBM
+  licence). A test that pins a bug that really happened outlives a generic one.
+- **Prefer structural impossibility over an agreement test.** Two copies of a
+  rule that must match (an ORDER BY in two queries, a slugify expression in SQL
+  and TS) should become one shared helper — see `slugifiedSqlText` in `@ss/db`.
+- **Know what unit tests do not cover.** They lock logic, not SQL behaviour
+  (OFFSET pagination, aggregate ordering) and not rendered layout. Those need a
+  dry-run against a copy of prod data and screenshots at several widths. Say
+  which of the three you did rather than implying full coverage.
+
+### The invariant this feature keeps breaking
+
+A company can hold **different ratings on different visa routes**. Routes and
+ratings must therefore never be rendered, serialised, or returned as two parallel
+lists — every consumer that re-pairs them by position gets it wrong. This defect
+recurred on seven surfaces (search card, both MCP tools, page display, page
+prose, FAQ JSON-LD, transitional RPC scalars) because the payload had dropped the
+pairing. Carry `licences: {route, rating}[]` end to end; `lib/company/licences.ts`
+holds the selection/grouping helpers and `licences.test.ts` locks them.
+
 ## Search input visibility — pre-hydration attribute pattern
 
 First-paint visibility is controlled by a blocking inline script

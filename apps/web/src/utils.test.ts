@@ -7,7 +7,12 @@ import {
   test,
 } from 'bun:test';
 
-import { cleanTitle, companySearchName, formatRelative } from './utils.ts';
+import {
+  cleanTitle,
+  companySearchName,
+  formatRelative,
+  skilledWorkerFirst,
+} from './utils.ts';
 
 // These cases MUST stay in lockstep with apps/desktop/src/main/site.test.ts —
 // the two cleanTitle copies mirror each other, and drift breaks the desktop preview title.
@@ -151,5 +156,32 @@ describe('formatRelative', () => {
 
   test('invalid date returns an empty string', () => {
     expect(formatRelative(new Date('not a date'))).toBe('');
+  });
+});
+
+// The single route-priority policy, shared by the listing card's chip and the
+// detail page's badge order, so the two surfaces can never advertise different
+// leading routes for the same company.
+describe('skilledWorkerFirst', () => {
+  test('puts Skilled Worker first, then alphabetical', () => {
+    expect(
+      skilledWorkerFirst([
+        'International Agreement',
+        'Skilled Worker',
+        'Creative Worker',
+      ]),
+    ).toEqual(['Skilled Worker', 'Creative Worker', 'International Agreement']);
+  });
+
+  test('falls back to alphabetical when Skilled Worker is absent', () => {
+    expect(
+      skilledWorkerFirst(['International Agreement', 'Creative Worker']),
+    ).toEqual(['Creative Worker', 'International Agreement']);
+  });
+
+  test('is a pure function — the input array is not mutated', () => {
+    const input = ['Creative Worker', 'Skilled Worker'];
+    skilledWorkerFirst(input);
+    expect(input).toEqual(['Creative Worker', 'Skilled Worker']);
   });
 });

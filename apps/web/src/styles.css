@@ -69,6 +69,12 @@
   --sponsor-card-bg: #f5f6f8;
   --chip-bg: #eceef1;
   --chip-line: #dfe1e6;
+  /* Inset rows sitting ON --sponsor-card-bg (the licence list): a shade darker
+     than the card in the SAME hue family. --chip-bg is tuned for chips on the
+     page background and reads far too contrasty here, especially in dark mode
+     where it is near-black against a navy card. */
+  --card-row-bg: #ebedf0;
+  --card-row-line: #e0e2e7;
   --footer-line: var(--gray-200);
   /* Translucent footer panel tinted to the header's base colour at 50%, so the
      page glow/grid reads faintly through it. */
@@ -138,6 +144,9 @@
   --grid-line: rgba(255, 255, 255, 0.08);
   --grid-opacity: 1;
   --sponsor-card-bg: #1a1a2e;
+  /* See the light-mode note: a touch darker than the navy card, not near-black. */
+  --card-row-bg: #16162a;
+  --card-row-line: #262640;
   --footer-line: var(--line);
   --footer-bg: rgba(10, 10, 10, 0.5);
   --logo-navy: #e0e7ff;

@@ -10,6 +10,7 @@ import { createServerFn } from '@tanstack/react-start';
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
+import { poolForPrimary } from '../lib/company/licences';
 import { buildNameMatchers } from '../lib/search/name-match';
 import { slugify } from '../utils';
 import {
@@ -20,6 +21,10 @@ import {
 
 const PAGE_SIZE = 50;
 
+// A real (route, rating) pair from one licence row — never reassembled from
+// separately-sorted route/rating lists.
+export type LicencePair = { route: string; rating: string };
+
 type SearchHit = {
   slugId: string;
   organisationName: string;
@@ -28,6 +33,7 @@ type SearchHit = {
   region: string | null;
   typeRatings: string[];
   routes: string[];
+  licences: LicencePair[];
   score: number;
   matchedPreviousName: string | null;
 };
@@ -68,9 +74,9 @@ export const searchHmrc = createServerFn()
     // Folding pm into the direct WHERE as an OR would force a seq scan.
     // The g0 GROUP BY is load-bearing: an org matching both directly AND via
     // a previous name yields two `hits` rows (UNION can't collapse the direct
-    // flag) that merge here, bool_or(direct) gating org_score. Only min(hash)
-    // is vestigial — 1:1 with hash = org|rating|route, kept for resilience if
-    // the hash inputs ever change again; the detail loader 301s any siblings.
+    // flag) that merge here, bool_or(direct) gating org_score. min(hash) is
+    // load-bearing too — it is the ORDER BY's final tiebreak, and without a
+    // stable one OFFSET pages duplicate or drop rows.
     // Grouping/LIMIT happen in `g`, BEFORE the CH location joins, so those
     // stay PK probes on the returned window only.
     // Listing location stays CH-sourced by decision, even though the
@@ -96,13 +102,32 @@ export const searchHmrc = createServerFn()
       ),
       g0 AS (
         SELECT min(h.hash) AS slug_id,
-               h.organisation_name,
+               -- One card per URL: grouping by name_slug alone folds a
+               -- company's case/punctuation-variant register rows (314 slugs
+               -- today, all variants of ONE company) into a single result
+               -- instead of near-identical cards that all open the same page.
+               -- The display name is elected exactly as getHmrcCompanyBySlug
+               -- elects the page's primary — mapped first, then LOWEST COMPANY
+               -- NUMBER, then name. Keep these two orderings identical: drop
+               -- the company_number key here and a slug pooling two mapped
+               -- companies shows one entity's name on the card and the other's
+               -- data on the page it opens.
+               (array_agg(h.organisation_name ORDER BY
+                  (mm.company_number IS NULL) ASC, mm.company_number ASC,
+                  h.organisation_name ASC
+                ))[1] AS organisation_name,
                h.name_slug,
                -- Licence rows merge per company: one result per (org, slug),
                -- routes/ratings aggregated. array_to_json so the driver always
                -- hands back JS arrays regardless of its text[] type parsers.
                array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS routes,
                array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS type_ratings,
+               -- The PAIRED rows. Consumers that show a route and a rating
+               -- together (the card's chip + icon) must read them from here:
+               -- picking each from its own sorted array fabricates a
+               -- combination the company does not hold.
+               array_to_json(array_agg(DISTINCT jsonb_build_object(
+                 'route', h.route, 'rating', h.type_rating))) AS licences,
                -- Transitional scalars must be ONE row's real pair (both aggs
                -- hash-ordered → same row), never independently-sorted heads,
                -- which can fabricate a (route, rating) no licence holds.
@@ -112,16 +137,20 @@ export const searchHmrc = createServerFn()
                -- free at WHERE time): for prev-name-only rows scoreCase is
                -- sub-threshold word_similarity noise that would suppress the
                -- "Previously" line and leak past the prev_won demotion
-               CASE WHEN bool_or(h.direct) THEN ${scoreCase(orgName)} ELSE 0 END AS org_score,
-               pm.matched_name,
-               pm.prev_score
+               CASE WHEN bool_or(h.direct) THEN max(${scoreCase(orgName)}) ELSE 0 END AS org_score,
+               -- Best previous-name match across the merged variants.
+               (array_agg(pm.matched_name ORDER BY
+                  pm.prev_score DESC NULLS LAST, pm.matched_name ASC
+                ))[1] AS matched_name,
+               max(pm.prev_score) AS prev_score
         FROM hits h
         LEFT JOIN pm ON pm.organisation_name = h.organisation_name
-        GROUP BY h.organisation_name, h.name_slug, pm.matched_name, pm.prev_score
+        LEFT JOIN ${hmrcCompanyMapping} mm ON mm.organisation_name = h.organisation_name
+        GROUP BY h.name_slug
       ),
       g AS (
         SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
-               legacy_route, legacy_type_rating,
+               licences, legacy_route, legacy_type_rating,
                GREATEST(org_score, coalesce(prev_score, 0)) AS score,
                coalesce(prev_score, 0) > org_score AS prev_won,
                CASE WHEN coalesce(prev_score, 0) > org_score
@@ -142,6 +171,7 @@ export const searchHmrc = createServerFn()
              c.region AS "region",
              g.type_ratings AS "typeRatings",
              g.routes AS "routes",
+             g.licences AS "licences",
              -- Transitional scalars for pre-deploy bundles (server fns outlive
              -- the client across a deploy) — drop after the next release cycle.
              g.legacy_type_rating AS "typeRating",
@@ -166,9 +196,14 @@ export const searchHmrc = createServerFn()
 
 // One licence row of a company page: a (rating, route) pair plus the
 // snapshot licence number when the triple maps to exactly one.
+// `companyNumber` is retained (not stripped) so consumers can tell a mapped
+// entity's pooled rows from an unmapped namesake's — the page suppresses
+// identity-bearing fields when it can't, and the MCP tool needs it to trust
+// the pool over a weaker name match.
 export type CompanyLicence = {
   slugId: string;
   organisationName: string;
+  companyNumber: string | null;
   typeRating: string;
   route: string;
   sponsorLicenceNumber: string | null;
@@ -221,26 +256,24 @@ export const getHmrcCompanyBySlug = createServerFn()
       FROM ${hmrcSkilledWorkers} h
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
       WHERE h.name_slug = ${slug}
-      ORDER BY (m.company_number IS NULL) ASC, h.organisation_name ASC, h.hash ASC
+      -- Primary election: mapped first, then LOWEST COMPANY NUMBER — never the
+      -- alphabetically-first name. Company numbers are immutable, so the same
+      -- entity keeps the page across renames and across a namesake gaining a
+      -- mapping mid-cycle; ordering by name would hand a months-indexed URL to
+      -- a different legal entity the moment the sweep maps a namesake (the
+      -- page is edge-cached 30 days and mapping changes trigger no purge).
+      -- Matches the ingest's min(company_number) tie-break for new collisions.
+      ORDER BY (m.company_number IS NULL) ASC, m.company_number ASC,
+               h.organisation_name ASC, h.hash ASC
     `);
-    const rows = found.rows as unknown as (CompanyLicence & {
-      companyNumber: string | null;
-    })[];
+    const rows = found.rows as unknown as CompanyLicence[];
     if (rows.length > 0) {
       // Long edge cache: slug pages only change via ingest, and the
       // post-ingest sitemap deploy purges the edge.
       setRpcCacheControl(LONG_EDGE_CACHE);
-      // Namesake guard: pool only the primary company's rows — same
-      // company_number, or unmapped rows (name-keyed, indistinguishable). A
-      // DIFFERENT mapped company sharing the slug is a distinct legal entity
-      // and must not leak its licences/name into this page.
-      const primaryCompany = rows[0].companyNumber;
-      const licences = rows
-        .filter(
-          (r) => r.companyNumber === primaryCompany || r.companyNumber === null,
-        )
-        .map(({ companyNumber: _companyNumber, ...licence }) => licence);
-      return { kind: 'found', nameSlug: slug, licences };
+      // Namesake guard (unit-tested in lib/company/licences): pool only the
+      // primary company's rows, never a different mapped entity's.
+      return { kind: 'found', nameSlug: slug, licences: poolForPrimary(rows) };
     }
 
     // Rename/alias fallback: an unknown slug resolves through the company
@@ -253,7 +286,7 @@ export const getHmrcCompanyBySlug = createServerFn()
     // be revived by later ingests.
     // MATERIALIZED fences candidate resolution (index probes on the 0038
     // slugified expression indexes; the tail branch probes
-    // idx_mapping_company_number) from the h2 join, and min() replaces
+    // idx_mapping_company_number) from the h2 join, and the aggregate replaces
     // ORDER BY+LIMIT so an empty candidate set never walks the slug index —
     // miss and hit paths both run in well under a millisecond.
     const moved = await db.execute(sql`
@@ -276,8 +309,34 @@ export const getHmrcCompanyBySlug = createServerFn()
         SELECT cur.organisation_name
         FROM ${hmrcCompanyMapping} cur
         WHERE cur.company_number = upper(substring(${slug} from '[^-]+$'))
+          -- Shape guard: a slug is only one of our minted
+          -- base-plus-company-number suffixes if EITHER its base is still a
+          -- live slug (the usual case — the other namesake still holds it) OR
+          -- this company still holds a slug carrying the same suffix (it
+          -- renamed but is still disambiguated). Without a guard, the ~3.3k org
+          -- names that embed a registration number — and any typo'd URL ending
+          -- in one — would 301 to an unrelated company.
+          AND (
+            EXISTS (
+              SELECT 1 FROM ${hmrcSkilledWorkers} hb
+              WHERE hb.name_slug = substring(${slug} from '^(.*)-[^-]+$')
+            )
+            OR EXISTS (
+              SELECT 1 FROM ${hmrcSkilledWorkers} hs
+              JOIN ${hmrcCompanyMapping} ms
+                ON ms.organisation_name = hs.organisation_name
+              WHERE ms.company_number = cur.company_number
+                AND hs.name_slug LIKE '%-' || lower(cur.company_number)
+            )
+          )
       )
-      SELECT min(h2.name_slug) AS "nameSlug"
+      -- Closest sibling, not the alphabetically-first one: when a company
+      -- number maps several orgs, a rename should land on the renamed org's
+      -- own page rather than a sibling entity's. name_slug breaks ties so the
+      -- redirect target stays deterministic.
+      SELECT (array_agg(h2.name_slug ORDER BY
+                similarity(h2.name_slug, ${slug}) DESC, h2.name_slug ASC))[1]
+             AS "nameSlug"
       FROM cand
       JOIN ${hmrcSkilledWorkers} h2 ON h2.organisation_name = cand.organisation_name
     `);

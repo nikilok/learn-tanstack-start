@@ -335,11 +335,19 @@ const disambiguated = (await sql`
   keepers AS (
     SELECT mp."name_slug",
            coalesce(
+             -- ORDER BY, not bare LIMIT 1: when two mapped companies both
+             -- count as prior holders of this slug (a namesake pooled here
+             -- unmapped, then gained a mapping), an unordered pick is plan-
+             -- dependent — it could hand the indexed base slug to the newcomer
+             -- and exile the incumbent, and even differ between a dry run and
+             -- the real run. Lowest company number is stable and matches the
+             -- new-collision tie-break below.
              (SELECT p."company_number"
               FROM prior p
               JOIN mapped mp2 ON mp2."company_number" = p."company_number"
                              AND mp2."name_slug" = mp."name_slug"
               WHERE p."name_slug" = mp."name_slug"
+              ORDER BY p."company_number" ASC
               LIMIT 1),
              min(mp."company_number")
            ) AS keeper

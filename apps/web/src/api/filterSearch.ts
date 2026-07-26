@@ -25,6 +25,7 @@ export type FilterSearchRow = {
   region: string | null;
   typeRatings: string[];
   routes: string[];
+  licences: { route: string; rating: string }[];
   score: number;
   matchedPreviousName: string | null;
   companyStatus: string | null;
@@ -75,13 +76,14 @@ export const searchFiltered = createServerFn()
     const order =
       filters.order ?? (sortKey === 'incorporated' ? 'desc' : 'asc');
     const dir = order === 'desc' ? sql`DESC` : sql`ASC`;
-    // min(h.hash) tail: ties must order identically across OFFSET pages.
+    // Aggregated now that rows group by name_slug: a bare organisation_name is
+    // no longer grouped. min(h.hash) tail keeps OFFSET pages stable.
     const orderBy =
       sortKey === 'relevance'
-        ? sql`score DESC, h.organisation_name ASC, min(h.hash) ASC`
+        ? sql`score DESC, min(h.organisation_name) ASC, min(h.hash) ASC`
         : sortKey === 'incorporated'
-          ? sql`c.date_of_creation ${dir} NULLS LAST, h.organisation_name ASC, min(h.hash) ASC`
-          : sql`h.organisation_name ${dir}, min(h.hash) ASC`;
+          ? sql`c.date_of_creation ${dir} NULLS LAST, min(h.organisation_name) ASC, min(h.hash) ASC`
+          : sql`min(h.organisation_name) ${dir}, min(h.hash) ASC`;
 
     // Licence rows merge per company (org, slug): routes/ratings aggregate,
     // and route/rating filters shape the aggregate — the chip reflects the
@@ -90,12 +92,21 @@ export const searchFiltered = createServerFn()
     // JS arrays regardless of its text[] type parsers.
     const result = await db.execute(sql`
       SELECT min(h.hash) AS "slugId",
-             h.organisation_name AS "organisationName",
+             -- Elected exactly as searchHmrc and the page elect their primary:
+             -- mapped first, then lowest company number, then name.
+             (array_agg(h.organisation_name ORDER BY
+                (m.company_number IS NULL) ASC, m.company_number ASC,
+                h.organisation_name ASC
+              ))[1] AS "organisationName",
              h.name_slug AS "nameSlug",
              COALESCE(c.locality, c.address_line_2) AS "locality",
              c.region AS "region",
              array_to_json(array_agg(DISTINCT h.type_rating ORDER BY h.type_rating)) AS "typeRatings",
              array_to_json(array_agg(DISTINCT h.route ORDER BY h.route)) AS "routes",
+             -- The PAIRED rows: anything showing a route and rating together
+             -- must read them from here, not from the two sorted lists above.
+             array_to_json(array_agg(DISTINCT jsonb_build_object(
+               'route', h.route, 'rating', h.type_rating))) AS "licences",
              -- Transitional scalars for pre-deploy bundles (server fns outlive
              -- the client across a deploy) — drop after the next release cycle.
              -- Hash-ordered so both come from ONE row: a real (route, rating)
@@ -111,7 +122,10 @@ export const searchFiltered = createServerFn()
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
       LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
       ${where}
-      GROUP BY h.organisation_name, h.name_slug, c.company_number
+      -- One card per URL, matching searchHmrc: grouping per organisation_name
+      -- left a company's case-variant register rows as separate, identical
+      -- cards that all open the same page (314 slugs) in browse mode only.
+      GROUP BY h.name_slug, c.company_number
       ORDER BY ${orderBy}
       LIMIT ${PAGE_SIZE + 1} OFFSET ${safeOffset}
     `);

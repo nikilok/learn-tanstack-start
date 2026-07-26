@@ -1,3 +1,4 @@
+import { FILTER_SECTIONS } from '../lib/search/sections';
 import { APP_DESCRIPTION, APP_NAME, APP_SHORT_NAME } from './app-meta';
 
 type Address = {
@@ -182,6 +183,37 @@ export function buildWebsiteJsonLd(homeUrl: string) {
         },
         'query-input': 'required name=search_term_string',
       },
+    },
+  ];
+}
+
+/** Compose the /filters page JSON-LD — a WebPage block plus an ItemList naming each filter dimension (from FILTER_SECTIONS) for crawlers and AI assistants. */
+export function buildFiltersJsonLd(input: {
+  title: string;
+  description: string;
+  canonicalUrl: string;
+}) {
+  return [
+    {
+      '@context': 'https://schema.org',
+      '@type': 'WebPage',
+      name: input.title,
+      description: input.description,
+      url: input.canonicalUrl,
+    },
+    {
+      '@context': 'https://schema.org',
+      '@type': 'ItemList',
+      name: 'Sponsor filter dimensions',
+      description:
+        'Ways the UK sponsorship list can be filtered on SponsorSearch.',
+      itemListElement: FILTER_SECTIONS.flatMap((section) =>
+        section.schemaLabel ? [section.schemaLabel] : [],
+      ).map((name, position) => ({
+        '@type': 'ListItem',
+        position: position + 1,
+        name,
+      })),
     },
   ];
 }

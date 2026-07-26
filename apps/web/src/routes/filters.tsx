@@ -27,8 +27,10 @@ import {
   WORKER_TYPES,
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+import { FILTER_SECTIONS } from '../lib/search/sections';
 import { humanizeEnum, prefersReducedMotion } from '../utils';
 import { buildCanonical } from '../utils/canonical';
+import { buildFiltersJsonLd } from '../utils/jsonld';
 import { buildSeoHead } from '../utils/seo';
 
 const getPlatformInfo = createIsomorphicFn()
@@ -67,38 +69,11 @@ export const Route = createFileRoute('/filters')({
       title: pageTitle,
       description: pageDescription,
       canonicalUrl,
-      jsonLd: [
-        {
-          '@context': 'https://schema.org',
-          '@type': 'WebPage',
-          name: pageTitle,
-          description: pageDescription,
-          url: canonicalUrl,
-        },
-        // Mirrors the page's eight filter sections (HeroText FACETS granularity)
-        // with fuller labels for crawlers and AI assistants.
-        {
-          '@context': 'https://schema.org',
-          '@type': 'ItemList',
-          name: 'Sponsor filter dimensions',
-          description:
-            'Ways the UK sponsorship list can be filtered on SponsorSearch.',
-          itemListElement: [
-            'Visa route',
-            'Sponsor licence rating and worker type',
-            'City or town',
-            'Industry or SIC code',
-            'Company status',
-            'Company type',
-            'Incorporation date',
-            'Change signals: renames, office moves, charges, insolvency, overdue accounts',
-          ].map((name, position) => ({
-            '@type': 'ListItem',
-            position: position + 1,
-            name,
-          })),
-        },
-      ],
+      jsonLd: buildFiltersJsonLd({
+        title: pageTitle,
+        description: pageDescription,
+        canonicalUrl,
+      }),
     });
   },
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
@@ -241,8 +216,12 @@ type UnsectionedKey = Exclude<
 type SectionId = [UnsectionedKey] extends [never]
   ? keyof typeof SECTION_KEYS
   : ['unsectioned registry keys', UnsectionedKey];
-// Declaration order doubles as the ⌥1…⌥9 jump order.
-const SECTION_ORDER = Object.keys(SECTION_KEYS) as SectionId[];
+// Declaration order (from the shared display list) doubles as the ⌥1…⌥9 jump order.
+const SECTION_ORDER = FILTER_SECTIONS.map((s) => s.id satisfies SectionId);
+// Indexing with SectionId compile-fails if a section lacks a FILTER_SECTIONS entry.
+const SECTION_TITLES = Object.fromEntries(
+  FILTER_SECTIONS.map((s) => [s.id, s.title]),
+) as Record<(typeof FILTER_SECTIONS)[number]['id'], string>;
 
 /** Which sections hold a choice in the given filter set (their default-open state). */
 function openSectionsFor(filters: SearchFilters): Record<SectionId, boolean> {
@@ -516,10 +495,10 @@ function FiltersPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const section = (id: SectionId, title: string, body: React.ReactNode) => (
+  const section = (id: SectionId, body: React.ReactNode) => (
     <Accordion
       id={`filter-section-${id}`}
-      title={title}
+      title={SECTION_TITLES[id]}
       shortcut={`${jumpKey}${SECTION_ORDER.indexOf(id) + 1}`}
       count={sectionCount(id)}
       confirmed={sectionConfirmed(id)}
@@ -548,7 +527,6 @@ function FiltersPage() {
         <div className="mt-6">
           {section(
             'route',
-            'Visa route',
             <CheckGroup
               options={KNOWN_ROUTES.map((r) => ({ value: r, label: r }))}
               selected={draft.route}
@@ -558,7 +536,6 @@ function FiltersPage() {
 
           {section(
             'licence',
-            'Licence',
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <div>
                 <p className="mb-2 text-xs font-medium text-(--sea-ink-soft)">
@@ -585,7 +562,6 @@ function FiltersPage() {
 
           {section(
             'location',
-            'Location',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Matches the sponsor’s town or its registered office.
@@ -612,7 +588,6 @@ function FiltersPage() {
 
           {section(
             'industry',
-            'Industry',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Describe the industry in plain words, like software, care homes
@@ -657,7 +632,6 @@ function FiltersPage() {
 
           {section(
             'status',
-            'Company status',
             <CheckGroup
               options={COMPANY_STATUSES.map((s) => ({
                 value: s,
@@ -670,7 +644,6 @@ function FiltersPage() {
 
           {section(
             'companyType',
-            'Company type',
             <CheckGroup
               options={COMPANY_TYPES.map((t) => ({
                 value: t,
@@ -683,7 +656,6 @@ function FiltersPage() {
 
           {section(
             'incorporated',
-            'Incorporated',
             <>
               <p className="mb-3 text-xs text-(--sea-ink-soft)">
                 Companies incorporated between these dates.
@@ -719,7 +691,6 @@ function FiltersPage() {
 
           {section(
             'signals',
-            'Signals',
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
               <TriState
                 label="Accounts overdue"
@@ -751,7 +722,6 @@ function FiltersPage() {
 
           {section(
             'sort',
-            'Sort',
             <div className="flex flex-wrap items-center gap-3">
               <Select
                 ariaLabel="Sort by"

@@ -34,6 +34,10 @@ const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
 
+// Home-only head bits, static so they build once: the canonical URL plus the WebSite name/alias schema search engines read site identity from.
+const HOME_CANONICAL = buildCanonical('/');
+const WEBSITE_JSONLD_META = jsonLdMeta(buildWebsiteJsonLd(HOME_CANONICAL));
+
 // What a bare mount renders while the rehydrate effect below re-applies the
 // stored filters: a loading frame, so the classic hook neither fires a
 // spurious name search nor lets a pending scroll restore be discarded.
@@ -61,16 +65,9 @@ export const Route = createFileRoute('/')({
     // filter params joining the schema surfaced that, hence the cast.
     middlewares: [stripSearchParams({ search: '' } as never)],
   },
-  head: ({ match }) => ({
-    // Title/description inherit from __root; the WebSite block only belongs on
-    // the home document — search engines read site name + aliases from it.
-    meta: jsonLdMeta(buildWebsiteJsonLd(buildCanonical('/'))),
-    links: [
-      {
-        rel: 'canonical',
-        href: buildCanonical(match.pathname),
-      },
-    ],
+  head: () => ({
+    meta: WEBSITE_JSONLD_META,
+    links: [{ rel: 'canonical', href: HOME_CANONICAL }],
   }),
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search }) => ({ search }),

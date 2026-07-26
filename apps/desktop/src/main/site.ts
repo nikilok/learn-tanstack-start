@@ -24,5 +24,6 @@ export function cleanTitle(title: string): string {
   return title
     .replace(/\s*[|—–-]\s*SponsorSearch(\.co\.uk)?\s*$/i, '')
     .replace(/\s*-\s*UK Visa Sponsor\s*$/i, '')
+    .replace(/\s*[.—–-]\s*Skilled Worker Visa Sponsors\s*$/i, '')
     .trim();
 }

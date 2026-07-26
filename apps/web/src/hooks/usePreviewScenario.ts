@@ -1,10 +1,9 @@
 import { type RefObject, useEffect, useState } from 'react';
 
 import { cleanTitle, prefersReducedMotion } from '../utils';
-import { APP_NAME, APP_TITLE } from '../utils/app-meta';
+import { APP_TITLE } from '../utils/app-meta';
 
-// The home document title as the title bar would render it — the details-title
-// poll must not mistake it (still current mid-navigation) for a page title.
+// What the shell's title pill shows on home — the replica's initial state.
 const HOME_TITLE_CLEANED = cleanTitle(APP_TITLE);
 
 /** What the scene camera should look at: an app-content rect (iframe-viewport coords) or the whole scene (`rect: null`). */
@@ -107,7 +106,7 @@ export function usePreviewScenario(
   ready: boolean,
 ) {
   const [detailsReached, setDetailsReached] = useState(false);
-  const [title, setTitle] = useState(APP_NAME);
+  const [title, setTitle] = useState(HOME_TITLE_CLEANED);
   const [shot, setShot] = useState<PreviewShot>({ rect: null, ms: 0 });
 
   useEffect(() => {
@@ -280,6 +279,8 @@ export function usePreviewScenario(
       await sleep(1700, signal);
 
       const cardName = card.querySelector('h3')?.textContent?.trim();
+      // Pre-click title: the details poll accepts only a title that moves off it.
+      const preNavTitle = cleanTitle(doc()?.title ?? APP_TITLE);
       clickLink(card);
       // Confirm the router actually navigated before flipping the chrome to the
       // details state — the anchor can go stale during the pre-click pause.
@@ -311,11 +312,7 @@ export function usePreviewScenario(
         () => {
           const t = doc()?.title;
           const cleaned = t ? cleanTitle(t) : '';
-          return cleaned &&
-            cleaned !== APP_NAME &&
-            cleaned !== HOME_TITLE_CLEANED
-            ? cleaned
-            : null;
+          return cleaned && cleaned !== preNavTitle ? cleaned : null;
         },
         { intervalMs: 300, timeoutMs: 5_000, signal },
       );
@@ -323,7 +320,8 @@ export function usePreviewScenario(
 
       // Camera: move in on the details header, hold, then pull away to the whole scene.
       const heading = await poll(
-        () => doc()?.querySelector<HTMLElement>('main h1') ?? null,
+        () =>
+          doc()?.querySelector<HTMLElement>('main h1:not(.sr-only)') ?? null,
         { intervalMs: 200, timeoutMs: 4_000, signal },
       );
       if (heading) {

@@ -1,0 +1,58 @@
+/* Full-window screensaver. Same max z-index as the custom cursor and the PWA splash —
+   it is rendered after both in __root.tsx, so it wins that tie and covers them. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  cursor: none;
+  /* Long dissolve in — it should creep up on you rather than snap on. */
+  transition: opacity 1200ms ease;
+}
+
+/* Waking has to feel instant, and the app must take clicks again straight away. */
+.leaving {
+  pointer-events: none;
+  transition-duration: 320ms;
+}
+
+/* `scrollbar-gutter: stable` reserves a strip outside the fixed overlay's box, painted
+   with <html>'s --bg-page-edge — a pale band down the edge of an otherwise full-bleed
+   screensaver. Match it to the field the canvas paints (both are --bg-base). */
+:global(html[data-screensaver]) {
+  background-color: var(--bg-base);
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Wordmark watermark, signed bottom-left once the coil has settled. */
+.mark {
+  position: absolute;
+  left: clamp(1.25rem, 4vw, 3rem);
+  bottom: calc(clamp(1.25rem, 4vw, 3rem) + env(safe-area-inset-bottom, 0px));
+  width: clamp(130px, 17vw, 210px);
+  height: auto;
+  /* A whisper, not a badge — it reads the same as a monochrome mark on either theme. */
+  opacity: 0.22;
+  animation: mark-in 1400ms ease 900ms both;
+}
+
+/* No `to` — the implicit end is the rule's own 0.22, so the two can't drift apart. */
+@keyframes mark-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    transition-duration: 320ms;
+  }
+  .mark {
+    animation: none;
+  }
+}

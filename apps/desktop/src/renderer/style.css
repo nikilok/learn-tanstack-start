@@ -36,6 +36,17 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* The page's screensaver owns the window (main forwards the state): fade the chrome out
+   with it, matching the overlay's own 1200ms dissolve in and 320ms wake. Clicks still land
+   — main turns any input on this view into a wake, which brings the bar straight back. */
+#root {
+  transition: opacity 320ms ease;
+}
+html.screensaver #root {
+  opacity: 0;
+  transition-duration: 1200ms;
+}
+
 /* -webkit-app-region has no Tailwind utility — define the drag regions here. */
 .drag {
   -webkit-app-region: drag;

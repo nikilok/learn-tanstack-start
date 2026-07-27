@@ -523,3 +523,47 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   even mid-interrupt. Don't give the filter its own duration/curve, and keep
   the lens layer oversized (`-inset-6`) so the blur's edge fade stays outside
   the pane.
+
+## Screensaver — cross-file invariants
+
+`<ScreenSaver />` (components/ScreenSaver.tsx) takes the whole window after
+`IDLE_TIMEOUT_MS` of quiet. The curve maths, fit and palette are pure in
+`lib/screensaver/coil.ts`; the idleness rules are pure in
+`lib/screensaver/idle.ts`; `hooks/useIdle.ts` is the only DOM wiring. Both pure
+modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` from
+`sampleCoil`, so a change to the curve fails rather than silently clipping.
+
+- **It must render LAST in `__root.tsx`** — after `UnionJackCursor` and
+  `AppSplash`. All three sit at z-index 2147483647, so DOM order is the only
+  thing that puts the screensaver over the custom cursor.
+- **The dark theme's red tentacles are a two-pass draw**: `sampleCoil` emits each
+  sample's `spread` (its offset from the spine, which is exactly `|q|`), and the
+  renderer paints body then strands with one `fillStyle` each — 10k dots either
+  way. It only stays flicker-free because the share above `TENTACLE_SPREAD` holds
+  steady across the whole cycle; `coil.test.ts` locks that, so retuning the
+  threshold fails loudly if it starts pulsing.
+- **`FADE_OUT_MS` (ScreenSaver.tsx) must equal `.leaving`'s
+  `transition-duration`** (ScreenSaver.module.css): it's how long the overlay
+  stays mounted after waking. Shorter and the fade-out is cut off mid-way.
+- **The wake threshold needs a pointer origin**: `useIdle` records the pointer
+  position continuously and snapshots it when going idle, so a drifting mouse
+  can't dismiss the screensaver. A null origin (pointer never moved in this
+  document) wakes on any movement — do not "simplify" that branch away.
+- **The activity listener is the hot path** (every `pointermove`): it writes one
+  timestamp, and `check` re-arms itself for the remainder. Do NOT convert it back
+  to clearTimeout/setTimeout per event.
+- **`scroll` is deliberately not an activity event** — the back-nav scroll
+  restore fires it programmatically and would reset the timer on its own.
+- **`isDesktopPreview()` gate in `useIdle`**: the /download preview iframes are
+  `inert`, so they receive no input and would idle instantly.
+- **The `:global(html[data-screensaver])` rule is load-bearing**: `scrollbar-gutter:
+  stable` reserves a strip outside a fixed element's box, painted with
+  `--bg-page-edge`, which edges the screen in light mode without it.
+- **Desktop is a three-hop round trip**: `setScreenSaver` → main → the title bar's
+  `html.screensaver` class (its `#root` fades) + `setWindowButtonVisibility` on
+  macOS. Because that bar is a separate WebContentsView, main forwards its
+  `input-event` back as `ss:screensaver-wake`, which the web app re-emits as
+  `EXTERNAL_ACTIVITY_EVENT` — without it, input on the faded chrome does nothing.
+  Main also clears the state on the site view's `render-process-gone`, or a dead
+  renderer would leave the window buttons hidden with no way back. Both bridge
+  methods are optional in `desktop.d.ts` (older shells predate them).

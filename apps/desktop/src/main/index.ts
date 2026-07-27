@@ -59,6 +59,7 @@ let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastFilterCount = 0; // active filters, badged on the title-bar icon
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
+let screenSaverOn = false; // the web app's screensaver has the window
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -98,6 +99,20 @@ function sendCommand(cmd: string): void {
   if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
 }
 
+/**
+ * Fades the chrome out of the way of the page's screensaver, and back in when it lifts.
+ * The bar floats over a full-height site view, so it would otherwise sit on top of the
+ * screensaver; macOS's traffic lights are drawn by the OS, not by that view.
+ */
+function setScreenSaver(on: boolean): void {
+  screenSaverOn = on;
+  titleBarView?.webContents.send('titlebar:screensaver', on);
+  if (on) tooltipView?.setVisible(false);
+  if (process.platform === 'darwin') {
+    mainWindow?.setWindowButtonVisibility(!on);
+  }
+}
+
 /** Sends the current page title (cleaned) to the title bar pill. */
 function pushTitle(title: string): void {
   titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
@@ -133,6 +148,7 @@ function createWindow(): void {
       titleBarView = null;
       siteView = null;
       tooltipView = null;
+      screenSaverOn = false;
     }
   });
   // Keep the custom maximise/restore icon (Windows/Linux) in sync with the window state.
@@ -172,6 +188,16 @@ function createWindow(): void {
     void bar.webContents.loadFile(join(__dirname, '../renderer/index.html'));
   }
   titleBarView = bar;
+
+  // The bar is its own view, so input landing on it never reaches the page — and while the
+  // screensaver is up the chrome is faded out, so a user poking at controls they can't see
+  // would get nothing back. Forward it as activity instead.
+  bar.webContents.on('input-event', () => {
+    if (screenSaverOn) view.webContents.send('ss:screensaver-wake');
+  });
+  // The page owns the screensaver state, so a dead renderer would otherwise leave the
+  // chrome (window buttons included) hidden with nothing left able to hand it back.
+  view.webContents.on('render-process-gone', () => setScreenSaver(false));
 
   win.contentView.addChildView(view); // site fills the window, behind…
   win.contentView.addChildView(bar); // …the transparent title bar on top
@@ -288,6 +314,8 @@ function registerIpc(): void {
     lastFilterCount = Math.max(0, Math.trunc(Number(count) || 0));
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
   });
+  // The web app reports its screensaver taking over the window (and handing it back).
+  ipcMain.on('ss:screensaver', (_event, on: boolean) => setScreenSaver(Boolean(on)));
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {

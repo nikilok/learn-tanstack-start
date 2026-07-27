@@ -14,11 +14,18 @@ export function CompanyIndustry({
   return (
     <div className="mt-3">
       <p className={LABEL_CLASS}>Industry (SIC Codes)</p>
-      <ol className="mt-1.5 flex flex-col gap-1.5 text-sm text-(--sea-ink-soft)">
+      {/* role="list": Tailwind's preflight sets list-style:none, which drops list semantics (and the "n of m" position) in WebKit. */}
+      <ol
+        role="list"
+        className="mt-1.5 flex flex-col gap-1.5 text-sm text-(--sea-ink-soft)"
+      >
         {entries.map((sic, i) => (
           // size-5 marker = the text's 20px line box, so it sits on the first line.
           <li key={sic.code} className="flex items-start gap-2">
-            <span className={MARKER_CLASS}>{i + 1}</span>
+            {/* Decorative: the list itself carries the ordinal. */}
+            <span aria-hidden="true" className={MARKER_CLASS}>
+              {i + 1}
+            </span>
             <span>
               {sic.description}{' '}
               {/* Literal so iOS doesn't turn a bare 5-digit code into a phone link. */}

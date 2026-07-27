@@ -31,6 +31,20 @@ describe('CompanyIndustry', () => {
     ]);
   });
 
+  test('keeps the list semantic and the drawn numbers out of assistive tech', () => {
+    const html = renderToStaticMarkup(
+      <CompanyIndustry
+        entries={[{ code: '35110', description: 'Production of electricity' }]}
+      />,
+    );
+    // Preflight's list-style:none costs WebKit the list role without this.
+    expect(html).toContain('<ol role="list"');
+    // Match by content so the assertion survives an attribute reorder.
+    expect(html.match(/<span[^>]*>1<\/span>/)?.[0]).toContain(
+      'aria-hidden="true"',
+    );
+  });
+
   test('renders nothing when the company has no SIC data', () => {
     expect(renderToStaticMarkup(<CompanyIndustry entries={[]} />)).toBe('');
   });

@@ -132,5 +132,7 @@ export function deriveCompanyDisplay({
     industry: profile?.sicDescriptions
       ?.map((sic) => sic.description)
       .join(', '),
+    // Pairs for the visible caption; `industry` stays code-free for prose, meta and JSON-LD.
+    sicEntries: profile?.sicDescriptions ?? [],
   };
 }

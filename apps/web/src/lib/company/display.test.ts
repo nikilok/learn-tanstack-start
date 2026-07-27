@@ -229,6 +229,28 @@ describe('deriveCompanyDisplay — location and industry', () => {
     ).toBeUndefined();
   });
 
+  test('keeps the SIC code/description pairs, empty when there is no profile', () => {
+    const pairs = [{ code: '62020', description: 'IT consultancy' }];
+    expect(
+      derive({
+        sponsor: { licences: [licence({})] },
+        profile: { sicDescriptions: pairs },
+      }).sicEntries,
+    ).toEqual(pairs);
+    // The page renders off .length — an undefined default would throw. Both
+    // ways there can be no list: no profile at all, and a profile CH returned
+    // without SIC codes (the common case for a dissolved or bare record).
+    expect(derive({ sponsor: { licences: [licence({})] } }).sicEntries).toEqual(
+      [],
+    );
+    expect(
+      derive({
+        sponsor: { licences: [licence({})] },
+        profile: { company_name: 'ACME LTD' },
+      }).sicEntries,
+    ).toEqual([]);
+  });
+
   test('survives an empty licence list without throwing', () => {
     const d = derive({ sponsor: { licences: [] } });
     expect(d.name).toBe('');

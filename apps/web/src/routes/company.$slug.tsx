@@ -20,6 +20,7 @@ import { companyTimelineQueryOptions } from '../api/companyTimeline';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
+import { CompanyIndustry } from '../components/CompanyIndustry';
 import { CompanyTimeline } from '../components/CompanyTimeline';
 import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
@@ -309,6 +310,7 @@ function CompanyDetail() {
   ];
   const displayLocation = display.location;
   const industry = display.industry;
+  const sicEntries = display.sicEntries;
   // Former names from Companies House (derived once, shared with head()).
   const formerNames = display.formerNames;
   const incorporated = formatDate(profile?.date_of_creation);
@@ -392,9 +394,7 @@ function CompanyDetail() {
                 Also registered with HMRC as {alsoRegisteredAs}
               </p>
             )}
-            {industry && (
-              <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
-            )}
+            <CompanyIndustry entries={sicEntries} />
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <DetailField
                 label="Location"

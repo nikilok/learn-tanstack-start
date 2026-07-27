@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   LONG_EDGE_CACHE,
@@ -20,6 +20,7 @@ import { companyTimelineQueryOptions } from '../api/companyTimeline';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
+import { CompanyIndustry } from '../components/CompanyIndustry';
 import { CompanyTimeline } from '../components/CompanyTimeline';
 import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
@@ -393,26 +394,7 @@ function CompanyDetail() {
                 Also registered with HMRC as {alsoRegisteredAs}
               </p>
             )}
-            {sicEntries.length > 0 && (
-              <div className="mt-3">
-                <p className={LABEL_CLASS}>Industry (SIC Codes)</p>
-                <p className="mt-1 text-sm text-(--sea-ink-soft)">
-                  {sicEntries.map((sic, i) => (
-                    <Fragment key={sic.code}>
-                      {i > 0 && ', '}
-                      {sic.description}{' '}
-                      {/* Literal so iOS doesn't turn a bare 5-digit code into a phone link. */}
-                      <span
-                        className="text-(--sea-ink) tabular-nums"
-                        x-apple-data-detectors="false"
-                      >
-                        ({sic.code})
-                      </span>
-                    </Fragment>
-                  ))}
-                </p>
-              </div>
-            )}
+            <CompanyIndustry entries={sicEntries} />
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <DetailField
                 label="Location"

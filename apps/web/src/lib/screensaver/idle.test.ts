@@ -6,8 +6,10 @@ import {
   EXTERNAL_ACTIVITY_EVENT,
   IDLE_TIMEOUT_MS,
   idleTimeoutFor,
+  isDeliberateInput,
   isWakeMove,
   remainingIdleMs,
+  SWALLOW_ON_WAKE,
   WAKE_MOVE_PX,
 } from './idle.ts';
 
@@ -52,10 +54,6 @@ describe('remainingIdleMs', () => {
 describe('isWakeMove', () => {
   const origin = { x: 400, y: 300 };
 
-  test('a pointer that has never moved wakes on its first movement', () => {
-    expect(isWakeMove(null, { x: 0, y: 0 })).toBe(true);
-  });
-
   test('drift below the threshold does not wake it', () => {
     expect(isWakeMove(origin, { x: 400, y: 300 })).toBe(false);
     expect(isWakeMove(origin, { x: 403, y: 302 })).toBe(false);
@@ -75,5 +73,37 @@ describe('ACTIVITY_EVENTS', () => {
 
   test('excludes scroll — programmatic restores would reset the timer on their own', () => {
     expect(ACTIVITY_EVENTS).not.toContain('scroll' as never);
+  });
+
+  test('counts returning to a hidden tab as presence', () => {
+    // Timers still fire in a background tab, but rAF and transitions do not — without
+    // this the user comes back to watch the page dissolve away in front of them.
+    expect(ACTIVITY_EVENTS).toContain('visibilitychange' as never);
+  });
+});
+
+describe('SWALLOW_ON_WAKE', () => {
+  test('claims the gestures that would otherwise reach the app underneath', () => {
+    // The waking keystroke must not also type into the search box or activate a result.
+    expect(SWALLOW_ON_WAKE.has('keydown')).toBe(true);
+    expect(SWALLOW_ON_WAKE.has('pointerdown')).toBe(true);
+    expect(SWALLOW_ON_WAKE.has('wheel')).toBe(true);
+  });
+
+  test('leaves visibilitychange alone — it is not the user aiming at anything', () => {
+    expect(SWALLOW_ON_WAKE.has('visibilitychange')).toBe(false);
+  });
+});
+
+describe('isDeliberateInput', () => {
+  test('treats unmarked input as deliberate', () => {
+    expect(isDeliberateInput(undefined)).toBe(true);
+    expect(isDeliberateInput(null)).toBe(true);
+    expect(isDeliberateInput({})).toBe(true);
+    expect(isDeliberateInput({ deliberate: true })).toBe(true);
+  });
+
+  test('only an explicit false is movement — so chrome drift cannot wake it', () => {
+    expect(isDeliberateInput({ deliberate: false })).toBe(false);
   });
 });

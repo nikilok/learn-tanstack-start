@@ -24,8 +24,9 @@ import Logo from './Logo';
 
 import styles from './ScreenSaver.module.css';
 
-// Must match .leaving's transition-duration — it's how long the overlay stays mounted
-// after waking so the fade-out can play.
+// Must match the stylesheet: .overlay's transition-duration, and .leaving's — the latter
+// is also how long the overlay stays mounted after waking so the fade-out can play.
+const FADE_IN_MS = 1200;
 const FADE_OUT_MS = 320;
 
 // Curve time the reduced-motion still is frozen at. Picked for a well-formed coil.
@@ -55,6 +56,7 @@ export default function ScreenSaver() {
   // Mounted covers the fade-out too; visible drives the opacity transition itself.
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [held, setHeld] = useState(false);
 
   // Keep it mounted through the fade-out, then drop the canvas (and its loop) entirely.
   useEffect(() => {
@@ -77,17 +79,34 @@ export default function ScreenSaver() {
     return () => cancelAnimationFrame(frame);
   }, [mounted]);
 
+  // Only take pointer events once the dissolve has finished. For its first second the page
+  // underneath is still readable and still what the user is aiming at, so a click then
+  // must reach the app — it wakes the screensaver on the way through, and the fade
+  // reverses, instead of the overlay silently eating it and the click having to be redone.
+  useEffect(() => {
+    if (!mounted || !idle) {
+      setHeld(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setHeld(true), FADE_IN_MS);
+    return () => window.clearTimeout(timer);
+  }, [mounted, idle]);
+
   // Tell the Electron shell so it can fade its native title bar out of the way.
   useEffect(() => {
     window.ssDesktop?.setScreenSaver?.(idle);
   }, [idle]);
 
-  // That title bar is a separate view, so input landing on it never reaches this
-  // document — the shell forwards it and we re-emit it as activity.
+  // The title bar is a separate view and main swallows the app's shortcuts before they
+  // reach this document, so neither reaches our listeners — the shell forwards both and we
+  // re-emit them as activity. `deliberate` rides along so a pointer merely crossing the
+  // chrome counts as presence without dismissing a running screensaver.
   useEffect(
     () =>
-      window.ssDesktop?.onScreenSaverWake?.(() => {
-        window.dispatchEvent(new Event(EXTERNAL_ACTIVITY_EVENT));
+      window.ssDesktop?.onChromeInput?.((deliberate) => {
+        window.dispatchEvent(
+          new CustomEvent(EXTERNAL_ACTIVITY_EVENT, { detail: { deliberate } }),
+        );
       }),
     [],
   );
@@ -284,7 +303,10 @@ export default function ScreenSaver() {
   return (
     <div
       className={`${styles.overlay} ${idle ? '' : styles.leaving}`}
-      style={{ opacity: idle && visible ? 1 : 0 }}
+      style={{
+        opacity: idle && visible ? 1 : 0,
+        pointerEvents: held ? 'auto' : 'none',
+      }}
       aria-hidden="true"
       data-screensaver=""
     >
@@ -293,11 +315,7 @@ export default function ScreenSaver() {
       <div className={`${styles.markRow} px-4`}>
         <div className="page-wrap py-3 sm:py-4">
           <div className="inline-flex px-3 py-1.5">
-            <Logo
-              className={`${styles.mark} h-6 sm:h-8`}
-              navyColor="currentColor"
-              redColor="currentColor"
-            />
+            <Logo className={`${styles.mark} h-6 sm:h-8`} />
           </div>
         </div>
       </div>

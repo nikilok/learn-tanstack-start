@@ -38,6 +38,35 @@ describe('bokehField', () => {
     }
   });
 
+  test('depth does not correlate with position', () => {
+    // `frac(i*a)` and `frac(i*b)` are the SAME sequence when a-b is an integer, so a step
+    // constant that merely looks different can still make focusSwing an exact function of
+    // x. That shipped once: SWING_STEP was bit-for-bit 1/PLASTIC, i.e. R2_X, which laid
+    // the sparkle out as a left-to-right ramp with a dead seam down the middle — exactly
+    // the column the coil occupies. Measure the independence, not the constants.
+    const correlation = (a: number[], b: number[]) => {
+      const mean = (v: number[]) => v.reduce((s, x) => s + x, 0) / v.length;
+      const [ma, mb] = [mean(a), mean(b)];
+      const cov = a.reduce(
+        (s, x, i) => s + (x - ma) * ((b[i] as number) - mb),
+        0,
+      );
+      const va = Math.sqrt(a.reduce((s, x) => s + (x - ma) ** 2, 0));
+      const vb = Math.sqrt(b.reduce((s, x) => s + (x - mb) ** 2, 0));
+      return Math.abs(cov / (va * vb));
+    };
+    const xs = field.map((p) => p.x);
+    const ys = field.map((p) => p.y);
+    for (const attr of [
+      field.map((p) => p.focusSwing),
+      field.map((p) => p.focusBias),
+      field.map((p) => p.seed),
+    ]) {
+      expect(correlation(xs, attr)).toBeLessThan(0.5);
+      expect(correlation(ys, attr)).toBeLessThan(0.5);
+    }
+  });
+
   test('sits mostly behind the coil, so only a minority ever cross in front', () => {
     const behind = field.filter((p) => p.focusBias < 0).length;
     expect(behind).toBeGreaterThan(BOKEH_COUNT * 0.55);

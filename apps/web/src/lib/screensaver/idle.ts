@@ -34,8 +34,25 @@ export const ACTIVITY_EVENTS = [
   'pointerdown',
   'keydown',
   'wheel',
+  // Coming back to a backgrounded tab counts as presence. Without it the countdown runs
+  // while the tab is hidden, and since rAF and transitions are frozen there, the user
+  // returns to watch the page they left dissolve away in front of them.
+  'visibilitychange',
   EXTERNAL_ACTIVITY_EVENT,
 ] as const;
+
+/**
+ * Events whose default action and onward delivery belong to the screensaver rather than
+ * the app when they are the gesture that wakes it. Without this the waking keystroke also
+ * reaches the app's own global key handlers — typing into the search box, activating the
+ * highlighted result, scrolling the page — which is the opposite of dismissing a screen.
+ */
+export const SWALLOW_ON_WAKE = new Set(['keydown', 'pointerdown', 'wheel']);
+
+/** Whether forwarded shell input was a deliberate gesture rather than the pointer passing over the chrome. Anything without the marker counts as deliberate; only the bridge flags movement. */
+export function isDeliberateInput(detail: unknown): boolean {
+  return (detail as { deliberate?: boolean } | null)?.deliberate !== false;
+}
 
 /** How far the pointer must travel from where it rested before that counts as waking the screensaver. */
 export const WAKE_MOVE_PX = 6;
@@ -55,15 +72,14 @@ export function remainingIdleMs(
 }
 
 /**
- * Whether a pointer position is a real wake gesture rather than drift, measured against
- * where the pointer sat when the screensaver took over. A null origin means the pointer
- * has never moved in this document, so any movement at all counts.
+ * Whether the pointer has travelled far enough from a reference point to count as real
+ * movement rather than drift. The caller supplies the reference: where the pointer rested
+ * when the screensaver took over, or the last position that counted as activity.
  */
 export function isWakeMove(
-  origin: PointerPoint | null,
+  origin: PointerPoint,
   to: PointerPoint,
   threshold: number = WAKE_MOVE_PX,
 ): boolean {
-  if (!origin) return true;
   return Math.hypot(to.x - origin.x, to.y - origin.y) >= threshold;
 }

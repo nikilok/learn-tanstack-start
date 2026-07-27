@@ -25,8 +25,8 @@ interface SsDesktop {
   installUpdate?(): void;
   /** Report that the screensaver has taken over (or handed back), so the shell can fade its native title bar with it. Optional: older shells predate it. */
   setScreenSaver?(on: boolean): void;
-  /** Subscribe to input landing on the shell's own title-bar view while the screensaver runs — that view is separate, so its events never reach this document. Returns an unsubscribe fn. Optional: older shells predate it. */
-  onScreenSaverWake?(cb: () => void): () => void;
+  /** Subscribe to input the shell handled on this page's behalf — the title bar is a separate view, and main swallows the app's shortcuts before they reach this document, so neither reaches our listeners. `deliberate` is false for the pointer merely passing over the chrome: that counts as presence but must not dismiss a running screensaver. Returns an unsubscribe fn. Optional: older shells predate it. */
+  onChromeInput?(cb: (deliberate: boolean) => void): () => void;
 }
 
 interface Window {

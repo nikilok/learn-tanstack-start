@@ -21,9 +21,13 @@ const PLASTIC = 1.324717957244746;
 const R2_X = 1 / PLASTIC;
 const R2_Y = 1 / (PLASTIC * PLASTIC);
 // Separate irrationals per attribute, so depth and shimmer don't correlate with position.
+// These must stay mutually independent AND independent of R2_X/R2_Y above — `frac(i × a)`
+// and `frac(i × b)` are the SAME sequence whenever a − b is an integer, so a step that
+// merely looks different can still be an exact function of the placement. bokeh.test.ts
+// locks the resulting independence rather than the constants.
 const SEED_STEP = 0.6180339887498949; // 1/φ
-const BIAS_STEP = Math.SQRT2;
-const SWING_STEP = 0.7548776662466927; // 1/g²  (offset from the placement sequence)
+const BIAS_STEP = Math.SQRT2; // 1.4142…
+const SWING_STEP = Math.E - 2; // 0.7182…, transcendental and unrelated to the above
 
 /** How many highlights the field holds. One `drawImage` each, so it costs nothing beside the coil's 10k dots. */
 export const BOKEH_COUNT = 32;

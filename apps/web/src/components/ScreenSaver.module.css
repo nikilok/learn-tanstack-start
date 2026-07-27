@@ -33,6 +33,14 @@
   transition-duration: 320ms;
 }
 
+/* Except the custom cursor, which must come back instantly. CustomCursor keeps a
+   `cursor: none !important` rule in <head> for its whole lifetime, so fading its follower
+   back over 320ms leaves the user mousing an entirely invisible pointer for that third of
+   a second — the native one is still suppressed. */
+:global(html[data-screensaver='off'] body > [data-uj-cursor]) {
+  transition-duration: 0s;
+}
+
 .canvas {
   position: absolute;
   inset: 0;
@@ -58,11 +66,13 @@
   top: 46px;
 }
 
-/* currentColor set here, not passed down from React, keeps it theme-aware with no
-   second theme read. A whisper, not a badge — the coil is the subject. */
+/* Keeps the wordmark's own --logo-navy / --logo-red defaults, which is what makes it dual
+   tone (and what makes it theme-aware with no React theme read). Forcing both to
+   currentColor flattens it; the footer's grayscale would too, at this opacity — a hue
+   difference survives a whisper on a pale field where a lightness difference does not.
+   Low opacity is what keeps it understated. A whisper, not a badge; the coil is the subject. */
 .mark {
-  color: var(--sea-ink);
-  opacity: 0.2;
+  opacity: 0.28;
   /* Same 1200ms as the app's fade-out, so the logo reads as dimming in place. */
   animation: mark-in 1200ms ease both;
 }

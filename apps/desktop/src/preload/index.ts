@@ -30,10 +30,11 @@ contextBridge.exposeInMainWorld('ssDesktop', {
   },
   installUpdate: () => ipcRenderer.send('ss:install-update'),
   setScreenSaver: (on: boolean) => ipcRenderer.send('ss:screensaver', on),
-  onScreenSaverWake: (cb: () => void) => {
-    const listener = () => cb();
-    ipcRenderer.on('ss:screensaver-wake', listener);
-    return () => ipcRenderer.removeListener('ss:screensaver-wake', listener);
+  onChromeInput: (cb: (deliberate: boolean) => void) => {
+    const listener = (_e: IpcRendererEvent, deliberate: boolean) =>
+      cb(deliberate);
+    ipcRenderer.on('ss:chrome-input', listener);
+    return () => ipcRenderer.removeListener('ss:chrome-input', listener);
   },
 });
 

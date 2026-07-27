@@ -1,5 +1,7 @@
 import { type RefObject, useEffect, useRef } from 'react';
 
+import { screenSaverHoldsWindow } from './useIdle';
+
 // Global listener state — persists across React mount/unmount cycles
 const state: {
   inputRef: RefObject<HTMLInputElement | null> | null;
@@ -14,6 +16,10 @@ const state: {
  * before focusing so consumers can open pill mode in the same tick.
  */
 function handleKeyDown(e: KeyboardEvent) {
+  // The keystroke that dismisses the screensaver must not also type in here. This listener
+  // registers before useIdle's (window capture, and this one is installed on input mount),
+  // so useIdle's stopImmediatePropagation cannot reach it — it has to check for itself.
+  if (screenSaverHoldsWindow()) return;
   const el = state.inputRef?.current;
   if (!el) return;
   if (document.activeElement === el) return;

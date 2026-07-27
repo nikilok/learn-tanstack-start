@@ -45,6 +45,12 @@ body {
 html.screensaver #root {
   opacity: 0;
   transition-duration: 1200ms;
+  /* Opacity alone does not stop hit-testing. Without this, the click a user makes to
+     dismiss the screensaver lands on whichever invisible control is under it — on
+     Windows/Linux the top-right corner is Close, so the app quits instead of waking.
+     Main still gets the view's `input-event` (that fires before DOM hit-testing), so
+     the click is swallowed here and forwarded to the page as the wake. */
+  pointer-events: none;
 }
 
 /* -webkit-app-region has no Tailwind utility — define the drag regions here. */

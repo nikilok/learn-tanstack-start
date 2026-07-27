@@ -572,10 +572,29 @@ modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` fro
 - **`FADE_OUT_MS` (ScreenSaver.tsx) must equal `.leaving`'s
   `transition-duration`** (ScreenSaver.module.css): it's how long the overlay
   stays mounted after waking. Shorter and the fade-out is cut off mid-way.
-- **The wake threshold needs a pointer origin**: `useIdle` records the pointer
-  position continuously and snapshots it when going idle, so a drifting mouse
-  can't dismiss the screensaver. A null origin (pointer never moved in this
-  document) wakes on any movement — do not "simplify" that branch away.
+- **The 6px drift threshold applies in BOTH directions**, and neither side may be
+  dropped. Going idle: movement is measured from an `anchor` (the last position
+  that counted as activity), not from the previous event, so sensor jitter under a
+  resting hand can't hold the countdown open forever while a slow real drag still
+  accumulates past it. Waking: measured from the position the pointer rested at
+  when the screensaver took over. If there is no such position — clicks never
+  record one, and the browser dispatches a move at *unchanged* coordinates to
+  recompute hover when the overlay appears under a resting cursor — the first move
+  only sets the reference and does NOT wake. Real movement clears the threshold on
+  the next event milliseconds later; making that first move wake instead meant the
+  screensaver flashed on and vanished forever for anyone who only ever clicks.
+- **The waking gesture belongs to the screensaver, not the app**: `useIdle`
+  swallows it (`SWALLOW_ON_WAKE` — keydown/pointerdown/wheel) with
+  `stopImmediatePropagation` + `preventDefault`, or the keystroke that dismisses
+  the screensaver also reaches the app's global key handlers and wipes the search
+  query or activates the highlighted result. Capture phase beats every bubble
+  handler, but NOT a window-capture listener registered earlier — `useSearchShortcut`
+  is one, so it checks `screenSaverHoldsWindow()` itself. Any future global key
+  handler registered in window capture needs the same guard.
+- **The overlay must not take pointer events until the dissolve finishes**
+  (`held`, FADE_IN_MS): for its first second the page underneath is still readable
+  and still what the user is aiming at, so a click then has to reach the app. It
+  wakes the screensaver on the way through and the fade reverses.
 - **The activity listener is the hot path** (every `pointermove`): it writes one
   timestamp, and `check` re-arms itself for the remainder. Do NOT convert it back
   to clearTimeout/setTimeout per event.
@@ -594,10 +613,26 @@ modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` fro
   a bare flag so the un-fade has a state to transition back to, and it is cleared
   on unmount, not on wake.
 - **Desktop is a three-hop round trip**: `setScreenSaver` → main → the title bar's
-  `html.screensaver` class (its `#root` fades) + `setWindowButtonVisibility` on
-  macOS. Because that bar is a separate WebContentsView, main forwards its
-  `input-event` back as `ss:screensaver-wake`, which the web app re-emits as
-  `EXTERNAL_ACTIVITY_EVENT` — without it, input on the faded chrome does nothing.
-  Main also clears the state on the site view's `render-process-gone`, or a dead
-  renderer would leave the window buttons hidden with no way back. Both bridge
-  methods are optional in `desktop.d.ts` (older shells predate them).
+  `html.screensaver` class (its `#root` fades AND goes `pointer-events: none`,
+  since opacity alone leaves every invisible button clickable — top-right on
+  Windows/Linux is Close) + `setWindowButtonVisibility` on macOS. Main also hides
+  the tooltip view and refuses to re-show it, since that view is separate again
+  and never gets the fade.
+- **Coming back the other way, `reportChromeInput` forwards ALWAYS, not just while
+  the screensaver is up**: the bar is a separate WebContentsView and main
+  `preventDefault`s the app's shortcuts before they reach the renderer, so a user
+  working entirely from the chrome registers as idle and gets the app dissolved out
+  from under them. It carries a `deliberate` flag (`DELIBERATE_INPUT`) because
+  Electron's `input-event` fires for `mouseMove` too — forwarding that as a wake
+  bypassed the drift threshold and made the screensaver dismiss itself on a pixel
+  of drift in the title-bar strip. Non-deliberate input counts as presence only.
+- **The two halves ship on different cadences**, so `useIdle` gates on the
+  capability (`typeof ssDesktop?.setScreenSaver === 'function'`), never on
+  `isSponsorSearchDesktop`. The web app deploys continuously to the URL every
+  installed shell loads; a shell that predates the bridge would otherwise take the
+  60s desktop timeout with an opaque title bar over the coil and no way to wake it.
+- Main clears the state on the site view's `render-process-gone` (a dead renderer
+  would leave the window buttons hidden with no way back), re-sends it on
+  `titlebar:ready` (a bar that reloads mid-screensaver returns opaque otherwise),
+  and guards `isDestroyed` — it is reachable during teardown. Both bridge methods
+  are optional in `desktop.d.ts` (older shells predate them).

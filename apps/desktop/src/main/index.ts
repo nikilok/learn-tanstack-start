@@ -85,6 +85,9 @@ function pushNavState(): void {
 
 /** Drives the site view's history back/forward, then hands keyboard focus back to the page. */
 function navigate(dir: 'back' | 'forward'): void {
+  // Shortcuts reach here via before-input-event, which preventDefaults them — so the page
+  // never sees the keystroke and would stay idle while the shell acts on it.
+  reportChromeInput(true);
   const h = siteView?.webContents.navigationHistory;
   if (!h) return;
   if (dir === 'back' && h.canGoBack()) h.goBack();
@@ -94,9 +97,36 @@ function navigate(dir: 'back' | 'forward'): void {
 
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
+  reportChromeInput(true); // see navigate(): shortcuts never reach the page as keystrokes
   siteView?.webContents.send('ss:command', cmd);
   // Navigation commands hand focus to the page (type-to-search, form controls).
   if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
+}
+
+// Input on the chrome that counts as a deliberate gesture rather than the pointer merely
+// passing over it. Anything not listed here is treated as movement: it keeps the page from
+// going idle, but it must not dismiss a running screensaver, or a mouse resting in the
+// title-bar strip would wake it on a pixel of drift — the very thing `isWakeMove` filters
+// out inside the page. Unknown future types fall to the safe side (movement).
+const DELIBERATE_INPUT = new Set([
+  'mouseDown',
+  'mouseUp',
+  'mouseWheel',
+  'contextMenu',
+  'keyDown',
+  'rawKeyDown',
+  'char',
+]);
+
+/**
+ * Tells the page the shell handled input on its behalf. The title bar is a separate view
+ * and main swallows the app's shortcuts before they reach the renderer, so without this
+ * the page counts a user working entirely in the chrome as idle.
+ */
+function reportChromeInput(deliberate: boolean): void {
+  const wc = siteView?.webContents;
+  if (!wc || wc.isDestroyed()) return;
+  wc.send('ss:chrome-input', deliberate);
 }
 
 /**
@@ -106,10 +136,15 @@ function sendCommand(cmd: string): void {
  */
 function setScreenSaver(on: boolean): void {
   screenSaverOn = on;
-  titleBarView?.webContents.send('titlebar:screensaver', on);
+  // Reachable while the window is being torn down (the site view's render-process-gone
+  // handler calls this), so check before touching either object.
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (titleBarView && !titleBarView.webContents.isDestroyed()) {
+    titleBarView.webContents.send('titlebar:screensaver', on);
+  }
   if (on) tooltipView?.setVisible(false);
   if (process.platform === 'darwin') {
-    mainWindow?.setWindowButtonVisibility(!on);
+    mainWindow.setWindowButtonVisibility(!on);
   }
 }
 
@@ -189,11 +224,12 @@ function createWindow(): void {
   }
   titleBarView = bar;
 
-  // The bar is its own view, so input landing on it never reaches the page — and while the
-  // screensaver is up the chrome is faded out, so a user poking at controls they can't see
-  // would get nothing back. Forward it as activity instead.
-  bar.webContents.on('input-event', () => {
-    if (screenSaverOn) view.webContents.send('ss:screensaver-wake');
+  // The bar is its own view, so input landing on it never reaches the page. Forward it
+  // ALWAYS, not just while the screensaver is up: someone navigating purely from the
+  // chrome is present, and the page would otherwise count them idle and dissolve the app
+  // out from under them mid-use.
+  bar.webContents.on('input-event', (_event, input) => {
+    reportChromeInput(DELIBERATE_INPUT.has(input.type));
   });
   // The page owns the screensaver state, so a dead renderer would otherwise leave the
   // chrome (window buttons included) hidden with nothing left able to hand it back.
@@ -337,6 +373,12 @@ function registerIpc(): void {
     (_event, payload: { kind: string; x: number } | null) => {
       const tip = tooltipView;
       if (!tip) return;
+      // The tooltip is its own view and never gets the screensaver fade, so a hover on
+      // invisible chrome would pop an opaque keycap on top of the screensaver.
+      if (screenSaverOn) {
+        tip.setVisible(false);
+        return;
+      }
       if (payload) {
         const caretX = positionTooltip(
           tip,
@@ -380,6 +422,8 @@ function registerIpc(): void {
     if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
+    // A bar that reloads mid-screensaver comes back opaque without this.
+    titleBarView?.webContents.send('titlebar:screensaver', screenSaverOn);
     titleBarView?.webContents.send(
       'titlebar:maximized',
       mainWindow?.isMaximized() ?? false,

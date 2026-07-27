@@ -11,7 +11,7 @@ import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { poolForPrimary } from '../lib/company/licences';
-import { buildNameMatchers } from '../lib/search/name-match';
+import { buildPrevNameMatch, composeNameScores } from '../lib/search/prev-name';
 import { slugify } from '../utils';
 import {
   LONG_EDGE_CACHE,
@@ -52,9 +52,11 @@ type SearchHit = {
  * empty page when the query is under 3 chars. `hasMore` is derived by
  * over-fetching one row past `PAGE_SIZE`.
  *
- * Match predicates come from buildNameMatchers (lib/search/name-match):
- * index-served trigram operators paired with threshold rechecks — see its
- * doc before touching either half.
+ * The previous-name CTEs and score fragments come from buildPrevNameMatch
+ * (lib/search/prev-name), shared with the filtered search so both surfaces
+ * rank an old name identically; its predicates come in turn from
+ * buildNameMatchers (lib/search/name-match) — index-served trigram operators
+ * paired with threshold rechecks. See both docs before touching either half.
  */
 export const searchHmrc = createServerFn()
   .inputValidator(
@@ -63,15 +65,19 @@ export const searchHmrc = createServerFn()
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
-    const { fuzzyMatch, scoreCase } = buildNameMatchers(query);
-    const prevName = sql`pn.name`;
-    const orgName = sql`h.organisation_name`;
+    const { prevMatches, hits, orgScore, prevScore, bestPrevName } =
+      buildPrevNameMatch(query);
+    // g0 lands the two scores in columns; the ranking rules stay shared.
+    const ranked = composeNameScores({
+      org: sql`org_score`,
+      prev: sql`prev_score`,
+      matched: sql`matched_name`,
+    });
 
     // Raw SQL throughout: the shape (CTEs + UNION) exists so every branch
     // stays on an index — pm probes idx_ch_prev_names_trgm then
     // idx_mapping_company_number; the direct branch BitmapOrs
     // idx_hmrc_org_name_trgm; the pm-driven branch probes idx_hmrc_org_name.
-    // Folding pm into the direct WHERE as an OR would force a seq scan.
     // The g0 GROUP BY is load-bearing: an org matching both directly AND via
     // a previous name yields two `hits` rows (UNION can't collapse the direct
     // flag) that merge here, bool_or(direct) gating org_score. min(hash) is
@@ -82,23 +88,9 @@ export const searchHmrc = createServerFn()
     // Listing location stays CH-sourced by decision, even though the
     // 2026-06-11 feed revert brought HMRC town/county back.
     const result = await db.execute(sql`
-      WITH pm AS (
-        SELECT m.organisation_name,
-               (array_agg(pn.name ORDER BY ${scoreCase(prevName)} DESC, pn.name ASC))[1] AS matched_name,
-               max(${scoreCase(prevName)}) AS prev_score
-        FROM ${chPreviousNames} pn
-        JOIN ${hmrcCompanyMapping} m ON m.company_number = pn.company_number
-        WHERE ${fuzzyMatch(prevName)}
-        GROUP BY m.organisation_name
+      WITH pm AS (${prevMatches}
       ),
-      hits AS (
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, true AS direct
-        FROM ${hmrcSkilledWorkers} h
-        WHERE ${fuzzyMatch(orgName)}
-        UNION
-        SELECT h.organisation_name, h.name_slug, h.type_rating, h.route, h.hash, false AS direct
-        FROM ${hmrcSkilledWorkers} h
-        JOIN pm ON pm.organisation_name = h.organisation_name
+      hits AS (${hits}
       ),
       g0 AS (
         SELECT min(h.hash) AS slug_id,
@@ -128,16 +120,9 @@ export const searchHmrc = createServerFn()
                -- combination the company does not hold.
                array_to_json(array_agg(DISTINCT jsonb_build_object(
                  'route', h.route, 'rating', h.type_rating))) AS licences,
-               -- Gate the current-name score on a real direct match (the flag is
-               -- free at WHERE time): for prev-name-only rows scoreCase is
-               -- sub-threshold word_similarity noise that would suppress the
-               -- "Previously" line and leak past the prev_won demotion
-               CASE WHEN bool_or(h.direct) THEN max(${scoreCase(orgName)}) ELSE 0 END AS org_score,
-               -- Best previous-name match across the merged variants.
-               (array_agg(pm.matched_name ORDER BY
-                  pm.prev_score DESC NULLS LAST, pm.matched_name ASC
-                ))[1] AS matched_name,
-               max(pm.prev_score) AS prev_score
+               ${orgScore} AS org_score,
+               ${bestPrevName} AS matched_name,
+               ${prevScore} AS prev_score
         FROM hits h
         LEFT JOIN pm ON pm.organisation_name = h.organisation_name
         LEFT JOIN ${hmrcCompanyMapping} mm ON mm.organisation_name = h.organisation_name
@@ -146,10 +131,9 @@ export const searchHmrc = createServerFn()
       g AS (
         SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
                licences,
-               GREATEST(org_score, coalesce(prev_score, 0)) AS score,
-               coalesce(prev_score, 0) > org_score AS prev_won,
-               CASE WHEN coalesce(prev_score, 0) > org_score
-                 THEN matched_name END AS matched_previous_name
+               ${ranked.score} AS score,
+               ${ranked.prevWon} AS prev_won,
+               ${ranked.matchedPrev} AS matched_previous_name
         FROM g0
         ORDER BY score DESC, prev_won ASC, organisation_name ASC, slug_id ASC
         -- prev_won demotes prev-name-only wins below same-score direct hits:

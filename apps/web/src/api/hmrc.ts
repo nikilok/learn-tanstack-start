@@ -7,7 +7,7 @@ import {
 import { slugifiedSqlText } from '@ss/db/constants';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { asc, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { poolForPrimary } from '../lib/company/licences';
@@ -128,11 +128,6 @@ export const searchHmrc = createServerFn()
                -- combination the company does not hold.
                array_to_json(array_agg(DISTINCT jsonb_build_object(
                  'route', h.route, 'rating', h.type_rating))) AS licences,
-               -- Transitional scalars must be ONE row's real pair (both aggs
-               -- hash-ordered → same row), never independently-sorted heads,
-               -- which can fabricate a (route, rating) no licence holds.
-               (array_agg(h.route ORDER BY h.hash))[1] AS legacy_route,
-               (array_agg(h.type_rating ORDER BY h.hash))[1] AS legacy_type_rating,
                -- Gate the current-name score on a real direct match (the flag is
                -- free at WHERE time): for prev-name-only rows scoreCase is
                -- sub-threshold word_similarity noise that would suppress the
@@ -150,7 +145,7 @@ export const searchHmrc = createServerFn()
       ),
       g AS (
         SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
-               licences, legacy_route, legacy_type_rating,
+               licences,
                GREATEST(org_score, coalesce(prev_score, 0)) AS score,
                coalesce(prev_score, 0) > org_score AS prev_won,
                CASE WHEN coalesce(prev_score, 0) > org_score
@@ -172,10 +167,6 @@ export const searchHmrc = createServerFn()
              g.type_ratings AS "typeRatings",
              g.routes AS "routes",
              g.licences AS "licences",
-             -- Transitional scalars for pre-deploy bundles (server fns outlive
-             -- the client across a deploy) — drop after the next release cycle.
-             g.legacy_type_rating AS "typeRating",
-             g.legacy_route AS "route",
              g.score AS "score",
              g.matched_previous_name AS "matchedPreviousName"
       FROM g
@@ -359,66 +350,6 @@ export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
     queryFn: () => getHmrcCompanyBySlug({ data: { slug } }),
     staleTime: (query) =>
       query.state.data?.kind === 'found' ? Number.POSITIVE_INFINITY : 0,
-  });
-
-/**
- * TRANSITIONAL — delete after the next release cycle. Pre-deploy client
- * bundles still call this RPC (its id derives from this file + export name)
- * from the old /company/$id/$slug loader; without it every card click in an
- * open tab errors until a hard reload. Serves the old row shape from current
- * data; canonicalSlugId === slugId (the group was 1:1 by construction).
- */
-export const getHmrcBySlugId = createServerFn()
-  .inputValidator((input: unknown) => input as { slugId: string })
-  .handler(async ({ data }) => {
-    const slugId = typeof data?.slugId === 'string' ? data.slugId : '';
-    const found = await db.execute(sql`
-      SELECT h.hash AS "slugId",
-             h.hash AS "canonicalSlugId",
-             h.organisation_name AS "organisationName",
-             h.name_slug AS "nameSlug",
-             h.type_rating AS "typeRating",
-             h.route AS "route",
-             (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
-                          THEN min(l.sponsor_licence_number) END
-              FROM hmrc_sponsor_licences l
-              WHERE l.organisation_name = h.organisation_name
-                AND l.type_rating = h.type_rating
-                AND l.route = h.route) AS "sponsorLicenceNumber"
-      FROM ${hmrcSkilledWorkers} h
-      WHERE h.hash = ${slugId}
-      LIMIT 1
-    `);
-    const row =
-      (found.rows[0] as unknown as
-        | {
-            slugId: string;
-            canonicalSlugId: string;
-            organisationName: string;
-            nameSlug: string;
-            typeRating: string;
-            route: string;
-            sponsorLicenceNumber: string | null;
-          }
-        | undefined) ?? null;
-    setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
-    return row;
-  });
-
-/** TRANSITIONAL — delete after the next release cycle. Old-bundle slug fallback; returns the minimal rows the old /company/$id/$slug loader consumed. */
-export const getHmrcBySlug = createServerFn()
-  .inputValidator((input: unknown) => input as { slug: string })
-  .handler(async ({ data }) => {
-    const slug = typeof data?.slug === 'string' ? data.slug : '';
-    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return [];
-    return db
-      .select({
-        slugId: hmrcSkilledWorkers.hash,
-        organisationName: hmrcSkilledWorkers.organisationName,
-      })
-      .from(hmrcSkilledWorkers)
-      .where(eq(hmrcSkilledWorkers.nameSlug, slug))
-      .orderBy(asc(hmrcSkilledWorkers.hash));
   });
 
 /**

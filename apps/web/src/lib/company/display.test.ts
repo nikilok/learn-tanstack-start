@@ -229,6 +229,20 @@ describe('deriveCompanyDisplay — location and industry', () => {
     ).toBeUndefined();
   });
 
+  test('keeps the SIC code/description pairs, empty when there is no profile', () => {
+    const pairs = [{ code: '62020', description: 'IT consultancy' }];
+    expect(
+      derive({
+        sponsor: { licences: [licence({})] },
+        profile: { sicDescriptions: pairs },
+      }).sicEntries,
+    ).toEqual(pairs);
+    // The page renders off .length — an undefined default would throw.
+    expect(derive({ sponsor: { licences: [licence({})] } }).sicEntries).toEqual(
+      [],
+    );
+  });
+
   test('survives an empty licence list without throwing', () => {
     const d = derive({ sponsor: { licences: [] } });
     expect(d.name).toBe('');

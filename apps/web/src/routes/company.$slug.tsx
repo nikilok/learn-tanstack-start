@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, MapPin } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import {
   LONG_EDGE_CACHE,
@@ -309,6 +309,7 @@ function CompanyDetail() {
   ];
   const displayLocation = display.location;
   const industry = display.industry;
+  const sicEntries = display.sicEntries;
   // Former names from Companies House (derived once, shared with head()).
   const formerNames = display.formerNames;
   const incorporated = formatDate(profile?.date_of_creation);
@@ -392,8 +393,25 @@ function CompanyDetail() {
                 Also registered with HMRC as {alsoRegisteredAs}
               </p>
             )}
-            {industry && (
-              <p className="mt-1 text-sm text-(--sea-ink-soft)">{industry}</p>
+            {sicEntries.length > 0 && (
+              <div className="mt-3">
+                <p className={LABEL_CLASS}>Industry (SIC Codes)</p>
+                <p className="mt-1 text-sm text-(--sea-ink-soft)">
+                  {sicEntries.map((sic, i) => (
+                    <Fragment key={sic.code}>
+                      {i > 0 && ', '}
+                      {sic.description}{' '}
+                      {/* Literal so iOS doesn't turn a bare 5-digit code into a phone link. */}
+                      <span
+                        className="text-(--sea-ink) tabular-nums"
+                        x-apple-data-detectors="false"
+                      >
+                        ({sic.code})
+                      </span>
+                    </Fragment>
+                  ))}
+                </p>
+              </div>
             )}
             <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <DetailField

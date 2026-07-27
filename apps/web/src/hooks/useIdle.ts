@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import {
   ACTIVITY_EVENTS,
-  IDLE_TIMEOUT_MS,
+  idleTimeoutFor,
   isWakeMove,
   type PointerPoint,
   remainingIdleMs,
@@ -10,18 +10,25 @@ import {
 import { isDesktopPreview } from '../utils/desktop-preview';
 
 /**
- * Whether the user has gone quiet for `timeoutMs` — no pointer movement, clicks, keys
- * or wheel. Client-only: it starts false so SSR and hydration agree, and only effects
- * ever read the DOM. Once idle, the same events end it, except that pointer movement
- * must cover a real distance so a drifting mouse can't dismiss the screensaver alone.
+ * Whether the user has gone quiet — no pointer movement, clicks, keys or wheel — for
+ * long enough that the screensaver should take over, which is sooner in the desktop
+ * shell than in a browser tab. Client-only: it starts false so SSR and hydration agree,
+ * and only effects ever read the DOM. Once idle, the same events end it, except that
+ * pointer movement must cover a real distance so a drifting mouse can't end it alone.
  */
-export function useIdle(timeoutMs: number = IDLE_TIMEOUT_MS): boolean {
+export function useIdle(): boolean {
   const [idle, setIdle] = useState(false);
 
   useEffect(() => {
     // The /download preview iframes are inert — they receive no input at all, so they
     // would go idle immediately and run a screensaver inside the demo window.
     if (isDesktopPreview()) return;
+    // Touch devices never get one: the handset blanks its own screen, and reading a page
+    // without touching it is the normal case there, so it would be near-all false fires.
+    // Mirrors the gate CustomCursor uses; `fine` also excludes `pointer: none` surfaces.
+    if (!window.matchMedia('(pointer: fine)').matches) return;
+
+    const timeoutMs = idleTimeoutFor(window.isSponsorSearchDesktop === true);
 
     let lastActivityAt = performance.now();
     let pointer: PointerPoint | null = null;
@@ -89,7 +96,7 @@ export function useIdle(timeoutMs: number = IDLE_TIMEOUT_MS): boolean {
         window.removeEventListener(type, onActivity, { capture: true });
       }
     };
-  }, [timeoutMs]);
+  }, []);
 
   return idle;
 }

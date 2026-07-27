@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useIdle } from '../hooks/useIdle';
-import { useIsDark } from '../hooks/useIsDark';
+import {
+  bokehAt,
+  bokehField,
+  bokehPalette,
+  bokehSprites,
+} from '../lib/screensaver/bokeh';
 import {
   COIL_DOT_RADIUS,
   coilBounds,
   coilDrift,
   coilPalette,
   fitCoil,
+  rgba,
   sampleCoil,
   TENTACLE_SPREAD,
   TIME_PER_SECOND,
@@ -33,13 +39,18 @@ const NO_DRIFT = { x: 0, y: 0 };
 
 /**
  * Takes over the whole window once the user has been idle (see `useIdle`) and hands it
- * back on the first real input. Draws the coil on a full-bleed canvas in the app's own
- * theme colours: white dots on the dark page, black on the light one. Reduced motion
- * gets the same scene held on a single frame.
+ * back on the first real input: the app's own elements fade out and the coil is drawn
+ * over the page's backdrop, in colours taken from that backdrop. Reduced motion gets the
+ * same scene held on a single frame.
+ *
+ * The wordmark stays, dimmed, at the header logo's position — the app dissolves around
+ * it. Note what that costs: in the desktop shell, where the title bar fades too, the mark
+ * becomes the only thing on screen naming the app, and looking for a visa sponsor is
+ * usually done from the job you are trying to leave. Gate it on
+ * `window.isSponsorSearchDesktop` if that ever outweighs the branding.
  */
 export default function ScreenSaver() {
   const idle = useIdle();
-  const dark = useIsDark();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Mounted covers the fade-out too; visible drives the opacity transition itself.
   const [mounted, setMounted] = useState(false);
@@ -81,15 +92,17 @@ export default function ScreenSaver() {
     [],
   );
 
-  // The scrollbar gutter sits outside a fixed element's box, so <html> has to be recoloured
-  // for the field to reach the screen edge (see the :global rule in the stylesheet).
+  // Fades the app's own elements out from under the coil (see the :global rule in the
+  // stylesheet) — the page's backdrop is what the screensaver runs on. Carries a value
+  // rather than being a bare flag so the fade has somewhere to transition back to.
   useEffect(() => {
-    if (!idle) return;
-    document.documentElement.dataset['screensaver'] = '';
-    return () => {
-      delete document.documentElement.dataset['screensaver'];
-    };
-  }, [idle]);
+    const root = document.documentElement;
+    if (!mounted) {
+      delete root.dataset['screensaver'];
+      return;
+    }
+    root.dataset['screensaver'] = idle ? 'on' : 'off';
+  }, [mounted, idle]);
 
   // Swallow scroll while it's up: the gesture that wakes the app shouldn't also move the
   // page under it. Non-passive, so the listener only exists while the screensaver shows.
@@ -110,13 +123,19 @@ export default function ScreenSaver() {
     if (!mounted) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
+    // Keeps its alpha: the coil is drawn onto the page's backdrop, not onto a field.
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const reduce = prefersReducedMotion();
     const start = performance.now();
     let raf = 0;
     let alive = true;
+
+    const field = bokehField();
+    // Discs are rebuilt only when the theme actually swaps them, not per frame.
+    let discs: HTMLCanvasElement[] = [];
+    let discKey = '';
 
     /** Match the backing store to the canvas box in device pixels. */
     const sizeCanvas = () => {
@@ -141,15 +160,54 @@ export default function ScreenSaver() {
       return gradient;
     };
 
+    /** Blits the highlights sitting on one side of the coil. */
+    const paintBokeh = (
+      elapsedMs: number,
+      front: boolean,
+      dark: boolean,
+      width: number,
+      height: number,
+    ) => {
+      const { colours, composite, gain } = bokehPalette(dark);
+      const key = colours.join();
+      if (key !== discKey) {
+        discKey = key;
+        discs = bokehSprites(colours, rgba);
+      }
+      const short = Math.min(width, height);
+      ctx.globalCompositeOperation = composite;
+      for (const particle of field) {
+        const sample = bokehAt(particle, elapsedMs);
+        // Which side of the focal plane it's on decides which side of the coil it draws on.
+        if (sample.front !== front) continue;
+        const { x, y, alpha } = sample;
+        const radius = sample.radius * short;
+        const disc = discs[particle.colour % discs.length];
+        if (!disc) continue;
+        ctx.globalAlpha = alpha * gain;
+        ctx.drawImage(
+          disc,
+          x * width - radius,
+          y * height - radius,
+          radius * 2,
+          radius * 2,
+        );
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+
     /** Paint one frame; `elapsedMs` drives both the curve and its drift. */
     const draw = (elapsedMs: number) => {
       const { width, height } = canvas;
       // Read the live theme each frame, so an OS appearance change mid-screensaver follows.
-      const { background, dotStops, tentacle } = coilPalette(
-        document.documentElement.classList.contains('dark'),
-      );
-      ctx.fillStyle = background;
-      ctx.fillRect(0, 0, width, height);
+      const dark = document.documentElement.classList.contains('dark');
+      const { dotStops, tentacle } = coilPalette(dark);
+      ctx.clearRect(0, 0, width, height);
+
+      // Reduced motion holds the field at rest along with the coil.
+      const bokehMs = reduce ? 0 : elapsedMs;
+      paintBokeh(bokehMs, false, dark, width, height);
 
       const { scale, offsetX, offsetY } = fitCoil(width, height);
       const drift = reduce
@@ -176,6 +234,9 @@ export default function ScreenSaver() {
       const sweep = dotFill(dotStops, coilBounds(scale, originX, originY));
       paint(sweep, false);
       paint(tentacle ?? sweep, true);
+
+      // The few large, faint ones ride over the coil — that crossing is what sells depth.
+      paintBokeh(bokehMs, true, dark, width, height);
     };
 
     sizeCanvas();
@@ -220,18 +281,28 @@ export default function ScreenSaver() {
 
   if (!mounted) return null;
 
-  const { background } = coilPalette(dark);
-  const ink = dark ? '#ffffff' : '#000000';
-
   return (
     <div
       className={`${styles.overlay} ${idle ? '' : styles.leaving}`}
-      style={{ background, opacity: idle && visible ? 1 : 0 }}
+      style={{ opacity: idle && visible ? 1 : 0 }}
       aria-hidden="true"
       data-screensaver=""
     >
       <canvas ref={canvasRef} className={styles.canvas} />
-      <Logo className={styles.mark} navyColor={ink} redColor={ink} />
+      {/* Mirrors Header.tsx's nesting so the mark lands on the header logo exactly. */}
+      <div className={`${styles.markRow} px-4`}>
+        <div className="page-wrap py-3 sm:py-4">
+          <div className="inline-flex px-3 py-1.5">
+            <Logo
+              className={`${styles.mark} h-6 sm:h-8`}
+              navyColor="currentColor"
+              redColor="currentColor"
+            />
+          </div>
+        </div>
+      </div>
+      {/* The curve is @yuruyurau's; see the attribution in lib/screensaver/coil.ts. */}
+      <p className={styles.credit}>original curve by @yuruyurau</p>
     </div>
   );
 }

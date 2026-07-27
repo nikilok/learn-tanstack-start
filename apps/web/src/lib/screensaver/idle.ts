@@ -1,8 +1,21 @@
 // Idleness rules for the screensaver. Kept apart from the DOM wiring in hooks/useIdle.ts
 // so the timing and the wake threshold are testable without a browser.
 
-/** How long the user must be quiet — no pointer movement, clicks, keys or wheel — before the screensaver takes over. */
-export const IDLE_TIMEOUT_MS = 30_000;
+/**
+ * How long the user must be quiet — no pointer movement, clicks, keys or wheel — before
+ * the screensaver takes over a browser tab. Reading a page generates no input at all, so
+ * this has to sit well clear of how long someone spends working through a company's
+ * licences, address and timeline, or the screensaver interrupts its most engaged reader.
+ */
+export const IDLE_TIMEOUT_MS = 3 * 60_000;
+
+/** The same, in the desktop shell — a window parked on a second monitor is idle in a way a tab being read never is, so it can settle much sooner. */
+export const DESKTOP_IDLE_TIMEOUT_MS = 60_000;
+
+/** The idle threshold for the surface the app is running on. */
+export function idleTimeoutFor(desktopShell: boolean): number {
+  return desktopShell ? DESKTOP_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS;
+}
 
 /**
  * Event other surfaces dispatch on `window` to count as user activity. The Electron

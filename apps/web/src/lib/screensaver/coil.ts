@@ -1,4 +1,19 @@
 // The screensaver's parametric curve — one 10k-sample coil, drawn as sub-pixel dots.
+//
+// THE CURVE IS NOT OURS. It is a #つぶやきProcessing ("tweet-length Processing") sketch by
+// @yuruyurau, posted 2026-07-25 — a single p5.js expression that fits in a tweet:
+//
+//   a=(y,d=mag(k=(4+cos(i/9-t*2))*cos(i/35),e=y/7-13)+sin(e/9+t/2)-4)=>point(
+//     (q=2*sin(k*3)-y/35*k*(9+k*sin(cos(e)*9-d*2+t)))+40*cos(c=d-t)+200,q*sin(c)+d*35)
+//   t=0,draw=$=>{t||createCanvas(w=400,w);background(9).stroke(w,96);
+//     for(t+=PI/80,i=1e4;i--;)a(i/235)}
+//
+// `sampleCoil` is that expression unrolled, faithfully: `mag()` written as `sqrt`, the
+// per-frame `t+=PI/80` lifted out so it can run off real time, and `stroke(w,96)` carried
+// through as DOT_ALPHA. Everything around it — the viewport fit, the drift, the colour,
+// the tentacle split, the bokeh — is ours. The shape is theirs, and the screensaver says
+// so on screen (see `.credit` in ScreenSaver.module.css). Keep that credit.
+//
 // Model space is the original 400×400 sketch's coordinate system; the renderer fits it
 // to whatever canvas it has (see `fitCoil`), so nothing here knows about the viewport.
 
@@ -120,8 +135,8 @@ const DOT_ALPHA = 96 / 255;
 // light sweep needs more weight per dot to read as densely as the dark one does.
 const LIGHT_DOT_ALPHA = 0.5;
 
-/** rgba() string for a #rrggbb colour at a dot alpha. */
-function dot(hex: string, alpha: number): string {
+/** rgba() string for a #rrggbb colour at a given alpha. Shared with the bokeh field so both draw from one set of hues. */
+export function rgba(hex: string, alpha: number): string {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
@@ -132,32 +147,29 @@ function dot(hex: string, alpha: number): string {
 // which leaves the brand red room to carry the tentacles. Light has no such glow to echo,
 // so it runs the warm half of --rail-spectrum itself — the same amber → pink → purple →
 // blue the hero streaks and the guide-rail use. Keep the hues in step with those tokens.
-const DARK_DOT_STOPS = ['#4f9dff', '#8b8ef7', '#b06cf0'];
-const LIGHT_DOT_STOPS = ['#e2820e', '#e23b86', '#7b3fe4', '#2954d6'];
+export const DARK_DOT_STOPS = ['#4f9dff', '#8b8ef7', '#b06cf0'];
+export const LIGHT_DOT_STOPS = ['#e2820e', '#e23b86', '#7b3fe4', '#2954d6'];
+
+/** --logo-red as dark mode renders it (styles.css) — the shade the wordmark already wears on this field. */
+export const TENTACLE_HEX = '#f87171';
 
 /**
- * Screensaver colours for the active theme, over the app's own page base (--bg-base in
- * styles.css — keep in sync). The stops are a sweep across the drawing, not a flat fill:
- * blue → indigo → violet on the dark page, amber → pink → purple → blue on the light one.
- * A lone dot lands as a pale tint and only the dense ribbons saturate to the full colour.
- * `tentacle`, when present, overrides the sweep for samples past `TENTACLE_SPREAD` — the
- * dark page runs the brand red out along the strands.
+ * Screensaver dot colours for the active theme. There is no background here — the canvas
+ * keeps its alpha and draws straight onto the page's own backdrop. The stops are a sweep
+ * across the drawing, not a flat fill: blue → indigo → violet on the dark page, amber →
+ * pink → purple → blue on the light one. A lone dot lands as a pale tint and only the
+ * dense ribbons saturate to the full colour. `tentacle`, when present, overrides the sweep
+ * for samples past `TENTACLE_SPREAD` — the dark page runs the brand red out along them.
  */
 export function coilPalette(dark: boolean): {
-  background: string;
   dotStops: string[];
   tentacle?: string;
 } {
   return dark
     ? {
-        background: '#0a0a0a',
-        dotStops: DARK_DOT_STOPS.map((hex) => dot(hex, DOT_ALPHA)),
-        // --logo-red as dark mode renders it (styles.css), the shade the wordmark
-        // already wears on this field. The light page keeps one unbroken sweep.
-        tentacle: dot('#f87171', DOT_ALPHA),
+        dotStops: DARK_DOT_STOPS.map((hex) => rgba(hex, DOT_ALPHA)),
+        // The light page keeps one unbroken sweep with no accent.
+        tentacle: rgba(TENTACLE_HEX, DOT_ALPHA),
       }
-    : {
-        background: '#ffffff',
-        dotStops: LIGHT_DOT_STOPS.map((hex) => dot(hex, LIGHT_DOT_ALPHA)),
-      };
+    : { dotStops: LIGHT_DOT_STOPS.map((hex) => rgba(hex, LIGHT_DOT_ALPHA)) };
 }

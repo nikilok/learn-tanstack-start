@@ -15,11 +15,22 @@
   transition-duration: 320ms;
 }
 
-/* `scrollbar-gutter: stable` reserves a strip outside the fixed overlay's box, painted
-   with <html>'s --bg-page-edge — a pale band down the edge of an otherwise full-bleed
-   screensaver. Match it to the field the canvas paints (both are --bg-base). */
-:global(html[data-screensaver]) {
-  background-color: var(--bg-base);
+/* The screensaver runs ON the site's own backdrop rather than over a flat field. The
+   backdrop is body's glow gradients plus its fixed grid/dot layers — and those are
+   PSEUDO-elements, not children — so fading body's children out leaves it standing
+   exactly as it was, scrollbar gutter and all. The overlay excludes itself.
+
+   Opacity, never display/visibility: the children must keep their boxes, or body
+   collapses and takes the gradients (sized to its height) down with it. */
+:global(html[data-screensaver] body > *:not([data-screensaver])) {
+  transition: opacity 1200ms ease;
+}
+:global(html[data-screensaver='on'] body > *:not([data-screensaver])) {
+  opacity: 0;
+}
+/* Waking: hand the app back at the same pace the overlay leaves. */
+:global(html[data-screensaver='off'] body > *:not([data-screensaver])) {
+  transition-duration: 320ms;
 }
 
 .canvas {
@@ -29,19 +40,52 @@
   height: 100%;
 }
 
-/* Wordmark watermark, signed bottom-left once the coil has settled. */
-.mark {
+/* The wordmark is held at the header logo's own position: as the app dissolves, the mark
+   fades up in the same spot, so the logo reads as staying put while everything around it
+   goes. The row mirrors the header's layout — px-4, .page-wrap, py-3/sm:py-4, the link's
+   px-3 py-1.5, and h-6/sm:h-8 on the mark — so keep those classes in step with Header.tsx.
+   Horizontal placement can't drift: .page-wrap is the same shared class the header uses. */
+.markRow {
   position: absolute;
-  left: clamp(1.25rem, 4vw, 3rem);
-  bottom: calc(clamp(1.25rem, 4vw, 3rem) + env(safe-area-inset-bottom, 0px));
-  width: clamp(130px, 17vw, 210px);
-  height: auto;
-  /* A whisper, not a badge — it reads the same as a monochrome mark on either theme. */
-  opacity: 0.22;
-  animation: mark-in 1400ms ease 900ms both;
+  inset-inline: 0;
+  top: 0;
 }
 
-/* No `to` — the implicit end is the rule's own 0.22, so the two can't drift apart. */
+/* In the shell the native title bar owns the top 46px and the web header is hidden, so
+   there is no logo to hold position with — drop below it (TITLEBAR_HEIGHT, the same
+   offset styles.css gives html[data-desktop] .site-header). */
+:global(html[data-desktop]) .markRow {
+  top: 46px;
+}
+
+/* currentColor set here, not passed down from React, keeps it theme-aware with no
+   second theme read. A whisper, not a badge — the coil is the subject. */
+.mark {
+  color: var(--sea-ink);
+  opacity: 0.2;
+  /* Same 1200ms as the app's fade-out, so the logo reads as dimming in place. */
+  animation: mark-in 1200ms ease both;
+}
+
+/* Credit for the curve itself, which is @yuruyurau's, not ours — see the attribution
+   block at the top of lib/screensaver/coil.ts. Set like a plate caption at the foot of
+   the frame: tiny, mono, and last to arrive. Do not remove it. */
+.credit {
+  position: absolute;
+  left: 50%;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--sea-ink-faint);
+  opacity: 0.55;
+  animation: mark-in 1400ms ease 800ms both;
+}
+
+/* No `to` — the implicit end is each rule's own opacity, so they can't drift apart. */
 @keyframes mark-in {
   from {
     opacity: 0;
@@ -49,10 +93,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .overlay {
+  .overlay,
+  :global(html[data-screensaver] body > *:not([data-screensaver])) {
     transition-duration: 320ms;
   }
-  .mark {
+  .mark,
+  .credit {
     animation: none;
   }
 }

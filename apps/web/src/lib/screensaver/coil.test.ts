@@ -15,7 +15,12 @@ import {
 
 /** Bounding box of every sample across `frames` evenly-spaced times spanning one cycle. */
 function measure(frames: number) {
-  const box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  const box = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+  };
   for (let f = 0; f < frames; f++) {
     // Off the exact per-frame grid, so the envelope holds for continuous time too.
     const t = (f / frames) * 4 * Math.PI + 0.013;
@@ -183,8 +188,7 @@ describe('coilDrift', () => {
 
 describe('coilPalette', () => {
   test('sweeps the dark page blue → indigo → violet, with brand red on the tentacles', () => {
-    const { background, dotStops, tentacle } = coilPalette(true);
-    expect(background).toBe('#0a0a0a');
+    const { dotStops, tentacle } = coilPalette(true);
     expect(dotStops).toEqual([
       `rgba(79, 157, 255, ${96 / 255})`,
       `rgba(139, 142, 247, ${96 / 255})`,
@@ -198,8 +202,7 @@ describe('coilPalette', () => {
   });
 
   test('runs the rail spectrum across the light page, amber → pink → purple → blue', () => {
-    const { background, dotStops } = coilPalette(false);
-    expect(background).toBe('#ffffff');
+    const { dotStops } = coilPalette(false);
     expect(dotStops).toEqual([
       'rgba(226, 130, 14, 0.5)',
       'rgba(226, 59, 134, 0.5)',
@@ -209,7 +212,10 @@ describe('coilPalette', () => {
   });
 
   test('every stop carries its theme alpha, so overlaps still accumulate', () => {
-    for (const stop of [...coilPalette(true).dotStops, coilPalette(true).tentacle]) {
+    for (const stop of [
+      ...coilPalette(true).dotStops,
+      coilPalette(true).tentacle,
+    ]) {
       expect(stop).toEndWith(`, ${96 / 255})`);
     }
     // Mid-tone dots on white need more weight than pale dots on near-black.

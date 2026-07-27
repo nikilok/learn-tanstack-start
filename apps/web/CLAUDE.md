@@ -526,22 +526,49 @@ user (usePreviewScenario: hydrate → type → real search → click → details
 
 ## Screensaver — cross-file invariants
 
-`<ScreenSaver />` (components/ScreenSaver.tsx) takes the whole window after
-`IDLE_TIMEOUT_MS` of quiet. The curve maths, fit and palette are pure in
+`<ScreenSaver />` (components/ScreenSaver.tsx) takes the whole window after a
+surface-dependent stretch of quiet: three minutes in a browser tab, one in the
+desktop shell (`idleTimeoutFor`), and never on a coarse/absent pointer — a
+handset blanks its own screen, and reading a page without touching it is the
+normal case there. The web threshold must stay the longer of the two: reading
+produces no input, so a short one interrupts the most engaged reader on the
+site. The curve maths, fit and palette are pure in
 `lib/screensaver/coil.ts`; the idleness rules are pure in
 `lib/screensaver/idle.ts`; `hooks/useIdle.ts` is the only DOM wiring. Both pure
 modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` from
 `sampleCoil`, so a change to the curve fails rather than silently clipping.
 
+- **The curve is not ours and the credit is not decoration**: it is a
+  `#つぶやきProcessing` sketch by @yuruyurau (full attribution, including the
+  original one-line source, at the top of `lib/screensaver/coil.ts`). The on-screen
+  credit line (`.credit`) is the licence to use it — do not remove it, and if the
+  curve is ever swapped for another, swap the credit with it.
 - **It must render LAST in `__root.tsx`** — after `UnionJackCursor` and
   `AppSplash`. All three sit at z-index 2147483647, so DOM order is the only
   thing that puts the screensaver over the custom cursor.
+- **The bokeh field is driven by ONE number per highlight**: its depth. `|depth|`
+  is the circle of confusion, so it sets the disc radius; brightness is the same
+  light spread over that disc, so it follows inversely; and the sign decides
+  whether the highlight draws over the coil or under it. Don't animate radius,
+  alpha and layer separately — they are one piece of physics, and splitting them
+  is what makes bokeh read as three unrelated effects. The discs are pre-rendered
+  sprites (`bokehSprites`) blitted per frame: building a radial gradient per
+  highlight per frame is the obvious version and it is much slower. Colours come
+  from `coil.ts`'s own exported stops, so the field can't drift from the creature.
 - **The dark theme's red tentacles are a two-pass draw**: `sampleCoil` emits each
   sample's `spread` (its offset from the spine, which is exactly `|q|`), and the
   renderer paints body then strands with one `fillStyle` each — 10k dots either
   way. It only stays flicker-free because the share above `TENTACLE_SPREAD` holds
   steady across the whole cycle; `coil.test.ts` locks that, so retuning the
   threshold fails loudly if it starts pulsing.
+- **The wordmark lands ON the header logo, pixel for pixel** (verified 0px delta at
+  1440 and 900 wide): the overlay repeats Header.tsx's nesting and classes —
+  `px-4` › `.page-wrap py-3 sm:py-4` › `inline-flex px-3 py-1.5` › `h-6 sm:h-8`.
+  That is the whole effect: the app dissolves and the logo appears to stay put. Its
+  horizontal placement can't drift (both use the shared `.page-wrap`), but the
+  paddings and heights are mirrored classes — change them in Header.tsx and change
+  them here too. `html[data-desktop]` drops the row below the 46px title bar, where
+  the web header is hidden and there is no logo to hold position with.
 - **`FADE_OUT_MS` (ScreenSaver.tsx) must equal `.leaving`'s
   `transition-duration`** (ScreenSaver.module.css): it's how long the overlay
   stays mounted after waking. Shorter and the fade-out is cut off mid-way.
@@ -556,9 +583,16 @@ modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` fro
   restore fires it programmatically and would reset the timer on its own.
 - **`isDesktopPreview()` gate in `useIdle`**: the /download preview iframes are
   `inert`, so they receive no input and would idle instantly.
-- **The `:global(html[data-screensaver])` rule is load-bearing**: `scrollbar-gutter:
-  stable` reserves a strip outside a fixed element's box, painted with
-  `--bg-page-edge`, which edges the screen in light mode without it.
+- **It runs ON the page's backdrop, it does not paint one**: the canvas keeps its
+  alpha, and `html[data-screensaver='on'|'off']` fades `body`'s *children* out
+  from under it. That works only because the backdrop — body's glow gradients and
+  the fixed grid/dot layers — lives on `body` and its **pseudo-elements**, which
+  are not children. Two consequences: the fade must use `opacity` (never
+  `display`/`visibility`, or body collapses and takes the gradients, sized to its
+  height, with it), and the rule must keep excluding the overlay itself via
+  `:not([data-screensaver])`. The attribute carries `on`/`off` rather than being
+  a bare flag so the un-fade has a state to transition back to, and it is cleared
+  on unmount, not on wake.
 - **Desktop is a three-hop round trip**: `setScreenSaver` → main → the title bar's
   `html.screensaver` class (its `#root` fades) + `setWindowButtonVisibility` on
   macOS. Because that bar is a separate WebContentsView, main forwards its

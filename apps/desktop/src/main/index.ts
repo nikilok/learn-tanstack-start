@@ -315,7 +315,9 @@ function registerIpc(): void {
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
   });
   // The web app reports its screensaver taking over the window (and handing it back).
-  ipcMain.on('ss:screensaver', (_event, on: boolean) => setScreenSaver(Boolean(on)));
+  ipcMain.on('ss:screensaver', (_event, on: boolean) =>
+    setScreenSaver(Boolean(on)),
+  );
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {

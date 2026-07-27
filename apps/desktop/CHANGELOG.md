@@ -8,7 +8,7 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
-- **Screensaver** — leave SponsorSearch alone for half a minute and it dissolves into a slow drifting coil of particles, coloured from the grid behind your pages: blue through violet on the dark theme, with the brand red running out along its tentacles, and the full amber-to-blue rail spectrum on the light one. The title bar and window buttons step aside so it has the whole window to itself. Move the mouse or press any key and you are straight back where you were.
+- **Screensaver** — leave SponsorSearch alone for a minute and the app dissolves away, leaving its own backdrop behind with a slow drifting coil of particles on top: blue through violet on the dark theme, with the brand red running out along its tentacles, and the full amber-to-blue rail spectrum on the light one. Points of light wander through the scene around it, blooming and sharpening as they drift through focus. The curve itself is a tweet-length Processing sketch by @yuruyurau, credited on screen. The title bar and window buttons step aside so it has the whole window to itself. Move the mouse or press any key and you are straight back where you were.
 - **Cleaner home title** — the title bar now reads "UK Sponsor Search" on the home page instead of echoing the website's full SEO title, matching the site's new branding.
 
 ## v0.3.0 — 2026-07-24

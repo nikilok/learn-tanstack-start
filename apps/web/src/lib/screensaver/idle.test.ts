@@ -2,16 +2,26 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   ACTIVITY_EVENTS,
+  DESKTOP_IDLE_TIMEOUT_MS,
   EXTERNAL_ACTIVITY_EVENT,
   IDLE_TIMEOUT_MS,
+  idleTimeoutFor,
   isWakeMove,
   remainingIdleMs,
   WAKE_MOVE_PX,
 } from './idle.ts';
 
-describe('IDLE_TIMEOUT_MS', () => {
-  test('is the 30 seconds the product asks for', () => {
-    expect(IDLE_TIMEOUT_MS).toBe(30_000);
+describe('idleTimeoutFor', () => {
+  test('gives a browser tab three minutes and the desktop shell one', () => {
+    expect(IDLE_TIMEOUT_MS).toBe(3 * 60_000);
+    expect(DESKTOP_IDLE_TIMEOUT_MS).toBe(60_000);
+    expect(idleTimeoutFor(false)).toBe(IDLE_TIMEOUT_MS);
+    expect(idleTimeoutFor(true)).toBe(DESKTOP_IDLE_TIMEOUT_MS);
+  });
+
+  test('never lets a tab settle sooner than the shell', () => {
+    // Reading a page produces no input, so the web threshold must stay the longer one.
+    expect(idleTimeoutFor(false)).toBeGreaterThan(idleTimeoutFor(true));
   });
 });
 

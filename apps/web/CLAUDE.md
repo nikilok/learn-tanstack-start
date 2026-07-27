@@ -280,11 +280,18 @@ the parent profile write (poison stream event). The OLD comparison must stay
 inside a nested `IF TG_OP = 'UPDATE'` block: plpgsql binds `OLD.x` before
 evaluating, so a combined condition errors on INSERT.
 
-Both queries keep prev-name hits in a separate `hits` UNION branch (probe
+Both queries keep prev-name hits in a separate `hits` branch (probe
 `idx_hmrc_org_name` by org) rather than `OR`-ing them into the direct WHERE —
 an OR across the join would force a seq scan and lose all index use. `hits`
 selects `h.*` so the filtered search's WHERE can still filter on any sponsor
-column (`buildFilterConditions` reads `h.town_city`). A result's
+column (`buildFilterConditions` reads `h.town_city`), and the two arms are
+combined with **`UNION ALL`, never plain `UNION`**: the dedupe is provably a
+no-op (the arms carry different `direct` literals, `h.id` is a serial PK, and
+`pm` is grouped by `organisation_name` so the join cannot fan out), but it still
+sorts every wide tuple to find that out — 78,370 rows spilling 10.4MB to disk on
+`limited`, removing 0. Verified on prod: identical rows on every term tried.
+A company matching both ways yields two `hits` rows either way, which is what
+`bool_or(h.direct)` in the consumer's GROUP BY is there to merge. A result's
 `matchedPreviousName` is set only when the previous-name score strictly beats
 the current-name score (ties show the current name without the line).
 Prev-name wins also sort below equal-score direct matches via the `prev_won`

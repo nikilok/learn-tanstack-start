@@ -50,12 +50,16 @@ export function buildPrevNameMatch(query: string) {
   // would force a seq scan. `h.*` is load-bearing — it is what makes any
   // sponsor column resolvable to a caller's WHERE (buildFilterConditions reads
   // h.town_city), so narrowing this projection breaks the filtered search.
-  // UNION can't collapse `direct`; the consumer's GROUP BY merges the pair.
+  // ALL, because the dedupe can only ever remove zero rows: the arms carry
+  // different `direct` literals, h.id is a serial PK, and pm is grouped by
+  // organisation_name so the join can't fan out. Plain UNION still sorted every
+  // wide tuple to prove it (10MB to disk on a broad term). A company matching
+  // both ways yields two rows either way; the consumer's GROUP BY merges them.
   const hits = sql`
         SELECT h.*, true AS direct
         FROM ${hmrcSkilledWorkers} h
         WHERE ${fuzzyMatch(orgName)}
-        UNION
+        UNION ALL
         SELECT h.*, false AS direct
         FROM ${hmrcSkilledWorkers} h
         JOIN pm ON pm.organisation_name = h.organisation_name`;

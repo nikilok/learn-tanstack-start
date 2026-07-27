@@ -61,6 +61,16 @@ describe('buildPrevNameMatch', () => {
     );
   });
 
+  test('hits keeps duplicates: the dedupe can only ever remove zero rows', () => {
+    // The arms differ by their `direct` literal, h.id is a serial PK, and pm is
+    // grouped by organisation_name — so nothing is ever collapsible. Plain
+    // UNION still sorted all 78k wide tuples on a broad term (10MB to disk) to
+    // discover that. Restoring it is a silent, measurable cost, never a fix.
+    const { text } = render(buildPrevNameMatch('acme').hits);
+    expect(text).toContain(' UNION ALL ');
+    expect(text).not.toMatch(/UNION(?! ALL)/);
+  });
+
   test('the current-name score is gated on a real direct match', () => {
     // Ungated, a previous-name-only row scores sub-threshold word_similarity
     // noise, which suppresses its "Previously" line and beats the demotion.

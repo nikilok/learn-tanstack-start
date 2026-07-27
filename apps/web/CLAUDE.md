@@ -226,9 +226,19 @@ Cross-file coupling to keep in sync:
   for a handful of rows; tall result sets exceed it and set the height from `getTotalSize()`.
 - `SkeletonCards` draws a matching static rail (no marker) so loading→loaded doesn't pop.
 
-## Home search (`searchHmrc`) — index-served predicates + previous-name matching
+## Name search — index-served predicates + previous-name matching
 
-The search WHERE pairs each pg_trgm function recheck with its index-served
+Both surfaces search names: `searchHmrc` (home, no filters) and `searchFiltered`
+(any filter active, name term as `q`). They must find and rank the same
+companies, so the previous-name CTEs and score fragments live in ONE place —
+`lib/search/prev-name.ts` — and each server fn only assembles them into its own
+query shape. `buildPrevNameMatch` returns the raw pieces (home search composes
+them across its `g0`/`g` CTEs); `buildNameTermSql` composes them for a
+single-level grouped listing (the filtered search) and degrades to the
+browse-everything query when there is no term. Changing a scoring rule in one
+surface only is not possible by construction — keep it that way.
+
+The match branches pair each pg_trgm function recheck with its index-served
 OPERATOR: `org ~* pattern`, `query <% org AND word_similarity(...) > 0.6`,
 `org % query AND similarity(...) > 0.5`. The operators let the GIN trigram
 indexes BitmapOr the candidate set (~20x faster); the function rechecks pin the
@@ -238,6 +248,19 @@ recheck's literal (0.6 / 0.5) makes the operator the binding filter and
 silently shrinks results. Do NOT "simplify" either half away: bare functions
 can never use an index (full scan, ~1s), bare operators silently change
 semantics if a GUC moves.
+
+**How the branches are combined depends on table size.** On
+`hmrc_skilled_workers` (141k rows) the planner costs a seq scan above the
+BitmapOr, so the ORed predicate (`fuzzyMatch`) is index-served. On
+`ch_previous_names` (48k rows / 800 pages) it does NOT: the ORed form estimates
+below the BitmapOr, the planner seq-scans, and the regex + trigram filter runs
+on every row — 300ms where three index probes cost 14ms (measured on prod data,
+2026-07-27; it made a `london` home search 795ms instead of 194ms). So the
+previous-name candidates are three UNIONed single-operator SELECTs, one per
+branch, deduped by the table's (company_number, name) PK. `matchBranches` in
+`lib/search/name-match.ts` is the single source both forms are built from, so
+they can never match different rows. Do NOT fold the UNION back into a WHERE;
+re-measure with EXPLAIN before assuming either shape is right for a new table.
 
 Previous Companies House names are searched via `ch_previous_names`
 (company_number, name) — a flattened projection of
@@ -254,22 +277,33 @@ the parent profile write (poison stream event). The OLD comparison must stay
 inside a nested `IF TG_OP = 'UPDATE'` block: plpgsql binds `OLD.x` before
 evaluating, so a combined condition errors on INSERT.
 
-The query keeps prev-name hits in a separate UNION branch (probe
+Both queries keep prev-name hits in a separate `hits` UNION branch (probe
 `idx_hmrc_org_name` by org) rather than `OR`-ing them into the direct WHERE —
-an OR across the join would force a seq scan and lose all index use. A result's
+an OR across the join would force a seq scan and lose all index use. `hits`
+selects `h.*` so the filtered search's WHERE can still filter on any sponsor
+column (`buildFilterConditions` reads `h.town_city`). A result's
 `matchedPreviousName` is set only when the previous-name score strictly beats
 the current-name score (ties show the current name without the line).
 Prev-name wins also sort below equal-score direct matches via the `prev_won`
 key — without it, renamed orgs tie prefix queries at full score and flood
-page 1 alphabetically by their unrelated current names. `prev_won` appears in
-BOTH the `g` ORDER BY and the outer re-sort; keep the two identical or OFFSET
-pages duplicate/drop rows. The current-name score is gated on the `direct`
-flag carried out of `hits` (`org_score` in `g0`): for prev-name-only rows,
-ungated `scoreCase` is sub-threshold word_similarity noise that would suppress
+page 1 alphabetically by their unrelated current names. In `searchHmrc`
+`prev_won` appears in BOTH the `g` ORDER BY and the outer re-sort; in
+`searchFiltered` it is the second key of the `relevance` ORDER BY (the only
+sort a name term can reach — `name`/`incorporated` order by their own column,
+and prev-name hits simply interleave). Keep the paired orderings identical or
+OFFSET pages duplicate/drop rows. The current-name score is gated on the
+`direct` flag carried out of `hits`: for prev-name-only rows, ungated
+`scoreCase` is sub-threshold word_similarity noise that would suppress
 `matchedPreviousName` and leak past the demotion. Do NOT replace the flag with
-a `fuzzyMatch(org)` recheck in `g0` — that re-runs trigram ops per grouped row.
+a `fuzzyMatch(org)` recheck — that re-runs trigram ops per grouped row.
 `public_body`/`no_match` mapping rows have NULL company_number, so they drop
 out of the prev-name join naturally.
+
+In the filtered search the filters apply to the company **as it is today**: a
+sponsor found under an old name must still satisfy every active filter. The
+name term therefore enters through the CTEs and never as a WHERE condition, and
+a filter-only listing (no `q`) emits no CTEs at all — its query is byte-for-byte
+the one it was before previous-name matching existed.
 
 ## Page transitions live in `transitions.css`, not `styles.css`
 

@@ -1,15 +1,10 @@
-import {
-  companiesHouseProfiles,
-  hmrcCompanyMapping,
-  hmrcSkilledWorkers,
-  sicCodes,
-} from '@ss/db';
+import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
 import { createServerFn } from '@tanstack/react-start';
-import { type SQL, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { buildNameMatchers } from '../lib/search/name-match';
 import { parseSearchFilters, type SortKey } from '../lib/search/params';
+import { buildNameTermSql } from '../lib/search/prev-name';
 import { buildFilterConditions } from '../lib/search/sql';
 import { SHORT_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
 
@@ -38,8 +33,11 @@ export type FilterSearchRow = {
  * listing with an optional
  * fuzzy name term. Input parses leniently through the registry — invalid
  * entries drop into `issues`, echoed in the response for the caller's
- * correction loop (Phase B model, UI). `q` matches current organisation
- * names only; the home search remains the deep previous-name surface.
+ * correction loop (Phase B model, UI). `q` matches current organisation names
+ * and previous Companies House names on the same terms as the home search
+ * (shared fragments in lib/search/prev-name), so a renamed sponsor stays
+ * findable under its old name once filters are applied; the filters then apply
+ * to the company as it is today.
  * Response depends only on input, so it edge-caches for 5 minutes.
  */
 export const searchFiltered = createServerFn()
@@ -59,15 +57,11 @@ export const searchFiltered = createServerFn()
       `[Filter Search] keys=${Object.keys(filters).join(',') || 'none'} offset=${safeOffset}`,
     );
 
+    // The name term enters through the CTEs (lib/search/prev-name), not the
+    // WHERE: it must match previous Companies House names too, and folding
+    // that into the filter conditions as an OR costs every index.
+    const name = buildNameTermSql(filters.q);
     const conds = buildFilterConditions(filters);
-    let scoreExpr: SQL = sql`0`;
-    if (filters.q) {
-      const { fuzzyMatch, scoreCase } = buildNameMatchers(filters.q);
-      const orgName = sql`h.organisation_name`;
-      conds.push(fuzzyMatch(orgName));
-      // Rows group by name_slug below — aggregate to the best variant's score.
-      scoreExpr = sql`max(${scoreCase(orgName)})`;
-    }
     const where = conds.length
       ? sql`WHERE ${sql.join(conds, sql` AND `)}`
       : sql``;
@@ -78,10 +72,12 @@ export const searchFiltered = createServerFn()
       filters.order ?? (sortKey === 'incorporated' ? 'desc' : 'asc');
     const dir = order === 'desc' ? sql`DESC` : sql`ASC`;
     // Aggregated now that rows group by name_slug: a bare organisation_name is
-    // no longer grouped. min(h.hash) tail keeps OFFSET pages stable.
+    // no longer grouped. min(h.hash) tail keeps OFFSET pages stable. Relevance
+    // is the only branch that can see a name term, so it alone demotes
+    // previous-name wins — mirroring the home search's `prev_won` key.
     const orderBy =
       sortKey === 'relevance'
-        ? sql`score DESC, min(h.organisation_name) ASC, min(h.hash) ASC`
+        ? sql`score DESC, ${name.prevWon} ASC, min(h.organisation_name) ASC, min(h.hash) ASC`
         : sortKey === 'incorporated'
           ? sql`c.date_of_creation ${dir} NULLS LAST, min(h.organisation_name) ASC, min(h.hash) ASC`
           : sql`min(h.organisation_name) ${dir}, min(h.hash) ASC`;
@@ -92,6 +88,7 @@ export const searchFiltered = createServerFn()
     // functional dependency); array_to_json so the driver always hands back
     // JS arrays regardless of its text[] type parsers.
     const result = await db.execute(sql`
+      ${name.ctes}
       SELECT min(h.hash) AS "slugId",
              -- Elected exactly as searchHmrc and the page elect their primary:
              -- mapped first, then lowest company number, then name.
@@ -108,14 +105,15 @@ export const searchFiltered = createServerFn()
              -- must read them from here, not from the two sorted lists above.
              array_to_json(array_agg(DISTINCT jsonb_build_object(
                'route', h.route, 'rating', h.type_rating))) AS "licences",
-             ${scoreExpr} AS "score",
-             NULL::text AS "matchedPreviousName",
+             ${name.score} AS "score",
+             ${name.matchedPrev} AS "matchedPreviousName",
              c.company_status AS "companyStatus",
              c.date_of_creation AS "incorporatedOn",
              (SELECT sc.description FROM ${sicCodes} sc WHERE sc.code = c.sic_codes[1]) AS "sicPrimary"
-      FROM ${hmrcSkilledWorkers} h
+      FROM ${name.source}
       LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
       LEFT JOIN ${companiesHouseProfiles} c ON c.company_number = m.company_number
+      ${name.prevJoin}
       ${where}
       -- One card per URL, matching searchHmrc: grouping per organisation_name
       -- left a company's case-variant register rows as separate, identical

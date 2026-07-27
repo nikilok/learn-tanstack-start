@@ -65,7 +65,8 @@ export const searchFiltered = createServerFn()
       const { fuzzyMatch, scoreCase } = buildNameMatchers(filters.q);
       const orgName = sql`h.organisation_name`;
       conds.push(fuzzyMatch(orgName));
-      scoreExpr = scoreCase(orgName);
+      // Rows group by name_slug below — aggregate to the best variant's score.
+      scoreExpr = sql`max(${scoreCase(orgName)})`;
     }
     const where = conds.length
       ? sql`WHERE ${sql.join(conds, sql` AND `)}`

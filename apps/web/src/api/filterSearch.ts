@@ -108,12 +108,6 @@ export const searchFiltered = createServerFn()
              -- must read them from here, not from the two sorted lists above.
              array_to_json(array_agg(DISTINCT jsonb_build_object(
                'route', h.route, 'rating', h.type_rating))) AS "licences",
-             -- Transitional scalars for pre-deploy bundles (server fns outlive
-             -- the client across a deploy) — drop after the next release cycle.
-             -- Hash-ordered so both come from ONE row: a real (route, rating)
-             -- pair, never independently-sorted heads fabricating one.
-             (array_agg(h.type_rating ORDER BY h.hash))[1] AS "typeRating",
-             (array_agg(h.route ORDER BY h.hash))[1] AS "route",
              ${scoreExpr} AS "score",
              NULL::text AS "matchedPreviousName",
              c.company_status AS "companyStatus",

@@ -13,6 +13,9 @@ import {
 //   hmrc_skilled_workers h
 //   LEFT JOIN hmrc_company_mapping m ON m.organisation_name = h.organisation_name
 //   LEFT JOIN companies_house_profiles c ON c.company_number = m.company_number
+// With a name term `h` is instead the `hits` CTE (lib/search/prev-name), which
+// projects `h.*` precisely so every h.<col> below still resolves — narrowing
+// that projection breaks the location filter, not this file.
 // CH-sourced conditions (c.*) evaluate NULL for unmapped sponsors, so those
 // rows drop out of any CH filter implicitly (see CH_FILTER_KEYS in params.ts).
 

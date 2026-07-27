@@ -7,8 +7,9 @@ export function escapeRegex(query: string): string {
 
 /**
  * Build the fuzzy-match predicate and ranking-CASE factories for one search
- * query, shared by searchHmrc and the /search filter fn so an optional name
- * term scores identically everywhere. Each predicate pairs an index-served
+ * query. lib/search/prev-name is the only caller — it composes these into the
+ * fragments both search surfaces share, so a name term scores identically
+ * everywhere. Each predicate pairs an index-served
  * trigram OPERATOR with a function recheck (`<%` + word_similarity, `%` +
  * similarity): the operators let the GIN trigram indexes BitmapOr the
  * candidate set (~20x faster than bare function calls), while the rechecks

@@ -72,9 +72,10 @@ export const searchFiltered = createServerFn()
       filters.order ?? (sortKey === 'incorporated' ? 'desc' : 'asc');
     const dir = order === 'desc' ? sql`DESC` : sql`ASC`;
     // Aggregated now that rows group by name_slug: a bare organisation_name is
-    // no longer grouped. min(h.hash) tail keeps OFFSET pages stable. Relevance
-    // is the only branch that can see a name term, so it alone demotes
-    // previous-name wins — mirroring the home search's `prev_won` key.
+    // no longer grouped. min(h.hash) tail keeps OFFSET pages stable. Only
+    // relevance ranks by score, so it alone demotes previous-name wins
+    // (the home search's `prev_won` key); name/incorporated are reachable with
+    // a term too, and there previous-name hits just interleave by their column.
     const orderBy =
       sortKey === 'relevance'
         ? sql`score DESC, ${name.prevWon} ASC, min(h.organisation_name) ASC, min(h.hash) ASC`

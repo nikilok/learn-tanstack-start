@@ -249,18 +249,21 @@ silently shrinks results. Do NOT "simplify" either half away: bare functions
 can never use an index (full scan, ~1s), bare operators silently change
 semantics if a GUC moves.
 
-**How the branches are combined depends on table size.** On
-`hmrc_skilled_workers` (141k rows) the planner costs a seq scan above the
-BitmapOr, so the ORed predicate (`fuzzyMatch`) is index-served. On
-`ch_previous_names` (48k rows / 800 pages) it does NOT: the ORed form estimates
-below the BitmapOr, the planner seq-scans, and the regex + trigram filter runs
-on every row — 300ms where three index probes cost 14ms (measured on prod data,
-2026-07-27; it made a `london` home search 795ms instead of 194ms). So the
-previous-name candidates are three UNIONed single-operator SELECTs, one per
-branch, deduped by the table's (company_number, name) PK. `matchBranches` in
-`lib/search/name-match.ts` is the single source both forms are built from, so
-they can never match different rows. Do NOT fold the UNION back into a WHERE;
-re-measure with EXPLAIN before assuming either shape is right for a new table.
+**How the branches are combined is a selectivity trade-off, and the two
+surfaces resolve it differently.** ORed into one WHERE, all three predicates
+evaluate in a single pass with short-circuiting; UNIONed as three
+single-operator SELECTs, each arm can take the trigram index — but all three
+always run, so nothing short-circuits. Which wins depends on whether any arm is
+selective, NOT on table size (`fuzzyMatch` on the 141k-row
+`hmrc_skilled_workers` seq-scans too for an unselective term). Measured on prod
+2026-07-27, `ch_previous_names` (48k rows) OR vs UNION: `london` 287ms → 13ms,
+`services` 299ms → 40ms, `acme` 10ms → 6ms, `care` 31ms → 32ms, but `limited`
+(matching 33.6k of 48.5k rows — no index can help) 128ms → 460ms. Real queries
+are company names, so previous-name candidates are UNIONed and the degenerate
+stop-word case pays ~330ms on a query already over a second. Keep that trade-off
+in view before copying either shape to a new table, and re-measure with EXPLAIN.
+`matchBranches` in `lib/search/name-match.ts` is the single source both forms
+are built from, so they can never match different rows.
 
 Previous Companies House names are searched via `ch_previous_names`
 (company_number, name) — a flattened projection of
@@ -288,9 +291,11 @@ Prev-name wins also sort below equal-score direct matches via the `prev_won`
 key — without it, renamed orgs tie prefix queries at full score and flood
 page 1 alphabetically by their unrelated current names. In `searchHmrc`
 `prev_won` appears in BOTH the `g` ORDER BY and the outer re-sort; in
-`searchFiltered` it is the second key of the `relevance` ORDER BY (the only
-sort a name term can reach — `name`/`incorporated` order by their own column,
-and prev-name hits simply interleave). Keep the paired orderings identical or
+`searchFiltered` it is the second key of the `relevance` ORDER BY. It is absent
+from the other two sorts by design, not by unreachability: `sort=name` and
+`sort=incorporated` ARE reachable with a term (only the reverse — `relevance`
+without `q` — is dropped by the parser), and there previous-name hits correctly
+interleave by their own column. Keep the paired orderings identical or
 OFFSET pages duplicate/drop rows. The current-name score is gated on the
 `direct` flag carried out of `hits`: for prev-name-only rows, ungated
 `scoreCase` is sub-threshold word_similarity noise that would suppress
@@ -302,8 +307,19 @@ out of the prev-name join naturally.
 In the filtered search the filters apply to the company **as it is today**: a
 sponsor found under an old name must still satisfy every active filter. The
 name term therefore enters through the CTEs and never as a WHERE condition, and
-a filter-only listing (no `q`) emits no CTEs at all — its query is byte-for-byte
-the one it was before previous-name matching existed.
+a filter-only listing (no `q`) emits no CTEs and no previous-name join at all —
+its plan and its rows are the ones it had before previous-name matching existed
+(verified by differential run against prod, not by text comparison: the empty
+interpolations still leave their whitespace in the statement).
+
+Adding a name term is not free: it roughly doubles a filtered listing's server
+time for common words (prod, 2026-07-27: `q=london&route=…` 95ms → 194ms,
+`q=services&status=active` ~200ms → ~360ms, the degenerate `q=limited` ~1.4s →
+~2.5s), because the `hits` UNION pulls every register row of every org whose
+*previous* name matched. That is the cost of the two surfaces agreeing, and it
+is the same cost the home search already pays for the same term — but it lands
+on the SSR prefetch (`routes/index.tsx`) and on `/_serverFn`, so weigh it before
+widening what the previous-name arm matches.
 
 ## Page transitions live in `transitions.css`, not `styles.css`
 

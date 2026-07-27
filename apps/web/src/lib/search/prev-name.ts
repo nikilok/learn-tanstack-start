@@ -3,7 +3,7 @@ import {
   hmrcCompanyMapping,
   hmrcSkilledWorkers,
 } from '@ss/db';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 
 import { buildNameMatchers } from './name-match';
 
@@ -25,12 +25,9 @@ export function buildPrevNameMatch(query: string) {
   const prevName = sql`pn.name`;
   const orgName = sql`h.organisation_name`;
 
-  // One UNION branch per match operator, NOT the single ORed predicate:
-  // ch_previous_names is small enough (48k rows / 800 pages) that the planner
-  // costs a seq scan below the BitmapOr and then pays the regex + trigram
-  // filter on every row — 300ms where three index probes cost 14ms. The UNION
-  // is over the table's PK columns, so it dedupes exactly. Do NOT fold these
-  // back into a WHERE; re-measure with EXPLAIN if the table ever grows.
+  // One UNION branch per operator, not one ORed WHERE: the OR loses the index
+  // here (CLAUDE.md "Name search" has the measurements and the trade-off).
+  // UNION is over the PK columns, so it dedupes exactly.
   const prevCandidates = sql.join(
     matchBranches(prevName).map(
       (branch) =>
@@ -39,10 +36,8 @@ export function buildPrevNameMatch(query: string) {
     sql` UNION `,
   );
 
-  // Previous names live in `ch_previous_names` — a trigram-indexed projection
-  // of companies_house_profiles.previous_company_names, because GIN can't
-  // index inside an array column. public_body/no_match mapping rows have a
-  // NULL company_number and drop out of the join naturally.
+  // public_body/no_match mapping rows have a NULL company_number, so they drop
+  // out of this join naturally.
   const prevMatches = sql`
         SELECT m.organisation_name,
                (array_agg(pn.name ORDER BY ${scoreCase(prevName)} DESC, pn.name ASC))[1] AS matched_name,
@@ -51,12 +46,11 @@ export function buildPrevNameMatch(query: string) {
         JOIN ${hmrcCompanyMapping} m ON m.company_number = pn.company_number
         GROUP BY m.organisation_name`;
 
-  // Old-name hits stay in their own UNION branch (probing idx_hmrc_org_name by
-  // org) rather than OR-ing into the direct WHERE — an OR across the join
-  // forces a seq scan and loses all index use. `h.*` so a caller's WHERE can
-  // filter on any sponsor column (buildFilterConditions reads h.town_city).
-  // UNION can't collapse the `direct` flag, so a company matching both ways
-  // yields two rows: the consumer's GROUP BY merges them under bool_or.
+  // Old-name hits get their own branch; OR-ing them into the direct WHERE
+  // would force a seq scan. `h.*` is load-bearing — it is what makes any
+  // sponsor column resolvable to a caller's WHERE (buildFilterConditions reads
+  // h.town_city), so narrowing this projection breaks the filtered search.
+  // UNION can't collapse `direct`; the consumer's GROUP BY merges the pair.
   const hits = sql`
         SELECT h.*, true AS direct
         FROM ${hmrcSkilledWorkers} h
@@ -69,17 +63,42 @@ export function buildPrevNameMatch(query: string) {
   return {
     prevMatches,
     hits,
-    // Gate the current-name score on a real direct match (the flag is free at
-    // WHERE time): for previous-name-only rows scoreCase is sub-threshold
-    // word_similarity noise that would suppress the "Previously" line and leak
-    // past the prev-name demotion. Do NOT swap the flag for a fuzzyMatch
-    // recheck here — that re-runs trigram ops per grouped row.
+    // Gated on a real direct match: ungated, a previous-name-only row scores
+    // sub-threshold noise that suppresses its "Previously" line. Keep the flag
+    // — a fuzzyMatch recheck here re-runs trigram ops per grouped row.
     orgScore: sql`CASE WHEN bool_or(h.direct) THEN max(${scoreCase(orgName)}) ELSE 0 END`,
     prevScore: sql`max(pm.prev_score)`,
     // Best previous-name match across the merged name variants.
     bestPrevName: sql`(array_agg(pm.matched_name ORDER BY
                   pm.prev_score DESC NULLS LAST, pm.matched_name ASC
                 ))[1]`,
+  };
+}
+
+/**
+ * Rank one name search from its two score sources: the better of the two wins,
+ * a previous-name win is demoted below an equal-scoring direct hit, and the old
+ * name surfaces only when it strictly beats the current one. Both surfaces MUST
+ * route through this — the rules are the ranking, and a second copy would let
+ * one listing disagree with the other about the same company. Operands take
+ * either the aggregates (grouping query) or the columns they landed in (a
+ * later CTE), and each is parenthesised so no caller's expression can bind
+ * loosely inside the `>` or the ORDER BY item it is spliced into.
+ */
+export function composeNameScores(parts: {
+  org: SQL;
+  prev: SQL;
+  matched: SQL;
+}) {
+  const prev = sql`coalesce(${parts.prev}, 0)`;
+  const won = sql`((${prev}) > (${parts.org}))`;
+  return {
+    score: sql`GREATEST((${parts.org}), (${prev}))`,
+    // Demotes previous-name wins below same-score direct hits: they tie prefix
+    // queries at full score but would tie-break by their unrelated current
+    // name, flooding page 1 (e.g. 'london').
+    prevWon: won,
+    matchedPrev: sql`CASE WHEN ${won} THEN ${parts.matched} END`,
   };
 }
 
@@ -96,14 +115,15 @@ export function buildNameTermSql(query: string | undefined) {
       source: sql`${hmrcSkilledWorkers} h`,
       prevJoin: sql``,
       score: sql`0`,
-      prevWon: sql`false`,
+      // NULL, not `false`: Postgres rejects a bare constant as an ORDER BY key
+      // (42601), and this is handed to a caller that sorts on it.
+      prevWon: sql`NULL::boolean`,
       matchedPrev: sql`NULL::text`,
     };
   }
 
   const { prevMatches, hits, orgScore, prevScore, bestPrevName } =
     buildPrevNameMatch(query);
-  const prev = sql`coalesce(${prevScore}, 0)`;
   return {
     ctes: sql`WITH pm AS (${prevMatches}
       ),
@@ -111,13 +131,10 @@ export function buildNameTermSql(query: string | undefined) {
       )`,
     source: sql`hits h`,
     prevJoin: sql`LEFT JOIN pm ON pm.organisation_name = h.organisation_name`,
-    score: sql`GREATEST(${orgScore}, ${prev})`,
-    // Demotes previous-name wins below same-score direct hits: they tie prefix
-    // queries at full score but would tie-break by their unrelated current
-    // name, flooding page 1 (e.g. 'london').
-    prevWon: sql`${prev} > ${orgScore}`,
-    // The "Previously …" line, shown only when the old name strictly beats the
-    // current one — a tie shows the current name alone.
-    matchedPrev: sql`CASE WHEN ${prev} > ${orgScore} THEN ${bestPrevName} END`,
+    ...composeNameScores({
+      org: orgScore,
+      prev: prevScore,
+      matched: bestPrevName,
+    }),
   };
 }

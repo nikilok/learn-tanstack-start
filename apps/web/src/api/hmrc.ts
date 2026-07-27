@@ -11,7 +11,7 @@ import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { poolForPrimary } from '../lib/company/licences';
-import { buildPrevNameMatch } from '../lib/search/prev-name';
+import { buildPrevNameMatch, composeNameScores } from '../lib/search/prev-name';
 import { slugify } from '../utils';
 import {
   LONG_EDGE_CACHE,
@@ -67,6 +67,12 @@ export const searchHmrc = createServerFn()
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
     const { prevMatches, hits, orgScore, prevScore, bestPrevName } =
       buildPrevNameMatch(query);
+    // g0 lands the two scores in columns; the ranking rules stay shared.
+    const ranked = composeNameScores({
+      org: sql`org_score`,
+      prev: sql`prev_score`,
+      matched: sql`matched_name`,
+    });
 
     // Raw SQL throughout: the shape (CTEs + UNION) exists so every branch
     // stays on an index — pm probes idx_ch_prev_names_trgm then
@@ -125,10 +131,9 @@ export const searchHmrc = createServerFn()
       g AS (
         SELECT slug_id, organisation_name, name_slug, routes, type_ratings,
                licences,
-               GREATEST(org_score, coalesce(prev_score, 0)) AS score,
-               coalesce(prev_score, 0) > org_score AS prev_won,
-               CASE WHEN coalesce(prev_score, 0) > org_score
-                 THEN matched_name END AS matched_previous_name
+               ${ranked.score} AS score,
+               ${ranked.prevWon} AS prev_won,
+               ${ranked.matchedPrev} AS matched_previous_name
         FROM g0
         ORDER BY score DESC, prev_won ASC, organisation_name ASC, slug_id ASC
         -- prev_won demotes prev-name-only wins below same-score direct hits:

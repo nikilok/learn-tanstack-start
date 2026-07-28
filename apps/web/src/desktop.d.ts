@@ -23,6 +23,10 @@ interface SsDesktop {
   onUpdateReady?(cb: (update: string | DesktopUpdateInfo) => void): () => void;
   /** Act on the ready update — restart to install, or open /download for a Linux manual update. Optional: older shells predate it. */
   installUpdate?(): void;
+  /** Report that the screensaver has taken over (or handed back), so the shell can fade its native title bar with it. Optional: older shells predate it. */
+  setScreenSaver?(on: boolean): void;
+  /** Subscribe to input the shell handled on this page's behalf — the title bar is a separate view, and main swallows the app's shortcuts before they reach this document, so neither reaches our listeners. `deliberate` is false for the pointer merely passing over the chrome: that counts as presence but must not dismiss a running screensaver. Returns an unsubscribe fn. Optional: older shells predate it. */
+  onChromeInput?(cb: (deliberate: boolean) => void): () => void;
 }
 
 interface Window {

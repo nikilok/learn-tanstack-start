@@ -1,0 +1,139 @@
+/* Full-window screensaver. Same max z-index as the custom cursor and the PWA splash —
+   it is rendered after both in __root.tsx, so it wins that tie and covers them. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  cursor: none;
+  /* Long dissolve in — it should creep up on you rather than snap on. */
+  transition: opacity 1200ms ease;
+}
+
+/* Waking has to feel instant, and the app must take clicks again straight away. */
+.leaving {
+  pointer-events: none;
+  transition-duration: 320ms;
+}
+
+/* The screensaver runs ON the site's own backdrop rather than over a flat field. The
+   backdrop is body's glow gradients plus its fixed grid/dot layers — and those are
+   PSEUDO-elements, not children — so fading body's children out leaves it standing
+   exactly as it was, scrollbar gutter and all. The overlay excludes itself.
+
+   Opacity, never display/visibility: the children must keep their boxes, or body
+   collapses and takes the gradients (sized to its height) down with it. */
+:global(html[data-screensaver] body > *:not([data-screensaver])) {
+  transition: opacity 1200ms ease;
+}
+:global(html[data-screensaver='on'] body > *:not([data-screensaver])) {
+  opacity: 0;
+}
+/* Waking: hand the app back at the same pace the overlay leaves. */
+:global(html[data-screensaver='off'] body > *:not([data-screensaver])) {
+  transition-duration: 320ms;
+}
+
+/* Except the custom cursor, which must come back instantly. CustomCursor keeps a
+   `cursor: none !important` rule in <head> for its whole lifetime, so fading its follower
+   back over 320ms leaves the user mousing an entirely invisible pointer for that third of
+   a second — the native one is still suppressed. */
+:global(html[data-screensaver='off'] body > [data-uj-cursor]) {
+  transition-duration: 0s;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* The wordmark is held at the header logo's own position: as the app dissolves, the mark
+   fades up in the same spot, so the logo reads as staying put while everything around it
+   goes. The row mirrors the header's layout — px-4, .page-wrap, py-3/sm:py-4, the link's
+   px-3 py-1.5, and h-6/sm:h-8 on the mark — so keep those classes in step with Header.tsx.
+   Horizontal placement can't drift: .page-wrap is the same shared class the header uses. */
+.markRow {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+}
+
+/* In the shell the native title bar owns the top 46px and the web header is hidden, so
+   there is no logo to hold position with — drop below it (TITLEBAR_HEIGHT, the same
+   offset styles.css gives html[data-desktop] .site-header). */
+:global(html[data-desktop]) .markRow {
+  top: 46px;
+}
+
+/* Keeps the wordmark's own --logo-navy / --logo-red defaults, which is what makes it dual
+   tone (and what makes it theme-aware with no React theme read). Forcing both to
+   currentColor flattens it; the footer's grayscale would too, at this opacity — a hue
+   difference survives a whisper on a pale field where a lightness difference does not.
+   Low opacity is what keeps it understated. A whisper, not a badge; the coil is the subject. */
+.mark {
+  opacity: 0.28;
+  /* Same 1200ms as the app's fade-out, so the logo reads as dimming in place. */
+  animation: mark-in 1200ms ease both;
+}
+
+/* Title and credit are set like the plate beside a picture: name above, caption below,
+   centred at the foot of the frame. One stack, so the pair can never drift apart. */
+.plate {
+  position: absolute;
+  left: 50%;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+/* Names the piece. Sans against the caption's mono, and a step up in both size and ink,
+   so the hierarchy holds at these sizes — 13px vs 10px alone would read as a wobble. */
+.title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: var(--sea-ink-soft);
+  opacity: 0.7;
+  animation: mark-in 1400ms ease 700ms both;
+}
+
+/* Credit for the curve itself, which is @yuruyurau's, not ours — see the attribution
+   block at the top of lib/screensaver/coil.ts. Tiny, mono, and last to arrive.
+   Do not remove it. */
+.credit {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--sea-ink-faint);
+  opacity: 0.55;
+  animation: mark-in 1400ms ease 900ms both;
+}
+
+/* No `to` — the implicit end is each rule's own opacity, so they can't drift apart. */
+@keyframes mark-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  :global(html[data-screensaver] body > *:not([data-screensaver])) {
+    transition-duration: 320ms;
+  }
+  .mark,
+  .title,
+  .credit {
+    animation: none;
+  }
+}

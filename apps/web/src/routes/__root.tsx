@@ -25,6 +25,7 @@ import NavigationProgress from '../components/NavigationProgress';
 import NotFound from '../components/NotFound';
 import PageContentTransition from '../components/PageContentTransition';
 import RouteError from '../components/RouteError';
+import ScreenSaver from '../components/ScreenSaver';
 import UnionJackCursor from '../components/UnionJackCursor';
 import WebHeaderBlur from '../components/WebHeaderBlur';
 import { markHydrationDone } from '../lib/hydration';
@@ -197,6 +198,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <UnionJackCursor />
         {/* Rendered after the cursor so it wins the shared max z-index tie. */}
         <AppSplash />
+        {/* Last of the three: the screensaver covers the cursor and the splash alike. */}
+        <ScreenSaver />
         {/* Must stay an unconditional top-level element: the devtools-vite prod
             strip can't parse it wrapped in `cond && (...)` (build SyntaxError). */}
         <TanStackDevtools

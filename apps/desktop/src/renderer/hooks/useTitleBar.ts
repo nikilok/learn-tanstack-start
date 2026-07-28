@@ -47,6 +47,10 @@ export function useTitleBar(): TitleBarModel {
       copiedTimer = setTimeout(() => setCopied(false), 1500);
     });
     const offMax = window.titlebar.onMaximized(setMaximized);
+    // Class, not React state: the whole bar fades as one, and nothing here re-renders.
+    const offSaver = window.titlebar.onScreenSaver((on) =>
+      document.documentElement.classList.toggle('screensaver', on),
+    );
     window.titlebar.ready();
     return () => {
       clearTimeout(copiedTimer);
@@ -57,6 +61,7 @@ export function useTitleBar(): TitleBarModel {
       offFilters();
       offCopied();
       offMax();
+      offSaver();
     };
   }, []);
 

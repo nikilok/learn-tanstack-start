@@ -29,6 +29,13 @@ contextBridge.exposeInMainWorld('ssDesktop', {
     return () => ipcRenderer.removeListener('ss:update-ready', listener);
   },
   installUpdate: () => ipcRenderer.send('ss:install-update'),
+  setScreenSaver: (on: boolean) => ipcRenderer.send('ss:screensaver', on),
+  onChromeInput: (cb: (deliberate: boolean) => void) => {
+    const listener = (_e: IpcRendererEvent, deliberate: boolean) =>
+      cb(deliberate);
+    ipcRenderer.on('ss:chrome-input', listener);
+    return () => ipcRenderer.removeListener('ss:chrome-input', listener);
+  },
 });
 
 /** Forwards the page's resolved theme (exact colour + explicit light/dark vs auto) to main. */

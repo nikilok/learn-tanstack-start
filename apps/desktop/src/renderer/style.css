@@ -36,6 +36,23 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+/* The page's screensaver owns the window (main forwards the state): fade the chrome out
+   with it, matching the overlay's own 1200ms dissolve in and 320ms wake. Clicks still land
+   — main turns any input on this view into a wake, which brings the bar straight back. */
+#root {
+  transition: opacity 320ms ease;
+}
+html.screensaver #root {
+  opacity: 0;
+  transition-duration: 1200ms;
+  /* Opacity alone does not stop hit-testing. Without this, the click a user makes to
+     dismiss the screensaver lands on whichever invisible control is under it — on
+     Windows/Linux the top-right corner is Close, so the app quits instead of waking.
+     Main still gets the view's `input-event` (that fires before DOM hit-testing), so
+     the click is swallowed here and forwarded to the page as the wake. */
+  pointer-events: none;
+}
+
 /* -webkit-app-region has no Tailwind utility — define the drag regions here. */
 .drag {
   -webkit-app-region: drag;

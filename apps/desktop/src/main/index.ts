@@ -59,6 +59,7 @@ let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastFilterCount = 0; // active filters, badged on the title-bar icon
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
+let screenSaverOn = false; // the web app's screensaver has the window
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -84,6 +85,9 @@ function pushNavState(): void {
 
 /** Drives the site view's history back/forward, then hands keyboard focus back to the page. */
 function navigate(dir: 'back' | 'forward'): void {
+  // Shortcuts reach here via before-input-event, which preventDefaults them — so the page
+  // never sees the keystroke and would stay idle while the shell acts on it.
+  reportChromeInput(true);
   const h = siteView?.webContents.navigationHistory;
   if (!h) return;
   if (dir === 'back' && h.canGoBack()) h.goBack();
@@ -93,9 +97,55 @@ function navigate(dir: 'back' | 'forward'): void {
 
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
+  reportChromeInput(true); // see navigate(): shortcuts never reach the page as keystrokes
   siteView?.webContents.send('ss:command', cmd);
   // Navigation commands hand focus to the page (type-to-search, form controls).
   if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
+}
+
+// Input on the chrome that counts as a deliberate gesture rather than the pointer merely
+// passing over it. Anything not listed here is treated as movement: it keeps the page from
+// going idle, but it must not dismiss a running screensaver, or a mouse resting in the
+// title-bar strip would wake it on a pixel of drift — the very thing `isWakeMove` filters
+// out inside the page. Unknown future types fall to the safe side (movement).
+const DELIBERATE_INPUT = new Set([
+  'mouseDown',
+  'mouseUp',
+  'mouseWheel',
+  'contextMenu',
+  'keyDown',
+  'rawKeyDown',
+  'char',
+]);
+
+/**
+ * Tells the page the shell handled input on its behalf. The title bar is a separate view
+ * and main swallows the app's shortcuts before they reach the renderer, so without this
+ * the page counts a user working entirely in the chrome as idle.
+ */
+function reportChromeInput(deliberate: boolean): void {
+  const wc = siteView?.webContents;
+  if (!wc || wc.isDestroyed()) return;
+  wc.send('ss:chrome-input', deliberate);
+}
+
+/**
+ * Fades the chrome out of the way of the page's screensaver, and back in when it lifts.
+ * The bar floats over a full-height site view, so it would otherwise sit on top of the
+ * screensaver; macOS's traffic lights are drawn by the OS, not by that view.
+ */
+function setScreenSaver(on: boolean): void {
+  screenSaverOn = on;
+  // Reachable while the window is being torn down (the site view's render-process-gone
+  // handler calls this), so check before touching either object.
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (titleBarView && !titleBarView.webContents.isDestroyed()) {
+    titleBarView.webContents.send('titlebar:screensaver', on);
+  }
+  if (on) tooltipView?.setVisible(false);
+  if (process.platform === 'darwin') {
+    mainWindow.setWindowButtonVisibility(!on);
+  }
 }
 
 /** Sends the current page title (cleaned) to the title bar pill. */
@@ -133,6 +183,7 @@ function createWindow(): void {
       titleBarView = null;
       siteView = null;
       tooltipView = null;
+      screenSaverOn = false;
     }
   });
   // Keep the custom maximise/restore icon (Windows/Linux) in sync with the window state.
@@ -172,6 +223,17 @@ function createWindow(): void {
     void bar.webContents.loadFile(join(__dirname, '../renderer/index.html'));
   }
   titleBarView = bar;
+
+  // The bar is its own view, so input landing on it never reaches the page. Forward it
+  // ALWAYS, not just while the screensaver is up: someone navigating purely from the
+  // chrome is present, and the page would otherwise count them idle and dissolve the app
+  // out from under them mid-use.
+  bar.webContents.on('input-event', (_event, input) => {
+    reportChromeInput(DELIBERATE_INPUT.has(input.type));
+  });
+  // The page owns the screensaver state, so a dead renderer would otherwise leave the
+  // chrome (window buttons included) hidden with nothing left able to hand it back.
+  view.webContents.on('render-process-gone', () => setScreenSaver(false));
 
   win.contentView.addChildView(view); // site fills the window, behind…
   win.contentView.addChildView(bar); // …the transparent title bar on top
@@ -288,6 +350,10 @@ function registerIpc(): void {
     lastFilterCount = Math.max(0, Math.trunc(Number(count) || 0));
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
   });
+  // The web app reports its screensaver taking over the window (and handing it back).
+  ipcMain.on('ss:screensaver', (_event, on: boolean) =>
+    setScreenSaver(Boolean(on)),
+  );
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {
@@ -307,6 +373,12 @@ function registerIpc(): void {
     (_event, payload: { kind: string; x: number } | null) => {
       const tip = tooltipView;
       if (!tip) return;
+      // The tooltip is its own view and never gets the screensaver fade, so a hover on
+      // invisible chrome would pop an opaque keycap on top of the screensaver.
+      if (screenSaverOn) {
+        tip.setVisible(false);
+        return;
+      }
       if (payload) {
         const caretX = positionTooltip(
           tip,
@@ -350,6 +422,8 @@ function registerIpc(): void {
     if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
+    // A bar that reloads mid-screensaver comes back opaque without this.
+    titleBarView?.webContents.send('titlebar:screensaver', screenSaverOn);
     titleBarView?.webContents.send(
       'titlebar:maximized',
       mainWindow?.isMaximized() ?? false,

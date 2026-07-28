@@ -23,6 +23,7 @@ declare global {
     onCursor(cb: (on: boolean) => void): Unsubscribe;
     onFilters(cb: (count: number) => void): Unsubscribe;
     onCopied(cb: () => void): Unsubscribe;
+    onScreenSaver(cb: (on: boolean) => void): Unsubscribe;
     command(cmd: TitlebarCommand): void;
     // Button hover -> main (bar view); tooltip content + caret offset <- main (tooltip view).
     showTooltip(payload: { kind: TooltipKind; x: number } | null): void;

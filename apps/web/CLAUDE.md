@@ -523,3 +523,116 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   even mid-interrupt. Don't give the filter its own duration/curve, and keep
   the lens layer oversized (`-inset-6`) so the blur's edge fade stays outside
   the pane.
+
+## Screensaver — cross-file invariants
+
+`<ScreenSaver />` (components/ScreenSaver.tsx) takes the whole window after a
+surface-dependent stretch of quiet: three minutes in a browser tab, one in the
+desktop shell (`idleTimeoutFor`), and never on a coarse/absent pointer — a
+handset blanks its own screen, and reading a page without touching it is the
+normal case there. The web threshold must stay the longer of the two: reading
+produces no input, so a short one interrupts the most engaged reader on the
+site. The curve maths, fit and palette are pure in
+`lib/screensaver/coil.ts`; the idleness rules are pure in
+`lib/screensaver/idle.ts`; `hooks/useIdle.ts` is the only DOM wiring. Both pure
+modules are locked by tests — the envelope test re-derives `COIL_ENVELOPE` from
+`sampleCoil`, so a change to the curve fails rather than silently clipping.
+
+- **The curve is not ours and the credit is not decoration**: it is a
+  `#つぶやきProcessing` sketch by @yuruyurau (full attribution, including the
+  original one-line source, at the top of `lib/screensaver/coil.ts`). The on-screen
+  credit line (`.credit`) is the licence to use it — do not remove it, and if the
+  curve is ever swapped for another, swap the credit with it.
+- **It must render LAST in `__root.tsx`** — after `UnionJackCursor` and
+  `AppSplash`. All three sit at z-index 2147483647, so DOM order is the only
+  thing that puts the screensaver over the custom cursor.
+- **The bokeh field is driven by ONE number per highlight**: its depth. `|depth|`
+  is the circle of confusion, so it sets the disc radius; brightness is the same
+  light spread over that disc, so it follows inversely; and the sign decides
+  whether the highlight draws over the coil or under it. Don't animate radius,
+  alpha and layer separately — they are one piece of physics, and splitting them
+  is what makes bokeh read as three unrelated effects. The discs are pre-rendered
+  sprites (`bokehSprites`) blitted per frame: building a radial gradient per
+  highlight per frame is the obvious version and it is much slower. Colours come
+  from `coil.ts`'s own exported stops, so the field can't drift from the creature.
+- **The dark theme's red tentacles are a two-pass draw**: `sampleCoil` emits each
+  sample's `spread` (its offset from the spine, which is exactly `|q|`), and the
+  renderer paints body then strands with one `fillStyle` each — 10k dots either
+  way. It only stays flicker-free because the share above `TENTACLE_SPREAD` holds
+  steady across the whole cycle; `coil.test.ts` locks that, so retuning the
+  threshold fails loudly if it starts pulsing.
+- **The wordmark lands ON the header logo, pixel for pixel** (verified 0px delta at
+  1440 and 900 wide): the overlay repeats Header.tsx's nesting and classes —
+  `px-4` › `.page-wrap py-3 sm:py-4` › `inline-flex px-3 py-1.5` › `h-6 sm:h-8`.
+  That is the whole effect: the app dissolves and the logo appears to stay put. Its
+  horizontal placement can't drift (both use the shared `.page-wrap`), but the
+  paddings and heights are mirrored classes — change them in Header.tsx and change
+  them here too. `html[data-desktop]` drops the row below the 46px title bar, where
+  the web header is hidden and there is no logo to hold position with.
+- **`FADE_OUT_MS` (ScreenSaver.tsx) must equal `.leaving`'s
+  `transition-duration`** (ScreenSaver.module.css): it's how long the overlay
+  stays mounted after waking. Shorter and the fade-out is cut off mid-way.
+- **The 6px drift threshold applies in BOTH directions**, and neither side may be
+  dropped. Going idle: movement is measured from an `anchor` (the last position
+  that counted as activity), not from the previous event, so sensor jitter under a
+  resting hand can't hold the countdown open forever while a slow real drag still
+  accumulates past it. Waking: measured from the position the pointer rested at
+  when the screensaver took over. If there is no such position — clicks never
+  record one, and the browser dispatches a move at *unchanged* coordinates to
+  recompute hover when the overlay appears under a resting cursor — the first move
+  only sets the reference and does NOT wake. Real movement clears the threshold on
+  the next event milliseconds later; making that first move wake instead meant the
+  screensaver flashed on and vanished forever for anyone who only ever clicks.
+- **The waking gesture belongs to the screensaver, not the app**: `useIdle`
+  swallows it (`SWALLOW_ON_WAKE` — keydown/pointerdown/wheel) with
+  `stopImmediatePropagation` + `preventDefault`, or the keystroke that dismisses
+  the screensaver also reaches the app's global key handlers and wipes the search
+  query or activates the highlighted result. Capture phase beats every bubble
+  handler, but NOT a window-capture listener registered earlier — `useSearchShortcut`
+  is one, so it checks `screenSaverHoldsWindow()` itself. Any future global key
+  handler registered in window capture needs the same guard.
+- **The overlay must not take pointer events until the dissolve finishes**
+  (`held`, FADE_IN_MS): for its first second the page underneath is still readable
+  and still what the user is aiming at, so a click then has to reach the app. It
+  wakes the screensaver on the way through and the fade reverses.
+- **The activity listener is the hot path** (every `pointermove`): it writes one
+  timestamp, and `check` re-arms itself for the remainder. Do NOT convert it back
+  to clearTimeout/setTimeout per event.
+- **`scroll` is deliberately not an activity event** — the back-nav scroll
+  restore fires it programmatically and would reset the timer on its own.
+- **`isDesktopPreview()` gate in `useIdle`**: the /download preview iframes are
+  `inert`, so they receive no input and would idle instantly.
+- **It runs ON the page's backdrop, it does not paint one**: the canvas keeps its
+  alpha, and `html[data-screensaver='on'|'off']` fades `body`'s *children* out
+  from under it. That works only because the backdrop — body's glow gradients and
+  the fixed grid/dot layers — lives on `body` and its **pseudo-elements**, which
+  are not children. Two consequences: the fade must use `opacity` (never
+  `display`/`visibility`, or body collapses and takes the gradients, sized to its
+  height, with it), and the rule must keep excluding the overlay itself via
+  `:not([data-screensaver])`. The attribute carries `on`/`off` rather than being
+  a bare flag so the un-fade has a state to transition back to, and it is cleared
+  on unmount, not on wake.
+- **Desktop is a three-hop round trip**: `setScreenSaver` → main → the title bar's
+  `html.screensaver` class (its `#root` fades AND goes `pointer-events: none`,
+  since opacity alone leaves every invisible button clickable — top-right on
+  Windows/Linux is Close) + `setWindowButtonVisibility` on macOS. Main also hides
+  the tooltip view and refuses to re-show it, since that view is separate again
+  and never gets the fade.
+- **Coming back the other way, `reportChromeInput` forwards ALWAYS, not just while
+  the screensaver is up**: the bar is a separate WebContentsView and main
+  `preventDefault`s the app's shortcuts before they reach the renderer, so a user
+  working entirely from the chrome registers as idle and gets the app dissolved out
+  from under them. It carries a `deliberate` flag (`DELIBERATE_INPUT`) because
+  Electron's `input-event` fires for `mouseMove` too — forwarding that as a wake
+  bypassed the drift threshold and made the screensaver dismiss itself on a pixel
+  of drift in the title-bar strip. Non-deliberate input counts as presence only.
+- **The two halves ship on different cadences**, so `useIdle` gates on the
+  capability (`typeof ssDesktop?.setScreenSaver === 'function'`), never on
+  `isSponsorSearchDesktop`. The web app deploys continuously to the URL every
+  installed shell loads; a shell that predates the bridge would otherwise take the
+  60s desktop timeout with an opaque title bar over the coil and no way to wake it.
+- Main clears the state on the site view's `render-process-gone` (a dead renderer
+  would leave the window buttons hidden with no way back), re-sends it on
+  `titlebar:ready` (a bar that reloads mid-screensaver returns opaque otherwise),
+  and guards `isDestroyed` — it is reachable during teardown. Both bridge methods
+  are optional in `desktop.d.ts` (older shells predate them).

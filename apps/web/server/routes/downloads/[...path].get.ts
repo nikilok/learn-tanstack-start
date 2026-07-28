@@ -5,8 +5,10 @@
  * desktop_downloads (fire-and-forget) and 302-redirects to the Vercel Blob
  * object that backs it, so the browser streams straight from the CDN under our
  * own domain. The `latest/` feed path (electron-updater channel files + updater
- * installers) redirects the same way but is NOT logged — those are update
- * checks/auto-updates, not user-initiated downloads.
+ * installers) redirects the same way but is NOT written to desktop_downloads —
+ * those are update checks/auto-updates, not user-initiated downloads. They
+ * instead emit an `[updater] …` runtime log line (see server/utils/updaterLog),
+ * which is how update activity is filtered and retained on Vercel.
  *
  * Not cached (no-store) so every hit reaches the function to log and so the
  * updater always resolves the freshest `latest/` object; the file bytes
@@ -28,6 +30,8 @@ import { defineEventHandler } from 'h3';
 import { DESKTOP_FORMATS, DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
 import { db } from '#/db.server';
 
+import { APP_VERSION_HEADER, updaterLogLine } from '../../utils/updaterLog';
+
 const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
 const INSTALLER_EXT = new RegExp(`\\.(${DESKTOP_FORMATS.join('|')})$`, 'i');
 
@@ -42,6 +46,19 @@ export default defineEventHandler((event) => {
   if (!path || path.includes('..')) {
     return new Response(null, { status: 400 });
   }
+
+  // Feed hits never reach desktop_downloads, so this line is the only durable
+  // record of an auto-update. Synchronous by design: it is one console.log on a
+  // route that sees a few hundred hits a week, and waitUntil would risk losing
+  // it if the redirect ends the invocation first.
+  const updaterLine = updaterLogLine({
+    path,
+    userAgent: event.req.headers.get('user-agent'),
+    appVersion: event.req.headers.get(APP_VERSION_HEADER),
+    country: event.req.headers.get('x-vercel-ip-country'),
+    range: event.req.headers.get('range'),
+  });
+  if (updaterLine) console.log(updaterLine);
 
   const segments = path.split('/');
   const [platform, guid, version, file] = segments;

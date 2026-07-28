@@ -20,6 +20,11 @@ let feedBase = ''; // <appUrl>/downloads/latest — set in initAutoUpdates
 let downloadUrl = ''; // <appUrl>/download — set in initAutoUpdates
 let installRequested = false; // install failures only surface via the 'error' event
 
+// electron-updater sends a fixed 'electron-builder' UA with no version, so the
+// feed cannot tell which version a machine is updating FROM. This header carries
+// it. Mirrored as APP_VERSION_HEADER in apps/web/server/utils/updaterLog.ts.
+const APP_VERSION_HEADER = 'x-app-version';
+
 /** The pending update, if any — single source of truth for the toast and its action. */
 export function getPendingUpdate(): PendingUpdate | null {
   return pending;
@@ -71,7 +76,10 @@ async function checkManualUpdate(
     const res = await fetch(`${feedBase}/latest-linux.yml`, {
       cache: 'no-store',
       // Explicit app UA (no 'Electron' token) so the feed request is a known-good identity, not a bot suspect.
-      headers: { 'User-Agent': `SponsorSearchDesktop/${app.getVersion()}` },
+      headers: {
+        'User-Agent': `SponsorSearchDesktop/${app.getVersion()}`,
+        [APP_VERSION_HEADER]: app.getVersion(),
+      },
     });
     if (!res.ok) {
       console.error('[updater] linux feed check failed:', res.status);
@@ -119,6 +127,15 @@ export function initAutoUpdates(
     setInterval(() => void checkManualUpdate(onUpdateReady), CHECK_INTERVAL_MS);
     return;
   }
+
+  // Every feed request (poll and installer fetch) then carries the version being
+  // updated from, which is what makes an update distinguishable from a download
+  // in the server logs. Merged with electron-updater's own headers, so the
+  // 'electron-builder' UA the feed keys on is unchanged.
+  autoUpdater.requestHeaders = {
+    ...autoUpdater.requestHeaders,
+    [APP_VERSION_HEADER]: app.getVersion(),
+  };
 
   autoUpdater.on('error', (err) => {
     console.error('[updater]', err);

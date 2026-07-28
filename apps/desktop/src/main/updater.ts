@@ -1,6 +1,7 @@
 import { app, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
+import { APP_VERSION_HEADER } from './feed';
 import { isNewer } from './version';
 
 // Long-running apps re-check on this cadence; the launch check fires immediately.
@@ -19,11 +20,6 @@ let pending: PendingUpdate | null = null;
 let feedBase = ''; // <appUrl>/downloads/latest — set in initAutoUpdates
 let downloadUrl = ''; // <appUrl>/download — set in initAutoUpdates
 let installRequested = false; // install failures only surface via the 'error' event
-
-// electron-updater sends a fixed 'electron-builder' UA with no version, so the
-// feed cannot tell which version a machine is updating FROM. This header carries
-// it. Mirrored as APP_VERSION_HEADER in apps/web/server/utils/updaterLog.ts.
-const APP_VERSION_HEADER = 'x-app-version';
 
 /** The pending update, if any — single source of truth for the toast and its action. */
 export function getPendingUpdate(): PendingUpdate | null {

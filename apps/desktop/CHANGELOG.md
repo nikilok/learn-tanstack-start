@@ -8,7 +8,7 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
-- **Update checks include your app version** — when SponsorSearch checks for a new release it now sends the version you are running, so we can see which versions update cleanly and which get stuck on an old build. It goes into our server logs along with the request, is deleted with them, and is not tied to any account. Nothing about how updates work has changed.
+- **Update checks include your app version** — when SponsorSearch checks for or downloads a new release it now sends the version you are running, so we can see which versions update cleanly and which get stuck on an old build. It goes into our server logs along with the request, is deleted with them, and is not tied to any account. Nothing about how updates work has changed.
 
 ## v0.4.0 — 2026-07-28
 

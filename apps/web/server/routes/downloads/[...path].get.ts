@@ -30,7 +30,11 @@ import { defineEventHandler } from 'h3';
 import { DESKTOP_FORMATS, DESKTOP_PLATFORMS } from '#/api/desktopPlatforms';
 import { db } from '#/db.server';
 
-import { APP_VERSION_HEADER, updaterLogLine } from '../../utils/updaterLog';
+import {
+  APP_VERSION_HEADER,
+  normalizeCountry,
+  updaterLogLine,
+} from '../../utils/updaterLog';
 
 const PLATFORMS = new Set<string>(DESKTOP_PLATFORMS);
 const INSTALLER_EXT = new RegExp(`\\.(${DESKTOP_FORMATS.join('|')})$`, 'i');
@@ -47,15 +51,19 @@ export default defineEventHandler((event) => {
     return new Response(null, { status: 400 });
   }
 
-  // Feed hits never reach desktop_downloads, so this line is the only durable
-  // record of an auto-update. Synchronous by design: it is one console.log on a
-  // route that sees a few hundred hits a week, and waitUntil would risk losing
-  // it if the redirect ends the invocation first.
+  const rawCountry = event.req.headers.get('x-vercel-ip-country');
+
+  // Feed hits never reach desktop_downloads, so this line is the only record of
+  // an auto-update. Emitted inline rather than via waitUntil because it is a
+  // single console.log with nothing to await — waitUntil exists to keep async
+  // post-response work alive (see the DB write below) and buys nothing here.
+  // Only recognised feed artifacts produce a line, so an arbitrary path under
+  // latest/ cannot mint them at request rate.
   const updaterLine = updaterLogLine({
     path,
     userAgent: event.req.headers.get('user-agent'),
     appVersion: event.req.headers.get(APP_VERSION_HEADER),
-    country: event.req.headers.get('x-vercel-ip-country'),
+    country: rawCountry,
     range: event.req.headers.get('range'),
   });
   if (updaterLine) console.log(updaterLine);
@@ -77,12 +85,9 @@ export default defineEventHandler((event) => {
     PLATFORMS.has(platform) &&
     INSTALLER_EXT.test(file)
   ) {
-    const rawCountry = event.req.headers.get('x-vercel-ip-country');
-    // country is varchar(2) — an oversized/malformed header must not abort the insert.
-    const country =
-      rawCountry && /^[A-Za-z]{2}$/.test(rawCountry)
-        ? rawCountry.toUpperCase()
-        : null;
+    // country is varchar(2) — an oversized/malformed header must not abort the
+    // insert. Shared with the log line above so the two can never disagree.
+    const country = normalizeCountry(rawCountry);
     waitUntil(
       (async () => {
         const [row] = await db

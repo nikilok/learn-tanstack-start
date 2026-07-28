@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+- **Update checks include your app version** — when SponsorSearch checks for or downloads a new release it now sends the version you are running, so we can see which versions update cleanly and which get stuck on an old build. It goes into our server logs along with the request, is deleted with them, and is not tied to any account. Nothing about how updates work has changed.
+
 ## v0.4.0 — 2026-07-28
 
 - **Screensaver** — leave SponsorSearch alone for a minute and the app dissolves away, leaving its own backdrop behind with a slow drifting coil of particles on top: blue through violet on the dark theme, with the brand red running out along its tentacles, and the full amber-to-blue rail spectrum on the light one. Points of light wander through the scene around it, blooming and sharpening as they drift through focus. The curve itself is a tweet-length Processing sketch by @yuruyurau, credited on screen. The title bar and window buttons step aside so it has the whole window to itself. Move the mouse or press any key and you are straight back where you were.

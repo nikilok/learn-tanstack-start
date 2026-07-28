@@ -1,6 +1,7 @@
 import { app, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
+import { APP_VERSION_HEADER } from './feed';
 import { isNewer } from './version';
 
 // Long-running apps re-check on this cadence; the launch check fires immediately.
@@ -71,7 +72,10 @@ async function checkManualUpdate(
     const res = await fetch(`${feedBase}/latest-linux.yml`, {
       cache: 'no-store',
       // Explicit app UA (no 'Electron' token) so the feed request is a known-good identity, not a bot suspect.
-      headers: { 'User-Agent': `SponsorSearchDesktop/${app.getVersion()}` },
+      headers: {
+        'User-Agent': `SponsorSearchDesktop/${app.getVersion()}`,
+        [APP_VERSION_HEADER]: app.getVersion(),
+      },
     });
     if (!res.ok) {
       console.error('[updater] linux feed check failed:', res.status);
@@ -119,6 +123,15 @@ export function initAutoUpdates(
     setInterval(() => void checkManualUpdate(onUpdateReady), CHECK_INTERVAL_MS);
     return;
   }
+
+  // Every feed request (poll and installer fetch) then carries the version being
+  // updated from, which is what makes an update distinguishable from a download
+  // in the server logs. Merged with electron-updater's own headers, so the
+  // 'electron-builder' UA the feed keys on is unchanged.
+  autoUpdater.requestHeaders = {
+    ...autoUpdater.requestHeaders,
+    [APP_VERSION_HEADER]: app.getVersion(),
+  };
 
   autoUpdater.on('error', (err) => {
     console.error('[updater]', err);

@@ -77,14 +77,38 @@
   animation: mark-in 1200ms ease both;
 }
 
-/* Credit for the curve itself, which is @yuruyurau's, not ours — see the attribution
-   block at the top of lib/screensaver/coil.ts. Set like a plate caption at the foot of
-   the frame: tiny, mono, and last to arrive. Do not remove it. */
-.credit {
+/* Title and credit are set like the plate beside a picture: name above, caption below,
+   centred at the foot of the frame. One stack, so the pair can never drift apart. */
+.plate {
   position: absolute;
   left: 50%;
   bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+/* Names the piece. Sans against the caption's mono, and a step up in both size and ink,
+   so the hierarchy holds at these sizes — 13px vs 10px alone would read as a wobble. */
+.title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: var(--sea-ink-soft);
+  opacity: 0.7;
+  animation: mark-in 1400ms ease 700ms both;
+}
+
+/* Credit for the curve itself, which is @yuruyurau's, not ours — see the attribution
+   block at the top of lib/screensaver/coil.ts. Tiny, mono, and last to arrive.
+   Do not remove it. */
+.credit {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -92,7 +116,7 @@
   white-space: nowrap;
   color: var(--sea-ink-faint);
   opacity: 0.55;
-  animation: mark-in 1400ms ease 800ms both;
+  animation: mark-in 1400ms ease 900ms both;
 }
 
 /* No `to` — the implicit end is each rule's own opacity, so they can't drift apart. */
@@ -108,6 +132,7 @@
     transition-duration: 320ms;
   }
   .mark,
+  .title,
   .credit {
     animation: none;
   }

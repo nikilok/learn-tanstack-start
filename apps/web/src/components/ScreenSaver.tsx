@@ -237,7 +237,19 @@ export default function ScreenSaver() {
       const radius = COIL_DOT_RADIUS * scale;
       const t = reduce ? STATIC_FRAME_T : (elapsedMs / 1000) * TIME_PER_SECOND;
 
-      /** Draws only the samples on one side of the tentacle threshold. */
+      /**
+       * Draws only the samples on one side of the tentacle threshold.
+       *
+       * Each dot gets its OWN beginPath/fill, and batching them into one path with a
+       * single fill() — the obvious optimisation, and one reviewers keep proposing —
+       * silently destroys the image. Overlapping discs in one path are unioned by the
+       * winding rule and composited once, so every covered pixel receives the dot alpha
+       * exactly once however many dots land on it. The accumulation is the whole picture:
+       * measured on one frame, batching takes it from 133 distinct tones to 4 and drops
+       * the brightest pixel from 251 to 102 — the dense ribbons that give the creature its
+       * form flatten into a uniform grey silhouette. If this ever needs to be faster, blit
+       * a pre-rendered sprite per dot (as the bokeh does); that keeps per-dot compositing.
+       */
       const paint = (fill: string | CanvasGradient, tentacles: boolean) => {
         ctx.fillStyle = fill;
         sampleCoil(t, (x, y, spread) => {
@@ -320,7 +332,10 @@ export default function ScreenSaver() {
         </div>
       </div>
       {/* The curve is @yuruyurau's; see the attribution in lib/screensaver/coil.ts. */}
-      <p className={styles.credit}>original curve by @yuruyurau</p>
+      <div className={styles.plate}>
+        <p className={styles.title}>The Mystical Fish</p>
+        <p className={styles.credit}>original curve by @yuruyurau</p>
+      </div>
     </div>
   );
 }

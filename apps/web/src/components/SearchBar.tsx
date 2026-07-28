@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
+import { shouldAutoFocusSearch } from '../lib/search/autofocus';
+import { loadStoredFilters } from '../lib/search/persist';
 import { isDesktopPreview } from '../utils/desktop-preview';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
@@ -19,6 +21,7 @@ import styles from './SearchBar.module.css';
  * scrolling a nameless filtered listing collapses the input to a pill with a
  * blinking I-beam, so a phrase can still be typed on top of the filters
  * (classic mode never reaches stuck-while-empty: that state is the hero page).
+ * Autofocus is the hero's alone — `shouldAutoFocusSearch` holds the rules.
  */
 export default function SearchBar({
   search,
@@ -46,6 +49,10 @@ export default function SearchBar({
   onBlur: () => void;
 }) {
   const showPill = isStuck && !pillClicked && (!!search || filtersActive);
+  // Read the store rather than trusting `filtersActive`: on the hydration mount
+  // that prop is false for SSR parity and the rehydrate navigate lands one
+  // effect too late — SearchInput's focus effect has already run by then.
+  const [storedFilterMode] = useState(() => loadStoredFilters() != null);
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
   const placeholder = useRotatingPlaceholder(shortcut, !!search);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
@@ -94,8 +101,12 @@ export default function SearchBar({
       >
         <SearchInput
           inputRef={inputRef}
-          // Never autofocus inside the /download preview iframe — it would steal the parent page's focus.
-          autoFocus={!isStuck && search.length < 3 && !isDesktopPreview()}
+          autoFocus={shouldAutoFocusSearch({
+            isStuck,
+            search,
+            filterMode: filtersActive || storedFilterMode,
+            isPreview: isDesktopPreview(),
+          })}
           focus={pillClicked}
           defaultValue={search}
           onChange={onSearch}

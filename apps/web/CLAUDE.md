@@ -109,6 +109,21 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   reset (`onBlur`) requires `isStuck=true`. Pill never shows. `onActivate` must be
   conditional on `isStuckRef.current` instead.
 
+### Autofocus belongs to the empty hero only
+
+`shouldAutoFocusSearch` (`lib/search/autofocus.ts`, locked by tests) is the whole rule
+and SearchBar is its only caller. Filter mode never autofocuses: a nameless filtered
+listing is already an answer, so claiming focus there raises the mobile keyboard over
+the results the user came to read.
+
+That gate cannot read `filtersActive` alone. On the hydration mount the prop is false by
+construction (SSR parity — see `pendingStoredFilters` in `routes/index.tsx`) and the
+rehydrate navigate lands an effect later, while SearchInput's focus effect — a child's —
+runs first. So SearchBar reads `loadStoredFilters()` itself in a lazy `useState`
+(once per mount, never on the keystroke path) and ORs it in. Keep that read separate
+from the `filtersActive` prop: widening the prop to include it would change the markup
+`HmrcResults` renders on the hydration mount and reintroduce a mismatch.
+
 ### `isStuck = false` must be debounced
 
 When results reload, the page height changes (content → skeletons → new content) and can
@@ -466,9 +481,9 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   routeRule): `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Reverting
   to DENY/'none' blanks the preview; cross-site embedding is still blocked.
 - **Focus-stealing needs BOTH guards**: the iframe is `inert` AND SearchBar gates
-  `autoFocus` on `!isDesktopPreview()`. Don't drop either — `inert` propagation
-  into iframes has browser variance, and an ungated autofocus yanks focus (and
-  scroll) from /download on load.
+  `autoFocus` on `!isDesktopPreview()` (via `shouldAutoFocusSearch`). Don't drop
+  either — `inert` propagation into iframes has browser variance, and an ungated
+  autofocus yanks focus (and scroll) from /download on load.
 - **The iframe mounts deferred** (`frameReady` in Preview.tsx: window `load`
   event — with a 4s safety net — then `requestIdleCallback`, setTimeout on
   Safari) so the second app copy doesn't compete with /download's own boot.

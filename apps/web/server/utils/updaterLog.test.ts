@@ -125,6 +125,38 @@ describe('parseFeedRequest', () => {
     expect(parseFeedRequest('latest/robots.txt')).toBeNull();
     expect(parseFeedRequest('latest/index.html')).toBeNull();
   });
+
+  test('requires a real artifact extension, not just the name prefix', () => {
+    // The prefix alone matched `SponsorSearch-win-0.4.0-<anything>`, so any
+    // string carrying a released-looking version logged as a download.
+    expect(
+      parseFeedRequest('latest/SponsorSearch-win-0.4.0-not-an-artifact'),
+    ).toBeNull();
+    expect(parseFeedRequest('latest/SponsorSearch-win-0.4.0-x')).toBeNull();
+    expect(
+      parseFeedRequest('latest/SponsorSearch-win-0.4.0-x64-user.exe.bak'),
+    ).toBeNull();
+  });
+
+  test('accepts every extension the feed actually carries', () => {
+    // upload-release.ts's isFeedArtifact mirrors these into downloads/latest/:
+    // mac .zip, win -user.exe, linux .AppImage, plus a .blockmap on any of them.
+    for (const file of [
+      'SponsorSearch-mac-0.4.0-arm64.zip',
+      'SponsorSearch-win-0.4.0-x64-user.exe',
+      'SponsorSearch-linux-0.4.0-x86_64.AppImage',
+      'SponsorSearch-linux-0.4.0-amd64.deb',
+      'SponsorSearch-mac-0.4.0-universal.dmg',
+    ]) {
+      expect(parseFeedRequest(`latest/${file}`)).toMatchObject({
+        event: 'download',
+        version: '0.4.0',
+      });
+    }
+    expect(
+      parseFeedRequest('latest/SponsorSearch-win-0.4.0-x64-user.exe.blockmap'),
+    ).toMatchObject({ event: 'blockmap', version: '0.4.0' });
+  });
 });
 
 describe('classifyClient', () => {

@@ -19,6 +19,7 @@
  * only reads headers and calls `updaterLogLine`.
  */
 import {
+  DESKTOP_FORMATS,
   DESKTOP_PLATFORMS,
   type DesktopPlatform,
 } from '#/api/desktopPlatforms';
@@ -44,6 +45,12 @@ const CHANNEL = /^latest(-mac|-linux(?:-[a-z0-9_]+)?)?\.yml$/;
 /** Installer/blockmap names are `SponsorSearch-<platform>-<version>-<arch>[-scope].<ext>` (apps/desktop/electron-builder.yml `artifactName`, whose prefix is its `productName` — rename that and this stops matching). A prerelease tag is dropped, never mistaken for the arch. */
 const ARTIFACT = new RegExp(
   `^SponsorSearch-(${DESKTOP_PLATFORMS.join('|')})-(\\d+\\.\\d+\\.\\d+)-`,
+);
+
+/** The prefix alone would accept `SponsorSearch-win-0.4.0-anything`, so a real extension is required too. `zip` is the mac updater package, which is not a page installer and so is absent from DESKTOP_FORMATS; a new *target* format has to be added there. The arch is deliberately NOT pinned — electron-builder's arch tokens drift (arm64/x64/universal/amd64/x86_64/aarch64) and pinning them would silently stop logging real downloads. */
+const FEED_EXT = new RegExp(
+  `\\.(?:${[...DESKTOP_FORMATS, 'zip'].join('|')})(?:\\.blockmap)?$`,
+  'i',
 );
 
 /** A plausible feed filename. Validates rather than strips: stripping would normalise a crafted path onto a real channel name and log a check that never happened, and the charset already excludes every log-injection separator. */
@@ -110,7 +117,7 @@ export function parseFeedRequest(path: string): UpdaterFeedRequest | null {
   // (crawlers reach this path constantly); logging it would mint `download`
   // lines at request rate for names that were never released.
   const artifact = ARTIFACT.exec(file);
-  if (!artifact) return null;
+  if (!artifact || !FEED_EXT.test(file)) return null;
 
   return {
     event: file.endsWith('.blockmap') ? 'blockmap' : 'download',

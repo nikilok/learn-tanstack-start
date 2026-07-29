@@ -1,3 +1,9 @@
 reviews:
   path_filters:
     - '!apps/web/public/sitemap*.xml'
+    # Drizzle emits these verbatim from `bun run db:generate` and they are never
+    # hand-edited, so reviewing them is pure noise — 0040_snapshot.json alone was
+    # 1,558 of PR #318's 3,446 added lines. The migration .sql files are NOT
+    # excluded: those are hand-edited (0040 gained IF NOT EXISTS guards) and are
+    # the DDL that actually runs.
+    - '!packages/db/migrations/meta/**'

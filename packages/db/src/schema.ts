@@ -10,6 +10,7 @@ import {
   pgTable,
   primaryKey,
   serial,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -411,5 +412,51 @@ export const desktopDownloads = pgTable(
         table.day,
       ],
     }),
+  ],
+);
+
+// Discovered company website, one row per company number. `evidence` is the
+// upgrade-only ladder in apps/web/src/lib/websites/decide.ts, and
+// `status='candidate'` IS the review backlog (no separate queue table).
+// `checked_at` is the sweep cursor: selection LEFT JOINs this table and orders
+// ASC NULLS FIRST, so a company with no row yet sorts first and
+// discovery/refresh are the same pass.
+//
+// RENDER GATE: `status = 'verified' AND checked_at IS NOT NULL`, never status
+// alone. status answers "whose site is this" — for a registry row that is an
+// exact company-number join, and it is sound. It says nothing about whether the
+// URL still resolves, and registry data rots badly: measured over 150 imported
+// sponsor URLs on 2026-07-29, only 74% responded (CQC 71.5%, Wikidata 90%), the
+// rest split between dead domains, timeouts and TLS name mismatches. The
+// importer therefore leaves checked_at NULL, and only the sweep that has
+// actually fetched a URL stamps it. Rendering on status alone puts a broken
+// link on roughly one company page in four.
+// Deliberately NOT foreign-keyed to companies_house_profiles, matching
+// hmrc_company_mapping.company_number — a company can be mapped before its
+// profile is fetched, and the generated FK name would exceed Postgres' 63-byte
+// identifier limit (the trap migration 0034 had to undo).
+export const companyWebsites = pgTable(
+  'company_websites',
+  {
+    companyNumber: varchar('company_number', { length: 20 }).primaryKey(),
+    // Canonical origin (scheme + host), null when status='none'.
+    url: text('url'),
+    // 'pending' | 'verified' | 'candidate' | 'none' | 'dead'
+    status: varchar('status', { length: 16 }).notNull(),
+    evidence: varchar('evidence', { length: 24 }).notNull(),
+    // Page the proof was found on — often /terms or /contact, not the homepage.
+    evidenceUrl: text('evidence_url'),
+    confidence: numeric('confidence', { precision: 4, scale: 3 }),
+    source: varchar('source', { length: 24 }).notNull(),
+    // Top search results retained for review, mirrors ch_search_results_top5.
+    candidates: jsonb('candidates'),
+    failureCount: smallint('failure_count').notNull().default(0),
+    checkedAt: timestamp('checked_at'),
+    verifiedAt: timestamp('verified_at'),
+    discoveredAt: timestamp('discovered_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_company_websites_cursor').on(table.checkedAt.asc().nullsFirst()),
+    index('idx_company_websites_status').on(table.status),
   ],
 );

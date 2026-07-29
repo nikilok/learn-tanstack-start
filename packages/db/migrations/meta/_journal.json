@@ -281,6 +281,13 @@
       "when": 1785079149920,
       "tag": "0039_white_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1785326925401,
+      "tag": "0040_real_smasher",
+      "breakpoints": true
     }
   ]
 }

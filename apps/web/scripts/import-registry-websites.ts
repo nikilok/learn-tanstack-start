@@ -52,7 +52,10 @@ import {
   statusForEvidence,
   upgradeOnlyPredicateSql,
 } from '../src/lib/websites/decide.ts';
-import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
+import {
+  isSameSite,
+  normaliseWebsiteUrl,
+} from '../src/lib/websites/normalise-url.ts';
 import {
   namesAreCompatible,
   normaliseCompanyNumber,
@@ -441,7 +444,18 @@ for (const finding of findings) {
     continue;
   }
 
-  const status = statusForEvidence(evidence);
+  // A liveness verdict survives an identity upgrade on the SAME url. Without
+  // this, a row the sweep proved unreachable was silently restored to
+  // 'verified' by an evidence promotion — and because checked_at is only
+  // cleared when the url changes, it satisfied the render gate immediately and
+  // republished a link the sweep had just established does not work.
+  const priorLiveness =
+    prior &&
+    (prior.status === 'unreachable' || prior.status === 'dead') &&
+    isSameSite(prior.url, finding.url)
+      ? (prior.status as WebsiteStatus)
+      : null;
+  const status = priorLiveness ?? statusForEvidence(evidence);
   writes.set(finding.companyNumber, {
     companyNumber: finding.companyNumber,
     url: finding.url,

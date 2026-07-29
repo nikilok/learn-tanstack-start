@@ -31,6 +31,7 @@ const result = (over: Partial<RevalidateResult> = {}): RevalidateResult => ({
   checkedAt: true,
   verified: true,
   live: true,
+  hostAnswered: true,
   note: '',
   ...over,
 });

@@ -64,16 +64,17 @@ function decodeEntities(text: string): string {
  */
 function visibleText(html: string): string {
   const stripped = html
-    // The `|$` alternatives are load-bearing, not defensive padding: web-fetch
-    // truncates a response at 2MB, so a page whose analytics blob straddles the
-    // cap arrives with an opening <script> and no closing tag. Without the
-    // end-of-input fallback that tag falls through to the generic tag strip and
-    // the entire script body becomes candidate text — which is exactly the
-    // analytics-id false positive this function exists to prevent, and a
-    // crn_on_page promotion off one is permanent.
+    // Comments FIRST. Running the script strip first meant a commented-out
+    // `<!-- <script src=x> -->` was read as a real opening tag, and its `|$`
+    // fallback then swallowed the entire rest of the document — including the
+    // footer where UK trading disclosures live, so the company number read as
+    // absent and, probing being first-pass-only, was never re-tested.
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '\n')
+    // The `|$` alternatives handle web-fetch's 2MB truncation, which can end a
+    // response mid-script; without them the unclosed body survives as visible
+    // text and an analytics id reads as a company number.
     .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '\n')
     .replace(/<style\b[^>]*>[\s\S]*?(?:<\/style>|$)/gi, '\n')
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, '\n')
     // Inline elements do not interrupt a line, so they leave nothing behind:
     // `<strong>0326</strong>0168` reads as one number to a person and must to
     // us. Every other tag is a line break, which is what stops `M1</p><p>1AE`
@@ -145,10 +146,25 @@ export function pageHasCompanyNumber(
  * sites that omit the number. Compared with whitespace removed, since
  * "SW1A 1AA", "SW1A1AA" and "sw1a  1aa" are one postcode.
  */
+/**
+ * A UK postcode: one or two letters, digits, an optional letter, then the
+ * three-character inward code. Only these are distinctive enough to serve as
+ * identity evidence.
+ */
+const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/;
+
 export function pageHasPostcode(html: string, postcode: string): boolean {
   const needle = postcode.replace(/\s+/g, '').toUpperCase();
   // Below this a "postcode" is too short to be distinctive enough to trust.
   if (needle.length < 5) return false;
+  // Non-UK postcodes are refused outright rather than matched loosely. The
+  // `length - 3` split below assumes the UK inward code, so a French '92400'
+  // became the pattern `92 ?400` — matching any standalone 92400 on the page, a
+  // price or a part number. Verified against prod: 82 profiles carry an
+  // all-digit postcode and 346 sweepable rows a 5-character one, and one
+  // coincidence is enough to promote a candidate row to the verified floor and
+  // publish an unconfirmed link.
+  if (!UK_POSTCODE.test(needle)) return false;
 
   // Whitespace is COLLAPSED, never removed. Removing it page-wide let a needle
   // be assembled from fragments that are never adjacent to a reader: with

@@ -35,6 +35,10 @@ const MAX_BYTES = 2_000_000;
 /** Redirect hops we will follow ourselves. Node's own follower cannot be used
  *  because it re-issues the request without re-running our guards. */
 const MAX_REDIRECTS = 5;
+/** Redirect hops followed for robots.txt, guarded the same way. */
+const ROBOTS_REDIRECTS = 3;
+/** Gap between variant attempts against the same host. */
+const VARIANT_DELAY_MS = 400;
 
 export type FetchFailure =
   | 'http_error'
@@ -78,18 +82,41 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
       robotsCache.set(origin, rules);
       return rules;
     }
-    const res = await fetch(target.href, {
-      headers: { 'user-agent': USER_AGENT },
-      signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
-      redirect: 'manual',
-    });
-    const type = res.headers.get('content-type') ?? '';
-    // An HTML "404 page" served with 200 is not a robots.txt. A redirect is not
-    // followed: robots.txt is defined for the origin it was requested from.
-    if (res.ok && !/html/i.test(type)) {
-      rules = parseRobots(await readCapped(res), ROBOTS_AGENT);
-    } else {
-      await res.body?.cancel();
+    // Follow redirects by hand, guarding each hop. Refusing to follow at all
+    // meant a canonical-host 301 on /robots.txt left us with empty rules — a
+    // site that had banned us by name was crawled anyway, because every
+    // non-ideal outcome fell through to "no restrictions".
+    let current = target;
+    let body: string | null = null;
+    for (let hop = 0; hop <= ROBOTS_REDIRECTS; hop++) {
+      if ((await resolveHost(current.hostname)) !== 'public') break;
+      const res = await fetch(current.href, {
+        headers: { 'user-agent': USER_AGENT },
+        signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
+        redirect: 'manual',
+      });
+      const location = res.headers.get('location');
+      if (res.status >= 300 && res.status < 400 && location) {
+        await res.body?.cancel();
+        try {
+          current = new URL(location, current);
+        } catch {
+          break;
+        }
+        continue;
+      }
+      if (!res.ok) {
+        await res.body?.cancel();
+        break;
+      }
+      body = await readCapped(res);
+      break;
+    }
+    // Content-type is NOT the test. A framework catch-all serving a perfectly
+    // valid robots.txt as text/html had its rules discarded; what matters is
+    // whether the body parses as robots directives rather than as a web page.
+    if (body !== null && !/^\s*<(?:!doctype|html)/i.test(body)) {
+      rules = parseRobots(body, ROBOTS_AGENT);
     }
   } catch {
     // Unreachable robots.txt is not a reason to refuse the site.
@@ -258,7 +285,13 @@ export type SiteFetch = PageFetch & {
  */
 export async function fetchSite(
   url: string,
-  onAttempt?: (candidate: string) => Promise<void> | void,
+  /** Paced between variant attempts. Defaults to a real delay because the sole
+   *  caller never supplied one, so the gap this is meant to create did not
+   *  exist: a TLS-mismatched host — live, not dead — took up to four page
+   *  requests plus four robots.txt requests inside a second, from a named bot,
+   *  which is exactly the access-log burst the pacing exists to avoid. */
+  onAttempt: (candidate: string) => Promise<void> | void = () =>
+    new Promise((resolve) => setTimeout(resolve, VARIANT_DELAY_MS)),
 ): Promise<SiteFetch> {
   const candidates = urlVariants(url);
   if (candidates.length === 0) {
@@ -276,7 +309,7 @@ export async function fetchSite(
   let attemptedUrl = candidates[0];
 
   for (const candidate of candidates) {
-    if (attempts > 0) await onAttempt?.(candidate);
+    if (attempts > 0) await onAttempt(candidate);
     attempts++;
     attemptedUrl = candidate;
     last = await fetchPage(candidate);

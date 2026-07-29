@@ -129,8 +129,15 @@ async function findDisclosure(
     // business — 665 rows look like `caremark.co.uk/arun`, one franchise of
     // many — so probing the origin spends the whole disclosure budget on the
     // franchisor's pages, which carry the franchisor's registration details.
-    const base = new URL(row.url);
-    const dir = base.pathname.replace(/\/+$/, '');
+    // Probe relative to the URL that ANSWERED, keeping the stored path. Using
+    // row.url outright sent every probe for a variant-adopted row back to the
+    // host that had just failed — guaranteed misses, and because probing is
+    // first-pass-only those rows could never be promoted again. Using the
+    // answering URL outright would instead drop the franchise path that 665
+    // rows depend on, so it is the answering ORIGIN plus the stored directory.
+    const answered = new URL(homepage.url);
+    const dir = new URL(row.url).pathname.replace(/\/+$/, '');
+    const base = answered;
     for (const path of DISCLOSURE_PATHS.slice(0, config.maxDisclosurePaths)) {
       await deps.sleep(config.delayMs);
       summary.disclosureFetches++;
@@ -183,9 +190,14 @@ export async function sweepWebsites(
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
       if (fetched.ok) {
+        // Attribute proof to the URL this row will STORE (the variant we
+        // tried), not to fetched.url which is post-redirect. Otherwise a site
+        // that 301s to an acquirer records evidence_url on the acquirer's
+        // domain while url stays the original — a proof page that does not
+        // belong to the URL it claims to prove.
         const found = await findDisclosure(
           row,
-          { url: fetched.url, html: fetched.html },
+          { url: fetched.attemptedUrl, html: fetched.html },
           config,
           deps,
           summary,
@@ -210,6 +222,13 @@ export async function sweepWebsites(
       if (fetched.ok) {
         summary.live++;
         failureStreak = 0;
+      } else if (result.hostAnswered) {
+        // A host that refused us is still a host that answered, so it says
+        // nothing about our egress. Counting these tripped the breaker on the
+        // 665 same-origin franchise rows, which sit adjacent in the cursor:
+        // one origin blocking us aborted the whole nightly slice and red-failed
+        // the job with a diagnosis pointing at our network.
+        failureStreak = 0;
       } else {
         failureStreak++;
       }
@@ -224,8 +243,7 @@ export async function sweepWebsites(
       // same behaviour a real run would have — including stopping early. Behind
       // the `continue` it never fired at all, and a dry run against a broken
       // runner burned the whole slice's fetches proving nothing.
-      const abort =
-        summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
+      const abort = failureStreak >= SYSTEMIC_FAILURE_STREAK;
       if (abort) {
         summary.systemicAbort = true;
         deps.log(

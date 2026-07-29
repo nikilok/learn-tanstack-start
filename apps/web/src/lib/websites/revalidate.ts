@@ -62,6 +62,10 @@ export type RevalidateResult = {
    *  and is written unconditionally; a success-derived status is computed from
    *  evidence the importer may meanwhile have improved, so it is guarded. */
   live: boolean;
+  /** Whether the HOST responded at all, even though we could not read the URL.
+   *  Distinct from `live`: it does not affect the verdict, but it is how the
+   *  circuit breaker tells a broken runner from sites that are refusing us. */
+  hostAnswered: boolean;
   note: string;
 };
 
@@ -76,34 +80,34 @@ export type RevalidateResult = {
 export const DEAD_AFTER_FAILURES = 2;
 
 /**
- * Failures where the host demonstrably responded and the URL is still sound.
- * Only a connection-level failure is evidence a site has gone.
+ * Failures where the host answered but the stored URL was never actually read.
+ *
+ * These get a NOTE, not an exemption. An earlier version treated them as proof
+ * of life — resetting the failure count and returning the row to `verified` —
+ * and that one branch produced two separate defects: a robots-banned URL nobody
+ * had ever fetched satisfied the render gate, and a permanently-403 host could
+ * never reach DEAD_AFTER_FAILURES, so a broken link was published forever.
+ *
+ * The exemption was wrong on the architecture's own terms. `verified` plus a
+ * stamped `checked_at` means "we fetched this and it answered". A 403 to our
+ * bot, a robots ban or a non-HTML body all mean we did not. We may well be
+ * losing a link that works for a human, but publishing a URL we could not
+ * verify is the exact failure this whole design exists to prevent — so an
+ * unverifiable URL correctly stops rendering, and eventually is written off.
+ * The distinction survives in the note and in the sweep's own counters, so an
+ * operator can tell bot management from a dead domain.
  */
-const ANSWERED_BUT_UNREADABLE = new Set<RevalidateFailure>([
+const ANSWERED_BUT_UNREAD = new Set<RevalidateFailure>([
   'blocked_by_robots',
   'not_html',
   'too_large',
 ]);
 
-/**
- * HTTP statuses that mean "live, but not for you". A 403 or 429 from bot
- * management is a deterministic refusal, so counting it toward death killed
- * live sites permanently on night two with no way back.
- *
- * 404 and 410 are deliberately NOT here: they mean the page itself is gone,
- * which for a stored franchise path like /arun is exactly the broken link the
- * sweep exists to find. Those must still count toward death.
- */
-const LIVE_BUT_REFUSED = new Set([401, 403, 429, 451]);
-
-/** Whether a failed fetch nonetheless proves the site is alive and the URL
- *  still points at something. */
-function answeredAlive(reason: RevalidateFailure, status?: number): boolean {
-  if (ANSWERED_BUT_UNREADABLE.has(reason)) return true;
-  if (reason === 'http_error' && status) {
-    return LIVE_BUT_REFUSED.has(status) || status >= 500;
-  }
-  return false;
+/** Whether the host answered, for reporting only — never for the verdict. */
+function hostAnswered(reason: RevalidateFailure, status?: number): boolean {
+  return (
+    ANSWERED_BUT_UNREAD.has(reason) || (reason === 'http_error' && !!status)
+  );
 }
 
 /** `manual` is an owner decision about identity; a dead URL does not overturn
@@ -178,36 +182,18 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
 
   if (!input.outcome.ok) {
     const reason = input.outcome.reason;
+    const status = input.outcome.status;
+    const answered = hostAnswered(reason, status);
 
-    // The host ANSWERED in all of these; we just could not read a page from it.
-    // Counting them toward death is what made a live site behind Cloudflare bot
-    // management permanently dead: a 403 to our User-Agent is deterministic, so
-    // the row hit the threshold on night two and no later pass could revive it.
-    // Liveness is confirmed, content is not, so the row keeps its tier and is
-    // stamped — and gets its status from the evidence rather than a hardcoded
-    // 'verified', which would push a below-floor candidate through the render
-    // gate on the strength of a page we were never allowed to read.
-    if (answeredAlive(reason, input.outcome.status)) {
-      return {
-        ...base,
-        url: input.storedUrl,
-        status: statusForEvidence(input.evidence),
-        evidence: input.evidence,
-        confidence: evidenceConfidence(input.evidence).toFixed(3),
-        failureCount: 0,
-        verified: false,
-        live: true,
-        note: `host answered but the page is unreadable (${reason}${input.outcome.status ? ' ' + input.outcome.status : ''}); the row stands`,
-      };
-    }
-
+    // ONE failure path, no exemptions. Whether the host refused us or never
+    // answered at all, the stored URL was not read, so the row cannot render
+    // and must move toward being written off. `unreachable` rather than
+    // `input.status`: checked_at is the cursor and is stamped on every pass
+    // including this one, so leaving a failed row as `verified` would satisfy
+    // the render gate and publish a link we could not reach.
     const failureCount = input.failureCount + 1;
     const dead = failureCount >= DEAD_AFTER_FAILURES;
-    // NOT `input.status`. checked_at is the cursor and is stamped on every
-    // pass including this one, so leaving a failed row as `verified` makes it
-    // satisfy the render gate and publish a link we could not reach. The row
-    // keeps its identity evidence and comes straight back to `verified` on the
-    // next pass that succeeds.
+    const detail = `${reason}${status ? ` ${status}` : ''}${answered ? ', host answered but the page was not read' : ''}`;
     return {
       ...base,
       url: input.storedUrl,
@@ -217,9 +203,10 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
       failureCount,
       verified: false,
       live: false,
+      hostAnswered: answered,
       note: dead
-        ? `dead after ${failureCount} consecutive failures (${reason})`
-        : `failure ${failureCount}/${DEAD_AFTER_FAILURES} (${reason})`,
+        ? `dead after ${failureCount} consecutive failures (${detail})`
+        : `failure ${failureCount}/${DEAD_AFTER_FAILURES} (${detail})`,
     };
   }
 
@@ -262,6 +249,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     failureCount: 0,
     verified: status === 'verified',
     live: true,
+    hostAnswered: true,
     note,
   };
 }

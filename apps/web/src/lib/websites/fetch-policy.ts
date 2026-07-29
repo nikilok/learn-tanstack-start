@@ -33,8 +33,17 @@ export function urlVariants(url: string): string[] {
   const path = parsed.pathname.replace(/\/+$/, '');
   const tail = `${parsed.port ? `:${parsed.port}` : ''}${path}${parsed.search}`;
 
+  // The STORED scheme goes first. Hard-coding https first meant a row the
+  // sweep had already adopted as http:// — because the domain serves no https
+  // at all — was judged on an https candidate it was never stored as. If the
+  // 443 default vhost answers 404 that is a non-retryable http_error, so
+  // fetchSite returns at candidate one and never tries the stored, working URL:
+  // unreachable on night one, dead on night two, while the link serves fine.
+  const stored = parsed.protocol === 'http:' ? 'http' : 'https';
+  const other = stored === 'https' ? 'http' : 'https';
+
   const out: string[] = [];
-  for (const scheme of ['https', 'http']) {
+  for (const scheme of [stored, other]) {
     for (const h of [host, counterpart]) {
       const candidate = `${scheme}://${h}${tail}`;
       if (!out.includes(candidate)) out.push(candidate);
@@ -97,9 +106,14 @@ export function isPrivateAddress(ip: string): boolean {
     // same endpoint wearing a different hat, and both were reaching the public
     // branch. Node's lookup usually returns the dotted form, but this is
     // exported policy, so it should not depend on that.
-    const dotted = /::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
+    const dotted = /^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
     if (dotted) return isPrivateAddress(dotted[1]);
-    const hex = /(?:::ffff:|^64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(
+    // Anchored on BOTH alternatives. With `^` inside the group it bound only to
+    // `64:ff9b::`, leaving `::ffff:` free to match that substring anywhere in an
+    // ordinary address — so isPrivateAddress('2400:cb00::ffff:1:1') was true and
+    // a normal dual-stack company site was refused as private, never retried,
+    // and dead within two nights.
+    const hex = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(
       addr,
     );
     if (hex) {
@@ -175,12 +189,40 @@ export function parseRobots(body: string, agent: string): RobotsRules {
 /** Longest-match wins, with Allow beating Disallow at equal length — the
  *  standard precedence, and the one that makes a blanket Disallow plus a
  *  specific Allow behave as the author intended. */
+/**
+ * Compile a robots.txt pattern to a regex, honouring `*` anywhere and a
+ * trailing `$`.
+ *
+ * Stripping only a TRAILING `*` and then using startsWith left every
+ * mid-string wildcard as a literal that could never match, so standard and
+ * widely used forms — `Disallow: /*​/private`, `Disallow: /*?` — were silently
+ * ignored and we crawled paths the operator had explicitly closed.
+ */
+function robotsPattern(pattern: string): {
+  test: (path: string) => boolean;
+  weight: number;
+} {
+  const anchoredEnd = pattern.endsWith('$');
+  const body = anchoredEnd ? pattern.slice(0, -1) : pattern;
+  const source = body
+    .split('*')
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  const re = new RegExp(`^${source}${anchoredEnd ? '$' : ''}`);
+  // Specificity is the pattern's literal length, per the standard's
+  // longest-match rule; wildcards contribute nothing.
+  return {
+    test: (path) => re.test(path),
+    weight: body.replace(/\*/g, '').length,
+  };
+}
+
 export function isAllowedByRobots(rules: RobotsRules, path: string): boolean {
   const match = (patterns: string[]): number => {
     let best = -1;
     for (const pattern of patterns) {
-      const prefix = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern;
-      if (path.startsWith(prefix) && prefix.length > best) best = prefix.length;
+      const compiled = robotsPattern(pattern);
+      if (compiled.test(path) && compiled.weight > best) best = compiled.weight;
     }
     return best;
   };

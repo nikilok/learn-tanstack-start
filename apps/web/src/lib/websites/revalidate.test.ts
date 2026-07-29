@@ -151,53 +151,84 @@ describe('revalidate — failures', () => {
     );
     expect(r.url).toBe('https://www.example.co.uk');
   });
-
-  test('robots blocking confirms liveness without confirming content', () => {
-    // robots.txt was served, so the host answered. The row stands and is
-    // stamped, so it does not spin at the front of the cursor forever.
-    const r = revalidate(
-      input({ outcome: { ok: false, reason: 'blocked_by_robots' } }),
-    );
-    expect(r.status).toBe('verified');
-    expect(r.failureCount).toBe(0);
-    expect(r.checkedAt).toBe(true);
-    expect(r.note).toContain('robots');
-  });
-
-  test('robots blocking revives a row previously marked dead', () => {
-    const r = revalidate(
-      input({
-        status: 'dead',
-        outcome: { ok: false, reason: 'blocked_by_robots' },
-      }),
-    );
-    expect(r.status).toBe('verified');
-  });
 });
 
-describe('revalidate — hosts that answered', () => {
-  test('a 403 from bot management is not a step toward death', () => {
-    // Deterministic, so counting it killed live sites on night two with no
-    // route back: the row can never recover from a refusal that never changes.
-    const r = revalidate(
-      input({ outcome: { ok: false, reason: 'http_error', status: 403 } }),
-    );
-    expect(r.status).toBe('verified');
-    expect(r.failureCount).toBe(0);
-  });
+describe('revalidate — hosts that answered but were not read', () => {
+  // These replace an earlier suite that asserted the opposite. That suite was
+  // pinning a defect: it exempted robots bans, 403s and unreadable bodies from
+  // the failure path entirely, which let a URL nobody had ever fetched satisfy
+  // the render gate AND made a permanently-refusing host immortal. The
+  // exemption was wrong on the architecture's own terms — `verified` plus a
+  // stamped checked_at asserts "we fetched this and it answered", and none of
+  // these did.
+  const unread = [
+    {
+      label: 'robots ban',
+      outcome: { ok: false as const, reason: 'blocked_by_robots' as const },
+    },
+    {
+      label: '403 bot management',
+      outcome: {
+        ok: false as const,
+        reason: 'http_error' as const,
+        status: 403,
+      },
+    },
+    {
+      label: '429 rate limited',
+      outcome: {
+        ok: false as const,
+        reason: 'http_error' as const,
+        status: 429,
+      },
+    },
+    {
+      label: '503 origin down',
+      outcome: {
+        ok: false as const,
+        reason: 'http_error' as const,
+        status: 503,
+      },
+    },
+    {
+      label: 'non-HTML body',
+      outcome: { ok: false as const, reason: 'not_html' as const },
+    },
+  ];
 
-  test('429 and 5xx likewise mean live, not gone', () => {
-    for (const status of [429, 503]) {
-      const r = revalidate(
-        input({ outcome: { ok: false, reason: 'http_error', status } }),
-      );
-      expect(r.failureCount, `status ${status}`).toBe(0);
+  test('none of them may render, because none of them read the url', () => {
+    for (const u of unread) {
+      const r = revalidate(input({ outcome: u.outcome }));
+      expect(r.status, u.label).not.toBe('verified');
+      expect(r.verified, u.label).toBe(false);
     }
   });
 
-  test('a 404 DOES count, because the page really is gone', () => {
-    // A stored franchise path like /arun returning 404 is exactly the broken
-    // link the sweep exists to find.
+  test('all of them progress toward dead, so nothing is immortal', () => {
+    for (const u of unread) {
+      const first = revalidate(input({ outcome: u.outcome }));
+      expect(first.failureCount, u.label).toBe(1);
+      const second = revalidate(input({ failureCount: 1, outcome: u.outcome }));
+      expect(second.status, u.label).toBe('dead');
+    }
+  });
+
+  test('the note still distinguishes a refusal from a dead domain', () => {
+    // The operator needs to tell bot management from a domain that has gone,
+    // even though both end at the same verdict.
+    const refused = revalidate(
+      input({ outcome: { ok: false, reason: 'http_error', status: 403 } }),
+    );
+    expect(refused.note).toContain('host answered');
+    const gone = revalidate(
+      input({ outcome: { ok: false, reason: 'dns_or_refused' } }),
+    );
+    expect(gone.note).not.toContain('host answered');
+  });
+
+  test('a 404 is not dressed up as an answer', () => {
+    // The page is genuinely gone, which for a stored franchise path is exactly
+    // the broken link the sweep exists to find.
     const r = revalidate(
       input({ outcome: { ok: false, reason: 'http_error', status: 404 } }),
     );
@@ -205,23 +236,9 @@ describe('revalidate — hosts that answered', () => {
     expect(r.failureCount).toBe(1);
   });
 
-  test('an unreadable body does not kill a live host', () => {
-    for (const reason of ['not_html', 'too_large'] as const) {
-      const r = revalidate(input({ outcome: { ok: false, reason } }));
-      expect(r.failureCount, reason).toBe(0);
-    }
-  });
-
-  test('a robots ban takes its status from the evidence, not a hardcoded verified', () => {
-    // The bug: a below-floor candidate was forced to 'verified' and stamped,
-    // publishing an unconfirmed guess from a page we were never allowed to read.
-    const r = revalidate(
-      input({
-        evidence: 'registry_unconfirmed',
-        status: 'dead',
-        outcome: { ok: false, reason: 'blocked_by_robots' },
-      }),
-    );
-    expect(r.status).toBe('candidate');
+  test('any of them recovers the moment a real fetch succeeds', () => {
+    const r = revalidate(input({ status: 'unreachable', failureCount: 1 }));
+    expect(r.status).toBe('verified');
+    expect(r.failureCount).toBe(0);
   });
 });

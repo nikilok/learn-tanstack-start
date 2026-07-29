@@ -5,6 +5,7 @@
  */
 
 import type { RevalidateResult } from './revalidate.ts';
+import { mergeRevalidation } from './revalidate.ts';
 import type { SweepRow } from './sweep.ts';
 
 type Sql = (
@@ -30,6 +31,8 @@ export function makeSelectRows(sql: Sql) {
         w.status,
         w.evidence,
         w.failure_count,
+        w.evidence_url,
+        w.confidence,
         -- "Have we ever completed a SUCCESSFUL pass", not "is checked_at set".
         -- checked_at is stamped on failures too, so keying off it alone meant a
         -- row whose first night timed out was excluded from disclosure probing
@@ -52,6 +55,8 @@ export function makeSelectRows(sql: Sql) {
       failureCount: Number(r.failure_count ?? 0),
       postcode: (r.postal_code as string | null) ?? null,
       everChecked: r.ever_checked === true,
+      evidenceUrl: (r.evidence_url as string | null) ?? null,
+      confidence: (r.confidence as string | null) ?? null,
     }));
   };
 }
@@ -59,52 +64,51 @@ export function makeSelectRows(sql: Sql) {
 /**
  * Write one revalidation result.
  *
- * Liveness columns are written unconditionally — that is the sweep's own
- * subject and no other writer owns them. The identity columns are guarded so a
- * pass cannot undo an upgrade the monthly registry importer made between our
- * read and our write: `confidence` is the ladder's numeric proxy, so writing
- * evidence only when the stored confidence has not overtaken ours is the same
- * upgrade-only rule expressed in SQL, and GREATEST keeps the column monotonic.
+ * Deliberately does no reasoning. Every column is a plain assignment of a value
+ * mergeRevalidation already decided, and concurrency is handled by an
+ * optimistic lock rather than by conditional writes.
  *
- * Postgres evaluates every SET expression against the pre-update row, so the
- * CASE and the GREATEST both see the old confidence rather than each other.
+ * The previous shape put that reasoning in SQL `CASE` expressions, and three
+ * separate defects settled there across two review rounds — each one a column
+ * written when it should have been left alone. None was catchable by a test,
+ * because none of it was reachable without a database. Keeping this statement
+ * dumb is what makes the rules testable.
  */
 export function makeApplyResult(sql: Sql) {
   return async (row: SweepRow, result: RevalidateResult): Promise<boolean> => {
+    const next = mergeRevalidation(
+      {
+        url: row.url,
+        evidence: row.evidence,
+        evidenceUrl: row.evidenceUrl,
+        confidence: row.confidence,
+      },
+      result,
+    );
     const updated = await sql`
       UPDATE company_websites SET
-        url           = ${result.url},
-        -- A failure verdict is the sweep's own and is written outright. A
-        -- success-derived status is computed from the evidence we READ, and the
-        -- registry importer can upgrade evidence on the same URL in the two
-        -- hours a slice runs — which the url lock does not catch. Guarding it
-        -- with the same confidence comparison stops the sweep writing back a
-        -- stale lower tier and un-rendering a row the importer just promoted.
-        status        = CASE
-          WHEN ${result.live} AND COALESCE(confidence, 0) > ${result.confidence}::numeric
-          THEN status ELSE ${result.status} END,
-        failure_count = ${result.failureCount},
+        url           = ${next.url},
+        status        = ${next.status},
+        evidence      = ${next.evidence},
+        evidence_url  = ${next.evidenceUrl},
+        confidence    = ${next.confidence}::numeric,
+        failure_count = ${next.failureCount},
         checked_at    = now(),
-        evidence      = CASE
-          WHEN COALESCE(confidence, 0) <= ${result.confidence}::numeric
-          THEN ${result.evidence} ELSE evidence END,
-        -- COALESCE, not a bare assignment: a pass that finds no proof returns
-        -- evidenceUrl null at unchanged confidence, so the CASE alone wiped the
-        -- stored proof page on the very next run. Disclosure probing is
-        -- first-pass-only, so once wiped it could never be rebuilt.
-        evidence_url  = CASE
-          WHEN COALESCE(confidence, 0) <= ${result.confidence}::numeric
-          THEN COALESCE(${result.evidenceUrl}, evidence_url) ELSE evidence_url END,
-        confidence    = GREATEST(COALESCE(confidence, 0), ${result.confidence}::numeric),
-        verified_at   = CASE WHEN ${result.verified} THEN now() ELSE verified_at END
+        verified_at   = CASE WHEN ${next.bumpVerifiedAt} THEN now() ELSE verified_at END
       WHERE company_number = ${row.companyNumber}
-        -- Optimistic lock on the URL we actually validated. A slice runs for up
-        -- to two hours; if the importer swapped the URL in that window our
-        -- liveness verdict describes a page that is no longer this row's, and
-        -- writing checked_at would mark the new URL renderable without anyone
-        -- having fetched it. Skipping here shows up as lock_missed and the next
-        -- pass picks the row up.
+        -- Full optimistic lock on every identity column we read, not just the
+        -- URL. A slice runs for up to two hours and the registry importer can
+        -- change any of them in that window — including upgrading evidence on
+        -- an unchanged URL, which a url-only lock waved through and which let
+        -- the sweep write back a stale tier. Anything moved under us and this
+        -- writes nothing, which surfaces as lock_missed and the next pass picks
+        -- the row up with fresh values.
+        --
+        -- This is also why there are no CASE expressions left here: the whole
+        -- reconciliation is mergeRevalidation's, where it is testable.
         AND url = ${row.url}
+        AND evidence = ${row.evidence}
+        AND confidence IS NOT DISTINCT FROM ${row.confidence}::numeric
       RETURNING company_number
     `;
     return updated.length > 0;

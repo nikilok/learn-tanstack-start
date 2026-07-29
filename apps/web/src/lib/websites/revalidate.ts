@@ -116,6 +116,59 @@ function nextEvidence(
   return evidenceRank(proposed) > evidenceRank(current) ? proposed : current;
 }
 
+/** The stored columns a merge has to reconcile against. */
+export type StoredWebsite = {
+  url: string;
+  evidence: WebsiteEvidence;
+  evidenceUrl: string | null;
+  confidence: string | null;
+};
+
+/** Exactly what to write for one row, every column resolved. */
+export type MergedWebsite = {
+  url: string;
+  status: WebsiteStatus;
+  evidence: WebsiteEvidence;
+  evidenceUrl: string | null;
+  confidence: string;
+  failureCount: number;
+  bumpVerifiedAt: boolean;
+};
+
+/**
+ * Reconcile a revalidation result with the row as it was read.
+ *
+ * This exists because the reconciliation used to live in SQL `CASE`
+ * expressions, where nothing could test it — and three separate defects
+ * settled there across two review rounds, each one a column written when it
+ * should have been left alone: evidence_url wiped on every pass, status
+ * clobbered back to a stale tier, and the URL written past a concurrent
+ * update. Here the rules are ordinary code with ordinary tests, and the writer
+ * becomes a plain assignment guarded by an optimistic lock.
+ */
+export function mergeRevalidation(
+  stored: StoredWebsite,
+  result: RevalidateResult,
+): MergedWebsite {
+  const storedConfidence = Number(stored.confidence ?? 0);
+  const resultConfidence = Number(result.confidence);
+  return {
+    url: result.url,
+    status: result.status,
+    evidence: result.evidence,
+    // Absence of new proof is not proof of absence: a pass that finds nothing
+    // returns null here, and overwriting with it destroyed the audit trail that
+    // first-pass-only probing can never rebuild.
+    evidenceUrl: result.evidenceUrl ?? stored.evidenceUrl,
+    // Monotonic. revalidate's own ladder should never propose lower, but this
+    // is the column the SQL upgrade guards compare, so it must not be able to
+    // slip backwards even if that ever changes.
+    confidence: Math.max(storedConfidence, resultConfidence).toFixed(3),
+    failureCount: result.failureCount,
+    bumpVerifiedAt: result.verified,
+  };
+}
+
 /** Apply one revalidation pass to a single row. */
 export function revalidate(input: RevalidateInput): RevalidateResult {
   const base = {

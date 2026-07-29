@@ -25,6 +25,10 @@ export type SweepRow = {
   /** Whether this row has been through a sweep before. Disclosure probing runs
    *  on the first pass only — see findDisclosure. */
   everChecked: boolean;
+  /** Stored proof page and confidence, carried so the writer can reconcile
+   *  against them and lock on them rather than reasoning in SQL. */
+  evidenceUrl: string | null;
+  confidence: string | null;
 };
 
 export type FetchedPage =

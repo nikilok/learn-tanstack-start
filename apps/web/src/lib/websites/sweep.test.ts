@@ -11,6 +11,8 @@ const row = (over: Partial<SweepRow> = {}): SweepRow => ({
   failureCount: 0,
   postcode: 'SW1A 1AA',
   everChecked: false,
+  evidenceUrl: null,
+  confidence: '0.950',
   ...over,
 });
 

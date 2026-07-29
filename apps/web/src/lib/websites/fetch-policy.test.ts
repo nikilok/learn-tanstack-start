@@ -1,0 +1,186 @@
+import { describe, expect, test } from 'bun:test';
+
+import {
+  isAllowedByRobots,
+  isPrivateAddress,
+  parseRobots,
+  urlVariants,
+} from './fetch-policy.ts';
+
+describe('urlVariants', () => {
+  test('tries https before http and the stored host before its counterpart', () => {
+    // 5.3% of stored URLs failed on TLS name mismatch, which is what these
+    // variants exist to survive. https first: we prefer to store the secure form.
+    expect(urlVariants('https://www.example.co.uk')).toEqual([
+      'https://www.example.co.uk',
+      'https://example.co.uk',
+      'http://www.example.co.uk',
+      'http://example.co.uk',
+    ]);
+  });
+
+  test('adds the www counterpart when the stored host is bare', () => {
+    expect(urlVariants('https://example.co.uk')).toEqual([
+      'https://example.co.uk',
+      'https://www.example.co.uk',
+      'http://example.co.uk',
+      'http://www.example.co.uk',
+    ]);
+  });
+
+  test('carries the path, query and port through every variant', () => {
+    const variants = urlVariants('https://www.caremark.co.uk:8443/arun?x=1');
+    expect(variants).toHaveLength(4);
+    for (const v of variants) {
+      expect(v).toContain(':8443/arun?x=1');
+    }
+  });
+
+  test('returns nothing for an unparseable url', () => {
+    expect(urlVariants('not a url')).toEqual([]);
+  });
+});
+
+describe('isPrivateAddress', () => {
+  test('refuses loopback, link-local and RFC1918 space', () => {
+    for (const ip of [
+      '127.0.0.1',
+      '10.1.2.3',
+      '192.168.0.5',
+      '172.16.0.1',
+      '172.31.255.254',
+      '169.254.169.254',
+      '0.0.0.0',
+    ]) {
+      expect(isPrivateAddress(ip), ip).toBe(true);
+    }
+  });
+
+  test('refuses carrier-grade NAT space', () => {
+    expect(isPrivateAddress('100.64.0.1')).toBe(true);
+    expect(isPrivateAddress('100.127.255.255')).toBe(true);
+  });
+
+  test('allows ordinary public addresses', () => {
+    for (const ip of [
+      '8.8.8.8',
+      '1.1.1.1',
+      '172.15.0.1',
+      '172.32.0.1',
+      '100.63.0.1',
+    ]) {
+      expect(isPrivateAddress(ip), ip).toBe(false);
+    }
+  });
+
+  test('handles IPv6 loopback and unique-local', () => {
+    expect(isPrivateAddress('::1')).toBe(true);
+    expect(isPrivateAddress('fd00::1')).toBe(true);
+    expect(isPrivateAddress('fe80::1')).toBe(true);
+    expect(isPrivateAddress('2606:4700:4700::1111')).toBe(false);
+  });
+
+  test('sees through an IPv4-mapped IPv6 address', () => {
+    // ::ffff:169.254.169.254 is the cloud metadata endpoint wearing a hat.
+    expect(isPrivateAddress('::ffff:169.254.169.254')).toBe(true);
+    expect(isPrivateAddress('::ffff:8.8.8.8')).toBe(false);
+  });
+
+  test('refuses an empty address rather than defaulting to allowed', () => {
+    expect(isPrivateAddress('')).toBe(true);
+    expect(isPrivateAddress('   ')).toBe(true);
+  });
+});
+
+describe('parseRobots', () => {
+  const AGENT = 'SponsorSearchBot';
+
+  test('reads the wildcard group', () => {
+    const rules = parseRobots('User-agent: *\nDisallow: /private\n', AGENT);
+    expect(rules.disallow).toEqual(['/private']);
+  });
+
+  test('reads a group naming us', () => {
+    const rules = parseRobots(
+      'User-agent: Googlebot\nDisallow: /g\n\nUser-agent: SponsorSearchBot\nDisallow: /s\n',
+      AGENT,
+    );
+    expect(rules.disallow).toEqual(['/s']);
+  });
+
+  test('treats consecutive user-agent lines as one group', () => {
+    // Both names share a single rule block, so the rule is recorded once.
+    const rules = parseRobots(
+      'User-agent: *\nUser-agent: SponsorSearchBot\nDisallow: /both\n',
+      AGENT,
+    );
+    expect(rules.disallow).toEqual(['/both']);
+  });
+
+  test('a later group for another agent does not leak into ours', () => {
+    const rules = parseRobots(
+      'User-agent: *\nDisallow: /ours\n\nUser-agent: BadBot\nDisallow: /theirs\n',
+      AGENT,
+    );
+    expect(rules.disallow).toEqual(['/ours']);
+  });
+
+  test('ignores groups for other agents', () => {
+    const rules = parseRobots('User-agent: BadBot\nDisallow: /\n', AGENT);
+    expect(rules.disallow).toEqual([]);
+  });
+
+  test('strips comments and tolerates blank lines', () => {
+    const rules = parseRobots(
+      '# a comment\n\nUser-agent: *   # us\nDisallow: /x  # nope\n',
+      AGENT,
+    );
+    expect(rules.disallow).toEqual(['/x']);
+  });
+
+  test('returns empty rules for an empty or junk file', () => {
+    expect(parseRobots('', AGENT).disallow).toEqual([]);
+    expect(parseRobots('<!doctype html><h1>404</h1>', AGENT).disallow).toEqual(
+      [],
+    );
+  });
+});
+
+describe('isAllowedByRobots', () => {
+  test('allows when nothing is disallowed', () => {
+    expect(isAllowedByRobots({ disallow: [], allow: [] }, '/')).toBe(true);
+  });
+
+  test('blocks a disallowed prefix', () => {
+    expect(
+      isAllowedByRobots({ disallow: ['/admin'], allow: [] }, '/admin/x'),
+    ).toBe(false);
+    expect(
+      isAllowedByRobots({ disallow: ['/admin'], allow: [] }, '/about'),
+    ).toBe(true);
+  });
+
+  test('blocks everything under a bare slash', () => {
+    expect(isAllowedByRobots({ disallow: ['/'], allow: [] }, '/')).toBe(false);
+    expect(isAllowedByRobots({ disallow: ['/'], allow: [] }, '/contact')).toBe(
+      false,
+    );
+  });
+
+  test('a longer Allow overrides a broader Disallow', () => {
+    const rules = { disallow: ['/'], allow: ['/about'] };
+    expect(isAllowedByRobots(rules, '/about')).toBe(true);
+    expect(isAllowedByRobots(rules, '/secret')).toBe(false);
+  });
+
+  test('Allow wins at equal specificity', () => {
+    const rules = { disallow: ['/x'], allow: ['/x'] };
+    expect(isAllowedByRobots(rules, '/x')).toBe(true);
+  });
+
+  test('handles a trailing wildcard', () => {
+    expect(
+      isAllowedByRobots({ disallow: ['/tmp*'], allow: [] }, '/tmp/1'),
+    ).toBe(false);
+  });
+});

@@ -9,7 +9,7 @@
  * unpadded and 120 once padded — so padding is not cosmetic).
  */
 
-import { squashForComparison } from '../hmrc-ch/pipeline';
+import { MIN_SQUASH_LENGTH, squashForComparison } from '../hmrc-ch/pipeline';
 
 /** Post-padding shape of a Companies House number: 8 digits, or a 2-letter
  *  prefix followed by 6 alphanumerics (SC123456, OC123456, IP21143R). */
@@ -49,11 +49,24 @@ export function namesAreCompatible(
   registryName: string | null | undefined,
   companyName: string | null | undefined,
 ): boolean {
-  if (!registryName || !companyName) return true; // nothing to contradict
+  // No name supplied at all: the caller gave us nothing to check, so abstain.
+  if (!registryName || !companyName) return true;
+
   const a = squashForComparison(registryName);
   const b = squashForComparison(companyName);
-  if (!a || !b) return true;
-  if (a === b || a.includes(b) || b.includes(a)) return true;
+  if (a === b && a) return true;
+
+  // A name was supplied but squashes to almost nothing. Every downstream path
+  // here — containment, and the bigram set, which is empty for a 1-character
+  // key — silently returns "compatible" for such a key, so "A" would confirm
+  // against BARCLAYS BANK PLC. That is the degenerate case this guard exists
+  // for (a placeholder company number of "1" zero-pads into a real company),
+  // so an unjudgeable name is treated as unconfirmed rather than confirmed.
+  // Same floor matchTierASquash keeps on this identical key.
+  if (a.length < MIN_SQUASH_LENGTH || b.length < MIN_SQUASH_LENGTH)
+    return false;
+
+  if (a.includes(b) || b.includes(a)) return true;
 
   const bigrams = (s: string): Set<string> => {
     const out = new Set<string>();
@@ -62,7 +75,6 @@ export function namesAreCompatible(
   };
   const left = bigrams(a);
   const right = bigrams(b);
-  if (left.size === 0 || right.size === 0) return true;
   let shared = 0;
   for (const g of left) if (right.has(g)) shared++;
   return shared / Math.min(left.size, right.size) >= MIN_NAME_OVERLAP;

@@ -13,12 +13,14 @@ const existing = (over: Partial<ExistingWebsite> = {}): ExistingWebsite => ({
   url: 'https://www.example.co.uk',
   status: 'verified',
   evidence: 'registry',
+  source: 'cqc',
   ...over,
 });
 
 const proposed = (over: Partial<ProposedWebsite> = {}): ProposedWebsite => ({
   url: 'https://www.example.co.uk',
   evidence: 'registry',
+  source: 'cqc',
   ...over,
 });
 
@@ -146,11 +148,43 @@ describe('decideWebsite', () => {
     expect(decideWebsite(existing(), proposed())).toEqual({ action: 'keep' });
   });
 
-  test('two registries naming different sites surface rather than race', () => {
-    // CQC and Wikidata overlap on 23 companies; run order must not decide.
+  test('two DIFFERENT registries naming different sites surface as a conflict', () => {
+    // CQC and Wikidata overlap on ~23 companies; run order must not decide.
     const result = decideWebsite(
-      existing({ url: 'https://cqc-says.co.uk' }),
-      proposed({ url: 'https://wikidata-says.co.uk' }),
+      existing({ url: 'https://cqc-says.co.uk', source: 'cqc' }),
+      proposed({ url: 'https://wikidata-says.co.uk', source: 'wikidata' }),
+    );
+    expect(result).toEqual({ action: 'conflict' });
+  });
+
+  test('the SAME registry revising its own address is an update, not a standoff', () => {
+    // A provider moving domains is the common case, and it arrives at the same
+    // rank from the same source. Treating it as a conflict froze the stale URL
+    // permanently: a later 'dead' status never lowers `evidence`, so the
+    // correction could never outrank the value it was meant to replace.
+    const result = decideWebsite(
+      existing({ url: 'https://old-domain.co.uk', source: 'cqc' }),
+      proposed({ url: 'https://new-domain.co.uk', source: 'cqc' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('a same-source correction still works once the row went dead', () => {
+    const result = decideWebsite(
+      existing({
+        url: 'https://old-domain.co.uk',
+        source: 'cqc',
+        status: 'dead',
+      }),
+      proposed({ url: 'https://new-domain.co.uk', source: 'cqc' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('an unknown prior source cannot claim to be the same source', () => {
+    const result = decideWebsite(
+      existing({ url: 'https://a.co.uk', source: null }),
+      proposed({ url: 'https://b.co.uk', source: 'cqc' }),
     );
     expect(result).toEqual({ action: 'conflict' });
   });

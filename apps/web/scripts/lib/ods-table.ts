@@ -42,7 +42,14 @@ function decodeEntities(text: string): string {
             ent[1] === 'x' || ent[1] === 'X'
               ? Number.parseInt(ent.slice(2), 16)
               : Number.parseInt(ent.slice(1), 10);
-          return Number.isFinite(code) ? String.fromCodePoint(code) : all;
+          // Range check, not just isFinite: String.fromCodePoint THROWS above
+          // U+10FFFF, and that throw escapes the replace callback, the parser
+          // and the generator, so one malformed reference anywhere in the
+          // ~439MB stream discards the entire month's import. Fall back to the
+          // literal text, which is what the surrounding ternary intends.
+          if (!Number.isInteger(code) || code < 0 || code > 0x10ffff)
+            return all;
+          return String.fromCodePoint(code);
         }
       }
     },

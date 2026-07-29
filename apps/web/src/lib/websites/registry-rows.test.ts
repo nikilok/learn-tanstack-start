@@ -86,4 +86,14 @@ describe('namesAreCompatible', () => {
     expect(namesAreCompatible('ACME LIMITED', undefined)).toBe(true);
     expect(namesAreCompatible('', 'ACME LIMITED')).toBe(true);
   });
+
+  test('a name too short to judge is not treated as confirmed', () => {
+    // These returned true: "A" is a substring of nearly everything, and a
+    // 1-character key produces an empty bigram set which also scored as a
+    // match. That is exactly the degenerate row the guard exists for — a
+    // placeholder company number of "1" zero-pads into a real company.
+    expect(namesAreCompatible('A', 'BARCLAYS BANK PLC')).toBe(false);
+    expect(namesAreCompatible('AC Ltd', 'ABACUS CARE LIMITED')).toBe(false);
+    expect(namesAreCompatible('ACME LIMITED', 'A')).toBe(false);
+  });
 });

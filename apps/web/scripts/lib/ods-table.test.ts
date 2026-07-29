@@ -38,6 +38,35 @@ describe('parseOdsRowCells', () => {
     expect(parseOdsRowCells(row)).toEqual(["Bill & Ben <Care> 'Ltd'"]);
   });
 
+  test('falls back to literal text on an out-of-range character reference', () => {
+    // String.fromCodePoint THROWS above U+10FFFF, and the throw escaped all the
+    // way out of readOdsRows — one bad reference anywhere in the 439MB stream
+    // discarded the entire month's import.
+    expect(() =>
+      parseOdsRowCells(
+        `<table:table-row>${cell('a&#x110000;b')}</table:table-row>`,
+      ),
+    ).not.toThrow();
+    expect(
+      parseOdsRowCells(
+        `<table:table-row>${cell('a&#x110000;b')}</table:table-row>`,
+      ),
+    ).toEqual(['a&#x110000;b']);
+    expect(
+      parseOdsRowCells(
+        `<table:table-row>${cell('&#99999999;')}</table:table-row>`,
+      ),
+    ).toEqual(['&#99999999;']);
+  });
+
+  test('still decodes a valid astral character reference', () => {
+    expect(
+      parseOdsRowCells(
+        `<table:table-row>${cell('&#x1F600;')}</table:table-row>`,
+      ),
+    ).toEqual(['\u{1F600}']);
+  });
+
   test('joins multiple text runs within one cell', () => {
     const row = `<table:table-row><table:table-cell><text:p>Line one</text:p><text:p>Line two</text:p></table:table-cell></table:table-row>`;
     expect(parseOdsRowCells(row)).toEqual(['Line one Line two']);

@@ -43,6 +43,42 @@ describe('normaliseWebsiteUrl', () => {
     ).toBeNull();
   });
 
+  test('rejects social profiles on ANY subdomain or shortener', () => {
+    // An exact-host denylist waved these through and stored them at the top
+    // tier; mobile-captured registry data routinely carries the m. form.
+    expect(normaliseWebsiteUrl('m.facebook.com/AcmeCareHome')).toBeNull();
+    expect(normaliseWebsiteUrl('en-gb.facebook.com/AcmeCareHome')).toBeNull();
+    expect(normaliseWebsiteUrl('https://fb.com/acme')).toBeNull();
+    expect(normaliseWebsiteUrl('https://wa.me/447700900000')).toBeNull();
+    expect(normaliseWebsiteUrl('www.youtube.com/@acmecare')).toBeNull();
+  });
+
+  test('does not reject a real domain that merely ends in a denied one', () => {
+    expect(normaliseWebsiteUrl('www.notfacebook.com')).toBe(
+      'https://www.notfacebook.com',
+    );
+  });
+
+  test('rejects embedded control characters instead of fusing two addresses', () => {
+    // The WHATWG parser DELETES tab/CR/LF rather than failing, so this used to
+    // normalise to the invented host www.a.co.ukwww.b.co.uk.
+    expect(normaliseWebsiteUrl('www.a.co.uk\nwww.b.co.uk')).toBeNull();
+    expect(normaliseWebsiteUrl('www.a.co.uk\r\nwww.b.co.uk')).toBeNull();
+    expect(normaliseWebsiteUrl('www.a.co.uk\twww.b.co.uk')).toBeNull();
+  });
+
+  test('preserves an explicit port, which is part of the destination', () => {
+    expect(normaliseWebsiteUrl('https://example.co.uk:8443/x')).toBe(
+      'https://example.co.uk:8443/x',
+    );
+  });
+
+  test('drops a redundant default port', () => {
+    expect(normaliseWebsiteUrl('https://example.co.uk:443/x')).toBe(
+      'https://example.co.uk/x',
+    );
+  });
+
   test('keeps a site hosted on a platform subdomain', () => {
     expect(normaliseWebsiteUrl('www.karonpcc.wix.com/pol-community-care')).toBe(
       'https://www.karonpcc.wix.com/pol-community-care',

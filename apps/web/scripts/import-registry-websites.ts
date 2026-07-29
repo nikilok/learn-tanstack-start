@@ -42,7 +42,10 @@ import { sql as raw } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import { describeDbHost } from '../src/lib/phase5/db-host.ts';
-import type { WebsiteEvidence } from '../src/lib/websites/decide.ts';
+import type {
+  WebsiteEvidence,
+  WebsiteStatus,
+} from '../src/lib/websites/decide.ts';
 import {
   decideWebsite,
   evidenceConfidence,
@@ -89,9 +92,16 @@ const BATCH_SIZE = 500;
  *  quiet month — below this share of the last known good count, fail loudly.
  *  CQC yielded 15,689 pairs on 2026-07-29. */
 const MIN_CQC_PAIRS = 8000;
-/** Registry rows matching a company we hold. 6,749 on 2026-07-29; a mis-read
- *  company-number column collapses this to near zero. */
-const MIN_MATCHED_COMPANIES = 2000;
+/** Registry rows matching a company we hold, PER SOURCE, so a single-source run
+ *  is measured against what that source alone can deliver. A combined floor
+ *  applied to `--source=wikidata` (an exposed workflow_dispatch choice) fails
+ *  every time and trains the operator to ignore a guard that is meant to catch
+ *  a repurposed company-number column. Measured 2026-07-29: CQC 5,617,
+ *  Wikidata 1,132. */
+const MIN_MATCHED_COMPANIES: Record<RegistrySource, number> = {
+  cqc: 2000,
+  wikidata: 400,
+};
 
 type RegistrySource = 'cqc' | 'wikidata';
 
@@ -249,6 +259,7 @@ type ExistingRow = {
   url: string | null;
   status: string;
   evidence: string;
+  source: string | null;
 };
 
 async function loadKnownCompanies(
@@ -279,7 +290,7 @@ async function loadExisting(
   for (let i = 0; i < numbers.length; i += 5000) {
     const slice = numbers.slice(i, i + 5000);
     const rows = (await sql`
-      SELECT company_number, url, status, evidence
+      SELECT company_number, url, status, evidence, source
       FROM company_websites
       WHERE company_number = ANY(${slice}::text[])
     `) as {
@@ -287,6 +298,7 @@ async function loadExisting(
       url: string | null;
       status: string;
       evidence: string;
+      source: string | null;
     }[];
     for (const r of rows) {
       out.set(r.company_number, {
@@ -294,6 +306,7 @@ async function loadExisting(
         url: r.url,
         status: r.status,
         evidence: r.evidence,
+        source: r.source,
       });
     }
   }
@@ -376,10 +389,19 @@ for (const finding of findings) {
   // The join is on the number; the name only decides how far up the ladder the
   // row lands. A mismatch is usually a post-administration rename, so it stays
   // as a candidate rather than being discarded.
-  const compatible = namesAreCompatible(
-    finding.registryName,
-    company.companyName,
-  );
+  //
+  // Only CQC is scored this way. The check compares a registry's name for a
+  // company against its registered name, which holds for CQC (Provider Name IS
+  // the registered name) but not for Wikidata, whose itemLabel is the brand:
+  // 'BBC' vs 'BRITISH BROADCASTING CORPORATION' and 'Bupa' vs 'THE BRITISH
+  // UNITED PROVIDENT ASSOCIATION LIMITED' both score zero overlap. Measured on
+  // the first live run it demoted 6.2% of Wikidata rows against 0.23% of CQC's
+  // — and Wikidata is in this pipeline precisely for globally-branded
+  // companies, so the check was rejecting the population it was added to cover.
+  const nameChecked = finding.source === 'cqc';
+  const compatible =
+    !nameChecked ||
+    namesAreCompatible(finding.registryName, company.companyName);
   const evidence: WebsiteEvidence = compatible
     ? 'registry'
     : 'registry_unconfirmed';
@@ -391,11 +413,12 @@ for (const finding of findings) {
     prior
       ? {
           url: prior.url,
-          status: prior.status as never,
+          status: prior.status as WebsiteStatus,
           evidence: prior.evidence as WebsiteEvidence,
+          source: prior.source,
         }
       : null,
-    { url: finding.url, evidence },
+    { url: finding.url, evidence, source: finding.source },
   );
 
   if (decision.action === 'keep') {
@@ -427,11 +450,28 @@ console.log(
   `\n${pending.length} rows to write (${kept} unchanged, ${conflicts} conflicts)`,
 );
 
+// Checked BEFORE the upsert, not after: this guard exists to catch a registry
+// repurposing its company-number column, and zero-padding turns such values
+// into structurally valid numbers that collide with real companies. Running it
+// after the write diagnoses the problem correctly but the wrong rows are
+// already committed, and the upgrade-only ladder then reads a later correct
+// run as an equal-rank conflict, so they would never be corrected.
+const matchedFloor = sources.reduce(
+  (total, source) => total + MIN_MATCHED_COMPANIES[source],
+  0,
+);
+if (known.size < matchedFloor) {
+  console.error(
+    `\n  Only ${known.size} registry rows matched a known company (expected >= ${matchedFloor} for ${sources.join('+')}) — check the company-number column. Nothing was written.`,
+  );
+  process.exit(1);
+}
+
 let written = 0;
 if (!dryRun && pending.length > 0) {
   for (let i = 0; i < pending.length; i += BATCH_SIZE) {
     const batch = pending.slice(i, i + BATCH_SIZE);
-    await db
+    const applied = await db
       .insert(companyWebsites)
       .values(batch)
       .onConflictDoUpdate({
@@ -443,14 +483,35 @@ if (!dryRun && pending.length > 0) {
           confidence: raw`excluded.confidence`,
           source: raw`excluded.source`,
           verifiedAt: raw`excluded.verified_at`,
+          // Liveness belongs to the URL, not the row. When the URL changes,
+          // the previous one's verification state is meaningless — carrying a
+          // checked_at over would let a never-fetched address satisfy the
+          // render gate (`verified AND checked_at IS NOT NULL`) immediately,
+          // and sort the row to the back of the sweep cursor so nothing
+          // revisits it. Only ~74% of registry URLs resolve, so that is a live
+          // broken link, not a theoretical one.
+          checkedAt: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN NULL ELSE company_websites.checked_at END`,
+          failureCount: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN 0 ELSE company_websites.failure_count END`,
+          evidenceUrl: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN NULL ELSE company_websites.evidence_url END`,
         },
         // Upgrade-only in SQL as well as in decideWebsite, so a concurrent
         // writer (the phase-2 sweep) cannot be clobbered between our read and
-        // our write. confidence is the ladder's numeric proxy.
-        setWhere: raw`company_websites.confidence IS NULL OR company_websites.confidence < excluded.confidence`,
-      });
-    written += batch.length;
+        // our write. confidence is the ladder's numeric proxy. `manual` is
+        // named explicitly rather than relying on its confidence of 1.0: the
+        // column is nullable, so an owner-set row written without one would
+        // otherwise be overwritten by the IS NULL disjunct.
+        setWhere: raw`company_websites.evidence <> 'manual' AND (company_websites.confidence IS NULL OR company_websites.confidence < excluded.confidence)`,
+      })
+      .returning({ companyNumber: companyWebsites.companyNumber });
+    // Count what the guard actually applied, not what we submitted — a no-op
+    // from setWhere is the only signal the upgrade guard ever rejects anything.
+    written += applied.length;
   }
+}
+if (!dryRun && written < pending.length) {
+  console.log(
+    `  ${pending.length - written} row(s) were rejected by the upgrade guard (a stronger writer got there first)`,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,11 +527,17 @@ const coverage = (await sql`
     (SELECT count(*) FROM mapped)::int AS sponsors,
     (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
       WHERE w.status = 'verified')::int AS verified_sponsors,
+    -- The render gate is status=verified AND checked_at IS NOT NULL (schema.ts),
+    -- and this importer deliberately leaves checked_at NULL, so reporting only
+    -- the line above would show growing coverage while nothing is renderable.
+    (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
+      WHERE w.status = 'verified' AND w.checked_at IS NOT NULL)::int AS renderable_sponsors,
     (SELECT count(*) FROM company_websites WHERE status = 'verified')::int AS verified_total,
     (SELECT count(*) FROM company_websites WHERE status = 'candidate')::int AS candidate_total
 `) as {
   sponsors: number;
   verified_sponsors: number;
+  renderable_sponsors: number;
   verified_total: number;
   candidate_total: number;
 }[];
@@ -490,11 +557,15 @@ console.log(`  written             : ${written}`);
 console.log(`  verified_total      : ${c.verified_total}`);
 console.log(`  candidate_total     : ${c.candidate_total}`);
 console.log(
-  `  sponsor_coverage    : ${c.verified_sponsors}/${c.sponsors} (${((c.verified_sponsors / c.sponsors) * 100).toFixed(2)}%)`,
+  `  sponsor_identified  : ${c.verified_sponsors}/${c.sponsors} (${((c.verified_sponsors / c.sponsors) * 100).toFixed(2)}%)`,
+);
+console.log(
+  `  sponsor_renderable  : ${c.renderable_sponsors}/${c.sponsors} (${((c.renderable_sponsors / c.sponsors) * 100).toFixed(2)}%)`,
 );
 console.log(`  duration            : ${durationSec}s`);
 
 setGitHubOutput('verified-sponsors', String(c.verified_sponsors));
+setGitHubOutput('renderable-sponsors', String(c.renderable_sponsors));
 setGitHubOutput('written', String(dryRun ? 0 : written));
 
 // Loud failure, same posture as the sweeps: one source dying is survivable and
@@ -503,15 +574,9 @@ if (errored > 0) {
   console.error(`\n  ${errored} of ${sources.length} sources failed.`);
   process.exit(1);
 }
-// A high unknown_company rate is the NORMAL state and must not be an alarm:
-// both registries cover the whole UK while companies_house_profiles only holds
-// companies that sponsor visas, so ~2/3 of rows legitimately match nothing
-// (measured 13,245 of 20,019 on 2026-07-29). The meaningful invariant is the
-// floor — reading the wrong column, or a renamed one, collapses matches to
-// near zero rather than merely thinning them.
-if (known.size < MIN_MATCHED_COMPANIES) {
-  console.error(
-    `\n  Only ${known.size} registry rows matched a known company (expected >= ${MIN_MATCHED_COMPANIES}) — check the company-number column.`,
-  );
-  process.exit(1);
-}
+// Note there is deliberately no alarm on the unknown_company rate: it is the
+// NORMAL state, because both registries cover the whole UK while
+// companies_house_profiles only holds companies that sponsor visas, so ~2/3 of
+// rows legitimately match nothing (13,245 of 20,019 on 2026-07-29). The
+// meaningful invariant is the matched-company floor, and it is enforced above,
+// before anything is written.

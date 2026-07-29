@@ -34,11 +34,14 @@ export type ExistingWebsite = {
   url: string | null;
   status: WebsiteStatus;
   evidence: WebsiteEvidence;
+  /** Which discoverer wrote this row; a source may revise its own answer. */
+  source: string | null;
 };
 
 export type ProposedWebsite = {
   url: string | null;
   evidence: WebsiteEvidence;
+  source: string;
 };
 
 export type DecideWebsiteResult =
@@ -46,53 +49,56 @@ export type DecideWebsiteResult =
   | { action: 'keep' }
   | { action: 'conflict' };
 
-/** Numeric rank for the upgrade-only ladder. `manual` is terminal: an owner
- *  decision outranks every discoverer and is never overwritten automatically.
- *  The verified/candidate boundary sits at 3 — everything at or above it is
- *  backed by something found on the page or by an exact registry join.
+/**
+ * The whole ladder, weakest rung first. Rank is the index and confidence is
+ * read straight off the rung, so the two orderings are one declaration rather
+ * than two maps an agreement test has to police (apps/web/CLAUDE.md: prefer
+ * structural impossibility over an agreement test). The SQL upgrade guard
+ * compares stored confidence, so its ordering comes from here too.
  *
- *  `registry_unconfirmed` ties `llm_adjudicated` (phase5's ladder ties
- *  fuzzy_edit/token_sim the same way): it is a registry row whose own company
- *  name does not recognisably match Companies House. Measured at 0.22% of CQC
- *  joins, and roughly half of those are correct rows whose CH name changed
- *  post-administration ("… REALISATIONS LIMITED"). Too good to discard, not
- *  good enough to render. */
-const RANK: Record<WebsiteEvidence, number> = {
-  none: 0,
-  domain_similarity: 1,
-  registry_unconfirmed: 2,
-  llm_adjudicated: 2,
-  postcode_on_page: 3,
-  registry: 4,
-  crn_on_page: 5,
-  manual: 6,
-};
+ * Tiers sharing a rung tie deliberately, as phase5's ladder ties
+ * fuzzy_edit/token_sim: `registry_unconfirmed` is a registry row whose own
+ * company name does not recognisably match Companies House, which is worth no
+ * more and no less than an LLM's opinion.
+ *
+ * `manual` is terminal — an owner decision outranks every discoverer. The
+ * verified/candidate boundary is VERIFIED_FLOOR: at or above it the answer is
+ * backed by something found on the page or by an exact registry join.
+ */
+const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
+  { tiers: ['none'], confidence: 0 },
+  { tiers: ['domain_similarity'], confidence: 0.4 },
+  { tiers: ['registry_unconfirmed', 'llm_adjudicated'], confidence: 0.6 },
+  { tiers: ['postcode_on_page'], confidence: 0.85 },
+  { tiers: ['registry'], confidence: 0.95 },
+  { tiers: ['crn_on_page'], confidence: 0.99 },
+  { tiers: ['manual'], confidence: 1 },
+];
 
 const VERIFIED_FLOOR = 3;
 
-/** Stored confidence is the ladder's numeric proxy, ordered identically to RANK
- *  (ties included), so a writer can enforce upgrade-only in SQL with a plain
- *  `confidence < $new` guard instead of re-deriving the ladder in a query.
- *  Keep it in lockstep with RANK — decide.test.ts locks that they agree. */
-const CONFIDENCE: Record<WebsiteEvidence, number> = {
-  none: 0,
-  domain_similarity: 0.4,
-  registry_unconfirmed: 0.6,
-  llm_adjudicated: 0.6,
-  postcode_on_page: 0.85,
-  registry: 0.95,
-  crn_on_page: 0.99,
-  manual: 1,
-};
+const RANK = new Map<WebsiteEvidence, number>();
+const CONFIDENCE = new Map<WebsiteEvidence, number>();
+for (const [rank, rung] of LADDER.entries()) {
+  if (rank > 0 && rung.confidence <= LADDER[rank - 1].confidence) {
+    throw new Error(
+      `Website ladder rung ${rank} (${rung.tiers.join('/')}) has confidence ${rung.confidence}, which does not exceed the rung below it. Stored confidence is what the SQL upgrade guard compares, so it must ascend with rank.`,
+    );
+  }
+  for (const tier of rung.tiers) {
+    RANK.set(tier, rank);
+    CONFIDENCE.set(tier, rung.confidence);
+  }
+}
 
 /** Rank of an evidence tier on the upgrade-only ladder. */
 export function evidenceRank(evidence: WebsiteEvidence): number {
-  return RANK[evidence] ?? 0;
+  return RANK.get(evidence) ?? 0;
 }
 
 /** Nominal confidence for an evidence tier. */
 export function evidenceConfidence(evidence: WebsiteEvidence): number {
-  return CONFIDENCE[evidence] ?? 0;
+  return CONFIDENCE.get(evidence) ?? 0;
 }
 
 /** The status a finding lands in — only `verified` is ever rendered, and
@@ -123,9 +129,18 @@ export function decideWebsite(
   if (pRank > eRank) return { action: 'update' };
   if (pRank < eRank) return { action: 'keep' };
 
-  // Same strength. Agreeing is a no-op; disagreeing is surfaced rather than
-  // silently resolved by run order — two registries naming different sites for
-  // one company means at least one of them is wrong.
+  // Same strength, same site: nothing to do.
   if (isSameSite(existing.url, proposed.url)) return { action: 'keep' };
+
+  // Same strength, different site. Which of the two cases this is depends
+  // entirely on the source. One source revising the address it published last
+  // month is the COMMON case (providers move domains), and treating it as a
+  // standoff would freeze the stale value forever, since a demotion to 'dead'
+  // never lowers `evidence` and so never lets the correction back in.
+  if (existing.source && existing.source === proposed.source) {
+    return { action: 'update' };
+  }
+  // Two different sources naming different sites really is a disagreement, and
+  // is surfaced rather than settled by whichever happened to run first.
   return { action: 'conflict' };
 }

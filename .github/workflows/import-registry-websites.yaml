@@ -90,6 +90,7 @@ jobs:
             echo "| ✅ Written | $(extract written) |"
             echo "| 🔗 Verified total | $(extract verified_total) |"
             echo "| 🕵️ Candidate total | $(extract candidate_total) |"
-            echo "| 📊 Sponsor coverage | $(extract sponsor_coverage) |"
+            echo "| 🆔 Sponsors identified | $(extract sponsor_identified) |"
+            echo "| 🌐 Sponsors renderable | $(extract sponsor_renderable) |"
             echo "| ⏱️ Duration | $(extract duration) |"
           } >> "$GITHUB_STEP_SUMMARY"

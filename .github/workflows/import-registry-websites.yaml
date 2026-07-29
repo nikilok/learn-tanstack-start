@@ -1,0 +1,95 @@
+name: Import Registry Websites
+
+# Monthly exact-identifier pass for company website discovery. Joins the CQC
+# care directory (the only CQC file carrying both a Companies House number and
+# a web address, published as .ods on a URL that rotates monthly) and Wikidata
+# (P2622 + P856) to companies_house_profiles, writing company_websites.
+#
+# Deliberately NOT in the phase5-sweep concurrency group. GitHub keeps only one
+# pending run per group, and the five sweep workflows are already staggered ~4h
+# apart to avoid evicting each other; adding a sixth member would put a queued
+# tier at risk. This job touches neither the Companies House API nor any table
+# the sweeps write, so there is nothing to serialise against. Runs on the 5th,
+# after CQC's monthly publication in the first days of the month, in the gap
+# between the 01:17 and 05:37 sweep windows.
+
+on:
+  schedule:
+    - cron: '11 3 5 * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run — parse and decide, no DB writes'
+        type: boolean
+        default: false
+      source:
+        description: 'Which registry to import'
+        required: false
+        type: choice
+        options: [all, cqc, wikidata]
+        default: all
+
+concurrency:
+  group: import-registry-websites
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: Import registry websites
+        shell: bash
+        # Inputs go through env, never interpolated into the run script.
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry-run }}
+          SOURCE: ${{ github.event.inputs.source }}
+        run: |
+          DRY_FLAG=""
+          if [ "$DRY_RUN" = "true" ]; then
+            DRY_FLAG="--dry-run"
+          fi
+          SOURCE_FLAG=""
+          if [ -n "$SOURCE" ]; then
+            SOURCE_FLAG="--source=$SOURCE"
+          fi
+          set -o pipefail
+          bun apps/web/scripts/import-registry-websites.ts $DRY_FLAG $SOURCE_FLAG | tee /tmp/registry-websites.log
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          LOG=/tmp/registry-websites.log
+          if [ ! -f "$LOG" ]; then exit 0; fi
+          extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
+          {
+            echo "## Registry Website Import"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| 🔎 Registry findings | $(extract findings) |"
+            echo "| 🏢 Not a company we hold | $(extract unknown_company) |"
+            echo "| ⚠️ Name unconfirmed | $(extract name_unconfirmed) |"
+            echo "| 😴 Unchanged | $(extract unchanged) |"
+            echo "| ⚔️ Conflicts | $(extract conflicts) |"
+            echo "| 🧪 Would write | $(extract would_write) |"
+            echo "| ✅ Written | $(extract written) |"
+            echo "| 🔗 Verified total | $(extract verified_total) |"
+            echo "| 🕵️ Candidate total | $(extract candidate_total) |"
+            echo "| 📊 Sponsor coverage | $(extract sponsor_coverage) |"
+            echo "| ⏱️ Duration | $(extract duration) |"
+          } >> "$GITHUB_STEP_SUMMARY"

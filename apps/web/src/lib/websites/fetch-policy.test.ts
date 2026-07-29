@@ -213,3 +213,30 @@ describe('parseRobots — group precedence', () => {
     expect(isAllowedByRobots(rules, '/')).toBe(false);
   });
 });
+
+describe('isPrivateAddress — ranges that were slipping through', () => {
+  test('refuses IETF protocol assignments and benchmarking space', () => {
+    expect(isPrivateAddress('192.0.0.192')).toBe(true);
+    expect(isPrivateAddress('198.18.0.1')).toBe(true);
+    expect(isPrivateAddress('198.19.255.255')).toBe(true);
+  });
+
+  test('refuses multicast, reserved and broadcast', () => {
+    expect(isPrivateAddress('224.0.0.1')).toBe(true);
+    expect(isPrivateAddress('239.255.255.250')).toBe(true);
+    expect(isPrivateAddress('255.255.255.255')).toBe(true);
+  });
+
+  test('refuses the hex form of an IPv4-mapped address', () => {
+    // ::ffff:a9fe:a9fe is 169.254.169.254 wearing a different hat.
+    expect(isPrivateAddress('::ffff:a9fe:a9fe')).toBe(true);
+    expect(isPrivateAddress('64:ff9b::a9fe:a9fe')).toBe(true);
+  });
+
+  test('still allows ordinary public addresses near those ranges', () => {
+    expect(isPrivateAddress('192.0.1.1')).toBe(false);
+    expect(isPrivateAddress('198.20.0.1')).toBe(false);
+    expect(isPrivateAddress('223.255.255.1')).toBe(false);
+    expect(isPrivateAddress('::ffff:0808:0808')).toBe(false);
+  });
+});

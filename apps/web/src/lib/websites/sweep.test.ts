@@ -280,3 +280,29 @@ describe('sweepWebsites — hardening', () => {
     ]);
   });
 });
+
+describe('sweepWebsites — dry run parity', () => {
+  test('a dry run aborts on broken egress exactly as a real run would', async () => {
+    // The abort check sat behind the dry-run `continue`, so --dry-run burned
+    // the whole slice's fetches and never reported systemicAbort.
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      fetchSite: async (url) => ({
+        ok: false,
+        reason: 'dns_or_refused',
+        attemptedUrl: url,
+      }),
+    });
+    const summary = await sweepWebsites(
+      config({ maxRows: 60, dryRun: true }),
+      h.deps,
+    );
+    expect(summary.systemicAbort).toBe(true);
+    expect(h.applied).toHaveLength(0);
+    expect(summary.selected).toBe(60);
+    expect(h.logs.some((l) => l.includes('ABORTING'))).toBe(true);
+  });
+});

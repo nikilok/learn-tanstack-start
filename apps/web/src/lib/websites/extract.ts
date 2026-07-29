@@ -64,9 +64,16 @@ function decodeEntities(text: string): string {
  */
 function visibleText(html: string): string {
   const stripped = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '\n')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '\n')
-    .replace(/<!--[\s\S]*?-->/g, '\n')
+    // The `|$` alternatives are load-bearing, not defensive padding: web-fetch
+    // truncates a response at 2MB, so a page whose analytics blob straddles the
+    // cap arrives with an opening <script> and no closing tag. Without the
+    // end-of-input fallback that tag falls through to the generic tag strip and
+    // the entire script body becomes candidate text — which is exactly the
+    // analytics-id false positive this function exists to prevent, and a
+    // crn_on_page promotion off one is permanent.
+    .replace(/<script\b[^>]*>[\s\S]*?(?:<\/script>|$)/gi, '\n')
+    .replace(/<style\b[^>]*>[\s\S]*?(?:<\/style>|$)/gi, '\n')
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, '\n')
     // Inline elements do not interrupt a line, so they leave nothing behind:
     // `<strong>0326</strong>0168` reads as one number to a person and must to
     // us. Every other tag is a line break, which is what stops `M1</p><p>1AE`

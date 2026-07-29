@@ -216,22 +216,29 @@ export async function sweepWebsites(
       if (result.evidence !== row.evidence) summary.promoted++;
       if (result.url !== row.url) summary.adoptedVariant++;
 
+      // Checked BEFORE the dry-run short-circuit, so --dry-run previews the
+      // same behaviour a real run would have — including stopping early. Behind
+      // the `continue` it never fired at all, and a dry run against a broken
+      // runner burned the whole slice's fetches proving nothing.
+      const abort =
+        summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
+      if (abort) {
+        summary.systemicAbort = true;
+        deps.log(
+          `  ABORTING: ${failureStreak} consecutive rows unreachable and nothing has succeeded — this is our egress, not their sites.`,
+        );
+      }
+
       if (config.dryRun) {
         deps.log(`  [dry] ${row.companyNumber} ${row.url} — ${result.note}`);
+        if (abort) break;
         continue;
       }
       const applied = await deps.applyResult(row, result);
       if (applied) summary.updated++;
       else summary.lockMissed++;
-
       // Stop BEFORE committing another 800 demotions, not after.
-      if (summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK) {
-        summary.systemicAbort = true;
-        deps.log(
-          `  ABORTING: ${failureStreak} consecutive rows unreachable and nothing has succeeded — this is our egress, not their sites.`,
-        );
-        break;
-      }
+      if (abort) break;
     } catch (err) {
       summary.errored++;
       deps.log(

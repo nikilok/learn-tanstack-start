@@ -66,6 +66,14 @@ const PRIVATE_V4 = [
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^0\./,
   /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  // IETF protocol assignments — includes 192.0.0.192, which is routable on
+  // some clouds.
+  /^192\.0\.0\./,
+  // Benchmarking range, 198.18.0.0/15.
+  /^198\.1[89]\./,
+  // Multicast and reserved space, plus the broadcast address.
+  /^(22[4-9]|2[3-5]\d)\./,
+  /^255\.255\.255\.255$/,
 ];
 
 /**
@@ -83,9 +91,24 @@ export function isPrivateAddress(ip: string): boolean {
     if (addr === '::1' || addr === '::') return true;
     if (/^f[cd]/.test(addr)) return true;
     if (/^fe[89ab]/.test(addr)) return true;
-    // IPv4-mapped (::ffff:10.0.0.1) carries the v4 rules with it.
-    const mapped = /::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
-    if (mapped) return isPrivateAddress(mapped[1]);
+    // IPv4-mapped and NAT64-embedded addresses carry the v4 rules with them,
+    // in either notation. `::ffff:169.254.169.254` was already caught; its hex
+    // twin `::ffff:a9fe:a9fe` and the NAT64 form `64:ff9b::a9fe:a9fe` are the
+    // same endpoint wearing a different hat, and both were reaching the public
+    // branch. Node's lookup usually returns the dotted form, but this is
+    // exported policy, so it should not depend on that.
+    const dotted = /::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
+    if (dotted) return isPrivateAddress(dotted[1]);
+    const hex = /(?:::ffff:|^64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(
+      addr,
+    );
+    if (hex) {
+      const high = Number.parseInt(hex[1], 16);
+      const low = Number.parseInt(hex[2], 16);
+      return isPrivateAddress(
+        `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`,
+      );
+    }
     return false;
   }
   return PRIVATE_V4.some((re) => re.test(addr));

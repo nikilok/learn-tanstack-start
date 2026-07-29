@@ -58,6 +58,10 @@ export type RevalidateResult = {
   checkedAt: true;
   /** Set when this pass produced identity evidence worth timestamping. */
   verified: boolean;
+  /** Whether the site answered. A failure verdict is the sweep's alone to make
+   *  and is written unconditionally; a success-derived status is computed from
+   *  evidence the importer may meanwhile have improved, so it is guarded. */
+  live: boolean;
   note: string;
 };
 
@@ -139,6 +143,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
         confidence: evidenceConfidence(input.evidence).toFixed(3),
         failureCount: 0,
         verified: false,
+        live: true,
         note: `host answered but the page is unreadable (${reason}${input.outcome.status ? ' ' + input.outcome.status : ''}); the row stands`,
       };
     }
@@ -158,6 +163,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
       confidence: evidenceConfidence(input.evidence).toFixed(3),
       failureCount,
       verified: false,
+      live: false,
       note: dead
         ? `dead after ${failureCount} consecutive failures (${reason})`
         : `failure ${failureCount}/${DEAD_AFTER_FAILURES} (${reason})`,
@@ -202,6 +208,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidenceUrl,
     failureCount: 0,
     verified: status === 'verified',
+    live: true,
     note,
   };
 }

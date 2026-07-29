@@ -175,3 +175,31 @@ describe('extract — false-positive guards', () => {
     ).toBe(true);
   });
 });
+
+describe('extract — truncated markup', () => {
+  test('an unterminated script body never becomes visible text', () => {
+    // Reachable via web-fetch's 2MB truncation: a page whose analytics blob
+    // straddles the cap arrives with an opening <script> and no closing tag.
+    const truncated =
+      '<body><p>Welcome</p><script>var id = "03260168"; var x =';
+    expect(pageHasCompanyNumber(truncated, '03260168')).toBe(false);
+  });
+
+  test('an unterminated style body and comment likewise', () => {
+    expect(
+      pageHasCompanyNumber(
+        '<p>hi</p><style>.a::after{content:"03260168"',
+        '03260168',
+      ),
+    ).toBe(false);
+    expect(
+      pageHasCompanyNumber('<p>hi</p><!-- 03260168 and then', '03260168'),
+    ).toBe(false);
+  });
+
+  test('real text before the truncation point still reads', () => {
+    const truncated =
+      '<footer>Company No. 03260168</footer><script>var t = "999';
+    expect(pageHasCompanyNumber(truncated, '03260168')).toBe(true);
+  });
+});

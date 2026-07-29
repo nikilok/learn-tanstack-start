@@ -74,7 +74,15 @@ export function makeApplyResult(sql: Sql) {
     const updated = await sql`
       UPDATE company_websites SET
         url           = ${result.url},
-        status        = ${result.status},
+        -- A failure verdict is the sweep's own and is written outright. A
+        -- success-derived status is computed from the evidence we READ, and the
+        -- registry importer can upgrade evidence on the same URL in the two
+        -- hours a slice runs — which the url lock does not catch. Guarding it
+        -- with the same confidence comparison stops the sweep writing back a
+        -- stale lower tier and un-rendering a row the importer just promoted.
+        status        = CASE
+          WHEN ${result.live} AND COALESCE(confidence, 0) > ${result.confidence}::numeric
+          THEN status ELSE ${result.status} END,
         failure_count = ${result.failureCount},
         checked_at    = now(),
         evidence      = CASE

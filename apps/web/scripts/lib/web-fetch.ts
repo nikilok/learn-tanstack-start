@@ -69,17 +69,27 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
 
   let rules: RobotsRules = { disallow: [], allow: [] };
   try {
-    const res = await fetch(`${origin}/robots.txt`, {
+    const target = new URL('/robots.txt', origin);
+    // Same two protections fetchPage is built around, and for the same reasons:
+    // a host answering /robots.txt with `302 Location: http://169.254.169.254/…`
+    // would otherwise be followed before any guard saw the new target, and an
+    // unbounded res.text() would buffer a "robots.txt" of any size at all.
+    if ((await resolveHost(target.hostname)) !== 'public') {
+      robotsCache.set(origin, rules);
+      return rules;
+    }
+    const res = await fetch(target.href, {
       headers: { 'user-agent': USER_AGENT },
       signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
-      redirect: 'follow',
+      redirect: 'manual',
     });
-    if (res.ok) {
-      const type = res.headers.get('content-type') ?? '';
-      // An HTML "404 page" served with 200 is not a robots.txt.
-      if (!/html/i.test(type)) {
-        rules = parseRobots(await res.text(), ROBOTS_AGENT);
-      }
+    const type = res.headers.get('content-type') ?? '';
+    // An HTML "404 page" served with 200 is not a robots.txt. A redirect is not
+    // followed: robots.txt is defined for the origin it was requested from.
+    if (res.ok && !/html/i.test(type)) {
+      rules = parseRobots(await readCapped(res), ROBOTS_AGENT);
+    } else {
+      await res.body?.cancel();
     }
   } catch {
     // Unreachable robots.txt is not a reason to refuse the site.

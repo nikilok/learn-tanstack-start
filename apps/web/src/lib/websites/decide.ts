@@ -136,6 +136,10 @@ export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
     `${table}.confidence IS NULL` +
     ` OR ${table}.confidence < excluded.confidence` +
     ` OR (${table}.confidence = excluded.confidence AND ${table}.source = excluded.source)` +
+    // Mirrors decideWebsite's dead-row branch: evidence about a URL that no
+    // longer resolves must not outrank a fresh address, or the in-process
+    // decision to accept the correction is silently discarded by the database.
+    ` OR ${table}.status = 'dead'` +
     `)`
   );
 }
@@ -154,6 +158,16 @@ export function decideWebsite(
     return isSameSite(existing.url, proposed.url)
       ? { action: 'keep' }
       : { action: 'conflict' };
+  }
+
+  // Identity evidence is evidence about a URL. Once the sweep has established
+  // that URL no longer resolves, the evidence is moot and must not outrank a
+  // fresh address. Without this, a row promoted to `crn_on_page` (0.99) whose
+  // company then moved domain was frozen on the dead URL forever: every monthly
+  // import proposed the new one at `registry` (0.95), lost the rank comparison,
+  // and the company never got its link back.
+  if (existing.status === 'dead' && !isSameSite(existing.url, proposed.url)) {
+    return { action: 'update' };
   }
 
   const eRank = evidenceRank(existing.evidence);

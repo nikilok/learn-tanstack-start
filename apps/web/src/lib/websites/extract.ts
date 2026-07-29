@@ -64,10 +64,20 @@ function decodeEntities(text: string): string {
  */
 function visibleText(html: string): string {
   const stripped = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ');
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '\n')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '\n')
+    .replace(/<!--[\s\S]*?-->/g, '\n')
+    // Inline elements do not interrupt a line, so they leave nothing behind:
+    // `<strong>0326</strong>0168` reads as one number to a person and must to
+    // us. Every other tag is a line break, which is what stops `M1</p><p>1AE`
+    // from reading as the postcode "M1 1AE" — with all tags mapped to a space
+    // that fusion matched, and a coincidence promoted a candidate row to
+    // verified.
+    .replace(
+      /<\/?(?:span|b|strong|em|i|u|small|font|label|abbr|a)\b[^>]*>/gi,
+      '',
+    )
+    .replace(/<[^>]+>/g, '\n');
   return decodeEntities(stripped).replace(INVISIBLE, '');
 }
 
@@ -83,7 +93,12 @@ export function companyNumberVariants(companyNumber: string): string[] {
   const variants = new Set([canonical]);
   if (/^\d{8}$/.test(canonical)) {
     const stripped = canonical.replace(/^0+/, '');
-    if (stripped.length >= 4) variants.add(stripped);
+    // Seven digits, i.e. at most ONE dropped zero — which is the habit this
+    // exists for ("Company No. 3260168" for 03260168). Going shorter turns any
+    // bare numeral on the page into proof of registration: with a 4-digit floor
+    // an extension number, a product code or a year matched, and because
+    // crn_on_page sits at the top of the ladder that promotion is permanent.
+    if (stripped.length >= 7) variants.add(stripped);
   }
   return [...variants];
 }
@@ -127,6 +142,19 @@ export function pageHasPostcode(html: string, postcode: string): boolean {
   const needle = postcode.replace(/\s+/g, '').toUpperCase();
   // Below this a "postcode" is too short to be distinctive enough to trust.
   if (needle.length < 5) return false;
-  const text = visibleText(html).replace(/\s+/g, '').toUpperCase();
-  return text.includes(needle);
+
+  // Whitespace is COLLAPSED, never removed. Removing it page-wide let a needle
+  // be assembled from fragments that are never adjacent to a reader: with
+  // `<p>Ref M1</p><p>1AEX warehouse</p>`, stripping every space produced
+  // "...M11AEX..." and "M1 1AE" matched a coincidence. A postcode's inward and
+  // outward codes are separated by at most one space, so that is all we allow,
+  // and the match is bounded so it cannot start or end mid-token.
+  // Spaces and tabs collapse; a newline is a block boundary and must survive,
+  // or the fusion this guards against comes straight back.
+  const text = visibleText(html)
+    .replace(/[^\S\n]+/g, ' ')
+    .toUpperCase();
+  const split = needle.length - 3;
+  const pattern = `${escapeRegExp(needle.slice(0, split))} ?${escapeRegExp(needle.slice(split))}`;
+  return new RegExp(`(?<![A-Z0-9])${pattern}(?![A-Z0-9])`).test(text);
 }

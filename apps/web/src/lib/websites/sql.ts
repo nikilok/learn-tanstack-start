@@ -30,7 +30,12 @@ export function makeSelectRows(sql: Sql) {
         w.status,
         w.evidence,
         w.failure_count,
-        (w.checked_at IS NOT NULL) AS ever_checked,
+        -- "Have we ever completed a SUCCESSFUL pass", not "is checked_at set".
+        -- checked_at is stamped on failures too, so keying off it alone meant a
+        -- row whose first night timed out was excluded from disclosure probing
+        -- forever, having never actually been probed once.
+        (w.checked_at IS NOT NULL
+          AND w.status NOT IN ('pending', 'unreachable', 'dead')) AS ever_checked,
         p.postal_code
       FROM company_websites w
       LEFT JOIN companies_house_profiles p
@@ -75,12 +80,23 @@ export function makeApplyResult(sql: Sql) {
         evidence      = CASE
           WHEN COALESCE(confidence, 0) <= ${result.confidence}::numeric
           THEN ${result.evidence} ELSE evidence END,
+        -- COALESCE, not a bare assignment: a pass that finds no proof returns
+        -- evidenceUrl null at unchanged confidence, so the CASE alone wiped the
+        -- stored proof page on the very next run. Disclosure probing is
+        -- first-pass-only, so once wiped it could never be rebuilt.
         evidence_url  = CASE
           WHEN COALESCE(confidence, 0) <= ${result.confidence}::numeric
-          THEN ${result.evidenceUrl} ELSE evidence_url END,
+          THEN COALESCE(${result.evidenceUrl}, evidence_url) ELSE evidence_url END,
         confidence    = GREATEST(COALESCE(confidence, 0), ${result.confidence}::numeric),
         verified_at   = CASE WHEN ${result.verified} THEN now() ELSE verified_at END
       WHERE company_number = ${row.companyNumber}
+        -- Optimistic lock on the URL we actually validated. A slice runs for up
+        -- to two hours; if the importer swapped the URL in that window our
+        -- liveness verdict describes a page that is no longer this row's, and
+        -- writing checked_at would mark the new URL renderable without anyone
+        -- having fetched it. Skipping here shows up as lock_missed and the next
+        -- pass picks the row up.
+        AND url = ${row.url}
       RETURNING company_number
     `;
     return updated.length > 0;

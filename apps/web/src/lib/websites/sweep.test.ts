@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { FetchedPage, SweepConfig, SweepDeps, SweepRow } from './sweep.ts';
-import { sweepWebsites } from './sweep.ts';
+import { SYSTEMIC_FAILURE_STREAK, sweepWebsites } from './sweep.ts';
 
 const row = (over: Partial<SweepRow> = {}): SweepRow => ({
   companyNumber: '03260168',
@@ -216,5 +216,67 @@ describe('sweepWebsites', () => {
     });
     await sweepWebsites(config({ delayMs: 250 }), h.deps);
     expect(sleeps).toEqual([250]);
+  });
+});
+
+describe('sweepWebsites — hardening', () => {
+  test('stops the run once nothing is reachable, before committing the rest', async () => {
+    // A runner with broken egress fails every fetch, and each row is committed
+    // as it goes — a check at the END would diagnose it correctly with 900
+    // demotions already written and sorted to the back of the cursor.
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      fetchSite: async (url) => ({
+        ok: false,
+        reason: 'dns_or_refused',
+        attemptedUrl: url,
+      }),
+    });
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.systemicAbort).toBe(true);
+    expect(summary.updated).toBeLessThan(rows.length);
+    expect(summary.updated).toBeLessThanOrEqual(SYSTEMIC_FAILURE_STREAK);
+  });
+
+  test('does not abort when failures are interleaved with successes', async () => {
+    let n = 0;
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      hasCompanyNumber: () => true,
+      fetchSite: async (url) => {
+        n++;
+        return n % 5 === 0
+          ? { ok: false, reason: 'dns_or_refused', attemptedUrl: url }
+          : { ok: true, url, html: 'x', attemptedUrl: url };
+      },
+    });
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.systemicAbort).toBe(false);
+    expect(summary.updated).toBe(60);
+  });
+
+  test('probes a franchise row against its own directory, not the franchisor', async () => {
+    // 665 stored URLs carry a load-bearing path; probing the origin spends the
+    // whole disclosure budget on the national site.
+    const probed: string[] = [];
+    const h = harness({
+      rows: [row({ url: 'https://www.caremark.co.uk/arun' })],
+      fetchSite: async (url) => live(url, ''),
+      fetchPage: async (url) => {
+        probed.push(url);
+        return { ok: false, reason: 'http_error', attemptedUrl: url };
+      },
+    });
+    await sweepWebsites(config({ maxDisclosurePaths: 2 }), h.deps);
+    expect(probed).toEqual([
+      'https://www.caremark.co.uk/arun/contact',
+      'https://www.caremark.co.uk/arun/contact-us',
+    ]);
   });
 });

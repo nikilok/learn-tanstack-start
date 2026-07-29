@@ -117,3 +117,61 @@ describe('pageHasPostcode', () => {
     expect(pageHasPostcode(page('<p>anything</p>'), '')).toBe(false);
   });
 });
+
+describe('extract — false-positive guards', () => {
+  test('a postcode is not assembled from separate block elements', () => {
+    // Stripping whitespace page-wide let "M1" and "1AE" in unrelated elements
+    // fuse into a match, promoting a candidate row to verified on a coincidence.
+    expect(
+      pageHasPostcode('<p>Ref M1</p><p>1AEX warehouse</p>', 'M1 1AE'),
+    ).toBe(false);
+    expect(
+      pageHasPostcode(
+        '<p>Salford. M1</p><ul><li>1AE Grade</li></ul>',
+        'M1 1AE',
+      ),
+    ).toBe(false);
+    expect(pageHasPostcode('<div>M1</div><div>1AE</div>', 'M1 1AE')).toBe(
+      false,
+    );
+  });
+
+  test('a postcode split across inline tags still matches, as a reader sees it', () => {
+    expect(pageHasPostcode('<b>SW1A</b><b>1AA</b>', 'SW1A 1AA')).toBe(true);
+    expect(
+      pageHasPostcode('<span>SW1A</span> <span>1AA</span>', 'SW1A 1AA'),
+    ).toBe(true);
+  });
+
+  test('a short bare numeral is never proof of registration', () => {
+    // A 4-digit floor made an extension number, a product code or a year read
+    // as a company number, and crn_on_page sits at the top of the ladder so the
+    // promotion was permanent.
+    expect(companyNumberVariants('00001234')).toEqual(['00001234']);
+    expect(pageHasCompanyNumber('<p>Call extension 1234</p>', '00001234')).toBe(
+      false,
+    );
+    expect(
+      pageHasCompanyNumber('<p>Order 123456 shipped</p>', '00123456'),
+    ).toBe(false);
+  });
+
+  test('the one-dropped-zero form, which is the real habit, still matches', () => {
+    expect(companyNumberVariants('03260168').sort()).toEqual([
+      '03260168',
+      '3260168',
+    ]);
+    expect(pageHasCompanyNumber('<p>Company No 3260168</p>', '03260168')).toBe(
+      true,
+    );
+  });
+
+  test('a number split across block elements is not fused either', () => {
+    expect(pageHasCompanyNumber('<p>0326</p><p>0168</p>', '03260168')).toBe(
+      false,
+    );
+    expect(
+      pageHasCompanyNumber('<p>No. <strong>0326</strong>0168</p>', '03260168'),
+    ).toBe(true);
+  });
+});

@@ -94,14 +94,27 @@ export function isPrivateAddress(ip: string): boolean {
 export type RobotsRules = { disallow: string[]; allow: string[] };
 
 /**
- * Parse the groups of a robots.txt that apply to us: the `*` group plus any
- * group naming our agent. Deliberately minimal — Allow, Disallow and
- * User-agent only, since that is all the policy below consults.
+ * Parse the one robots.txt group that applies to us.
+ *
+ * The most specific matching group wins and every other group is ignored — the
+ * wildcard group is a FALLBACK, not something to merge in. Merging them means a
+ * site publishing `User-agent: *` / `Allow: /` followed by an explicit
+ * `User-agent: SponsorSearchBot` / `Disallow: /` is read as permitting us,
+ * because Allow beats Disallow at equal specificity. That is precisely
+ * backwards: the operator named us to keep us out, and their only remaining
+ * remedy would be an IP block.
+ *
+ * Deliberately minimal — User-agent, Allow and Disallow only, since that is all
+ * isAllowedByRobots consults.
  */
 export function parseRobots(body: string, agent: string): RobotsRules {
-  const rules: RobotsRules = { disallow: [], allow: [] };
-  const wanted = new Set(['*', agent.toLowerCase()]);
-  let applies = false;
+  const wanted = agent.toLowerCase();
+  const named: RobotsRules = { disallow: [], allow: [] };
+  const wildcard: RobotsRules = { disallow: [], allow: [] };
+  let namedSeen = false;
+  // Groups currently being accumulated into; consecutive User-agent lines
+  // share one rule block, so a group can target both.
+  let targets: RobotsRules[] = [];
   let inGroup = false;
 
   for (const raw of body.split(/\r?\n/)) {
@@ -112,21 +125,28 @@ export function parseRobots(body: string, agent: string): RobotsRules {
     const value = rest.join(':').trim();
 
     if (field === 'user-agent') {
-      // A new group starts only after a non-user-agent line; consecutive
-      // user-agent lines share one group.
       if (inGroup) {
-        applies = false;
+        targets = [];
         inGroup = false;
       }
-      if (wanted.has(value.toLowerCase())) applies = true;
+      const name = value.toLowerCase();
+      if (name === wanted) {
+        namedSeen = true;
+        if (!targets.includes(named)) targets.push(named);
+      } else if (name === '*') {
+        if (!targets.includes(wildcard)) targets.push(wildcard);
+      }
       continue;
     }
-    if (!applies) continue;
+    if (targets.length === 0) continue;
     inGroup = true;
-    if (field === 'disallow' && value) rules.disallow.push(value);
-    if (field === 'allow' && value) rules.allow.push(value);
+    for (const target of targets) {
+      if (field === 'disallow' && value) target.disallow.push(value);
+      if (field === 'allow' && value) target.allow.push(value);
+    }
   }
-  return rules;
+
+  return namedSeen ? named : wildcard;
 }
 
 /** Longest-match wins, with Allow beating Disallow at equal length — the

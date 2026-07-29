@@ -90,6 +90,7 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
     ok: false,
     reason: result.reason,
     attemptedUrl: result.attemptedUrl ?? requested,
+    status: result.status,
   };
 }
 
@@ -136,6 +137,7 @@ console.log(`  disclosure_fetches  : ${summary.disclosureFetches}`);
 console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);
+console.log(`  systemic_abort      : ${summary.systemicAbort}`);
 console.log(`  never_checked_left  : ${after.neverChecked}`);
 console.log(`  dead_total          : ${after.deadTotal}`);
 console.log(
@@ -157,11 +159,11 @@ if (
   );
   process.exit(1);
 }
-// Every row failing to fetch is a network or DNS problem on our side, not 1200
-// companies going offline on the same night.
-if (summary.selected >= 20 && summary.live === 0) {
+// The sweep now stops itself mid-slice rather than committing a whole night of
+// demotions from a broken runner, so this only reports what already happened.
+if (summary.systemicAbort) {
   console.error(
-    '\n  NOTHING was reachable — check egress before trusting these demotions.',
+    '\n  ABORTED: nothing was reachable — check egress. The run stopped early, so only the first few rows were demoted.',
   );
   process.exit(1);
 }

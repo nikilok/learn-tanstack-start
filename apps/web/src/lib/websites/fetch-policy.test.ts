@@ -184,3 +184,32 @@ describe('isAllowedByRobots', () => {
     ).toBe(false);
   });
 });
+
+describe('parseRobots — group precedence', () => {
+  const AGENT = 'SponsorSearchBot';
+
+  test('a group naming us wins outright over the wildcard group', () => {
+    // The bug: both groups were merged, so the wildcard Allow cancelled the
+    // explicit by-name Disallow and we crawled a site that had banned us.
+    const rules = parseRobots(
+      'User-agent: *\nAllow: /\n\nUser-agent: SponsorSearchBot\nDisallow: /\n',
+      AGENT,
+    );
+    expect(rules.disallow).toEqual(['/']);
+    expect(rules.allow).toEqual([]);
+    expect(isAllowedByRobots(rules, '/')).toBe(false);
+  });
+
+  test('the wildcard group still applies when we are not named', () => {
+    const rules = parseRobots('User-agent: *\nDisallow: /admin\n', AGENT);
+    expect(rules.disallow).toEqual(['/admin']);
+  });
+
+  test('order does not matter: a named group before the wildcard still wins', () => {
+    const rules = parseRobots(
+      'User-agent: SponsorSearchBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n',
+      AGENT,
+    );
+    expect(isAllowedByRobots(rules, '/')).toBe(false);
+  });
+});

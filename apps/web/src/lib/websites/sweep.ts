@@ -29,7 +29,14 @@ export type SweepRow = {
 
 export type FetchedPage =
   | { ok: true; url: string; html: string; attemptedUrl: string }
-  | { ok: false; reason: RevalidateFailure; attemptedUrl: string };
+  | {
+      ok: false;
+      reason: RevalidateFailure;
+      attemptedUrl: string;
+      /** HTTP status when the host answered — 403 means live-but-refused, 404
+       *  means the page is genuinely gone. */
+      status?: number;
+    };
 
 export type SweepDeps = {
   selectRows(maxRows: number): Promise<SweepRow[]>;
@@ -65,7 +72,21 @@ export type SweepSummary = {
   updated: number;
   lockMissed: number;
   errored: number;
+  /** Set when the run stopped early because nothing was reachable. */
+  systemicAbort: boolean;
 };
+
+/**
+ * Consecutive unreachable rows, with no success at all, before the run stops.
+ *
+ * A runner with broken DNS or blocked egress fails every fetch, and each failed
+ * row is committed as it goes — so a check at the END of the run diagnoses the
+ * problem correctly while the demotions are already written, taking the links
+ * off up to 900 company pages and sorting those rows to the back of the cursor
+ * so they are the last to be revisited. 900 companies do not go offline on the
+ * same night; this many in a row is our network, not theirs.
+ */
+export const SYSTEMIC_FAILURE_STREAK = 15;
 
 /**
  * Look for the company's own number on the site: the homepage first, then a
@@ -99,11 +120,17 @@ async function findDisclosure(
       : null;
 
   if (!row.everChecked && row.evidence !== 'crn_on_page') {
-    const origin = new URL(homepage.url).origin;
+    // Probe relative to the stored URL's own directory, not the bare origin.
+    // normaliseWebsiteUrl keeps a path precisely because it identifies the
+    // business — 665 rows look like `caremark.co.uk/arun`, one franchise of
+    // many — so probing the origin spends the whole disclosure budget on the
+    // franchisor's pages, which carry the franchisor's registration details.
+    const base = new URL(row.url);
+    const dir = base.pathname.replace(/\/+$/, '');
     for (const path of DISCLOSURE_PATHS.slice(0, config.maxDisclosurePaths)) {
       await deps.sleep(config.delayMs);
       summary.disclosureFetches++;
-      const page = await deps.fetchPage(`${origin}${path}`);
+      const page = await deps.fetchPage(`${base.origin}${dir}${path}`);
       if (!page.ok) continue;
       if (deps.hasCompanyNumber(page.html, row.companyNumber)) {
         return { crnFoundAt: page.url, postcodeFoundAt };
@@ -137,7 +164,9 @@ export async function sweepWebsites(
     updated: 0,
     lockMissed: 0,
     errored: 0,
+    systemicAbort: false,
   };
+  let failureStreak = 0;
 
   const rows = await deps.selectRows(config.maxRows);
   summary.selected = rows.length;
@@ -169,12 +198,17 @@ export async function sweepWebsites(
         attemptedUrl: fetched.attemptedUrl,
         outcome: fetched.ok
           ? { ok: true }
-          : { ok: false, reason: fetched.reason },
+          : { ok: false, reason: fetched.reason, status: fetched.status },
         crnFoundAt,
         postcodeFoundAt,
       });
 
-      if (fetched.ok) summary.live++;
+      if (fetched.ok) {
+        summary.live++;
+        failureStreak = 0;
+      } else {
+        failureStreak++;
+      }
       if (result.status === 'dead') summary.dead++;
       if (!fetched.ok && fetched.reason === 'blocked_by_robots') {
         summary.robotsBlocked++;
@@ -189,6 +223,15 @@ export async function sweepWebsites(
       const applied = await deps.applyResult(row, result);
       if (applied) summary.updated++;
       else summary.lockMissed++;
+
+      // Stop BEFORE committing another 800 demotions, not after.
+      if (summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK) {
+        summary.systemicAbort = true;
+        deps.log(
+          `  ABORTING: ${failureStreak} consecutive rows unreachable and nothing has succeeded — this is our egress, not their sites.`,
+        );
+        break;
+      }
     } catch (err) {
       summary.errored++;
       deps.log(

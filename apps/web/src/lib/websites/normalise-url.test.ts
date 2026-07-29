@@ -159,3 +159,22 @@ describe('isSameSite', () => {
     expect(isSameSite('https://a.com', null)).toBe(false);
   });
 });
+
+describe('isSameSite — scheme insensitivity', () => {
+  test('an adopted http url is the same site as its https form', () => {
+    // The sweep adopts http:// when a site serves no https at all; a
+    // scheme-sensitive comparison then read that and the next registry import
+    // as two different sites, recording a spurious conflict.
+    expect(isSameSite('http://example.co.uk', 'https://example.co.uk')).toBe(
+      true,
+    );
+    expect(
+      isSameSite('http://www.example.co.uk', 'https://example.co.uk'),
+    ).toBe(true);
+  });
+
+  test('it still separates genuinely different sites', () => {
+    expect(isSameSite('http://a.co.uk', 'https://b.co.uk')).toBe(false);
+    expect(isSameSite('http://a.co.uk/x', 'https://a.co.uk/y')).toBe(false);
+  });
+});

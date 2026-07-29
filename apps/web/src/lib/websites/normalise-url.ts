@@ -115,6 +115,12 @@ export function normaliseWebsiteUrl(
  */
 export function isSameSite(a: string | null, b: string | null): boolean {
   if (!a || !b) return a === b;
-  const strip = (u: string) => u.replace(/^https:\/\/www\./, 'https://');
+  // Scheme-insensitive as well as www-insensitive. The revalidation sweep may
+  // adopt an `http://` variant when a site serves no https at all, and a
+  // comparison that only understood `https://www.` then read that stored URL
+  // and the next registry import's `https://` form as two different sites —
+  // recording a spurious conflict, or churning checked_at on every import.
+  const strip = (u: string) =>
+    u.replace(/^https?:\/\//, '').replace(/^www\./, '');
   return strip(a) === strip(b);
 }

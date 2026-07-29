@@ -32,6 +32,9 @@ const ROBOTS_TIMEOUT_MS = 8_000;
 /** Enough for any disclosure footer; a page larger than this is not one we need
  *  to read in full, and reading it is someone else's bandwidth. */
 const MAX_BYTES = 2_000_000;
+/** Redirect hops we will follow ourselves. Node's own follower cannot be used
+ *  because it re-issues the request without re-running our guards. */
+const MAX_REDIRECTS = 5;
 
 export type FetchFailure =
   | 'http_error'
@@ -109,11 +112,18 @@ async function resolveHost(
   }
 }
 
-/** Read at most MAX_BYTES of a response body, so one enormous page cannot stall
- *  or exhaust the job. */
-async function readCapped(res: Response): Promise<string | null> {
+/**
+ * Read at most MAX_BYTES of a response body.
+ *
+ * TRUNCATES rather than discarding. Returning null on overflow made an
+ * oversized but perfectly live page a `too_large` failure, which fed the death
+ * counter deterministically and killed the row for good; the same applied to a
+ * mid-stream read error. What we came for is a disclosure footer, and the first
+ * 2MB is far more likely to contain it than nothing is.
+ */
+async function readCapped(res: Response): Promise<string> {
   const reader = res.body?.getReader();
-  if (!reader) return null;
+  if (!reader) return '';
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -121,15 +131,15 @@ async function readCapped(res: Response): Promise<string | null> {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value) continue;
-      total += value.byteLength;
-      if (total > MAX_BYTES) {
-        await reader.cancel();
-        return null;
-      }
       chunks.push(value);
+      total += value.byteLength;
+      if (total >= MAX_BYTES) {
+        await reader.cancel();
+        break;
+      }
     }
   } catch {
-    return null;
+    // Keep whatever arrived before the stream broke.
   }
   const merged = new Uint8Array(total);
   let offset = 0;
@@ -140,57 +150,83 @@ async function readCapped(res: Response): Promise<string | null> {
   return new TextDecoder('utf-8', { fatal: false }).decode(merged);
 }
 
-/** Fetch one URL, applying every guard. Does not try variants. */
+/** Every guard that must hold before we are allowed to request a URL. */
+async function guard(target: URL): Promise<FetchFailure | null> {
+  const resolution = await resolveHost(target.hostname);
+  if (resolution === 'private') return 'private_address';
+  if (resolution === 'unresolvable') return 'dns_or_refused';
+  const rules = await robotsFor(target.origin);
+  if (!isAllowedByRobots(rules, target.pathname || '/')) {
+    return 'blocked_by_robots';
+  }
+  return null;
+}
+
+/**
+ * Fetch one URL, applying every guard at EVERY hop. Does not try variants.
+ *
+ * Redirects are followed by hand rather than by `redirect: 'follow'`, because
+ * the built-in follower re-issues the request itself and so never re-runs
+ * resolveHost or the robots check. That left the private-address guard
+ * protecting only the first hop: a parked or hostile domain answering
+ * `302 Location: http://169.254.169.254/…` would have been fetched from a
+ * runner holding database credentials, and its body could even have been
+ * written into evidence_url as a company's proof of identity.
+ */
 export async function fetchPage(url: string): Promise<PageFetch> {
-  let parsed: URL;
+  let current: URL;
   try {
-    parsed = new URL(url);
+    current = new URL(url);
   } catch {
     return { ok: false, reason: 'dns_or_refused' };
   }
 
-  const resolution = await resolveHost(parsed.hostname);
-  if (resolution === 'private') {
-    return { ok: false, reason: 'private_address' };
-  }
-  if (resolution === 'unresolvable') {
-    return { ok: false, reason: 'dns_or_refused' };
-  }
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const blocked = await guard(current);
+    if (blocked) return { ok: false, reason: blocked };
 
-  const rules = await robotsFor(parsed.origin);
-  if (!isAllowedByRobots(rules, parsed.pathname || '/')) {
-    return { ok: false, reason: 'blocked_by_robots' };
-  }
+    try {
+      const res = await fetch(current.href, {
+        headers: {
+          'user-agent': USER_AGENT,
+          accept: 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        redirect: 'manual',
+      });
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        'user-agent': USER_AGENT,
-        accept: 'text/html,application/xhtml+xml',
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      redirect: 'follow',
-    });
+      const location = res.headers.get('location');
+      if (res.status >= 300 && res.status < 400 && location) {
+        await res.body?.cancel();
+        try {
+          current = new URL(location, current);
+        } catch {
+          return { ok: false, reason: 'http_error', status: res.status };
+        }
+        continue;
+      }
 
-    if (!res.ok) {
-      await res.body?.cancel();
-      return { ok: false, reason: 'http_error', status: res.status };
+      if (!res.ok) {
+        await res.body?.cancel();
+        return { ok: false, reason: 'http_error', status: res.status };
+      }
+      const type = res.headers.get('content-type') ?? '';
+      if (type && !/html|xml|text\/plain/i.test(type)) {
+        await res.body?.cancel();
+        return { ok: false, reason: 'not_html', status: res.status };
+      }
+      return {
+        ok: true,
+        url: current.href,
+        status: res.status,
+        html: await readCapped(res),
+      };
+    } catch (err) {
+      return { ok: false, reason: classify(err) };
     }
-    const type = res.headers.get('content-type') ?? '';
-    if (type && !/html|xml|text\/plain/i.test(type)) {
-      await res.body?.cancel();
-      return { ok: false, reason: 'not_html', status: res.status };
-    }
-    const html = await readCapped(res);
-    if (html === null)
-      return { ok: false, reason: 'too_large', status: res.status };
-
-    // res.url is the post-redirect address; a site that redirects to its real
-    // home is live there, and that is what we want to record.
-    return { ok: true, url: res.url || url, status: res.status, html };
-  } catch (err) {
-    return { ok: false, reason: classify(err) };
   }
+  // A redirect loop is a broken site, not a transient fault.
+  return { ok: false, reason: 'http_error' };
 }
 
 export type SiteFetch = PageFetch & {

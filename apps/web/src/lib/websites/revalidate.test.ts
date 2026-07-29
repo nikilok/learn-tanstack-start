@@ -174,3 +174,54 @@ describe('revalidate — failures', () => {
     expect(r.status).toBe('verified');
   });
 });
+
+describe('revalidate — hosts that answered', () => {
+  test('a 403 from bot management is not a step toward death', () => {
+    // Deterministic, so counting it killed live sites on night two with no
+    // route back: the row can never recover from a refusal that never changes.
+    const r = revalidate(
+      input({ outcome: { ok: false, reason: 'http_error', status: 403 } }),
+    );
+    expect(r.status).toBe('verified');
+    expect(r.failureCount).toBe(0);
+  });
+
+  test('429 and 5xx likewise mean live, not gone', () => {
+    for (const status of [429, 503]) {
+      const r = revalidate(
+        input({ outcome: { ok: false, reason: 'http_error', status } }),
+      );
+      expect(r.failureCount, `status ${status}`).toBe(0);
+    }
+  });
+
+  test('a 404 DOES count, because the page really is gone', () => {
+    // A stored franchise path like /arun returning 404 is exactly the broken
+    // link the sweep exists to find.
+    const r = revalidate(
+      input({ outcome: { ok: false, reason: 'http_error', status: 404 } }),
+    );
+    expect(r.status).toBe('unreachable');
+    expect(r.failureCount).toBe(1);
+  });
+
+  test('an unreadable body does not kill a live host', () => {
+    for (const reason of ['not_html', 'too_large'] as const) {
+      const r = revalidate(input({ outcome: { ok: false, reason } }));
+      expect(r.failureCount, reason).toBe(0);
+    }
+  });
+
+  test('a robots ban takes its status from the evidence, not a hardcoded verified', () => {
+    // The bug: a below-floor candidate was forced to 'verified' and stamped,
+    // publishing an unconfirmed guess from a page we were never allowed to read.
+    const r = revalidate(
+      input({
+        evidence: 'registry_unconfirmed',
+        status: 'dead',
+        outcome: { ok: false, reason: 'blocked_by_robots' },
+      }),
+    );
+    expect(r.status).toBe('candidate');
+  });
+});

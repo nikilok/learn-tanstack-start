@@ -38,7 +38,9 @@ export type RevalidateInput = {
   failureCount: number;
   /** The variant that answered, before redirects. */
   attemptedUrl: string;
-  outcome: { ok: true } | { ok: false; reason: RevalidateFailure };
+  outcome:
+    | { ok: true }
+    | { ok: false; reason: RevalidateFailure; status?: number };
   /** Set when the company's registered number was found on a fetched page. */
   crnFoundAt?: string | null;
   /** Set when the registered office postcode was found on a fetched page. */
@@ -69,6 +71,37 @@ export type RevalidateResult = {
  */
 export const DEAD_AFTER_FAILURES = 2;
 
+/**
+ * Failures where the host demonstrably responded and the URL is still sound.
+ * Only a connection-level failure is evidence a site has gone.
+ */
+const ANSWERED_BUT_UNREADABLE = new Set<RevalidateFailure>([
+  'blocked_by_robots',
+  'not_html',
+  'too_large',
+]);
+
+/**
+ * HTTP statuses that mean "live, but not for you". A 403 or 429 from bot
+ * management is a deterministic refusal, so counting it toward death killed
+ * live sites permanently on night two with no way back.
+ *
+ * 404 and 410 are deliberately NOT here: they mean the page itself is gone,
+ * which for a stored franchise path like /arun is exactly the broken link the
+ * sweep exists to find. Those must still count toward death.
+ */
+const LIVE_BUT_REFUSED = new Set([401, 403, 429, 451]);
+
+/** Whether a failed fetch nonetheless proves the site is alive and the URL
+ *  still points at something. */
+function answeredAlive(reason: RevalidateFailure, status?: number): boolean {
+  if (ANSWERED_BUT_UNREADABLE.has(reason)) return true;
+  if (reason === 'http_error' && status) {
+    return LIVE_BUT_REFUSED.has(status) || status >= 500;
+  }
+  return false;
+}
+
 /** `manual` is an owner decision about identity; a dead URL does not overturn
  *  it, so the row is marked dead without touching the evidence tier. */
 function nextEvidence(
@@ -89,19 +122,24 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
   if (!input.outcome.ok) {
     const reason = input.outcome.reason;
 
-    // Robots served us a file, which means the host answered — we are simply
-    // not permitted to read the page. Liveness is confirmed even though the
-    // content is not, so the row keeps its identity evidence and is stamped.
-    if (reason === 'blocked_by_robots') {
+    // The host ANSWERED in all of these; we just could not read a page from it.
+    // Counting them toward death is what made a live site behind Cloudflare bot
+    // management permanently dead: a 403 to our User-Agent is deterministic, so
+    // the row hit the threshold on night two and no later pass could revive it.
+    // Liveness is confirmed, content is not, so the row keeps its tier and is
+    // stamped — and gets its status from the evidence rather than a hardcoded
+    // 'verified', which would push a below-floor candidate through the render
+    // gate on the strength of a page we were never allowed to read.
+    if (answeredAlive(reason, input.outcome.status)) {
       return {
         ...base,
         url: input.storedUrl,
-        status: input.status === 'dead' ? 'verified' : input.status,
+        status: statusForEvidence(input.evidence),
         evidence: input.evidence,
         confidence: evidenceConfidence(input.evidence).toFixed(3),
         failureCount: 0,
         verified: false,
-        note: 'robots.txt disallows us; host is live so the row stands',
+        note: `host answered but the page is unreadable (${reason}${input.outcome.status ? ' ' + input.outcome.status : ''}); the row stands`,
       };
     }
 

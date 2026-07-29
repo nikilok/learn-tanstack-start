@@ -193,7 +193,14 @@ export async function fetchPage(url: string): Promise<PageFetch> {
   }
 }
 
-export type SiteFetch = PageFetch & { attempts: number };
+export type SiteFetch = PageFetch & {
+  attempts: number;
+  /** The candidate that produced this outcome, BEFORE redirects. When it
+   *  differs from the URL we were asked for, the stored URL does not itself
+   *  work and only a host or scheme variant of it does — which is the ~8% of
+   *  rows a single-attempt sweep would have demoted as dead. */
+  attemptedUrl: string;
+};
 
 /**
  * Fetch a site, trying host and scheme variants before concluding it is dead.
@@ -209,21 +216,28 @@ export async function fetchSite(
 ): Promise<SiteFetch> {
   const candidates = urlVariants(url);
   if (candidates.length === 0) {
-    return { ok: false, reason: 'dns_or_refused', attempts: 0 };
+    return {
+      ok: false,
+      reason: 'dns_or_refused',
+      attempts: 0,
+      attemptedUrl: url,
+    };
   }
 
   const retryable = new Set<FetchFailure>(['tls', 'dns_or_refused', 'timeout']);
   let last: PageFetch = { ok: false, reason: 'dns_or_refused' };
   let attempts = 0;
+  let attemptedUrl = candidates[0];
 
   for (const candidate of candidates) {
     if (attempts > 0) await onAttempt?.(candidate);
     attempts++;
+    attemptedUrl = candidate;
     last = await fetchPage(candidate);
-    if (last.ok) return { ...last, attempts };
-    if (!retryable.has(last.reason)) return { ...last, attempts };
+    if (last.ok) return { ...last, attempts, attemptedUrl };
+    if (!retryable.has(last.reason)) return { ...last, attempts, attemptedUrl };
   }
-  return { ...last, attempts };
+  return { ...last, attempts, attemptedUrl };
 }
 
 /** Drop every cached robots.txt. Exposed for tests and long-lived processes. */

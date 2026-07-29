@@ -27,6 +27,12 @@ export type WebsiteStatus =
   | 'pending'
   | 'verified'
   | 'candidate'
+  /** Tried and could not be reached this pass, but not yet written off. Its own
+   *  status rather than a flag on `verified` because `checked_at` is the sweep
+   *  CURSOR and must be stamped on every pass, including failures — so a failed
+   *  row left as `verified` satisfies the render gate and ships a link we could
+   *  not reach. Measured: a 30-row sweep produced 25 live and 29 renderable. */
+  | 'unreachable'
   | 'none'
   | 'dead';
 

@@ -108,6 +108,32 @@ export function statusForEvidence(evidence: WebsiteEvidence): WebsiteStatus {
   return evidenceRank(evidence) >= VERIFIED_FLOOR ? 'verified' : 'candidate';
 }
 
+/**
+ * The same upgrade-only policy as a SQL predicate, for an
+ * `ON CONFLICT DO UPDATE ... WHERE` clause.
+ *
+ * Emitted here rather than hand-written at the call site because a copied
+ * predicate has already diverged once: decideWebsite gained same-source
+ * corrections while the SQL still demanded a strictly higher confidence, so
+ * every correction a registry published was accepted in process and then
+ * silently discarded by the database. This is the `slugifiedSqlText` pattern
+ * from @ss/db — one declaration, two consumers, no agreement test to forget.
+ *
+ * Mirrors decideWebsite clause for clause: `manual` is terminal; a stronger
+ * tier wins; an equal tier wins only when it is the same source revising its
+ * own answer (a bare `=` leaves a NULL stored source non-matching, exactly as
+ * the `existing.source &&` guard does in process).
+ */
+export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
+  return (
+    `${table}.evidence <> 'manual' AND (` +
+    `${table}.confidence IS NULL` +
+    ` OR ${table}.confidence < excluded.confidence` +
+    ` OR (${table}.confidence = excluded.confidence AND ${table}.source = excluded.source)` +
+    `)`
+  );
+}
+
 /** Apply the upgrade-only policy to one company. */
 export function decideWebsite(
   existing: ExistingWebsite | null,

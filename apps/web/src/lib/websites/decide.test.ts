@@ -6,6 +6,7 @@ import {
   evidenceConfidence,
   evidenceRank,
   statusForEvidence,
+  upgradeOnlyPredicateSql,
   type WebsiteEvidence,
 } from './decide.ts';
 
@@ -179,6 +180,33 @@ describe('decideWebsite', () => {
       proposed({ url: 'https://new-domain.co.uk', source: 'cqc' }),
     );
     expect(result).toEqual({ action: 'update' });
+  });
+
+  test('the SQL guard admits every case decideWebsite calls an update', () => {
+    // The bug this pins: decideWebsite gained same-source corrections while the
+    // hand-written SQL still required a strictly HIGHER confidence, so a
+    // registry revising its own URL was accepted in process and then silently
+    // dropped by the database (0.95 < 0.95 is false). Both now come from
+    // upgradeOnlyPredicateSql, and these are the clauses that make the three
+    // update paths reachable.
+    const predicate = upgradeOnlyPredicateSql();
+    // stronger tier wins
+    expect(predicate).toContain(
+      'company_websites.confidence < excluded.confidence',
+    );
+    // same tier wins when, and only when, it is the same source
+    expect(predicate).toContain(
+      'company_websites.confidence = excluded.confidence AND company_websites.source = excluded.source',
+    );
+    // manual stays terminal
+    expect(predicate).toContain("company_websites.evidence <> 'manual'");
+  });
+
+  test('the SQL guard is emitted for the table it is applied to', () => {
+    expect(upgradeOnlyPredicateSql('other_table')).not.toContain(
+      'company_websites',
+    );
+    expect(upgradeOnlyPredicateSql('other_table')).toContain('other_table');
   });
 
   test('an unknown prior source cannot claim to be the same source', () => {

@@ -50,6 +50,7 @@ import {
   decideWebsite,
   evidenceConfidence,
   statusForEvidence,
+  upgradeOnlyPredicateSql,
 } from '../src/lib/websites/decide.ts';
 import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
 import {
@@ -326,6 +327,12 @@ console.log(`  sources: ${sources.join(', ')}`);
 const workDir = mkdtempSync(join(tmpdir(), 'registry-websites-'));
 let findings: Finding[] = [];
 let errored = 0;
+/** Sources that actually produced rows. The matched-company floor is summed
+ *  over THESE, not over the requested list: if CQC fails and Wikidata succeeds,
+ *  a floor still counting CQC's 2,000 rejects Wikidata's ~1,100 good rows and
+ *  writes nothing, which is the combined-floor failure the per-source floors
+ *  exist to prevent. */
+const succeeded: RegistrySource[] = [];
 
 try {
   for (const source of sources) {
@@ -334,6 +341,7 @@ try {
       const rows =
         source === 'cqc' ? await readCqc(workDir) : await readWikidata();
       findings = findings.concat(rows);
+      succeeded.push(source);
     } catch (err) {
       errored++;
       console.error(`  FAILED: ${err instanceof Error ? err.message : err}`);
@@ -456,13 +464,13 @@ console.log(
 // after the write diagnoses the problem correctly but the wrong rows are
 // already committed, and the upgrade-only ladder then reads a later correct
 // run as an equal-rank conflict, so they would never be corrected.
-const matchedFloor = sources.reduce(
+const matchedFloor = succeeded.reduce(
   (total, source) => total + MIN_MATCHED_COMPANIES[source],
   0,
 );
 if (known.size < matchedFloor) {
   console.error(
-    `\n  Only ${known.size} registry rows matched a known company (expected >= ${matchedFloor} for ${sources.join('+')}) — check the company-number column. Nothing was written.`,
+    `\n  Only ${known.size} registry rows matched a known company (expected >= ${matchedFloor} for ${succeeded.join('+')}) — check the company-number column. Nothing was written.`,
   );
   process.exit(1);
 }
@@ -496,11 +504,10 @@ if (!dryRun && pending.length > 0) {
         },
         // Upgrade-only in SQL as well as in decideWebsite, so a concurrent
         // writer (the phase-2 sweep) cannot be clobbered between our read and
-        // our write. confidence is the ladder's numeric proxy. `manual` is
-        // named explicitly rather than relying on its confidence of 1.0: the
-        // column is nullable, so an owner-set row written without one would
-        // otherwise be overwritten by the IS NULL disjunct.
-        setWhere: raw`company_websites.evidence <> 'manual' AND (company_websites.confidence IS NULL OR company_websites.confidence < excluded.confidence)`,
+        // our write. Emitted from decide.ts rather than written out here: a
+        // hand-copied predicate silently diverged from decideWebsite once
+        // already and made same-source corrections a no-op.
+        setWhere: raw.raw(upgradeOnlyPredicateSql()),
       })
       .returning({ companyNumber: companyWebsites.companyNumber });
     // Count what the guard actually applied, not what we submitted — a no-op

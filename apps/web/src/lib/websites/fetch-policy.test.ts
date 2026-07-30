@@ -240,3 +240,40 @@ describe('isPrivateAddress — ranges that were slipping through', () => {
     expect(isPrivateAddress('::ffff:0808:0808')).toBe(false);
   });
 });
+
+describe('isAllowedByRobots — hostile input', () => {
+  test('collapses wildcard runs so the compiled regex cannot blow up', () => {
+    // robots.txt comes from arbitrary third-party hosts, and adjacent `.*`
+    // groups backtrack exponentially. Runs of `*` mean the same as one.
+    const nasty = { disallow: [`/${'*'.repeat(200)}private`], allow: [] };
+    const started = Date.now();
+    // Collapsed to `/*private`, so it behaves exactly as one wildcard would:
+    // a matching path is disallowed, a non-matching one is not, and neither
+    // takes measurable time on a 300-character subject.
+    expect(isAllowedByRobots(nasty, `/${'a'.repeat(300)}private`)).toBe(false);
+    expect(isAllowedByRobots(nasty, `/${'a'.repeat(300)}`)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  test('a pathologically long directive is bounded, not compiled whole', () => {
+    const long = { disallow: [`/${'a*'.repeat(2000)}`], allow: [] };
+    const started = Date.now();
+    expect(() => isAllowedByRobots(long, '/anything')).not.toThrow();
+    expect(Date.now() - started).toBeLessThan(200);
+  });
+
+  test('collapsing wildcards does not change what a normal rule matches', () => {
+    expect(
+      isAllowedByRobots(
+        { disallow: ['/**/private'], allow: [] },
+        '/uk/private',
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedByRobots({ disallow: ['/*/private'], allow: [] }, '/uk/private'),
+    ).toBe(false);
+    expect(
+      isAllowedByRobots({ disallow: ['/*/private'], allow: [] }, '/uk/public'),
+    ).toBe(true);
+  });
+});

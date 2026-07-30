@@ -243,7 +243,14 @@ export async function sweepWebsites(
       // same behaviour a real run would have — including stopping early. Behind
       // the `continue` it never fired at all, and a dry run against a broken
       // runner burned the whole slice's fetches proving nothing.
-      const abort = failureStreak >= SYSTEMIC_FAILURE_STREAK;
+      // The `live === 0` half is load-bearing and was wrong to drop. Rows are
+      // swept in checked_at order and CQC's file is alphabetical by provider,
+      // so a defunct group can put 15 genuinely dead domains next to each
+      // other — aborting there skips the rest of a slice that is working fine
+      // and red-fails the job nightly. Requiring that NOTHING has succeeded
+      // costs nothing against real broken egress, where nothing does.
+      const abort =
+        summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
       if (abort) {
         summary.systemicAbort = true;
         deps.log(

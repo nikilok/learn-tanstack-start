@@ -308,3 +308,47 @@ describe('sweepWebsites — dry run parity', () => {
     expect(h.logs.some((l) => l.includes('ABORTING'))).toBe(true);
   });
 });
+
+describe('sweepWebsites — the breaker does not fire on a working slice', () => {
+  test('a run of dead domains after successes does not abort', async () => {
+    // Rows are swept in checked_at order and CQC's file is alphabetical by
+    // provider, so a defunct group can put many dead domains side by side.
+    // Aborting there would skip the rest of a slice that is working fine.
+    let n = 0;
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      hasCompanyNumber: () => true,
+      fetchSite: async (url) => {
+        n++;
+        // First five answer, then a long run of genuinely dead domains.
+        return n <= 5
+          ? { ok: true, url, html: 'x', attemptedUrl: url }
+          : { ok: false, reason: 'dns_or_refused', attemptedUrl: url };
+      },
+    });
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.systemicAbort).toBe(false);
+    expect(summary.selected).toBe(60);
+    expect(summary.updated).toBe(60);
+  });
+
+  test('but genuinely broken egress, where nothing succeeds, still aborts', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      fetchSite: async (url) => ({
+        ok: false,
+        reason: 'dns_or_refused',
+        attemptedUrl: url,
+      }),
+    });
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.systemicAbort).toBe(true);
+    expect(summary.updated).toBeLessThanOrEqual(SYSTEMIC_FAILURE_STREAK);
+  });
+});

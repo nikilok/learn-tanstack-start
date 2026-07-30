@@ -128,6 +128,9 @@ export function isPrivateAddress(ip: string): boolean {
   return PRIVATE_V4.some((re) => re.test(addr));
 }
 
+/** Longest robots.txt directive we will compile. Real directives are paths. */
+const MAX_ROBOTS_PATTERN = 500;
+
 export type RobotsRules = { disallow: string[]; allow: string[] };
 
 /**
@@ -203,7 +206,14 @@ function robotsPattern(pattern: string): {
   weight: number;
 } {
   const anchoredEnd = pattern.endsWith('$');
-  const body = anchoredEnd ? pattern.slice(0, -1) : pattern;
+  // Bounded and de-duplicated before compiling. This regex is built from a
+  // third-party file we fetch from arbitrary hosts, and consecutive wildcards
+  // compile to adjacent `.*` groups whose backtracking is exponential. Runs of
+  // `*` collapse to one (they mean the same thing) and the body is capped, so a
+  // hostile or misconfigured robots.txt cannot turn the guard into a stall.
+  const body = (anchoredEnd ? pattern.slice(0, -1) : pattern)
+    .replace(/\*{2,}/g, '*')
+    .slice(0, MAX_ROBOTS_PATTERN);
   const source = body
     .split('*')
     .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))

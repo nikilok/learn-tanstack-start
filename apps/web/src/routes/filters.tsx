@@ -102,6 +102,7 @@ type Draft = {
   hasInsolvencyHistory?: boolean;
   hasRenamed?: boolean;
   hasMoved?: boolean;
+  hasWebsite?: boolean;
   sort: string;
   order: string;
 };
@@ -129,6 +130,7 @@ function draftFromFilters(filters: SearchFilters): Draft {
     hasInsolvencyHistory: filters.hasInsolvencyHistory,
     hasRenamed: filters.hasRenamed,
     hasMoved: filters.hasMoved,
+    hasWebsite: filters.hasWebsite,
     sort: filters.sort ?? '',
     order: filters.order ?? '',
   };
@@ -158,6 +160,7 @@ function filtersFromDraft(draft: Draft) {
     hasInsolvencyHistory: draft.hasInsolvencyHistory,
     hasRenamed: draft.hasRenamed,
     hasMoved: draft.hasMoved,
+    hasWebsite: draft.hasWebsite,
     sort: draft.sort || undefined,
     order: draft.order || undefined,
   } satisfies Record<Exclude<keyof SearchFilters, 'q'>, unknown>);
@@ -200,6 +203,7 @@ const SECTION_KEYS = {
     'hasInsolvencyHistory',
     'hasRenamed',
     'hasMoved',
+    'hasWebsite',
   ],
   sort: ['sort', 'order'],
 } as const satisfies Record<
@@ -691,33 +695,53 @@ function FiltersPage() {
 
           {section(
             'signals',
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
-              <TriState
-                label="Accounts overdue"
-                value={draft.accountsOverdue}
-                onChange={(v) => setBool('accountsOverdue', v)}
-              />
-              <TriState
-                label="Has charges"
-                value={draft.hasCharges}
-                onChange={(v) => setBool('hasCharges', v)}
-              />
-              <TriState
-                label="Insolvency history"
-                value={draft.hasInsolvencyHistory}
-                onChange={(v) => setBool('hasInsolvencyHistory', v)}
-              />
-              <TriState
-                label="Changed name"
-                value={draft.hasRenamed}
-                onChange={(v) => setBool('hasRenamed', v)}
-              />
-              <TriState
-                label="Moved recently"
-                value={draft.hasMoved}
-                onChange={(v) => setBool('hasMoved', v)}
-              />
-            </div>,
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-8">
+                <TriState
+                  label="Accounts overdue"
+                  value={draft.accountsOverdue}
+                  onChange={(v) => setBool('accountsOverdue', v)}
+                />
+                <TriState
+                  label="Has charges"
+                  value={draft.hasCharges}
+                  onChange={(v) => setBool('hasCharges', v)}
+                />
+                <TriState
+                  label="Insolvency history"
+                  value={draft.hasInsolvencyHistory}
+                  onChange={(v) => setBool('hasInsolvencyHistory', v)}
+                />
+                <TriState
+                  label="Changed name"
+                  value={draft.hasRenamed}
+                  onChange={(v) => setBool('hasRenamed', v)}
+                />
+                <TriState
+                  label="Moved recently"
+                  value={draft.hasMoved}
+                  onChange={(v) => setBool('hasMoved', v)}
+                />
+              </div>
+              {/* A checkbox, not a TriState like its neighbours: those describe
+                  the company, so "No" is a real question to ask. This one
+                  describes our coverage, and "companies we have not found a
+                  website for" is not a thing anyone searches for. Unchecked
+                  therefore means unconstrained, not "no website". */}
+              {/* Margin is the grid's 16px row gap MINUS the checkbox's own
+                  tap-target padding (py-3, sm:py-1), so the visible gap above
+                  it matches the gap between the tri-state rows. Change either
+                  padding in Checkbox.tsx and this has to move with it. */}
+              <div className="mt-1 sm:mt-3">
+                <Checkbox
+                  checked={draft.hasWebsite === true}
+                  onChange={() =>
+                    setBool('hasWebsite', draft.hasWebsite ? undefined : true)
+                  }
+                  label="Has website"
+                />
+              </div>
+            </>,
           )}
 
           {section(

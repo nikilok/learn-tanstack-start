@@ -1,10 +1,10 @@
 import { companyWebsites } from '@ss/db';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { PUBLISHABLE_EVIDENCE } from '../lib/websites/publishable';
+import { publishableWebsiteGate } from '../lib/websites/publishable';
 import {
   LONG_EDGE_CACHE,
   setCacheTag,
@@ -51,10 +51,7 @@ const getCompanyWebsite = createServerFn()
         .where(
           and(
             eq(companyWebsites.companyNumber, companyNumber),
-            eq(companyWebsites.status, 'verified'),
-            isNotNull(companyWebsites.checkedAt),
-            inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
-            isNotNull(companyWebsites.url),
+            publishableWebsiteGate(),
           ),
         )
         .limit(1);

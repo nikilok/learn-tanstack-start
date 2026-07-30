@@ -231,6 +231,7 @@ export type SearchFilters = {
   hasInsolvencyHistory?: boolean;
   hasRenamed?: boolean;
   hasMoved?: boolean;
+  hasWebsite?: boolean;
   sort?: SortKey;
   order?: SortOrder;
 };
@@ -260,6 +261,8 @@ export const FILTER_DOCS = {
     'true = has insolvency history; false = none or unknown.',
   hasRenamed: 'true = company has at least one previous name.',
   hasMoved: 'true = registered address changed since tracking began (2026-04).',
+  hasWebsite:
+    'true = we have confirmed the company’s own website and show a link to it.',
   sort: 'relevance (requires q), name, or incorporated.',
   order: 'asc or desc.',
 } as const satisfies Record<keyof SearchFilters, string>;
@@ -295,6 +298,8 @@ export const CH_FILTER_KEYS = [
   'hasInsolvencyHistory',
   'hasRenamed',
   'hasMoved',
+  // Keyed on company_number, so an unmapped sponsor can never satisfy it.
+  'hasWebsite',
 ] as const satisfies readonly (keyof SearchFilters)[];
 
 /** True when any active filter reads Companies House data (drops unmapped sponsors). */
@@ -667,6 +672,7 @@ export function parseSearchFilters(input: unknown): ParsedSearchFilters {
     'hasInsolvencyHistory',
     'hasRenamed',
     'hasMoved',
+    'hasWebsite',
   ] as const) {
     if (raw[key] !== undefined) set(key, boolInput(key, raw[key], issues));
   }

@@ -48,11 +48,13 @@ import {
 
 loadScriptEnv(import.meta.url);
 
-/** Measured against real hosts at 4.5s per row on a FIRST pass — the expensive
- *  one, where every row also probes its legal pages. 900 rows is then roughly
- *  70 minutes of a 120-minute job, and the 6,750-row backlog drains in about
- *  eight nightly runs. Later passes are liveness only and far quicker. */
-const DEFAULT_MAX_ROWS = 900;
+/** Measured ON THE RUNNER, not locally: 40 rows took 260s on a first pass, so
+ *  6.5s/row once GitHub's egress and DNS are in the path. 600 rows is then
+ *  ~65 minutes of a 120-minute job — a margin that survives a slice carrying
+ *  more 12s timeouts than this sample did. (900 would have been ~98 minutes,
+ *  which is too close.) The 6,641-row backlog drains in about eleven nights;
+ *  later passes are liveness only and much quicker. */
+const DEFAULT_MAX_ROWS = 600;
 /** Politeness pacing. Every row is a different host, so this is courtesy
  *  rather than rate-limit avoidance — but it also keeps the job from looking
  *  like a burst to anyone watching their access log. */

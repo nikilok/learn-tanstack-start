@@ -214,15 +214,11 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
     );
   }
 
-  if (filters.hasWebsite !== undefined) {
-    // Same CH-link guard as hasMoved: NOT EXISTS over a NULL company_number is
-    // vacuously true, which would sweep every unmapped sponsor into "no
-    // website" when what we actually know about them is nothing.
-    conds.push(
-      filters.hasWebsite
-        ? sql`EXISTS (${websiteProbe()})`
-        : sql`(c.company_number IS NOT NULL AND NOT EXISTS (${websiteProbe()}))`,
-    );
+  // True-only by type (params.ts), so there is no negative branch to write:
+  // an EXISTS over a NULL company_number is already false, which correctly
+  // excludes sponsors with no Companies House link.
+  if (filters.hasWebsite) {
+    conds.push(sql`EXISTS (${websiteProbe()})`);
   }
 
   return conds;

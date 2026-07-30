@@ -319,9 +319,25 @@ describe('hasWebsite', () => {
     expect(parseSearchFilters({ hasWebsite: true }).filters.hasWebsite).toBe(
       true,
     );
-    expect(parseSearchFilters({ hasWebsite: 'false' }).filters.hasWebsite).toBe(
-      false,
-    );
+  });
+
+  test('drops false rather than keeping a filter the checkbox cannot show', () => {
+    // A retained `false` is an active filter the form renders as inactive, and
+    // clicking the box would flip it to true instead of clearing it. The URL,
+    // the form and the SQL have to agree, so the registry drops it loudly.
+    const parsed = parseSearchFilters({ hasWebsite: 'false' });
+    expect(parsed.filters.hasWebsite).toBeUndefined();
+    expect(parsed.issues).toEqual([
+      'hasWebsite: only true is supported — dropped',
+    ]);
+  });
+
+  test('still reports genuinely malformed input', () => {
+    const parsed = parseSearchFilters({ hasWebsite: 'maybe' });
+    expect(parsed.filters.hasWebsite).toBeUndefined();
+    expect(parsed.issues).toEqual([
+      'hasWebsite: expected true/false — dropped',
+    ]);
   });
 
   test('survives the URL round trip', () => {

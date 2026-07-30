@@ -102,7 +102,8 @@ type Draft = {
   hasInsolvencyHistory?: boolean;
   hasRenamed?: boolean;
   hasMoved?: boolean;
-  hasWebsite?: boolean;
+  /** True-only, mirroring the registry: the checkbox cannot render `false`. */
+  hasWebsite?: true;
   sort: string;
   order: string;
 };

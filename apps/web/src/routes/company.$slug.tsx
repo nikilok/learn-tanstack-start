@@ -38,6 +38,7 @@ import {
   type CompanyDisplayInput,
   deriveCompanyDisplay,
 } from '../lib/company/display';
+import { companyDocumentDegraded } from '../lib/company/document-cache';
 import type { RouteLicence } from '../lib/company/licences';
 import { displayDomain } from '../lib/company/website';
 import { searchTermInput } from '../lib/search/params';
@@ -156,7 +157,10 @@ export const Route = createFileRoute('/company/$slug')({
     // Both are auxiliary — a transient failure must not take down the page —
     // and both key off the same company number, so they run together rather
     // than stacking another round trip onto the load.
-    const [timeline, website] = profile?.company_number
+    // A failed website lookup has to stay distinguishable from a successful
+    // "no website": both render the same page, but only the first must not be
+    // cached for 30 days. See companyDocumentDegraded.
+    const [timeline, websiteLoad] = profile?.company_number
       ? await Promise.all([
           queryClient
             .ensureQueryData({
@@ -169,19 +173,25 @@ export const Route = createFileRoute('/company/$slug')({
             }),
           queryClient
             .ensureQueryData(companyWebsiteQueryOptions(profile.company_number))
+            .then((website) => ({ website, failed: false }))
             .catch((error) => {
               console.error('[Website] load failed:', error);
-              return null;
+              return { website: null, failed: true };
             }),
         ])
-      : [null, null];
+      : [null, { website: null, failed: false }];
+    const website = websiteLoad.website;
 
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
-    // Short-cache when the timeline is missing for a company that should have
-    // one (RPC error, or a first visit racing getCompanyProfile's background
-    // upsert) so the degraded document isn't baked in for 30 days.
-    const timelineMissing = Boolean(profile?.company_number) && !timeline;
-    setSsrCacheControl(timelineMissing ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
+    // Short-cache a document built from incomplete data (a timeline RPC error,
+    // a first visit racing getCompanyProfile's background upsert, or a website
+    // lookup that threw) so the degraded rendering isn't baked in for 30 days.
+    const degraded = companyDocumentDegraded({
+      hasCompanyNumber: Boolean(profile?.company_number),
+      timelineLoaded: Boolean(timeline),
+      websiteLookupFailed: websiteLoad.failed,
+    });
+    setSsrCacheControl(degraded ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
     // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
     if (profile?.company_number) {
       setCacheTag(`company-${profile.company_number}`);

@@ -197,13 +197,11 @@ describe('buildFilterConditions', () => {
     expect(params).toEqual(['verified', 'manual', 'crn_on_page']);
   });
 
-  test('hasWebsite=false guards the CH link so unmapped sponsors stay excluded', () => {
-    // NOT EXISTS over a NULL company_number is vacuously true, which would
-    // otherwise sweep in every sponsor we have no Companies House link for.
-    const { text } = renderOne({ hasWebsite: false });
-    expect(
-      text.startsWith('(c.company_number IS NOT NULL AND NOT EXISTS ('),
-    ).toBe(true);
+  test('hasWebsite has no negative branch to get wrong', () => {
+    // It is true-only by type, and EXISTS over a NULL company_number is
+    // already false — so unmapped sponsors are excluded without the explicit
+    // CH-link guard that hasMoved's NOT EXISTS branch needs.
+    expect(buildFilterConditions({ hasWebsite: undefined })).toEqual([]);
   });
 
   test('non-condition params contribute nothing', () => {

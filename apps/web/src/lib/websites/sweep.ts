@@ -63,7 +63,22 @@ export type SweepConfig = {
    *  disclosure is on the homepage or one click from it or effectively absent. */
   maxDisclosurePaths: number;
   dryRun: boolean;
+  /** Print `company_number -> url -> verdict` for each row.
+   *
+   *  OFF unless a human explicitly passes --verbose. That per-row line IS the
+   *  enriched dataset this crawl exists to produce, this repo is public, and
+   *  Actions logs are world-readable — so printing it in CI hands the whole
+   *  table over for free.
+   *
+   *  Deliberately an explicit opt-in rather than something inferred from
+   *  `process.env.CI`: an env-sniffing guard fails OPEN if the variable is ever
+   *  missing, which is the wrong direction for a control protecting data. */
+  logRows: boolean;
 };
+
+/** Rows between progress heartbeats. Aggregate counts only — never an
+ *  identifier — so a public log shows liveness without leaking data. */
+const HEARTBEAT_ROWS = 50;
 
 export type SweepSummary = {
   selected: number;
@@ -258,8 +273,19 @@ export async function sweepWebsites(
         );
       }
 
+      if (config.logRows) {
+        deps.log(
+          `  ${config.dryRun ? '[dry] ' : ''}${row.companyNumber} ${row.url} — ${result.note}`,
+        );
+      }
+
+      if ((index + 1) % HEARTBEAT_ROWS === 0) {
+        deps.log(
+          `  … ${index + 1}/${rows.length} rows, ${summary.live} live, ${summary.dead} dead`,
+        );
+      }
+
       if (config.dryRun) {
-        deps.log(`  [dry] ${row.companyNumber} ${row.url} — ${result.note}`);
         if (abort) break;
         continue;
       }

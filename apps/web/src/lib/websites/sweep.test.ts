@@ -21,6 +21,7 @@ const config = (over: Partial<SweepConfig> = {}): SweepConfig => ({
   delayMs: 0,
   maxDisclosurePaths: 2,
   dryRun: false,
+  logRows: false,
   ...over,
 });
 
@@ -177,7 +178,10 @@ describe('sweepWebsites', () => {
 
   test('writes nothing on a dry run but still reports what it would do', async () => {
     const h = harness();
-    const summary = await sweepWebsites(config({ dryRun: true }), h.deps);
+    const summary = await sweepWebsites(
+      config({ dryRun: true, logRows: true }),
+      h.deps,
+    );
     expect(h.applied).toHaveLength(0);
     expect(summary.updated).toBe(0);
     expect(summary.selected).toBe(1);
@@ -350,5 +354,53 @@ describe('sweepWebsites — the breaker does not fire on a working slice', () =>
     const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
     expect(summary.systemicAbort).toBe(true);
     expect(summary.updated).toBeLessThanOrEqual(SYSTEMIC_FAILURE_STREAK);
+  });
+});
+
+describe('sweepWebsites — logging must not leak the dataset', () => {
+  test('no company number or url reaches the log when logRows is off', async () => {
+    // The repo is public, so Actions logs are world-readable and a per-row line
+    // is company_number -> url -> verdict: the enriched dataset itself.
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({
+        companyNumber: String(i).padStart(8, '0'),
+        url: `https://secret-${i}.example`,
+      }),
+    );
+    const h = harness({ rows, fetchSite: async (url) => live(url, '') });
+    await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    const printed = h.logs.join('\n');
+    for (const r of rows) {
+      expect(printed).not.toContain(r.companyNumber);
+      expect(printed).not.toContain(r.url);
+    }
+  });
+
+  test('the heartbeat still reports progress, in aggregate only', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({ rows, fetchSite: async (url) => live(url, '') });
+    await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(h.logs.some((l) => l.includes('50/60 rows'))).toBe(true);
+  });
+
+  test('a dry run WITHOUT --verbose is also silent, so CI cannot leak', async () => {
+    // The workflow dispatches dry runs too, and those logs are just as public.
+    const h = harness();
+    await sweepWebsites(config({ dryRun: true }), h.deps);
+    expect(h.logs.join('\n')).not.toContain('03260168');
+  });
+
+  test('--verbose prints the detail, for a human at a terminal', async () => {
+    const h = harness();
+    await sweepWebsites(config({ dryRun: true, logRows: true }), h.deps);
+    expect(h.logs.join('\n')).toContain('03260168');
+  });
+
+  test('a LIVE run never prints rows by default', async () => {
+    const h = harness();
+    await sweepWebsites(config({ dryRun: false }), h.deps);
+    expect(h.logs.join('\n')).not.toContain('03260168');
   });
 });

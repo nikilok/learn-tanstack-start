@@ -33,7 +33,7 @@ import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import type { CHFullProfile } from '../src/lib/phase5/apply-promotion.ts';
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env loading
@@ -252,7 +252,7 @@ async function upsertProfile(profile: CHFullProfile): Promise<void> {
 console.log(
   `Hydrate queue proposed profiles${DRY_RUN ? ' (DRY RUN — no fetches, no writes)' : ''}${limit !== undefined ? ` limit=${limit}` : ''}`,
 );
-console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
+console.log(`  db host      : ${dbFingerprint(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
 
 type ToFetchRow = { proposed_company_number: string };

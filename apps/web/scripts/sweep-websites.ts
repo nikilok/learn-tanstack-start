@@ -21,7 +21,7 @@
 
 import { neon } from '@ss/db/client';
 
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
   pageHasCompanyNumber,
   pageHasPostcode,
@@ -100,7 +100,7 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
 
 const startedAt = Date.now();
 console.log(
-  `Website revalidation sweep — db ${describeDbHost(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
+  `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(`  max-rows: ${maxRows}  delay: ${delayMs}ms`);
 

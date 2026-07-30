@@ -41,7 +41,7 @@ import type {
 import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
 import type { CompareCandidate } from '../src/lib/phase5/compare-candidates.ts';
 import { compareForInlineResolution } from '../src/lib/phase5/compare-candidates.ts';
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import type {
   ExistingMapping,
   MatchMethod,
@@ -668,7 +668,7 @@ function countBy<T>(
 console.log(
   `Drain review queue${COMPARE ? ' — compare mode (no writes)' : ` — apply mode (strategy=${STRATEGY})`}${limit !== undefined ? ` limit=${limit}` : ''}`,
 );
-console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
+console.log(`  db host      : ${dbFingerprint(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
 
 if (COMPARE) {

@@ -104,14 +104,19 @@ describe('describeDbHost — credential leak resistance (the load-bearing tests)
 });
 
 describe('dbFingerprint — nothing identifying may reach a public log', () => {
+  // SYNTHETIC endpoint. Never paste the real one here: this file is committed
+  // to a public repo, so a test asserting "nothing identifying reaches a public
+  // log" would itself publish the identifier — permanently, and in git history
+  // rather than in logs that age out. The shape is what the test needs; the
+  // value is deliberately fictional, matching ep-spring-butterfly above.
   const PROD =
-    'postgresql://user:secret@ep-ancient-shadow-ab3rf73u-pooler.eu-west-2.aws.neon.tech/db';
+    'postgresql://user:secret@ep-example-fixture-0000-pooler.eu-west-2.aws.neon.tech/db';
 
   test('reveals no part of the host, the provider or the region', () => {
     const out = dbFingerprint(PROD);
     for (const leak of [
-      'ep-ancient-shadow',
-      'ab3rf73u',
+      'ep-example-fixture',
+      '0000-pooler',
       'neon',
       'aws',
       'eu-west-2',
@@ -127,7 +132,7 @@ describe('dbFingerprint — nothing identifying may reach a public log', () => {
   });
 
   test('changes when the database changes, which is the whole point', () => {
-    const branch = PROD.replace('ancient-shadow', 'other-branch');
+    const branch = PROD.replace('example-fixture', 'other-branch');
     expect(dbFingerprint(branch)).not.toBe(dbFingerprint(PROD));
   });
 

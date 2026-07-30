@@ -404,3 +404,45 @@ describe('sweepWebsites — logging must not leak the dataset', () => {
     expect(h.logs.join('\n')).not.toContain('03260168');
   });
 });
+
+describe('sweepWebsites — the error path must not leak either', () => {
+  const throwing = (message: string) =>
+    harness({
+      rows: [
+        row({ companyNumber: '03260168', url: 'https://secret-acme.co.uk' }),
+      ],
+      fetchSite: async () => {
+        throw new Error(message);
+      },
+    });
+
+  test('a thrown fetch prints no identifiers by default', async () => {
+    // This path was unconditional, so one error published a company/URL pair
+    // to a public Actions log however logRows was set.
+    const h = throwing('boom');
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.errored).toBe(1);
+    const printed = h.logs.join('\n');
+    expect(printed).not.toContain('03260168');
+    expect(printed).not.toContain('secret-acme.co.uk');
+    expect(printed).toContain('ERROR row 1');
+  });
+
+  test('an error message that quotes the address is redacted too', async () => {
+    // DNS and URL-parse errors name what failed, so omitting the prefix alone
+    // would still leak through the message.
+    const h = throwing('getaddrinfo ENOTFOUND secret-acme.co.uk');
+    await sweepWebsites(config(), h.deps);
+    const printed = h.logs.join('\n');
+    expect(printed).not.toContain('secret-acme.co.uk');
+    expect(printed).toContain('<host>');
+  });
+
+  test('--verbose still gives a human the full error', async () => {
+    const h = throwing('boom');
+    await sweepWebsites(config({ logRows: true }), h.deps);
+    const printed = h.logs.join('\n');
+    expect(printed).toContain('03260168');
+    expect(printed).toContain('secret-acme.co.uk');
+  });
+});

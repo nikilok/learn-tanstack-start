@@ -174,6 +174,24 @@ async function findDisclosure(
   return { crnFoundAt: null, postcodeFoundAt };
 }
 
+/**
+ * Remove a row's identifiers from free text.
+ *
+ * Errors quote what failed, so a message can carry the address even when the
+ * caller never interpolated it. The host is stripped separately from the full
+ * URL because DNS errors name only the host.
+ */
+function redactRowIdentity(text: string, row: SweepRow): string {
+  let out = text.split(row.companyNumber).join('<company>');
+  out = out.split(row.url).join('<url>');
+  try {
+    out = out.split(new URL(row.url).hostname).join('<host>');
+  } catch {
+    // Unparseable stored URL; the whole-string replace above already covered it.
+  }
+  return out;
+}
+
 /** Run one bounded slice of the revalidation sweep. */
 export async function sweepWebsites(
   config: SweepConfig,
@@ -296,8 +314,16 @@ export async function sweepWebsites(
       if (abort) break;
     } catch (err) {
       summary.errored++;
+      const raw = err instanceof Error ? err.message : String(err);
+      // The error path needs the same gate as the success path — it was
+      // unconditional, so one thrown fetch published a company/URL pair however
+      // logRows was set. Redaction rather than a bare prefix swap because the
+      // MESSAGE carries the address too: DNS failures quote the host, URL
+      // parse errors quote the input.
       deps.log(
-        `  ERROR ${row.companyNumber} ${row.url}: ${err instanceof Error ? err.message : err}`,
+        config.logRows
+          ? `  ERROR ${row.companyNumber} ${row.url}: ${raw}`
+          : `  ERROR row ${index + 1}: ${redactRowIdentity(raw, row)}`,
       );
     }
   }

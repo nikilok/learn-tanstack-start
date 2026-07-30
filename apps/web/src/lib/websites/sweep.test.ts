@@ -21,6 +21,7 @@ const config = (over: Partial<SweepConfig> = {}): SweepConfig => ({
   delayMs: 0,
   maxDisclosurePaths: 2,
   dryRun: false,
+  logRows: false,
   ...over,
 });
 
@@ -177,7 +178,10 @@ describe('sweepWebsites', () => {
 
   test('writes nothing on a dry run but still reports what it would do', async () => {
     const h = harness();
-    const summary = await sweepWebsites(config({ dryRun: true }), h.deps);
+    const summary = await sweepWebsites(
+      config({ dryRun: true, logRows: true }),
+      h.deps,
+    );
     expect(h.applied).toHaveLength(0);
     expect(summary.updated).toBe(0);
     expect(summary.selected).toBe(1);
@@ -350,5 +354,95 @@ describe('sweepWebsites — the breaker does not fire on a working slice', () =>
     const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
     expect(summary.systemicAbort).toBe(true);
     expect(summary.updated).toBeLessThanOrEqual(SYSTEMIC_FAILURE_STREAK);
+  });
+});
+
+describe('sweepWebsites — logging must not leak the dataset', () => {
+  test('no company number or url reaches the log when logRows is off', async () => {
+    // The repo is public, so Actions logs are world-readable and a per-row line
+    // is company_number -> url -> verdict: the enriched dataset itself.
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({
+        companyNumber: String(i).padStart(8, '0'),
+        url: `https://secret-${i}.example`,
+      }),
+    );
+    const h = harness({ rows, fetchSite: async (url) => live(url, '') });
+    await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    const printed = h.logs.join('\n');
+    for (const r of rows) {
+      expect(printed).not.toContain(r.companyNumber);
+      expect(printed).not.toContain(r.url);
+    }
+  });
+
+  test('the heartbeat still reports progress, in aggregate only', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({ rows, fetchSite: async (url) => live(url, '') });
+    await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(h.logs.some((l) => l.includes('50/60 rows'))).toBe(true);
+  });
+
+  test('a dry run WITHOUT --verbose is also silent, so CI cannot leak', async () => {
+    // The workflow dispatches dry runs too, and those logs are just as public.
+    const h = harness();
+    await sweepWebsites(config({ dryRun: true }), h.deps);
+    expect(h.logs.join('\n')).not.toContain('03260168');
+  });
+
+  test('--verbose prints the detail, for a human at a terminal', async () => {
+    const h = harness();
+    await sweepWebsites(config({ dryRun: true, logRows: true }), h.deps);
+    expect(h.logs.join('\n')).toContain('03260168');
+  });
+
+  test('a LIVE run never prints rows by default', async () => {
+    const h = harness();
+    await sweepWebsites(config({ dryRun: false }), h.deps);
+    expect(h.logs.join('\n')).not.toContain('03260168');
+  });
+});
+
+describe('sweepWebsites — the error path must not leak either', () => {
+  const throwing = (message: string) =>
+    harness({
+      rows: [
+        row({ companyNumber: '03260168', url: 'https://secret-acme.co.uk' }),
+      ],
+      fetchSite: async () => {
+        throw new Error(message);
+      },
+    });
+
+  test('a thrown fetch prints no identifiers by default', async () => {
+    // This path was unconditional, so one error published a company/URL pair
+    // to a public Actions log however logRows was set.
+    const h = throwing('boom');
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.errored).toBe(1);
+    const printed = h.logs.join('\n');
+    expect(printed).not.toContain('03260168');
+    expect(printed).not.toContain('secret-acme.co.uk');
+    expect(printed).toContain('ERROR row 1');
+  });
+
+  test('an error message that quotes the address is redacted too', async () => {
+    // DNS and URL-parse errors name what failed, so omitting the prefix alone
+    // would still leak through the message.
+    const h = throwing('getaddrinfo ENOTFOUND secret-acme.co.uk');
+    await sweepWebsites(config(), h.deps);
+    const printed = h.logs.join('\n');
+    expect(printed).not.toContain('secret-acme.co.uk');
+    expect(printed).toContain('<host>');
+  });
+
+  test('--verbose still gives a human the full error', async () => {
+    const h = throwing('boom');
+    await sweepWebsites(config({ logRows: true }), h.deps);
+    const printed = h.logs.join('\n');
+    expect(printed).toContain('03260168');
+    expect(printed).toContain('secret-acme.co.uk');
   });
 });

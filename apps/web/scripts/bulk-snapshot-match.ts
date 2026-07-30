@@ -60,7 +60,7 @@ import {
 import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import type { CHFullProfile } from '../src/lib/phase5/apply-promotion.ts';
 import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import type {
   ExistingMapping,
   MatchMethod,
@@ -358,7 +358,7 @@ const startedAt = Date.now();
 console.log(
   `Bulk snapshot match${DRY_RUN ? ' (DRY RUN — no writes)' : ''} — max_verifications=${MAX_VERIFICATIONS}`,
 );
-console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
+console.log(`  db host      : ${dbFingerprint(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
 
 const backlogRows = await fetchBacklog();

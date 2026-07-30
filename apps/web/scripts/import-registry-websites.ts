@@ -41,7 +41,7 @@ import { companyWebsites } from '@ss/db/schema';
 import { sql as raw } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import type {
   WebsiteEvidence,
   WebsiteStatus,
@@ -323,7 +323,7 @@ async function loadExisting(
 
 const startedAt = Date.now();
 console.log(
-  `Registry website import — db ${describeDbHost(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
+  `Registry website import — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(`  sources: ${sources.join(', ')}`);
 

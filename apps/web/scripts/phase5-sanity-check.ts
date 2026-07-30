@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { neon } from '@ss/db/client';
 import dotenv from 'dotenv';
 
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT_ENV = resolve(SCRIPT_DIR, '../../../.env.local');
@@ -26,7 +26,7 @@ if (!process.env.POSTGRES_URL)
 const sql = neon(process.env.POSTGRES_URL);
 
 console.log('Phase 5 sanity check');
-console.log(`  db host: ${describeDbHost(process.env.POSTGRES_URL)}`);
+console.log(`  db host: ${dbFingerprint(process.env.POSTGRES_URL)}`);
 console.log(
   '═════════════════════════════════════════════════════════════════\n',
 );

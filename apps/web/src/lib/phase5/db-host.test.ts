@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { describeDbHost } from './db-host.ts';
+import { dbFingerprint, describeDbHost } from './db-host.ts';
 
 describe('describeDbHost — happy path', () => {
   test('standard Postgres URL with port → returns host:port', () => {
@@ -100,5 +100,50 @@ describe('describeDbHost — credential leak resistance (the load-bearing tests)
 
   test('output does NOT contain the path separator', () => {
     expect(out).not.toContain('/');
+  });
+});
+
+describe('dbFingerprint — nothing identifying may reach a public log', () => {
+  // SYNTHETIC endpoint. Never paste the real one here: this file is committed
+  // to a public repo, so a test asserting "nothing identifying reaches a public
+  // log" would itself publish the identifier — permanently, and in git history
+  // rather than in logs that age out. The shape is what the test needs; the
+  // value is deliberately fictional, matching ep-spring-butterfly above.
+  const PROD =
+    'postgresql://user:secret@ep-example-fixture-0000-pooler.eu-west-2.aws.neon.tech/db';
+
+  test('reveals no part of the host, the provider or the region', () => {
+    const out = dbFingerprint(PROD);
+    for (const leak of [
+      'ep-example-fixture',
+      '0000-pooler',
+      'neon',
+      'aws',
+      'eu-west-2',
+      'secret',
+      'user',
+    ]) {
+      expect(out, `leaked ${leak}`).not.toContain(leak);
+    }
+  });
+
+  test('is stable, so a run can be compared with the last one', () => {
+    expect(dbFingerprint(PROD)).toBe(dbFingerprint(PROD));
+  });
+
+  test('changes when the database changes, which is the whole point', () => {
+    const branch = PROD.replace('example-fixture', 'other-branch');
+    expect(dbFingerprint(branch)).not.toBe(dbFingerprint(PROD));
+  });
+
+  test('ignores credentials, so a rotated password reads as the same db', () => {
+    expect(dbFingerprint(PROD.replace('secret', 'rotated'))).toBe(
+      dbFingerprint(PROD),
+    );
+  });
+
+  test('still reports an unset or malformed url plainly', () => {
+    expect(dbFingerprint(undefined)).toBe('(not set)');
+    expect(dbFingerprint('not a url')).toBe('(unparseable)');
   });
 });

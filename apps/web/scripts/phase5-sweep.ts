@@ -33,7 +33,7 @@ import type {
   CHFullProfile,
 } from '../src/lib/phase5/apply-promotion.ts';
 import { applyPromotion } from '../src/lib/phase5/apply-promotion.ts';
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
   makeBumpVerifiedAt,
   makeCommitPromotion,
@@ -305,7 +305,7 @@ const delayLabel = delayMs !== undefined ? ` delay=${delayMs}ms` : '';
 console.log(
   `Phase 5 sweep — tier=${tier} max_rows=${maxRows}${delayLabel}${DRY_RUN ? ' (DRY RUN — no writes)' : ''}`,
 );
-console.log(`  db host      : ${describeDbHost(process.env.POSTGRES_URL)}`);
+console.log(`  db host      : ${dbFingerprint(process.env.POSTGRES_URL)}`);
 console.log('───────────────────────────────────────────────────────────');
 
 const summary: SweepSummary = await sweep(config, sweepDeps);

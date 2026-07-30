@@ -12,7 +12,7 @@
  * shape as the phase5 sweeps.
  *
  * Run from monorepo root:
- *   bun apps/web/scripts/sweep-websites.ts --dry-run --max-rows=20
+ *   bun apps/web/scripts/sweep-websites.ts --dry-run --max-rows=20 --verbose
  *   bun apps/web/scripts/sweep-websites.ts --max-rows=500
  *   bun apps/web/scripts/sweep-websites.ts            # full slice (CI)
  *
@@ -21,7 +21,7 @@
 
 import { neon } from '@ss/db/client';
 
-import { describeDbHost } from '../src/lib/phase5/db-host.ts';
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
   pageHasCompanyNumber,
   pageHasPostcode,
@@ -66,6 +66,8 @@ const MAX_DISCLOSURE_PATHS = 2;
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
+/** Per-row detail, for a human at a terminal. Never set by the workflow. */
+const verbose = args.includes('--verbose');
 const maxRowsArg = args.find((a) => a.startsWith('--max-rows='))?.split('=')[1];
 const maxRows = maxRowsArg
   ? parseStrictInt(maxRowsArg, '--max-rows')
@@ -98,7 +100,7 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
 
 const startedAt = Date.now();
 console.log(
-  `Website revalidation sweep — db ${describeDbHost(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
+  `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(`  max-rows: ${maxRows}  delay: ${delayMs}ms`);
 
@@ -108,7 +110,17 @@ console.log(
 );
 
 const summary = await sweepWebsites(
-  { maxRows, delayMs, maxDisclosurePaths: MAX_DISCLOSURE_PATHS, dryRun },
+  {
+    maxRows,
+    delayMs,
+    maxDisclosurePaths: MAX_DISCLOSURE_PATHS,
+    dryRun,
+    // Explicit opt-in only. The repo is public and Actions logs are
+    // world-readable, so a per-row line would publish the company/URL pairs the
+    // crawl produces. Nothing infers this from the environment — the workflow
+    // never passes --verbose, so CI cannot turn it on by accident.
+    logRows: verbose,
+  },
   {
     selectRows: makeSelectRows(sql),
     fetchSite: async (url) => toFetchedPage(await fetchOneSite(url), url),

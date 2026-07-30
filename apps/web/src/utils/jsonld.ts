@@ -32,6 +32,9 @@ export type CompanyJsonLdInput = {
   address?: Address | null;
   canonicalUrl: string;
   homeUrl: string;
+  /** The company's own site, when confirmed. `url` is already this page, so
+   *  the official website can only be expressed as sameAs. */
+  websiteUrl?: string | null;
 };
 
 // Grammatical joiner for multi-item phrases ("A-rated, B-rated and X").
@@ -83,6 +86,10 @@ function organization(input: CompanyJsonLdInput) {
   }
   const address = postalAddress(input.address);
   if (address) org.address = address;
+  // sameAs, not url: `url` above is this page, and schema.org treats sameAs as
+  // "another authoritative reference to this entity" — which is exactly what a
+  // site carrying the company's own registration number is.
+  if (input.websiteUrl) org.sameAs = input.websiteUrl;
   // One credential per licence — the machine-readable form of the route↔rating
   // pairing. Each object binds ONE route to the rating held on it, so a
   // consumer can never mis-associate them the way two flat lists invite.

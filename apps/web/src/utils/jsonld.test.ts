@@ -157,3 +157,31 @@ describe('FAQ answers state the pairing when ratings differ', () => {
     );
   });
 });
+
+describe('sameAs — the confirmed company website', () => {
+  test('emits the website as sameAs, leaving url as this page', () => {
+    const org = organization(
+      buildCompanyJsonLd({
+        ...base,
+        licences: MIXED,
+        websiteUrl: 'https://ljwb.co.uk',
+      }),
+    );
+    expect(org.sameAs).toBe('https://ljwb.co.uk');
+    // url must stay the canonical SponsorSearch page: overloading it with the
+    // company's own site would tell a crawler this page IS that site.
+    expect(org.url).toBe(base.canonicalUrl);
+  });
+
+  test('omits sameAs entirely when no website is confirmed', () => {
+    const org = organization(buildCompanyJsonLd({ ...base, licences: MIXED }));
+    expect(org).not.toHaveProperty('sameAs');
+  });
+
+  test('omits sameAs for an explicit null rather than emitting an empty value', () => {
+    const org = organization(
+      buildCompanyJsonLd({ ...base, licences: MIXED, websiteUrl: null }),
+    );
+    expect(org).not.toHaveProperty('sameAs');
+  });
+});

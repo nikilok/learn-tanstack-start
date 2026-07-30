@@ -234,3 +234,47 @@ describe('decideWebsite', () => {
     expect(result).toEqual({ action: 'update' });
   });
 });
+
+describe('decideWebsite — dead rows accept corrections', () => {
+  test('a dead row does not outrank a fresh address from a weaker source', () => {
+    // Identity evidence is evidence about a URL. Once the sweep proves that URL
+    // is gone, crn_on_page (0.99) must stop blocking the registry's new one
+    // (0.95) — otherwise a company that moves domain is frozen dead forever and
+    // every monthly import silently discards the correction.
+    const result = decideWebsite(
+      existing({
+        url: 'https://old-domain.co.uk',
+        evidence: 'crn_on_page',
+        status: 'dead',
+      }),
+      proposed({ url: 'https://new-domain.co.uk', evidence: 'registry' }),
+    );
+    expect(result).toEqual({ action: 'update' });
+  });
+
+  test('a dead row naming the same site is still a no-op', () => {
+    const result = decideWebsite(
+      existing({
+        url: 'https://www.acme.co.uk',
+        evidence: 'crn_on_page',
+        status: 'dead',
+      }),
+      proposed({ url: 'https://acme.co.uk', evidence: 'registry' }),
+    );
+    expect(result).toEqual({ action: 'keep' });
+  });
+
+  test('a LIVE row keeps outranking a weaker proposal, as before', () => {
+    const result = decideWebsite(
+      existing({ evidence: 'crn_on_page', status: 'verified' }),
+      proposed({ url: 'https://other.co.uk', evidence: 'registry' }),
+    );
+    expect(result).toEqual({ action: 'keep' });
+  });
+
+  test('the SQL guard admits dead-row corrections too', () => {
+    expect(upgradeOnlyPredicateSql()).toContain(
+      "company_websites.status = 'dead'",
+    );
+  });
+});

@@ -27,6 +27,12 @@ export type WebsiteStatus =
   | 'pending'
   | 'verified'
   | 'candidate'
+  /** Tried and could not be reached this pass, but not yet written off. Its own
+   *  status rather than a flag on `verified` because `checked_at` is the sweep
+   *  CURSOR and must be stamped on every pass, including failures — so a failed
+   *  row left as `verified` satisfies the render gate and ships a link we could
+   *  not reach. Measured: a 30-row sweep produced 25 live and 29 renderable. */
+  | 'unreachable'
   | 'none'
   | 'dead';
 
@@ -76,6 +82,9 @@ const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
 ];
 
 const VERIFIED_FLOOR = 3;
+/** Confidence of the weakest tier that renders on its own. Derived from the
+ *  ladder so the SQL floor cannot drift from statusForEvidence. */
+const VERIFIED_FLOOR_CONFIDENCE = LADDER[VERIFIED_FLOOR].confidence;
 
 const RANK = new Map<WebsiteEvidence, number>();
 const CONFIDENCE = new Map<WebsiteEvidence, number>();
@@ -130,6 +139,11 @@ export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
     `${table}.confidence IS NULL` +
     ` OR ${table}.confidence < excluded.confidence` +
     ` OR (${table}.confidence = excluded.confidence AND ${table}.source = excluded.source)` +
+    // Mirrors decideWebsite's dead-row branch INCLUDING its evidence floor:
+    // only a proposal strong enough to render on its own may displace a dead
+    // row, or an unconfirmed guess replaces a proven number in the database
+    // even though the in-process decision refused it.
+    ` OR (${table}.status = 'dead' AND excluded.confidence >= ${VERIFIED_FLOOR_CONFIDENCE})` +
     `)`
   );
 }
@@ -148,6 +162,27 @@ export function decideWebsite(
     return isSameSite(existing.url, proposed.url)
       ? { action: 'keep' }
       : { action: 'conflict' };
+  }
+
+  // Identity evidence is evidence about a URL. Once the sweep has established
+  // that URL no longer resolves, the evidence is moot and must not outrank a
+  // fresh address — otherwise a row promoted to `crn_on_page` (0.99) whose
+  // company moved domain is frozen on the dead URL forever, because every
+  // monthly import proposes the new one at `registry` (0.95) and loses.
+  //
+  // The floor is the point. Without one, ANY proposal beat a dead row,
+  // including `registry_unconfirmed` — the tier that means "the registry's name
+  // for this company does not match Companies House". Since two timeouts are
+  // enough to mark a row dead, a live site with a proven number could be
+  // replaced by an unconfirmed guess at someone else's address, and the proof
+  // page destroyed with it. Only evidence good enough to render on its own may
+  // displace a dead row.
+  if (
+    existing.status === 'dead' &&
+    !isSameSite(existing.url, proposed.url) &&
+    statusForEvidence(proposed.evidence) === 'verified'
+  ) {
+    return { action: 'update' };
   }
 
   const eRank = evidenceRank(existing.evidence);

@@ -441,7 +441,11 @@ export const companyWebsites = pgTable(
     companyNumber: varchar('company_number', { length: 20 }).primaryKey(),
     // Canonical origin (scheme + host), null when status='none'.
     url: text('url'),
-    // 'pending' | 'verified' | 'candidate' | 'none' | 'dead'
+    // 'pending' | 'verified' | 'candidate' | 'unreachable' | 'none' | 'dead'.
+    // `unreachable` exists because checked_at is the sweep CURSOR and is
+    // stamped on every pass including failures: a row that failed to fetch but
+    // stayed 'verified' would satisfy the render gate and publish a link we
+    // could not reach. It returns to 'verified' on the next pass that answers.
     status: varchar('status', { length: 16 }).notNull(),
     evidence: varchar('evidence', { length: 24 }).notNull(),
     // Page the proof was found on — often /terms or /contact, not the homepage.

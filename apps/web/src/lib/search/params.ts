@@ -231,6 +231,8 @@ export type SearchFilters = {
   hasInsolvencyHistory?: boolean;
   hasRenamed?: boolean;
   hasMoved?: boolean;
+  /** `true` only, never `false` — see the parse branch in parseSearchFilters. */
+  hasWebsite?: true;
   sort?: SortKey;
   order?: SortOrder;
 };
@@ -260,6 +262,8 @@ export const FILTER_DOCS = {
     'true = has insolvency history; false = none or unknown.',
   hasRenamed: 'true = company has at least one previous name.',
   hasMoved: 'true = registered address changed since tracking began (2026-04).',
+  hasWebsite:
+    'true = we have confirmed the company’s own website and show a link to it. Only true is accepted; false is dropped.',
   sort: 'relevance (requires q), name, or incorporated.',
   order: 'asc or desc.',
 } as const satisfies Record<keyof SearchFilters, string>;
@@ -295,6 +299,8 @@ export const CH_FILTER_KEYS = [
   'hasInsolvencyHistory',
   'hasRenamed',
   'hasMoved',
+  // Keyed on company_number, so an unmapped sponsor can never satisfy it.
+  'hasWebsite',
 ] as const satisfies readonly (keyof SearchFilters)[];
 
 /** True when any active filter reads Companies House data (drops unmapped sponsors). */
@@ -669,6 +675,22 @@ export function parseSearchFilters(input: unknown): ParsedSearchFilters {
     'hasMoved',
   ] as const) {
     if (raw[key] !== undefined) set(key, boolInput(key, raw[key], issues));
+  }
+
+  // hasWebsite is true-only, unlike every other boolean here. Its UI is a
+  // checkbox, which has no way to show `false` as distinct from unset, so a
+  // retained `false` would be an active filter the form renders as inactive
+  // and a click would flip to `true` instead of clearing. Dropping it at the
+  // registry keeps the URL, the form and the SQL saying the same thing. It is
+  // also not a filter worth having: "companies we have not confirmed a website
+  // for" describes our coverage, not the company.
+  if (raw.hasWebsite !== undefined) {
+    const value = boolInput('hasWebsite', raw.hasWebsite, issues);
+    if (value === false) {
+      issues.push('hasWebsite: only true is supported — dropped');
+    } else {
+      set('hasWebsite', value);
+    }
   }
 
   if (raw.sort !== undefined) {

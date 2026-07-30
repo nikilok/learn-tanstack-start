@@ -185,6 +185,25 @@ describe('buildFilterConditions', () => {
     ).toBe(true);
   });
 
+  test('hasWebsite probes the same gate the detail page renders', () => {
+    const { text, params } = renderOne({ hasWebsite: true });
+    // The four conditions come from publishableWebsiteGate, so this assertion
+    // is what fails if the filter and the company page ever drift apart.
+    expect(text).toBe(
+      'EXISTS (SELECT 1 FROM "company_websites" WHERE "company_websites"."company_number" = c.company_number AND ("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and "company_websites"."evidence" in ($2, $3) and "company_websites"."url" is not null))',
+    );
+    // Evidence tiers are bound params, never inlined, so the allow-list can
+    // never be widened by a string that reached the query builder.
+    expect(params).toEqual(['verified', 'manual', 'crn_on_page']);
+  });
+
+  test('hasWebsite has no negative branch to get wrong', () => {
+    // It is true-only by type, and EXISTS over a NULL company_number is
+    // already false — so unmapped sponsors are excluded without the explicit
+    // CH-link guard that hasMoved's NOT EXISTS branch needs.
+    expect(buildFilterConditions({ hasWebsite: undefined })).toEqual([]);
+  });
+
   test('non-condition params contribute nothing', () => {
     expect(
       buildFilterConditions({ q: 'tesco', sort: 'name', order: 'asc' }),

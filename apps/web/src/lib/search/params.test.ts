@@ -305,6 +305,56 @@ describe('requiresChLink', () => {
     expect(requiresChLink({ industry: 'software' })).toBe(true);
     expect(requiresChLink({ sic: ['62020'] })).toBe(true);
     expect(requiresChLink({ sicSection: ['J'] })).toBe(true);
+    // hasWebsite joins company_websites on company_number, so an unmapped
+    // sponsor can never satisfy it.
+    expect(requiresChLink({ hasWebsite: true })).toBe(true);
+  });
+});
+
+describe('hasWebsite', () => {
+  test('parses like every other boolean filter', () => {
+    expect(parseSearchFilters({ hasWebsite: 'true' }).filters.hasWebsite).toBe(
+      true,
+    );
+    expect(parseSearchFilters({ hasWebsite: true }).filters.hasWebsite).toBe(
+      true,
+    );
+  });
+
+  test('drops false rather than keeping a filter the checkbox cannot show', () => {
+    // A retained `false` is an active filter the form renders as inactive, and
+    // clicking the box would flip it to true instead of clearing it. The URL,
+    // the form and the SQL have to agree, so the registry drops it loudly.
+    const parsed = parseSearchFilters({ hasWebsite: 'false' });
+    expect(parsed.filters.hasWebsite).toBeUndefined();
+    expect(parsed.issues).toEqual([
+      'hasWebsite: only true is supported — dropped',
+    ]);
+  });
+
+  test('still reports genuinely malformed input', () => {
+    const parsed = parseSearchFilters({ hasWebsite: 'maybe' });
+    expect(parsed.filters.hasWebsite).toBeUndefined();
+    expect(parsed.issues).toEqual([
+      'hasWebsite: expected true/false — dropped',
+    ]);
+  });
+
+  test('survives the URL round trip', () => {
+    // The boolean parse loop in params.ts is keyed by an explicit list, so a
+    // key omitted there is silently stripped on every persist and reload with
+    // no compile error. This is the test that catches that.
+    const { filters } = parseSearchFilters({ hasWebsite: 'true' });
+    const params = filtersToSearchParams(filters);
+    expect(params.hasWebsite).toBe(true);
+    expect(parseSearchFilters(params).filters.hasWebsite).toBe(true);
+  });
+
+  test('is absent when unset rather than defaulting to false', () => {
+    // Unchecked must mean unconstrained: a default of false would hide every
+    // company whose website we simply have not got to yet.
+    expect(parseSearchFilters({}).filters.hasWebsite).toBeUndefined();
+    expect(filtersToSearchParams(parseSearchFilters({}).filters)).toEqual({});
   });
 });
 

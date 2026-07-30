@@ -1,6 +1,8 @@
 import { ADDRESS_COLUMNS } from '@ss/db/constants';
+import { companyWebsites } from '@ss/db/schema';
 import { type SQL, sql } from 'drizzle-orm';
 
+import { publishableWebsiteGate } from '../websites/publishable';
 import {
   industryWords,
   type SearchFilters,
@@ -60,6 +62,19 @@ const industryWordPred = (word: string): SQL => {
 /** Aggregate the SIC codes whose description satisfies the given predicate. */
 const industryCodes = (preds: SQL): SQL =>
   sql`SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE ${preds}`;
+
+/**
+ * Correlated probe shared by both hasWebsite branches: does this company have
+ * a website the detail page would actually render? The gate itself comes from
+ * lib/websites/publishable, so the filter cannot drift from the page.
+ *
+ * A correlated EXISTS rather than a join: the filter query groups by
+ * `h.name_slug, c.company_number`, so a joined table would need a GROUP BY
+ * entry and could fan a sponsor out across rows. Costs one PK lookup per
+ * candidate against a table of a few thousand rows.
+ */
+const websiteProbe = (): SQL =>
+  sql`SELECT 1 FROM ${companyWebsites} WHERE ${companyWebsites.companyNumber} = c.company_number AND ${publishableWebsiteGate()}`;
 
 /** true = flag set; false = mapped company whose flag is false or unknown (NULL). */
 const chFlag = (col: SQL, value: boolean): SQL =>
@@ -197,6 +212,13 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
         ? sql`EXISTS (${addressTrailProbe()})`
         : sql`(c.company_number IS NOT NULL AND NOT EXISTS (${addressTrailProbe()}))`,
     );
+  }
+
+  // True-only by type (params.ts), so there is no negative branch to write:
+  // an EXISTS over a NULL company_number is already false, which correctly
+  // excludes sponsors with no Companies House link.
+  if (filters.hasWebsite) {
+    conds.push(sql`EXISTS (${websiteProbe()})`);
   }
 
   return conds;

@@ -6,7 +6,7 @@ import {
   stripSearchParams,
   useNavigate,
 } from '@tanstack/react-router';
-import { ExternalLink, MapPin } from 'lucide-react';
+import { ExternalLink, Globe, MapPin } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import {
@@ -17,6 +17,10 @@ import {
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
+import {
+  type CompanyWebsite,
+  companyWebsiteQueryOptions,
+} from '../api/companyWebsite';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
@@ -34,7 +38,9 @@ import {
   type CompanyDisplayInput,
   deriveCompanyDisplay,
 } from '../lib/company/display';
+import { companyDocumentDegraded } from '../lib/company/document-cache';
 import type { RouteLicence } from '../lib/company/licences';
+import { displayDomain } from '../lib/company/website';
 import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
@@ -148,35 +154,58 @@ export const Route = createFileRoute('/company/$slug')({
       companyProfileQueryOptions(company.licences[0].organisationName),
     );
 
-    // Timeline is auxiliary — a transient failure must not take down the page.
-    const timeline = profile?.company_number
-      ? await queryClient
-          .ensureQueryData({
-            ...companyTimelineQueryOptions(profile.company_number),
-            revalidateIfStale: true,
-          })
-          .catch((error) => {
-            console.error('[Timeline] load failed:', error);
-            return null;
-          })
-      : null;
+    // Both are auxiliary — a transient failure must not take down the page —
+    // and both key off the same company number, so they run together rather
+    // than stacking another round trip onto the load.
+    // A failed website lookup has to stay distinguishable from a successful
+    // "no website": both render the same page, but only the first must not be
+    // cached for 30 days. See companyDocumentDegraded.
+    const [timeline, websiteLoad] = profile?.company_number
+      ? await Promise.all([
+          queryClient
+            .ensureQueryData({
+              ...companyTimelineQueryOptions(profile.company_number),
+              revalidateIfStale: true,
+            })
+            .catch((error) => {
+              console.error('[Timeline] load failed:', error);
+              return null;
+            }),
+          queryClient
+            .ensureQueryData(companyWebsiteQueryOptions(profile.company_number))
+            .then((website) => ({ website, failed: false }))
+            .catch((error) => {
+              console.error('[Website] load failed:', error);
+              return { website: null, failed: true };
+            }),
+        ])
+      : [null, { website: null, failed: false }];
+    const website = websiteLoad.website;
 
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
-    // Short-cache when the timeline is missing for a company that should have
-    // one (RPC error, or a first visit racing getCompanyProfile's background
-    // upsert) so the degraded document isn't baked in for 30 days.
-    const timelineMissing = Boolean(profile?.company_number) && !timeline;
-    setSsrCacheControl(timelineMissing ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
+    // Short-cache a document built from incomplete data (a timeline RPC error,
+    // a first visit racing getCompanyProfile's background upsert, or a website
+    // lookup that threw) so the degraded rendering isn't baked in for 30 days.
+    const degraded = companyDocumentDegraded({
+      hasCompanyNumber: Boolean(profile?.company_number),
+      timelineLoaded: Boolean(timeline),
+      websiteLookupFailed: websiteLoad.failed,
+    });
+    setSsrCacheControl(degraded ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
     // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
     if (profile?.company_number) {
       setCacheTag(`company-${profile.company_number}`);
     }
 
-    return { sponsor: company, profile, timeline };
+    return { sponsor: company, profile, timeline, website };
   },
   head: ({ match }) => {
-    // Same shape the loader returns; CompanyDisplayInput is the one written copy.
-    const loaderData = match.loaderData as CompanyDisplayInput | undefined;
+    // Same shape the loader returns; CompanyDisplayInput is the one written
+    // copy. The website is not part of the display derivation, so it rides
+    // alongside rather than widening that type.
+    const loaderData = match.loaderData as
+      | (CompanyDisplayInput & { website?: CompanyWebsite | null })
+      | undefined;
 
     // Lead with the Companies House current name; HMRC may hold a stale former name.
     const display = loaderData ? deriveCompanyDisplay(loaderData) : null;
@@ -233,6 +262,7 @@ export const Route = createFileRoute('/company/$slug')({
             address: loaderData.profile?.registered_office_address,
             canonicalUrl,
             homeUrl: buildCanonical('/'),
+            websiteUrl: loaderData.website?.url,
           })
         : [];
 
@@ -253,7 +283,7 @@ export const Route = createFileRoute('/company/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, timeline } = Route.useLoaderData();
+  const { sponsor, profile, timeline, website } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -511,6 +541,27 @@ function CompanyDetail() {
             {summary}
           </p>
         </section>
+
+        {website && (
+          <section className="mt-6" aria-labelledby="company-website-heading">
+            <h2 id="company-website-heading" className={LABEL_CLASS}>
+              Website
+            </h2>
+            {/* The domain, not the word "Website", so the reader can see where
+                the link goes before taking it. How we confirmed it is
+                deliberately not stated: that method is ours to keep. */}
+            <a
+              href={website.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-(--link-blue) no-underline hover:underline"
+            >
+              <Globe size={14} className="shrink-0" aria-hidden="true" />
+              <span className="break-all">{displayDomain(website.url)}</span>
+              <ExternalLink size={12} className="shrink-0" aria-hidden="true" />
+            </a>
+          </section>
+        )}
 
         {timeline && (
           <section className="mt-6" aria-labelledby="company-timeline-heading">

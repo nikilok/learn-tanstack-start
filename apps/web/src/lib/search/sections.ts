@@ -19,7 +19,7 @@ export const FILTER_SECTIONS = [
     id: 'signals',
     title: 'Signals',
     schemaLabel:
-      'Change signals: renames, office moves, charges, insolvency, overdue accounts',
+      'Signals: renames, office moves, charges, insolvency, overdue accounts, confirmed website',
   },
   { id: 'sort', title: 'Sort', schemaLabel: null },
 ] as const;

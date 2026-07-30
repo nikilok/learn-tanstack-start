@@ -6,6 +6,7 @@ export {
   companiesHouseProfileCache,
   companiesHouseProfiles,
   companiesHouseProfileTrails,
+  companyWebsites,
   desktopDownloads,
   desktopReleaseAssets,
   desktopReleases,

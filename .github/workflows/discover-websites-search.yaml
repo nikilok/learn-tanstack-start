@@ -39,6 +39,12 @@ on:
         required: false
         type: number
 
+# Read-only. This job checks out, queries Neon and calls Serper; it pushes
+# nothing and opens nothing, so the default write-capable token is more
+# authority than it needs.
+permissions:
+  contents: read
+
 concurrency:
   group: discover-websites-search
   cancel-in-progress: false

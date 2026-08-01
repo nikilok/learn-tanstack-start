@@ -116,26 +116,30 @@ async function search(query: string): Promise<string[]> {
     body: JSON.stringify({ q: query, gl: 'gb', hl: 'en', num: 10 }),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!res.ok) return [];
+  // Throw rather than return nothing. A recall probe that silently counts an
+  // exhausted balance or a provider outage as "did not find it" reports a
+  // false recall rate, which is the one number this script exists to produce.
+  if (!res.ok) {
+    throw new Error(`serper returned ${res.status}`);
+  }
   const body = (await res.json()) as { organic?: { link?: string }[] };
-  return (body.organic ?? []).map((r) => r.link ?? '').filter(Boolean);
+  if (!Array.isArray(body.organic)) {
+    throw new Error('serper returned an unparsable body');
+  }
+  return body.organic.map((r) => r.link ?? '').filter(Boolean);
 }
 
 const ranks: (number | null)[] = [];
 let emptyQueries = 0;
 
 for (const [index, row] of rows.entries()) {
-  let rank: number | null = null;
-  try {
-    const urls = await search(queryFor(row.company_name, row.town));
-    if (urls.length === 0) emptyQueries += 1;
-    const want = siteOf(row.url);
-    const hit = urls.findIndex((u) => siteOf(u) === want);
-    rank = hit === -1 ? null : hit + 1;
-  } catch {
-    rank = null;
-  }
-  ranks.push(rank);
+  // Deliberately unguarded: a provider failure ends the run rather than
+  // quietly becoming a miss in the denominator.
+  const urls = await search(queryFor(row.company_name, row.town));
+  if (urls.length === 0) emptyQueries += 1;
+  const want = siteOf(row.url);
+  const hit = urls.findIndex((u) => siteOf(u) === want);
+  ranks.push(hit === -1 ? null : hit + 1);
   if ((index + 1) % 25 === 0) {
     const found = ranks.filter((r) => r !== null).length;
     console.log(`  ${index + 1}/${rows.length} searched (${found} found)`);

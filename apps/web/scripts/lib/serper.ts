@@ -66,6 +66,12 @@ export async function searchCompany(
     if (res.status === 429) {
       return { ok: false, reason: 'rate_limit', status: 429 };
     }
+    // Serper answers an exhausted balance with 402. Falling through to the
+    // generic `http` reason would spend ten more rows on the failure streak
+    // before the run stopped, each one a query that could never have worked.
+    if (res.status === 402) {
+      return { ok: false, reason: 'out_of_credits', status: 402 };
+    }
     if (res.status === 403) {
       const body = await res.text().catch(() => '');
       return {
@@ -77,11 +83,21 @@ export async function searchCompany(
     return { ok: false, reason: 'http', status: res.status };
   }
 
-  const body = (await res.json().catch(() => null)) as {
-    organic?: { link?: string }[];
-  } | null;
+  // A truncated or non-JSON 200 is a FAILURE, not an empty result set. Read as
+  // "no results" it would bank an empty candidate list and write a permanent
+  // `none` for a company that was never actually searched — a credit spent on
+  // a wrong answer that nothing would ever revisit.
+  let body: { organic?: { link?: string }[] } | null = null;
+  try {
+    body = (await res.json()) as { organic?: { link?: string }[] };
+  } catch {
+    return { ok: false, reason: 'http', status: res.status };
+  }
+  if (!body || !Array.isArray(body.organic)) {
+    return { ok: false, reason: 'http', status: res.status };
+  }
   return {
     ok: true,
-    urls: (body?.organic ?? []).map((r) => r.link ?? '').filter(Boolean),
+    urls: body.organic.map((r) => r.link ?? '').filter(Boolean),
   };
 }

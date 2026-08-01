@@ -14,6 +14,7 @@ const row = (over: Partial<DiscoveryRow> = {}): DiscoveryRow => ({
   companyName: 'BRENDONCARE FOUNDATION LIMITED',
   town: 'Winchester',
   postcode: 'SO22 5AZ',
+  bankedCandidates: null,
   ...over,
 });
 
@@ -213,6 +214,44 @@ describe('discoverWebsites', () => {
       expect(line).not.toContain('BRENDONCARE');
       expect(line).not.toMatch(/\d{8}/);
     }
+  });
+
+  test('a company that throws after banking stays retryable', async () => {
+    // The defect this locks: candidates are banked before any page is
+    // fetched, and the selector used to exclude every company that had a row.
+    // One socket hang-up therefore left the company at `pending` with its
+    // credit spent and its answer never written — invisible to every future
+    // slice, permanently.
+    const h = harness({
+      probe: async () => {
+        throw new Error('socket hang up');
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.banked).toHaveLength(1);
+
+    // The next slice hands the row back WITH its banked candidates, and the
+    // retry must not buy them again.
+    let searched = 0;
+    const retry = harness({
+      rows: [row({ bankedCandidates: ['https://a.co.uk'] })],
+      search: async () => {
+        searched += 1;
+        return { ok: true, urls: [] };
+      },
+      probes: {
+        'https://a.co.uk': probe({
+          url: 'https://a.co.uk',
+          postcodeFound: true,
+        }),
+      },
+    });
+    const summary = await discoverWebsites(config(), retry.deps);
+    expect(searched).toBe(0);
+    expect(summary.searched).toBe(0);
+    expect(summary.retried).toBe(1);
+    expect(summary.foundByAddress).toBe(1);
+    expect(retry.written[0].outcome.url).toBe('https://a.co.uk');
   });
 
   test('one company throwing does not take down the run', async () => {

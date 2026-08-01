@@ -18,6 +18,9 @@ export type DiscoveryRow = {
   companyName: string;
   town: string;
   postcode: string | null;
+  /** Results a previous pass already paid for and never got to settle. Set
+   *  only on a retry, and reusing them is what stops a second charge. */
+  bankedCandidates: string[] | null;
 };
 
 export type SearchResult =
@@ -56,6 +59,8 @@ export type DiscoverySummary = {
   candidateFetches: number;
   /** Names too thin to search — the credit was never spent. */
   unsearchable: number;
+  /** Rows resumed from banked candidates, costing no further credit. */
+  retried: number;
   written: number;
   errored: number;
   /** Set when the run stopped early: no credits, or the search budget hit. */
@@ -88,6 +93,7 @@ export async function discoverWebsites(
     foundNothing: 0,
     candidateFetches: 0,
     unsearchable: 0,
+    retried: 0,
     written: 0,
     errored: 0,
     stoppedEarly: false,
@@ -104,39 +110,49 @@ export async function discoverWebsites(
     }
 
     try {
-      const query = buildQuery(row.companyName, row.town);
-      if (!query) {
-        // An empty query would spend a credit and match the whole web.
-        summary.unsearchable += 1;
-        continue;
-      }
-
-      const result = await deps.search(query);
-      summary.searched += 1;
-      if (!result.ok) {
-        if (result.reason === 'out_of_credits') {
-          summary.stoppedEarly = 'out_of_credits';
-          break;
+      // A row carrying banked candidates is a retry: the credit was spent on
+      // a pass that failed before it could write an answer, and searching
+      // again would charge twice for results we already hold.
+      let urls = row.bankedCandidates;
+      if (urls) {
+        summary.retried += 1;
+      } else {
+        const query = buildQuery(row.companyName, row.town);
+        if (!query) {
+          // An empty query would spend a credit and match the whole web.
+          summary.unsearchable += 1;
+          continue;
         }
-        failureStreak += 1;
-        if (failureStreak >= SEARCH_FAILURE_STREAK) {
-          summary.stoppedEarly = 'search_failing';
-          break;
-        }
-        summary.errored += 1;
-        continue;
-      }
-      failureStreak = 0;
 
-      // Bank BEFORE verifying. The credit is spent the moment the results
-      // arrive, so a run that dies mid-fetch must not make the next one pay
-      // for the same company again.
-      if (!config.dryRun) {
-        await deps.bankCandidates(row.companyNumber, result.urls);
+        const result = await deps.search(query);
+        summary.searched += 1;
+        if (!result.ok) {
+          if (result.reason === 'out_of_credits') {
+            summary.stoppedEarly = 'out_of_credits';
+            break;
+          }
+          failureStreak += 1;
+          if (failureStreak >= SEARCH_FAILURE_STREAK) {
+            summary.stoppedEarly = 'search_failing';
+            break;
+          }
+          summary.errored += 1;
+          continue;
+        }
+        failureStreak = 0;
+        urls = result.urls;
+
+        // Bank BEFORE verifying. The credit is spent the moment the results
+        // arrive, so a run that dies mid-fetch must not make the next one pay
+        // for the same company again — and the row it creates comes back round
+        // on a later slice because the selector admits undecided rows.
+        if (!config.dryRun) {
+          await deps.bankCandidates(row.companyNumber, urls);
+        }
       }
 
       const probes: CandidateProbe[] = [];
-      for (const url of result.urls.slice(0, MAX_CANDIDATES)) {
+      for (const url of urls.slice(0, MAX_CANDIDATES)) {
         const probe = await deps.probe(row, url);
         summary.candidateFetches += 1;
         if (!probe) continue;

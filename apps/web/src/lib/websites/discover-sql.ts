@@ -12,15 +12,21 @@ type Sql = (
 ) => Promise<Record<string, unknown>[]>;
 
 /**
- * Mapped sponsors with no website row at all.
+ * Companies still to search: no website row at all, OR one this job banked
+ * candidates for and never got to settle.
  *
- * There is no cursor and no state file: writing a row is what removes a
- * company from this query, so a run that dies halfway simply resumes. The same
- * idiom the sweep uses, and the reason the orchestrator banks candidates
- * before verifying — the row's existence is the record that a credit was spent.
+ * That second clause is load-bearing. Row EXISTENCE used to be the resume
+ * marker, and because candidates are banked before any page is fetched, a
+ * company whose probe threw — one socket hang-up — was left at `pending` with
+ * no URL and excluded from every future slice. Its credit was spent and its
+ * answer never written, permanently. Completeness, not existence, is the
+ * marker: an undecided row this job owns comes back round.
  *
- * Ordered by company number rather than randomly so consecutive runs walk the
- * set predictably and a half-finished slice is easy to reason about.
+ * Scoped to `source = 'search'` so it can never adopt a row another discoverer
+ * left undecided; those belong to whoever created them.
+ *
+ * Still no cursor and no state file. Ordered by company number rather than
+ * randomly so consecutive runs walk the set predictably.
  */
 export function makeSelectUndiscovered(sql: Sql) {
   return async (maxRows: number): Promise<DiscoveryRow[]> => {
@@ -29,12 +35,17 @@ export function makeSelectUndiscovered(sql: Sql) {
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
-        p.postal_code
+        p.postal_code,
+        -- Carried so a retry can reuse what the failed pass already paid for.
+        w.candidates
       FROM hmrc_company_mapping m
       JOIN companies_house_profiles p ON p.company_number = m.company_number
       LEFT JOIN company_websites w ON w.company_number = m.company_number
       WHERE m.company_number IS NOT NULL
-        AND w.company_number IS NULL
+        AND (
+          w.company_number IS NULL
+          OR (w.status = 'pending' AND w.source = 'search' AND w.url IS NULL)
+        )
         -- Nothing to search on, so the credit would be wasted before it is
         -- spent. buildQuery refuses these too; excluding them here keeps them
         -- out of the slice entirely rather than burning rows from it.
@@ -47,6 +58,9 @@ export function makeSelectUndiscovered(sql: Sql) {
       companyName: (r.company_name as string | null) ?? '',
       town: (r.town as string | null) ?? '',
       postcode: (r.postal_code as string | null) ?? null,
+      bankedCandidates: Array.isArray(r.candidates)
+        ? (r.candidates as string[])
+        : null,
     }));
   };
 }
@@ -71,10 +85,14 @@ export function makeBankCandidates(sql: Sql) {
       )
       ON CONFLICT (company_number) DO UPDATE
         SET candidates = excluded.candidates
-        -- Never overwrite a real answer with a fresh set of guesses. A row
-        -- that already has a URL was decided by a registry or a previous
-        -- verification, and this job's job is only to add the raw results.
+        -- Never overwrite a real answer with a fresh set of guesses, and never
+        -- touch a row another discoverer owns. The source check is not
+        -- redundant with the url check: a registry row left undecided would
+        -- otherwise have its candidates set here while keeping source='cqc',
+        -- and makeWriteOutcome's own source guard would then refuse to settle
+        -- it — banked, charged, and unresolvable.
         WHERE company_websites.url IS NULL
+          AND company_websites.source = 'search'
     `;
   };
 }

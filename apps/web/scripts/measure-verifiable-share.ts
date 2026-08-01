@@ -88,14 +88,20 @@ for (const [index, row] of rows.entries()) {
   // Homepage first, then the pages a disclosure conventionally lives on —
   // stopping as soon as both are settled, as the sweep does.
   for (const path of ['', ...DISCLOSURE_PATHS]) {
-    if (crn && postcode) break;
+    // Everything findable has been found. Without the second clause a company
+    // we hold no postcode for kept fetching every disclosure path after the
+    // number was already confirmed, since `postcode` could never become true.
+    if (crn && (postcode || !row.postcode)) break;
     const res = await fetchPage(base + path);
-    if (!res.ok) continue;
-    reached = true;
-    if (!crn) crn = pageHasCompanyNumber(res.html, row.company_number);
-    if (!postcode && row.postcode) {
-      postcode = pageHasPostcode(res.html, row.postcode);
+    if (res.ok) {
+      reached = true;
+      if (!crn) crn = pageHasCompanyNumber(res.html, row.company_number);
+      if (!postcode && row.postcode) {
+        postcode = pageHasPostcode(res.html, row.postcode);
+      }
     }
+    // Paced on every path, including failures: a 404 is still a request, and
+    // `continue` used to skip the delay entirely on the commonest outcome.
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 

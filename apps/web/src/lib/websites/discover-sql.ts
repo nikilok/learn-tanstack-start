@@ -156,10 +156,11 @@ export function makeWriteOutcome(sql: Sql) {
   ): Promise<boolean> => {
     const updated = await sql`
       UPDATE company_websites SET
-        url        = ${outcome.url},
-        status     = ${outcome.url ? 'verified' : 'none'},
-        evidence   = ${outcome.evidence},
-        confidence = ${outcome.url ? confidence.toFixed(3) : null}::numeric
+        url          = ${outcome.url},
+        evidence_url = ${outcome.evidenceUrl},
+        status       = ${outcome.url ? 'verified' : 'none'},
+        evidence     = ${outcome.evidence},
+        confidence   = ${outcome.url ? confidence.toFixed(3) : null}::numeric
       WHERE company_number = ${row.companyNumber}
         AND url IS NULL
         AND source = 'search'

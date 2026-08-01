@@ -11,7 +11,12 @@
  */
 
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
-import { buildQuery, decideFromCandidates, MAX_CANDIDATES } from './discover';
+import {
+  buildQuery,
+  candidateOrigins,
+  decideFromCandidates,
+  MAX_CANDIDATES,
+} from './discover';
 
 export type DiscoveryRow = {
   companyNumber: string;
@@ -42,8 +47,14 @@ export type DiscoveryDeps = {
   search(query: string): Promise<SearchResult>;
   /** Persist the raw result URLs the moment they arrive. */
   bankCandidates(companyNumber: string, urls: string[]): Promise<void>;
-  /** Fetch one candidate and read the two query-independent signals off it. */
+  /** Fetch one candidate ORIGIN and read the two query-independent signals. */
   probe(row: DiscoveryRow, url: string): Promise<CandidateProbe | null>;
+  /** Probe the disclosure paths of an already-fetched candidate, returning it
+   *  updated with anything they proved. */
+  walkDisclosure(
+    row: DiscoveryRow,
+    probe: CandidateProbe,
+  ): Promise<CandidateProbe | null>;
   write(row: DiscoveryRow, outcome: DiscoveryOutcome): Promise<boolean>;
   /** Note that a pass took this row and could not settle it. */
   markAttempt(companyNumber: string): Promise<void>;
@@ -202,9 +213,12 @@ export async function discoverWebsites(
         }
       }
 
+      // Origins, not raw results: several results usually share one site, so
+      // this removes fetches rather than adding them.
+      const origins = candidateOrigins(urls);
       const probes: CandidateProbe[] = [];
       let unreadable = 0;
-      for (const url of urls.slice(0, MAX_CANDIDATES)) {
+      for (const url of origins.slice(0, MAX_CANDIDATES)) {
         const probe = await deps.probe(row, url);
         summary.candidateFetches += 1;
         if (probe) {
@@ -222,13 +236,30 @@ export async function discoverWebsites(
 
       // Read-and-found-nothing is an answer; could-not-read is not, and storing
       // it as one writes a permanent `none` no selector revisits.
-      if (urls.length > 0 && probes.length === 0 && unreadable > 0) {
+      if (origins.length > 0 && probes.length === 0 && unreadable > 0) {
         summary.unreadable += 1;
         if (!config.dryRun) await deps.markAttempt(row.companyNumber);
         continue;
       }
 
-      const outcome = decideFromCandidates(probes);
+      let outcome = decideFromCandidates(probes);
+
+      // Homepages settled nothing, so walk the legal pages of the top-ranked
+      // usable candidate. Measured over 20 companies: this tripled publishable
+      // rows, and walking every candidate instead found no more at three times
+      // the fetches — if the number is not on rank 1's site it is not on rank
+      // 2's either. The same pure decider runs again over the updated probe,
+      // so there is still one place a decision is made.
+      if (outcome.evidence !== 'crn_on_page') {
+        const top = probes.findIndex((p) => !p.onAggregator && !p.parked);
+        if (top >= 0) {
+          const walked = await deps.walkDisclosure(row, probes[top]);
+          if (walked) {
+            probes[top] = walked;
+            outcome = decideFromCandidates(probes);
+          }
+        }
+      }
       if (outcome.evidence === 'crn_on_page') summary.foundByNumber += 1;
       else if (outcome.evidence === 'postcode_on_page') {
         summary.foundByAddress += 1;

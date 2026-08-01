@@ -42,6 +42,7 @@ import {
   pageHasPostcode,
   visibleText,
 } from '../src/lib/websites/extract.ts';
+import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
 import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
 import {
   isAggregatorHost,
@@ -77,6 +78,20 @@ const maxSearches = Math.min(
   ABSOLUTE_MAX_SEARCHES,
 );
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
+/**
+ * Legal pages tried on the top-ranked candidate when homepages settle nothing.
+ *
+ * Measured over 20 companies: walking these tripled publishable rows, and
+ * walking every candidate rather than the top one found no more at three times
+ * the fetches.
+ */
+const MAX_DISCLOSURE_PATHS = parseStrictInt(
+  flag('max-disclosure') ?? '5',
+  'max-disclosure',
+);
+let disclosureFetches = 0;
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 const apiKey = process.env.SERPER_API_KEY;
 if (!apiKey) {
@@ -98,7 +113,7 @@ console.log(
   `  before: ${before.target} companies undiscovered, ${before.discovered} already searched`,
 );
 
-/** Fetch one candidate and read the two query-independent signals off it. */
+/** Fetch one candidate origin and read the two query-independent signals. */
 async function probe(
   row: DiscoveryRow,
   url: string,
@@ -116,19 +131,53 @@ async function probe(
     }
   })();
   const text = visibleText(fetched.html);
+  const crnFound = pageHasCompanyNumber(fetched.html, row.companyNumber);
+  const postcodeFound = row.postcode
+    ? pageHasPostcode(fetched.html, row.postcode)
+    : false;
   return {
     // Store the URL we ASKED for, not the post-redirect one: that is what a
     // visitor clicks and what the sweep will revalidate. The host is judged
     // post-redirect for the same reason it is in the sweep — a stored URL that
     // 301s into a directory has to be judged on where it lands.
     url: canonical,
-    crnFound: pageHasCompanyNumber(fetched.html, row.companyNumber),
-    postcodeFound: row.postcode
-      ? pageHasPostcode(fetched.html, row.postcode)
-      : false,
+    evidenceUrl: crnFound || postcodeFound ? canonical : null,
+    crnFound,
+    postcodeFound,
     onAggregator: isAggregatorHost(host),
     parked: looksParked(text),
   };
+}
+
+/**
+ * Probe a candidate's legal pages when its homepage proved nothing.
+ *
+ * Returns the probe updated with whatever they found, so the same pure decider
+ * settles the row either way. Stops at the first registration number: nothing
+ * below it can beat the company naming itself.
+ */
+async function walkDisclosure(
+  row: DiscoveryRow,
+  base: CandidateProbe,
+): Promise<CandidateProbe | null> {
+  let updated = base;
+  for (const path of DISCLOSURE_PATHS.slice(0, MAX_DISCLOSURE_PATHS)) {
+    await sleep(delayMs);
+    const fetched = await fetchSite(`${base.url}${path}`);
+    disclosureFetches += 1;
+    if (!fetched.ok) continue;
+    if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {
+      return { ...updated, crnFound: true, evidenceUrl: fetched.url };
+    }
+    if (
+      !updated.postcodeFound &&
+      row.postcode &&
+      pageHasPostcode(fetched.html, row.postcode)
+    ) {
+      updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
+    }
+  }
+  return updated;
 }
 
 const writeOutcome = makeWriteOutcome(sql);
@@ -146,9 +195,10 @@ const summary = await discoverWebsites(
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
     probe,
+    walkDisclosure,
     write: (row, outcome) =>
       writeOutcome(row, outcome, evidenceConfidence(outcome.evidence)),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    sleep,
     log: (message) => console.log(message),
   },
 );
@@ -169,6 +219,7 @@ console.log(`  found_by_address    : ${summary.foundByAddress}`);
 console.log(`  found_nothing       : ${summary.foundNothing}`);
 console.log(`  hit_rate            : ${hitRate.toFixed(1)}%`);
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
+console.log(`  disclosure_fetches  : ${disclosureFetches}`);
 console.log(`  unsearchable        : ${summary.unsearchable}`);
 console.log(`  written             : ${summary.written}`);
 console.log(`  unreadable          : ${summary.unreadable}`);

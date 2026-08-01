@@ -90,8 +90,8 @@ describe('sweepWebsites', () => {
     const h = harness();
     await sweepWebsites(config({ maxDisclosurePaths: 2 }), h.deps);
     expect(h.fetchedPaths).toEqual([
-      'https://www.example.co.uk/contact',
-      'https://www.example.co.uk/contact-us',
+      'https://www.example.co.uk/privacy',
+      'https://www.example.co.uk/privacy-policy',
     ]);
   });
 
@@ -108,7 +108,7 @@ describe('sweepWebsites', () => {
       config({ maxDisclosurePaths: 4 }),
       h.deps,
     );
-    expect(probed).toEqual(['https://www.example.co.uk/contact']);
+    expect(probed).toEqual(['https://www.example.co.uk/privacy']);
     expect(summary.disclosureFetches).toBe(1);
     expect(summary.promoted).toBe(1);
   });
@@ -281,8 +281,8 @@ describe('sweepWebsites — hardening', () => {
     });
     await sweepWebsites(config({ maxDisclosurePaths: 2 }), h.deps);
     expect(probed).toEqual([
-      'https://www.caremark.co.uk/arun/contact',
-      'https://www.caremark.co.uk/arun/contact-us',
+      'https://www.caremark.co.uk/arun/privacy',
+      'https://www.caremark.co.uk/arun/privacy-policy',
     ]);
   });
 });

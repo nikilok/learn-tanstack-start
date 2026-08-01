@@ -22,9 +22,13 @@
 
 import type { WebsiteEvidence } from './decide';
 
-/** What one candidate URL turned out to be, once fetched. */
+/** What one candidate site turned out to be, once fetched. */
 export type CandidateProbe = {
+  /** The site ORIGIN, which is what gets stored and rendered. */
   url: string;
+  /** The page the proof was actually found on: the origin, or a disclosure
+   *  path one click away. Null when nothing was proven. */
+  evidenceUrl: string | null;
   /** The company's own registration number was on the page. */
   crnFound: boolean;
   /** The company's registered office postcode was on the page. */
@@ -37,6 +41,9 @@ export type CandidateProbe = {
 
 export type DiscoveryOutcome = {
   url: string | null;
+  /** Where the proof was read. Stored alongside the URL so a later pass can
+   *  see which page carried the number rather than re-deriving it. */
+  evidenceUrl: string | null;
   evidence: WebsiteEvidence;
   /** Which candidate rank won, 1-based. Null when nothing did. */
   rank: number | null;
@@ -78,6 +85,7 @@ export function decideFromCandidates(
   if (byNumber) {
     return {
       url: byNumber.probe.url,
+      evidenceUrl: byNumber.probe.evidenceUrl,
       evidence: 'crn_on_page',
       rank: byNumber.rank,
     };
@@ -87,12 +95,36 @@ export function decideFromCandidates(
   if (byAddress) {
     return {
       url: byAddress.probe.url,
+      evidenceUrl: byAddress.probe.evidenceUrl,
       evidence: 'postcode_on_page',
       rank: byAddress.rank,
     };
   }
 
-  return { url: null, evidence: 'none', rank: null };
+  return { url: null, evidenceUrl: null, evidence: 'none', rank: null };
+}
+
+/**
+ * Search results reduced to the sites they belong to, in rank order.
+ *
+ * A result is usually a deep page, and a deep page is neither what a visitor
+ * should be sent to nor where a company states who it is — ownership is on the
+ * homepage, the registration number on a legal page. Several results also
+ * frequently share one site, so deduping here removes fetches rather than
+ * adding them.
+ */
+export function candidateOrigins(urls: readonly string[]): string[] {
+  const origins: string[] = [];
+  for (const raw of urls) {
+    let origin: string;
+    try {
+      origin = new URL(raw).origin;
+    } catch {
+      continue;
+    }
+    if (!origins.includes(origin)) origins.push(origin);
+  }
+  return origins;
 }
 
 /** Legal suffixes: no company's website ranks for the word "LIMITED". */

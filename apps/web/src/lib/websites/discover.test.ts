@@ -3,12 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildQuery,
   type CandidateProbe,
+  candidateOrigins,
   decideFromCandidates,
   MAX_CANDIDATES,
 } from './discover';
 
 const probe = (over: Partial<CandidateProbe> = {}): CandidateProbe => ({
   url: 'https://example.co.uk',
+  evidenceUrl: null,
   crnFound: false,
   postcodeFound: false,
   onAggregator: false,
@@ -45,7 +47,12 @@ describe('decideFromCandidates', () => {
     // discarded: publishing the first search hit because it was first is
     // exactly the name-matching this pipeline exists to avoid.
     const outcome = decideFromCandidates([probe(), probe(), probe()]);
-    expect(outcome).toEqual({ url: null, evidence: 'none', rank: null });
+    expect(outcome).toEqual({
+      url: null,
+      evidenceUrl: null,
+      evidence: 'none',
+      rank: null,
+    });
   });
 
   test('a directory listing never wins, even carrying the number', () => {
@@ -74,6 +81,7 @@ describe('decideFromCandidates', () => {
   test('an empty result set is nothing, not a crash', () => {
     expect(decideFromCandidates([])).toEqual({
       url: null,
+      evidenceUrl: null,
       evidence: 'none',
       rank: null,
     });
@@ -109,5 +117,53 @@ describe('buildQuery', () => {
     // Guards the caller: an empty query would burn a credit and return the
     // whole web.
     expect(buildQuery('LIMITED', 'Leeds')).toBe('');
+  });
+});
+
+describe('candidateOrigins', () => {
+  test('reduces deep results to the site they belong to', () => {
+    // A search result is usually a deep page, which is neither what a visitor
+    // should be sent to nor where a company states who it is.
+    expect(
+      candidateOrigins([
+        'https://www.greeneking.co.uk/our-beers/our-breweries/westgate-brewery',
+      ]),
+    ).toEqual(['https://www.greeneking.co.uk']);
+  });
+
+  test('dedupes, so several results on one site cost one fetch', () => {
+    expect(
+      candidateOrigins([
+        'https://acme.co.uk/about',
+        'https://acme.co.uk/contact',
+        'https://other.co.uk/x',
+      ]),
+    ).toEqual(['https://acme.co.uk', 'https://other.co.uk']);
+  });
+
+  test('preserves rank order, since rank is the only signal search gave us', () => {
+    expect(
+      candidateOrigins(['https://b.co.uk/x', 'https://a.co.uk/y']),
+    ).toEqual(['https://b.co.uk', 'https://a.co.uk']);
+  });
+
+  test('skips unparseable entries rather than throwing', () => {
+    expect(candidateOrigins(['not a url', 'https://ok.co.uk/p'])).toEqual([
+      'https://ok.co.uk',
+    ]);
+  });
+});
+
+describe('decideFromCandidates records where the proof was read', () => {
+  test('carries the evidence page through, not just the site', () => {
+    const outcome = decideFromCandidates([
+      probe({
+        url: 'https://acme.co.uk',
+        evidenceUrl: 'https://acme.co.uk/privacy',
+        crnFound: true,
+      }),
+    ]);
+    expect(outcome.url).toBe('https://acme.co.uk');
+    expect(outcome.evidenceUrl).toBe('https://acme.co.uk/privacy');
   });
 });

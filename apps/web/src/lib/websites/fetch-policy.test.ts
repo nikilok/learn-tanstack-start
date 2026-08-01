@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  DISCLOSURE_PATHS,
   isAllowedByRobots,
   isPrivateAddress,
   parseRobots,
@@ -275,5 +276,26 @@ describe('isAllowedByRobots — hostile input', () => {
     expect(
       isAllowedByRobots({ disallow: ['/*/private'], allow: [] }, '/uk/public'),
     ).toBe(true);
+  });
+});
+
+describe('DISCLOSURE_PATHS ordering is load-bearing', () => {
+  test('privacy pages lead, because callers cap the list', () => {
+    // The sweep takes only the first two, so order decides what is ever tried.
+    // GDPR requires a privacy policy to identify the data controller as a legal
+    // entity, which is why it names the registered number on sites that are
+    // otherwise pure brand — measured: the only page on redfunnel.co.uk
+    // carrying 00002404 was /privacy, and /contact-us did not have it.
+    expect(DISCLOSURE_PATHS.slice(0, 2)).toEqual([
+      '/privacy',
+      '/privacy-policy',
+    ]);
+  });
+
+  test('every entry is a rooted path, so origin + path concatenates cleanly', () => {
+    for (const path of DISCLOSURE_PATHS) {
+      expect(path.startsWith('/')).toBe(true);
+      expect(path.endsWith('/')).toBe(false);
+    }
   });
 });

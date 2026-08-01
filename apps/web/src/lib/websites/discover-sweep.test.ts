@@ -28,6 +28,7 @@ const config = (over: Partial<DiscoveryConfig> = {}): DiscoveryConfig => ({
 
 const probe = (over: Partial<CandidateProbe> = {}): CandidateProbe => ({
   url: 'https://example.co.uk',
+  evidenceUrl: null,
   crnFound: false,
   postcodeFound: false,
   onAggregator: false,
@@ -41,6 +42,7 @@ type Harness = {
   written: { row: DiscoveryRow; outcome: DiscoveryOutcome }[];
   probed: string[];
   attempts: string[];
+  walked: string[];
   logs: string[];
 };
 
@@ -49,12 +51,14 @@ function harness(
     rows?: DiscoveryRow[];
     urls?: string[];
     probes?: Record<string, CandidateProbe | null>;
+    disclosure?: Record<string, CandidateProbe>;
   } = {},
 ): Harness {
   const banked: Harness['banked'] = [];
   const written: Harness['written'] = [];
   const probed: string[] = [];
   const attempts: string[] = [];
+  const walked: string[] = [];
   const logs: string[] = [];
   const urls = over.urls ?? ['https://a.co.uk', 'https://b.co.uk'];
   const deps: DiscoveryDeps = {
@@ -72,6 +76,10 @@ function harness(
       written.push({ row: r, outcome });
       return true;
     },
+    walkDisclosure: async (_row, base) => {
+      walked.push(base.url);
+      return over.disclosure ? (over.disclosure[base.url] ?? base) : base;
+    },
     markAttempt: async (companyNumber) => {
       attempts.push(companyNumber);
     },
@@ -79,7 +87,7 @@ function harness(
     log: (m) => logs.push(m),
     ...over,
   };
-  return { deps, banked, written, probed, attempts, logs };
+  return { deps, banked, written, probed, attempts, walked, logs };
 }
 
 describe('discoverWebsites', () => {
@@ -511,5 +519,78 @@ describe('progress is reported even when rows are skipped', () => {
 
     expect(summary.unreadable).toBe(25);
     expect(h.logs.some((l) => l.includes('25/25'))).toBe(true);
+  });
+});
+
+describe('the disclosure walk is what makes rows publishable', () => {
+  test('walks the top candidate when no homepage carries the number', async () => {
+    // Measured over 20 companies: this tripled publishable rows. The CRN lives
+    // on a legal page far more often than on the front page.
+    const h = harness({
+      urls: ['https://acme.co.uk/deep/page', 'https://other.co.uk/x'],
+      disclosure: {
+        'https://acme.co.uk': probe({
+          url: 'https://acme.co.uk',
+          evidenceUrl: 'https://acme.co.uk/privacy',
+          crnFound: true,
+        }),
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.foundByNumber).toBe(1);
+    expect(h.written[0].outcome.url).toBe('https://acme.co.uk');
+    expect(h.written[0].outcome.evidenceUrl).toBe('https://acme.co.uk/privacy');
+  });
+
+  test('does NOT walk when a homepage already carries the number', async () => {
+    // The walk is the expensive half. Paying for it after the question is
+    // already answered is pure waste.
+    const h = harness({
+      urls: ['https://acme.co.uk'],
+      probes: {
+        'https://acme.co.uk': probe({
+          url: 'https://acme.co.uk',
+          evidenceUrl: 'https://acme.co.uk',
+          crnFound: true,
+        }),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.walked).toEqual([]);
+  });
+
+  test('walks only the TOP-ranked usable candidate, not every one', async () => {
+    // Escalating to ranks 2 and 3 was measured and found nothing at double the
+    // fetches: if the number is not on rank 1's site it is not on rank 2's.
+    const h = harness({
+      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.walked).toEqual(['https://a.co.uk']);
+  });
+
+  test('skips aggregators when choosing which candidate to walk', async () => {
+    const h = harness({
+      urls: ['https://endole.co.uk/x', 'https://real.co.uk/y'],
+      probes: {
+        'https://endole.co.uk': probe({
+          url: 'https://endole.co.uk',
+          onAggregator: true,
+        }),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.walked).toEqual(['https://real.co.uk']);
+  });
+
+  test('candidates are reduced to origins before anything is fetched', async () => {
+    // Two results, one site: one fetch, not two.
+    const h = harness({
+      urls: ['https://acme.co.uk/about', 'https://acme.co.uk/contact'],
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(h.probed).toEqual(['https://acme.co.uk']);
+    expect(summary.candidateFetches).toBe(1);
   });
 });

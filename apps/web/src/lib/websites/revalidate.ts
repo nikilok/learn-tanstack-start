@@ -67,6 +67,16 @@ export type RevalidateInput = {
    * site announcing "our new wing is coming soon" trips it.
    */
   looksParked?: boolean;
+  /**
+   * The page carried too little text to have shown an address at all — a
+   * cookie wall, a JS shell, or a response truncated at the fetcher's 2MB cap.
+   *
+   * Absence of the postcode on such a page is not evidence the site stopped
+   * publishing it, so it must not withdraw a confirmation. Without this a
+   * single interstitial unpublishes the link and the next clean pass restores
+   * it, which reads to a visitor as a company website that flickers.
+   */
+  pageTooThin?: boolean;
 };
 
 export type RevalidateResult = {
@@ -285,7 +295,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidence = 'registry_confirmed';
     evidenceUrl = input.postcodeFoundAt ?? null;
     note = 'live; registered office postcode found on the site';
-  } else if (evidence === 'registry_confirmed') {
+  } else if (evidence === 'registry_confirmed' && !input.pageTooThin) {
     evidenceUrl = input.postcodeFoundAt ?? null;
     // The address was there and is not any more: the site was rebuilt, the
     // domain changed hands, or the company moved. Upgrade-only applies

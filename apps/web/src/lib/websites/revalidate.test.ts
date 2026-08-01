@@ -363,3 +363,40 @@ describe('a confirmed row that now lands on a directory', () => {
     expect(result.status).toBe('candidate');
   });
 });
+
+describe('a thin page never withdraws a confirmation', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.example.co.uk',
+      evidence: 'registry_confirmed',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.example.co.uk',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('a cookie wall or JS shell leaves the rung alone', () => {
+    // Absence of the address on a page that carried almost no text is not
+    // evidence the site stopped publishing it. Without this, one interstitial
+    // unpublishes the link and the next clean pass restores it — a company
+    // website that flickers on and off across nightly sweeps.
+    expect(live({ postcodeConfirms: false, pageTooThin: true }).evidence).toBe(
+      'registry_confirmed',
+    );
+  });
+
+  test('a real page with no address still withdraws', () => {
+    expect(live({ postcodeConfirms: false, pageTooThin: false }).evidence).toBe(
+      'registry',
+    );
+  });
+
+  test('a thin page does not block a confirmation either way', () => {
+    // Finding the address is positive evidence whatever the page length.
+    expect(
+      live({ evidence: 'registry', postcodeConfirms: true, pageTooThin: true })
+        .evidence,
+    ).toBe('registry_confirmed');
+  });
+});

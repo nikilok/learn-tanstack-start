@@ -490,8 +490,20 @@ describe('the sweep computes its signals from the right inputs', () => {
   test('counts a withdrawal as demoted, never as promoted', async () => {
     // A mass withdrawal reported under the run's healthiest-looking metric is
     // how a silent unpublish stays invisible.
+    //
+    // The page has to be SUBSTANTIAL for a withdrawal to happen at all: a
+    // cookie wall or a JS shell says nothing about whether the site still
+    // publishes the address, and unpublishing off one would make the link
+    // flicker. That guard is what the padding here is defeating.
+    const realPage = `<html><body>${'Home About us Our care Careers Contact. '.repeat(60)}</body></html>`;
     const h = harness({
       rows: [row({ evidence: 'registry_confirmed', confidence: '0.970' })],
+      fetchSite: async (url) => ({
+        ok: true,
+        url,
+        attemptedUrl: url,
+        html: realPage,
+      }),
       hasPostcode: () => false,
     });
     const summary = await sweepWebsites(config(), h.deps);

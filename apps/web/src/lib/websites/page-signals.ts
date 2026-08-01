@@ -74,3 +74,19 @@ export function looksParked(visibleText: string): boolean {
   const flat = visibleText.replace(/\s+/g, ' ').trim();
   return flat.length < PARKED_MAX_TEXT && PARKED_PHRASES.test(flat);
 }
+
+/**
+ * Below this a page cannot be taken as evidence of ABSENCE.
+ *
+ * A cookie wall, a JavaScript shell before hydration, or a body truncated at
+ * the fetcher's 2MB cap all return 200 with almost no text. Not finding the
+ * registered address on one of those says nothing about whether the site
+ * publishes it, and treating it as a withdrawal makes a company's website
+ * flicker off and back on across sweeps.
+ *
+ * Deliberately the same threshold looksParked uses: both are asking the same
+ * question, whether there is enough here to have read.
+ */
+export function pageTooThin(visibleText: string): boolean {
+  return visibleText.replace(/\s+/g, ' ').trim().length < PARKED_MAX_TEXT;
+}

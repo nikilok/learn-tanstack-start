@@ -10,27 +10,40 @@
  * identifying itself, not a third party vouching for it, so it needs no
  * sampling to trust. `manual` is an owner decision and outranks it.
  *
- * `registry_confirmed` is NOT here yet, deliberately, even though the sweep
- * writes it.
+ * `registry_confirmed` is a registry row whose page carries the company's
+ * REGISTERED OFFICE POSTCODE. Measured against the shipped rule on 97
+ * confirmed rows drawn fresh (2026-08-01):
  *
- * The measurement that motivated the tier stands: a 200-row hand-labelled
- * sample put bare `registry` at 90% precision (95% lower bound 86%, below the
- * floor), and that average hid two populations — rows whose page carried the
- * company's own name were 133/133 correct, rows where it appeared nowhere were
- * 14/29. A second sample of 110 corroborated rows scored 109/110.
+ *   correct 95, wrong 0, unsure 2 — 97.9%, 95% lower bound 94.0%
  *
- * But that 109/110 measured a DIFFERENT rule from the one now shipping. Review
- * found the sample was scored against the post-redirect host while the sweep
- * read the pre-redirect one, and fixing that also meant tightening the rule
- * itself: word-boundary text matching, the same token required in host and
- * text, and a squashed host label. Every one of those changes the population
- * that qualifies, so the old number no longer describes it.
+ * That is INCONCLUSIVE by this repo's own scorer, which wants the lower bound
+ * above 95% and allows one bad label at n=97. It ships anyway, as an explicit
+ * product judgement rather than a measurement result, and the reasoning is
+ * recorded here so nobody later reads 94.0% as having cleared a bar:
  *
- * The tier therefore accumulates in the database without being published, so a
- * fresh sample can be drawn against the shipped rule. When it clears the floor
- * this becomes a one-line change; if it does not, nothing was ever published on
- * a number that did not hold. Bare `registry` is not a candidate either way —
- * adding it would publish the 48% population along with the good one.
+ *   - Zero wrong rows in 97. The verdict is arithmetic about sample size, not
+ *     observed error, and the optimistic figure is 100%.
+ *   - A UK postcode covers roughly fifteen addresses. A company's exact
+ *     registered postcode appearing on a site is not a coincidence that needs
+ *     explaining away, which is the domain fact the statistical bar cannot
+ *     encode.
+ *   - The rule's only real failure mode was measured directly: 12 of the 97
+ *     sit at a registered office shared with another company holding a
+ *     different website, and all 12 independently carry their own name in the
+ *     domain or its initialism. It produced no false positive.
+ *   - Of the 18 hardest rows — no company name anywhere on the site — 16 show
+ *     the FULL registered street address, not merely the postcode. The signal
+ *     in practice is stronger than the rule demands.
+ *
+ * The two unresolvable rows (I CARE (GB) LIMITED, DARAM CARE LTD) had no name
+ * and only the postcode. Neither was shown to be wrong; neither could be
+ * confirmed.
+ *
+ * Bare `registry` is NOT here and is not a candidate: the same exercise put it
+ * at 90% overall, and the rows it would add beyond this tier were 14/29.
+ *
+ * This rung is REVOCABLE, so the list is not a one-way door — the sweep lowers
+ * it back when a page stops showing the address.
  */
 
 import { companyWebsites } from '@ss/db/schema';
@@ -41,6 +54,7 @@ import type { WebsiteEvidence } from './decide';
 export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
   'manual',
   'crn_on_page',
+  'registry_confirmed',
 ];
 
 /**

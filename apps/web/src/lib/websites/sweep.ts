@@ -12,7 +12,7 @@ import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
 import { evidenceRank } from './decide.ts';
 import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
-import { isAggregatorHost, looksParked } from './page-signals.ts';
+import { isAggregatorHost, looksParked, pageTooThin } from './page-signals.ts';
 import type { RevalidateFailure, RevalidateResult } from './revalidate.ts';
 import { revalidate } from './revalidate.ts';
 
@@ -250,6 +250,7 @@ export async function sweepWebsites(
       let postcodeConfirms = false;
       let onAggregator = false;
       let looksParkedPage = false;
+      let thinPage = false;
       if (fetched.ok) {
         // Read off the homepage we already have — no extra request.
         //
@@ -268,6 +269,7 @@ export async function sweepWebsites(
         const host = hostOf(fetched.url);
         onAggregator = isAggregatorHost(host);
         looksParkedPage = looksParked(text);
+        thinPage = pageTooThin(text);
         postcodeConfirms = Boolean(
           row.postcode && deps.hasPostcode(fetched.html, row.postcode),
         );
@@ -304,6 +306,7 @@ export async function sweepWebsites(
         postcodeConfirms,
         onAggregator,
         looksParked: looksParkedPage,
+        pageTooThin: thinPage,
       });
 
       if (fetched.ok) {

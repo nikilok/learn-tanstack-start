@@ -61,6 +61,7 @@ import {
   normaliseCompanyNumber,
 } from '../src/lib/websites/registry-rows.ts';
 import { setGitHubOutput } from './ci-utils.ts';
+import { newestCqcOdsUrl } from './lib/cqc-directory.ts';
 import { readOdsRows } from './lib/ods-table.ts';
 import { loadScriptEnv } from './lib/script-utils.ts';
 
@@ -72,11 +73,6 @@ loadScriptEnv(import.meta.url);
 
 const CQC_DATA_PAGE =
   'https://www.cqc.org.uk/about-us/transparency/using-cqc-data';
-/** The care directory with filters. Its URL carries the publication date, so it
- *  is scraped from the index page rather than constructed. */
-const CQC_ODS_LINK =
-  /https:\/\/www\.cqc\.org\.uk\/sites\/default\/files\/[0-9]{4}-[0-9]{2}\/[^"'\s]*HSCA_Active_Locations\.ods/g;
-
 const CQC_COLUMN_CRN = 'Provider Companies House Number';
 const CQC_COLUMN_WEB = 'Provider Web Address';
 const CQC_COLUMN_NAME = 'Provider Name';
@@ -147,15 +143,13 @@ async function discoverCqcOdsUrl(): Promise<string> {
   if (!res.ok) {
     throw new Error(`CQC index page returned ${res.status}`);
   }
-  const html = await res.text();
-  const matches = [...new Set(html.match(CQC_ODS_LINK) ?? [])];
-  if (matches.length === 0) {
+  const url = newestCqcOdsUrl(await res.text());
+  if (!url) {
     throw new Error(
       `No HSCA_Active_Locations.ods link on ${CQC_DATA_PAGE} — the page layout or file name changed`,
     );
   }
-  // Newest first: the date is in the path, so a lexical sort is chronological.
-  return matches.sort().reverse()[0];
+  return url;
 }
 
 async function readCqc(workDir: string): Promise<Finding[]> {

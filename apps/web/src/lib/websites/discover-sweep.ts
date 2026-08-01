@@ -23,9 +23,19 @@ export type DiscoveryRow = {
   bankedCandidates: string[] | null;
 };
 
+/** Mirrors the client's union so a renamed reason is a type error, not a
+ *  comparison that silently stops matching. */
+export type SearchFailure =
+  | 'auth'
+  | 'rate_limit'
+  | 'out_of_credits'
+  | 'malformed'
+  | 'http'
+  | 'network';
+
 export type SearchResult =
   | { ok: true; urls: string[] }
-  | { ok: false; reason: string };
+  | { ok: false; reason: SearchFailure; charged?: boolean };
 
 export type DiscoveryDeps = {
   selectRows(maxRows: number): Promise<DiscoveryRow[]>;
@@ -73,6 +83,8 @@ export type DiscoverySummary = {
   errored: number;
   /** Searches that were charged but whose results could not be persisted. */
   creditsLost: number;
+  /** Decisions the database refused to store, the row having changed hands. */
+  unpersisted: number;
   /** Set when the run stopped early: no credits, or the search budget hit. */
   stoppedEarly: false | 'out_of_credits' | 'budget' | 'search_failing';
 };
@@ -109,6 +121,7 @@ export async function discoverWebsites(
     written: 0,
     errored: 0,
     creditsLost: 0,
+    unpersisted: 0,
     stoppedEarly: false,
   };
 
@@ -123,6 +136,12 @@ export async function discoverWebsites(
     }
 
     summary.processed += 1;
+    // Rows reached, emitted before the `continue`s that used to skip it.
+    if (summary.processed % HEARTBEAT_ROWS === 0) {
+      deps.log(
+        `  ${summary.processed}/${rows.length} — ${summary.foundByNumber + summary.foundByAddress} found, ${summary.searched} searched`,
+      );
+    }
 
     try {
       // A row carrying banked candidates is a retry: the credit was spent on
@@ -141,14 +160,14 @@ export async function discoverWebsites(
 
         const result = await deps.search(query);
         if (!result.ok) {
-          // Counted only when charged. A request that never reached Serper, or
-          // one it rejected without billing, is not a credit — and this
-          // counter is both the budget and the `credits_spent` figure an
-          // operator reconciles against the invoice.
+          // Counted only when charged: this is the credits_spent figure.
           if (result.reason === 'out_of_credits') {
             summary.stoppedEarly = 'out_of_credits';
             break;
           }
+          // A malformed 200 was still billed, so it belongs in credits_spent
+          // even though it produced nothing usable.
+          if (result.charged) summary.searched += 1;
           failureStreak += 1;
           if (failureStreak >= SEARCH_FAILURE_STREAK) {
             summary.stoppedEarly = 'search_failing';
@@ -165,12 +184,8 @@ export async function discoverWebsites(
         // arrive, so a run that dies mid-fetch must not make the next one pay
         // for the same company again — and the row it creates comes back round
         // on a later slice because the selector admits undecided rows.
-        // A throw here is the one failure that costs real money with nothing
-        // to show for it: the credit is spent the instant the results arrive,
-        // and without the row the next run pays for the same company again.
-        // Worth a second attempt before writing it off, and worth saying out
-        // loud when even that fails — a silently lost credit is invisible in
-        // every counter the summary prints.
+        // The credit is spent the instant results arrive, so a failed bank is
+        // money gone. Retry, then say so.
         if (!config.dryRun) {
           try {
             await deps.bankCandidates(row.companyNumber, urls);
@@ -200,21 +215,13 @@ export async function discoverWebsites(
         } else {
           unreadable += 1;
         }
-        // Paced on EVERY candidate, including the ones that failed. `continue`
-        // used to skip this on the commonest outcome, so five dead hosts became
-        // roughly twenty requests back to back — each probe expands to host and
-        // scheme variants, each preceded by a robots.txt fetch — from a bot
-        // that advertises itself by name.
+        // Every candidate, including failures: skipping the commonest outcome
+        // made five dead hosts ~20 unpaced requests.
         await deps.sleep(config.delayMs);
       }
 
-      // "We fetched the candidates and none of them proved anything" is an
-      // answer. "We could not fetch any of them" is not, and writing it as one
-      // records a permanent `none` that no selector can revisit: the sweep
-      // requires url IS NOT NULL and this job's selector only readmits
-      // `pending`. One flaky slice would otherwise write off every company in
-      // it, credit already spent, on a DNS wobble. This is the graceful sibling
-      // of the throw path — and the far commoner one.
+      // Read-and-found-nothing is an answer; could-not-read is not, and storing
+      // it as one writes a permanent `none` no selector revisits.
       if (urls.length > 0 && probes.length === 0 && unreadable > 0) {
         summary.unreadable += 1;
         if (!config.dryRun) await deps.markAttempt(row.companyNumber);
@@ -227,23 +234,16 @@ export async function discoverWebsites(
         summary.foundByAddress += 1;
       } else summary.foundNothing += 1;
 
-      if (!config.dryRun && (await deps.write(row, outcome))) {
-        summary.written += 1;
+      if (!config.dryRun) {
+        // `false` = another discoverer claimed the row. Charged, decided, lost.
+        if (await deps.write(row, outcome)) summary.written += 1;
+        else summary.unpersisted += 1;
       }
     } catch (error) {
-      // Reason only, never the company or the URL. A silent catch let a run
-      // where every database call failed spend its whole budget nightly behind
-      // a green tick, and the operator's only clue was a counter nobody was
-      // watching.
+      // Reason only, never the company or the URL.
       summary.errored += 1;
       deps.log(
         `  row failed: ${error instanceof Error ? error.name : 'unknown'}`,
-      );
-    }
-
-    if ((index + 1) % HEARTBEAT_ROWS === 0) {
-      deps.log(
-        `  ${index + 1}/${rows.length} — ${summary.foundByNumber + summary.foundByAddress} found, ${summary.searched} searched`,
       );
     }
   }

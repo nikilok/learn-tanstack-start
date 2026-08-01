@@ -161,3 +161,33 @@ describe('searchCompany — a bare array body is not a result set', () => {
     expect((await searchCompany('q', 'key')).ok).toBe(false);
   });
 });
+
+describe('searchCompany — an error message alongside organic is still an error', () => {
+  test.each([
+    ['organic null', { message: 'Not enough credits', organic: null }],
+    ['organic empty', { message: 'Not enough credits', organic: [] }],
+    ['organic wrong type', { message: 'boom', organic: 'oops' }],
+  ])('%s is a failure, not zero results', async (_label, jsonBody) => {
+    // The guard used to require `organic` to be entirely ABSENT, so an errored
+    // 200 carrying the key in any form was banked as a legitimate empty
+    // answer and wrote a permanent `none` for a company never searched.
+    stub({ ok: true, status: 200, jsonBody });
+    expect((await searchCompany('q', 'key')).ok).toBe(false);
+  });
+
+  test('a malformed 200 reports that it was charged', async () => {
+    // Any 200 is billed, so reporting it as unspent understates credits_spent
+    // against the invoice and re-charges the company next run.
+    stub({ ok: true, status: 200 });
+    expect(await searchCompany('q', 'key')).toMatchObject({ charged: true });
+  });
+
+  test('a pre-200 failure is not charged', async () => {
+    stub({ ok: false, status: 401 });
+    expect(
+      (await searchCompany('q', 'key')) as { charged?: boolean },
+    ).not.toMatchObject({
+      charged: true,
+    });
+  });
+});

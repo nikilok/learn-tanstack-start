@@ -411,3 +411,105 @@ describe('pacing', () => {
     expect(sleeps).toBe(urls.length);
   });
 });
+
+describe('processed is the honest denominator for the error gate', () => {
+  test('counts rows REACHED, not rows selected', async () => {
+    // The whole point of the counter. The loop breaks on budget, so a gate
+    // dividing by `selected` reads a run that failed most of what it did as
+    // healthy.
+    const rows = Array.from({ length: 300 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({ rows });
+    const summary = await discoverWebsites(
+      config({ maxRows: 300, maxSearches: 10 }),
+      h.deps,
+    );
+
+    expect(summary.selected).toBe(300);
+    expect(summary.processed).toBe(10);
+    expect(summary.stoppedEarly).toBe('budget');
+  });
+
+  test('the row that breaks on budget is not counted as processed', async () => {
+    const rows = Array.from({ length: 5 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({ rows });
+    const summary = await discoverWebsites(
+      config({ maxRows: 5, maxSearches: 2 }),
+      h.deps,
+    );
+    // Two searched, and the third row broke before any work was done on it.
+    expect(summary.processed).toBe(2);
+  });
+
+  test('every row reached is counted, whichever way it ends', async () => {
+    const h = harness({
+      rows: [
+        row({ companyNumber: '00000001' }),
+        row({ companyNumber: '00000002', companyName: '' }),
+        row({ companyNumber: '00000003' }),
+      ],
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.processed).toBe(3);
+    expect(summary.unsearchable).toBe(1);
+  });
+});
+
+describe('a decision the database refuses is a failure, not a skip', () => {
+  test('write returning false is counted', async () => {
+    // The row changed hands between selection and write, so the credit is
+    // spent and the answer is gone. Counted by nothing, it could not reach
+    // any gate.
+    const h = harness({ write: async () => false });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.written).toBe(0);
+    expect(summary.unpersisted).toBe(1);
+  });
+});
+
+describe('a billed failure still counts as a credit', () => {
+  test('a malformed 200 is charged even though it yielded nothing', async () => {
+    // Any 200 is billed. Reporting it as unspent understates credits_spent
+    // against the invoice.
+    const h = harness({
+      search: async () => ({ ok: false, reason: 'malformed', charged: true }),
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.searched).toBe(1);
+    expect(summary.errored).toBe(1);
+  });
+
+  test('a network failure that never reached the provider is not', async () => {
+    const h = harness({
+      search: async () => ({ ok: false, reason: 'network' }),
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.searched).toBe(0);
+  });
+});
+
+describe('progress is reported even when rows are skipped', () => {
+  test('the heartbeat keys off rows reached, so a skip cannot lose one', async () => {
+    // At the foot of the loop it was skipped by all three `continue` paths,
+    // so a 25-row boundary landing on an unreadable row lost that line for
+    // good rather than deferring it.
+    const rows = Array.from({ length: 25 }, (_, i) =>
+      row({ companyNumber: String(i).padStart(8, '0') }),
+    );
+    const h = harness({
+      rows,
+      urls: ['https://dead.co.uk'],
+      probes: { 'https://dead.co.uk': null },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.unreadable).toBe(25);
+    expect(h.logs.some((l) => l.includes('25/25'))).toBe(true);
+  });
+});

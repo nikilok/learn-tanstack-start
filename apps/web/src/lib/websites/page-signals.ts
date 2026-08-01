@@ -52,9 +52,7 @@ const AGGREGATOR_HOSTS = [
   'companieshouse.gov.uk',
   'find-and-update.company-information.service.gov.uk',
   'thegazette.co.uk',
-  // Specific registers only, never bare `gov.uk`: local authorities and NHS
-  // bodies are sponsors in their own right and `<council>.gov.uk` IS their
-  // website, so the wildcard would reject the correct answer.
+  // Specific registers only: `<council>.gov.uk` is a sponsor's real website.
   'charitycommission.gov.uk',
   'ofsted.gov.uk',
   'fca.org.uk',
@@ -115,18 +113,24 @@ const AGGREGATOR_HOSTS = [
   'trustatrader.com',
   'tripadvisor.co.uk',
   'tripadvisor.com',
-  // maps.google.com only, never bare google.com: matching is by suffix, so
-  // google.com would also reject sites.google.com — and small UK companies do
-  // publish their real website on Google Sites. Same reasoning that keeps
-  // nhs.uk and bare gov.uk off this list.
-  'maps.google.com',
+  'google.com',
   'amazon.co.uk',
   'ebay.co.uk',
 ];
 
+/** Hosts inside a listed domain that ARE a company's own site. */
+const AGGREGATOR_EXEMPT_HOSTS = ['sites.google.com'];
+
 /** Whether a host is a directory rather than a company's own site. */
 export function isAggregatorHost(host: string): boolean {
   const clean = host.toLowerCase().replace(/^www\./, '');
+  if (
+    AGGREGATOR_EXEMPT_HOSTS.some(
+      (exempt) => clean === exempt || clean.endsWith(`.${exempt}`),
+    )
+  ) {
+    return false;
+  }
   return AGGREGATOR_HOSTS.some(
     (aggregator) => clean === aggregator || clean.endsWith(`.${aggregator}`),
   );

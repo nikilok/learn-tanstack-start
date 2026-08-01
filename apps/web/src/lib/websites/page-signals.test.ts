@@ -115,17 +115,24 @@ describe('public bodies are sponsors too', () => {
   });
 });
 
-describe('the list matches by suffix, so parents cover their subdomains', () => {
-  test('Google Sites is a real website for a small company', () => {
-    // Listing bare google.com to catch maps would reject it, since matching is
-    // by suffix. The listing surface is named precisely instead.
+describe('assertions use the host callers actually see, post-redirect', () => {
+  test('a Maps link is judged as www.google.com, because that is where it lands', () => {
+    // maps.google.com 302s to www.google.com/maps, and both callers pass the
+    // POST-redirect host. Listing maps.google.com instead of google.com is a
+    // rule that can never fire.
+    expect(isAggregatorHost('www.google.com')).toBe(true);
+    expect(isAggregatorHost('google.com')).toBe(true);
+  });
+
+  test('Google Sites is exempt, so a small company keeps its real website', () => {
     expect(isAggregatorHost('sites.google.com')).toBe(false);
-    expect(isAggregatorHost('maps.google.com')).toBe(true);
   });
 
   test('subdomains of a listed host need no entry of their own', () => {
+    // The claim that justified deleting four entries. Asserted on a host that
+    // has no entry of its own, so re-adding one would not change the result.
     expect(isAggregatorHost('suite.endole.co.uk')).toBe(true);
-    expect(isAggregatorHost('register.fca.org.uk')).toBe(true);
-    expect(isAggregatorHost('uk.indeed.com')).toBe(true);
+    expect(isAggregatorHost('reports.endole.co.uk')).toBe(true);
+    expect(isAggregatorHost('data.opencorporates.com')).toBe(true);
   });
 });

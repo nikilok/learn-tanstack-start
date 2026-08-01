@@ -66,15 +66,7 @@ const flag = (name: string) =>
     .slice(1)
     .join('=');
 
-/**
- * Ceiling on credits a single run may spend, whatever the inputs say.
- *
- * --max-searches is operator-supplied and defaults to --max-rows, so both
- * halves of the budget came from the same untrusted place: one dispatch with a
- * fat max-rows, or a typo'd extra digit, spends the whole prepaid balance in
- * one unattended overnight run with no way to claw it back. The clamp is the
- * only figure here that a workflow input cannot raise.
- */
+/** Ceiling on credits one run may spend. The only figure an input cannot raise. */
 const ABSOLUTE_MAX_SEARCHES = 5000;
 
 const dryRun = args.includes('--dry-run');
@@ -111,11 +103,7 @@ async function probe(
   row: DiscoveryRow,
   url: string,
 ): Promise<CandidateProbe | null> {
-  // Every other writer of company_websites.url normalises first; this one is
-  // fed raw provider output — tracking parameters, http, mixed case, deep
-  // paths — and stored it verbatim, so the same site arriving from search and
-  // from the registry would be two different strings to isSameSite and the
-  // sweep's upgrade guard.
+  // Raw provider output, so normalise as every other writer of url does.
   const canonical = normaliseWebsiteUrl(url);
   if (!canonical) return null;
   const fetched = await fetchSite(canonical);
@@ -167,7 +155,10 @@ const summary = await discoverWebsites(
 
 const after = await remaining();
 const found = summary.foundByNumber + summary.foundByAddress;
-const hitRate = summary.searched === 0 ? 0 : (found / summary.searched) * 100;
+// Rows decided, not credits spent: retries settle without spending one.
+const decided =
+  summary.foundByNumber + summary.foundByAddress + summary.foundNothing;
+const hitRate = decided === 0 ? 0 : (found / decided) * 100;
 
 console.log('\n─── summary ───');
 console.log(`  selected            : ${summary.selected}`);
@@ -182,6 +173,7 @@ console.log(`  unsearchable        : ${summary.unsearchable}`);
 console.log(`  written             : ${summary.written}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
 console.log(`  retried             : ${summary.retried}`);
+console.log(`  unpersisted         : ${summary.unpersisted}`);
 console.log(`  errored             : ${summary.errored}`);
 console.log(`  credits_lost        : ${summary.creditsLost}`);
 console.log(`  stopped_early       : ${summary.stoppedEarly || 'no'}`);
@@ -205,18 +197,19 @@ if (summary.stoppedEarly === 'search_failing') {
   );
   process.exit(1);
 }
-// A run whose rows all threw spent its whole budget and wrote nothing, and
-// until now said so only in a counter nobody reads. Same posture as the phase5
-// sweep: above the shared threshold, exit loud.
-// Rows REACHED, not rows selected. The loop breaks on budget, out_of_credits
-// and search_failing, so with maxSearches 10 against 300 selected rows, eight
-// throws out of the ten actually processed is 8/300 = 2.7% — under the
-// threshold, green tick, 80% of the real work failed.
+/** Rows below which the error rate is too small a sample to act on. */
+const MIN_GATE_SAMPLE = 25;
+
+// Rows reached, and every outcome that spent a credit without storing an answer.
 const attempted = summary.processed - summary.unsearchable;
-const errorRate = attempted === 0 ? 0 : summary.errored / attempted;
-if (attempted > 0 && errorRate > ERROR_RATE_THRESHOLD) {
+const wasted = summary.errored + summary.unreadable + summary.unpersisted;
+const errorRate = attempted === 0 ? 0 : wasted / attempted;
+if (attempted >= MIN_GATE_SAMPLE && errorRate > ERROR_RATE_THRESHOLD) {
   console.error(
-    `\n  ${summary.errored}/${attempted} rows failed (${(errorRate * 100).toFixed(1)}%) — above the ${(ERROR_RATE_THRESHOLD * 100).toFixed(0)}% threshold.`,
+    `\n  ${wasted}/${attempted} rows produced nothing (${(errorRate * 100).toFixed(1)}%) — above the ${(ERROR_RATE_THRESHOLD * 100).toFixed(0)}% threshold.`,
+  );
+  console.error(
+    `  errored: ${summary.errored}  unreadable: ${summary.unreadable}  unpersisted: ${summary.unpersisted}`,
   );
   process.exit(1);
 }

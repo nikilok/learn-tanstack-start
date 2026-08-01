@@ -34,6 +34,7 @@ import { neon } from '@ss/db/client';
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { buildQuery } from '../src/lib/websites/discover.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
+import { searchCompany } from './lib/serper.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -83,8 +84,7 @@ const rows = (await sql.query(
   town: string;
 }[];
 
-// After the query, not before: LIMIT can return fewer rows than asked for, and
-// a measurement that misstates its own cohort size is the wrong kind of wrong.
+// After the query: LIMIT can return fewer rows than asked for.
 console.log(
   `  ground truth: ${rows.length} registry-sourced crn_on_page rows (asked ${n})`,
 );
@@ -107,45 +107,32 @@ function siteOf(url: string): string {
 /**
  * One query, returning result URLs in rank order.
  *
- * `gl: 'gb'` matters: every company here is UK-registered, and an unlocalised
- * query surfaces the US namesake ahead of the right one.
+ * Delegates to the production client: a private copy meant this script could
+ * not measure the thing that actually runs, and the two had already diverged
+ * — the copy threw on the zero-organic-results body the client banks as a
+ * legitimate empty answer, killing a paid run mid-way.
+ *
+ * Still throws on failure. A recall probe that silently counts an exhausted
+ * balance or a provider outage as "did not find it" reports a false recall
+ * rate, which is the one number this script exists to produce.
  */
 async function search(query: string): Promise<string[]> {
-  const res = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: {
-      'X-API-KEY': process.env.SERPER_API_KEY as string,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ q: query, gl: 'gb', hl: 'en', num: 10 }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  // Throw rather than return nothing. A recall probe that silently counts an
-  // exhausted balance or a provider outage as "did not find it" reports a
-  // false recall rate, which is the one number this script exists to produce.
-  if (!res.ok) {
-    throw new Error(`serper returned ${res.status}`);
-  }
-  const body = (await res.json()) as { organic?: { link?: string }[] };
-  if (!Array.isArray(body.organic)) {
-    throw new Error('serper returned an unparsable body');
-  }
-  return body.organic.map((r) => r.link ?? '').filter(Boolean);
+  const result = await searchCompany(query, process.env.SERPER_API_KEY ?? '');
+  if (!result.ok) throw new Error(`serper failed: ${result.reason}`);
+  return result.urls;
 }
 
 const ranks: (number | null)[] = [];
 let emptyQueries = 0;
 let skipped = 0;
 
-for (const [index, row] of rows.entries()) {
+for (const row of rows) {
   // Deliberately unguarded: a provider failure ends the run rather than
   // quietly becoming a miss in the denominator.
   const query = buildQuery(row.company_name, row.town);
   if (!query) {
-    // buildQuery can empty a name that passed the SQL filter — a company
-    // called only "LIMITED". Spending a credit to search the whole web and
-    // then recording a rank for the result would be measurement noise bought
-    // at cost, so drop the row from the cohort instead.
+    // buildQuery can empty a name that passed the SQL filter. Don't pay to
+    // search the whole web; drop the row from the cohort.
     skipped += 1;
     continue;
   }
@@ -154,9 +141,10 @@ for (const [index, row] of rows.entries()) {
   const want = siteOf(row.url);
   const hit = urls.findIndex((u) => siteOf(u) === want);
   ranks.push(hit === -1 ? null : hit + 1);
-  if ((index + 1) % 25 === 0) {
+  // ranks.length, not index: skips mean position no longer tracks spend.
+  if (ranks.length % 25 === 0) {
     const found = ranks.filter((r) => r !== null).length;
-    console.log(`  ${index + 1}/${rows.length} searched (${found} found)`);
+    console.log(`  ${ranks.length}/${rows.length} searched (${found} found)`);
   }
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }

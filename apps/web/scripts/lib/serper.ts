@@ -18,11 +18,22 @@ const RESULTS_PER_QUERY = 10;
 
 const ENDPOINT = 'https://google.serper.dev/search';
 
+/** Why a search did not yield usable results. */
+export type SearchFailureReason =
+  | 'auth'
+  | 'rate_limit'
+  | 'out_of_credits'
+  | 'malformed'
+  | 'http'
+  | 'network';
+
 export type SearchOutcome =
   | { ok: true; urls: string[] }
   | {
       ok: false;
-      reason: 'auth' | 'rate_limit' | 'out_of_credits' | 'http' | 'network';
+      reason: SearchFailureReason;
+      /** A 200 Serper billed for but whose body could not be used. */
+      charged?: boolean;
       status?: number;
     };
 
@@ -83,30 +94,42 @@ export async function searchCompany(
     return { ok: false, reason: 'http', status: res.status };
   }
 
-  // A truncated or non-JSON 200 is a FAILURE, not an empty result set. Read as
-  // "no results" it would bank an empty candidate list and write a permanent
-  // `none` for a company that was never actually searched — a credit spent on
-  // a wrong answer that nothing would ever revisit.
+  // A malformed 200 is a failure, not zero results — and still billed.
   let body: { organic?: { link?: string }[]; message?: string } | null = null;
   try {
     body = (await res.json()) as { organic?: { link?: string }[] };
   } catch {
-    return { ok: false, reason: 'http', status: res.status };
+    return {
+      ok: false,
+      reason: 'malformed',
+      status: res.status,
+      charged: true,
+    };
   }
-  // Array.isArray matters: typeof [] is 'object', so a bare array body would
-  // otherwise pass this guard, read `undefined` for organic, and be banked as
-  // a legitimate "no results" for a company that was never searched.
+  // typeof [] is 'object', so a bare array would read undefined for organic.
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return { ok: false, reason: 'http', status: res.status };
+    return {
+      ok: false,
+      reason: 'malformed',
+      status: res.status,
+      charged: true,
+    };
   }
-  // A body that parsed but carries an error message is a failure wearing a
-  // 200. A body with no `organic` key at all is Serper's shape for a query
-  // with zero organic results, which is a real answer worth banking — reading
-  // it as a failure meant that company was re-searched and re-charged on every
-  // future run, forever.
-  if ('message' in body && !('organic' in body)) {
-    return { ok: false, reason: 'http', status: res.status };
+  const organic = Array.isArray(body.organic) ? body.organic : null;
+  // An error message with nothing usable beside it is a failure wearing a 200.
+  // Asymmetric on purpose: a false failure costs one bounded retry, a false
+  // success writes a permanent `none` for a company never searched.
+  if ('message' in body && !organic?.length) {
+    return {
+      ok: false,
+      reason: 'malformed',
+      status: res.status,
+      charged: true,
+    };
   }
-  const organic = Array.isArray(body.organic) ? body.organic : [];
-  return { ok: true, urls: organic.map((r) => r.link ?? '').filter(Boolean) };
+  // No `organic` key at all is Serper's zero-results shape, and a real answer.
+  return {
+    ok: true,
+    urls: (organic ?? []).map((r) => r.link ?? '').filter(Boolean),
+  };
 }

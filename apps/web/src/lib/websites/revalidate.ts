@@ -89,7 +89,10 @@ export const DEAD_AFTER_FAILURES = 2;
 /** Tiers the name-corroboration rule may move between, in either direction.
  *  Never `crn_on_page` or `manual`: a registered number found on the page and
  *  an owner's decision both outrank anything a name match can say. */
-const CONFIRMABLE = new Set<WebsiteEvidence>(['registry', 'registry_confirmed']);
+const CONFIRMABLE = new Set<WebsiteEvidence>([
+  'registry',
+  'registry_confirmed',
+]);
 
 /**
  * Failures where the host answered but the stored URL was never actually read.

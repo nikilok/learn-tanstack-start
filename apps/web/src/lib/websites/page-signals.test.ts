@@ -22,7 +22,9 @@ describe('distinctiveTokens', () => {
   test('returns nothing for a name made entirely of generic words', () => {
     // Correct, not a bug — and the reason the squashed fallback exists.
     expect(distinctiveTokens('HOME GROUP LIMITED')).toEqual([]);
-    expect(distinctiveTokens('HEALTHCARE HOMES (LSC) LIMITED')).toEqual(['lsc']);
+    expect(distinctiveTokens('HEALTHCARE HOMES (LSC) LIMITED')).toEqual([
+      'lsc',
+    ]);
   });
 });
 

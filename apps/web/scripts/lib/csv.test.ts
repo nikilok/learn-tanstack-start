@@ -29,7 +29,9 @@ describe('fromCsv', () => {
         url: 'https://example.co.uk',
       },
     ];
-    const parsed = fromCsv(toCsv(['company_number', 'company_name', 'url'], rows));
+    const parsed = fromCsv(
+      toCsv(['company_number', 'company_name', 'url'], rows),
+    );
     expect(parsed.rows).toEqual(rows);
     expect(parsed.malformed).toEqual([]);
   });

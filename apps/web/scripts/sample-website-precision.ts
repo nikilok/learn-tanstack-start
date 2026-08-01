@@ -63,7 +63,11 @@ type SampleRow = Record<(typeof COLUMNS)[number], string>;
 
 const args = process.argv.slice(2);
 const flag = (name: string) =>
-  args.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
+  args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Score mode
@@ -111,7 +115,8 @@ function score(path: string): void {
       `    labelled     : ${s.labelled}  (correct ${s.correct}, wrong ${s.wrong}, unsure ${s.unsure})`,
     );
     console.log(`    precision    : ${pct(s.precision)}`);
-    if (s.unsure) console.log(`    if all unsure were right: ${pct(s.optimistic)}`);
+    if (s.unsure)
+      console.log(`    if all unsure were right: ${pct(s.optimistic)}`);
     console.log(
       `    95% lower    : ${pct(s.lowerBound)}  (floor ${pct(PRECISION_FLOOR)})`,
     );
@@ -159,8 +164,12 @@ async function sample(): Promise<void> {
   const control = parseStrictInt(flag('control') ?? '20', 'control');
   const seed = flag('seed') ?? '2026-08-01';
 
-  console.log(`Website precision sample — db ${dbFingerprint(process.env.POSTGRES_URL)}`);
-  console.log(`  subject: ${SUBJECT_TIER} (${n})  control: ${CONTROL_TIER} (${control})  seed: ${seed}`);
+  console.log(
+    `Website precision sample — db ${dbFingerprint(process.env.POSTGRES_URL)}`,
+  );
+  console.log(
+    `  subject: ${SUBJECT_TIER} (${n})  control: ${CONTROL_TIER} (${control})  seed: ${seed}`,
+  );
 
   const draw = async (tier: string, limit: number) =>
     (await sql.query(
@@ -202,14 +211,22 @@ async function sample(): Promise<void> {
 
   const needed = n - Math.floor(n * PRECISION_FLOOR);
   console.log('');
-  console.log(`  ${rows.length} rows written (${subject.length} ${SUBJECT_TIER}, ${controls.length} ${CONTROL_TIER})`);
+  console.log(
+    `  ${rows.length} rows written (${subject.length} ${SUBJECT_TIER}, ${controls.length} ${CONTROL_TIER})`,
+  );
   console.log(`  csv   : ${csvPath}`);
   console.log(`  label : ${htmlPath}`);
   console.log('');
-  console.log('  Open the html, label every row, then Download CSV over the file above and run:');
-  console.log(`    bun apps/web/scripts/sample-website-precision.ts --score=${csvPath}`);
+  console.log(
+    '  Open the html, label every row, then Download CSV over the file above and run:',
+  );
+  console.log(
+    `    bun apps/web/scripts/sample-website-precision.ts --score=${csvPath}`,
+  );
   console.log('');
-  console.log(`  At ${n} rows, ${SUBJECT_TIER} promotes on at most 4 wrong-or-unsure (roughly ${needed} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`);
+  console.log(
+    `  At ${n} rows, ${SUBJECT_TIER} promotes on at most 4 wrong-or-unsure (roughly ${needed} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

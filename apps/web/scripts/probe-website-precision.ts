@@ -19,7 +19,10 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import { pageHasCompanyNumber, visibleText } from '../src/lib/websites/extract.ts';
+import {
+  pageHasCompanyNumber,
+  visibleText,
+} from '../src/lib/websites/extract.ts';
 import {
   isAggregatorHost,
   looksParked,
@@ -33,7 +36,11 @@ loadScriptEnv(import.meta.url);
 
 const args = process.argv.slice(2);
 const flag = (name: string) =>
-  args.find((a) => a.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
+  args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=');
 
 const samplePath = flag('sample');
 if (!samplePath) {
@@ -104,7 +111,9 @@ for (const [index, row] of rows.entries()) {
 
     evidence.status = result.status;
     evidence.finalUrl = result.url;
-    evidence.title = (/<title[^>]*>([\s\S]*?)<\/title>/i.exec(result.html)?.[1] ?? '')
+    evidence.title = (
+      /<title[^>]*>([\s\S]*?)<\/title>/i.exec(result.html)?.[1] ?? ''
+    )
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 120);
@@ -139,5 +148,7 @@ console.log(`  aggregators : ${out.filter((e) => e.aggregator).length}`);
 console.log(`  parked      : ${out.filter((e) => e.parked).length}`);
 console.log(`  crn on page : ${out.filter((e) => e.crn).length}`);
 console.log(`  corroborated: ${out.filter((e) => e.corroborated).length}`);
-console.log(`  not corrob. : ${out.filter((e) => e.status && typeof e.status === 'number' && !e.corroborated).length}`);
+console.log(
+  `  not corrob. : ${out.filter((e) => e.status && typeof e.status === 'number' && !e.corroborated).length}`,
+);
 console.log(`  evidence    : ${outPath}`);

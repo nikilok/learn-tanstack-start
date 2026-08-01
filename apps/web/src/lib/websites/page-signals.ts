@@ -20,10 +20,36 @@
  * between any two unrelated providers.
  */
 const STOPWORDS = new Set([
-  'limited', 'ltd', 'llp', 'plc', 'the', 'and', 'of', 'group', 'holdings',
-  'care', 'homes', 'home', 'health', 'healthcare', 'services', 'service',
-  'uk', 'england', 'living', 'support', 'community', 'trust', 'centre',
-  'center', 'medical', 'clinic', 'nursing', 'residential', 'house', 'lodge',
+  'limited',
+  'ltd',
+  'llp',
+  'plc',
+  'the',
+  'and',
+  'of',
+  'group',
+  'holdings',
+  'care',
+  'homes',
+  'home',
+  'health',
+  'healthcare',
+  'services',
+  'service',
+  'uk',
+  'england',
+  'living',
+  'support',
+  'community',
+  'trust',
+  'centre',
+  'center',
+  'medical',
+  'clinic',
+  'nursing',
+  'residential',
+  'house',
+  'lodge',
 ]);
 
 /** Legal suffixes, stripped before squashing a name for comparison. */
@@ -44,7 +70,10 @@ export function distinctiveTokens(name: string): string[] {
 
 /** A name reduced to comparable characters: no suffix, no punctuation, no spaces. */
 export function squashName(name: string): string {
-  return name.replace(SUFFIX, ' ').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return name
+    .replace(SUFFIX, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 /**

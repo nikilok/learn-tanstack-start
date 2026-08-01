@@ -338,8 +338,8 @@ describe('parked and directory pages', () => {
     // Pinnacle Care Homes Limited -> pinnaclecarehome.com, a "Coming Soon"
     // page on the company's own domain: the name matches, and there is still
     // nothing worth linking to.
-    expect(
-      live({ nameCorroborated: true, noSiteThere: true }).status,
-    ).toBe('candidate');
+    expect(live({ nameCorroborated: true, noSiteThere: true }).status).toBe(
+      'candidate',
+    );
   });
 });

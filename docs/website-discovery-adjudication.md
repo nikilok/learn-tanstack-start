@@ -171,10 +171,33 @@ This corrects two earlier readings badly:
   would roughly 2.4× publishable output — still the largest single lever, but
   much smaller than the head sample implied.
 
-The 70% is the more interesting number and is unexplained: search recall was
-measured at 80.7%@5, so most of that is companies whose site carries neither
-signal, or which have no site. Worth separating before assuming more effort on
-adjudication is the best use of the balance.
+The 70% was then decomposed by `scripts/measure-none-breakdown.ts` (zero
+credits — it re-reads the banked candidates and re-fetches pages, with Gemma
+owner-extraction as the ownership estimator):
+
+| why the row is `none` | n | of none | of all 40 |
+|---|---|---|---|
+| nothing in the SERP looks like the company — likely **no website exists** | 16 | 57% | 40% |
+| own site found and walked, carries **neither statutory signal** | 9 | 32% | 22.5% |
+| own-looking site below rank 1 (privacy pages checked: **0 carried the CRN**) | 3 | 11% | 7.5% |
+| search returned nothing / all directories / all dead | 0 | — | — |
+
+Three conclusions:
+
+- **The 70% is real absence, not pipeline loss.** No dead-fetch bucket, no
+  JS-shell bucket, no zero-padding misses. The dominant cause is small
+  companies (takeaways, corner shops, micro-employers) with no site — the SERP
+  contains non-directory pages, they just belong to other people, so
+  `no_ownership` is what "no website" looks like in practice.
+- **Rank-1-only walking is validated on representative data.** All three
+  lower-rank own-looking sites were privacy-checked and none carries the
+  number: escalation would have bought zero publishable rows here too.
+- **The deterministic ceiling on this population is ~30%.** 12.5% CRN + 17.5%
+  postcode is everything with any statutory signal. The 22.5% own-but-silent
+  pool has NO deterministic evidence at all — reaching it needs a different
+  evidence class (Common Crawl CRN sweep, or an adjudicated tier), not a better
+  walk. Ownership buckets are estimator-based (15/16 on labelled data), so
+  treat their sizes as ±2 rows.
 
 ## Sampling warning
 

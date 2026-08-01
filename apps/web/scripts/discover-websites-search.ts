@@ -188,9 +188,11 @@ const summary = await discoverWebsites(
     selectRows: makeSelectUndiscovered(sql),
     search: async (query) => {
       const result = await searchCompany(query, apiKey);
-      return result.ok
-        ? { ok: true, urls: result.urls }
-        : { ok: false, reason: result.reason };
+      // Failures pass through WHOLE rather than field-by-field. Rebuilding
+      // them dropped `charged`, which is how the orchestrator knows a
+      // malformed 200 still cost a credit — so the fix for that existed in the
+      // client and in the sweep, and died in the four lines between them.
+      return result.ok ? { ok: true, urls: result.urls } : result;
     },
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),

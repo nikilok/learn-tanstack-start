@@ -23,7 +23,7 @@ a bucket that never renders. Closing that gap is the whole problem.
 Per company: reduce each Serper result to its **origin**, dedupe preserving rank,
 then walk disclosure paths on the **rank-1 non-aggregator** candidate only.
 
-```
+```text
 '', '/privacy', '/privacy-policy', '/terms-and-conditions', '/terms',
 '/legal', '/contact-us', '/contact', '/about-us', '/about'
 ```
@@ -79,7 +79,7 @@ CRN sidesteps name identity entirely, which is the same principle as
 Proposed twice, falsified twice. The idea was to corroborate an extracted owner
 name against SIC descriptions, town, postcode and incorporation year.
 
-```
+```text
              name    town    postcode   year
 own   n=14   0.79    0.21    0.29       0.00
 OTHER n=2    0.00    0.50    0.50       0.00
@@ -173,8 +173,9 @@ only needed for the postcode-tier precision question.
 ## Ledger
 
 - Serper: 52,324 credits at $50. 25 spent validating (5 dry-run, 20 live).
-- Target population: 109,318 companies with no website row. One search each
-  exceeds the balance by roughly half.
+- Target population: 109,318 companies with no website row. At one search each
+  the balance covers **48%** of them: 52,324 held against 109,318 needed, a
+  shortfall of 56,994.
 - `crn_on_page` is the only tier this job publishes. At the method-lab rate the
   balance buys far fewer rendered websites than credits spent, which is why the
   postcode question is worth real effort before the bulk spend.

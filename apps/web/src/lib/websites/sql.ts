@@ -4,6 +4,7 @@
  * lives here so the orchestrator stays testable without a database.
  */
 
+import { PUBLISHABLE_EVIDENCE } from './publishable.ts';
 import type { RevalidateResult } from './revalidate.ts';
 import { mergeRevalidation } from './revalidate.ts';
 import type { SweepRow } from './sweep.ts';
@@ -134,8 +135,14 @@ export function makeCoverage(sql: Sql) {
         (SELECT count(*) FROM mapped)::int AS sponsors,
         (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
           WHERE w.status = 'verified')::int AS identified,
+        -- The gate the company page actually renders behind, which is narrower
+        -- than status+checked_at: evidence is bound from the same constant the
+        -- page reads (lib/websites/publishable.ts), so promoting a tier moves
+        -- this number with it. Counting every fetched row regardless of tier
+        -- reported 1,581 renderable when the site was showing 324.
         (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
-          WHERE w.status = 'verified' AND w.checked_at IS NOT NULL)::int AS renderable,
+          WHERE w.status = 'verified' AND w.checked_at IS NOT NULL
+            AND w.evidence = ANY(${PUBLISHABLE_EVIDENCE}) AND w.url IS NOT NULL)::int AS renderable,
         (SELECT count(*) FROM company_websites WHERE status = 'dead')::int AS dead_total,
         (SELECT count(*) FROM company_websites WHERE checked_at IS NULL)::int AS never_checked
     `;

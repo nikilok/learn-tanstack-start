@@ -93,6 +93,8 @@ jobs:
             echo "| ⬆️ Promoted | $(extract promoted) |"
             echo "| 🔀 Adopted variant | $(extract adopted_variant) |"
             echo "| 📄 Disclosure fetches | $(extract disclosure_fetches) |"
+            echo "| 🪪 Name corroborated | $(extract corroborated) |"
+            echo "| 🚧 No site there | $(extract no_site_there) |"
             echo "| 💾 Updated | $(extract updated) |"
             echo "| ❌ Errored | $(extract errored) |"
             echo "| ⏳ Never checked left | $(extract never_checked_left) |"

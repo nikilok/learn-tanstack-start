@@ -242,3 +242,104 @@ describe('revalidate — hosts that answered but were not read', () => {
     expect(r.failureCount).toBe(0);
   });
 });
+
+describe('name corroboration — the one revocable rung', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.brendoncare.org.uk',
+      evidence: 'registry',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.brendoncare.org.uk',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('promotes a registry row whose page names the company', () => {
+    const result = live({ nameCorroborated: true });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(result.status).toBe('verified');
+    expect(Number(result.confidence)).toBeGreaterThan(0.95);
+  });
+
+  test('WITHDRAWS the confirmation when corroboration disappears', () => {
+    // The decay this tier exists for: the site is rebuilt, the domain changes
+    // hands, or the company is renamed, and the page stops naming it. Upgrade-
+    // only applies to discovery — revalidation is allowed to move a row down,
+    // and a latched rung here would keep publishing the link.
+    const result = live({
+      evidence: 'registry_confirmed',
+      nameCorroborated: false,
+    });
+    expect(result.evidence).toBe('registry');
+    expect(result.note).toContain('no longer corroborated');
+  });
+
+  test('re-confirms without churn when corroboration is still there', () => {
+    expect(
+      live({ evidence: 'registry_confirmed', nameCorroborated: true }).evidence,
+    ).toBe('registry_confirmed');
+  });
+
+  test('never touches a registered number found on the page', () => {
+    // crn_on_page outranks it, and a missing name match must not undo it.
+    expect(
+      live({ evidence: 'crn_on_page', nameCorroborated: false }).evidence,
+    ).toBe('crn_on_page');
+  });
+
+  test('never overturns an owner decision', () => {
+    expect(live({ evidence: 'manual', nameCorroborated: false }).evidence).toBe(
+      'manual',
+    );
+    expect(live({ evidence: 'manual', nameCorroborated: true }).evidence).toBe(
+      'manual',
+    );
+  });
+
+  test('does not promote a tier the rule was never measured on', () => {
+    // Measured only against registry rows, where the name confirms a claim an
+    // exact company-number join already made. Standing alone it is far weaker.
+    expect(
+      live({ evidence: 'registry_unconfirmed', nameCorroborated: true })
+        .evidence,
+    ).toBe('registry_unconfirmed');
+  });
+});
+
+describe('parked and directory pages', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.pinnaclecarehome.com',
+      evidence: 'registry',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.pinnaclecarehome.com',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('holds a row back from rendering without calling it dead', () => {
+    // A holding page answers 200, so liveness cannot see it. It is an identity
+    // failure, not a liveness one — the row keeps its evidence and its failure
+    // count, and simply stops rendering.
+    const result = live({ noSiteThere: true });
+    expect(result.status).toBe('candidate');
+    expect(result.evidence).toBe('registry');
+    expect(result.live).toBe(true);
+    expect(result.failureCount).toBe(0);
+  });
+
+  test('restores the row on its own once a real site appears', () => {
+    expect(live({ noSiteThere: false }).status).toBe('verified');
+  });
+
+  test('holds back even a corroborated row', () => {
+    // Pinnacle Care Homes Limited -> pinnaclecarehome.com, a "Coming Soon"
+    // page on the company's own domain: the name matches, and there is still
+    // nothing worth linking to.
+    expect(
+      live({ nameCorroborated: true, noSiteThere: true }).status,
+    ).toBe('candidate');
+  });
+});

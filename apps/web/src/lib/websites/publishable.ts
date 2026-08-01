@@ -10,10 +10,18 @@
  * identifying itself, not a third party vouching for it, so it needs no
  * sampling to trust. `manual` is an owner decision and outranks it.
  *
- * `registry` is NOT here yet: accurate far more often than not, but it goes
- * stale silently — two rows in the first full sweep pointed at domains that now
- * only redirect — and its precision is unmeasured. It joins this list when the
- * hand-labelled sample says so, which is a product decision, not a tidy-up.
+ * `registry_confirmed` earned its place by measurement. A 200-row hand-labelled
+ * sample put the registry tier as a whole at 90% precision (95% lower bound
+ * 86%), which is below the floor — but that average hid two populations: rows
+ * whose page carried the company's own name were 133/133 correct, and rows
+ * where it appeared nowhere were 14/29. Every wrong row was in the second
+ * group. A second sample of 110 corroborated rows the rule had never seen came
+ * back 109/110, lower bound 96%.
+ *
+ * Bare `registry` is therefore NOT here, and adding it would publish the 48%
+ * population along with the good one. Note also that `registry_confirmed` is
+ * revocable: the sweep lowers it back when a page stops naming the company, so
+ * this list is not a one-way door.
  */
 
 import { companyWebsites } from '@ss/db/schema';
@@ -24,6 +32,7 @@ import type { WebsiteEvidence } from './decide';
 export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
   'manual',
   'crn_on_page',
+  'registry_confirmed',
 ];
 
 /**

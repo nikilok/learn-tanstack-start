@@ -5,6 +5,7 @@ import { SYSTEMIC_FAILURE_STREAK, sweepWebsites } from './sweep.ts';
 
 const row = (over: Partial<SweepRow> = {}): SweepRow => ({
   companyNumber: '03260168',
+  companyName: 'EXAMPLE HOLDINGS LIMITED',
   url: 'https://www.example.co.uk',
   status: 'verified',
   evidence: 'registry',

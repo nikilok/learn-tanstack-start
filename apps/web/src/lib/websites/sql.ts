@@ -33,6 +33,7 @@ export function makeSelectRows(sql: Sql) {
         w.failure_count,
         w.evidence_url,
         w.confidence,
+        coalesce(p.company_name, '') AS company_name,
         -- "Have we ever completed a SUCCESSFUL pass", not "is checked_at set".
         -- checked_at is stamped on failures too, so keying off it alone meant a
         -- row whose first night timed out was excluded from disclosure probing
@@ -49,6 +50,7 @@ export function makeSelectRows(sql: Sql) {
     `;
     return rows.map((r) => ({
       companyNumber: r.company_number as string,
+      companyName: (r.company_name as string | null) ?? '',
       url: r.url as string,
       status: r.status as SweepRow['status'],
       evidence: r.evidence as SweepRow['evidence'],

@@ -16,6 +16,13 @@ import { isSameSite } from './normalise-url';
 export type WebsiteEvidence =
   | 'manual'
   | 'crn_on_page'
+  /** A registry URL whose page carries the company's own name, in both the
+   *  hostname and the visible text. Measured 109/110 correct on rows the rule
+   *  had never seen (2026-08-01), against 90% for the registry tier as a
+   *  whole. Unlike every other rung this one is REVOCABLE — see
+   *  mergeRevalidation, which lowers it back to `registry` when a later pass
+   *  finds the corroboration gone. */
+  | 'registry_confirmed'
   | 'registry'
   | 'postcode_on_page'
   | 'llm_adjudicated'
@@ -77,6 +84,7 @@ const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
   { tiers: ['registry_unconfirmed', 'llm_adjudicated'], confidence: 0.6 },
   { tiers: ['postcode_on_page'], confidence: 0.85 },
   { tiers: ['registry'], confidence: 0.95 },
+  { tiers: ['registry_confirmed'], confidence: 0.97 },
   { tiers: ['crn_on_page'], confidence: 0.99 },
   { tiers: ['manual'], confidence: 1 },
 ];

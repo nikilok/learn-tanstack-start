@@ -45,6 +45,13 @@ export type RevalidateInput = {
   crnFoundAt?: string | null;
   /** Set when the registered office postcode was found on a fetched page. */
   postcodeFoundAt?: string | null;
+  /** Whether the page carried the company's own name, in BOTH the hostname and
+   *  the visible text (lib/websites/page-signals). Recomputed every pass, and
+   *  the only signal here that can move a row DOWN as well as up. */
+  nameCorroborated?: boolean;
+  /** The page is parked, for sale, or a directory listing. The host answered,
+   *  so this is not a liveness failure — it is an identity one. */
+  noSiteThere?: boolean;
 };
 
 export type RevalidateResult = {
@@ -78,6 +85,11 @@ export type RevalidateResult = {
  * cycle of latency and removes almost all of the false demotions.
  */
 export const DEAD_AFTER_FAILURES = 2;
+
+/** Tiers the name-corroboration rule may move between, in either direction.
+ *  Never `crn_on_page` or `manual`: a registered number found on the page and
+ *  an owner's decision both outrank anything a name match can say. */
+const CONFIRMABLE = new Set<WebsiteEvidence>(['registry', 'registry_confirmed']);
 
 /**
  * Failures where the host answered but the stored URL was never actually read.
@@ -219,6 +231,21 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidence = nextEvidence(evidence, 'crn_on_page');
     evidenceUrl = input.crnFoundAt;
     note = 'live; registered number found on the site';
+  } else if (input.nameCorroborated && CONFIRMABLE.has(evidence)) {
+    // The one revocable rung. Gated to `registry` and its own tier because
+    // that is the only population the corroboration rule was measured on: a
+    // name match confirms a claim an exact company-number join already made,
+    // and it is much weaker standing alone behind a search result.
+    evidence = 'registry_confirmed';
+    note = 'live; company name corroborated by the site';
+  } else if (evidence === 'registry_confirmed') {
+    // Corroboration was there and is not any more: the site was rebuilt, the
+    // domain changed hands, or the company was renamed. Upgrade-only applies
+    // to DISCOVERY; revalidation is the one thing allowed to move a row down,
+    // and leaving this rung latched would publish a link whose page no longer
+    // names the company — the exact decay this tier exists to catch.
+    evidence = 'registry';
+    note = 'live; company name no longer corroborated, confirmation withdrawn';
   } else if (input.postcodeFoundAt) {
     evidence = nextEvidence(evidence, 'postcode_on_page');
     evidenceUrl = input.postcodeFoundAt;
@@ -237,7 +264,19 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
 
   // A row that was dead and now answers comes back at whatever its evidence
   // supports, rather than staying dead because it once failed.
-  const status: WebsiteStatus = statusForEvidence(evidence);
+  //
+  // Unless there is no site there. A parked, for-sale or directory page answers
+  // 200 quite happily, so liveness cannot see it and the row would keep its
+  // verified status and its published link. Held at `candidate` — the review
+  // backlog — with the evidence tier untouched, exactly as the dead path leaves
+  // `manual` alone: this says nothing about whose domain it is, only that there
+  // is currently nothing on it worth linking to. A later pass that finds a real
+  // site restores the row on its own.
+  let status: WebsiteStatus = statusForEvidence(evidence);
+  if (input.noSiteThere) {
+    status = 'candidate';
+    note += '; parked or directory page, held back from rendering';
+  }
 
   return {
     ...base,

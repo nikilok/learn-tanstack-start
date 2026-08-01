@@ -148,6 +148,8 @@ console.log(`  robots_blocked      : ${summary.robotsBlocked}`);
 console.log(`  promoted            : ${summary.promoted}`);
 console.log(`  adopted_variant     : ${summary.adoptedVariant}`);
 console.log(`  disclosure_fetches  : ${summary.disclosureFetches}`);
+console.log(`  corroborated        : ${summary.corroborated}`);
+console.log(`  no_site_there       : ${summary.noSiteThere}`);
 console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);

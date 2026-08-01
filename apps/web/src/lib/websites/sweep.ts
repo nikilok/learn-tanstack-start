@@ -9,12 +9,30 @@
  */
 
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
+import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
+import {
+  isAggregatorHost,
+  looksParked,
+  nameCorroboration,
+} from './page-signals.ts';
 import type { RevalidateFailure, RevalidateResult } from './revalidate.ts';
 import { revalidate } from './revalidate.ts';
 
+/** Hostname of a URL, or '' when it will not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 export type SweepRow = {
   companyNumber: string;
+  /** Companies House name, for the corroboration check. Empty when we hold no
+   *  profile, which simply means the check cannot confirm anything. */
+  companyName: string;
   url: string;
   status: WebsiteStatus;
   evidence: WebsiteEvidence;
@@ -88,6 +106,10 @@ export type SweepSummary = {
   adoptedVariant: number;
   robotsBlocked: number;
   disclosureFetches: number;
+  /** Rows whose page carried the company's own name in host and text. */
+  corroborated: number;
+  /** Rows held back from rendering: parked, for sale, or a directory. */
+  noSiteThere: number;
   updated: number;
   lockMissed: number;
   errored: number;
@@ -205,6 +227,8 @@ export async function sweepWebsites(
     adoptedVariant: 0,
     robotsBlocked: 0,
     disclosureFetches: 0,
+    corroborated: 0,
+    noSiteThere: 0,
     updated: 0,
     lockMissed: 0,
     errored: 0,
@@ -222,7 +246,24 @@ export async function sweepWebsites(
 
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
+      let nameCorroborated = false;
+      let noSiteThere = false;
       if (fetched.ok) {
+        // Read off the homepage we already have — no extra request. The
+        // hostname comes from the URL this row will STORE, for the same reason
+        // evidence_url does: a redirect to an acquirer must not corroborate
+        // the original domain.
+        const text = visibleText(fetched.html);
+        const host = hostOf(fetched.attemptedUrl);
+        nameCorroborated = nameCorroboration(
+          row.companyName,
+          host,
+          text,
+        ).corroborated;
+        noSiteThere = isAggregatorHost(host) || looksParked(text);
+        if (nameCorroborated) summary.corroborated++;
+        if (noSiteThere) summary.noSiteThere++;
+
         // Attribute proof to the URL this row will STORE (the variant we
         // tried), not to fetched.url which is post-redirect. Otherwise a site
         // that 301s to an acquirer records evidence_url on the acquirer's
@@ -250,6 +291,8 @@ export async function sweepWebsites(
           : { ok: false, reason: fetched.reason, status: fetched.status },
         crnFoundAt,
         postcodeFoundAt,
+        nameCorroborated,
+        noSiteThere,
       });
 
       if (fetched.ok) {

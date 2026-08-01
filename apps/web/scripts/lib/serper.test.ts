@@ -127,3 +127,27 @@ describe('searchCompany — failures are distinguished, not collapsed', () => {
     });
   });
 });
+
+describe('searchCompany — zero results is an answer, not an error', () => {
+  test('a 200 with no organic key banks an empty result set', async () => {
+    // Serper omits `organic` entirely when a query returns nothing organic.
+    // Treating that as a failure meant the company was never banked and so was
+    // re-searched and re-charged on every future run, forever — a regression
+    // introduced by the fix for unparsable bodies.
+    stub({
+      ok: true,
+      status: 200,
+      jsonBody: { searchParameters: {}, credits: 1 },
+    });
+    expect(await searchCompany('q', 'key')).toEqual({ ok: true, urls: [] });
+  });
+
+  test('a 200 carrying an error message is still a failure', async () => {
+    stub({
+      ok: true,
+      status: 200,
+      jsonBody: { message: 'Not enough credits' },
+    });
+    expect((await searchCompany('q', 'key')).ok).toBe(false);
+  });
+});

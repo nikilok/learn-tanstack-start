@@ -87,17 +87,23 @@ export async function searchCompany(
   // "no results" it would bank an empty candidate list and write a permanent
   // `none` for a company that was never actually searched — a credit spent on
   // a wrong answer that nothing would ever revisit.
-  let body: { organic?: { link?: string }[] } | null = null;
+  let body: { organic?: { link?: string }[]; message?: string } | null = null;
   try {
     body = (await res.json()) as { organic?: { link?: string }[] };
   } catch {
     return { ok: false, reason: 'http', status: res.status };
   }
-  if (!body || !Array.isArray(body.organic)) {
+  if (!body || typeof body !== 'object') {
     return { ok: false, reason: 'http', status: res.status };
   }
-  return {
-    ok: true,
-    urls: body.organic.map((r) => r.link ?? '').filter(Boolean),
-  };
+  // A body that parsed but carries an error message is a failure wearing a
+  // 200. A body with no `organic` key at all is Serper's shape for a query
+  // with zero organic results, which is a real answer worth banking — reading
+  // it as a failure meant that company was re-searched and re-charged on every
+  // future run, forever.
+  if ('message' in body && !('organic' in body)) {
+    return { ok: false, reason: 'http', status: res.status };
+  }
+  const organic = Array.isArray(body.organic) ? body.organic : [];
+  return { ok: true, urls: organic.map((r) => r.link ?? '').filter(Boolean) };
 }

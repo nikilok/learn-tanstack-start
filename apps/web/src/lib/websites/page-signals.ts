@@ -26,25 +26,103 @@
  * Directory and profile hosts. A row pointing at one of these is a listing,
  * not the company's website, however accurate the listing may be.
  *
+ * This list was sized when the only inputs were registry URLs, where a
+ * directory was a rare mistake. It is now also the sole filter standing over a
+ * SEARCH ENGINE's top five results for a UK company name, where directories
+ * are not the exception but the bulk of the page — and every one of them
+ * prints the registration number it was asked about, which is precisely the
+ * signal the ladder trusts most. An unlisted directory therefore does not
+ * degrade to a weak match; it lands at `crn_on_page`, 0.990, published, with
+ * the company's own page confirming it. The list has to cover the SERP, not
+ * just the registry.
+ *
  * `nhs.uk` is deliberately NOT here. GP practices legitimately run their sites
  * on NHS-hosted domains, and including it wrongly rejected two correct rows in
  * the sample (Eightlands Surgery, The Town Surgery).
  */
 const AGGREGATOR_HOSTS = [
+  // Care sector
   'carehome.co.uk',
   'carehomes.co.uk',
   'cqc.org.uk',
-  'yell.com',
-  'facebook.com',
-  'linkedin.com',
+  'autumna.co.uk',
+  'lottie.org',
+  'homecare.co.uk',
+  // Official registers. A company's own filings are not its website.
   'companieshouse.gov.uk',
   'find-and-update.company-information.service.gov.uk',
+  'thegazette.co.uk',
+  // Specific registers only, never bare `gov.uk`: local authorities and NHS
+  // bodies are sponsors in their own right and `<council>.gov.uk` IS their
+  // website, so the wildcard would reject the correct answer.
+  'charitycommission.gov.uk',
+  'register-of-charities.charitycommission.gov.uk',
+  'ofsted.gov.uk',
+  'fca.org.uk',
+  'register.fca.org.uk',
+  // UK company-data resellers. These rank hard on "<name> ltd" queries and
+  // every one of them reprints the CRN.
   'endole.co.uk',
   'opencorporates.com',
   'bizdb.co.uk',
   'checkcompany.co.uk',
+  'companiesintheuk.co.uk',
+  'company-director-check.co.uk',
+  'companycheck.co.uk',
+  'creditsafe.com',
+  'dnb.com',
+  'globaldatabase.com',
+  'kompass.com',
+  'cylex-uk.co.uk',
+  'company-information.co.uk',
+  'ukbusinessdirectory.co.uk',
+  'thecompanycheck.com',
+  'companiesuk.info',
+  'suite.endole.co.uk',
+  'bizzdirect.co.uk',
+  'businessmagnet.co.uk',
+  'freecompanyaccounts.co.uk',
+  'companydirectorcheck.com',
+  'companiesuk.net',
+  'datalog.co.uk',
+  'ukcompanieslist.co.uk',
+  'northdata.com',
+  'bloomberg.com',
+  'crunchbase.com',
+  'zaubacorp.com',
+  // Social, review and jobs profiles.
+  'yell.com',
+  'facebook.com',
+  'linkedin.com',
+  'x.com',
+  'twitter.com',
+  'instagram.com',
+  'youtube.com',
+  'tiktok.com',
   'yelp.co.uk',
+  'yelp.com',
   'trustpilot.com',
+  'glassdoor.co.uk',
+  'indeed.com',
+  'uk.indeed.com',
+  'reed.co.uk',
+  'totaljobs.com',
+  'cv-library.co.uk',
+  'wikipedia.org',
+  'thomsonlocal.com',
+  'scoot.co.uk',
+  'freeindex.co.uk',
+  '192.com',
+  'bark.com',
+  'checkatrade.com',
+  'rated-people.com',
+  'trustatrader.com',
+  'tripadvisor.co.uk',
+  'tripadvisor.com',
+  'google.com',
+  'maps.google.com',
+  'amazon.co.uk',
+  'ebay.co.uk',
 ];
 
 /** Whether a host is a directory rather than a company's own site. */

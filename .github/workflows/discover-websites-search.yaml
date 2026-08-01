@@ -17,9 +17,10 @@ name: Discover Company Websites (Search)
 # sweep and the 05:37 job, and well clear of the 21:43 website sweep whose rows
 # this one creates.
 #
-# COSTS MONEY. Every search spends one Serper credit, and the job caps both the
-# rows it takes and the searches it will run, so a misconfigured dispatch
-# cannot drain the balance.
+# COSTS MONEY. Every search spends one Serper credit. Both the rows taken and
+# the searches run are capped, and the script clamps the total to its own
+# ABSOLUTE_MAX_SEARCHES regardless of what is dispatched here — the inputs
+# below can lower the spend but never raise it past that ceiling.
 
 on:
   schedule:
@@ -82,20 +83,30 @@ jobs:
           MAX_ROWS: ${{ github.event.inputs.max-rows }}
           MAX_SEARCHES: ${{ github.event.inputs.max-searches }}
         run: |
-          DRY_FLAG=""
-          if [ "$DRY_RUN" = "true" ]; then
-            DRY_FLAG="--dry-run"
-          fi
-          ROWS_FLAG=""
-          if [ -n "$MAX_ROWS" ]; then
-            ROWS_FLAG="--max-rows=$MAX_ROWS"
-          fi
-          SEARCHES_FLAG=""
-          if [ -n "$MAX_SEARCHES" ]; then
-            SEARCHES_FLAG="--max-searches=$MAX_SEARCHES"
-          fi
           set -o pipefail
-          bun apps/web/scripts/discover-websites-search.ts $DRY_FLAG $ROWS_FLAG $SEARCHES_FLAG | tee /tmp/discover-websites.log
+          # Built as an array and expanded quoted. Unquoted "$ROWS_FLAG" was
+          # word-split by the shell, so a max-rows of `1 --max-searches=99999`
+          # arrived as two arguments and smuggled past the spend cap this job
+          # exists to enforce. Numeric inputs are also validated rather than
+          # trusted: workflow_dispatch type:number is not enforced for API and
+          # gh-CLI dispatches, which send strings.
+          ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ -n "$MAX_ROWS" ]; then
+            case "$MAX_ROWS" in
+              ''|*[!0-9]*) echo "max-rows must be a positive integer"; exit 1 ;;
+            esac
+            ARGS+=("--max-rows=$MAX_ROWS")
+          fi
+          if [ -n "$MAX_SEARCHES" ]; then
+            case "$MAX_SEARCHES" in
+              ''|*[!0-9]*) echo "max-searches must be a positive integer"; exit 1 ;;
+            esac
+            ARGS+=("--max-searches=$MAX_SEARCHES")
+          fi
+          bun apps/web/scripts/discover-websites-search.ts "${ARGS[@]}" | tee /tmp/discover-websites.log
 
       - name: Write job summary
         if: always()
@@ -117,7 +128,10 @@ jobs:
             echo "| 📈 Hit rate | $(extract hit_rate) |"
             echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"
             echo "| 💾 Written | $(extract written) |"
+            echo "| 🔁 Retried | $(extract retried) |"
+            echo "| 📵 Unreadable | $(extract unreadable) |"
             echo "| ❌ Errored | $(extract errored) |"
+            echo "| 💸 Credits lost | $(extract credits_lost) |"
             echo "| 🛑 Stopped early | $(extract stopped_early) |"
             echo "| ⏳ Undiscovered left | $(extract undiscovered_left) |"
             echo "| 💳 Credits spent | $(extract credits_spent) |"

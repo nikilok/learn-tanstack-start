@@ -40,6 +40,7 @@ type Harness = {
   banked: { companyNumber: string; urls: string[] }[];
   written: { row: DiscoveryRow; outcome: DiscoveryOutcome }[];
   probed: string[];
+  attempts: string[];
   logs: string[];
 };
 
@@ -53,6 +54,7 @@ function harness(
   const banked: Harness['banked'] = [];
   const written: Harness['written'] = [];
   const probed: string[] = [];
+  const attempts: string[] = [];
   const logs: string[] = [];
   const urls = over.urls ?? ['https://a.co.uk', 'https://b.co.uk'];
   const deps: DiscoveryDeps = {
@@ -63,19 +65,21 @@ function harness(
     },
     probe: async (_row, url) => {
       probed.push(url);
-      return over.probes
-        ? (over.probes[url] ?? probe({ url }))
-        : probe({ url });
+      if (over.probes && url in over.probes) return over.probes[url];
+      return probe({ url });
     },
     write: async (r, outcome) => {
       written.push({ row: r, outcome });
       return true;
     },
+    markAttempt: async (companyNumber) => {
+      attempts.push(companyNumber);
+    },
     sleep: async () => {},
     log: (m) => logs.push(m),
     ...over,
   };
-  return { deps, banked, written, probed, logs };
+  return { deps, banked, written, probed, attempts, logs };
 }
 
 describe('discoverWebsites', () => {
@@ -160,7 +164,10 @@ describe('discoverWebsites', () => {
     });
     const summary = await discoverWebsites(config(), h.deps);
     expect(summary.stoppedEarly).toBe('out_of_credits');
-    expect(summary.searched).toBe(1);
+    // Zero, not one. A 402 is the balance refusing the request, so nothing was
+    // billed — and this counter is the credits_spent figure reconciled against
+    // the invoice, not a count of requests attempted.
+    expect(summary.searched).toBe(0);
   });
 
   test('stops when searches fail in a run, without blaming the data', async () => {
@@ -173,7 +180,10 @@ describe('discoverWebsites', () => {
     });
     const summary = await discoverWebsites(config({ maxRows: 30 }), h.deps);
     expect(summary.stoppedEarly).toBe('search_failing');
-    expect(summary.searched).toBe(SEARCH_FAILURE_STREAK);
+    // The streak counts failed ATTEMPTS; searched counts what was charged, and
+    // a network error never reached the provider to be billed.
+    expect(summary.searched).toBe(0);
+    expect(summary.errored).toBe(SEARCH_FAILURE_STREAK - 1);
   });
 
   test('honours the search budget even with rows left', async () => {
@@ -267,5 +277,137 @@ describe('discoverWebsites', () => {
     const summary = await discoverWebsites(config(), h.deps);
     expect(summary.errored).toBe(1);
     expect(summary.selected).toBe(2);
+  });
+});
+
+describe('a credit already spent is never thrown away', () => {
+  test('candidates that cannot be FETCHED leave the row undecided, not `none`', async () => {
+    // The distinction the whole retry design rests on. "We read the pages and
+    // none of them proved anything" is an answer worth storing. "We could not
+    // read any of them" is not, and storing it as one writes a permanent
+    // status='none' that no selector revisits — the sweep needs url IS NOT
+    // NULL and this job only readmits `pending`. One flaky slice would
+    // otherwise write off every company in it on a DNS wobble, credit spent.
+    const h = harness({
+      urls: ['https://a.co.uk', 'https://b.co.uk'],
+      probes: { 'https://a.co.uk': null, 'https://b.co.uk': null },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.unreadable).toBe(1);
+    expect(h.written).toHaveLength(0);
+    expect(summary.foundNothing).toBe(0);
+    // Banked, so the retry costs nothing.
+    expect(h.banked).toHaveLength(1);
+    expect(h.attempts).toEqual(['03260168']);
+  });
+
+  test('one readable candidate among failures still produces a decision', async () => {
+    // The guard must not swallow a real answer just because its neighbours
+    // were unreachable.
+    const h = harness({
+      urls: ['https://dead.co.uk', 'https://real.co.uk'],
+      probes: {
+        'https://dead.co.uk': null,
+        'https://real.co.uk': probe({
+          url: 'https://real.co.uk',
+          crnFound: true,
+        }),
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.unreadable).toBe(0);
+    expect(summary.foundByNumber).toBe(1);
+    expect(h.written[0].outcome.url).toBe('https://real.co.uk');
+  });
+
+  test('a genuinely empty result set is still a decided `none`', async () => {
+    // No candidates to read is not the same as candidates that would not read:
+    // the search answered, and "this company has no findable site" is the
+    // answer. It must settle, or the row is retried forever for free.
+    const h = harness({ urls: [] });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.unreadable).toBe(0);
+    expect(summary.foundNothing).toBe(1);
+    expect(h.written[0].outcome.url).toBeNull();
+  });
+
+  test('a failed bank is retried, and a credit lost anyway is reported', async () => {
+    let calls = 0;
+    const h = harness({
+      bankCandidates: async () => {
+        calls += 1;
+        throw new Error('PostgresError');
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(calls).toBe(2);
+    expect(summary.creditsLost).toBe(1);
+    // Money vanished silently before this: no counter, no line, green tick.
+    expect(h.logs.some((l) => l.includes('credit lost'))).toBe(true);
+  });
+
+  test('a bank that succeeds on the retry loses nothing', async () => {
+    let calls = 0;
+    const h = harness({
+      bankCandidates: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('transient');
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.creditsLost).toBe(0);
+  });
+});
+
+describe('what the run is charged for is what it reports', () => {
+  test('a failed search is not counted as a credit', async () => {
+    // summary.searched is both the budget and the credits_spent figure an
+    // operator reconciles against the invoice, so counting uncharged requests
+    // overstates spend and eats the budget with queries that never ran.
+    const h = harness({
+      search: async () => ({ ok: false, reason: 'network' }),
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.searched).toBe(0);
+    expect(summary.errored).toBe(1);
+  });
+
+  test('a retried row costs no credit', async () => {
+    const h = harness({
+      rows: [row({ bankedCandidates: ['https://banked.co.uk'] })],
+      search: async () => {
+        throw new Error('must not search a banked row');
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+
+    expect(summary.retried).toBe(1);
+    expect(summary.searched).toBe(0);
+  });
+});
+
+describe('pacing', () => {
+  test('every candidate is paced, including the ones that failed to fetch', async () => {
+    // `continue` used to skip the delay on the commonest outcome, so five dead
+    // hosts became roughly twenty requests back to back — each probe expands
+    // to host and scheme variants, each preceded by robots.txt — from a bot
+    // that advertises itself by name.
+    let sleeps = 0;
+    const urls = ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'];
+    const h = harness({
+      urls,
+      probes: Object.fromEntries(urls.map((u) => [u, null])),
+      sleep: async () => {
+        sleeps += 1;
+      },
+    });
+    await discoverWebsites(config({ delayMs: 400 }), h.deps);
+
+    expect(sleeps).toBe(urls.length);
   });
 });

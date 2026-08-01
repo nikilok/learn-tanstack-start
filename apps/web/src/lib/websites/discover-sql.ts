@@ -6,6 +6,15 @@
 import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
 
+/**
+ * Passes a banked-but-unsettled row gets before it is left alone.
+ *
+ * Three is enough to ride out a transient outage across three nightly runs
+ * without letting a permanently unreachable set of candidates monopolise the
+ * front of the queue.
+ */
+export const MAX_DISCOVERY_ATTEMPTS = 3;
+
 type Sql = (
   strings: TemplateStringsArray,
   ...values: unknown[]
@@ -24,6 +33,15 @@ type Sql = (
  *
  * Scoped to `source = 'search'` so it can never adopt a row another discoverer
  * left undecided; those belong to whoever created them.
+ *
+ * Bounded by failure_count. Readmitting undecided rows fixed a permanent
+ * stall, but with no cap it created a slower one: the order is by company
+ * number, so a row that can never settle — every candidate host dead, results
+ * banked — sorts to the front of every future slice and is retried forever,
+ * ahead of companies never searched at all. Enough of them and the run does
+ * nothing but re-probe the same dead hosts behind a green tick. After
+ * MAX_DISCOVERY_ATTEMPTS the row stops being selected; its candidates stay on
+ * it, so a future decision to revisit them costs no credit.
  *
  * Still no cursor and no state file. Ordered by company number rather than
  * randomly so consecutive runs walk the set predictably.
@@ -44,7 +62,10 @@ export function makeSelectUndiscovered(sql: Sql) {
       WHERE m.company_number IS NOT NULL
         AND (
           w.company_number IS NULL
-          OR (w.status = 'pending' AND w.source = 'search' AND w.url IS NULL)
+          OR (
+            w.status = 'pending' AND w.source = 'search' AND w.url IS NULL
+            AND coalesce(w.failure_count, 0) < ${MAX_DISCOVERY_ATTEMPTS}
+          )
         )
         -- Nothing to search on, so the credit would be wasted before it is
         -- spent. buildQuery refuses these too; excluding them here keeps them
@@ -98,6 +119,25 @@ export function makeBankCandidates(sql: Sql) {
 }
 
 /**
+ * Record that a pass took a row and could not settle it.
+ *
+ * The counter is what stops an unsettleable row being retried forever, and it
+ * is deliberately separate from writing an outcome: an outcome is a decision,
+ * this is only a note that a decision could not be reached.
+ */
+export function makeMarkAttempt(sql: Sql) {
+  return async (companyNumber: string): Promise<void> => {
+    await sql`
+      UPDATE company_websites
+        SET failure_count = coalesce(failure_count, 0) + 1
+      WHERE company_number = ${companyNumber}
+        AND url IS NULL
+        AND source = 'search'
+    `;
+  };
+}
+
+/**
  * Write what the candidates turned out to prove.
  *
  * `checked_at` is deliberately left NULL, exactly as the registry importer
@@ -129,7 +169,16 @@ export function makeWriteOutcome(sql: Sql) {
   };
 }
 
-/** How much of the target population is left, for the run summary. */
+/**
+ * How much of the target population is left, for the run summary.
+ *
+ * The target predicate mirrors makeSelectUndiscovered exactly, including the
+ * readmitted-undecided clause and the attempt cap. Defined as "has no row at
+ * all" it disagreed with the thing it describes in both directions: a banked
+ * row still due a retry counted as done, and the operator watching the number
+ * fall to zero would have concluded the population was covered while the job
+ * still had work queued.
+ */
 export function makeRemaining(sql: Sql) {
   return async (): Promise<{ target: number; discovered: number }> => {
     const rows = await sql`
@@ -140,8 +189,13 @@ export function makeRemaining(sql: Sql) {
       SELECT
         (SELECT count(*) FROM mapped
           LEFT JOIN company_websites w ON w.company_number = mapped.cn
-          WHERE w.company_number IS NULL)::int AS target,
-        (SELECT count(*) FROM company_websites WHERE source = 'search')::int
+          WHERE w.company_number IS NULL
+             OR (
+               w.status = 'pending' AND w.source = 'search' AND w.url IS NULL
+               AND coalesce(w.failure_count, 0) < ${MAX_DISCOVERY_ATTEMPTS}
+             ))::int AS target,
+        (SELECT count(*) FROM company_websites
+          WHERE source = 'search' AND url IS NOT NULL)::int
           AS discovered
     `;
     const r = rows[0];

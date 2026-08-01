@@ -29,6 +29,7 @@ import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { evidenceConfidence } from '../src/lib/websites/decide.ts';
 import {
   makeBankCandidates,
+  makeMarkAttempt,
   makeRemaining,
   makeSelectUndiscovered,
   makeWriteOutcome,
@@ -41,12 +42,17 @@ import {
   pageHasPostcode,
   visibleText,
 } from '../src/lib/websites/extract.ts';
+import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
 import {
   isAggregatorHost,
   looksParked,
 } from '../src/lib/websites/page-signals.ts';
 import { setGitHubOutput } from './ci-utils.ts';
-import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
+import {
+  ERROR_RATE_THRESHOLD,
+  loadScriptEnv,
+  parseStrictInt,
+} from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
 import { fetchSite } from './lib/web-fetch.ts';
 
@@ -60,12 +66,23 @@ const flag = (name: string) =>
     .slice(1)
     .join('=');
 
+/**
+ * Ceiling on credits a single run may spend, whatever the inputs say.
+ *
+ * --max-searches is operator-supplied and defaults to --max-rows, so both
+ * halves of the budget came from the same untrusted place: one dispatch with a
+ * fat max-rows, or a typo'd extra digit, spends the whole prepaid balance in
+ * one unattended overnight run with no way to claw it back. The clamp is the
+ * only figure here that a workflow input cannot raise.
+ */
+const ABSOLUTE_MAX_SEARCHES = 5000;
+
 const dryRun = args.includes('--dry-run');
 const maxRows = parseStrictInt(flag('max-rows') ?? '300', 'max-rows');
 /** Defaults to the row count: one search per company, and never a surprise. */
-const maxSearches = parseStrictInt(
-  flag('max-searches') ?? String(maxRows),
-  'max-searches',
+const maxSearches = Math.min(
+  parseStrictInt(flag('max-searches') ?? String(maxRows), 'max-searches'),
+  ABSOLUTE_MAX_SEARCHES,
 );
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 
@@ -94,7 +111,14 @@ async function probe(
   row: DiscoveryRow,
   url: string,
 ): Promise<CandidateProbe | null> {
-  const fetched = await fetchSite(url);
+  // Every other writer of company_websites.url normalises first; this one is
+  // fed raw provider output — tracking parameters, http, mixed case, deep
+  // paths — and stored it verbatim, so the same site arriving from search and
+  // from the registry would be two different strings to isSameSite and the
+  // sweep's upgrade guard.
+  const canonical = normaliseWebsiteUrl(url);
+  if (!canonical) return null;
+  const fetched = await fetchSite(canonical);
   if (!fetched.ok) return null;
   const host = (() => {
     try {
@@ -109,7 +133,7 @@ async function probe(
     // visitor clicks and what the sweep will revalidate. The host is judged
     // post-redirect for the same reason it is in the sweep — a stored URL that
     // 301s into a directory has to be judged on where it lands.
-    url,
+    url: canonical,
     crnFound: pageHasCompanyNumber(fetched.html, row.companyNumber),
     postcodeFound: row.postcode
       ? pageHasPostcode(fetched.html, row.postcode)
@@ -132,6 +156,7 @@ const summary = await discoverWebsites(
         : { ok: false, reason: result.reason };
     },
     bankCandidates: makeBankCandidates(sql),
+    markAttempt: makeMarkAttempt(sql),
     probe,
     write: (row, outcome) =>
       writeOutcome(row, outcome, evidenceConfidence(outcome.evidence)),
@@ -154,7 +179,10 @@ console.log(`  hit_rate            : ${hitRate.toFixed(1)}%`);
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
 console.log(`  unsearchable        : ${summary.unsearchable}`);
 console.log(`  written             : ${summary.written}`);
+console.log(`  unreadable          : ${summary.unreadable}`);
+console.log(`  retried             : ${summary.retried}`);
 console.log(`  errored             : ${summary.errored}`);
+console.log(`  credits_lost        : ${summary.creditsLost}`);
 console.log(`  stopped_early       : ${summary.stoppedEarly || 'no'}`);
 console.log(`  undiscovered_left   : ${after.target}`);
 console.log(`  credits_spent       : ${summary.searched}`);
@@ -173,6 +201,23 @@ if (summary.stoppedEarly === 'out_of_credits') {
 if (summary.stoppedEarly === 'search_failing') {
   console.error(
     '\n  Searches failed repeatedly — check the key and the provider.',
+  );
+  process.exit(1);
+}
+// A run whose rows all threw spent its whole budget and wrote nothing, and
+// until now said so only in a counter nobody reads. Same posture as the phase5
+// sweep: above the shared threshold, exit loud.
+const attempted = summary.selected - summary.unsearchable;
+const errorRate = attempted === 0 ? 0 : summary.errored / attempted;
+if (attempted > 0 && errorRate > ERROR_RATE_THRESHOLD) {
+  console.error(
+    `\n  ${summary.errored}/${attempted} rows failed (${(errorRate * 100).toFixed(1)}%) — above the ${(ERROR_RATE_THRESHOLD * 100).toFixed(0)}% threshold.`,
+  );
+  process.exit(1);
+}
+if (summary.creditsLost > 0) {
+  console.error(
+    `\n  ${summary.creditsLost} searches were charged but not persisted — those companies will be re-searched.`,
   );
   process.exit(1);
 }

@@ -32,6 +32,7 @@
 import { neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
+import { buildQuery } from '../src/lib/websites/discover.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 
 loadScriptEnv(import.meta.url);
@@ -57,7 +58,7 @@ const sql = neon(process.env.POSTGRES_URL as string);
 console.log(
   `Search recall probe — db ${dbFingerprint(process.env.POSTGRES_URL)}`,
 );
-console.log(`  ground truth: ${n} crn_on_page rows`);
+console.log(`  ground truth: ${n} registry-sourced crn_on_page rows`);
 console.log('  provider: serper');
 
 const rows = (await sql.query(
@@ -67,6 +68,13 @@ const rows = (await sql.query(
    LEFT JOIN companies_house_profiles p USING (company_number)
    WHERE w.evidence = 'crn_on_page' AND w.status = 'verified'
      AND w.url IS NOT NULL AND coalesce(p.company_name, '') <> ''
+     -- Registry-sourced rows ONLY. crn_on_page used to mean "a registry gave
+     -- us this URL and the page proved it", an origin independent of any
+     -- search engine. This job now writes that same tier from Serper's own
+     -- results, so without this clause the sample fills with rows Serper
+     -- produced and the measurement becomes Serper graded against itself —
+     -- recall rising towards 100% as coverage grows, telling us nothing.
+     AND w.source <> 'search'
    ORDER BY md5(w.company_number || $1)
    LIMIT $2`,
   ['search-recall', n],
@@ -89,15 +97,6 @@ function siteOf(url: string): string {
   } catch {
     return '';
   }
-}
-
-/** Strip the legal suffix: nobody's website ranks for "LIMITED". */
-function queryFor(name: string, town: string): string {
-  const clean = name
-    .replace(/\b(limited|ltd|llp|plc|cic)\b\.?/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return town ? `${clean} ${town}` : clean;
 }
 
 /**
@@ -135,7 +134,7 @@ let emptyQueries = 0;
 for (const [index, row] of rows.entries()) {
   // Deliberately unguarded: a provider failure ends the run rather than
   // quietly becoming a miss in the denominator.
-  const urls = await search(queryFor(row.company_name, row.town));
+  const urls = await search(buildQuery(row.company_name, row.town));
   if (urls.length === 0) emptyQueries += 1;
   const want = siteOf(row.url);
   const hit = urls.findIndex((u) => siteOf(u) === want);

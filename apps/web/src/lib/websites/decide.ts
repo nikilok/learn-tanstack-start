@@ -16,16 +16,16 @@ import { isSameSite } from './normalise-url';
 export type WebsiteEvidence =
   | 'manual'
   | 'crn_on_page'
-  /** A registry URL whose page carries the company's own name, in both the
-   *  hostname and the visible text. Measured 109/110 correct on rows the rule
-   *  had never seen (2026-08-01), against 90% for the registry tier as a
-   *  whole. That figure is NOT a licence to publish: it scored a different
-   *  rule from the one shipping, which is why the tier is absent from
-   *  PUBLISHABLE_EVIDENCE — the full caveat is in publishable.ts and this
-   *  number means nothing without it. Unlike every other rung this one is
-   *  REVOCABLE — see
-   *  mergeRevalidation, which lowers it back to `registry` when a later pass
-   *  finds the corroboration gone. */
+  /** A registry URL whose page carries the company's REGISTERED OFFICE
+   *  POSTCODE. Published, and the only rung published on anything other than
+   *  the company's own registration number or an owner's decision — see
+   *  publishable.ts, which records both the measurement and the fact that it
+   *  shipped on a product judgement rather than on clearing the scorer's bar.
+   *  Do not quote a precision figure for this tier from here.
+   *
+   *  Unlike every other rung it is REVOCABLE: mergeRevalidation lowers it back
+   *  to `registry` when a later pass reads a substantial page that no longer
+   *  shows the address. */
   | 'registry_confirmed'
   | 'registry'
   | 'postcode_on_page'
@@ -117,7 +117,7 @@ export function evidenceRank(evidence: WebsiteEvidence): number {
   return RANK.get(evidence) ?? 0;
 }
 
-/** Rank for comparing two DISCOVERIES, with the sweep's own corroboration
+/** Rank for comparing two DISCOVERIES, with the sweep's own confirmation
  *  collapsed away. See the comment in decideWebsite. */
 function discoveryRank(evidence: WebsiteEvidence): number {
   return evidenceRank(

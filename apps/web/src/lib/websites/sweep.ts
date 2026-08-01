@@ -100,7 +100,10 @@ export type SweepSummary = {
   adoptedVariant: number;
   robotsBlocked: number;
   disclosureFetches: number;
-  /** Rows whose page carried the company's registered office postcode. */
+  /** Rows whose page carried the company's registered office postcode, which
+   *  is what confirms a registry row. Named `corroborated` because that is the
+   *  column name in the workflow summary and changing it would break the
+   *  `extract` greps in sweep-websites.yaml. */
   corroborated: number;
   /** Rows whose evidence tier went DOWN this pass. Counted separately from
    *  `promoted`, which used to be safe as an any-change counter only because

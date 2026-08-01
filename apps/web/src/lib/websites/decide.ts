@@ -16,6 +16,17 @@ import { isSameSite } from './normalise-url';
 export type WebsiteEvidence =
   | 'manual'
   | 'crn_on_page'
+  /** A registry URL whose page carries the company's REGISTERED OFFICE
+   *  POSTCODE. Published, and the only rung published on anything other than
+   *  the company's own registration number or an owner's decision — see
+   *  publishable.ts, which records both the measurement and the fact that it
+   *  shipped on a product judgement rather than on clearing the scorer's bar.
+   *  Do not quote a precision figure for this tier from here.
+   *
+   *  Unlike every other rung it is REVOCABLE: mergeRevalidation lowers it back
+   *  to `registry` when a later pass reads a substantial page that no longer
+   *  shows the address. */
+  | 'registry_confirmed'
   | 'registry'
   | 'postcode_on_page'
   | 'llm_adjudicated'
@@ -77,6 +88,7 @@ const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
   { tiers: ['registry_unconfirmed', 'llm_adjudicated'], confidence: 0.6 },
   { tiers: ['postcode_on_page'], confidence: 0.85 },
   { tiers: ['registry'], confidence: 0.95 },
+  { tiers: ['registry_confirmed'], confidence: 0.97 },
   { tiers: ['crn_on_page'], confidence: 0.99 },
   { tiers: ['manual'], confidence: 1 },
 ];
@@ -103,6 +115,14 @@ for (const [rank, rung] of LADDER.entries()) {
 /** Rank of an evidence tier on the upgrade-only ladder. */
 export function evidenceRank(evidence: WebsiteEvidence): number {
   return RANK.get(evidence) ?? 0;
+}
+
+/** Rank for comparing two DISCOVERIES, with the sweep's own confirmation
+ *  collapsed away. See the comment in decideWebsite. */
+function discoveryRank(evidence: WebsiteEvidence): number {
+  return evidenceRank(
+    evidence === 'registry_confirmed' ? 'registry' : evidence,
+  );
 }
 
 /** Nominal confidence for an evidence tier. */
@@ -134,11 +154,22 @@ export function statusForEvidence(evidence: WebsiteEvidence): WebsiteStatus {
  * the `existing.source &&` guard does in process).
  */
 export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
+  // The confidence of the rung `registry_confirmed` collapses to, so the SQL
+  // compares the same DISCOVERY strength decideWebsite does. Without this the
+  // collapse existed in process only: decideWebsite returned `update` for a
+  // registry correcting a confirmed row, and then the ON CONFLICT predicate
+  // silently threw the write away because 0.970 is neither below nor equal to
+  // 0.950 — so the freeze the collapse was written to remove survived, with
+  // no trace but a generic "rejected by the upgrade guard" count.
+  const collapsed =
+    `CASE WHEN ${table}.evidence = 'registry_confirmed'` +
+    ` THEN ${evidenceConfidence('registry')}::numeric` +
+    ` ELSE ${table}.confidence END`;
   return (
     `${table}.evidence <> 'manual' AND (` +
     `${table}.confidence IS NULL` +
-    ` OR ${table}.confidence < excluded.confidence` +
-    ` OR (${table}.confidence = excluded.confidence AND ${table}.source = excluded.source)` +
+    ` OR ${collapsed} < excluded.confidence` +
+    ` OR (${collapsed} = excluded.confidence AND ${table}.source = excluded.source)` +
     // Mirrors decideWebsite's dead-row branch INCLUDING its evidence floor:
     // only a proposal strong enough to render on its own may displace a dead
     // row, or an unconfirmed guess replaces a proven number in the database
@@ -185,8 +216,16 @@ export function decideWebsite(
     return { action: 'update' };
   }
 
-  const eRank = evidenceRank(existing.evidence);
-  const pRank = evidenceRank(proposed.evidence);
+  // `registry_confirmed` is `registry` plus a page check the SWEEP adds, not a
+  // stronger discovery claim, so for deciding between two DISCOVERIES the two
+  // rungs are one. Without this collapse a registry proposal (rank 4) always
+  // lost to a confirmed row (rank 5), the equal-rank same-source branch below
+  // became unreachable, and a provider that moved domain could never have its
+  // URL corrected by the registry that published it — the exact freeze that
+  // branch's comment says it exists to prevent. The sweep re-confirms or
+  // withdraws the rung on the next pass either way.
+  const eRank = discoveryRank(existing.evidence);
+  const pRank = discoveryRank(proposed.evidence);
   if (pRank > eRank) return { action: 'update' };
   if (pRank < eRank) return { action: 'keep' };
 

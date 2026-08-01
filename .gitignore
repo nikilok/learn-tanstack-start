@@ -17,3 +17,6 @@ src/data/sic-codes.json
 
 # Local AI model files (CI caches these via actions/cache)
 .litert-models
+
+# Hand-labelling samples: company-to-URL pairs, i.e. the dataset itself
+apps/web/.precision-samples

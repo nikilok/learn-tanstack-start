@@ -439,14 +439,22 @@ for (const finding of findings) {
     continue;
   }
 
-  // A liveness verdict survives an identity upgrade on the SAME url. Without
-  // this, a row the sweep proved unreachable was silently restored to
-  // 'verified' by an evidence promotion — and because checked_at is only
-  // cleared when the url changes, it satisfied the render gate immediately and
-  // republished a link the sweep had just established does not work.
+  // A verdict the SWEEP reached about the page survives an identity upgrade on
+  // the SAME url. Without this, a row the sweep proved unreachable was silently
+  // restored to 'verified' by an evidence promotion — and because checked_at is
+  // only cleared when the url changes, it satisfied the render gate immediately
+  // and republished a link the sweep had just established does not work.
+  //
+  // `candidate` is in this list because the sweep now uses it for a page that
+  // answered but is a directory listing or a holding page. That is a fact about
+  // the page, which an evidence promotion says nothing about, and recomputing
+  // status from evidence alone would republish the listing. Before the sweep
+  // could set it, `candidate` was purely a function of evidence and recomputing
+  // it was correct.
+  const SWEEP_VERDICTS: WebsiteStatus[] = ['unreachable', 'dead', 'candidate'];
   const priorLiveness =
     prior &&
-    (prior.status === 'unreachable' || prior.status === 'dead') &&
+    SWEEP_VERDICTS.includes(prior.status as WebsiteStatus) &&
     isSameSite(prior.url, finding.url)
       ? (prior.status as WebsiteStatus)
       : null;

@@ -191,12 +191,10 @@ describe('decideWebsite', () => {
     // update paths reachable.
     const predicate = upgradeOnlyPredicateSql();
     // stronger tier wins
-    expect(predicate).toContain(
-      'company_websites.confidence < excluded.confidence',
-    );
+    expect(predicate).toContain('< excluded.confidence');
     // same tier wins when, and only when, it is the same source
     expect(predicate).toContain(
-      'company_websites.confidence = excluded.confidence AND company_websites.source = excluded.source',
+      '= excluded.confidence AND company_websites.source = excluded.source',
     );
     // manual stays terminal
     expect(predicate).toContain("company_websites.evidence <> 'manual'");
@@ -276,5 +274,94 @@ describe('decideWebsite — dead rows accept corrections', () => {
     expect(upgradeOnlyPredicateSql()).toContain(
       "company_websites.status = 'dead'",
     );
+  });
+});
+
+describe('registry_confirmed does not freeze a registry correction', () => {
+  test('the source that published a confirmed url may still revise it', () => {
+    // A provider moves domain while the old one still answers with a page
+    // carrying the name, so the sweep has promoted the row. The registry's
+    // monthly file now lists the new address. Before the collapse in
+    // discoveryRank this compared rank 5 against rank 4 and returned `keep`,
+    // making every confirmed row permanently uncorrectable by its own source.
+    expect(
+      decideWebsite(
+        {
+          url: 'https://oldhome.co.uk',
+          status: 'verified',
+          evidence: 'registry_confirmed',
+          source: 'cqc',
+        },
+        {
+          url: 'https://newhome-care.co.uk',
+          evidence: 'registry',
+          source: 'cqc',
+        },
+      ),
+    ).toEqual({ action: 'update' });
+  });
+
+  test('a DIFFERENT source still cannot overwrite a confirmed url', () => {
+    expect(
+      decideWebsite(
+        {
+          url: 'https://oldhome.co.uk',
+          status: 'verified',
+          evidence: 'registry_confirmed',
+          source: 'cqc',
+        },
+        {
+          url: 'https://other.co.uk',
+          evidence: 'registry',
+          source: 'wikidata',
+        },
+      ),
+    ).toEqual({ action: 'conflict' });
+  });
+
+  test('crn_on_page still outranks a registry proposal', () => {
+    expect(
+      decideWebsite(
+        {
+          url: 'https://a.co.uk',
+          status: 'verified',
+          evidence: 'crn_on_page',
+          source: 'cqc',
+        },
+        { url: 'https://b.co.uk', evidence: 'registry', source: 'cqc' },
+      ),
+    ).toEqual({ action: 'keep' });
+  });
+});
+
+describe('upgradeOnlyPredicateSql agrees with decideWebsite', () => {
+  test('collapses registry_confirmed the same way discoveryRank does', () => {
+    // The in-process fix landed without this, so decideWebsite said `update`
+    // and the database then discarded the write: 0.970 is neither below nor
+    // equal to the registry proposal's 0.950. The correction was dropped on
+    // every monthly import, reported only as a generic rejected-row count.
+    const predicate = upgradeOnlyPredicateSql();
+    expect(predicate).toContain("evidence = 'registry_confirmed'");
+    expect(predicate).toContain('0.95');
+  });
+
+  test('still refuses a weaker proposal against a plain registry row', () => {
+    // The collapse must not become a general loosening: only the confirmed
+    // rung is rewritten, everything else compares its own confidence.
+    expect(
+      decideWebsite(
+        {
+          url: 'https://a.co.uk',
+          status: 'verified',
+          evidence: 'registry',
+          source: 'cqc',
+        },
+        {
+          url: 'https://b.co.uk',
+          evidence: 'registry_unconfirmed',
+          source: 'wikidata',
+        },
+      ),
+    ).toEqual({ action: 'keep' });
   });
 });

@@ -62,7 +62,7 @@ function decodeEntities(text: string): string {
  * a client-rendered site. So this stays regex-based, at roughly a third of the
  * wall-clock, and the browser is kept for the cases that genuinely need one.
  */
-function visibleText(html: string): string {
+export function visibleText(html: string): string {
   const stripped = html
     // Comments FIRST. Running the script strip first meant a commented-out
     // `<!-- <script src=x> -->` was read as a real opening tag, and its `|$`

@@ -10,10 +10,40 @@
  * identifying itself, not a third party vouching for it, so it needs no
  * sampling to trust. `manual` is an owner decision and outranks it.
  *
- * `registry` is NOT here yet: accurate far more often than not, but it goes
- * stale silently — two rows in the first full sweep pointed at domains that now
- * only redirect — and its precision is unmeasured. It joins this list when the
- * hand-labelled sample says so, which is a product decision, not a tidy-up.
+ * `registry_confirmed` is a registry row whose page carries the company's
+ * REGISTERED OFFICE POSTCODE. Measured against the shipped rule on 97
+ * confirmed rows drawn fresh (2026-08-01):
+ *
+ *   correct 95, wrong 0, unsure 2 — 97.9%, 95% lower bound 94.0%
+ *
+ * That is INCONCLUSIVE by this repo's own scorer, which wants the lower bound
+ * above 95% and allows one bad label at n=97. It ships anyway, as an explicit
+ * product judgement rather than a measurement result, and the reasoning is
+ * recorded here so nobody later reads 94.0% as having cleared a bar:
+ *
+ *   - Zero wrong rows in 97. The verdict is arithmetic about sample size, not
+ *     observed error, and the optimistic figure is 100%.
+ *   - A UK postcode covers roughly fifteen addresses. A company's exact
+ *     registered postcode appearing on a site is not a coincidence that needs
+ *     explaining away, which is the domain fact the statistical bar cannot
+ *     encode.
+ *   - The rule's only real failure mode was measured directly: 12 of the 97
+ *     sit at a registered office shared with another company holding a
+ *     different website, and all 12 independently carry their own name in the
+ *     domain or its initialism. It produced no false positive.
+ *   - Of the 18 hardest rows — no company name anywhere on the site — 16 show
+ *     the FULL registered street address, not merely the postcode. The signal
+ *     in practice is stronger than the rule demands.
+ *
+ * The two unresolvable rows (I CARE (GB) LIMITED, DARAM CARE LTD) had no name
+ * and only the postcode. Neither was shown to be wrong; neither could be
+ * confirmed.
+ *
+ * Bare `registry` is NOT here and is not a candidate: the same exercise put it
+ * at 90% overall, and the rows it would add beyond this tier were 14/29.
+ *
+ * This rung is REVOCABLE, so the list is not a one-way door — the sweep lowers
+ * it back when a page stops showing the address.
  */
 
 import { companyWebsites } from '@ss/db/schema';
@@ -24,6 +54,7 @@ import type { WebsiteEvidence } from './decide';
 export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
   'manual',
   'crn_on_page',
+  'registry_confirmed',
 ];
 
 /**

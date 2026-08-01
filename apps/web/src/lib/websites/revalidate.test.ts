@@ -242,3 +242,161 @@ describe('revalidate — hosts that answered but were not read', () => {
     expect(r.failureCount).toBe(0);
   });
 });
+
+describe('postcode confirmation — the one revocable rung', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.brendoncare.org.uk',
+      evidence: 'registry',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.brendoncare.org.uk',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('promotes a registry row whose page shows its registered address', () => {
+    const result = live({ postcodeConfirms: true });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(result.status).toBe('verified');
+    expect(Number(result.confidence)).toBeGreaterThan(0.95);
+  });
+
+  test('WITHDRAWS the confirmation when the address disappears', () => {
+    // The decay this tier exists for: the site is rebuilt, the domain changes
+    // hands, or the company moves. Upgrade-only applies to discovery —
+    // revalidation is allowed to move a row down, and a latched rung here
+    // would keep publishing the link.
+    const result = live({
+      evidence: 'registry_confirmed',
+      postcodeConfirms: false,
+    });
+    expect(result.evidence).toBe('registry');
+    expect(result.note).toContain('no longer on the site');
+  });
+
+  test('re-confirms without churn when the address is still there', () => {
+    expect(
+      live({ evidence: 'registry_confirmed', postcodeConfirms: true }).evidence,
+    ).toBe('registry_confirmed');
+  });
+
+  test('never touches a registered number found on the page', () => {
+    // crn_on_page outranks it, and a missing address must not undo it.
+    expect(
+      live({ evidence: 'crn_on_page', postcodeConfirms: false }).evidence,
+    ).toBe('crn_on_page');
+  });
+
+  test('never overturns an owner decision', () => {
+    expect(live({ evidence: 'manual', postcodeConfirms: false }).evidence).toBe(
+      'manual',
+    );
+    expect(live({ evidence: 'manual', postcodeConfirms: true }).evidence).toBe(
+      'manual',
+    );
+  });
+
+  test('does not promote a tier the rule was never measured on', () => {
+    // Measured only against registry rows, where the address confirms a claim
+    // an exact company-number join already made. Standing alone it is weaker.
+    expect(
+      live({ evidence: 'registry_unconfirmed', postcodeConfirms: true })
+        .evidence,
+    ).toBe('registry_unconfirmed');
+  });
+});
+
+describe('parked pages (heuristic) and directory hosts (certain)', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.pinnaclecarehome.com',
+      evidence: 'registry',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.pinnaclecarehome.com',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('holds a row back from rendering without calling it dead', () => {
+    // A holding page answers 200, so liveness cannot see it. It is an identity
+    // failure, not a liveness one — the row keeps its evidence and its failure
+    // count, and simply stops rendering.
+    const result = live({ looksParked: true });
+    expect(result.status).toBe('candidate');
+    expect(result.evidence).toBe('registry');
+    expect(result.live).toBe(true);
+    expect(result.failureCount).toBe(0);
+  });
+
+  test('restores the row on its own once a real site appears', () => {
+    expect(live({ looksParked: false }).status).toBe('verified');
+  });
+
+  test('holds back even a corroborated row', () => {
+    // Pinnacle Care Homes Limited -> pinnaclecarehome.com, a "Coming Soon"
+    // page on the company's own domain: the name matches, and there is still
+    // nothing worth linking to.
+    expect(live({ postcodeConfirms: true, looksParked: true }).status).toBe(
+      'candidate',
+    );
+  });
+});
+
+describe('a confirmed row that now lands on a directory', () => {
+  test('loses its confirmation, not just its rendering', () => {
+    // Holding it at `candidate` while leaving evidence at registry_confirmed
+    // keeps a claim the page no longer supports, and pins confidence at 0.970
+    // so the registry can never replace the URL.
+    const result = revalidate({
+      storedUrl: 'https://www.carehome.co.uk/carehome.cfm/id/1',
+      evidence: 'registry_confirmed',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.carehome.co.uk/carehome.cfm/id/1',
+      outcome: { ok: true },
+      onAggregator: true,
+    });
+    expect(result.evidence).toBe('registry');
+    expect(result.confidence).toBe('0.950');
+    expect(result.status).toBe('candidate');
+  });
+});
+
+describe('a thin page never withdraws a confirmation', () => {
+  const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.example.co.uk',
+      evidence: 'registry_confirmed',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.example.co.uk',
+      outcome: { ok: true },
+      ...over,
+    });
+
+  test('a cookie wall or JS shell leaves the rung alone', () => {
+    // Absence of the address on a page that carried almost no text is not
+    // evidence the site stopped publishing it. Without this, one interstitial
+    // unpublishes the link and the next clean pass restores it — a company
+    // website that flickers on and off across nightly sweeps.
+    expect(live({ postcodeConfirms: false, pageTooThin: true }).evidence).toBe(
+      'registry_confirmed',
+    );
+  });
+
+  test('a real page with no address still withdraws', () => {
+    expect(live({ postcodeConfirms: false, pageTooThin: false }).evidence).toBe(
+      'registry',
+    );
+  });
+
+  test('a thin page does not block a confirmation either way', () => {
+    // Finding the address is positive evidence whatever the page length.
+    expect(
+      live({ evidence: 'registry', postcodeConfirms: true, pageTooThin: true })
+        .evidence,
+    ).toBe('registry_confirmed');
+  });
+});

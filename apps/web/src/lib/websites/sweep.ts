@@ -9,9 +9,21 @@
  */
 
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
+import { evidenceRank } from './decide.ts';
+import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
+import { isAggregatorHost, looksParked, pageTooThin } from './page-signals.ts';
 import type { RevalidateFailure, RevalidateResult } from './revalidate.ts';
 import { revalidate } from './revalidate.ts';
+
+/** Hostname of a URL, or '' when it will not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
 
 export type SweepRow = {
   companyNumber: string;
@@ -88,6 +100,19 @@ export type SweepSummary = {
   adoptedVariant: number;
   robotsBlocked: number;
   disclosureFetches: number;
+  /** Rows whose page carried the company's registered office postcode, which
+   *  is what confirms a registry row. Named `corroborated` because that is the
+   *  column name in the workflow summary and changing it would break the
+   *  `extract` greps in sweep-websites.yaml. */
+  corroborated: number;
+  /** Rows whose evidence tier went DOWN this pass. Counted separately from
+   *  `promoted`, which used to be safe as an any-change counter only because
+   *  revalidate could never lower a tier. A mass withdrawal reported as a
+   *  large "promoted" figure is a silent unpublish wearing the job's
+   *  healthiest-looking metric. */
+  demoted: number;
+  /** Rows held back from rendering: parked, for sale, or a directory. */
+  noSiteThere: number;
   updated: number;
   lockMissed: number;
   errored: number;
@@ -205,6 +230,9 @@ export async function sweepWebsites(
     adoptedVariant: 0,
     robotsBlocked: 0,
     disclosureFetches: 0,
+    corroborated: 0,
+    demoted: 0,
+    noSiteThere: 0,
     updated: 0,
     lockMissed: 0,
     errored: 0,
@@ -222,7 +250,35 @@ export async function sweepWebsites(
 
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
+      let postcodeConfirms = false;
+      let onAggregator = false;
+      let looksParkedPage = false;
+      let thinPage = false;
       if (fetched.ok) {
+        // Read off the homepage we already have — no extra request.
+        //
+        // The host is the POST-redirect one, because a stored URL that 301s
+        // into a directory has to be judged on where it actually lands:
+        // pairing the final page's content with the pre-redirect host let such
+        // a row escape isAggregatorHost entirely.
+        //
+        // The postcode is checked on the HOMEPAGE specifically, not taken from
+        // findDisclosure below, because this signal revokes as well as
+        // confirms and so must be recomputed identically on every pass.
+        // Disclosure-path probing is first-pass-only, so keying off it would
+        // read as absent from the second pass on and revoke every row it had
+        // just confirmed.
+        const text = visibleText(fetched.html);
+        const host = hostOf(fetched.url);
+        onAggregator = isAggregatorHost(host);
+        looksParkedPage = looksParked(text);
+        thinPage = pageTooThin(text);
+        postcodeConfirms = Boolean(
+          row.postcode && deps.hasPostcode(fetched.html, row.postcode),
+        );
+        if (postcodeConfirms) summary.corroborated++;
+        if (onAggregator || looksParkedPage) summary.noSiteThere++;
+
         // Attribute proof to the URL this row will STORE (the variant we
         // tried), not to fetched.url which is post-redirect. Otherwise a site
         // that 301s to an acquirer records evidence_url on the acquirer's
@@ -250,6 +306,10 @@ export async function sweepWebsites(
           : { ok: false, reason: fetched.reason, status: fetched.status },
         crnFoundAt,
         postcodeFoundAt,
+        postcodeConfirms,
+        onAggregator,
+        looksParked: looksParkedPage,
+        pageTooThin: thinPage,
       });
 
       if (fetched.ok) {
@@ -269,7 +329,17 @@ export async function sweepWebsites(
       if (!fetched.ok && fetched.reason === 'blocked_by_robots') {
         summary.robotsBlocked++;
       }
-      if (result.evidence !== row.evidence) summary.promoted++;
+      if (result.evidence !== row.evidence) {
+        // Direction matters now that a tier can be withdrawn. Lumping both
+        // into `promoted` reported a mass unpublish as the run's best number.
+        // Strictly, in both directions. registry_unconfirmed and
+        // llm_adjudicated share a rung, so a lateral swap between them is
+        // neither a promotion nor a withdrawal and must not inflate either.
+        const before = evidenceRank(row.evidence);
+        const after = evidenceRank(result.evidence);
+        if (after > before) summary.promoted++;
+        else if (after < before) summary.demoted++;
+      }
       if (result.url !== row.url) summary.adoptedVariant++;
 
       // Checked BEFORE the dry-run short-circuit, so --dry-run previews the

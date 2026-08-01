@@ -446,3 +446,68 @@ describe('sweepWebsites — the error path must not leak either', () => {
     expect(printed).toContain('secret-acme.co.uk');
   });
 });
+
+describe('the sweep computes its signals from the right inputs', () => {
+  test('judges the host AFTER redirects, not the one we asked for', async () => {
+    // The regression this locks: pairing the final page's content with the
+    // PRE-redirect host let a row that 301s into a directory escape the
+    // deny-list entirely, while the listing itself supplied the confirming
+    // signal — publishing a carehome.co.uk page as a company's website.
+    const h = harness({
+      rows: [row({ url: 'https://www.beachcrofthomes.co.uk' })],
+      fetchSite: async () => ({
+        ok: true,
+        url: 'https://www.carehome.co.uk/carehome.cfm/id/12345',
+        attemptedUrl: 'https://www.beachcrofthomes.co.uk',
+        html: '<html><body>Beachcroft Homes</body></html>',
+      }),
+      hasPostcode: () => true,
+    });
+    await sweepWebsites(config(), h.deps);
+    const result = h.applied[0].result as { status: string; evidence: string };
+    // Judged as a directory: held back, and NOT promoted off the listing.
+    expect(result.status).toBe('candidate');
+    expect(result.evidence).toBe('registry');
+  });
+
+  test('confirms on the registered postcode found on the homepage', async () => {
+    const h = harness({
+      rows: [row({ postcode: 'SW1A 1AA' })],
+      fetchSite: async (url) => ({
+        ok: true,
+        url,
+        attemptedUrl: url,
+        html: '<html><body>Registered office: SW1A 1AA</body></html>',
+      }),
+      hasPostcode: () => true,
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    const result = h.applied[0].result as { evidence: string };
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(summary.corroborated).toBe(1);
+  });
+
+  test('counts a withdrawal as demoted, never as promoted', async () => {
+    // A mass withdrawal reported under the run's healthiest-looking metric is
+    // how a silent unpublish stays invisible.
+    //
+    // The page has to be SUBSTANTIAL for a withdrawal to happen at all: a
+    // cookie wall or a JS shell says nothing about whether the site still
+    // publishes the address, and unpublishing off one would make the link
+    // flicker. That guard is what the padding here is defeating.
+    const realPage = `<html><body>${'Home About us Our care Careers Contact. '.repeat(60)}</body></html>`;
+    const h = harness({
+      rows: [row({ evidence: 'registry_confirmed', confidence: '0.970' })],
+      fetchSite: async (url) => ({
+        ok: true,
+        url,
+        attemptedUrl: url,
+        html: realPage,
+      }),
+      hasPostcode: () => false,
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.demoted).toBe(1);
+    expect(summary.promoted).toBe(0);
+  });
+});

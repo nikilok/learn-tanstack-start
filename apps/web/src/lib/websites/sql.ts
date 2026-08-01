@@ -34,6 +34,11 @@ export function makeSelectRows(sql: Sql) {
         w.evidence_url,
         w.confidence,
         coalesce(p.company_name, '') AS company_name,
+        -- Previous names as well as the current one. Companies House renames
+        -- are applied automatically by ch-stream while a site keeps its old
+        -- branding for months, and matching only the current name drove the
+        -- revocation branch on rows whose website was still perfectly correct.
+        coalesce(p.previous_company_names, '{}')::text[] AS previous_names,
         -- "Have we ever completed a SUCCESSFUL pass", not "is checked_at set".
         -- checked_at is stamped on failures too, so keying off it alone meant a
         -- row whose first night timed out was excluded from disclosure probing
@@ -51,6 +56,7 @@ export function makeSelectRows(sql: Sql) {
     return rows.map((r) => ({
       companyNumber: r.company_number as string,
       companyName: (r.company_name as string | null) ?? '',
+      previousNames: (r.previous_names as string[] | null) ?? [],
       url: r.url as string,
       status: r.status as SweepRow['status'],
       evidence: r.evidence as SweepRow['evidence'],

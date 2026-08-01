@@ -4,15 +4,20 @@ import { PUBLISHABLE_EVIDENCE } from './publishable';
 
 describe('PUBLISHABLE_EVIDENCE', () => {
   test('publishes only tiers a measurement or an owner stands behind', () => {
-    // Each entry earned its place differently and none may drift in: crn_on_page
-    // is the company publishing its own registration number, manual is an owner
-    // decision, and registry_confirmed cleared a hand-labelled sample (109/110
-    // on rows the rule had never seen, 95% lower bound 96%).
-    expect([...PUBLISHABLE_EVIDENCE].sort()).toEqual([
-      'crn_on_page',
-      'manual',
-      'registry_confirmed',
-    ]);
+    // Each entry earned its place differently and none may drift in:
+    // crn_on_page is the company publishing its own registration number, and
+    // manual is an owner decision. Nothing else is published on a heuristic
+    // until a sample of the SHIPPED rule clears the floor.
+    expect([...PUBLISHABLE_EVIDENCE].sort()).toEqual(['crn_on_page', 'manual']);
+  });
+
+  test('registry_confirmed is written but NOT yet published', () => {
+    // The tier exists and the sweep maintains it, but the precision figure that
+    // motivated it scored a different rule: the sample used the post-redirect
+    // host while the sweep read the pre-redirect one, and fixing that also
+    // meant tightening token and squash matching. It publishes when a fresh
+    // sample clears the floor against the rule as shipped, not before.
+    expect(PUBLISHABLE_EVIDENCE).not.toContain('registry_confirmed');
   });
 
   test('bare registry is NOT publishable', () => {

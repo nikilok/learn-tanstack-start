@@ -9,6 +9,7 @@
  */
 
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
+import { evidenceRank } from './decide.ts';
 import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
 import {
@@ -33,6 +34,9 @@ export type SweepRow = {
   /** Companies House name, for the corroboration check. Empty when we hold no
    *  profile, which simply means the check cannot confirm anything. */
   companyName: string;
+  /** Former names, checked alongside the current one so a rename does not
+   *  un-publish a site that has not rebranded yet. */
+  previousNames: string[];
   url: string;
   status: WebsiteStatus;
   evidence: WebsiteEvidence;
@@ -108,6 +112,12 @@ export type SweepSummary = {
   disclosureFetches: number;
   /** Rows whose page carried the company's own name in host and text. */
   corroborated: number;
+  /** Rows whose evidence tier went DOWN this pass. Counted separately from
+   *  `promoted`, which used to be safe as an any-change counter only because
+   *  revalidate could never lower a tier. A mass withdrawal reported as a
+   *  large "promoted" figure is a silent unpublish wearing the job's
+   *  healthiest-looking metric. */
+  demoted: number;
   /** Rows held back from rendering: parked, for sale, or a directory. */
   noSiteThere: number;
   updated: number;
@@ -228,6 +238,7 @@ export async function sweepWebsites(
     robotsBlocked: 0,
     disclosureFetches: 0,
     corroborated: 0,
+    demoted: 0,
     noSiteThere: 0,
     updated: 0,
     lockMissed: 0,
@@ -249,17 +260,21 @@ export async function sweepWebsites(
       let nameCorroborated = false;
       let noSiteThere = false;
       if (fetched.ok) {
-        // Read off the homepage we already have — no extra request. The
-        // hostname comes from the URL this row will STORE, for the same reason
-        // evidence_url does: a redirect to an acquirer must not corroborate
-        // the original domain.
+        // Read off the homepage we already have — no extra request.
+        //
+        // The host is the POST-redirect one, unlike evidence_url just below,
+        // and the difference matters in both directions. The text we are
+        // matching against came from the final page, so pairing it with the
+        // pre-redirect host let a stored URL that 301s into a directory escape
+        // isAggregatorHost while the directory's own listing supplied the name
+        // match — publishing a carehome.co.uk page as a company's website. It
+        // is also the host the precision sample was scored against, so using
+        // the other one would mean shipping a rule nobody measured.
         const text = visibleText(fetched.html);
-        const host = hostOf(fetched.attemptedUrl);
-        nameCorroborated = nameCorroboration(
-          row.companyName,
-          host,
-          text,
-        ).corroborated;
+        const host = hostOf(fetched.url);
+        nameCorroborated = [row.companyName, ...row.previousNames].some(
+          (name) => name && nameCorroboration(name, host, text).corroborated,
+        );
         noSiteThere = isAggregatorHost(host) || looksParked(text);
         if (nameCorroborated) summary.corroborated++;
         if (noSiteThere) summary.noSiteThere++;
@@ -312,7 +327,15 @@ export async function sweepWebsites(
       if (!fetched.ok && fetched.reason === 'blocked_by_robots') {
         summary.robotsBlocked++;
       }
-      if (result.evidence !== row.evidence) summary.promoted++;
+      if (result.evidence !== row.evidence) {
+        // Direction matters now that a tier can be withdrawn. Lumping both
+        // into `promoted` reported a mass unpublish as the run's best number.
+        if (evidenceRank(result.evidence) > evidenceRank(row.evidence)) {
+          summary.promoted++;
+        } else {
+          summary.demoted++;
+        }
+      }
       if (result.url !== row.url) summary.adoptedVariant++;
 
       // Checked BEFORE the dry-run short-circuit, so --dry-run previews the

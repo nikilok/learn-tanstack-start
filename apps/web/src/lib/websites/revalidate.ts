@@ -94,6 +94,13 @@ const CONFIRMABLE = new Set<WebsiteEvidence>([
   'registry_confirmed',
 ]);
 
+/** Tiers no page-shape heuristic may unpublish. `manual` is an owner decision
+ *  and `crn_on_page` is the company's own registration number found on the
+ *  site; a phrase match on a short page is not evidence against either. An
+ *  ordinary one-page care home announcing "our new wing is coming soon" clears
+ *  looksParked's bar, and without this it silently removed the link. */
+const TERMINAL_EVIDENCE = new Set<WebsiteEvidence>(['manual', 'crn_on_page']);
+
 /**
  * Failures where the host answered but the stored URL was never actually read.
  *
@@ -169,7 +176,6 @@ export function mergeRevalidation(
   stored: StoredWebsite,
   result: RevalidateResult,
 ): MergedWebsite {
-  const storedConfidence = Number(stored.confidence ?? 0);
   const resultConfidence = Number(result.confidence);
   return {
     url: result.url,
@@ -179,10 +185,13 @@ export function mergeRevalidation(
     // returns null here, and overwriting with it destroyed the audit trail that
     // first-pass-only probing can never rebuild.
     evidenceUrl: result.evidenceUrl ?? stored.evidenceUrl,
-    // Monotonic. revalidate's own ladder should never propose lower, but this
-    // is the column the SQL upgrade guards compare, so it must not be able to
-    // slip backwards even if that ever changes.
-    confidence: Math.max(storedConfidence, resultConfidence).toFixed(3),
+    // Tracks `evidence` exactly, in BOTH directions. It used to be monotonic,
+    // on the reasoning that revalidate could never propose a lower tier — which
+    // stopped being true when registry_confirmed became revocable. A stored
+    // 0.970 left behind on a row demoted to `registry` is not cosmetic: it is
+    // the column upgradeOnlyPredicateSql compares, so every later correction
+    // the registry publishes for that company is silently discarded, forever.
+    confidence: resultConfidence.toFixed(3),
     failureCount: result.failureCount,
     bumpVerifiedAt: result.verified,
   };
@@ -235,13 +244,21 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidenceUrl = input.crnFoundAt;
     note = 'live; registered number found on the site';
   } else if (input.nameCorroborated && CONFIRMABLE.has(evidence)) {
+    // Record the postcode proof page if this pass found one. Disclosure
+    // probing is first-pass-only, so a page not captured here can never be
+    // recovered — and this branch outranks the postcode branch below, so
+    // without this a confirmed row would carry no proof pointer at all.
     // The one revocable rung. Gated to `registry` and its own tier because
     // that is the only population the corroboration rule was measured on: a
     // name match confirms a claim an exact company-number join already made,
     // and it is much weaker standing alone behind a search result.
     evidence = 'registry_confirmed';
-    note = 'live; company name corroborated by the site';
+    evidenceUrl = input.postcodeFoundAt ?? null;
+    note = input.postcodeFoundAt
+      ? 'live; company name corroborated by the site, postcode also found'
+      : 'live; company name corroborated by the site';
   } else if (evidence === 'registry_confirmed') {
+    evidenceUrl = input.postcodeFoundAt ?? null;
     // Corroboration was there and is not any more: the site was rebuilt, the
     // domain changed hands, or the company was renamed. Upgrade-only applies
     // to DISCOVERY; revalidation is the one thing allowed to move a row down,
@@ -276,7 +293,7 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
   // is currently nothing on it worth linking to. A later pass that finds a real
   // site restores the row on its own.
   let status: WebsiteStatus = statusForEvidence(evidence);
-  if (input.noSiteThere) {
+  if (input.noSiteThere && !TERMINAL_EVIDENCE.has(evidence)) {
     status = 'candidate';
     note += '; parked or directory page, held back from rendering';
   }

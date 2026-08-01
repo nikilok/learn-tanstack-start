@@ -278,3 +278,60 @@ describe('decideWebsite — dead rows accept corrections', () => {
     );
   });
 });
+
+describe('registry_confirmed does not freeze a registry correction', () => {
+  test('the source that published a confirmed url may still revise it', () => {
+    // A provider moves domain while the old one still answers with a page
+    // carrying the name, so the sweep has promoted the row. The registry's
+    // monthly file now lists the new address. Before the collapse in
+    // discoveryRank this compared rank 5 against rank 4 and returned `keep`,
+    // making every confirmed row permanently uncorrectable by its own source.
+    expect(
+      decideWebsite(
+        {
+          url: 'https://oldhome.co.uk',
+          status: 'verified',
+          evidence: 'registry_confirmed',
+          source: 'cqc',
+        },
+        {
+          url: 'https://newhome-care.co.uk',
+          evidence: 'registry',
+          source: 'cqc',
+        },
+      ),
+    ).toEqual({ action: 'update' });
+  });
+
+  test('a DIFFERENT source still cannot overwrite a confirmed url', () => {
+    expect(
+      decideWebsite(
+        {
+          url: 'https://oldhome.co.uk',
+          status: 'verified',
+          evidence: 'registry_confirmed',
+          source: 'cqc',
+        },
+        {
+          url: 'https://other.co.uk',
+          evidence: 'registry',
+          source: 'wikidata',
+        },
+      ),
+    ).toEqual({ action: 'conflict' });
+  });
+
+  test('crn_on_page still outranks a registry proposal', () => {
+    expect(
+      decideWebsite(
+        {
+          url: 'https://a.co.uk',
+          status: 'verified',
+          evidence: 'crn_on_page',
+          source: 'cqc',
+        },
+        { url: 'https://b.co.uk', evidence: 'registry', source: 'cqc' },
+      ),
+    ).toEqual({ action: 'keep' });
+  });
+});

@@ -113,6 +113,14 @@ export function evidenceRank(evidence: WebsiteEvidence): number {
   return RANK.get(evidence) ?? 0;
 }
 
+/** Rank for comparing two DISCOVERIES, with the sweep's own corroboration
+ *  collapsed away. See the comment in decideWebsite. */
+function discoveryRank(evidence: WebsiteEvidence): number {
+  return evidenceRank(
+    evidence === 'registry_confirmed' ? 'registry' : evidence,
+  );
+}
+
 /** Nominal confidence for an evidence tier. */
 export function evidenceConfidence(evidence: WebsiteEvidence): number {
   return CONFIDENCE.get(evidence) ?? 0;
@@ -193,8 +201,16 @@ export function decideWebsite(
     return { action: 'update' };
   }
 
-  const eRank = evidenceRank(existing.evidence);
-  const pRank = evidenceRank(proposed.evidence);
+  // `registry_confirmed` is `registry` plus a page check the SWEEP adds, not a
+  // stronger discovery claim, so for deciding between two DISCOVERIES the two
+  // rungs are one. Without this collapse a registry proposal (rank 4) always
+  // lost to a confirmed row (rank 5), the equal-rank same-source branch below
+  // became unreachable, and a provider that moved domain could never have its
+  // URL corrected by the registry that published it — the exact freeze that
+  // branch's comment says it exists to prevent. The sweep re-confirms or
+  // withdraws the rung on the next pass either way.
+  const eRank = discoveryRank(existing.evidence);
+  const pRank = discoveryRank(proposed.evidence);
   if (pRank > eRank) return { action: 'update' };
   if (pRank < eRank) return { action: 'keep' };
 

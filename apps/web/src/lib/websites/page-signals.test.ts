@@ -178,3 +178,75 @@ describe('looksParked', () => {
     );
   });
 });
+
+describe('nameCorroboration — cases the review found', () => {
+  test('a token inside an unrelated word does not corroborate', () => {
+    // "ELM HOUSE CARE LIMITED" reduces to the single token 'elm', which sits
+    // inside "Helmsley" in both the host and the page. Host matching has to
+    // stay a substring test (domains run words together), so the word boundary
+    // on the TEXT side is what separates them.
+    expect(
+      nameCorroboration(
+        'ELM HOUSE CARE LIMITED',
+        'helmsleycare.co.uk',
+        'Helmsley Care | residential and nursing care in North Yorkshire',
+      ).corroborated,
+    ).toBe(false);
+  });
+
+  test('two DIFFERENT tokens do not add up to a match', () => {
+    // The host carried 'park' and the page carried "viewing"; neither token
+    // appeared in both, and corroboration is about one name matching twice.
+    const result = nameCorroboration(
+      'PARK VIEW CARE LIMITED',
+      'parkland.co.uk',
+      'Parkland Estates. Book a view of any plot today.',
+    );
+    expect(result.inHost).toContain('park');
+    expect(result.inText).toContain('view');
+    expect(result.shared).toEqual([]);
+    expect(result.corroborated).toBe(false);
+  });
+
+  test('the squashed fallback survives a hyphenated domain', () => {
+    // home-group.org.uk was rejected because the name was squashed and the
+    // host label was not, so a hyphen alone broke a plainly correct row.
+    expect(
+      nameCorroboration(
+        'HOME GROUP LIMITED',
+        'www.home-group.org.uk',
+        'Home Group | Welcome to Home Group',
+      ).corroborated,
+    ).toBe(true);
+  });
+
+  test('the squashed fallback ignores a suffix on the host side', () => {
+    expect(
+      nameCorroboration(
+        'J.E.M. CARE LIMITED',
+        'www.jemcareltd.co.uk',
+        'Jem Care Ltd - Provider of Independent Residential Homes',
+      ).corroborated,
+    ).toBe(true);
+  });
+
+  test('a generic squashed name cannot match a longer look-alike host', () => {
+    // "HOME CARE LIMITED" squashes to 'homecare', which used to prefix-match
+    // an unrelated agency at homecare-plus.co.uk. The name may carry an extra
+    // qualifier the host omits; the host may not extend the name.
+    expect(
+      nameCorroboration(
+        'HOME CARE LIMITED',
+        'homecare-plus.co.uk',
+        'Homecare Plus | home care services across the Midlands',
+      ).corroborated,
+    ).toBe(false);
+  });
+
+  test('a regex metacharacter in a name does not throw', () => {
+    // Company names carry brackets and dots; the token goes into a RegExp.
+    expect(() =>
+      nameCorroboration('C.A.R.E. (UK) LIMITED', 'example.co.uk', 'example'),
+    ).not.toThrow();
+  });
+});

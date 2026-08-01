@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
 import {
   decideWebsite,
+  evidenceConfidence,
   evidenceRank,
   statusForEvidence,
   upgradeOnlyPredicateSql,
@@ -42,6 +43,7 @@ const EVIDENCES: WebsiteEvidence[] = [
   'llm_adjudicated',
   'postcode_on_page',
   'registry',
+  'registry_confirmed',
   'crn_on_page',
   'manual',
 ];
@@ -87,6 +89,17 @@ function* allCases(): Generator<Case> {
     },
   ];
 
+  // Page-shape signals, enumerated alongside the disclosure findings. Leaving
+  // them permanently undefined meant the machine's only DOWNWARD transition —
+  // and the only thing that can unpublish a live row — sat outside every
+  // invariant below.
+  const pageShapes = [
+    { label: 'plain', nameCorroborated: false, noSiteThere: false },
+    { label: 'corroborated', nameCorroborated: true, noSiteThere: false },
+    { label: 'nosite', nameCorroborated: false, noSiteThere: true },
+    { label: 'corroborated+nosite', nameCorroborated: true, noSiteThere: true },
+  ];
+
   for (const status of STATUSES) {
     for (const evidence of EVIDENCES) {
       for (const failureCount of [0, 1, 2]) {
@@ -94,19 +107,25 @@ function* allCases(): Generator<Case> {
           for (const d of disclosures) {
             // Disclosure findings only exist when a page was actually read.
             if (!o.outcome.ok && d.label !== 'nothing') continue;
-            yield {
-              label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label}`,
-              input: {
-                storedUrl: STORED_URL,
-                evidence,
-                status,
-                failureCount,
-                attemptedUrl: STORED_URL,
-                outcome: o.outcome,
-                crnFoundAt: d.crnFoundAt,
-                postcodeFoundAt: d.postcodeFoundAt,
-              },
-            };
+            for (const p of pageShapes) {
+              // Nor do page-shape signals: there is no page to shape.
+              if (!o.outcome.ok && p.label !== 'plain') continue;
+              yield {
+                label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label} + ${p.label}`,
+                input: {
+                  storedUrl: STORED_URL,
+                  evidence,
+                  status,
+                  failureCount,
+                  attemptedUrl: STORED_URL,
+                  outcome: o.outcome,
+                  crnFoundAt: d.crnFoundAt,
+                  postcodeFoundAt: d.postcodeFoundAt,
+                  nameCorroborated: p.nameCorroborated,
+                  noSiteThere: p.noSiteThere,
+                },
+              };
+            }
           }
         }
       }
@@ -165,15 +184,21 @@ describe('state machine invariants', () => {
   /**
    * I3. Evidence is a claim about the stored URL, and it may only rise when
    * this pass actually found the proof. Anything else lets a tier drift upward
-   * on no evidence at all, and the ladder is upgrade-only so it never comes
-   * back down.
+   * on no evidence at all.
+   *
+   * `nameCorroborated` counts as proof — it is read off the page this pass
+   * fetched, like the other two. It is listed explicitly rather than left
+   * implicit so that adding a fourth signal fails here until someone decides
+   * whether it is proof, which is the question this invariant exists to force.
    */
   test('I3 — evidence never rises without proof found this pass', () => {
     const violations: string[] = [];
     for (const c of CASES) {
       const r = revalidate(c.input);
       const foundSomething = Boolean(
-        c.input.crnFoundAt || c.input.postcodeFoundAt,
+        c.input.crnFoundAt ||
+        c.input.postcodeFoundAt ||
+        c.input.nameCorroborated,
       );
       if (
         !foundSomething &&
@@ -213,9 +238,17 @@ describe('state machine invariants', () => {
     expect(violations.slice(0, 10)).toEqual([]);
   });
 
-  /** I6. Confidence is the ladder's numeric proxy and the column the SQL
-   *  upgrade guards compare, so a merge must never lower it. */
-  test('I6 — merged confidence never slips backwards', () => {
+  /** I6. Confidence is the ladder's numeric proxy AND the column the SQL
+   *  upgrade guards compare, so it must agree with the evidence tier written
+   *  beside it — in both directions.
+   *
+   *  This invariant used to say "never slips backwards", which was safe only
+   *  while revalidate could not lower a tier. Once registry_confirmed became
+   *  revocable, monotonic confidence left 0.970 on a row demoted to `registry`
+   *  and upgradeOnlyPredicateSql then rejected every correction the registry
+   *  published for that company, permanently. Disagreement between the two
+   *  columns is the defect; a decrease is not. */
+  test('I6 — merged confidence always matches the merged evidence', () => {
     const violations: string[] = [];
     for (const c of CASES) {
       const r = revalidate(c.input);
@@ -229,9 +262,10 @@ describe('state machine invariants', () => {
           },
           r,
         );
-        if (Number(merged.confidence) < Number(stored ?? 0)) {
+        const expected = evidenceConfidence(merged.evidence).toFixed(3);
+        if (merged.confidence !== expected) {
           violations.push(
-            `${c.label} stored=${stored} -> ${merged.confidence}`,
+            `${c.label} stored=${stored} -> ${merged.evidence}/${merged.confidence}, expected ${expected}`,
           );
         }
       }
@@ -308,5 +342,76 @@ describe('decideWebsite invariants', () => {
     const predicate = upgradeOnlyPredicateSql();
     expect(predicate).toContain("company_websites.status = 'dead'");
     expect(predicate).toMatch(/status = 'dead' AND excluded\.confidence >=/);
+  });
+});
+
+describe('state machine invariants — the revocable rung', () => {
+  /** I11. A page-shape heuristic may not overturn a registered number found on
+   *  the site or an owner's decision. Both are terminal everywhere else in the
+   *  module, and looksParked fires on any short page saying "coming soon". */
+  test('I11 — noSiteThere never unpublishes manual or crn_on_page', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (!c.input.noSiteThere) continue;
+      if (c.input.evidence !== 'manual' && c.input.evidence !== 'crn_on_page') {
+        continue;
+      }
+      const r = revalidate(c.input);
+      if (c.input.outcome.ok && r.status !== 'verified') {
+        violations.push(`${c.label} -> ${r.status}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I12. Only registry/registry_confirmed may move on the corroboration
+   *  signal. It was measured on registry rows alone, where it confirms a claim
+   *  an exact company-number join already made; standing behind anything else
+   *  it is a far weaker thing. */
+  test('I12 — corroboration only ever moves the two confirmable tiers', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      const r = revalidate(c.input);
+      if (r.evidence === c.input.evidence) continue;
+      const confirmable =
+        c.input.evidence === 'registry' ||
+        c.input.evidence === 'registry_confirmed';
+      // A move to/from registry_confirmed is only legitimate from those two.
+      if (
+        (r.evidence === 'registry_confirmed' ||
+          c.input.evidence === 'registry_confirmed') &&
+        !confirmable
+      ) {
+        violations.push(`${c.label} -> ${r.evidence}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I13. The withdrawal must be reversible with no state left behind: a row
+   *  that loses corroboration and regains it must land exactly where it was,
+   *  or the tier decays a little on every flap. */
+  test('I13 — withdrawal then re-confirmation is a round trip', () => {
+    const base = {
+      storedUrl: 'https://www.example.co.uk',
+      status: 'verified' as WebsiteStatus,
+      failureCount: 0,
+      attemptedUrl: 'https://www.example.co.uk',
+      outcome: { ok: true } as const,
+    };
+    const withdrawn = revalidate({
+      ...base,
+      evidence: 'registry_confirmed',
+      nameCorroborated: false,
+    });
+    expect(withdrawn.evidence).toBe('registry');
+    const regained = revalidate({
+      ...base,
+      evidence: withdrawn.evidence,
+      nameCorroborated: true,
+    });
+    expect(regained.evidence).toBe('registry_confirmed');
+    expect(regained.confidence).toBe('0.970');
+    expect(regained.status).toBe('verified');
   });
 });

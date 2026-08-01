@@ -94,17 +94,24 @@ function score(path: string): void {
   const byTier = new Map<string, Verdict[]>();
   let unlabelled = 0;
   for (const row of rows) {
+    // An unlabelled row scores as `unsure`, which the scorer counts as wrong.
+    // Dropping it from the denominator instead meant labelling 60 of 200 rows
+    // and stopping returned PROMOTE — and stopping part-way is the normal way
+    // to stop, since the labelling sheet always lands on the first unlabelled
+    // row and a labeller works front to back. This is the same hole that
+    // unsure-counts-as-wrong closes, on the likelier path.
     const verdict = readVerdict(row.verdict ?? '');
-    if (!verdict) {
-      unlabelled += 1;
-      continue;
-    }
+    if (!verdict) unlabelled += 1;
     const tier = row.evidence || 'unknown';
-    byTier.set(tier, [...(byTier.get(tier) ?? []), verdict]);
+    byTier.set(tier, [...(byTier.get(tier) ?? []), verdict ?? 'unsure']);
   }
 
   console.log(`\nScored ${rows.length - unlabelled}/${rows.length} rows`);
-  if (unlabelled) console.log(`  ${unlabelled} still unlabelled`);
+  if (unlabelled) {
+    console.log(
+      `  ${unlabelled} still unlabelled — counted as unsure, i.e. against the tier`,
+    );
+  }
   console.log('');
 
   for (const [tier, verdicts] of [...byTier].sort()) {

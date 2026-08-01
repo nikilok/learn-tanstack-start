@@ -55,6 +55,16 @@ const STOPWORDS = new Set([
 /** Legal suffixes, stripped before squashing a name for comparison. */
 const SUFFIX = /\b(limited|ltd|llp|plc|cic|c\.i\.c|incorporated|inc)\b\.?/gi;
 
+/** The same suffixes with no word boundary to find them by. Host labels run
+ *  everything together, so `jemcareltd` keeps a `ltd` the name side has
+ *  already dropped, and the two never compare equal. */
+const SQUASHED_SUFFIX = /(limited|ltd|llp|plc|cic|incorporated|inc)$/;
+
+/** Escape a literal for embedding in a RegExp. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** The tokens that actually identify a company, longest first. */
 export function distinctiveTokens(name: string): string[] {
   return [
@@ -68,12 +78,17 @@ export function distinctiveTokens(name: string): string[] {
   ].sort((a, b) => b.length - a.length);
 }
 
-/** A name reduced to comparable characters: no suffix, no punctuation, no spaces. */
+/** A name reduced to comparable characters: no suffix, no punctuation, no spaces.
+ *  Applied to the HOST LABEL too, not just the company name — comparing a
+ *  squashed name against a raw label meant `home-group.org.uk` failed to match
+ *  HOME GROUP LIMITED on a hyphen, and `jemcareltd.co.uk` failed to match
+ *  J.E.M. CARE LIMITED on the suffix the name side had already dropped. */
 export function squashName(name: string): string {
   return name
     .replace(SUFFIX, ' ')
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+    .replace(/[^a-z0-9]/g, '')
+    .replace(SQUASHED_SUFFIX, '');
 }
 
 /**
@@ -82,11 +97,19 @@ export function squashName(name: string): string {
  */
 const MIN_SQUASH = 6;
 
-/** Whether two squashed strings are the same name, allowing one to carry an
- *  extra qualifier ("healthcarehomeslsc" vs the host's "healthcarehomes"). */
-function squashMatches(a: string, b: string): boolean {
-  if (a.length < MIN_SQUASH || b.length < MIN_SQUASH) return false;
-  return a === b || a.startsWith(b) || b.startsWith(a);
+/**
+ * Whether a squashed company name and a squashed host label are the same name.
+ *
+ * Equal, or the NAME carries an extra qualifier the host leaves out
+ * ("healthcarehomeslsc" vs "healthcarehomes"). Deliberately NOT the other
+ * direction: allowing the label to extend the name let the generic
+ * "HOME CARE LIMITED" match an unrelated agency at homecare-plus.co.uk, and
+ * the whole point of MIN_SQUASH is to keep generic names from matching
+ * anything longer that starts the same way.
+ */
+function squashMatches(name: string, label: string): boolean {
+  if (name.length < MIN_SQUASH || label.length < MIN_SQUASH) return false;
+  return name === label || name.startsWith(label);
 }
 
 export type Corroboration = {
@@ -94,6 +117,8 @@ export type Corroboration = {
   inHost: string[];
   /** Distinctive tokens found in the page's visible text. */
   inText: string[];
+  /** Tokens found in BOTH. This, not the two lists separately, is the signal. */
+  shared: string[];
   /** Whether the whole name matched the host, for companies made only of
    *  generic words ("Home Group Limited" -> homegroup.org.uk). */
   squashed: boolean;
@@ -123,15 +148,29 @@ export function nameCorroboration(
   const lowerHost = host.toLowerCase();
   const flatText = visibleText.toLowerCase();
 
+  // Hostnames run words together (mosaic1898.co.uk), so a token can only be
+  // matched as a substring there. The page is prose, so it is matched on word
+  // boundaries — without that, "ELM HOUSE CARE" corroborated an unrelated
+  // provider at helmsleycare.co.uk, because 'elm' sits inside "Helmsley" in
+  // both the host and the text.
   const inHost = tokens.filter((token) => lowerHost.includes(token));
-  const inText = tokens.filter((token) => flatText.includes(token));
+  const inText = tokens.filter((token) =>
+    new RegExp(`\\b${escapeRegExp(token)}\\b`).test(flatText),
+  );
+  // The SAME token has to appear in both. Testing the two lists for
+  // non-emptiness separately let one token carry the host and a different one
+  // carry the text: "PARK VIEW CARE" corroborated parkland.co.uk whenever the
+  // word "viewing" appeared anywhere on the page.
+  const shared = inHost.filter((token) => inText.includes(token));
 
   // Only when there are no distinctive tokens at all, so this can never
   // override the primary rule — it only covers the case it cannot express.
   let squashed = false;
   if (tokens.length === 0) {
     const name = squashName(companyName);
-    const label = lowerHost.replace(/^www\./, '').split('.')[0] ?? '';
+    const label = squashName(
+      lowerHost.replace(/^www\./, '').split('.')[0] ?? '',
+    );
     squashed =
       squashMatches(name, label) &&
       flatText.replace(/[^a-z0-9]/g, '').includes(name);
@@ -140,8 +179,9 @@ export function nameCorroboration(
   return {
     inHost,
     inText,
+    shared,
     squashed,
-    corroborated: squashed || (inHost.length > 0 && inText.length > 0),
+    corroborated: squashed || shared.length > 0,
   };
 }
 

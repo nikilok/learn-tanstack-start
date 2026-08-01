@@ -84,9 +84,18 @@ describe('mergeRevalidation — evidence_url', () => {
 });
 
 describe('mergeRevalidation — confidence', () => {
-  test('never slips backwards', () => {
-    const next = merge({ confidence: '0.990' }, { confidence: '0.950' });
-    expect(next.confidence).toBe('0.990');
+  test('follows the evidence DOWN, not just up', () => {
+    // Was "never slips backwards", which held only while revalidate could not
+    // lower a tier. Once registry_confirmed became revocable, a monotonic
+    // confidence left 0.970 beside evidence `registry`, and
+    // upgradeOnlyPredicateSql then rejected every correction the registry
+    // published for that company — permanently, on every monthly import.
+    const next = merge(
+      { evidence: 'registry_confirmed', confidence: '0.970' },
+      { evidence: 'registry', confidence: '0.950' },
+    );
+    expect(next.evidence).toBe('registry');
+    expect(next.confidence).toBe('0.950');
   });
 
   test('rises with a promotion', () => {

@@ -94,6 +94,7 @@ jobs:
             echo "| 🔀 Adopted variant | $(extract adopted_variant) |"
             echo "| 📄 Disclosure fetches | $(extract disclosure_fetches) |"
             echo "| 🪪 Name corroborated | $(extract corroborated) |"
+            echo "| ⬇️ Demoted | $(extract demoted) |"
             echo "| 🚧 No site there | $(extract no_site_there) |"
             echo "| 💾 Updated | $(extract updated) |"
             echo "| ❌ Errored | $(extract errored) |"

@@ -156,6 +156,14 @@ const raw = (await sql`
   previous_company_names: string[] | null;
 }[];
 
+if (raw.length === 0) {
+  // Math.min() of nothing is Infinity, and new Date(Infinity) throws.
+  console.log(
+    '  no search-discovery rows in this database — nothing to decompose',
+  );
+  process.exit(0);
+}
+
 const stamps = raw.map((r) => new Date(r.discovered_at).getTime());
 const windowFrom = new Date(Math.min(...stamps)).toISOString();
 const windowTo = new Date(Math.max(...stamps)).toISOString();

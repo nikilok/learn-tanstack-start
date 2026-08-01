@@ -50,7 +50,10 @@ export async function probeOrigin(
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
     // because a URL that 301s into a directory is what it lands on.
     url: canonical,
-    evidenceUrl: crnFound || postcodeFound ? canonical : null,
+    // The page actually PARSED — post-redirect — matching walkDisclosure. On a
+    // redirecting candidate, `canonical` names a page the signals never came
+    // from.
+    evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
     crnFound,
     postcodeFound,
     onAggregator: isAggregatorHost(host),

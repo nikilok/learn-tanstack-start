@@ -149,8 +149,10 @@ later be measured stratified by it, and set the threshold from data.
 
 Drawn at random across the whole undiscovered population — incorporation years
 1986–2025, median 2017, mixed jurisdictions — by
-`scripts/measure-search-yield.ts`, which runs the real orchestrator with only
-`selectRows` swapped.
+`scripts/measure-search-yield.ts`, which runs the real orchestrator with a
+seeded-random `selectRows` plus measurement instrumentation — a write wrapper
+recording persisted outcomes, and per-run caps. Production probing, walking and
+persistence are unchanged.
 
 | outcome | n | share |
 |---|---|---|
@@ -180,7 +182,7 @@ Gemma owner-extraction as the ownership estimator). Corrected run, 2026-08-01:
 |---|---|---|---|
 | no own-looking page in the SERP — no site, a site search missed, or a JS shell (flagged per row) | 14 | 50% | 35% |
 | own site found and walked, carries **neither statutory signal** | 10 | 36% | 25% |
-| own-looking site below rank 1 (all five production walk paths checked: **0 of 4 carried the CRN**) | 4 | 14% | 10% |
+| own-looking site below rank 1 (walked on production's default cap, `--max-disclosure=5` of the ten-path list: **0 of 4 carried the CRN**) | 4 | 14% | 10% |
 | search returned nothing / all directories / all dead | 0 | — | — |
 
 An earlier flawed run reported 16/9/3: it judged aggregators pre-redirect,
@@ -202,12 +204,16 @@ Three conclusions, scoped to what the measurement can support:
 - **Rank-1-only walking survives representative data.** All four lower-rank
   own-looking sites were walked on the same five paths production uses and
   none carries the number. n=4 — consistent with the lab, not proof.
-- **The deterministic ceiling on this population is ~30%.** 12.5% CRN + 17.5%
-  postcode is everything with any statutory signal. The 25% own-but-silent
-  pool has NO deterministic evidence at all — reaching it needs a different
-  evidence class (Common Crawl CRN sweep, or an adjudicated tier), not a
-  better walk. Ownership buckets are estimator-based (15/16 on labelled
-  data), so treat their sizes as ±2 rows.
+- **~30% is the observed statutory-signal rate under the shipped procedure,
+  not a population ceiling.** 12.5% CRN + 17.5% postcode is what this
+  provider's top five origins and the five-path walk surfaced at n=40. Recall
+  misses (80.7%@5) mean some signal-bearing sites were never reached, so the
+  population's true rate sits somewhat higher — better recall could still
+  raise yield. What the rate does establish: the 25% own-but-silent pool has
+  NO deterministic evidence at all, so reaching it needs a different evidence
+  class (Common Crawl CRN sweep, or an adjudicated tier), not a better walk.
+  Ownership buckets are estimator-based (15/16 on labelled data), so treat
+  their sizes as ±2 rows.
 
 ## Sampling warning
 

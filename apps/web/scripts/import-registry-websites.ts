@@ -56,6 +56,7 @@ import {
   isSameSite,
   normaliseWebsiteUrl,
 } from '../src/lib/websites/normalise-url.ts';
+import { PUBLISHABLE_EVIDENCE } from '../src/lib/websites/publishable.ts';
 import {
   namesAreCompatible,
   normaliseCompanyNumber,
@@ -548,11 +549,13 @@ const coverage = (await sql`
     (SELECT count(*) FROM mapped)::int AS sponsors,
     (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
       WHERE w.status = 'verified')::int AS verified_sponsors,
-    -- The render gate is status=verified AND checked_at IS NOT NULL (schema.ts),
-    -- and this importer deliberately leaves checked_at NULL, so reporting only
-    -- the line above would show growing coverage while nothing is renderable.
+    -- The gate the company page renders behind, defined in
+    -- lib/websites/publishable.ts. This importer deliberately leaves
+    -- checked_at NULL and writes registry evidence, so reporting only the line
+    -- above would show coverage growing while nothing new is renderable.
     (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
-      WHERE w.status = 'verified' AND w.checked_at IS NOT NULL)::int AS renderable_sponsors,
+      WHERE w.status = 'verified' AND w.checked_at IS NOT NULL
+        AND w.evidence = ANY(${PUBLISHABLE_EVIDENCE}) AND w.url IS NOT NULL)::int AS renderable_sponsors,
     (SELECT count(*) FROM company_websites WHERE status = 'verified')::int AS verified_total,
     (SELECT count(*) FROM company_websites WHERE status = 'candidate')::int AS candidate_total
 `) as {

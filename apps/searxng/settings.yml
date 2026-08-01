@@ -1,0 +1,45 @@
+# SearXNG configuration for company website discovery.
+#
+# This is a private, machine-driven instance: one caller (our discovery script)
+# asking one kind of question (what is this UK company's website). It is not a
+# public search page, and every setting below follows from that.
+
+use_default_settings: true
+
+general:
+  # Nothing here is user-facing, so there is no instance to name or brand.
+  instance_name: 'ss-discovery'
+  # Error surfaces belong in our logs, not in a response body we then parse.
+  debug: false
+
+server:
+  # Overridden by SEARXNG_SECRET at runtime. Never commit a real one.
+  secret_key: 'replace-me-at-runtime'
+  # The limiter exists to stop a public instance being scraped. We ARE the
+  # scraper, we are the only caller, and our own pacing is what protects the
+  # upstream engines. Left on, it throttles us against ourselves.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  # JSON is the entire point: the HTML format is kept only so a human can open
+  # the instance and see what a query actually returns while tuning engines.
+  formats:
+    - html
+    - json
+  # A company website is an unambiguous, heavily-linked target, so safe search
+  # and autocomplete add nothing and autocomplete leaks the query to a third
+  # party we have not vetted.
+  safe_search: 0
+  autocomplete: ''
+  default_lang: 'en-GB'
+
+outgoing:
+  # Deliberately unhurried. The reason to run this on a persistent host rather
+  # than a CI runner is IP reputation, and hammering the upstreams is how that
+  # reputation is lost.
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  pool_connections: 10
+  pool_maxsize: 10

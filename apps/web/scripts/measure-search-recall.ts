@@ -162,6 +162,11 @@ if (skipped > 0) {
     `  ${skipped} rows dropped — no searchable name after suffix strip`,
   );
 }
+if (ranks.length === 0) {
+  // Every sampled name was skipped, so there is no cohort to report on.
+  console.log('  no rows searched — nothing to measure');
+  process.exit(0);
+}
 console.log('─── can search find a website we already know the answer for ───');
 for (const k of [1, 3, 5, 10]) {
   console.log(

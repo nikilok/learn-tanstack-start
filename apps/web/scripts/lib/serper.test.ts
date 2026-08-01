@@ -191,3 +191,39 @@ describe('searchCompany — an error message alongside organic is still an error
     });
   });
 });
+
+describe('searchCompany — organic entries are validated, not counted', () => {
+  test('an error message beside link-less entries is still a failure', async () => {
+    // organic.length was the gate, but [{}] is length 1 and yields no usable
+    // URL — so this banked as zero results and wrote a permanent `none`.
+    stub({
+      ok: true,
+      status: 200,
+      jsonBody: { message: 'Not enough credits', organic: [{}] },
+    });
+    expect(await searchCompany('q', 'key')).toMatchObject({
+      ok: false,
+      reason: 'malformed',
+      charged: true,
+    });
+  });
+
+  test('a null entry does not throw out of the client', async () => {
+    // `r.link` on null threw a TypeError that escaped searchCompany entirely,
+    // bypassing every charged-credit path the caller relies on.
+    stub({ ok: true, status: 200, jsonBody: { organic: [null] } });
+    expect(await searchCompany('q', 'key')).toEqual({ ok: true, urls: [] });
+  });
+
+  test('usable links survive alongside unusable entries', async () => {
+    stub({
+      ok: true,
+      status: 200,
+      jsonBody: { organic: [null, {}, { link: 'https://real.co.uk' }] },
+    });
+    expect(await searchCompany('q', 'key')).toEqual({
+      ok: true,
+      urls: ['https://real.co.uk'],
+    });
+  });
+});

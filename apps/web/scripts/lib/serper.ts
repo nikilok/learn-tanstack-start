@@ -95,9 +95,12 @@ export async function searchCompany(
   }
 
   // A malformed 200 is a failure, not zero results — and still billed.
-  let body: { organic?: { link?: string }[]; message?: string } | null = null;
+  let body: {
+    organic?: ({ link?: string } | null)[];
+    message?: string;
+  } | null = null;
   try {
-    body = (await res.json()) as { organic?: { link?: string }[] };
+    body = (await res.json()) as { organic?: ({ link?: string } | null)[] };
   } catch {
     return {
       ok: false,
@@ -115,11 +118,17 @@ export async function searchCompany(
       charged: true,
     };
   }
-  const organic = Array.isArray(body.organic) ? body.organic : null;
+  // Extract BEFORE judging: entries can be null or link-less, so array length
+  // is not a count of usable results, and `r.link` on null throws out of the
+  // client entirely.
+  const organic = Array.isArray(body.organic) ? body.organic : [];
+  const urls = organic
+    .map((r) => (r && typeof r === 'object' ? (r.link ?? '') : ''))
+    .filter(Boolean);
   // An error message with nothing usable beside it is a failure wearing a 200.
   // Asymmetric on purpose: a false failure costs one bounded retry, a false
   // success writes a permanent `none` for a company never searched.
-  if ('message' in body && !organic?.length) {
+  if ('message' in body && urls.length === 0) {
     return {
       ok: false,
       reason: 'malformed',
@@ -128,8 +137,5 @@ export async function searchCompany(
     };
   }
   // No `organic` key at all is Serper's zero-results shape, and a real answer.
-  return {
-    ok: true,
-    urls: (organic ?? []).map((r) => r.link ?? '').filter(Boolean),
-  };
+  return { ok: true, urls };
 }

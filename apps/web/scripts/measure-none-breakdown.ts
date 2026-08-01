@@ -1,30 +1,37 @@
 /**
  * Why did a searched company produce NOTHING?
  *
- * On the first representative yield sample, 70% of rows (28/40) ended at
- * `none` — far more than the ~19% that search recall (80.7%@5) can explain.
- * This script decomposes that bucket using the candidates the run already
- * banked, so it costs no Serper credits: only polite re-fetches.
+ * Decomposes the `none` rows of the most recent search-discovery writes using
+ * the candidates those runs banked, so it costs no Serper credits: only polite
+ * re-fetches. The reconstruction mirrors production probing exactly — every
+ * origin up to five is fetched and aggregator status is judged on the
+ * POST-redirect host, as probeOrigin does — so what is classified is what the
+ * pipeline actually saw.
+ *
+ * THE COHORT IS POSITIONAL: the latest --limit rows by discovered_at. Run it
+ * before any further discovery writes, or the window silently shifts to a
+ * different population. The printed discovered_at range and evidence split are
+ * there to verify the cohort is the run you mean. Undecided rows (banked,
+ * status still `pending`) are reported and excluded — they are not `none`.
  *
  * Buckets, in decision order per row:
  *   no_candidates   search returned nothing usable at all
- *   all_aggregator  every candidate is a directory/profile — the classic
- *                   signature of a company with no website
- *   all_dead        candidate sites exist but none would fetch
- *   own_no_signals  a page that LOOKS like the company's own site was probed
- *                   and walked, and carries neither statutory signal — the
- *                   "unverifiable third" measured at 35.3% of live sites
+ *   all_aggregator  every reachable candidate is a directory or parked page
+ *   all_dead        no candidate would fetch at all
+ *   own_no_signals  a page that LOOKS like the company's own site was the one
+ *                   production walked, and carries neither statutory signal
  *   own_lower_rank  an own-looking site sat below the candidate prod walked;
- *                   its privacy pages are checked here for the number, which
- *                   measures the cost of walking rank-1 only
- *   no_ownership    pages fetched fine but nothing looks like the company
+ *                   the five production walk paths are checked here for the
+ *                   number, measuring the true cost of walking rank-1 only
+ *   no_ownership    pages fetched fine but nothing looks like the company —
+ *                   no site, a site search missed, or a JS shell (flagged)
  *
- * Ownership is estimated with Gemma owner-extraction (measured 15/16) plus
- * name overlap against current AND previous names — diagnostic only, never
- * written anywhere. Run from monorepo root:
+ * Ownership is estimated with Gemma owner-extraction plus name overlap against
+ * current AND previous names — diagnostic only, never written anywhere. This
+ * script never writes to the database. Run from monorepo root:
  *
  *   bun apps/web/scripts/measure-none-breakdown.ts
- *   bun apps/web/scripts/measure-none-breakdown.ts --no-gemma
+ *   bun apps/web/scripts/measure-none-breakdown.ts --limit=60 --no-gemma
  */
 
 import { neon } from '@ss/db/client';
@@ -32,21 +39,35 @@ import { neon } from '@ss/db/client';
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { candidateOrigins } from '../src/lib/websites/discover.ts';
 import {
+  companyNumberVariants,
   pageHasCompanyNumber,
   visibleText,
 } from '../src/lib/websites/extract.ts';
+import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
 import {
   isAggregatorHost,
   looksParked,
 } from '../src/lib/websites/page-signals.ts';
-import { loadScriptEnv } from './lib/script-utils.ts';
+import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 import { fetchSite } from './lib/web-fetch.ts';
 
 loadScriptEnv(import.meta.url);
 
-const useGemma = !process.argv.includes('--no-gemma');
+const args = process.argv.slice(2);
+const flag = (name: string) =>
+  args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=');
+
+const useGemma = !args.includes('--no-gemma');
+const limit = parseStrictInt(flag('limit') ?? '40', 'limit');
 const DELAY_MS = 250;
-const MAX_NON_AGG = 3;
+/** Mirrors production: probeOrigin fetches every origin in the top five. */
+const MAX_ORIGINS = 5;
+/** Mirrors production's walk cap in discover-websites-search.ts. */
+const WALK_PATHS = DISCLOSURE_PATHS.slice(0, 5);
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -54,9 +75,21 @@ const sql = neon(process.env.POSTGRES_URL as string);
 
 /** Generic UK postcode shape — ANY postcode, not the registered one. */
 const ANY_POSTCODE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/;
-/** A registration disclosure carrying some OTHER number. */
-const OTHER_CRN =
-  /\b(?:COMPANY|REGISTERED|REG)\.?\s*(?:NO|NUMBER)\.?:?\s*#?\s*(?:SC|NI|OC)?\d{6,8}\b/;
+/** A registration disclosure and the number it carries. */
+const CRN_DISCLOSURE =
+  /\b(?:COMPANY|REGISTERED|REG)\.?\s*(?:NO|NUMBER)\.?:?\s*#?\s*((?:SC|NI|OC)?\d{6,8})\b/g;
+
+/**
+ * The own number with MORE zeros dropped than the detector tolerates.
+ * pageHasCompanyNumber accepts one dropped zero; a match on these forms is a
+ * disclosure the pipeline structurally cannot see — a real recoverable miss,
+ * which must not be reported as another company's number.
+ */
+function depaddedBlindForms(companyNumber: string): string[] {
+  if (!/^\d{8}$/.test(companyNumber)) return [];
+  const stripped = companyNumber.replace(/^0+/, '');
+  return stripped.length === 6 ? [stripped] : [];
+}
 
 const STOP = new Set([
   'the',
@@ -102,46 +135,72 @@ type NoneRow = {
   candidates: string[];
 };
 
-const rows = (await sql`
-  SELECT x.company_number, x.candidates,
+const raw = (await sql`
+  SELECT x.company_number, x.candidates, x.status, x.evidence, x.discovered_at,
          coalesce(p.company_name, '') AS company_name,
          p.previous_company_names
   FROM (
-    SELECT company_number, candidates, evidence
+    SELECT company_number, candidates, status, evidence, discovered_at
     FROM company_websites WHERE source = 'search'
-    ORDER BY discovered_at DESC LIMIT 40
+    ORDER BY discovered_at DESC LIMIT ${limit}
   ) x
   JOIN companies_house_profiles p USING (company_number)
-  WHERE x.evidence = 'none'
   ORDER BY x.company_number
 `) as {
   company_number: string;
   candidates: unknown;
+  status: string;
+  evidence: string;
+  discovered_at: Date;
   company_name: string;
   previous_company_names: string[] | null;
 }[];
 
-const cohort: NoneRow[] = rows.map((r) => ({
-  companyNumber: r.company_number,
-  companyName: r.company_name,
-  prevNames: r.previous_company_names ?? [],
-  candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
-}));
+const stamps = raw.map((r) => new Date(r.discovered_at).getTime());
+const windowFrom = new Date(Math.min(...stamps)).toISOString();
+const windowTo = new Date(Math.max(...stamps)).toISOString();
+const split = new Map<string, number>();
+for (const r of raw) {
+  const key = r.status === 'pending' ? 'pending (excluded)' : r.evidence;
+  split.set(key, (split.get(key) ?? 0) + 1);
+}
+
+// Decided `none` only. A banked row still at `pending` was never settled —
+// production retries it for free, and counting it here would report a
+// retryable outage as permanent absence.
+const cohort: NoneRow[] = raw
+  .filter((r) => r.evidence === 'none' && r.status === 'none')
+  .map((r) => ({
+    companyNumber: r.company_number,
+    companyName: r.company_name,
+    prevNames: r.previous_company_names ?? [],
+    candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
+  }));
 
 console.log(
   `Decomposing the none bucket — db ${dbFingerprint(process.env.POSTGRES_URL)}`,
 );
-console.log(`  rows: ${cohort.length}  gemma: ${useGemma ? 'on' : 'off'}\n`);
+console.log(
+  `  cohort: latest ${raw.length} search rows, discovered ${windowFrom} → ${windowTo}`,
+);
+console.log(
+  `  split : ${[...split.entries()].map(([k, v]) => `${k}=${v}`).join('  ')}`,
+);
+console.log(
+  `  none rows: ${cohort.length}  gemma: ${useGemma ? 'on' : 'off'}\n`,
+);
 
 type PageLook = {
   origin: string;
   ok: boolean;
+  /** Judged on the POST-redirect host, exactly as production probeOrigin does. */
+  aggregator: boolean;
   parked: boolean;
   /** Big HTML, almost no visible text: a client-rendered shell. */
   shellish: boolean;
   text: string;
   anyPostcode: boolean;
-  otherCrn: boolean;
+  crnNumbers: string[];
 };
 
 async function look(origin: string): Promise<PageLook> {
@@ -150,18 +209,27 @@ async function look(origin: string): Promise<PageLook> {
     return {
       origin,
       ok: false,
+      aggregator: false,
       parked: false,
       shellish: false,
       text: '',
       anyPostcode: false,
-      otherCrn: false,
+      crnNumbers: [],
     };
   }
+  const host = (() => {
+    try {
+      return new URL(fetched.url).host.toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
   const text = visibleText(fetched.html);
   const upper = text.toUpperCase();
   return {
     origin,
     ok: true,
+    aggregator: isAggregatorHost(host),
     parked: looksParked(text),
     shellish: text.length < 300 && fetched.html.length > 30_000,
     text:
@@ -169,7 +237,7 @@ async function look(origin: string): Promise<PageLook> {
         ? `${text.slice(0, 1500)}\n…\n${text.slice(-1300)}`
         : text,
     anyPostcode: ANY_POSTCODE.test(upper),
-    otherCrn: OTHER_CRN.test(upper),
+    crnNumbers: [...upper.matchAll(CRN_DISCLOSURE)].map((m) => m[1]),
   };
 }
 
@@ -208,52 +276,58 @@ async function ownScore(row: NoneRow, page: PageLook): Promise<number> {
   return Math.max(...names.map((n) => overlap(sourceWords, n)));
 }
 
-type Verdict = {
-  row: NoneRow;
-  bucket: string;
-  detail: string;
-};
+/** Disclosure flags for one page, separating the padding-blind own number. */
+function crnFlags(row: NoneRow, page: PageLook): string[] {
+  if (page.crnNumbers.length === 0) return [];
+  const own = new Set(companyNumberVariants(row.companyNumber));
+  const blind = new Set(depaddedBlindForms(row.companyNumber));
+  const flags: string[] = [];
+  if (page.crnNumbers.some((c) => blind.has(c))) {
+    flags.push('OWN-CRN-DEPADDED-MISS');
+  }
+  if (page.crnNumbers.some((c) => !own.has(c) && !blind.has(c))) {
+    flags.push('other-crn');
+  }
+  return flags;
+}
 
+type Verdict = { row: NoneRow; bucket: string; detail: string };
 const verdicts: Verdict[] = [];
 
 for (const row of cohort) {
-  const origins = candidateOrigins(row.candidates).slice(0, 5);
+  const origins = candidateOrigins(row.candidates).slice(0, MAX_ORIGINS);
   if (origins.length === 0) {
     verdicts.push({ row, bucket: 'no_candidates', detail: '' });
     continue;
   }
-  const nonAgg = origins.filter((o) => {
-    try {
-      return !isAggregatorHost(new URL(o).host.toLowerCase());
-    } catch {
-      return false;
-    }
-  });
-  if (nonAgg.length === 0) {
-    verdicts.push({
-      row,
-      bucket: 'all_aggregator',
-      detail: `${origins.length} candidates, all directories`,
-    });
-    continue;
-  }
 
   const pages: PageLook[] = [];
-  for (const origin of nonAgg.slice(0, MAX_NON_AGG)) {
+  for (const origin of origins) {
     await sleep(DELAY_MS);
     pages.push(await look(origin));
   }
-  const usable = pages.filter((p) => p.ok && !p.parked);
-  if (usable.length === 0) {
+  const reachable = pages.filter((p) => p.ok);
+  if (reachable.length === 0) {
     verdicts.push({
       row,
       bucket: 'all_dead',
-      detail: pages.map((p) => (p.ok ? 'parked' : 'dead')).join(','),
+      detail: `${pages.length} candidates, none fetch`,
+    });
+    continue;
+  }
+  const usable = reachable.filter((p) => !p.aggregator && !p.parked);
+  if (usable.length === 0) {
+    const agg = reachable.filter((p) => p.aggregator).length;
+    const parked = reachable.filter((p) => p.parked).length;
+    verdicts.push({
+      row,
+      bucket: 'all_aggregator',
+      detail: `${agg} directories, ${parked} parked, ${pages.length - reachable.length} dead`,
     });
     continue;
   }
 
-  // The candidate prod's walk actually ran on: the first usable one.
+  // The candidate production's walk ran on: the first usable one, in rank order.
   const walked = usable[0];
   let best: { page: PageLook; score: number } | null = null;
   for (const page of usable) {
@@ -262,10 +336,13 @@ for (const row of cohort) {
   }
 
   if (!best || best.score < 0.5) {
+    const shells = usable.filter((p) => p.shellish).map((p) => p.origin);
     verdicts.push({
       row,
       bucket: 'no_ownership',
-      detail: `best own-score ${best ? best.score.toFixed(2) : '-'}`,
+      detail: `best own-score ${best ? best.score.toFixed(2) : '-'}${
+        shells.length ? `  [js-shell: ${shells.join(' ')}]` : ''
+      }`,
     });
     continue;
   }
@@ -274,7 +351,7 @@ for (const row of cohort) {
     const flags = [
       best.page.shellish ? 'js-shell' : '',
       best.page.anyPostcode ? 'other-postcode' : '',
-      best.page.otherCrn ? 'other-crn' : '',
+      ...crnFlags(row, best.page),
     ]
       .filter(Boolean)
       .join(',');
@@ -286,9 +363,11 @@ for (const row of cohort) {
     continue;
   }
 
-  // Own-looking site below the walked candidate: was the number one click away?
+  // Own-looking site below the walked candidate. Check the SAME five paths a
+  // production walk would have, so 0 hits genuinely means escalation buys
+  // nothing rather than "the two paths we tried were bare".
   let crnAt: string | null = null;
-  for (const path of ['/privacy', '/privacy-policy']) {
+  for (const path of WALK_PATHS) {
     await sleep(DELAY_MS);
     const fetched = await fetchSite(`${best.page.origin}${path}`);
     if (fetched.ok && pageHasCompanyNumber(fetched.html, row.companyNumber)) {
@@ -316,8 +395,8 @@ for (const v of verdicts) {
 console.log(`\n─── decomposition of ${verdicts.length} none rows ───`);
 const buckets = [...new Set(verdicts.map((v) => v.bucket))].sort();
 for (const b of buckets) {
-  const n = verdicts.filter((v) => v.bucket === b).length;
+  const count = verdicts.filter((v) => v.bucket === b).length;
   console.log(
-    `  ${b.padEnd(26)} ${String(n).padStart(3)}  ${((n / verdicts.length) * 100).toFixed(0)}%`,
+    `  ${b.padEnd(26)} ${String(count).padStart(3)}  ${((count / verdicts.length) * 100).toFixed(0)}%`,
   );
 }

@@ -159,7 +159,7 @@ Drawn at random across the whole undiscovered population — incorporation years
 | nothing | 28 | 70.0% |
 
 Wilson 95% CI on the publishable rate: **5.5% – 26.1%**. At the point estimate
-the balance buys ~6,500 rendered websites, roughly £0.008 each.
+the balance buys ~6,500 rendered websites at roughly $0.008 (≈£0.006) each.
 
 This corrects two earlier readings badly:
 
@@ -172,45 +172,56 @@ This corrects two earlier readings badly:
   much smaller than the head sample implied.
 
 The 70% was then decomposed by `scripts/measure-none-breakdown.ts` (zero
-credits — it re-reads the banked candidates and re-fetches pages, with Gemma
-owner-extraction as the ownership estimator):
+credits — it re-reads the banked candidates and re-fetches pages, mirroring
+production probing: all five origins, aggregator judged post-redirect, with
+Gemma owner-extraction as the ownership estimator). Corrected run, 2026-08-01:
 
 | why the row is `none` | n | of none | of all 40 |
 |---|---|---|---|
-| nothing in the SERP looks like the company — likely **no website exists** | 16 | 57% | 40% |
-| own site found and walked, carries **neither statutory signal** | 9 | 32% | 22.5% |
-| own-looking site below rank 1 (privacy pages checked: **0 carried the CRN**) | 3 | 11% | 7.5% |
+| no own-looking page in the SERP — no site, a site search missed, or a JS shell (flagged per row) | 14 | 50% | 35% |
+| own site found and walked, carries **neither statutory signal** | 10 | 36% | 25% |
+| own-looking site below rank 1 (all five production walk paths checked: **0 of 4 carried the CRN**) | 4 | 14% | 10% |
 | search returned nothing / all directories / all dead | 0 | — | — |
 
-Three conclusions:
+An earlier flawed run reported 16/9/3: it judged aggregators pre-redirect,
+fetched only three origins, and checked two paths on lower-rank sites. The
+corrected reconstruction moved two rows (one company's real site surfaced only
+in origins 4–5).
 
-- **The 70% is real absence, not pipeline loss.** No dead-fetch bucket, no
-  JS-shell bucket, no zero-padding misses. The dominant cause is small
-  companies (takeaways, corner shops, micro-employers) with no site — the SERP
-  contains non-directory pages, they just belong to other people, so
-  `no_ownership` is what "no website" looks like in practice.
-- **Rank-1-only walking is validated on representative data.** All three
-  lower-rank own-looking sites were privacy-checked and none carries the
-  number: escalation would have bought zero publishable rows here too.
+Three conclusions, scoped to what the measurement can support:
+
+- **No mechanical loss was found, but `no_ownership` is a mixed bucket.** Zero
+  dead-fetch rows, zero all-directory rows, one JS-shell flag (a page that is
+  plainly not the company), and zero padding-blind numbers — the cohort
+  contains no company with two-plus leading zeros, so that failure mode was
+  untestable here and the tooling now flags it. The 50% bucket is *mostly*
+  small companies with no site (takeaways, corner shops), but a site absent
+  from the top-10 SERP lands here indistinguishably, and the measured recall
+  gap (80.7%@5) allows for up to roughly a third of it. "Likely no website"
+  is the right reading; "proven no website" is not.
+- **Rank-1-only walking survives representative data.** All four lower-rank
+  own-looking sites were walked on the same five paths production uses and
+  none carries the number. n=4 — consistent with the lab, not proof.
 - **The deterministic ceiling on this population is ~30%.** 12.5% CRN + 17.5%
-  postcode is everything with any statutory signal. The 22.5% own-but-silent
+  postcode is everything with any statutory signal. The 25% own-but-silent
   pool has NO deterministic evidence at all — reaching it needs a different
-  evidence class (Common Crawl CRN sweep, or an adjudicated tier), not a better
-  walk. Ownership buckets are estimator-based (15/16 on labelled data), so
-  treat their sizes as ±2 rows.
+  evidence class (Common Crawl CRN sweep, or an adjudicated tier), not a
+  better walk. Ownership buckets are estimator-based (15/16 on labelled
+  data), so treat their sizes as ±2 rows.
 
 ## Sampling warning
 
-Every number here comes from the **20 lowest company numbers on the register** —
-`makeSelectUndiscovered` orders by `company_number`, so the first slices are the
-oldest, largest, most institutional companies (incorporated 1861–1889 in this
-batch). That is the population *least* likely to publish a registration number
-in a website footer, and most likely to trade under a brand unrelated to its
-registered name. A representative slice should do better than 3-in-20.
+The PRODUCTION selector still walks `company_number` ascending, so scheduled
+runs process the oldest, most institutional companies first (incorporated
+1861–1889 in the first slices) — the population least likely to publish a
+registration number and most likely to trade under an unrelated brand. The
+method-lab table above comes from that head; the representative section is the
+corrective, drawn by `measure-search-yield.ts`'s seeded random sample.
 
-**Do not recalibrate anything on early production runs** without accounting for
-this. Randomising the selector order, or sampling across the number range, is
-worth doing before the measurement sample is drawn.
+**Do not recalibrate anything on early production runs**: their yield will read
+far below the representative 12.5% until the selector is past the head. If the
+ascending order ever becomes a problem rather than a quirk, randomise the
+selector — but that trades away its predictable resumability.
 
 ## How to resume cheaply
 
@@ -227,10 +238,12 @@ only needed for the postcode-tier precision question.
 
 ## Ledger
 
-- Serper: 52,324 credits at $50. 25 spent validating (5 dry-run, 20 live).
-- Target population: 109,318 companies with no website row. At one search each
-  the balance covers **48%** of them: 52,324 held against 109,318 needed, a
-  shortfall of 56,994.
-- `crn_on_page` is the only tier this job publishes. At the method-lab rate the
-  balance buys far fewer rendered websites than credits spent, which is why the
-  postcode question is worth real effort before the bulk spend.
+- Serper: 52,324 credits at $50. **75 spent**, itemised: 5 dry-run + 20 live
+  (head, pre-walk) + 10 live (head, first walk run — the "0-for-10") + 40
+  representative yield sample. Balance 52,249. 66 rows written.
+- Target population: 109,318 companies with no website row at the start; one
+  search each covers **48%** of them (shortfall 56,994).
+- `crn_on_page` is the only tier this job publishes. At the representative
+  12.5% the balance buys ~6,500 rendered sites; the postcode question is worth
+  settling before the bulk spend, and the own-but-silent pool needs a
+  different evidence class entirely.

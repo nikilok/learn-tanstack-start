@@ -44,13 +44,18 @@ const flag = (name: string) =>
     .slice(1)
     .join('=');
 
-const n = parseStrictInt(flag('n') ?? '40', 'n');
+/** Ceiling on credits one run may spend. The only figure an input cannot raise. */
+const EXPERIMENT_MAX_N = 500;
+
+const n = Math.min(parseStrictInt(flag('n') ?? '40', 'n'), EXPERIMENT_MAX_N);
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 const maxDisclosure = parseStrictInt(
   flag('max-disclosure') ?? '5',
   'max-disclosure',
 );
-/** Fixed, so the same sample can be redrawn without paying twice by accident. */
+/** Fixed so the DRAW is deterministic for a given population state — NOT a free
+ *  re-run: sampled companies gain rows and leave the population, so a second
+ *  run with the same seed draws DIFFERENT companies and spends fresh credits. */
 const seed = flag('seed') ?? 'yield-2026-08-01';
 
 const apiKey = process.env.SERPER_API_KEY;
@@ -129,8 +134,15 @@ const summary = await discoverWebsites(
         },
       }),
     write: async (row, outcome) => {
-      outcomeOf.set(row.companyNumber, outcome.evidence);
-      return writeOutcome(row, outcome, evidenceConfidence(outcome.evidence));
+      const persisted = await writeOutcome(
+        row,
+        outcome,
+        evidenceConfidence(outcome.evidence),
+      );
+      // Counted only when the database kept it: a row another discoverer
+      // claimed mid-run must not appear in the yield table.
+      if (persisted) outcomeOf.set(row.companyNumber, outcome.evidence);
+      return persisted;
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (message) => console.log(message),
@@ -173,8 +185,12 @@ console.log(
 );
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
 console.log(`  disclosure_fetches  : ${disclosureFetches}`);
+console.log(`  written             : ${summary.written}`);
+console.log(`  unpersisted         : ${summary.unpersisted}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
 console.log(`  errored             : ${summary.errored}`);
+console.log(`  credits_lost        : ${summary.creditsLost}`);
+console.log(`  stopped_early       : ${summary.stoppedEarly || 'no'}`);
 
 console.log('\n─── by incorporation decade ───');
 const decades = [...new Set([...decadeOf.values()])].sort();
@@ -190,4 +206,19 @@ for (const d of decades) {
   console.log(
     `  ${d.padEnd(10)} ${String(members.length).padEnd(4)} ${String(c).padEnd(5)} ${String(p).padEnd(6)} ${members.length - c - p}`,
   );
+}
+
+// A measurement over a partial or leaky run is not the measurement it claims
+// to be. Same posture as production: print everything, then refuse the green
+// tick so the partial figures cannot be recorded as the n they were not.
+if (
+  summary.stoppedEarly ||
+  summary.creditsLost > 0 ||
+  summary.unpersisted > 0
+) {
+  console.error(
+    `\n  RUN INCOMPLETE — stopped_early=${summary.stoppedEarly || 'no'} credits_lost=${summary.creditsLost} unpersisted=${summary.unpersisted}`,
+  );
+  console.error('  Figures above cover a partial sample. Do not record them.');
+  process.exit(1);
 }

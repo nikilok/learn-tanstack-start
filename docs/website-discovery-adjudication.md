@@ -14,9 +14,10 @@ ownership from the page itself. Only one proof is strong enough to publish: the
 company's own registration number on its own site (`crn_on_page`, 0.990). The
 registered office **postcode** on the page (`postcode_on_page`, 0.850) is far
 more common but is not in `PUBLISHABLE_EVIDENCE`, because its precision has
-never been measured on a searched population. In the first live run that tier
-was **15 of 20 rows** — so roughly three quarters of every credit spent lands in
-a bucket that never renders. Closing that gap is the whole problem.
+never been measured on a searched population. On a representative sample
+that tier is 17.5% of rows against 12.5% publishable, so closing it would
+roughly 2.4× what renders. (An earlier head-biased sample put it at 15 of 20,
+which overstated the prize considerably — see the measured section below.)
 
 ## What ships (deterministic, no model)
 
@@ -143,6 +144,37 @@ displays that postcode, so the match is a guaranteed false positive rather than
 a random one. There is **no knee in the distribution**; the mechanism argument
 only clearly bites above ~50. Carry the share count onto the row so precision can
 later be measured stratified by it, and set the threshold from data.
+
+## Measured on a REPRESENTATIVE sample (2026-08-01, n=40)
+
+Drawn at random across the whole undiscovered population — incorporation years
+1986–2025, median 2017, mixed jurisdictions — by
+`scripts/measure-search-yield.ts`, which runs the real orchestrator with only
+`selectRows` swapped.
+
+| outcome | n | share |
+|---|---|---|
+| `crn_on_page` (publishable) | 5 | **12.5%** |
+| `postcode_on_page` | 7 | 17.5% |
+| nothing | 28 | 70.0% |
+
+Wilson 95% CI on the publishable rate: **5.5% – 26.1%**. At the point estimate
+the balance buys ~6,500 rendered websites, roughly £0.008 each.
+
+This corrects two earlier readings badly:
+
+- **The 0-for-10 live run was the head bias, not the method.** 12.5% here is
+  consistent with the lab's 3-in-20.
+- **"Three quarters of every credit lands in the postcode tier" was an artefact
+  of the oldest companies.** On a real sample the postcode tier is 17.5%, and
+  the dominant outcome is *nothing at all* (70%). Unlocking the postcode tier
+  would roughly 2.4× publishable output — still the largest single lever, but
+  much smaller than the head sample implied.
+
+The 70% is the more interesting number and is unexplained: search recall was
+measured at 80.7%@5, so most of that is companies whose site carries neither
+signal, or which have no site. Worth separating before assuming more effort on
+adjudication is the best use of the balance.
 
 ## Sampling warning
 

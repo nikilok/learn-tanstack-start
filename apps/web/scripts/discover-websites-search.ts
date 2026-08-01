@@ -34,20 +34,7 @@ import {
   makeSelectUndiscovered,
   makeWriteOutcome,
 } from '../src/lib/websites/discover-sql.ts';
-import type { DiscoveryRow } from '../src/lib/websites/discover-sweep.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
-import type { CandidateProbe } from '../src/lib/websites/discover.ts';
-import {
-  pageHasCompanyNumber,
-  pageHasPostcode,
-  visibleText,
-} from '../src/lib/websites/extract.ts';
-import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
-import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
-import {
-  isAggregatorHost,
-  looksParked,
-} from '../src/lib/websites/page-signals.ts';
 import { setGitHubOutput } from './ci-utils.ts';
 import {
   ERROR_RATE_THRESHOLD,
@@ -55,7 +42,7 @@ import {
   parseStrictInt,
 } from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
-import { fetchSite } from './lib/web-fetch.ts';
+import { probeOrigin, walkDisclosure } from './lib/website-probe.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -113,73 +100,6 @@ console.log(
   `  before: ${before.target} companies undiscovered, ${before.discovered} already searched`,
 );
 
-/** Fetch one candidate origin and read the two query-independent signals. */
-async function probe(
-  row: DiscoveryRow,
-  url: string,
-): Promise<CandidateProbe | null> {
-  // Raw provider output, so normalise as every other writer of url does.
-  const canonical = normaliseWebsiteUrl(url);
-  if (!canonical) return null;
-  const fetched = await fetchSite(canonical);
-  if (!fetched.ok) return null;
-  const host = (() => {
-    try {
-      return new URL(fetched.url).host.toLowerCase();
-    } catch {
-      return '';
-    }
-  })();
-  const text = visibleText(fetched.html);
-  const crnFound = pageHasCompanyNumber(fetched.html, row.companyNumber);
-  const postcodeFound = row.postcode
-    ? pageHasPostcode(fetched.html, row.postcode)
-    : false;
-  return {
-    // Store the URL we ASKED for, not the post-redirect one: that is what a
-    // visitor clicks and what the sweep will revalidate. The host is judged
-    // post-redirect for the same reason it is in the sweep — a stored URL that
-    // 301s into a directory has to be judged on where it lands.
-    url: canonical,
-    evidenceUrl: crnFound || postcodeFound ? canonical : null,
-    crnFound,
-    postcodeFound,
-    onAggregator: isAggregatorHost(host),
-    parked: looksParked(text),
-  };
-}
-
-/**
- * Probe a candidate's legal pages when its homepage proved nothing.
- *
- * Returns the probe updated with whatever they found, so the same pure decider
- * settles the row either way. Stops at the first registration number: nothing
- * below it can beat the company naming itself.
- */
-async function walkDisclosure(
-  row: DiscoveryRow,
-  base: CandidateProbe,
-): Promise<CandidateProbe | null> {
-  let updated = base;
-  for (const path of DISCLOSURE_PATHS.slice(0, MAX_DISCLOSURE_PATHS)) {
-    await sleep(delayMs);
-    const fetched = await fetchSite(`${base.url}${path}`);
-    disclosureFetches += 1;
-    if (!fetched.ok) continue;
-    if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {
-      return { ...updated, crnFound: true, evidenceUrl: fetched.url };
-    }
-    if (
-      !updated.postcodeFound &&
-      row.postcode &&
-      pageHasPostcode(fetched.html, row.postcode)
-    ) {
-      updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
-    }
-  }
-  return updated;
-}
-
 const writeOutcome = makeWriteOutcome(sql);
 
 const summary = await discoverWebsites(
@@ -196,8 +116,15 @@ const summary = await discoverWebsites(
     },
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
-    probe,
-    walkDisclosure,
+    probe: probeOrigin,
+    walkDisclosure: (row, base) =>
+      walkDisclosure(row, base, {
+        maxPaths: MAX_DISCLOSURE_PATHS,
+        delayMs,
+        onFetch: () => {
+          disclosureFetches += 1;
+        },
+      }),
     write: (row, outcome) =>
       writeOutcome(row, outcome, evidenceConfidence(outcome.evidence)),
     sleep,

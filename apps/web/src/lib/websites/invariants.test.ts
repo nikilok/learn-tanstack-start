@@ -94,10 +94,42 @@ function* allCases(): Generator<Case> {
   // and the only thing that can unpublish a live row — sat outside every
   // invariant below.
   const pageShapes = [
-    { label: 'plain', nameCorroborated: false, noSiteThere: false },
-    { label: 'corroborated', nameCorroborated: true, noSiteThere: false },
-    { label: 'nosite', nameCorroborated: false, noSiteThere: true },
-    { label: 'corroborated+nosite', nameCorroborated: true, noSiteThere: true },
+    {
+      label: 'plain',
+      postcodeConfirms: false,
+      onAggregator: false,
+      looksParked: false,
+    },
+    {
+      label: 'corroborated',
+      postcodeConfirms: true,
+      onAggregator: false,
+      looksParked: false,
+    },
+    {
+      label: 'parked',
+      postcodeConfirms: false,
+      onAggregator: false,
+      looksParked: true,
+    },
+    {
+      label: 'aggregator',
+      postcodeConfirms: false,
+      onAggregator: true,
+      looksParked: false,
+    },
+    {
+      label: 'confirmed+aggregator',
+      postcodeConfirms: true,
+      onAggregator: true,
+      looksParked: false,
+    },
+    {
+      label: 'confirmed+parked',
+      postcodeConfirms: true,
+      onAggregator: false,
+      looksParked: true,
+    },
   ];
 
   for (const status of STATUSES) {
@@ -121,8 +153,9 @@ function* allCases(): Generator<Case> {
                   outcome: o.outcome,
                   crnFoundAt: d.crnFoundAt,
                   postcodeFoundAt: d.postcodeFoundAt,
-                  nameCorroborated: p.nameCorroborated,
-                  noSiteThere: p.noSiteThere,
+                  postcodeConfirms: p.postcodeConfirms,
+                  onAggregator: p.onAggregator,
+                  looksParked: p.looksParked,
                 },
               };
             }
@@ -186,7 +219,7 @@ describe('state machine invariants', () => {
    * this pass actually found the proof. Anything else lets a tier drift upward
    * on no evidence at all.
    *
-   * `nameCorroborated` counts as proof — it is read off the page this pass
+   * `postcodeConfirms` counts as proof — it is read off the page this pass
    * fetched, like the other two. It is listed explicitly rather than left
    * implicit so that adding a fourth signal fails here until someone decides
    * whether it is proof, which is the question this invariant exists to force.
@@ -198,7 +231,7 @@ describe('state machine invariants', () => {
       const foundSomething = Boolean(
         c.input.crnFoundAt ||
         c.input.postcodeFoundAt ||
-        c.input.nameCorroborated,
+        c.input.postcodeConfirms,
       );
       if (
         !foundSomething &&
@@ -346,19 +379,39 @@ describe('decideWebsite invariants', () => {
 });
 
 describe('state machine invariants — the revocable rung', () => {
-  /** I11. A page-shape heuristic may not overturn a registered number found on
-   *  the site or an owner's decision. Both are terminal everywhere else in the
-   *  module, and looksParked fires on any short page saying "coming soon". */
-  test('I11 — noSiteThere never unpublishes manual or crn_on_page', () => {
+  /** I11. The HEURISTIC may not overturn a registered number found on the site
+   *  or an owner's decision: looksParked fires on any short page saying "coming
+   *  soon", and neither tier should fall to a phrase match. */
+  test('I11 — looksParked never unpublishes manual or crn_on_page', () => {
     const violations: string[] = [];
     for (const c of CASES) {
-      if (!c.input.noSiteThere) continue;
+      if (!c.input.looksParked || c.input.onAggregator) continue;
       if (c.input.evidence !== 'manual' && c.input.evidence !== 'crn_on_page') {
         continue;
       }
       const r = revalidate(c.input);
       if (c.input.outcome.ok && r.status !== 'verified') {
         violations.push(`${c.label} -> ${r.status}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I14. The CERTAIN signal has no exemptions and suppresses promotion, not
+   *  just rendering. A directory listing prints the registration number, so the
+   *  crn check fires on exactly the hosts the deny-list rejects — and a tier
+   *  written off a listing would also pin the row's confidence, blocking the
+   *  registry from ever replacing the URL. */
+  test('I14 — a directory listing never renders and never promotes', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (!c.input.onAggregator || !c.input.outcome.ok) continue;
+      const r = revalidate(c.input);
+      if (r.status === 'verified') {
+        violations.push(`${c.label} rendered`);
+      }
+      if (evidenceRank(r.evidence) > evidenceRank(c.input.evidence)) {
+        violations.push(`${c.label} promoted to ${r.evidence}`);
       }
     }
     expect(violations.slice(0, 10)).toEqual([]);
@@ -402,13 +455,13 @@ describe('state machine invariants — the revocable rung', () => {
     const withdrawn = revalidate({
       ...base,
       evidence: 'registry_confirmed',
-      nameCorroborated: false,
+      postcodeConfirms: false,
     });
     expect(withdrawn.evidence).toBe('registry');
     const regained = revalidate({
       ...base,
       evidence: withdrawn.evidence,
-      nameCorroborated: true,
+      postcodeConfirms: true,
     });
     expect(regained.evidence).toBe('registry_confirmed');
     expect(regained.confidence).toBe('0.970');

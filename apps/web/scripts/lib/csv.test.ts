@@ -108,3 +108,26 @@ describe('fromCsv', () => {
     expect(fromCsv('')).toEqual({ rows: [], malformed: [] });
   });
 });
+
+describe('fromCsv — files a spreadsheet actually writes', () => {
+  test('survives the UTF-8 BOM Excel and Numbers prepend', () => {
+    // Left in, the first header cell is "﻿company_number", so every row's
+    // company_number is undefined — and `malformed` stays empty, so the
+    // corruption check that exists to catch this passes it through.
+    const parsed = fromCsv('﻿company_number,url\n03260168,https://x.co.uk\n');
+    expect(parsed.rows).toEqual([
+      { company_number: '03260168', url: 'https://x.co.uk' },
+    ]);
+    expect(parsed.malformed).toEqual([]);
+  });
+
+  test('one stray quote does not swallow the rest of the file', () => {
+    // A company name typed as `5" PIPE LTD` used to make every later newline
+    // part of the same logical record, silently discarding well-formed rows
+    // that were never reported as malformed.
+    const parsed = fromCsv('a,b\n1,ok\n2,5" PIPE LTD\n3,fine\n4,also fine\n');
+    expect(parsed.malformed).toEqual([3]);
+    // The rows after the bad one must survive.
+    expect(parsed.rows.map((r) => r.a)).toEqual(['1', '3', '4']);
+  });
+});

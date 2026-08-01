@@ -243,7 +243,7 @@ describe('revalidate — hosts that answered but were not read', () => {
   });
 });
 
-describe('name corroboration — the one revocable rung', () => {
+describe('postcode confirmation — the one revocable rung', () => {
   const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
     revalidate({
       storedUrl: 'https://www.brendoncare.org.uk',
@@ -255,59 +255,59 @@ describe('name corroboration — the one revocable rung', () => {
       ...over,
     });
 
-  test('promotes a registry row whose page names the company', () => {
-    const result = live({ nameCorroborated: true });
+  test('promotes a registry row whose page shows its registered address', () => {
+    const result = live({ postcodeConfirms: true });
     expect(result.evidence).toBe('registry_confirmed');
     expect(result.status).toBe('verified');
     expect(Number(result.confidence)).toBeGreaterThan(0.95);
   });
 
-  test('WITHDRAWS the confirmation when corroboration disappears', () => {
+  test('WITHDRAWS the confirmation when the address disappears', () => {
     // The decay this tier exists for: the site is rebuilt, the domain changes
-    // hands, or the company is renamed, and the page stops naming it. Upgrade-
-    // only applies to discovery — revalidation is allowed to move a row down,
-    // and a latched rung here would keep publishing the link.
+    // hands, or the company moves. Upgrade-only applies to discovery —
+    // revalidation is allowed to move a row down, and a latched rung here
+    // would keep publishing the link.
     const result = live({
       evidence: 'registry_confirmed',
-      nameCorroborated: false,
+      postcodeConfirms: false,
     });
     expect(result.evidence).toBe('registry');
-    expect(result.note).toContain('no longer corroborated');
+    expect(result.note).toContain('no longer on the site');
   });
 
-  test('re-confirms without churn when corroboration is still there', () => {
+  test('re-confirms without churn when the address is still there', () => {
     expect(
-      live({ evidence: 'registry_confirmed', nameCorroborated: true }).evidence,
+      live({ evidence: 'registry_confirmed', postcodeConfirms: true }).evidence,
     ).toBe('registry_confirmed');
   });
 
   test('never touches a registered number found on the page', () => {
-    // crn_on_page outranks it, and a missing name match must not undo it.
+    // crn_on_page outranks it, and a missing address must not undo it.
     expect(
-      live({ evidence: 'crn_on_page', nameCorroborated: false }).evidence,
+      live({ evidence: 'crn_on_page', postcodeConfirms: false }).evidence,
     ).toBe('crn_on_page');
   });
 
   test('never overturns an owner decision', () => {
-    expect(live({ evidence: 'manual', nameCorroborated: false }).evidence).toBe(
+    expect(live({ evidence: 'manual', postcodeConfirms: false }).evidence).toBe(
       'manual',
     );
-    expect(live({ evidence: 'manual', nameCorroborated: true }).evidence).toBe(
+    expect(live({ evidence: 'manual', postcodeConfirms: true }).evidence).toBe(
       'manual',
     );
   });
 
   test('does not promote a tier the rule was never measured on', () => {
-    // Measured only against registry rows, where the name confirms a claim an
-    // exact company-number join already made. Standing alone it is far weaker.
+    // Measured only against registry rows, where the address confirms a claim
+    // an exact company-number join already made. Standing alone it is weaker.
     expect(
-      live({ evidence: 'registry_unconfirmed', nameCorroborated: true })
+      live({ evidence: 'registry_unconfirmed', postcodeConfirms: true })
         .evidence,
     ).toBe('registry_unconfirmed');
   });
 });
 
-describe('parked and directory pages', () => {
+describe('parked pages (heuristic) and directory hosts (certain)', () => {
   const live = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
     revalidate({
       storedUrl: 'https://www.pinnaclecarehome.com',
@@ -323,7 +323,7 @@ describe('parked and directory pages', () => {
     // A holding page answers 200, so liveness cannot see it. It is an identity
     // failure, not a liveness one — the row keeps its evidence and its failure
     // count, and simply stops rendering.
-    const result = live({ noSiteThere: true });
+    const result = live({ looksParked: true });
     expect(result.status).toBe('candidate');
     expect(result.evidence).toBe('registry');
     expect(result.live).toBe(true);
@@ -331,14 +331,14 @@ describe('parked and directory pages', () => {
   });
 
   test('restores the row on its own once a real site appears', () => {
-    expect(live({ noSiteThere: false }).status).toBe('verified');
+    expect(live({ looksParked: false }).status).toBe('verified');
   });
 
   test('holds back even a corroborated row', () => {
     // Pinnacle Care Homes Limited -> pinnaclecarehome.com, a "Coming Soon"
     // page on the company's own domain: the name matches, and there is still
     // nothing worth linking to.
-    expect(live({ nameCorroborated: true, noSiteThere: true }).status).toBe(
+    expect(live({ postcodeConfirms: true, looksParked: true }).status).toBe(
       'candidate',
     );
   });

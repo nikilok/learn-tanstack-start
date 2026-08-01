@@ -12,11 +12,7 @@ import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
 import { evidenceRank } from './decide.ts';
 import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
-import {
-  isAggregatorHost,
-  looksParked,
-  nameCorroboration,
-} from './page-signals.ts';
+import { isAggregatorHost, looksParked } from './page-signals.ts';
 import type { RevalidateFailure, RevalidateResult } from './revalidate.ts';
 import { revalidate } from './revalidate.ts';
 
@@ -31,12 +27,6 @@ function hostOf(url: string): string {
 
 export type SweepRow = {
   companyNumber: string;
-  /** Companies House name, for the corroboration check. Empty when we hold no
-   *  profile, which simply means the check cannot confirm anything. */
-  companyName: string;
-  /** Former names, checked alongside the current one so a rename does not
-   *  un-publish a site that has not rebranded yet. */
-  previousNames: string[];
   url: string;
   status: WebsiteStatus;
   evidence: WebsiteEvidence;
@@ -110,7 +100,7 @@ export type SweepSummary = {
   adoptedVariant: number;
   robotsBlocked: number;
   disclosureFetches: number;
-  /** Rows whose page carried the company's own name in host and text. */
+  /** Rows whose page carried the company's registered office postcode. */
   corroborated: number;
   /** Rows whose evidence tier went DOWN this pass. Counted separately from
    *  `promoted`, which used to be safe as an any-change counter only because
@@ -257,27 +247,32 @@ export async function sweepWebsites(
 
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
-      let nameCorroborated = false;
-      let noSiteThere = false;
+      let postcodeConfirms = false;
+      let onAggregator = false;
+      let looksParkedPage = false;
       if (fetched.ok) {
         // Read off the homepage we already have — no extra request.
         //
-        // The host is the POST-redirect one, unlike evidence_url just below,
-        // and the difference matters in both directions. The text we are
-        // matching against came from the final page, so pairing it with the
-        // pre-redirect host let a stored URL that 301s into a directory escape
-        // isAggregatorHost while the directory's own listing supplied the name
-        // match — publishing a carehome.co.uk page as a company's website. It
-        // is also the host the precision sample was scored against, so using
-        // the other one would mean shipping a rule nobody measured.
+        // The host is the POST-redirect one, because a stored URL that 301s
+        // into a directory has to be judged on where it actually lands:
+        // pairing the final page's content with the pre-redirect host let such
+        // a row escape isAggregatorHost entirely.
+        //
+        // The postcode is checked on the HOMEPAGE specifically, not taken from
+        // findDisclosure below, because this signal revokes as well as
+        // confirms and so must be recomputed identically on every pass.
+        // Disclosure-path probing is first-pass-only, so keying off it would
+        // read as absent from the second pass on and revoke every row it had
+        // just confirmed.
         const text = visibleText(fetched.html);
         const host = hostOf(fetched.url);
-        nameCorroborated = [row.companyName, ...row.previousNames].some(
-          (name) => name && nameCorroboration(name, host, text).corroborated,
+        onAggregator = isAggregatorHost(host);
+        looksParkedPage = looksParked(text);
+        postcodeConfirms = Boolean(
+          row.postcode && deps.hasPostcode(fetched.html, row.postcode),
         );
-        noSiteThere = isAggregatorHost(host) || looksParked(text);
-        if (nameCorroborated) summary.corroborated++;
-        if (noSiteThere) summary.noSiteThere++;
+        if (postcodeConfirms) summary.corroborated++;
+        if (onAggregator || looksParkedPage) summary.noSiteThere++;
 
         // Attribute proof to the URL this row will STORE (the variant we
         // tried), not to fetched.url which is post-redirect. Otherwise a site
@@ -306,8 +301,9 @@ export async function sweepWebsites(
           : { ok: false, reason: fetched.reason, status: fetched.status },
         crnFoundAt,
         postcodeFoundAt,
-        nameCorroborated,
-        noSiteThere,
+        postcodeConfirms,
+        onAggregator,
+        looksParked: looksParkedPage,
       });
 
       if (fetched.ok) {

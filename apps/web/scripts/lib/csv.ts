@@ -95,16 +95,34 @@ function parseRecord(line: string): { fields: string[]; valid: boolean } {
   return { fields, valid };
 }
 
-/** Split text into logical records, keeping each one's PHYSICAL start line. */
+/**
+ * Split text into logical records, keeping each one's PHYSICAL start line.
+ *
+ * A quote only opens a quoted field at the START of a field, exactly as
+ * parseRecord requires. Toggling on every quote instead meant one stray one in
+ * a hand-typed name — `5" PIPE LTD` — swallowed every following record into the
+ * same logical row, and they were dropped without ever reaching `malformed`.
+ * The two functions disagreeing is what made that silent: parseRecord had the
+ * strict rule and never saw the records splitRecords had already eaten.
+ */
 function splitRecords(text: string): { line: string; at: number }[] {
   const records: { line: string; at: number }[] = [];
   let current = '';
   let quoted = false;
+  /** True at the start of a field, where alone a quote may open one. */
+  let atFieldStart = true;
   let physical = 1;
   let startedAt = 1;
 
   for (const char of text) {
-    if (char === '"') quoted = !quoted;
+    if (quoted) {
+      if (char === '"') quoted = false;
+    } else if (char === '"' && atFieldStart) {
+      quoted = true;
+    }
+    if (!quoted) {
+      atFieldStart = char === ',' || char === '\n';
+    }
     if (char === '\n' && !quoted) {
       records.push({ line: current.replace(/\r$/, ''), at: startedAt });
       current = '';
@@ -134,7 +152,11 @@ export function fromCsv(text: string): {
   rows: Record<string, string>[];
   malformed: number[];
 } {
-  const records = splitRecords(text);
+  // Excel and Numbers write a UTF-8 BOM when saving CSV, and this module exists
+  // for files they save. Left in, the first header cell becomes "\ufeffcompany_number"
+  // and every row's company_number reads as undefined — while `malformed` stays
+  // empty, so the corruption check that exists to catch exactly this passes.
+  const records = splitRecords(text.replace(/^\ufeff/, ''));
   const header = records.shift();
   if (!header) return { rows: [], malformed: [] };
   const columns = parseRecord(header.line).fields;

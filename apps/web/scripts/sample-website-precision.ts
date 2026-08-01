@@ -24,7 +24,7 @@
  * CSV, and do not commit the output. See feedback: CI logs are public.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { neon } from '@ss/db/client';
@@ -48,8 +48,10 @@ loadScriptEnv(import.meta.url);
 
 const OUT_DIR = new URL('../.precision-samples/', import.meta.url).pathname;
 
-/** The tier under test, and a small control drawn from a tier we already trust. */
-const SUBJECT_TIER = 'registry';
+/** The tier under test (--tier), and a small control from one we already
+ *  trust. It has to be selectable: the whole point of the tooling is to score
+ *  `registry_confirmed` before publishing it, and a hardcoded 'registry' can
+ *  never draw that population at all. */
 const CONTROL_TIER = 'crn_on_page';
 
 const COLUMNS = [
@@ -169,6 +171,7 @@ const SHUFFLE = 'md5(company_number || $SEED)';
 
 async function sample(): Promise<void> {
   const sql = neon(process.env.POSTGRES_URL as string);
+  const subjectTier = flag('tier') ?? 'registry';
   const n = parseStrictInt(flag('n') ?? '200', 'n');
   const control = parseStrictInt(flag('control') ?? '20', 'control');
   const seed = flag('seed') ?? '2026-08-01';
@@ -177,7 +180,7 @@ async function sample(): Promise<void> {
     `Website precision sample — db ${dbFingerprint(process.env.POSTGRES_URL)}`,
   );
   console.log(
-    `  subject: ${SUBJECT_TIER} (${n})  control: ${CONTROL_TIER} (${control})  seed: ${seed}`,
+    `  subject: ${subjectTier} (${n})  control: ${CONTROL_TIER} (${control})  seed: ${seed}`,
   );
 
   const draw = async (tier: string, limit: number) =>
@@ -196,12 +199,12 @@ async function sample(): Promise<void> {
       [tier, seed, limit],
     )) as Omit<SampleRow, 'verdict'>[];
 
-  const subject = await draw(SUBJECT_TIER, n);
+  const subject = await draw(subjectTier, n);
   const controls = await draw(CONTROL_TIER, control);
 
   if (subject.length < n) {
     console.log(
-      `  NOTE: only ${subject.length} ${SUBJECT_TIER} rows are swept so far; the sweep completes around 9 August.`,
+      `  NOTE: only ${subject.length} ${subjectTier} rows are swept so far; the sweep completes around 9 August.`,
     );
   }
 
@@ -212,9 +215,23 @@ async function sample(): Promise<void> {
     .sort((a, b) => a.company_number.localeCompare(b.company_number));
 
   mkdirSync(OUT_DIR, { recursive: true });
-  const stamp = seed.replace(/[^0-9a-z-]/gi, '');
+  const stamp = `${subjectTier}-${seed}`.replace(/[^0-9a-z-]/gi, '');
   const csvPath = join(OUT_DIR, `sample-${stamp}.csv`);
   const htmlPath = join(OUT_DIR, `label-${stamp}.html`);
+  // Never replace a file that already carries labels. The sheet's own
+  // instruction is "Download CSV over the file above", so a re-draw on the same
+  // seed would silently destroy hours of hand labelling with no backup — the
+  // sibling probe script already refuses this and this one did not.
+  if (existsSync(csvPath)) {
+    const existing = fromCsv(readFileSync(csvPath, 'utf8'));
+    const labelled = existing.rows.filter((r) => (r.verdict ?? '').trim());
+    if (labelled.length > 0) {
+      console.error(
+        `\n  ${csvPath} already holds ${labelled.length} labelled row(s). Refusing to overwrite it — pass a different --seed.`,
+      );
+      process.exit(1);
+    }
+  }
   writeFileSync(csvPath, toCsv([...COLUMNS], rows));
   writeFileSync(htmlPath, labellingSheet(rows, `sample-${stamp}.csv`));
 
@@ -225,7 +242,7 @@ async function sample(): Promise<void> {
   const naive = n - Math.floor(n * PRECISION_FLOOR);
   console.log('');
   console.log(
-    `  ${rows.length} rows written (${subject.length} ${SUBJECT_TIER}, ${controls.length} ${CONTROL_TIER})`,
+    `  ${rows.length} rows written (${subject.length} ${subjectTier}, ${controls.length} ${CONTROL_TIER})`,
   );
   console.log(`  csv   : ${csvPath}`);
   console.log(`  label : ${htmlPath}`);
@@ -243,7 +260,7 @@ async function sample(): Promise<void> {
     );
   } else {
     console.log(
-      `  At ${n} rows, ${SUBJECT_TIER} promotes on at most ${allowance} wrong-or-unsure (${naive} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`,
+      `  At ${n} rows, ${subjectTier} promotes on at most ${allowance} wrong-or-unsure (${naive} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`,
     );
   }
 }

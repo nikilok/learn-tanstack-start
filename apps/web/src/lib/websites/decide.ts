@@ -154,11 +154,22 @@ export function statusForEvidence(evidence: WebsiteEvidence): WebsiteStatus {
  * the `existing.source &&` guard does in process).
  */
 export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
+  // The confidence of the rung `registry_confirmed` collapses to, so the SQL
+  // compares the same DISCOVERY strength decideWebsite does. Without this the
+  // collapse existed in process only: decideWebsite returned `update` for a
+  // registry correcting a confirmed row, and then the ON CONFLICT predicate
+  // silently threw the write away because 0.970 is neither below nor equal to
+  // 0.950 — so the freeze the collapse was written to remove survived, with
+  // no trace but a generic "rejected by the upgrade guard" count.
+  const collapsed =
+    `CASE WHEN ${table}.evidence = 'registry_confirmed'` +
+    ` THEN ${evidenceConfidence('registry')}::numeric` +
+    ` ELSE ${table}.confidence END`;
   return (
     `${table}.evidence <> 'manual' AND (` +
     `${table}.confidence IS NULL` +
-    ` OR ${table}.confidence < excluded.confidence` +
-    ` OR (${table}.confidence = excluded.confidence AND ${table}.source = excluded.source)` +
+    ` OR ${collapsed} < excluded.confidence` +
+    ` OR (${collapsed} = excluded.confidence AND ${table}.source = excluded.source)` +
     // Mirrors decideWebsite's dead-row branch INCLUDING its evidence floor:
     // only a proposal strong enough to render on its own may displace a dead
     // row, or an unconfirmed guess replaces a proven number in the database

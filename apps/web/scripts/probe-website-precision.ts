@@ -19,14 +19,16 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
+import { neon } from '@ss/db/client';
+
 import {
   pageHasCompanyNumber,
+  pageHasPostcode,
   visibleText,
 } from '../src/lib/websites/extract.ts';
 import {
   isAggregatorHost,
   looksParked,
-  nameCorroboration,
 } from '../src/lib/websites/page-signals.ts';
 import { fromCsv } from './lib/csv.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
@@ -67,7 +69,9 @@ type Evidence = {
   townOnPage?: boolean;
   aggregator?: boolean;
   parked?: boolean;
-  /** The rule under test: name in BOTH host and page. */
+  /** The rule under test: the registered office postcode on the homepage.
+   *  Must stay identical to what sweep.ts computes, or the sample scores a
+   *  rule the pipeline does not run — which has already happened once. */
   corroborated?: boolean;
   /** A short readable slice, for the rows the signals do not settle. */
   snippet?: string;
@@ -78,6 +82,20 @@ if (malformed.length) {
   console.error(`  malformed rows at ${malformed.join(', ')}`);
   process.exit(1);
 }
+
+// The postcode is not in the sample CSV: it is pipeline input, not something a
+// labeller judges, and putting it in the file a human edits invites drift
+// between what was scored and what the sweep runs.
+const sql = neon(process.env.POSTGRES_URL as string);
+const postcodes = new Map<string, string>(
+  (
+    (await sql.query(
+      `SELECT company_number, coalesce(postal_code, '') AS postal_code
+       FROM companies_house_profiles WHERE company_number = ANY($1)`,
+      [rows.map((r) => r.company_number)],
+    )) as { company_number: string; postal_code: string }[]
+  ).map((r) => [r.company_number, r.postal_code]),
+);
 
 console.log(`Probing ${rows.length} sampled sites at ${delayMs}ms spacing`);
 
@@ -117,10 +135,10 @@ for (const [index, row] of rows.entries()) {
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 120);
-    const corr = nameCorroboration(row.company_name ?? '', host, flat);
-    evidence.hits = corr.inText;
-    evidence.domainHits = corr.inHost;
-    evidence.corroborated = corr.corroborated;
+    const postcode = postcodes.get(row.company_number) ?? '';
+    evidence.corroborated = Boolean(
+      postcode && pageHasPostcode(result.html, postcode),
+    );
     evidence.crn = pageHasCompanyNumber(result.html, row.company_number);
     evidence.townOnPage = Boolean(
       row.location && flat.includes(row.location.toLowerCase()),

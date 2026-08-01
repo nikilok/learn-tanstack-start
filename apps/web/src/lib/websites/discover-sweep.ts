@@ -51,6 +51,9 @@ export type DiscoveryConfig = {
 
 export type DiscoverySummary = {
   selected: number;
+  /** Rows the run actually reached. Lower than `selected` whenever the loop
+   *  broke early, and the only honest denominator for an error rate. */
+  processed: number;
   searched: number;
   /** Companies where a candidate carried the registration number. */
   foundByNumber: number;
@@ -94,6 +97,7 @@ export async function discoverWebsites(
   const rows = await deps.selectRows(config.maxRows);
   const summary: DiscoverySummary = {
     selected: rows.length,
+    processed: 0,
     searched: 0,
     foundByNumber: 0,
     foundByAddress: 0,
@@ -117,6 +121,8 @@ export async function discoverWebsites(
       summary.stoppedEarly = 'budget';
       break;
     }
+
+    summary.processed += 1;
 
     try {
       // A row carrying banked candidates is a retry: the credit was spent on

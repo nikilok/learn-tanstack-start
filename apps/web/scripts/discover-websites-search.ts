@@ -171,6 +171,7 @@ const hitRate = summary.searched === 0 ? 0 : (found / summary.searched) * 100;
 
 console.log('\n─── summary ───');
 console.log(`  selected            : ${summary.selected}`);
+console.log(`  processed           : ${summary.processed}`);
 console.log(`  searched            : ${summary.searched}`);
 console.log(`  found_by_number     : ${summary.foundByNumber}`);
 console.log(`  found_by_address    : ${summary.foundByAddress}`);
@@ -207,7 +208,11 @@ if (summary.stoppedEarly === 'search_failing') {
 // A run whose rows all threw spent its whole budget and wrote nothing, and
 // until now said so only in a counter nobody reads. Same posture as the phase5
 // sweep: above the shared threshold, exit loud.
-const attempted = summary.selected - summary.unsearchable;
+// Rows REACHED, not rows selected. The loop breaks on budget, out_of_credits
+// and search_failing, so with maxSearches 10 against 300 selected rows, eight
+// throws out of the ten actually processed is 8/300 = 2.7% — under the
+// threshold, green tick, 80% of the real work failed.
+const attempted = summary.processed - summary.unsearchable;
 const errorRate = attempted === 0 ? 0 : summary.errored / attempted;
 if (attempted > 0 && errorRate > ERROR_RATE_THRESHOLD) {
   console.error(

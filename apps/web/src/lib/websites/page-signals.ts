@@ -56,10 +56,8 @@ const AGGREGATOR_HOSTS = [
   // bodies are sponsors in their own right and `<council>.gov.uk` IS their
   // website, so the wildcard would reject the correct answer.
   'charitycommission.gov.uk',
-  'register-of-charities.charitycommission.gov.uk',
   'ofsted.gov.uk',
   'fca.org.uk',
-  'register.fca.org.uk',
   // UK company-data resellers. These rank hard on "<name> ltd" queries and
   // every one of them reprints the CRN.
   'endole.co.uk',
@@ -78,7 +76,6 @@ const AGGREGATOR_HOSTS = [
   'ukbusinessdirectory.co.uk',
   'thecompanycheck.com',
   'companiesuk.info',
-  'suite.endole.co.uk',
   'bizzdirect.co.uk',
   'businessmagnet.co.uk',
   'freecompanyaccounts.co.uk',
@@ -104,7 +101,6 @@ const AGGREGATOR_HOSTS = [
   'trustpilot.com',
   'glassdoor.co.uk',
   'indeed.com',
-  'uk.indeed.com',
   'reed.co.uk',
   'totaljobs.com',
   'cv-library.co.uk',
@@ -119,7 +115,10 @@ const AGGREGATOR_HOSTS = [
   'trustatrader.com',
   'tripadvisor.co.uk',
   'tripadvisor.com',
-  'google.com',
+  // maps.google.com only, never bare google.com: matching is by suffix, so
+  // google.com would also reject sites.google.com — and small UK companies do
+  // publish their real website on Google Sites. Same reasoning that keeps
+  // nhs.uk and bare gov.uk off this list.
   'maps.google.com',
   'amazon.co.uk',
   'ebay.co.uk',

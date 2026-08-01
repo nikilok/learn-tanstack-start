@@ -58,8 +58,6 @@ const sql = neon(process.env.POSTGRES_URL as string);
 console.log(
   `Search recall probe — db ${dbFingerprint(process.env.POSTGRES_URL)}`,
 );
-console.log(`  ground truth: ${n} registry-sourced crn_on_page rows`);
-console.log('  provider: serper');
 
 const rows = (await sql.query(
   `SELECT w.company_number, w.url, coalesce(p.company_name, '') AS company_name,
@@ -84,6 +82,13 @@ const rows = (await sql.query(
   company_name: string;
   town: string;
 }[];
+
+// After the query, not before: LIMIT can return fewer rows than asked for, and
+// a measurement that misstates its own cohort size is the wrong kind of wrong.
+console.log(
+  `  ground truth: ${rows.length} registry-sourced crn_on_page rows (asked ${n})`,
+);
+console.log('  provider: serper');
 
 /**
  * Host, minus `www.`. Recall is a question about SITES, not URLs: a result at
@@ -130,11 +135,21 @@ async function search(query: string): Promise<string[]> {
 
 const ranks: (number | null)[] = [];
 let emptyQueries = 0;
+let skipped = 0;
 
 for (const [index, row] of rows.entries()) {
   // Deliberately unguarded: a provider failure ends the run rather than
   // quietly becoming a miss in the denominator.
-  const urls = await search(buildQuery(row.company_name, row.town));
+  const query = buildQuery(row.company_name, row.town);
+  if (!query) {
+    // buildQuery can empty a name that passed the SQL filter — a company
+    // called only "LIMITED". Spending a credit to search the whole web and
+    // then recording a rank for the result would be measurement noise bought
+    // at cost, so drop the row from the cohort instead.
+    skipped += 1;
+    continue;
+  }
+  const urls = await search(query);
   if (urls.length === 0) emptyQueries += 1;
   const want = siteOf(row.url);
   const hit = urls.findIndex((u) => siteOf(u) === want);
@@ -152,6 +167,13 @@ const pct = (count: number) =>
   ranks.length === 0 ? '-' : `${((count / ranks.length) * 100).toFixed(1)}%`;
 
 console.log('');
+if (skipped > 0) {
+  // Said out loud: recall is over ranks.length, so a silent skip would shrink
+  // the cohort without shrinking the headline number.
+  console.log(
+    `  ${skipped} rows dropped — no searchable name after suffix strip`,
+  );
+}
 console.log('─── can search find a website we already know the answer for ───');
 for (const k of [1, 3, 5, 10]) {
   console.log(

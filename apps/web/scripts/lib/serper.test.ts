@@ -151,3 +151,13 @@ describe('searchCompany — zero results is an answer, not an error', () => {
     expect((await searchCompany('q', 'key')).ok).toBe(false);
   });
 });
+
+describe('searchCompany — a bare array body is not a result set', () => {
+  test('an array 200 is a failure, since typeof [] is "object"', async () => {
+    // It would otherwise slip past the object guard, read undefined for
+    // `organic`, and bank an empty candidate list for a company that was
+    // never really searched.
+    stub({ ok: true, status: 200, jsonBody: [] });
+    expect((await searchCompany('q', 'key')).ok).toBe(false);
+  });
+});

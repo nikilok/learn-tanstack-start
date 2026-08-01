@@ -93,7 +93,10 @@ export async function searchCompany(
   } catch {
     return { ok: false, reason: 'http', status: res.status };
   }
-  if (!body || typeof body !== 'object') {
+  // Array.isArray matters: typeof [] is 'object', so a bare array body would
+  // otherwise pass this guard, read `undefined` for organic, and be banked as
+  // a legitimate "no results" for a company that was never searched.
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, reason: 'http', status: res.status };
   }
   // A body that parsed but carries an error message is a failure wearing a

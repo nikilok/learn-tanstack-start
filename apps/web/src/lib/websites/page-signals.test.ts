@@ -114,3 +114,18 @@ describe('public bodies are sponsors too', () => {
     expect(isAggregatorHost('reports.ofsted.gov.uk')).toBe(true);
   });
 });
+
+describe('the list matches by suffix, so parents cover their subdomains', () => {
+  test('Google Sites is a real website for a small company', () => {
+    // Listing bare google.com to catch maps would reject it, since matching is
+    // by suffix. The listing surface is named precisely instead.
+    expect(isAggregatorHost('sites.google.com')).toBe(false);
+    expect(isAggregatorHost('maps.google.com')).toBe(true);
+  });
+
+  test('subdomains of a listed host need no entry of their own', () => {
+    expect(isAggregatorHost('suite.endole.co.uk')).toBe(true);
+    expect(isAggregatorHost('register.fca.org.uk')).toBe(true);
+    expect(isAggregatorHost('uk.indeed.com')).toBe(true);
+  });
+});

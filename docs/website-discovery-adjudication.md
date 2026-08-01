@@ -154,14 +154,22 @@ seeded-random `selectRows` plus measurement instrumentation — a write wrapper
 recording persisted outcomes, and per-run caps. Production probing, walking and
 persistence are unchanged.
 
-| outcome | n | share |
-|---|---|---|
-| `crn_on_page` (publishable) | 5 | **12.5%** |
-| `postcode_on_page` | 7 | 17.5% |
-| nothing | 28 | 70.0% |
+Two independent seeded samples of 40, pooled:
 
-Wilson 95% CI on the publishable rate: **5.5% – 26.1%**. At the point estimate
-the balance buys ~6,500 rendered websites at roughly $0.008 (≈£0.006) each.
+| outcome | seed 08-01 | seed 08-02 | pooled n=80 | share |
+|---|---|---|---|---|
+| `crn_on_page` (publishable) | 5 | 4 | 9 | **11.25%** |
+| `postcode_on_page` | 7 | 6 | 13 | 16.25% |
+| nothing | 28 | 30 | 58 | 72.5% |
+
+Wilson 95% CI on the pooled publishable rate: **6.0% – 20.0%** (n=40 alone was
+5.5–26.1). At the point estimate the remaining balance buys ~5,900 rendered
+websites (range 3,100–10,400) at roughly $0.009 (≈£0.007) each. The second
+sample also validated the evidence pointers end to end: all 27 verified rows
+written since `evidence_url` was populated carry their claimed proof on the
+exact page recorded — re-fetched and re-checked, zero failures — including the
+6 whose proof lives on a disclosure page or post-redirect URL rather than the
+stored origin.
 
 This corrects two earlier readings badly:
 
@@ -244,12 +252,13 @@ only needed for the postcode-tier precision question.
 
 ## Ledger
 
-- Serper: 52,324 credits at $50. **75 spent**, itemised: 5 dry-run + 20 live
-  (head, pre-walk) + 10 live (head, first walk run — the "0-for-10") + 40
-  representative yield sample. Balance 52,249. 66 rows written.
+- Serper: 52,324 credits at $50. **115 spent**, itemised: 5 dry-run + 20 live
+  (head, pre-walk) + 10 live (head, first walk run — the "0-for-10") + 40 + 40
+  representative yield samples (seeds 08-01, 08-02). Balance 52,209. 106 rows
+  written.
 - Target population: 109,318 companies with no website row at the start; one
   search each covers **48%** of them (shortfall 56,994).
-- `crn_on_page` is the only tier this job publishes. At the representative
-  12.5% the balance buys ~6,500 rendered sites; the postcode question is worth
-  settling before the bulk spend, and the own-but-silent pool needs a
-  different evidence class entirely.
+- `crn_on_page` is the only tier this job publishes. At the pooled 11.25% the
+  balance buys ~5,900 rendered sites; the postcode question is worth settling
+  before the bulk spend, and the own-but-silent pool needs a different
+  evidence class entirely.

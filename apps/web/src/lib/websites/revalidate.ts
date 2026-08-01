@@ -263,6 +263,12 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
   // tier being written at all: a stored 0.970 on a listing would then block
   // the registry from ever replacing that URL.
   if (input.onAggregator) {
+    // Withdraw a stale confirmation as well as refusing a new one. The page
+    // that supported the rung is now a directory listing, so the claim is no
+    // longer backed by anything — and a latched 0.970 would block the registry
+    // from ever replacing this URL, which is the freeze the confidence and
+    // discoveryRank work elsewhere exists to prevent.
+    if (evidence === 'registry_confirmed') evidence = 'registry';
     note = 'live; directory or profile listing, not a company website';
   } else if (input.crnFoundAt) {
     evidence = nextEvidence(evidence, 'crn_on_page');

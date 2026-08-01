@@ -343,3 +343,23 @@ describe('parked pages (heuristic) and directory hosts (certain)', () => {
     );
   });
 });
+
+describe('a confirmed row that now lands on a directory', () => {
+  test('loses its confirmation, not just its rendering', () => {
+    // Holding it at `candidate` while leaving evidence at registry_confirmed
+    // keeps a claim the page no longer supports, and pins confidence at 0.970
+    // so the registry can never replace the URL.
+    const result = revalidate({
+      storedUrl: 'https://www.carehome.co.uk/carehome.cfm/id/1',
+      evidence: 'registry_confirmed',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.carehome.co.uk/carehome.cfm/id/1',
+      outcome: { ok: true },
+      onAggregator: true,
+    });
+    expect(result.evidence).toBe('registry');
+    expect(result.confidence).toBe('0.950');
+    expect(result.status).toBe('candidate');
+  });
+});

@@ -131,3 +131,27 @@ describe('fromCsv — files a spreadsheet actually writes', () => {
     expect(parsed.rows.map((r) => r.a)).toEqual(['1', '3', '4']);
   });
 });
+
+describe('fromCsv — a quote and a newline in the same field', () => {
+  test('round-trips a field holding both', () => {
+    // toCsv emits "x""y\nz". Reading the first " of the escaped pair as the
+    // field terminator put a record break before the embedded newline, so a
+    // single value came back as two malformed records and the row was lost.
+    const value = 'x"y\nz';
+    const parsed = fromCsv(toCsv(['a'], [{ a: value }]));
+    expect(parsed.malformed).toEqual([]);
+    expect(parsed.rows).toEqual([{ a: value }]);
+  });
+
+  test('round-trips a company name with a quoted alias across lines', () => {
+    const rows = [
+      {
+        company_number: '03260168',
+        company_name: 'ACME ("THE GROUP")\nTRADING LIMITED',
+      },
+    ];
+    const parsed = fromCsv(toCsv(['company_number', 'company_name'], rows));
+    expect(parsed.malformed).toEqual([]);
+    expect(parsed.rows).toEqual(rows);
+  });
+});

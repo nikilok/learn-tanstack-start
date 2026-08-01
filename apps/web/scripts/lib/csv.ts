@@ -98,12 +98,13 @@ function parseRecord(line: string): { fields: string[]; valid: boolean } {
 /**
  * Split text into logical records, keeping each one's PHYSICAL start line.
  *
- * A quote only opens a quoted field at the START of a field, exactly as
- * parseRecord requires. Toggling on every quote instead meant one stray one in
- * a hand-typed name — `5" PIPE LTD` — swallowed every following record into the
- * same logical row, and they were dropped without ever reaching `malformed`.
- * The two functions disagreeing is what made that silent: parseRecord had the
- * strict rule and never saw the records splitRecords had already eaten.
+ * A quote only opens a quoted field at the START of a field, and a DOUBLED
+ * quote inside one is an escape rather than a terminator — exactly as
+ * parseRecord reads them. Every place these two functions have disagreed has
+ * produced a silent data bug, because parseRecord never sees what splitRecords
+ * has already mis-split: toggling on every quote let one stray `5" PIPE LTD`
+ * swallow the rest of the file, and treating `""` as a terminator broke any
+ * field holding both a quote and a newline into two malformed records.
  */
 function splitRecords(text: string): { line: string; at: number }[] {
   const records: { line: string; at: number }[] = [];
@@ -114,8 +115,16 @@ function splitRecords(text: string): { line: string; at: number }[] {
   let physical = 1;
   let startedAt = 1;
 
-  for (const char of text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
     if (quoted) {
+      if (char === '"' && text[i + 1] === '"') {
+        // An escaped quote, not the end of the field. Consume both and stay
+        // inside, or a following newline reads as a record break.
+        current += '""';
+        i += 1;
+        continue;
+      }
       if (char === '"') quoted = false;
     } else if (char === '"' && atFieldStart) {
       quoted = true;

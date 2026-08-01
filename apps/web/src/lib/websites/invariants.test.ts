@@ -413,6 +413,13 @@ describe('state machine invariants — the revocable rung', () => {
       if (evidenceRank(r.evidence) > evidenceRank(c.input.evidence)) {
         violations.push(`${c.label} promoted to ${r.evidence}`);
       }
+      // Not promoting is not enough: a row already at registry_confirmed that
+      // now lands on a directory must LOSE the rung. Leaving it latched keeps
+      // a claim no page supports, and its 0.970 blocks the registry from ever
+      // replacing the URL.
+      if (r.evidence === 'registry_confirmed') {
+        violations.push(`${c.label} kept its confirmation`);
+      }
     }
     expect(violations.slice(0, 10)).toEqual([]);
   });

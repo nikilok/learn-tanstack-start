@@ -31,6 +31,8 @@ import { neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
+  maxFailuresFor,
+  minimumSampleForPromotion,
   PRECISION_FLOOR,
   scoreTier,
   type Verdict,
@@ -216,7 +218,11 @@ async function sample(): Promise<void> {
   writeFileSync(csvPath, toCsv([...COLUMNS], rows));
   writeFileSync(htmlPath, labellingSheet(rows, `sample-${stamp}.csv`));
 
-  const needed = n - Math.floor(n * PRECISION_FLOOR);
+  // The largest wrong-or-unsure count that still clears the floor, computed
+  // rather than quoted: the printed allowance was only ever right at n=200,
+  // and --n is a flag.
+  const allowance = maxFailuresFor(n);
+  const naive = n - Math.floor(n * PRECISION_FLOOR);
   console.log('');
   console.log(
     `  ${rows.length} rows written (${subject.length} ${SUBJECT_TIER}, ${controls.length} ${CONTROL_TIER})`,
@@ -231,9 +237,15 @@ async function sample(): Promise<void> {
     `    bun apps/web/scripts/sample-website-precision.ts --score=${csvPath}`,
   );
   console.log('');
-  console.log(
-    `  At ${n} rows, ${SUBJECT_TIER} promotes on at most 4 wrong-or-unsure (roughly ${needed} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`,
-  );
+  if (allowance < 0) {
+    console.log(
+      `  WARNING: ${n} rows cannot clear the ${(PRECISION_FLOOR * 100).toFixed(0)}% floor even if every label is correct. Draw at least ${minimumSampleForPromotion()}.`,
+    );
+  } else {
+    console.log(
+      `  At ${n} rows, ${SUBJECT_TIER} promotes on at most ${allowance} wrong-or-unsure (${naive} would be the naive ${(PRECISION_FLOOR * 100).toFixed(0)}% allowance, which is not enough to be confident).`,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,6 +259,9 @@ async function sample(): Promise<void> {
  * wrong, which is worse than not measuring.
  */
 function labellingSheet(rows: SampleRow[], csvName: string): string {
+  // `</script>` inside a company name or URL would close the block early and
+  // silently truncate the list a labeller then works through. JSON.stringify
+  // does not escape `<`.
   const data = JSON.stringify(
     rows.map((r) => ({
       c: r.company_number,
@@ -255,7 +270,7 @@ function labellingSheet(rows: SampleRow[], csvName: string): string {
       u: r.url,
       e: r.evidence,
     })),
-  );
+  ).replaceAll('<', '\\u003c');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Website precision labelling</title>

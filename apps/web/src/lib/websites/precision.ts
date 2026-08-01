@@ -75,7 +75,11 @@ export function scoreTier(tier: string, verdicts: Verdict[]): TierScore {
   // too unresolved to tell, which is a call to label more rather than a
   // verdict on the data.
   let verdict: TierScore['verdict'];
-  if (lowerBound >= PRECISION_FLOOR) verdict = 'promote';
+  // Nothing labelled says nothing about the tier. Falling through to `hold`
+  // printed "the tier is below the floor" for a measurement never made, which
+  // is reachable any time a tier draws zero rows (--control=0, say).
+  if (labelled === 0) verdict = 'inconclusive';
+  else if (lowerBound >= PRECISION_FLOOR) verdict = 'promote';
   else if (optimistic < PRECISION_FLOOR) verdict = 'hold';
   else verdict = 'inconclusive';
 
@@ -90,6 +94,22 @@ export function scoreTier(tier: string, verdicts: Verdict[]): TierScore {
     lowerBound,
     verdict,
   };
+}
+
+/**
+ * The largest number of wrong-or-unsure labels a sample of `n` may carry and
+ * still clear the floor. Derived from the same Wilson bound the verdict uses,
+ * because a hardcoded allowance is only ever right at one sample size.
+ *
+ * Returns -1 when no number of clean labels would clear it, which is every `n`
+ * below minimumSampleForPromotion. Callers must say so rather than print it.
+ */
+export function maxFailuresFor(n: number): number {
+  for (let failures = 0; failures <= n; failures += 1) {
+    if (wilsonLowerBound(n - failures, n) < PRECISION_FLOOR)
+      return failures - 1;
+  }
+  return n;
 }
 
 /**

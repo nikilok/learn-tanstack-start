@@ -330,11 +330,13 @@ export async function sweepWebsites(
       if (result.evidence !== row.evidence) {
         // Direction matters now that a tier can be withdrawn. Lumping both
         // into `promoted` reported a mass unpublish as the run's best number.
-        if (evidenceRank(result.evidence) > evidenceRank(row.evidence)) {
-          summary.promoted++;
-        } else {
-          summary.demoted++;
-        }
+        // Strictly, in both directions. registry_unconfirmed and
+        // llm_adjudicated share a rung, so a lateral swap between them is
+        // neither a promotion nor a withdrawal and must not inflate either.
+        const before = evidenceRank(row.evidence);
+        const after = evidenceRank(result.evidence);
+        if (after > before) summary.promoted++;
+        else if (after < before) summary.demoted++;
       }
       if (result.url !== row.url) summary.adoptedVariant++;
 

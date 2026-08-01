@@ -8,9 +8,22 @@
  * every column right and silently mislabels the row.
  */
 
+/**
+ * Spreadsheet formula prefixes. A field beginning with one of these executes on
+ * open in Excel, Numbers and Sheets, and everything written here comes from the
+ * database — company names and URLs we did not author. Leading whitespace
+ * counts, because the spreadsheet trims before deciding.
+ */
+const FORMULA_START = /^[\s]*[=+\-@]/;
+
 /** Quote a field only when it needs it, doubling any embedded quotes. */
-function escapeField(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+function escapeField(value: string, alwaysQuote: boolean): string {
+  // Neutralise before quoting: a leading apostrophe makes the spreadsheet
+  // treat the rest as text, and survives the round trip as part of the value.
+  const safe = FORMULA_START.test(value) ? `'${value}` : value;
+  return alwaysQuote || /[",\r\n]/.test(safe)
+    ? `"${safe.replaceAll('"', '""')}"`
+    : safe;
 }
 
 /** Serialise rows (objects keyed by the given columns) to CSV text. */
@@ -21,17 +34,37 @@ export function toCsv<T extends Record<string, unknown>>(
   const lines = [columns.join(',')];
   for (const row of rows) {
     lines.push(
-      columns.map((col) => escapeField(String(row[col] ?? ''))).join(','),
+      columns
+        .map((col) => {
+          const value = String(row[col] ?? '');
+          // With one column an empty value serialises to a blank line, which is
+          // indistinguishable from the blank lines fromCsv skips, so the record
+          // disappears. Quoting keeps it a record.
+          const alwaysQuote = columns.length === 1 && value.trim() === '';
+          return escapeField(value, alwaysQuote);
+        })
+        .join(','),
     );
   }
   return `${lines.join('\n')}\n`;
 }
 
-/** Split one CSV line, honouring quotes and doubled escapes. */
-function parseLine(line: string): string[] {
+/**
+ * Split one CSV record, honouring quotes and doubled escapes.
+ *
+ * Reports `valid: false` rather than guessing. The consumer is a precision
+ * measurement that refuses to score a file it cannot read, and an unterminated
+ * quote can still yield the right field count — so field count alone is not a
+ * corruption check.
+ */
+function parseRecord(line: string): { fields: string[]; valid: boolean } {
   const fields: string[] = [];
   let field = '';
   let quoted = false;
+  /** A quoted field has closed; only a comma may legally follow it. */
+  let closed = false;
+  let valid = true;
+
   for (let i = 0; i < line.length; i += 1) {
     const char = line[i];
     if (quoted) {
@@ -39,53 +72,83 @@ function parseLine(line: string): string[] {
       else if (line[i + 1] === '"') {
         field += '"';
         i += 1;
-      } else quoted = false;
-    } else if (char === '"') quoted = true;
-    else if (char === ',') {
+      } else {
+        quoted = false;
+        closed = true;
+      }
+    } else if (char === '"') {
+      // A quote may only open a field, never appear inside a bare one.
+      if (field.length === 0 && !closed) quoted = true;
+      else valid = false;
+    } else if (char === ',') {
       fields.push(field);
       field = '';
-    } else field += char;
+      closed = false;
+    } else {
+      if (closed) valid = false;
+      field += char;
+    }
   }
+  // Ran off the end still inside a quote.
+  if (quoted) valid = false;
   fields.push(field);
-  return fields;
+  return { fields, valid };
+}
+
+/** Split text into logical records, keeping each one's PHYSICAL start line. */
+function splitRecords(text: string): { line: string; at: number }[] {
+  const records: { line: string; at: number }[] = [];
+  let current = '';
+  let quoted = false;
+  let physical = 1;
+  let startedAt = 1;
+
+  for (const char of text) {
+    if (char === '"') quoted = !quoted;
+    if (char === '\n' && !quoted) {
+      records.push({ line: current.replace(/\r$/, ''), at: startedAt });
+      current = '';
+      physical += 1;
+      startedAt = physical;
+      continue;
+    }
+    if (char === '\n') physical += 1;
+    current += char;
+  }
+  if (current.trim()) {
+    records.push({ line: current.replace(/\r$/, ''), at: startedAt });
+  }
+  return records;
 }
 
 /**
- * Parse CSV text into objects keyed by the header row. Rows whose field count
- * does not match the header are returned in `malformed` rather than silently
- * dropped or padded — a shifted row is exactly the bug that matters here.
+ * Parse CSV text into objects keyed by the header row.
+ *
+ * Records whose field count does not match the header, or whose quoting is
+ * invalid, are reported in `malformed` by PHYSICAL line number rather than
+ * silently dropped or padded. A shifted row is the bug that matters here, and
+ * the line number is what the caller tells a human to go and fix — so it has to
+ * survive a legitimate multi-line record earlier in the file.
  */
 export function fromCsv(text: string): {
   rows: Record<string, string>[];
   malformed: number[];
 } {
-  // Split on newlines that are not inside quotes.
-  const lines: string[] = [];
-  let current = '';
-  let quoted = false;
-  for (const char of text) {
-    if (char === '"') quoted = !quoted;
-    if (char === '\n' && !quoted) {
-      lines.push(current.replace(/\r$/, ''));
-      current = '';
-    } else current += char;
-  }
-  if (current.trim()) lines.push(current.replace(/\r$/, ''));
-
-  const [header, ...body] = lines;
+  const records = splitRecords(text);
+  const header = records.shift();
   if (!header) return { rows: [], malformed: [] };
-  const columns = parseLine(header);
+  const columns = parseRecord(header.line).fields;
 
   const rows: Record<string, string>[] = [];
   const malformed: number[] = [];
-  body.forEach((line, index) => {
-    if (!line.trim()) return;
-    const fields = parseLine(line);
-    if (fields.length !== columns.length) {
-      malformed.push(index + 2); // 1-based, plus the header
-      return;
+  for (const record of records) {
+    if (!record.line.trim()) continue;
+    const { fields, valid } = parseRecord(record.line);
+    if (!valid || fields.length !== columns.length) {
+      malformed.push(record.at);
+      continue;
     }
     rows.push(Object.fromEntries(columns.map((col, i) => [col, fields[i]])));
-  });
+  }
   return { rows, malformed };
 }

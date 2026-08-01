@@ -19,7 +19,11 @@ export type WebsiteEvidence =
   /** A registry URL whose page carries the company's own name, in both the
    *  hostname and the visible text. Measured 109/110 correct on rows the rule
    *  had never seen (2026-08-01), against 90% for the registry tier as a
-   *  whole. Unlike every other rung this one is REVOCABLE — see
+   *  whole. That figure is NOT a licence to publish: it scored a different
+   *  rule from the one shipping, which is why the tier is absent from
+   *  PUBLISHABLE_EVIDENCE — the full caveat is in publishable.ts and this
+   *  number means nothing without it. Unlike every other rung this one is
+   *  REVOCABLE — see
    *  mergeRevalidation, which lowers it back to `registry` when a later pass
    *  finds the corroboration gone. */
   | 'registry_confirmed'

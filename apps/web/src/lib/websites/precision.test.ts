@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  maxFailuresFor,
   minimumSampleForPromotion,
   PRECISION_FLOOR,
   scoreTier,
@@ -78,10 +79,44 @@ describe('minimumSampleForPromotion', () => {
 });
 
 describe('empty input', () => {
-  test('scores as inconclusive rather than dividing by zero', () => {
+  test('is inconclusive, not a verdict on a measurement never made', () => {
+    // It used to report `hold`, whose message is "the tier is below the
+    // floor" — a claim about data nobody looked at. Reachable whenever a tier
+    // draws zero rows.
     const score = scoreTier('registry', []);
     expect(score.precision).toBe(0);
     expect(score.lowerBound).toBe(0);
-    expect(score.verdict).toBe('hold');
+    expect(score.verdict).toBe('inconclusive');
+  });
+});
+
+describe('maxFailuresFor', () => {
+  test('matches the verdict the scorer actually returns', () => {
+    // The printed allowance and the verdict must agree, or the sheet tells a
+    // labeller a budget the scorer will not honour.
+    for (const n of [100, 150, 200, 300]) {
+      const allowed = maxFailuresFor(n);
+      expect(
+        scoreTier('t', labels(n, allowed)).verdict,
+        `${n} @ ${allowed}`,
+      ).toBe('promote');
+      expect(
+        scoreTier('t', labels(n, allowed + 1)).verdict,
+        `${n} @ ${allowed + 1}`,
+      ).not.toBe('promote');
+    }
+  });
+
+  test('says -1 when no clean run could clear the floor', () => {
+    // n below minimumSampleForPromotion. The caller must phrase this rather
+    // than print "at most -1 wrong-or-unsure".
+    expect(maxFailuresFor(40)).toBe(-1);
+    expect(maxFailuresFor(minimumSampleForPromotion())).toBe(0);
+  });
+
+  test('is stricter than the naive floor allowance', () => {
+    // The whole point: 200 * 5% = 10 failures reads as exactly 95%, but the
+    // sample is equally consistent with 91%.
+    expect(maxFailuresFor(200)).toBeLessThan(10);
   });
 });

@@ -137,7 +137,16 @@ for (const [index, row] of rows.entries()) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
-const outPath = samplePath.replace(/\.csv$/, '.evidence.json');
+// Never derive the output path by substitution alone: a sample not named
+// *.csv would leave `replace` a no-op and the probe would overwrite its own
+// input, which is hand-produced and not recoverable by re-running.
+const outPath = samplePath.endsWith('.csv')
+  ? samplePath.replace(/\.csv$/, '.evidence.json')
+  : `${samplePath}.evidence.json`;
+if (outPath === samplePath) {
+  console.error('  refusing to overwrite the sample; rename it and re-run');
+  process.exit(1);
+}
 writeFileSync(outPath, `${JSON.stringify(out, null, 1)}\n`);
 
 console.log('');

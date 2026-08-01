@@ -50,6 +50,13 @@ const STOPWORDS = new Set([
   'residential',
   'house',
   'lodge',
+  // The legal suffixes SUFFIX and SQUASHED_SUFFIX already strip. Without them
+  // here, "COMMUNITY CARE CIC" reduces to the single token 'cic', which then
+  // substring-matches any host containing those three letters while another
+  // CIC's page supplies the word — corroborating two unrelated companies.
+  'cic',
+  'incorporated',
+  'inc',
 ]);
 
 /** Legal suffixes, stripped before squashing a name for comparison. */

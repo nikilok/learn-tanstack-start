@@ -14,9 +14,9 @@ ownership from the page itself. Only one proof is strong enough to publish: the
 company's own registration number on its own site (`crn_on_page`, 0.990). The
 registered office **postcode** on the page (`postcode_on_page`, 0.850) is far
 more common but is not in `PUBLISHABLE_EVIDENCE`, because its precision has
-never been measured on a searched population. On a representative sample
-that tier is 17.5% of rows against 12.5% publishable, so closing it would
-roughly 2.4× what renders. (An earlier head-biased sample put it at 15 of 20,
+never been measured on a searched population. On representative samples
+(pooled n=80) that tier is 16.25% of rows against 11.25% publishable, so
+closing it would roughly 2.4× what renders. (An earlier head-biased sample put it at 15 of 20,
 which overstated the prize considerably — see the measured section below.)
 
 ## What ships (deterministic, no model)
@@ -145,10 +145,11 @@ a random one. There is **no knee in the distribution**; the mechanism argument
 only clearly bites above ~50. Carry the share count onto the row so precision can
 later be measured stratified by it, and set the threshold from data.
 
-## Measured on a REPRESENTATIVE sample (2026-08-01, n=40)
+## Measured on REPRESENTATIVE samples (two seeded draws, pooled n=80)
 
-Drawn at random across the whole undiscovered population — incorporation years
-1986–2025, median 2017, mixed jurisdictions — by
+Each drawn at random across the whole undiscovered population (seed 08-01:
+incorporation years 1986–2025, median 2017; seed 08-02: 1910s–2020s; mixed
+jurisdictions) by
 `scripts/measure-search-yield.ts`, which runs the real orchestrator with a
 seeded-random `selectRows` plus measurement instrumentation — a write wrapper
 recording persisted outcomes, and per-run caps. Production probing, walking and
@@ -173,20 +174,23 @@ stored origin.
 
 This corrects two earlier readings badly:
 
-- **The 0-for-10 live run was the head bias, not the method.** 12.5% here is
-  consistent with the lab's 3-in-20.
+- **The 0-for-10 live run was the head bias, not the method.** The pooled
+  11.25% (12.5% and 10.0% in the two draws) is consistent with the lab's
+  3-in-20.
 - **"Three quarters of every credit lands in the postcode tier" was an artefact
-  of the oldest companies.** On a real sample the postcode tier is 17.5%, and
-  the dominant outcome is *nothing at all* (70%). Unlocking the postcode tier
+  of the oldest companies.** On pooled representative data the postcode tier
+  is 16.25%, and the dominant outcome is *nothing at all* (72.5%). Unlocking it
   would roughly 2.4× publishable output — still the largest single lever, but
   much smaller than the head sample implied.
 
-The 70% was then decomposed by `scripts/measure-none-breakdown.ts` (zero
+The nothing bucket was then decomposed for the FIRST sample only — seed
+08-01's 28 `none` rows; seed 08-02's 30 have not been decomposed — by
+`scripts/measure-none-breakdown.ts` (zero
 credits — it re-reads the banked candidates and re-fetches pages, mirroring
 production probing: all five origins, aggregator judged post-redirect, with
 Gemma owner-extraction as the ownership estimator). Corrected run, 2026-08-01:
 
-| why the row is `none` | n | of none | of all 40 |
+| why the row is `none` (seed 08-01) | n | of its none | of its 40 |
 |---|---|---|---|
 | no own-looking page in the SERP — no site, a site search missed, or a JS shell (flagged per row) | 14 | 50% | 35% |
 | own site found and walked, carries **neither statutory signal** | 10 | 36% | 25% |
@@ -212,13 +216,15 @@ Three conclusions, scoped to what the measurement can support:
 - **Rank-1-only walking survives representative data.** All four lower-rank
   own-looking sites were walked on the same five paths production uses and
   none carries the number. n=4 — consistent with the lab, not proof.
-- **~30% is the observed statutory-signal rate under the shipped procedure,
-  not a population ceiling.** 12.5% CRN + 17.5% postcode is what this
-  provider's top five origins and the five-path walk surfaced at n=40. Recall
+- **~27.5% is the observed statutory-signal rate under the shipped procedure,
+  not a population ceiling.** 11.25% CRN + 16.25% postcode is what this
+  provider's top five origins and the five-path walk surfaced at pooled n=80.
+  Recall
   misses (80.7%@5) mean some signal-bearing sites were never reached, so the
   population's true rate sits somewhat higher — better recall could still
-  raise yield. What the rate does establish: the 25% own-but-silent pool has
-  NO deterministic evidence at all, so reaching it needs a different evidence
+  raise yield. What the rate does establish: the own-but-silent pool (~25% of
+  seed 08-01, the one sample the estimator ran on) has NO deterministic
+  evidence at all, so reaching it needs a different evidence
   class (Common Crawl CRN sweep, or an adjudicated tier), not a better walk.
   Ownership buckets are estimator-based (15/16 on labelled data), so treat
   their sizes as ±2 rows.
@@ -233,7 +239,7 @@ method-lab table above comes from that head; the representative section is the
 corrective, drawn by `measure-search-yield.ts`'s seeded random sample.
 
 **Do not recalibrate anything on early production runs**: their yield will read
-far below the representative 12.5% until the selector is past the head. If the
+far below the pooled representative 11.25% until the selector is past the head. If the
 ascending order ever becomes a problem rather than a quirk, randomise the
 selector — but that trades away its predictable resumability.
 

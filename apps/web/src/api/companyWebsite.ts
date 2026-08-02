@@ -7,7 +7,7 @@ import { db } from '../db.server';
 import { publishableWebsiteGate } from '../lib/websites/publishable';
 import {
   LONG_EDGE_CACHE,
-  setCacheTag,
+  setCompanyCacheTag,
   setRpcCacheControl,
 } from './cache-headers';
 
@@ -60,7 +60,7 @@ const getCompanyWebsite = createServerFn()
       // the page and this together. A miss caches as long as a hit: "no
       // website" is the steady state for almost every company, and
       // short-caching it would put nearly every company page on the short TTL.
-      setCacheTag(`company-${companyNumber}`);
+      setCompanyCacheTag(companyNumber);
       setRpcCacheControl(LONG_EDGE_CACHE);
 
       if (!row?.url) return null;

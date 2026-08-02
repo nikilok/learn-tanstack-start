@@ -74,6 +74,27 @@ jobs:
           set -o pipefail
           bun apps/web/scripts/sweep-websites.ts $DRY_FLAG $ROWS_FLAG | tee /tmp/sweep-websites.log
 
+      - name: Purge company-pages edge cache
+        # The sweep is the once-daily writer that changes what company pages
+        # render, so one population-tag invalidation after it is the whole
+        # freshness story (docs/company-pages-cache.md). invalidateByTags marks
+        # entries stale for background revalidation — gentler than a deploy's
+        # full purge. always(): the sweep writes promotions incrementally, so
+        # even a failed or timed-out run has changes worth publishing. NOTE:
+        # the endpoint answers 202 on AUTH failure BY DESIGN, so a wrong
+        # secret shows here as a green step and a silent no-op (an unset one
+        # fails the assert below; an API failure 500s and goes red) — when
+        # pages stay stale under green crons, check the Vercel function logs.
+        if: always() && github.event.inputs.dry-run != 'true'
+        shell: bash
+        env:
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+        run: |
+          [ -n "$REVALIDATE_SECRET" ] || { echo "REVALIDATE_SECRET is not set"; exit 1; }
+          curl -fsS -X POST -o /dev/null \
+            -H "x-revalidate-secret: $REVALIDATE_SECRET" \
+            "https://sponsorsearch.co.uk/api/revalidate?purge=company-pages"
+
       - name: Write job summary
         if: always()
         shell: bash

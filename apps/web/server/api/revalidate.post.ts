@@ -5,14 +5,19 @@
  * Called by ch-stream (Railway) after processing Companies House stream events.
  *
  * Auth:    x-revalidate-secret header (timing-safe comparison)
- * Response: always 202 Accepted (no auth signal to attackers)
+ * Response: unauthenticated callers always get a neutral 202 (no auth signal).
+ *           Authenticated: the trail drain answers 202 and runs async; ?purge
+ *           is awaited — 200 {purged} on success, 400 on a non-whitelisted
+ *           value, 500 on API failure so the sweep workflow's curl -f goes red
  *
  * Behaviour:
+ *  - ?purge=company-pages: awaited invalidation of the population tag instead
+ *    of draining trails — the sweep workflow's nightly call after promotions
  *  - Reads a cursor from companies_house_profile_cache to find new trail entries
  *  - Builds cache tags (company-{number}) for each changed company
  *  - VERCEL_CACHE_INVALIDATION=true:  calls Vercel SDK invalidateByTags, advances cursor
  *  - VERCEL_CACHE_INVALIDATION=false: logs tags (dry-run), cursor unchanged
- *  - On purge failure: cursor is NOT advanced, so next call retries
+ *  - On trail-purge failure: cursor is NOT advanced, so next call retries
  *
  * Env vars (Vercel):
  *  - REVALIDATE_SECRET          — shared secret with ch-stream
@@ -27,10 +32,25 @@ import {
 import { waitUntil } from '@vercel/functions';
 import { eq, gt, max } from 'drizzle-orm';
 
+import { ALL_COMPANY_PAGES_TAG, companyTag } from '#/api/cache-tags';
 import { db } from '#/db.server';
 
-import { invalidateTags, TAG_BATCH_SIZE } from '../utils/invalidateTags.ts';
+import {
+  invalidateTagsIfLive,
+  TAG_BATCH_SIZE,
+} from '../utils/invalidateTags.ts';
 import { json, withSecret } from '../utils/withSecret.ts';
+
+/** Nightly population purge; false = dry-run (invalidation off). Throws on API failure so the endpoint can 500. */
+async function processCompanyPagesPurge(): Promise<boolean> {
+  const purged = await invalidateTagsIfLive([ALL_COMPANY_PAGES_TAG]);
+  console.log(
+    purged
+      ? `[revalidate] Invalidated ${ALL_COMPANY_PAGES_TAG}`
+      : `[revalidate:dry-run] Would invalidate ${ALL_COMPANY_PAGES_TAG}`,
+  );
+  return purged;
+}
 
 async function processRevalidation() {
   const [cursor] = await db
@@ -61,18 +81,14 @@ async function processRevalidation() {
   }
 
   const newLastId = Math.max(...trails.map((t) => t.maxId ?? 0));
-  const tags = trails.map((t) => `company-${t.companyNumber}`);
+  const tags = trails.map((t) => companyTag(t.companyNumber));
 
-  const isLive = process.env.VERCEL_CACHE_INVALIDATION === 'true';
-
-  if (!isLive) {
+  if (!(await invalidateTagsIfLive(tags))) {
     console.log(
       `[revalidate:dry-run] Would invalidate ${tags.length} tags: ${tags.join(', ')}`,
     );
     return;
   }
-
-  await invalidateTags(tags);
 
   await db
     .insert(companiesHouseProfileCache)
@@ -94,7 +110,19 @@ async function processRevalidation() {
 export default withSecret(
   'x-revalidate-secret',
   process.env.REVALIDATE_SECRET,
-  () => {
+  async (event) => {
+    // Fixed whitelist, never input: the secret holder cannot purge arbitrary
+    // tags through this endpoint.
+    const purge = new URL(event.req.url).searchParams.get('purge');
+    if (purge !== null) {
+      if (purge !== ALL_COMPANY_PAGES_TAG) {
+        return json({ accepted: false }, 400);
+      }
+      // Awaited, unlike the trail drain: one invalidateByTags call is fast,
+      // and a throw must surface as a 500 so the sweep workflow's curl -f
+      // turns the step red instead of burying the failure in function logs.
+      return json({ purged: await processCompanyPagesPurge() }, 200);
+    }
     waitUntil(
       processRevalidation().catch((err) => {
         console.error('[revalidate] Failed:', err);

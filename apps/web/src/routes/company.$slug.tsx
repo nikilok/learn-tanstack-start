@@ -13,7 +13,7 @@ import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
   setSsrCacheControl,
-  setCacheTag,
+  setCompanyCacheTag,
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
@@ -192,10 +192,9 @@ export const Route = createFileRoute('/company/$slug')({
       websiteLookupFailed: websiteLoad.failed,
     });
     setSsrCacheControl(degraded ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
-    // Tag the HTML with the same company-{number} tag as the RPC so the revalidate pipeline purges both.
-    if (profile?.company_number) {
-      setCacheTag(`company-${profile.company_number}`);
-    }
+    // Same tags as the RPCs, so both purge pipelines cover HTML and data alike.
+    // Unmapped sponsors get the population tag alone — still nightly-purgeable.
+    setCompanyCacheTag(profile?.company_number);
 
     return { sponsor: company, profile, timeline, website };
   },

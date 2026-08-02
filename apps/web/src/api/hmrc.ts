@@ -16,6 +16,7 @@ import { slugify } from '../utils';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
+  setCompanyCacheTag,
   setRpcCacheControl,
 } from './cache-headers';
 
@@ -246,6 +247,9 @@ export const getHmrcCompanyBySlug = createServerFn()
       // Long edge cache: slug pages only change via ingest, and the
       // post-ingest sitemap deploy purges the edge.
       setRpcCacheControl(LONG_EDGE_CACHE);
+      // Tagged so the nightly and per-company purges reach this RPC too;
+      // the primary (first row) owns the page, so its number is the tag.
+      setCompanyCacheTag(rows[0]?.companyNumber ?? undefined);
       // Namesake guard (unit-tested in lib/company/licences): pool only the
       // primary company's rows, never a different mapped entity's.
       return { kind: 'found', nameSlug: slug, licences: poolForPrimary(rows) };
@@ -352,6 +356,8 @@ export const getSlugForHash = createServerFn()
       .limit(1);
     // Nulls cache short: a sponsor can be reinstated under the same hash.
     setRpcCacheControl(row ? LONG_EDGE_CACHE : SHORT_EDGE_CACHE);
+    // Population tag only — the hash row carries no company number.
+    if (row) setCompanyCacheTag();
     return row ?? null;
   });
 

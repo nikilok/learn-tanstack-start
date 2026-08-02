@@ -13,7 +13,7 @@ import { db } from '../db.server';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
 import {
   LONG_EDGE_CACHE,
-  setCacheTag,
+  setCompanyCacheTag,
   setRpcCacheControl,
 } from './cache-headers';
 import { loadSicDescriptions } from './sic';
@@ -356,7 +356,7 @@ const getCompanyProfile = createServerFn()
     // Look up SIC code descriptions from our database
     const sicDescriptions = await loadSicDescriptions(profile.sic_codes ?? []);
 
-    setCacheTag(`company-${profile.company_number}`);
+    setCompanyCacheTag(profile.company_number);
 
     // RPC calls don't inherit the Nitro route rule's s-maxage, so set it explicitly
     setRpcCacheControl(LONG_EDGE_CACHE);

@@ -31,10 +31,11 @@ export function secretMatches(
  * `secret`. Runs `handler` (returning its Response) only on a match; on a
  * mismatch it returns a neutral 202 {accepted:true} — deliberately not a
  * 401/403, so probing gets no explicit auth signal. The neutrality is only as
- * strong as the wrapped handler's own responses: revalidate answers 202 either
- * way (fully indistinguishable), while /api/releases returns 200/400/500 when
- * authenticated — a deliberate trade so its CI caller can verify success (the
- * timing-safe compare is what actually stops secret guessing). Each caller
+ * strong as the wrapped handler's own responses: revalidate's trail drain
+ * answers 202 either way, while its ?purge mode and /api/releases return
+ * 200/400/500 once authenticated — a deliberate trade so CI callers can
+ * verify success (the timing-safe compare only closes the timing
+ * side-channel; the secret's entropy is what stops guessing). Each caller
  * passes its own header name + secret.
  */
 export function withSecret(

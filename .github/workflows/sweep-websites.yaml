@@ -74,6 +74,31 @@ jobs:
           set -o pipefail
           bun apps/web/scripts/sweep-websites.ts $DRY_FLAG $ROWS_FLAG | tee /tmp/sweep-websites.log
 
+      - name: Purge company-pages edge cache
+        # The sweep is the once-daily writer that changes what company pages
+        # render, so one population-tag invalidation after it is the whole
+        # freshness story (docs/company-pages-cache.md). invalidateByTags marks
+        # entries stale for background revalidation — gentler than a deploy's
+        # full purge. always(): the sweep writes promotions incrementally, so
+        # even a failed or timed-out run has changes worth publishing.
+        # 200 {purged:true} is the ONLY success. The endpoint answers a
+        # neutral 202 to a bad secret BY DESIGN (no auth signal to probes),
+        # but 202 != 200 tells THIS caller; and 200 {purged:false} means
+        # VERCEL_CACHE_INVALIDATION is off in prod. Both fail the step
+        # instead of green-no-op'ing, as does a 500 from an API failure.
+        if: always() && github.event.inputs.dry-run != 'true'
+        shell: bash
+        env:
+          REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+        run: |
+          [ -n "$REVALIDATE_SECRET" ] || { echo "REVALIDATE_SECRET is not set"; exit 1; }
+          body=$(mktemp)
+          status=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
+            -H "x-revalidate-secret: $REVALIDATE_SECRET" \
+            "https://sponsorsearch.co.uk/api/revalidate?purge=company-pages") || exit $?
+          [ "$status" = "200" ] || { echo "Expected 200, got $status"; cat "$body"; exit 1; }
+          jq -e '.purged == true' "$body" >/dev/null || { echo "Purge did not run"; cat "$body"; exit 1; }
+
       - name: Write job summary
         if: always()
         shell: bash

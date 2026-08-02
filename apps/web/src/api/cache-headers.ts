@@ -1,6 +1,8 @@
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
 
+import { ALL_COMPANY_PAGES_TAG, companyCacheTagHeader } from './cache-tags';
+
 /**
  * Shared `Cache-Control` value for server-fn RPC responses — 30-day edge
  * TTL with 7-day stale-while-revalidate. Used by the long-lived, near-
@@ -54,3 +56,19 @@ export const setCacheTag = createIsomorphicFn()
     setResponseHeader('x-vercel-cache-tag', tag);
   })
   .client(() => {});
+
+/**
+ * Tag a company-scoped response with the population-wide `company-pages` tag —
+ * plus its own `company-{number}` tag when the number is known — in one header
+ * write: setResponseHeader overwrites, so two setCacheTag calls would silently
+ * drop the first tag. Every long-cached company SSR document and RPC must use
+ * this, never a bare setCacheTag, or the nightly post-sweep purge cannot reach
+ * that response.
+ */
+export function setCompanyCacheTag(companyNumber?: string): void {
+  setCacheTag(
+    companyNumber
+      ? companyCacheTagHeader(companyNumber)
+      : ALL_COMPANY_PAGES_TAG,
+  );
+}

@@ -9,7 +9,7 @@ import type { TimelineEvent, TrailRow } from '../lib/timeline/types';
 import {
   LONG_EDGE_CACHE,
   SHORT_EDGE_CACHE,
-  setCacheTag,
+  setCompanyCacheTag,
   setRpcCacheControl,
 } from './cache-headers';
 import { loadSicDescriptions } from './sic';
@@ -104,9 +104,9 @@ const getCompanyTimeline = createServerFn()
         truncated,
       });
 
-      // Same tag as the profile RPC + SSR doc, so the existing trail-driven
-      // purge pipeline refreshes the timeline with no new wiring.
-      setCacheTag(`company-${companyNumber}`);
+      // Same tags as the profile RPC + SSR doc, so both purge pipelines
+      // refresh the timeline with no new wiring.
+      setCompanyCacheTag(companyNumber);
       setRpcCacheControl(LONG_EDGE_CACHE);
 
       return { companyNumber, events };

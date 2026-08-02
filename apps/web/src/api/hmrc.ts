@@ -361,11 +361,17 @@ export const getSlugForHash = createServerFn()
     return row ?? null;
   });
 
-/** Server fn returning the count of distinct sponsor organisations. Edge-cached on the /_serverFn/ RPC path (client fetch); only changes on ingestion. */
+/** Server fn returning the count of sponsor companies the site actually serves. Edge-cached on the /_serverFn/ RPC path (client fetch); only changes on ingestion. */
 export const getSponsorCount = createServerFn().handler(async () => {
+  // Counts name_slug, NOT organisation_name, so the hero stat equals the number
+  // of company pages that exist (generate-sitemap.ts emits one URL per
+  // name_slug). Register rows that are case/punctuation variants of one company
+  // slugify together and share a page, so counting raw org names overstates the
+  // headline by ~330 against a sitemap anyone can crawl. Keep this keyed to
+  // whatever the page URL is keyed to.
   const [row] = await db
     .select({
-      count: sql<number>`count(distinct ${hmrcSkilledWorkers.organisationName})::int`,
+      count: sql<number>`count(distinct ${hmrcSkilledWorkers.nameSlug})::int`,
     })
     .from(hmrcSkilledWorkers);
   setRpcCacheControl(LONG_EDGE_CACHE);

@@ -10,7 +10,8 @@ alone when the sponsor has no CH mapping) and the company RPCs
 (companiesHouse, companyWebsite, companyTimeline, hmrcCompanyBySlug,
 slugForHash) — carries the edge-cache tag `company-pages`, alongside its own
 `company-{number}` where the number is known. One header write via
-`setCompanyCacheTag` (`src/api/cache-tags.ts` owns both spellings), because
+`setCompanyCacheTag` in `src/api/cache-headers.ts` (the pure
+`src/api/cache-tags.ts` owns both tag spellings), because
 `setResponseHeader` overwrites and two calls would drop a tag. After the
 nightly sweep, its workflow makes one call:
 `POST /api/revalidate?purge=company-pages` (fixed whitelist, same secret) —
@@ -32,15 +33,17 @@ exchange each page shows a promotion one visit late (a page crawled once a day
 sees yesterday's state on today's crawl and freshens behind it). Deploys
 remain the true full resets, with fresh-on-first-visit semantics. If
 first-visit freshness after the sweep ever matters — crawler-facing during the
-SEO recovery, say — the escalations are the SDK's `dangerouslyDeleteByTags`
-(true MISS, origin-stampede risk) or the queue below. No per-company
-precision either way.
+SEO recovery, say — the escalation is the SDK's `dangerouslyDeleteByTags`
+(true MISS, origin-stampede risk). The queue below is the escalation for a
+different cost — per-company precision at sub-day latency — and it still
+invalidates, so these stale-while-revalidate semantics remain.
 
-Operational note: the endpoint answers 202 on AUTH failure by design, so a
-wrong `REVALIDATE_SECRET` in Actions shows as a green step and a silent no-op
-(an unset one fails the workflow's pre-curl assert). An invalidation API
-failure is awaited and answers 500, turning the step red. Stale pages with
-green crons → check the Vercel function logs first.
+Operational note: the endpoint answers a neutral 202 on AUTH failure by
+design (no signal to probes), but the workflow step requires
+`200 {purged:true}` — so a wrong secret (202), an unset one (pre-curl
+assert), invalidation switched off (`purged:false`), and an API failure
+(500) all turn the step red. Genuinely stale pages under green crons →
+check the Vercel function logs first.
 
 ---
 
@@ -136,12 +139,17 @@ broker. Adding Kafka means building this design *plus* a broker on top.
 The escalation is a `cdn_purge_queue` table as a transactional outbox — one
 narrow waist that N producers INSERT into and the revalidate endpoint drains
 under its existing 16-tag/5-per-min budget. The shape, so it need not be
-re-derived: `cdn_purge_queue(company_number varchar PRIMARY KEY, enqueued_at
-timestamp)` — a SET, not a log, so producers `INSERT … ON CONFLICT DO
-NOTHING` in the same transaction as the row change (no dual-write), with
+re-derived: `cdn_purge_queue(company_number varchar PRIMARY KEY, enqueued_seq
+bigint NOT NULL)` — one row per company (a SET, not a log), written in the
+same transaction as the row change (no dual-write) via `INSERT … ON CONFLICT
+(company_number) DO UPDATE SET enqueued_seq = nextval('cdn_purge_seq')`, with
 sweep enqueues gated on render-outcome *transitions* rather than stamps. The
-drain SELECTs a batch, invalidates, then DELETEs exactly the rows it read —
-watermarked on `enqueued_at` at drain start, so concurrent enqueues survive
-to the next call. Migrating the trails drain onto the same waist ends with
-the trails cursor row deleted. Build it only when a measured cost — function
-bill, crawler TTFB — says the blunt purge hurts.
+drain SELECTs a batch, invalidates, then deletes each row guarded on the seq
+it read (`DELETE … WHERE company_number = $n AND enqueued_seq = $s`) — a
+same-company change landing mid-drain bumps the seq, fails the guarded
+delete, and survives to the next call. The guard is an integer sequence, NOT
+`enqueued_at`: timestamp-equality locks already bit this repo once (Neon
+truncates microseconds — the phase-5 sweep freeze). Migrating the trails
+drain onto the same waist ends with the trails cursor row deleted. Build it
+only when a measured cost — function bill, crawler TTFB — says the blunt
+purge hurts.

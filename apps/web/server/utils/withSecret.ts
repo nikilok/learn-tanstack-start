@@ -34,8 +34,9 @@ export function secretMatches(
  * strong as the wrapped handler's own responses: revalidate's trail drain
  * answers 202 either way, while its ?purge mode and /api/releases return
  * 200/400/500 once authenticated — a deliberate trade so CI callers can
- * verify success (the timing-safe compare is what actually stops secret
- * guessing). Each caller passes its own header name + secret.
+ * verify success (the timing-safe compare only closes the timing
+ * side-channel; the secret's entropy is what stops guessing). Each caller
+ * passes its own header name + secret.
  */
 export function withSecret(
   header: string,

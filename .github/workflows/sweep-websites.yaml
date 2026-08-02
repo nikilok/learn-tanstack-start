@@ -80,20 +80,24 @@ jobs:
         # freshness story (docs/company-pages-cache.md). invalidateByTags marks
         # entries stale for background revalidation — gentler than a deploy's
         # full purge. always(): the sweep writes promotions incrementally, so
-        # even a failed or timed-out run has changes worth publishing. NOTE:
-        # the endpoint answers 202 on AUTH failure BY DESIGN, so a wrong
-        # secret shows here as a green step and a silent no-op (an unset one
-        # fails the assert below; an API failure 500s and goes red) — when
-        # pages stay stale under green crons, check the Vercel function logs.
+        # even a failed or timed-out run has changes worth publishing.
+        # 200 {purged:true} is the ONLY success. The endpoint answers a
+        # neutral 202 to a bad secret BY DESIGN (no auth signal to probes),
+        # but 202 != 200 tells THIS caller; and 200 {purged:false} means
+        # VERCEL_CACHE_INVALIDATION is off in prod. Both fail the step
+        # instead of green-no-op'ing, as does a 500 from an API failure.
         if: always() && github.event.inputs.dry-run != 'true'
         shell: bash
         env:
           REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
         run: |
           [ -n "$REVALIDATE_SECRET" ] || { echo "REVALIDATE_SECRET is not set"; exit 1; }
-          curl -fsS -X POST -o /dev/null \
+          body=$(mktemp)
+          status=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
             -H "x-revalidate-secret: $REVALIDATE_SECRET" \
-            "https://sponsorsearch.co.uk/api/revalidate?purge=company-pages"
+            "https://sponsorsearch.co.uk/api/revalidate?purge=company-pages") || exit $?
+          [ "$status" = "200" ] || { echo "Expected 200, got $status"; cat "$body"; exit 1; }
+          jq -e '.purged == true' "$body" >/dev/null || { echo "Purge did not run"; cat "$body"; exit 1; }
 
       - name: Write job summary
         if: always()

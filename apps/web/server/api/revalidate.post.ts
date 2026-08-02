@@ -8,7 +8,8 @@
  * Response: unauthenticated callers always get a neutral 202 (no auth signal).
  *           Authenticated: the trail drain answers 202 and runs async; ?purge
  *           is awaited — 200 {purged} on success, 400 on a non-whitelisted
- *           value, 500 on API failure so the sweep workflow's curl -f goes red
+ *           value, 500 on API failure — so the sweep workflow's status check
+ *           (200 + purged:true) goes red on every failure mode
  *
  * Behaviour:
  *  - ?purge=company-pages: awaited invalidation of the population tag instead
@@ -119,8 +120,8 @@ export default withSecret(
         return json({ accepted: false }, 400);
       }
       // Awaited, unlike the trail drain: one invalidateByTags call is fast,
-      // and a throw must surface as a 500 so the sweep workflow's curl -f
-      // turns the step red instead of burying the failure in function logs.
+      // and a throw must surface as a 500 so the sweep workflow's status
+      // check turns the step red instead of burying the failure in logs.
       return json({ purged: await processCompanyPagesPurge() }, 200);
     }
     waitUntil(

@@ -1,0 +1,140 @@
+name: Discover Company Websites (Search)
+
+# The third discoverer, alongside the CQC and Wikidata registry joins.
+#
+# Those two find a website by joining a registry on the company number, which
+# covers 6,750 companies. The other 109,000 have no registry entry naming a
+# site, so the only way to find one is to look for it: one Serper query per
+# company, then fetch the top candidates and keep whichever carries the
+# company's own registration number or its registered office postcode.
+#
+# Like the registry importer, this job deliberately leaves checked_at NULL. It
+# fetches pages, but only to choose between candidates — the nightly sweep
+# stays the single thing that decides a URL is live and renderable. Two jobs
+# claiming that would be two jobs to keep in agreement.
+#
+# Own concurrency group. Runs at 02:37, in the gap between the 01:17 tier-1
+# sweep and the 05:37 job, and well clear of the 21:43 website sweep whose rows
+# this one creates.
+#
+# COSTS MONEY. Every search spends one Serper credit. Both the rows taken and
+# the searches run are capped, and the script clamps the total to its own
+# ABSOLUTE_MAX_SEARCHES regardless of what is dispatched here — the inputs
+# below can lower the spend but never raise it past that ceiling.
+
+on:
+  schedule:
+    - cron: '37 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run — search and decide, no DB writes (still spends credits)'
+        type: boolean
+        default: false
+      max-rows:
+        description: 'Companies to process this run (default 300)'
+        required: false
+        type: number
+      max-searches:
+        description: 'Hard ceiling on credits spent (defaults to max-rows)'
+        required: false
+        type: number
+
+# Read-only. This job checks out, queries Neon and calls Serper; it pushes
+# nothing and opens nothing, so the default write-capable token is more
+# authority than it needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: discover-websites-search
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # This job never pushes, so it has no use for a credential that
+          # actions/checkout would otherwise leave in the local git config.
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: Discover websites
+        shell: bash
+        # Inputs go through env, never interpolated into the run script.
+        # Secrets are scoped to this step rather than the job: at job level they
+        # are also readable by actions/checkout, setup-bun and every postinstall
+        # script `bun install` executes.
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          DRY_RUN: ${{ github.event.inputs.dry-run }}
+          MAX_ROWS: ${{ github.event.inputs.max-rows }}
+          MAX_SEARCHES: ${{ github.event.inputs.max-searches }}
+        run: |
+          set -o pipefail
+          # Built as an array and expanded quoted. Unquoted "$ROWS_FLAG" was
+          # word-split by the shell, so a max-rows of `1 --max-searches=99999`
+          # arrived as two arguments and smuggled past the spend cap this job
+          # exists to enforce. Numeric inputs are also validated rather than
+          # trusted: workflow_dispatch type:number is not enforced for API and
+          # gh-CLI dispatches, which send strings.
+          ARGS=()
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ -n "$MAX_ROWS" ]; then
+            case "$MAX_ROWS" in
+              ''|*[!0-9]*) echo "max-rows must be a positive integer"; exit 1 ;;
+            esac
+            ARGS+=("--max-rows=$MAX_ROWS")
+          fi
+          if [ -n "$MAX_SEARCHES" ]; then
+            case "$MAX_SEARCHES" in
+              ''|*[!0-9]*) echo "max-searches must be a positive integer"; exit 1 ;;
+            esac
+            ARGS+=("--max-searches=$MAX_SEARCHES")
+          fi
+          bun apps/web/scripts/discover-websites-search.ts "${ARGS[@]}" | tee /tmp/discover-websites.log
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          LOG=/tmp/discover-websites.log
+          if [ ! -f "$LOG" ]; then exit 0; fi
+          extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
+          {
+            echo "## Search Website Discovery"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| 🎯 Selected | $(extract selected) |"
+            echo "| ⚙️ Processed | $(extract processed) |"
+            echo "| 🔎 Searched | $(extract searched) |"
+            echo "| 🪪 Found by number | $(extract found_by_number) |"
+            echo "| 📮 Found by address | $(extract found_by_address) |"
+            echo "| 🚫 Found nothing | $(extract found_nothing) |"
+            echo "| 📈 Hit rate | $(extract hit_rate) |"
+            echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"
+            echo "| 💾 Written | $(extract written) |"
+            echo "| 🔁 Retried | $(extract retried) |"
+            echo "| 📵 Unreadable | $(extract unreadable) |"
+            echo "| 🗃️ Unpersisted | $(extract unpersisted) |"
+            echo "| ❌ Errored | $(extract errored) |"
+            echo "| 💸 Credits lost | $(extract credits_lost) |"
+            echo "| 🛑 Stopped early | $(extract stopped_early) |"
+            echo "| ⏳ Undiscovered left | $(extract undiscovered_left) |"
+            echo "| 💳 Credits spent | $(extract credits_spent) |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -51,3 +51,88 @@ describe('looksParked', () => {
     );
   });
 });
+
+describe('isAggregatorHost over a search engine result page', () => {
+  // This list stopped being a registry-hygiene nicety when search discovery
+  // started feeding it. It is now the only filter between a SERP for "<name>
+  // ltd" — which is mostly company-data resellers — and a published website,
+  // and every one of those resellers reprints the registration number the
+  // query named. An unlisted directory does not become a weak match; it
+  // becomes crn_on_page at 0.990 with the company's own number confirming it.
+  const directories = [
+    'companiesintheuk.co.uk',
+    'www.thegazette.co.uk',
+    'find-and-update.company-information.service.gov.uk',
+    'www.endole.co.uk',
+    'opencorporates.com',
+    'creditsafe.com',
+    'northdata.com',
+    'uk.indeed.com',
+    'www.glassdoor.co.uk',
+    'uk.linkedin.com',
+    'www.checkatrade.com',
+    'en.wikipedia.org',
+    'www.tripadvisor.co.uk',
+    'register.fca.org.uk',
+  ];
+  for (const host of directories) {
+    test(`${host} is a listing, not a company website`, () => {
+      expect(isAggregatorHost(host)).toBe(true);
+    });
+  }
+
+  test('nhs.uk stays off the list', () => {
+    // GP practices legitimately run their sites on NHS-hosted domains, and
+    // adding it rejected two correct rows in the sample.
+    expect(isAggregatorHost('www.eightlandssurgery.nhs.uk')).toBe(false);
+  });
+
+  test('an ordinary company site is untouched', () => {
+    expect(isAggregatorHost('www.brendoncare.org.uk')).toBe(false);
+    expect(isAggregatorHost('acmecare.co.uk')).toBe(false);
+  });
+
+  test('matching is on the host, not a substring of it', () => {
+    // `notyell.com` and `yell.com.example.co.uk` are not yell.com.
+    expect(isAggregatorHost('notyell.com')).toBe(false);
+    expect(isAggregatorHost('yell.com.example.co.uk')).toBe(false);
+  });
+});
+
+describe('public bodies are sponsors too', () => {
+  test('a council keeps its own gov.uk site', () => {
+    // Blanket-listing gov.uk to catch the registers would reject the correct
+    // answer for every local authority on the register.
+    expect(isAggregatorHost('www.leeds.gov.uk')).toBe(false);
+    expect(isAggregatorHost('birmingham.gov.uk')).toBe(false);
+  });
+
+  test('but the registers hosted on gov.uk are still listings', () => {
+    expect(
+      isAggregatorHost('register-of-charities.charitycommission.gov.uk'),
+    ).toBe(true);
+    expect(isAggregatorHost('reports.ofsted.gov.uk')).toBe(true);
+  });
+});
+
+describe('assertions use the host callers actually see, post-redirect', () => {
+  test('a Maps link is judged as www.google.com, because that is where it lands', () => {
+    // maps.google.com 302s to www.google.com/maps, and both callers pass the
+    // POST-redirect host. Listing maps.google.com instead of google.com is a
+    // rule that can never fire.
+    expect(isAggregatorHost('www.google.com')).toBe(true);
+    expect(isAggregatorHost('google.com')).toBe(true);
+  });
+
+  test('Google Sites is exempt, so a small company keeps its real website', () => {
+    expect(isAggregatorHost('sites.google.com')).toBe(false);
+  });
+
+  test('subdomains of a listed host need no entry of their own', () => {
+    // The claim that justified deleting four entries. Asserted on a host that
+    // has no entry of its own, so re-adding one would not change the result.
+    expect(isAggregatorHost('suite.endole.co.uk')).toBe(true);
+    expect(isAggregatorHost('reports.endole.co.uk')).toBe(true);
+    expect(isAggregatorHost('data.opencorporates.com')).toBe(true);
+  });
+});

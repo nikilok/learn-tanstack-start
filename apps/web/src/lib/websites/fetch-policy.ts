@@ -55,16 +55,23 @@ export function urlVariants(url: string): string[] {
 /** Paths probed for a trading disclosure when the homepage carries none. UK
  *  companies must publish the number somewhere on the site, and on larger sites
  *  it lives on a legal page rather than the front page — which is most of why
- *  globally-branded subsidiaries look unverifiable from the homepage alone. */
+ *  globally-branded subsidiaries look unverifiable from the homepage alone.
+ *
+ *  Privacy pages lead because GDPR requires them to identify the data
+ *  controller as a legal entity, so they name the registered company and number
+ *  even on sites that are otherwise pure brand. Measured: the only page on
+ *  redfunnel.co.uk carrying 00002404 was /privacy, and callers cap this list —
+ *  the sweep takes the first two — so the order decides what is ever tried. */
 export const DISCLOSURE_PATHS = [
-  '/contact',
-  '/contact-us',
-  '/terms',
-  '/terms-and-conditions',
-  '/legal',
   '/privacy',
-  '/about',
+  '/privacy-policy',
+  '/terms-and-conditions',
+  '/terms',
+  '/legal',
+  '/contact-us',
+  '/contact',
   '/about-us',
+  '/about',
 ];
 
 const PRIVATE_V4 = [

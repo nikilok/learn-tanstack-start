@@ -1,11 +1,12 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
+import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
 import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
 export type ActionChoice = 'log' | 'challenge' | 'deny' | 'bypass'; // a rule's switchable mitigate action
-type Condition = {
-  type: 'path' | 'query' | 'header';
+export type Condition = {
+  type: 'path' | 'query' | 'header' | 'ja4_digest' | 'geo_as_number';
   op: 'pre' | 'eq' | 'ex' | 'sub' | 're';
   key?: string;
   value?: string | string[];
@@ -99,7 +100,12 @@ function rateLimitRule(opts: {
   };
 }
 
-/** Build a header-gated path bypass — a trusted non-browser server-to-server caller exempted from the managed Bot Protection challenge it can't solve. Matching on header PRESENCE (not value) keeps the secret out of firewall config; the endpoint's timing-safe secret check stays the real auth gate. */
+/**
+ * Build a header-gated path bypass — a trusted non-browser caller exempted from the managed Bot
+ * Protection challenge it can't solve. Matching header PRESENCE keeps the secret out of firewall
+ * config; the endpoint's timing-safe check stays the real gate. Only safe while `headerKey` is a
+ * bespoke name no ordinary client sends — never a standard one like `authorization`.
+ */
 function bypassRule(opts: {
   name: string;
   description: string;
@@ -121,6 +127,26 @@ function bypassRule(opts: {
     action: { mitigate: { action: 'bypass' } },
   };
 }
+
+// Both REQUIRED (absent throws — see envMatching); values stay in .env.local, never this repo.
+// Unlike observe-ja4-serverfn these match a digest rather than rate-limiting keyed by one, so
+// isLogOnly() leaves them switchable. That rests on the operator having PROVEN the digest is
+// non-browser: a shared browser fingerprint here denies everyone carrying it, and no code-level
+// guard can tell the two apart.
+const blockedJa4Rule = denyListRule({
+  name: 'deny-scraper-ja4',
+  description: 'Deny scraper TLS fingerprints (FW_BLOCKED_JA4).',
+  spec: JA4_DENY,
+  values: envMatching('FW_BLOCKED_JA4', JA4_DENY, !dryRun),
+});
+
+const blockedAsnRule = denyListRule({
+  name: 'deny-scraper-asn',
+  description:
+    'Deny hosting ASNs that only ever serve scrapers (FW_BLOCKED_ASN).',
+  spec: ASN_DENY,
+  values: envMatching('FW_BLOCKED_ASN', ASN_DENY, !dryRun),
+});
 
 // Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
 // missing var drops just this rule instead of throwing the whole apply at import.
@@ -194,6 +220,9 @@ export const rules: Rule[] = [
     path: '/api/releases',
     headerKey: 'x-desktop-release-secret',
   }),
+  // Position here is documentation only: live priority is INSERTION order (applyRule appends).
+  blockedJa4Rule,
+  blockedAsnRule,
   // Two tiers per path: BURST (60s) sized well above a real session so humans never trip it,
   // SUSTAINED (10m) holding the flat rate. Humans burst then idle; scrapers run level.
   rateLimitRule({

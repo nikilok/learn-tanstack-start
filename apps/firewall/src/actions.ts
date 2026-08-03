@@ -26,12 +26,16 @@ export function isLogOnly(rule: Rule): boolean {
   return rule.action.mitigate.rateLimit?.keys.includes('ja4_digest') ?? false;
 }
 
-/** Switchable actions valid for a rule: JA4 rules are locked to log; other rate-limit rules can't bypass (the exceeded-action enum excludes it); plain rules get all four. */
+/**
+ * Switchable actions valid for a rule. JA4-keyed rate-limit rules are locked to log; `bypass` is
+ * offered only to rules authored as one, since cycling a deny past `deny` would invert it into an
+ * exemption — and seedItems prefers the live action, so that would survive every later apply.
+ */
 export function actionOptions(rule: Rule): ActionChoice[] {
   if (isLogOnly(rule)) return ['log'];
-  return rule.action.mitigate.action === 'rate_limit'
-    ? ['log', 'challenge', 'deny']
-    : ['log', 'challenge', 'deny', 'bypass'];
+  return rule.action.mitigate.action === 'bypass'
+    ? ['log', 'challenge', 'deny', 'bypass']
+    : ['log', 'challenge', 'deny'];
 }
 
 /** Copy of the rule with its governing action set: rate-limit rules update rateLimit.action, others mitigate.action. */

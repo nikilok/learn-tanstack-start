@@ -5,7 +5,8 @@
   "scripts": {
     "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "bun test"
   },
   "dependencies": {
     "@vercel/sdk": "^1.21.5",

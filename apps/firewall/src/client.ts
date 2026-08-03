@@ -122,6 +122,16 @@ export async function runHeadless() {
       console.log(
         `${status}${detail ? ` (${detail})` : ''}  ${item.rule.name}`,
       );
+      // "overwrote" alone reads as "in force", which is false in these two cases.
+      if (live.activeByName.get(item.rule.name) === false)
+        console.log(
+          `  WARNING: ${item.rule.name} is DEACTIVATED live — this update was written but the WAF will not evaluate it`,
+        );
+      const liveAction = live.actionByName.get(item.rule.name);
+      if (liveAction && liveAction !== item.action)
+        console.log(
+          `  WARNING: ${item.rule.name} live action "${liveAction}" is not valid for this rule — reset to "${item.action}"`,
+        );
     } catch (e) {
       anyError = true;
       console.log(`error (${errMsg(e)})  ${item.rule.name}`);

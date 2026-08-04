@@ -39,7 +39,7 @@ import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
 import { resolveIpEntry } from './ip-entry';
-import { type IpProfile, topIps } from './ip-profile';
+import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
@@ -54,6 +54,7 @@ type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
 const PANE_KEY: Record<string, PaneKind> = {
   r: 'report',
   i: 'ip',
+  f: 'ip', // same pane, fingerprint picker
   s: 'sitemap',
   d: 'denylist',
 };
@@ -92,6 +93,8 @@ export function App() {
   const [focus, setFocus] = useState<
     'editor' | 'pane' | 'ip-input' | 'asn-input' | 'range-input' | 'confirm'
   >('editor');
+  // Which identity the picker and new tabs address. `i` and `f` set it.
+  const [pickKind, setPickKind] = useState<'ip' | 'ja4'>('ip');
   const [ipInput, setIpInput] = useState('');
   const [ipError, setIpError] = useState('');
   // -1 means "use what I typed"; 0+ indexes the filtered suggestions, like a URL bar.
@@ -105,6 +108,7 @@ export function App() {
   const [rangeInput, setRangeInput] = useState('');
   const [rangeError, setRangeError] = useState('');
   const topIpList = usePane<[string, number][]>();
+  const topJa4List = usePane<[string, number][]>();
   const denyActivity = usePane<Map<string, Activity>>();
   const [denyCursor, setDenyCursor] = useState(0);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
@@ -294,10 +298,13 @@ export function App() {
         botVerified: ipTabs.active.data.byBotVerified,
         wafActions: ipTabs.active.data.byWafAction,
         wafRules: ipTabs.active.data.byWafRule,
+        statuses: ipTabs.active.data.byStatus,
         digestReach: ipTabs.active.data.digestReach,
         asnReach: ipTabs.active.data.asnReach,
         alreadyDeniedJa4: liveJa4.includes(
-          ipTabs.active.data.byJa4[0]?.[0] ?? '',
+          ipTabs.active.data.subject.kind === 'ja4'
+            ? ipTabs.active.data.subject.value
+            : (ipTabs.active.data.byJa4[0]?.[0] ?? ''),
         ),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
@@ -307,27 +314,24 @@ export function App() {
     : undefined;
 
   // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
-  const ipFiltered = (topIpList.data ?? []).filter(
+  const pickList = pickKind === 'ip' ? topIpList : topJa4List;
+  const ipFiltered = (pickList.data ?? []).filter(
     ([ip]) => !ipInput || ip.includes(ipInput),
   );
   const ipMatches = ipFiltered.slice(0, IP_SUGGESTIONS);
 
   /** Open a pane, loading it on first view. `i` always prompts for another IP — tab is how you get back to one already open. */
-  const openPane = (kind: PaneKind) => {
+  const openPane = (kind: PaneKind, pick: 'ip' | 'ja4' = 'ip') => {
     setPane(kind);
     setReportScroll(0);
     if (kind === 'ip') {
+      setPickKind(pick);
       setIpInput('');
       setIpError('');
       setIpCursor(-1);
       setFocus('ip-input');
       // Picking from live traffic beats typing an address from memory. Fetched once per session.
-      if (!topIpList.data)
-        void topIpList.load(async () => {
-          const { rows, error } = await topIps(creds, ipWindow, TOP_IPS_LIMIT);
-          if (error) throw new Error(error);
-          return rows;
-        });
+      void loadPickList(pick, ipWindow);
       return;
     }
     setFocus('pane');
@@ -397,6 +401,20 @@ export function App() {
     setApplied(null);
   };
 
+  /** Load the picker list for `kind`. Cached per kind so switching back is instant. */
+  const loadPickList = (kind: 'ip' | 'ja4', w: Window) => {
+    const cache = kind === 'ip' ? topIpList : topJa4List;
+    if (cache.data) return;
+    void cache.load(async () => {
+      const { rows, error } =
+        kind === 'ip'
+          ? await topIps(creds, w, TOP_IPS_LIMIT)
+          : await topJa4(creds, w, TOP_IPS_LIMIT);
+      if (error) throw new Error(error);
+      return rows;
+    });
+  };
+
   /** Apply a typed date range to IP lookups. Blank reverts to the rolling default. */
   const submitRange = (raw: string) => {
     const text = raw.trim();
@@ -441,14 +459,22 @@ export function App() {
   /** Open `value` as a tab; keeps focus in the field when it is not an IP. Takes the value rather than reading state, so a paste that ends in a newline can submit what it just appended. */
   const submitIp = (value: string) => {
     const ip = value.trim();
-    if (!ip || !IP_CHARS.test(ip)) {
-      setIpError('not an IP address');
+    // Validated per kind: a JA4 contains letters and underscores an IP never can.
+    const valid =
+      pickKind === 'ip' ? IP_CHARS.test(ip) : JA4_DENY.valid(ip.toLowerCase());
+    if (!ip || !valid) {
+      setIpError(
+        pickKind === 'ip' ? 'not an IP address' : 'not a JA4 digest',
+      );
       return;
     }
     setIpError('');
     setFocus('pane');
     setReportScroll(0);
-    ipTabs.open(ip, ipWindow);
+    ipTabs.open(
+      { kind: pickKind, value: pickKind === 'ja4' ? ip.toLowerCase() : ip },
+      ipWindow,
+    );
   };
 
   /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
@@ -547,7 +573,8 @@ export function App() {
         setIpCursor(-1); // typing re-asserts the typed text over any highlight
         // A paste arrives as ONE chunk, so filter within it rather than testing the whole
         // string — requiring the chunk to match meant pasting an IP silently did nothing.
-        const next = (ipInput + input.replace(/[^0-9a-fA-F.:]/g, '')).slice(
+        const allowed = pickKind === 'ip' ? /[^0-9a-fA-F.:]/g : /[^0-9a-z_]/gi;
+        const next = (ipInput + input.replace(allowed, '')).slice(
           0,
           45, // longest IPv6 literal
         );
@@ -591,7 +618,8 @@ export function App() {
       } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
-      } else if (PANE_KEY[input]) openPane(PANE_KEY[input]);
+      } else if (PANE_KEY[input])
+        openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
       else if (key.escape) setFocus('editor');
       else if (pane === 'denylist' && (key.upArrow || input === 'k'))
         setDenyCursor((c) => Math.max(0, c - 1));
@@ -619,7 +647,8 @@ export function App() {
       } else if (input === ' ')
         editCursorItem((it) => ({ ...it, active: !it.active }));
       // Lazy: fetch once, cached after, so re-opening a pane is instant.
-      else if (PANE_KEY[input]) openPane(PANE_KEY[input]);
+      else if (PANE_KEY[input])
+        openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'a') {
         if (applying.current) return;
@@ -720,7 +749,7 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · s sitemap · d denylist
+              ip · f ja4 · s sitemap · d denylist
               {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
@@ -759,12 +788,15 @@ export function App() {
             <Box>
               {ipTabs.tabs.map((t, i) => (
                 <Text
-                  key={t.ip}
+                  key={`${t.subject.kind}:${t.subject.value}`}
                   bold={i === ipTabs.index}
                   color={i === ipTabs.index ? 'cyan' : undefined}
                   dimColor={i !== ipTabs.index}
                 >
-                  {i === ipTabs.index ? `[${t.ip}]` : ` ${t.ip} `}
+                  {/* Digests are long, so tabs show a recognisable head, never the whole thing. */}
+                  {i === ipTabs.index
+                    ? `[${tabLabel(t)}]`
+                    : ` ${tabLabel(t)} `}
                   {t.loading ? '…' : ''}{' '}
                 </Text>
               ))}
@@ -817,9 +849,10 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
-                  new ip · w range
-                  {pane === 'ip' && ipAdvice && !ipAdvice.blockers.length
-                    ? ' · b deny fingerprint'
+                  new ip · f ja4 · w range
+                  {/* Shown exactly when `b` does something: the advisor offered a lever. */}
+                  {pane === 'ip' && ipAdvice?.lever
+                    ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
                     : ''}
                   {pane === 'denylist' ? ' · u unban' : ''}
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
@@ -869,23 +902,30 @@ export function App() {
           )}
           {focus === 'ip-input' && (
             <Box flexDirection="column">
-              {topIpList.loading && !topIpList.data ? (
-                <Text dimColor>  loading busiest IPs…</Text>
+              {pickList.loading && !pickList.data ? (
+                <Text dimColor>
+                  {'  '}loading busiest{' '}
+                  {pickKind === 'ip' ? 'IPs' : 'fingerprints'}…
+                </Text>
               ) : (
-                topIpList.data && (
+                pickList.data && (
                   <Text dimColor>
-                    {'  '}busiest IPs · {ipWindow.label} ·{' '}
+                    {'  '}busiest{' '}
+                    {pickKind === 'ip' ? 'IPs' : 'JA4 fingerprints'} ·{' '}
+                    {ipWindow.label} ·{' '}
                     {ipInput
                       ? `${ipFiltered.length} match` +
                         (ipFiltered.length > ipMatches.length
                           ? `, showing ${ipMatches.length}`
                           : '')
-                      : `top ${ipMatches.length} of ${topIpList.data.length}, type to filter · w changes range`}
+                      : `top ${ipMatches.length} of ${pickList.data.length}, type to filter · w changes range`}
                   </Text>
                 )
               )}
               {ipMatches.map(([ip, count], i) => {
-                const open = ipTabs.tabs.some((t) => t.ip === ip);
+                const open = ipTabs.tabs.some(
+                  (t) => t.subject.value === ip,
+                );
                 return (
                   <Box key={ip}>
                     <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
@@ -901,7 +941,7 @@ export function App() {
                 <Text dimColor>  no busy IP matches — enter profiles it anyway</Text>
               )}
               <Box>
-                <Text color="cyan">IP: </Text>
+                <Text color="cyan">{pickKind === 'ip' ? 'IP: ' : 'JA4: '}</Text>
                 <Text>{ipInput}</Text>
                 <Text color="cyan">▏</Text>
                 <Text dimColor>
@@ -916,6 +956,13 @@ export function App() {
       )}
     </Box>
   );
+}
+
+/** A tab's chip text. A JA4 is 37 chars, so it is shortened to its distinguishing head. */
+function tabLabel(t: IpTab): string {
+  return t.subject.kind === 'ja4'
+    ? `${t.subject.value.slice(0, 14)}…`
+    : t.subject.value;
 }
 
 /** Body of whichever side pane is open. Report keeps its bespoke Ink view; the other two share the line model. */

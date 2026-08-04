@@ -32,6 +32,7 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
     botVerified: [],
     wafActions: [['log', 9060]],
     wafRules: [],
+    statuses: [['200', 9000]],
     digestReach: {
       label: 't13d311200_1d947a95fc68_7e1102d2036b',
       ips: 413,
@@ -73,6 +74,7 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
     botVerified: [],
     wafActions: [['allow', 662]],
     wafRules: [],
+    statuses: [['200', 9000]],
     digestReach: {
       label: 't13d2013h2_a09f3c656075_7f0f34a4126d',
       ips: 3,
@@ -101,11 +103,22 @@ describe('adviseBan — the scraper', () => {
     expect(adviseBan(scraper()).reasons.join(' ')).toContain('413 IPs');
   });
 
-  test('an already-denied digest is left alone', () => {
+  test('an already-denied digest reads as handled, not as innocent', () => {
+    // 'leave' would render as a green DO NOT DENY, which says the opposite of what happened.
     const a = adviseBan(scraper({ alreadyDeniedJa4: true }));
-    expect(a.verdict).toBe('leave');
+    expect(a.verdict).toBe('already');
     expect(a.blockers.join(' ')).toContain('already in FW_BLOCKED_JA4');
     expect(a.lever).toBeUndefined();
+    // The evidence must survive: it is why the rule exists.
+    expect(a.reasons.length).toBeGreaterThan(1);
+  });
+
+  test('a legitimate client that is also denied still reads as legitimate', () => {
+    const a = adviseBan(
+      scraper({ alreadyDeniedJa4: true, botVerified: [['pass', 500]] }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.blockers.join(' ')).toContain('verified bot');
   });
 });
 
@@ -213,6 +226,7 @@ describe('adviseBan — first-party callers', () => {
     botVerified: [],
     wafActions: [['bypass', 1158]],
     wafRules: [['allow-ch-stream-revalidate', 1158]],
+    statuses: [['202', 1158]],
     digestReach: {
       label: 't13d1714h1_5b57614c22b0_7baf387fc6ff',
       ips: 1,
@@ -243,6 +257,7 @@ describe('adviseBan — first-party callers', () => {
       ...chStream(),
       wafActions: [['log', 1158]],
       wafRules: [],
+    statuses: [['200', 9000]],
     });
     expect(a.verdict).toBe('leave');
     expect(a.blockers.join(' ')).toContain('nothing here to enumerate');
@@ -266,6 +281,7 @@ describe('adviseBan — the ASN lever', () => {
     botVerified: [],
     wafActions: [['log', 1630]],
     wafRules: [],
+    statuses: [['200', 9000]],
     // Rotating: this digest is shared with real browsers elsewhere, so JA4 is not available.
     digestReach: {
       label: 't13d3012h1_1d37bd780c83_882d495ac381',
@@ -371,5 +387,71 @@ describe('adviseBan — the ASN lever', () => {
       }),
     );
     expect(a.lever?.kind).toBe('ja4');
+  });
+});
+
+describe('adviseBan — is acting worth it', () => {
+  // An Azure PHP-backdoor scanner: scraper-shaped, but already challenged on every request and
+  // finding nothing. Still deniable, but the operator should know a deny buys very little.
+  const prober = (): AdviceInput => ({
+    total: 490,
+    mix: mixOf([['/1.php', 200], ['/admin.php', 290]]),
+    shape: shapeOf(series(Array(144).fill(4), 0, 144), 10),
+    ja4: [['t13d201100_2b729b4bf6f3_36bf25f296df', 490]],
+    asns: [['Microsoft Corporation', 490]],
+    botVerified: [],
+    wafActions: [['challenge', 490]],
+    wafRules: [],
+    statuses: [['429', 490]],
+    digestReach: {
+      label: 't13d201100_2b729b4bf6f3_36bf25f296df',
+      ips: 8,
+      countries: 5,
+      total: 490,
+      subResources: 0,
+      beacons: 0,
+      verifiedNames: [],
+    },
+    asnReach: {
+      label: 'Microsoft Corporation',
+      ips: 431,
+      countries: 17,
+      total: 4828,
+      subResources: 221,
+      beacons: 0,
+      verifiedNames: ['bingbot', 'gptbot'],
+    },
+    alreadyDeniedJa4: false,
+    alreadyDeniedAsn: false,
+    windowMinutes: 1440,
+  });
+
+  test('still recommends the fingerprint, never the network', () => {
+    const a = adviseBan(prober());
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.kind).toBe('ja4');
+  });
+
+  test('refuses the network because bingbot and gptbot egress from it', () => {
+    expect(adviseBan(prober()).leverNotes.join(' ')).not.toContain(
+      'ZERO sub-resources across 4828',
+    );
+  });
+
+  test('says a deny buys little when managed rules already act on everything', () => {
+    expect(adviseBan(prober()).leverNotes.join(' ')).toContain(
+      'saves the challenge round-trip',
+    );
+  });
+
+  test('distinguishes probing from harvesting when every response is 4xx', () => {
+    expect(adviseBan(prober()).leverNotes.join(' ')).toContain(
+      'probing rather than harvesting',
+    );
+  });
+
+  test('a client that actually gets 200s is not called a prober', () => {
+    const a = adviseBan({ ...prober(), statuses: [['200', 490]], wafActions: [['log', 490]] });
+    expect(a.leverNotes.join(' ')).not.toContain('probing rather than harvesting');
   });
 });

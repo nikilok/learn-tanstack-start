@@ -12,7 +12,7 @@ import {
   pool,
   ruleNames,
   safeIp,
-  seriesByIp,
+  seriesBy,
   top,
 } from './observability';
 import { envCeiling, errMsg } from './util';
@@ -112,7 +112,7 @@ async function refinePeaks(
         const from = w;
         const to = new Date(w.getTime() + 10 * 60_000);
         try {
-          return seriesByIp(
+          return seriesBy(
             await metrics(ctx, ['clientIp'], {
               filter: ipFilter,
               limit: 500,
@@ -184,7 +184,7 @@ async function fetchDist(
 
   let tenMin: Map<string, Bucket[]>;
   try {
-    tenMin = seriesByIp(
+    tenMin = seriesBy(
       await metrics(ctx, ['clientIp'], {
         filter: ipFilter,
         limit: 500,

@@ -114,13 +114,21 @@ function reachLine(what: string, r: IpProfile['digestReach']): Line[] {
 /** The recommendation block. Blockers and rejected levers print even on a `ban`-less verdict — knowing WHY something is untouchable is the useful part. */
 function adviceLines(a: Advice, p: IpProfile): Line[] {
   const tone =
-    a.verdict === 'ban' ? 'bad' : a.verdict === 'watch' ? 'warn' : 'good';
+    a.verdict === 'ban'
+      ? 'bad'
+      : a.verdict === 'watch'
+        ? 'warn'
+        : a.verdict === 'already'
+          ? 'dim'
+          : 'good';
   const headline =
     a.verdict === 'ban'
       ? `DENY RECOMMENDED (${a.lever?.kind.toUpperCase()}) — press b to stage, a to apply`
       : a.verdict === 'watch'
         ? 'INCONCLUSIVE — no safe lever, do not deny'
-        : 'DO NOT DENY';
+        : a.verdict === 'already'
+          ? 'ALREADY DENIED — the evidence stands, the rule is in place'
+          : 'DO NOT DENY';
   const L: Line[] = [blank(), line(seg('RECOMMENDATION', 'bold'))];
   L.push(line('  ', seg(headline, tone)));
   if (a.lever)

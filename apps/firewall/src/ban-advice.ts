@@ -40,7 +40,9 @@ export type Lever = {
 };
 
 export type Advice = {
-  verdict: 'ban' | 'watch' | 'leave';
+  // 'leave' means legitimate; 'already' means correctly denied and nothing left to do. Collapsing
+  // the two made a caught scraper read as innocent.
+  verdict: 'ban' | 'watch' | 'already' | 'leave';
   lever?: Lever;
   digest?: string;
   reasons: string[];
@@ -58,6 +60,7 @@ export type AdviceInput = {
   botVerified: [string, number][];
   wafActions: [string, number][];
   wafRules: [string, number][];
+  statuses: [string, number][];
   digestReach?: Reach;
   asnReach?: Reach;
   alreadyDeniedJa4: boolean;
@@ -102,10 +105,6 @@ function blockersFor(input: AdviceInput): string[] {
     out.push(
       `only ${input.total} requests — below ${MIN_VOLUME}, not worth a rule evaluated on every request`,
     );
-  // Already handled. Kept a blocker rather than a lever note so the answer reads "nothing to
-  // do" instead of "inconclusive" — an ASN escalation on top is a deliberate manual call.
-  if (input.alreadyDeniedJa4)
-    out.push('fingerprint is already in FW_BLOCKED_JA4 — nothing to add');
   if (!input.ja4.length)
     out.push('no TLS fingerprint recorded — nothing to identify it by');
   return out;
@@ -144,7 +143,12 @@ export function qualifyLever(
  * cleared is worse than no action at all.
  */
 export function adviseBan(input: AdviceInput): Advice {
+  // Kept apart from the real blockers: being already denied is not a reason the client is
+  // legitimate, it is a reason there is nothing further to do.
   const blockers = blockersFor(input);
+  const denied = input.alreadyDeniedJa4
+    ? ['fingerprint is already in FW_BLOCKED_JA4 — nothing to add']
+    : [];
   const reasons: string[] = [];
   const { mix, shape } = input;
 
@@ -172,9 +176,35 @@ export function adviseBan(input: AdviceInput): Advice {
       `the fingerprint spans ${input.digestReach.ips} IPs across ${input.digestReach.countries} countries — per-IP limits cannot see it`,
     );
 
+  // Context on whether acting is worth it, separate from whether it is safe. A client already
+  // challenged on every request, or one that only ever gets 404s, is not reading anything.
+  const acted = input.wafActions
+    .filter(([a]) => a === 'challenge' || a === 'deny')
+    .reduce((n, [, c]) => n + c, 0);
+  const missed = input.statuses
+    .filter(([code]) => code.startsWith('4'))
+    .reduce((n, [, c]) => n + c, 0);
+  const context: string[] = [];
+  if (acted >= input.total * 0.9)
+    context.push(
+      `managed rules already challenge or deny ${acted} of ${input.total} — an explicit deny mainly saves the challenge round-trip`,
+    );
+  if (missed >= input.total * 0.9)
+    context.push(
+      `${missed} of ${input.total} responses are 4xx — it is finding nothing, so this is probing rather than harvesting`,
+    );
+
   const digest = input.ja4[0]?.[0];
-  const leverNotes: string[] = [];
-  if (blockers.length) return { verdict: 'leave', reasons, blockers, leverNotes };
+  const leverNotes: string[] = [...context];
+  if (blockers.length)
+    return {
+      verdict: 'leave',
+      reasons,
+      blockers: [...blockers, ...denied],
+      leverNotes,
+    };
+  if (input.alreadyDeniedJa4)
+    return { verdict: 'already', digest, reasons, blockers: denied, leverNotes };
   if (reasons.length < 2)
     return { verdict: 'watch', digest, reasons, blockers, leverNotes };
 

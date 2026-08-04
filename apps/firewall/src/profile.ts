@@ -9,7 +9,7 @@
 import { adviseBan } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { JA4_DENY, envMatching } from './deny-list';
-import { fetchIpProfile, topIps } from './ip-profile';
+import { type Subject, fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
 import { rollingWindow } from './time-window';
@@ -85,9 +85,13 @@ async function main() {
     return;
   }
 
+  // A JA4 is recognised by shape, so the same command profiles either identity.
+  const subject: Subject = JA4_DENY.valid(args.ip.toLowerCase())
+    ? { kind: 'ja4', value: args.ip.toLowerCase() }
+    : { kind: 'ip', value: args.ip };
   const profile = await fetchIpProfile(
     creds,
-    args.ip,
+    subject,
     rollingWindow(args.hours, new Date()),
   );
   // Not required: without a denylist configured nothing is already-denied, which is the truth.
@@ -101,6 +105,7 @@ async function main() {
     botVerified: profile.byBotVerified,
     wafActions: profile.byWafAction,
     wafRules: profile.byWafRule,
+    statuses: profile.byStatus,
     digestReach: profile.digestReach,
     asnReach: profile.asnReach,
     alreadyDeniedJa4: deniedJa4.includes(profile.byJa4[0]?.[0] ?? ''),

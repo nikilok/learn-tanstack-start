@@ -2,6 +2,7 @@
 // Read-only by design: this reports, it never bans (see the watch-branch post-mortem).
 
 import type { Reach } from './ban-advice';
+import { JA4_DENY } from './deny-list';
 import {
   type Mix,
   type Shape,
@@ -17,7 +18,7 @@ import {
   pool,
   ruleNames,
   safeIp,
-  seriesByIp,
+  seriesBy,
   top,
 } from './observability';
 import type { Window } from './time-window';
@@ -26,8 +27,20 @@ import { errMsg } from './util';
 // 10-minute buckets resolve a session; hourly hides it. Past 2 days that is too many rows to read.
 const FINE_BUCKET_HOURS = 48;
 
+/** What is being profiled. A JA4 digest is the handle that survives IP rotation, so it gets the same view. */
+export type Subject = { kind: 'ip' | 'ja4'; value: string };
+
+/** The observability dimension and filter for a subject. */
+export function subjectDim(s: Subject): string {
+  return s.kind === 'ip' ? 'clientIp' : 'clientJa4Digest';
+}
+export function subjectFilter(s: Subject): string {
+  return `${subjectDim(s)} eq '${s.value}'`;
+}
+
 export type IpProfile = {
-  ip: string;
+  subject: Subject;
+  ip: string; // the subject's value, kept for the header and tab label
   start: string;
   end: string;
   windowHours: number;
@@ -36,6 +49,7 @@ export type IpProfile = {
   byStatus: [string, number][];
   byUserAgent: [string, number][];
   byJa4: [string, number][];
+  byIp: [string, number][]; // the interesting axis when the subject IS a fingerprint
   byAsn: [string, number][];
   byCountry: [string, number][];
   byBot: [string, number][]; // botVerified|botName|botCategory, for display
@@ -93,13 +107,18 @@ async function group(
 /** Profile one IP over the last `hours`. Fans out one grouped query per dimension plus a bucket series, then scores the result with the pure tells. */
 export async function fetchIpProfile(
   creds: { projectId: string; teamId: string; token: string },
-  ip: string,
+  subject: Subject,
   window: Window,
 ): Promise<IpProfile> {
-  if (!safeIp(ip)) throw new Error(`"${ip}" is not a valid IP address`);
+  const ip = subject.value;
+  if (subject.kind === 'ip' && !safeIp(ip))
+    throw new Error(`"${ip}" is not a valid IP address`);
+  if (subject.kind === 'ja4' && !JA4_DENY.valid(ip.toLowerCase()))
+    throw new Error(`"${ip}" is not a JA4 digest`);
   const hours = window.hours;
   const { ctx } = makeCtx(creds, window);
-  const filter = `clientIp eq '${ip}'`;
+  const dim = subjectDim(subject);
+  const filter = subjectFilter(subject);
   const errors: string[] = [];
   const g = (label: string, dims: string[], event?: string) => () =>
     group(ctx, errors, label, dims, filter, event);
@@ -108,6 +127,7 @@ export async function fetchIpProfile(
     byStatus,
     byUserAgent,
     byJa4,
+    byIp,
     byAsn,
     byCountry,
     byBot,
@@ -121,6 +141,7 @@ export async function fetchIpProfile(
       g('status', ['httpStatus']),
       g('user agents', ['clientUserAgent']),
       g('ja4', ['clientJa4Digest']),
+      g('ips', ['clientIp']),
       g('asn', ['asnName']),
       g('country', ['clientIpCountry']),
       g('bot', ['botVerified', 'botName', 'botCategory']),
@@ -139,12 +160,13 @@ export async function fetchIpProfile(
   let buckets: { t: string; c: number }[] = [];
   try {
     buckets =
-      seriesByIp(
-        await metrics(ctx, ['clientIp'], {
+      seriesBy(
+        await metrics(ctx, [dim], {
           filter,
           limit: 500,
           granularity: { minutes: bucketMinutes },
         }),
+        dim,
       ).get(ip) ?? [];
   } catch (e) {
     errors.push(`series: ${errMsg(e)}`);
@@ -227,6 +249,7 @@ export async function fetchIpProfile(
   );
 
   return {
+    subject,
     ip,
     start: ctx.startTime,
     end: ctx.endTime,
@@ -236,6 +259,7 @@ export async function fetchIpProfile(
     byStatus,
     byUserAgent,
     byJa4,
+    byIp,
     byAsn,
     byCountry,
     byBot,
@@ -262,6 +286,26 @@ export async function fetchIpProfile(
     }),
     errors,
   };
+}
+
+/** Top JA4 digests by volume — the entry point when the fingerprint is the handle, which it usually is. */
+export async function topJa4(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+  limit: number,
+): Promise<{ rows: [string, number][]; error?: string }> {
+  const { ctx } = makeCtx(creds, window);
+  try {
+    return {
+      rows: top(
+        await metrics(ctx, ['clientJa4Digest'], { limit: 500 }),
+        'clientJa4Digest',
+        limit,
+      ).filter(([d]) => d && d !== '?'),
+    };
+  } catch (e) {
+    return { rows: [], error: errMsg(e) };
+  }
 }
 
 /** Top IPs by volume over the window — the entry point when you do not yet have an IP to profile. */

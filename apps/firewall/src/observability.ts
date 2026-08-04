@@ -151,11 +151,14 @@ export async function pool<T>(
 
 export type Bucket = { t: string; c: number };
 
-/** Group per-bucket rows into a chronological series per IP. The API zero-fills, so each series is contiguous. */
-export function seriesByIp(resp: { data?: Row[] }): Map<string, Bucket[]> {
+/** Group per-bucket rows into a chronological series per group key. The API zero-fills, so each series is contiguous. */
+export function seriesBy(
+  resp: { data?: Row[] },
+  dim = 'clientIp',
+): Map<string, Bucket[]> {
   const byIp = new Map<string, Bucket[]>();
   for (const r of resp.data ?? []) {
-    const ip = String(r.clientIp ?? '?');
+    const ip = String(r[dim] ?? '?');
     const t = String(r.timestamp ?? '');
     if (!t) continue;
     const list = byIp.get(ip);

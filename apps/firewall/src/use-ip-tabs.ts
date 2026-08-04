@@ -3,14 +3,14 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import { type IpProfile, fetchIpProfile } from './ip-profile';
+import { type IpProfile, type Subject, fetchIpProfile } from './ip-profile';
 import type { Window } from './time-window';
 import { errMsg } from './util';
 
 export type Creds = { projectId: string; teamId: string; token: string };
 
 export type IpTab = {
-  ip: string;
+  subject: Subject;
   window: Window;
   data: IpProfile | null;
   error: string;
@@ -22,7 +22,7 @@ export type IpTabs = {
   index: number;
   active: IpTab | undefined;
   /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
-  open: (ip: string, window: Window) => void;
+  open: (subject: Subject, window: Window) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. */
   refresh: () => void;
   /** Move `dir` tabs, wrapping. */
@@ -48,47 +48,57 @@ export function useIpTabs(creds: Creds): IpTabs {
   const inFlight = useRef(new Set<string>());
 
   const run = useCallback(
-    async (ip: string, window: Window) => {
-      if (inFlight.current.has(ip)) return;
-      inFlight.current.add(ip);
+    async (subject: Subject, window: Window) => {
+      const key = `${subject.kind}:${subject.value}`;
+      if (inFlight.current.has(key)) return;
+      inFlight.current.add(key);
       const patch = (p: Partial<IpTab>) =>
-        // Matched by IP, not index: tabs can be closed or reordered while a fetch is in flight.
+        // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
         setTabs((prev) =>
-          prev.map((t) => (t.ip === ip ? { ...t, ...p } : t)),
+          prev.map((t) =>
+            t.subject.kind === subject.kind && t.subject.value === subject.value
+              ? { ...t, ...p }
+              : t,
+          ),
         );
       patch({ loading: true, error: '' });
       try {
-        patch({ data: await fetchIpProfile(creds, ip, window), loading: false });
+        patch({
+          data: await fetchIpProfile(creds, subject, window),
+          loading: false,
+        });
       } catch (e) {
         patch({ error: errMsg(e), loading: false });
       } finally {
-        inFlight.current.delete(ip);
+        inFlight.current.delete(key);
       }
     },
     [creds],
   );
 
   const open = useCallback(
-    (ip: string, window: Window) => {
+    (subject: Subject, window: Window) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
-      const existing = tabs.findIndex((t) => t.ip === ip);
+      const existing = tabs.findIndex(
+        (t) => t.subject.kind === subject.kind && t.subject.value === subject.value,
+      );
       if (existing !== -1) {
         setIndex(existing);
         return;
       }
       setTabs((prev) => [
         ...prev,
-        { ip, window, data: null, error: '', loading: true },
+        { subject, window, data: null, error: '', loading: true },
       ]);
       setIndex(tabs.length); // where the append lands
-      void run(ip, window);
+      void run(subject, window);
     },
     [run, tabs],
   );
 
   const refresh = useCallback(() => {
     const t = tabs[index];
-    if (t) void run(t.ip, t.window);
+    if (t) void run(t.subject, t.window);
   }, [tabs, index, run]);
 
   const cycle = useCallback(

@@ -16,9 +16,12 @@ export type Window = {
   label: string; // what the UI shows, e.g. "live" or "01 Aug - 04 Aug"
 };
 
+/** The `live` span. Short enough to be current, long enough that 10-minute buckets have content. */
+export const LIVE_MINUTES = 20;
+
 /** Presets cycled with a single key. `live` is the "is it happening right now" view. */
 export const WINDOW_PRESETS: { label: string; minutes: number }[] = [
-  { label: 'live', minutes: 20 },
+  { label: 'live', minutes: LIVE_MINUTES },
   { label: 'last 1h', minutes: 60 },
   { label: 'last 3h', minutes: 180 },
   { label: 'last 6h', minutes: 360 },

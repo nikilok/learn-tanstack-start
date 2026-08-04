@@ -47,6 +47,7 @@ import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import {
+  LIVE_MINUTES,
   type Window,
   WINDOW_PRESETS,
   resolveWindow,
@@ -71,6 +72,14 @@ const DENY_ACTIVITY_HOURS = 144;
 // Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
 const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
 const IP_WINDOW_HOURS = 24;
+// One query per tick. Measured: 10 back-to-back calls to this endpoint all returned 200 at ~1s
+// each, so ~1/s is tolerated. This sits 15x under that, matching the cadence Vercel's own live
+// view uses, and backs off on failure rather than relying on never finding the real ceiling.
+// Cost when left running: 4 queries/min, ~5.8k/day — about what 290 profile loads cost.
+const LIVE_REFRESH_MS = 15_000;
+// Consecutive failures double the interval, up to this. A watcher left running for days must
+// never turn into a retry storm against an endpoint that has started refusing it.
+const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 const SITEMAP_WINDOW_HOURS = 144;
 const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
 const IP_SUGGESTIONS = 8; // rows shown at once
@@ -133,6 +142,14 @@ export function App() {
     detail: string;
     onYes: () => void;
   } | null>(null);
+  // Read by the live-refresh interval, which must not capture a stale render's values.
+  const pickKindRef = useRef(pickKind);
+  pickKindRef.current = pickKind;
+  const topIpListRef = useRef(topIpList);
+  topIpListRef.current = topIpList;
+  const topJa4ListRef = useRef(topJa4List);
+  topJa4ListRef.current = topJa4List;
+  const failuresRef = useRef(0); // consecutive live-refresh failures, drives the backoff
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
@@ -140,6 +157,7 @@ export function App() {
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
   const reportRef = useRef<DOMElement | null>(null);
 
+  const isLive = ipWindow.label === 'live';
   const paneLoading =
     pane === 'report'
       ? report.loading
@@ -186,6 +204,52 @@ export function App() {
     ipTabs.index,
     reportH,
   ]);
+
+  // The live window re-queries itself, so the tool can be left open as a watch screen. Only the
+  // busiest list refreshes: re-fetching a profile under someone reading it would be hostile.
+  useEffect(() => {
+    if (!isLive || pane !== 'ip') return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    // setTimeout, not setInterval: a tick that takes longer than the period must not queue
+    // another behind it, and the delay has to change when we back off.
+    const schedule = (delay: number) => {
+      timer = setTimeout(async () => {
+        if (stopped) return;
+        const w = rollingMinutes(LIVE_MINUTES, new Date(), 'live');
+        setIpWindow(w);
+        const cache =
+          pickKindRef.current === 'ip' ? topIpListRef.current : topJa4ListRef.current;
+        cache.reset();
+        let ok = true;
+        await cache.load(async () => {
+          const { rows, error } =
+            pickKindRef.current === 'ip'
+              ? await topIps(creds, w, TOP_IPS_LIMIT)
+              : await topJa4(creds, w, TOP_IPS_LIMIT);
+          if (error) {
+            ok = false;
+            throw new Error(error);
+          }
+          return rows;
+        });
+        if (stopped) return;
+        failuresRef.current = ok ? 0 : failuresRef.current + 1;
+        schedule(
+          Math.min(
+            LIVE_REFRESH_MS * 2 ** failuresRef.current,
+            LIVE_BACKOFF_MAX_MS,
+          ),
+        );
+      }, delay);
+    };
+    schedule(LIVE_REFRESH_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, pane]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -1040,7 +1104,11 @@ export function App() {
                         (ipFiltered.length > ipMatches.length
                           ? `, showing ${ipMatches.length}`
                           : '')
-                      : `top ${ipMatches.length} of ${pickList.data.length}, type to filter · w cycles window`}
+                      : `top ${ipMatches.length} of ${pickList.data.length}` +
+                        (isLive
+                          ? ` · auto-refresh ${LIVE_REFRESH_MS / 1000}s${failuresRef.current ? ' (backing off)' : ''}`
+                          : ', type to filter') +
+                        ' · w cycles window'}
                   </Text>
                 )
               )}

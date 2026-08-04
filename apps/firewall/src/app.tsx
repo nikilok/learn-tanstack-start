@@ -25,7 +25,8 @@ import {
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
-import type { IpProfile } from './ip-profile';
+import { resolveIpEntry } from './ip-entry';
+import { type IpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
@@ -43,6 +44,8 @@ const PANE_KEY: Record<string, PaneKind> = {
 };
 const IP_WINDOW_HOURS = 24;
 const SITEMAP_WINDOW_HOURS = 144;
+const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
+const IP_SUGGESTIONS = 8; // rows shown at once
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
 const MIN_RULES_W = 34; // enough for a truncated name plus its action tag
 const PANE_GAP = 2; // marginRight between the two columns
@@ -69,6 +72,9 @@ export function App() {
   const [focus, setFocus] = useState<'editor' | 'pane' | 'ip-input'>('editor');
   const [ipInput, setIpInput] = useState('');
   const [ipError, setIpError] = useState('');
+  // -1 means "use what I typed"; 0+ indexes the filtered suggestions, like a URL bar.
+  const [ipCursor, setIpCursor] = useState(-1);
+  const topIpList = usePane<[string, number][]>();
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
@@ -177,6 +183,11 @@ export function App() {
 
   const creds = { projectId, teamId, token };
 
+  // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
+  const ipMatches = (topIpList.data ?? [])
+    .filter(([ip]) => !ipInput || ip.includes(ipInput))
+    .slice(0, IP_SUGGESTIONS);
+
   /** Open a pane, loading it on first view. `i` always prompts for another IP — tab is how you get back to one already open. */
   const openPane = (kind: PaneKind) => {
     setPane(kind);
@@ -184,7 +195,15 @@ export function App() {
     if (kind === 'ip') {
       setIpInput('');
       setIpError('');
+      setIpCursor(-1);
       setFocus('ip-input');
+      // Picking from live traffic beats typing an address from memory. Fetched once per session.
+      if (!topIpList.data)
+        void topIpList.load(async () => {
+          const { rows, error } = await topIps(creds, IP_WINDOW_HOURS, TOP_IPS_LIMIT);
+          if (error) throw new Error(error);
+          return rows;
+        });
       return;
     }
     setFocus('pane');
@@ -246,9 +265,22 @@ export function App() {
     // Text entry owns every keystroke, so q/j/k stay typeable inside an IP.
     if (focus === 'ip-input') {
       if (key.escape) setFocus(ipTabs.tabs.length ? 'pane' : 'editor');
-      else if (key.return) submitIp(ipInput);
-      else if (key.backspace || key.delete) setIpInput((s) => s.slice(0, -1));
-      else if (input && !key.ctrl && !key.meta) {
+      else if (key.return)
+        submitIp(
+          resolveIpEntry(
+            ipInput,
+            ipCursor,
+            ipMatches.map(([ip]) => ip),
+          ),
+        );
+      else if (key.upArrow) setIpCursor((c) => Math.max(-1, c - 1));
+      else if (key.downArrow)
+        setIpCursor((c) => Math.min(ipMatches.length - 1, c + 1));
+      else if (key.backspace || key.delete) {
+        setIpInput((s) => s.slice(0, -1));
+        setIpCursor(-1);
+      } else if (input && !key.ctrl && !key.meta) {
+        setIpCursor(-1); // typing re-asserts the typed text over any highlight
         // A paste arrives as ONE chunk, so filter within it rather than testing the whole
         // string — requiring the chunk to match meant pasting an IP silently did nothing.
         const next = (ipInput + input.replace(/[^0-9a-fA-F.:]/g, '')).slice(
@@ -350,7 +382,8 @@ export function App() {
   // viewport — an over-tall frame makes the terminal scroll and hides the editor cursor.
   const paneChrome =
     (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
-    (focus === 'ip-input' ? 2 : 0) +
+    // The suggestion overlay grows the prompt, so the box has to give back the same rows.
+    (focus === 'ip-input' ? 2 + ipMatches.length + (topIpList.loading ? 1 : 0) : 0) +
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -488,13 +521,36 @@ export function App() {
             </Box>
           )}
           {focus === 'ip-input' && (
-            <Box>
-              <Text color="cyan">IP: </Text>
-              <Text>{ipInput}</Text>
-              <Text color="cyan">▏</Text>
-              <Text dimColor>
-                {ipError ? `  ${ipError}` : '  enter profile · esc cancel'}
-              </Text>
+            <Box flexDirection="column">
+              {topIpList.loading && !topIpList.data && (
+                <Text dimColor>  loading busiest IPs…</Text>
+              )}
+              {ipMatches.map(([ip, count], i) => {
+                const open = ipTabs.tabs.some((t) => t.ip === ip);
+                return (
+                  <Box key={ip}>
+                    <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
+                    <Text dimColor>{String(count).padStart(7)} </Text>
+                    <Text bold={i === ipCursor} color={i === ipCursor ? 'cyan' : undefined}>
+                      {ip}
+                    </Text>
+                    {open && <Text dimColor> (open)</Text>}
+                  </Box>
+                );
+              })}
+              {Boolean(topIpList.data) && !ipMatches.length && ipInput && (
+                <Text dimColor>  no busy IP matches — enter profiles it anyway</Text>
+              )}
+              <Box>
+                <Text color="cyan">IP: </Text>
+                <Text>{ipInput}</Text>
+                <Text color="cyan">▏</Text>
+                <Text dimColor>
+                  {ipError
+                    ? `  ${ipError}`
+                    : '  ↑↓ pick · enter profile · esc cancel'}
+                </Text>
+              </Box>
             </Box>
           )}
         </Box>

@@ -7,6 +7,7 @@ import {
   type SignalInput,
   alpnOf,
   assetsIndicateBrowser,
+  isComputeNetwork,
   mixOf,
   pathKind,
   shapeOf,
@@ -264,5 +265,60 @@ describe('assetsIndicateBrowser', () => {
     // Same threshold the blocker uses, so one screen cannot say browser while the other acts.
     expect(tell?.points).toBe('bot');
     expect(tell?.detail).toContain('too few');
+  });
+});
+
+describe('headless browsers', () => {
+  test('a compute network is one; a consumer relay is NOT', () => {
+    // Private Relay and WARP egress real people through Cloudflare/Akamai/Fastly, and a
+    // 1,612-request iPhone Safari session on Cloudflare in the live data is a person.
+    expect(isComputeNetwork('Amazon.com, Inc.')).toBe(true);
+    expect(isComputeNetwork('DigitalOcean, LLC')).toBe(true);
+    expect(isComputeNetwork('Hetzner Online GmbH')).toBe(true);
+    expect(isComputeNetwork('Cloudflare, Inc.')).toBe(false);
+    expect(isComputeNetwork('British Telecommunications Limited')).toBe(false);
+    expect(isComputeNetwork('Hyperoptic Ltd')).toBe(false);
+  });
+
+  test('Playwright renders like a browser, so it is caught by WHERE it runs', () => {
+    // Every rendering signal is genuine — it drives real Chromium. The discriminator is the ASN.
+    const input = humanInput();
+    input.asns = [['Amazon.com, Inc.', 366]];
+    const tell = tellsFor(input).find((t) => t.label === 'browser on compute');
+    expect(tell?.points).toBe('bot');
+    expect(tell?.detail).toContain('none of them mean');
+  });
+
+  test('the same rendering signals on a consumer ISP raise nothing', () => {
+    expect(
+      tellsFor(humanInput()).find((t) => t.label === 'browser on compute'),
+    ).toBeUndefined();
+  });
+
+  test('a raw fetcher on compute is not flagged by this tell — it has its own', () => {
+    // The tell is specifically about browser-shaped traffic; a curl loop is caught elsewhere.
+    const input = scraperInput();
+    input.asns = [['Hetzner Online GmbH', 10100]];
+    expect(
+      tellsFor(input).find((t) => t.label === 'browser on compute'),
+    ).toBeUndefined();
+  });
+
+  test('few paths at volume reads as monitoring, not harvesting', () => {
+    // Measured: 572 requests over 2 paths (571x /sw.js) from Microsoft.
+    const input = humanInput();
+    input.total = 572;
+    input.distinctPaths = 2;
+    const tell = tellsFor(input).find((t) => t.label === 'path diversity');
+    expect(tell?.points).toBe('neutral');
+    expect(tell?.detail).toContain('monitoring');
+  });
+
+  test('many paths, page-heavy, reads as walking the catalogue', () => {
+    const input = scraperInput();
+    input.distinctPaths = 4000;
+    const tell = tellsFor(input).find((t) => t.label === 'path diversity');
+    expect(tell?.points).toBe('bot');
+    expect(tell?.detail).toContain('walking the catalogue');
   });
 });

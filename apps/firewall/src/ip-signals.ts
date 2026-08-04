@@ -19,6 +19,47 @@ export function assetsIndicateBrowser(assets: number, total: number): boolean {
   return assets >= MIN_ASSETS && assets / Math.max(1, total) >= MIN_ASSET_SHARE;
 }
 
+// True compute providers only. Deliberately EXCLUDES Cloudflare, Akamai, Fastly and Apple: iCloud
+// Private Relay and WARP egress real consumer traffic through them, and a 1,612-request iPhone
+// Safari session on Cloudflare in this very dataset is a person, not a farm.
+const COMPUTE_ASNS = [
+  'amazon',
+  'amazon.com',
+  'aws',
+  'google llc',
+  'google cloud',
+  'microsoft',
+  'azure',
+  'digitalocean',
+  'hetzner',
+  'ovh',
+  'linode',
+  'akamai technologies, inc. (linode)',
+  'vultr',
+  'choopa',
+  'scaleway',
+  'contabo',
+  'oracle',
+  'alibaba',
+  'tencent',
+  'huawei',
+  'leaseweb',
+  'fdcservers',
+  'egihosting',
+  'colocation america',
+  'hostpapa',
+  'velia',
+  'ucloud',
+  'logicweb',
+  'web2objects',
+];
+
+/** Whether an ASN name is a compute provider people rent servers on, rather than one they browse from. */
+export function isComputeNetwork(asn: string): boolean {
+  const a = asn.toLowerCase();
+  return COMPUTE_ASNS.some((n) => a.includes(n));
+}
+
 export type PathKind =
   | 'asset'
   | 'beacon'
@@ -161,6 +202,8 @@ export type Tell = {
 
 export type SignalInput = {
   total: number;
+  /** Distinct request paths seen. Low against high volume means repetition, not exploration. */
+  distinctPaths?: number;
   mix: Mix;
   shape: Shape;
   ja4: [string, number][];
@@ -284,6 +327,34 @@ export function tellsFor(input: SignalInput): Tell[] {
       label: 'SPA vs SSR',
       detail: `${mix.page} page fetches, zero RPCs, zero sub-resources — HTML enumeration`,
     });
+
+  // The headless-browser tell, and the only one a stealth plugin cannot patch away: it is about
+  // where the packets come from, not what the page's JavaScript reports. A driven Chromium looks
+  // exactly like a browser because it IS one — but nobody browses a job-search site from EC2.
+  const computeAsns = input.asns.filter(([a]) => isComputeNetwork(a));
+  if (computeAsns.length && browsery)
+    tells.push({
+      points: 'bot',
+      label: 'browser on compute',
+      detail: `renders like a browser but comes from ${computeAsns.map(([a]) => a).join(', ')} — a hosting network. Headless Chromium is a real browser, so every rendering signal above is genuine and none of them mean "user"`,
+    });
+
+  // Repetition vs exploration. A monitor reloads a handful of URLs; a farm walks thousands.
+  if (input.distinctPaths && total >= 100) {
+    const perPath = total / input.distinctPaths;
+    if (perPath >= 20)
+      tells.push({
+        points: 'neutral',
+        label: 'path diversity',
+        detail: `${input.distinctPaths} distinct paths for ${total} requests (${perPath.toFixed(0)}x each) — repetition, so monitoring or preview rendering rather than harvesting`,
+      });
+    else if (input.distinctPaths >= 200 && mix.page > mix.rpc)
+      tells.push({
+        points: 'bot',
+        label: 'path diversity',
+        detail: `${input.distinctPaths} distinct paths, page-heavy — walking the catalogue rather than using it`,
+      });
+  }
 
   const dutyCycle = shape.spanMinutes / Math.max(1, input.windowMinutes);
   tells.push({

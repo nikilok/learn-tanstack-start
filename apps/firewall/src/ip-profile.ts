@@ -302,6 +302,7 @@ export async function fetchIpProfile(
       asns: byAsn,
       countries: byCountry,
       botVerified: byBotVerified,
+      distinctPaths: byPath.length,
       windowMinutes: hours * 60,
     }),
     errors,

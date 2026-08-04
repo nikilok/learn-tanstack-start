@@ -46,7 +46,7 @@ import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import { type Window, resolveWindow, rollingWindow } from './time-window';
-import { type IpTab, useIpTabs } from './use-ip-tabs';
+import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
 
@@ -721,6 +721,13 @@ export function App() {
     46,
     Math.min(cols - MIN_RULES_W - PANE_GAP, Math.floor(cols * PANE_SHARE)),
   );
+  // Tab chips are sized here so the bar can be windowed: overflowing the row makes Ink wrap it
+  // and the entire bar disappears, leaving no sign of which tab is active.
+  const tabBar = tabWindow(
+    ipTabs.tabs.map((t) => tabLabel(t).length + 3), // brackets/spaces + trailing gap
+    ipTabs.index,
+    reportW,
+  );
   const rulesW = pane ? cols - reportW - PANE_GAP : cols;
   const longestName = items.reduce((n, it) => Math.max(n, it.rule.name.length), 0);
   // ◂ n/m ▸ stays visible whenever there is somewhere to cycle to, even with the rules focused —
@@ -817,20 +824,38 @@ export function App() {
         <Box flexDirection="column" width={reportW}>
           {pane === 'ip' && ipTabs.tabs.length > 0 && (
             <Box>
-              {ipTabs.tabs.map((t, i) => (
-                <Text
-                  key={`${t.subject.kind}:${t.subject.value}`}
-                  bold={i === ipTabs.index}
-                  color={i === ipTabs.index ? 'cyan' : undefined}
-                  dimColor={i !== ipTabs.index}
-                >
-                  {/* Digests are long, so tabs show a recognisable head, never the whole thing. */}
-                  {i === ipTabs.index
-                    ? `[${tabLabel(t)}]`
-                    : ` ${tabLabel(t)} `}
-                  {t.loading ? '…' : ''}{' '}
+              {tabBar.left && (
+                <Text color="cyan" bold>
+                  ‹{' '}
                 </Text>
-              ))}
+              )}
+              {ipTabs.tabs.slice(tabBar.start, tabBar.end).map((t, j) => {
+                const i = tabBar.start + j;
+                const chip =
+                  i === ipTabs.index
+                    ? `[${tabLabel(t)}]`
+                    : ` ${tabLabel(t)} `;
+                return (
+                  <Text
+                    key={`${t.subject.kind}:${t.subject.value}`}
+                    bold={i === ipTabs.index}
+                    color={i === ipTabs.index ? 'cyan' : undefined}
+                    dimColor={i !== ipTabs.index}
+                    // Clips a lone chip too wide for the row; without this it wraps and Ink
+                    // loses the whole bar.
+                    wrap="truncate-end"
+                  >
+                    {chip}
+                    {t.loading ? '…' : ''}{' '}
+                  </Text>
+                );
+              })}
+              {tabBar.right && (
+                <Text color="cyan" bold>
+                  {' '}
+                  ›
+                </Text>
+              )}
             </Box>
           )}
           <Box

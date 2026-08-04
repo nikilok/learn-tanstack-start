@@ -41,6 +41,46 @@ export function indexAfterClose(current: number, remaining: number): number {
   return Math.max(0, Math.min(current, remaining - 1));
 }
 
+const ARROW = 2; // '‹ ' / ' ›'
+
+/**
+ * The slice of tabs that fits `available` columns, always including `active`. Overflowing the row
+ * makes Ink wrap it and the whole bar disappears, so the bar is windowed and the ends are marked.
+ */
+export function tabWindow(
+  widths: number[],
+  active: number,
+  available: number,
+): { start: number; end: number; left: boolean; right: boolean } {
+  const n = widths.length;
+  if (!n) return { start: 0, end: 0, left: false, right: false };
+  const total = widths.reduce((a, b) => a + b, 0);
+  if (total <= available) return { start: 0, end: n, left: false, right: false };
+
+  // Both arrows are budgeted for even when only one shows, so the window does not resize as it
+  // slides — a bar that reflows on every tab press is harder to read than one that is stable.
+  const budget = Math.max(0, available - ARROW * 2);
+  const i = Math.min(Math.max(active, 0), n - 1);
+  let start = i;
+  let end = i + 1;
+  let used = widths[i];
+  // Expand outward from the active tab, right first, so it never scrolls out of view.
+  for (let grew = true; grew; ) {
+    grew = false;
+    if (end < n && used + widths[end] <= budget) {
+      used += widths[end];
+      end++;
+      grew = true;
+    }
+    if (start > 0 && used + widths[start - 1] <= budget) {
+      used += widths[start - 1];
+      start--;
+      grew = true;
+    }
+  }
+  return { start, end, left: start > 0, right: end < n };
+}
+
 export function useIpTabs(creds: Creds): IpTabs {
   const [tabs, setTabs] = useState<IpTab[]>([]);
   const [index, setIndex] = useState(0);

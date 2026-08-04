@@ -43,6 +43,9 @@ const PANE_KEY: Record<string, PaneKind> = {
 };
 const IP_WINDOW_HOURS = 24;
 const SITEMAP_WINDOW_HOURS = 144;
+const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
+const MIN_RULES_W = 34; // enough for a truncated name plus its action tag
+const PANE_GAP = 2; // marginRight between the two columns
 const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
@@ -331,7 +334,14 @@ export function App() {
   const onCount = items.filter((it) => it.active).length;
   const target = phase === 'action' ? items[cursor] : null;
   const cols = process.stdout.columns ?? 120;
-  const reportW = Math.max(46, Math.floor(cols * 0.5)); // ≥50% on wide terminals; 46-col floor keeps it readable when narrow
+  // 70% to the pane: it carries the reports, profiles and charts, while the rules list is names
+  // and a tag. Floors both ways so a narrow terminal still shows a usable rule row.
+  const reportW = Math.max(
+    46,
+    Math.min(cols - MIN_RULES_W - PANE_GAP, Math.floor(cols * PANE_SHARE)),
+  );
+  const rulesW = pane ? cols - reportW - PANE_GAP : cols;
+  const longestName = items.reduce((n, it) => Math.max(n, it.rule.name.length), 0);
   // ◂ n/m ▸ stays visible whenever there is somewhere to cycle to, even with the rules focused —
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
@@ -344,7 +354,12 @@ export function App() {
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
-      <Box flexDirection="column" flexGrow={1} marginRight={pane ? 2 : 0}>
+      <Box
+        flexDirection="column"
+        width={rulesW}
+        flexShrink={0}
+        marginRight={pane ? PANE_GAP : 0}
+      >
         <Box>
           <Text bold>Vercel firewall rules </Text>
           <Text color={dryRun ? 'yellow' : 'green'}>
@@ -359,6 +374,8 @@ export function App() {
               item={it}
               isCursor={i === cursor && focus === 'editor'}
               phase={phase}
+              width={rulesW}
+              longestName={longestName}
             />
           ))}
         </Box>
@@ -523,7 +540,7 @@ function PaneBody({
       <Lines
         lines={
           kind === 'ip'
-            ? profileLines((ipTab as IpTab).data as IpProfile)
+            ? profileLines((ipTab as IpTab).data as IpProfile, width)
             : sitemapLines(sitemap.data as SitemapReport)
         }
         width={width}

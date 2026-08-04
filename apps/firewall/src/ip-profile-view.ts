@@ -12,9 +12,17 @@ import {
   seg,
 } from './line-model';
 
-const BAR_WIDTH = 34;
+const BAR_GUTTER = 26; // stamp + count columns before a bar starts
+const BAR_MIN = 20;
+const BAR_MAX = 90; // past this the eye stops comparing lengths usefully
 const MAX_BUCKETS = 60; // beyond this the chart stops being readable
 const TOP_ROWS = 12;
+
+/** Bar length for the column width available, so a wide pane is actually used. */
+export function barWidth(paneWidth: number | undefined): number {
+  if (!paneWidth) return BAR_MIN + 14;
+  return Math.max(BAR_MIN, Math.min(BAR_MAX, paneWidth - BAR_GUTTER));
+}
 
 /** `2026-08-03T20:00:00.000Z` → `08-03 20:00Z`, the only part of a bucket stamp worth reading. */
 function stamp(iso: string): string {
@@ -48,7 +56,11 @@ function sessionLines(shape: Shape): Line[] {
 }
 
 /** Bars for the active buckets only — a 24h window is mostly zeros, and printing them buries the session. */
-function bucketChart(buckets: { t: string; c: number }[], peak: number): Line[] {
+function bucketChart(
+  buckets: { t: string; c: number }[],
+  peak: number,
+  bar: number,
+): Line[] {
   const active = buckets.filter((b) => b.c > 0);
   if (!active.length) return [];
   const scale = Math.max(1, peak);
@@ -57,7 +69,7 @@ function bucketChart(buckets: { t: string; c: number }[], peak: number): Line[] 
     line(
       seg(`  ${stamp(b.t)}  `, 'dim'),
       `${String(b.c).padStart(5)}  `,
-      seg('█'.repeat(Math.max(1, Math.round((b.c / scale) * BAR_WIDTH))), 'key'),
+      seg('█'.repeat(Math.max(1, Math.round((b.c / scale) * bar))), 'key'),
     ),
   );
   if (active.length > shown.length)
@@ -82,8 +94,8 @@ function tellLines(tells: Tell[]): Line[] {
   );
 }
 
-/** Full profile layout. */
-export function profileLines(p: IpProfile): Line[] {
+/** Full profile layout. `paneWidth` only scales the bar chart; everything else is clipped by the renderer. */
+export function profileLines(p: IpProfile, paneWidth?: number): Line[] {
   const L: Line[] = [];
 
   L.push(
@@ -98,7 +110,7 @@ export function profileLines(p: IpProfile): Line[] {
 
   L.push(...heading(`SESSION SHAPE (${p.shape.bucketMinutes}-min buckets)`));
   L.push(...sessionLines(p.shape));
-  const chart = bucketChart(p.buckets, p.shape.peak);
+  const chart = bucketChart(p.buckets, p.shape.peak, barWidth(paneWidth));
   if (chart.length) L.push(blank(), ...chart);
 
   L.push(...heading('IDENTITY'));

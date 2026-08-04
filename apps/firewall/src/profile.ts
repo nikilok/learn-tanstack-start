@@ -80,7 +80,7 @@ async function main() {
 
   const profile = await fetchIpProfile(creds, args.ip, args.hours);
   console.log(
-    toAnsi(profileLines(profile), {
+    toAnsi(profileLines(profile, process.stdout.columns), {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
     }),
   );

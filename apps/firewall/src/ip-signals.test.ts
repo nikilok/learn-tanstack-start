@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   type SignalInput,
   alpnOf,
+  assetsIndicateBrowser,
   mixOf,
   pathKind,
   shapeOf,
@@ -225,5 +226,43 @@ describe('tellsFor — review regression', () => {
     const input = scraperInput();
     input.botVerified = [['pass', 500]];
     expect(tellsFor(input).find((t) => t.label === 'verified bot')?.points).toBe('neutral');
+  });
+});
+
+describe('pathKind — probes are not assets', () => {
+  test('a webshell probe under /assets/ is not browser evidence', () => {
+    // Measured on t13d201100_...: /assets/images/doc.php and bare /assets/ were its only two
+    // "sub-resources", and counting them as such blocked the deny lever on a PHP scanner.
+    expect(pathKind('/assets/images/doc.php')).toBe('page');
+    expect(pathKind('/assets/')).toBe('page');
+    expect(pathKind('/assets/shell.aspx')).toBe('page');
+  });
+
+  test('real hashed bundles are still assets wherever they live', () => {
+    expect(pathKind('/assets/index-C1pPKFbU.js')).toBe('asset');
+    expect(pathKind('/assets/company-KTukeWpj.css')).toBe('asset');
+    expect(pathKind('/fonts/geist-latin.woff2')).toBe('asset');
+    expect(pathKind('/favicon.svg')).toBe('asset');
+  });
+});
+
+describe('assetsIndicateBrowser', () => {
+  test('a token fetch is not a browser', () => {
+    expect(assetsIndicateBrowser(2, 587)).toBe(false);
+    expect(assetsIndicateBrowser(1, 10000)).toBe(false);
+  });
+
+  test('a real session is', () => {
+    expect(assetsIndicateBrowser(42, 663)).toBe(true);
+  });
+
+  test('the SIGNALS tell and the blocker agree on the same numbers', () => {
+    const input = scraperInput();
+    input.mix = mixOf([['/company/a', 585], ['/assets/x.js', 2]]);
+    input.total = 587;
+    const tell = tellsFor(input).find((t) => t.label === 'sub-resources');
+    // Same threshold the blocker uses, so one screen cannot say browser while the other acts.
+    expect(tell?.points).toBe('bot');
+    expect(tell?.detail).toContain('too few');
   });
 });

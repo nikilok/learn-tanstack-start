@@ -11,14 +11,11 @@
 // bot, and NO SUB-RESOURCES ANYWHERE ON IT. Anything that ever rendered a page pulled CSS, fonts
 // and analytics; an identity showing none of that has never served a real user.
 
-import { alpnOf } from './ip-signals';
+import { alpnOf, assetsIndicateBrowser } from './ip-signals';
 import type { Mix, Shape } from './ip-signals';
 
 // Below this an IP is not worth a rule — rules are evaluated on every request forever.
 const MIN_VOLUME = 200;
-// A token asset fetch must not immunise a scraper, but a real browser's share is far above this.
-const MIN_ASSETS = 5;
-const MIN_ASSET_SHARE = 0.005;
 // Names of rules gated on a bespoke secret header — the only ones that prove a first-party
 // caller. Kept here rather than matched by prefix so a future allow-* rule cannot join by accident.
 export const HEADER_GATED_RULES = [
@@ -129,7 +126,7 @@ function blockersFor(input: AdviceInput): string[] {
   // Share-based, not absolute: one deliberate /favicon.svg per 10,000 page fetches would
   // otherwise immunise a scraper against the whole advisory forever.
   const assetShare = input.mix.asset / Math.max(1, input.total);
-  if (input.mix.asset >= MIN_ASSETS && assetShare >= MIN_ASSET_SHARE)
+  if (assetsIndicateBrowser(input.mix.asset, input.total))
     out.push(
       `${input.mix.asset} sub-resource fetches (${(assetShare * 100).toFixed(1)}%) — browsers pull these, raw fetchers never do`,
     );

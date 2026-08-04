@@ -3,6 +3,22 @@
 
 import type { Bucket } from './observability';
 
+// Static-asset extensions this app actually serves. Anything under /assets/ without one is a
+// probe, not a bundle.
+const ASSET_EXT =
+  /\.(css|js|mjs|woff2?|png|jpe?g|svg|ico|webp|avif|json|txt|xml|map)$/;
+
+// A token number of asset fetches is not evidence of a browser: one deliberate /favicon.svg
+// would otherwise read as "a real user is here". Shared with ban-advice so the SIGNALS line and
+// the blocker cannot contradict each other on the same screen.
+export const MIN_ASSETS = 5;
+export const MIN_ASSET_SHARE = 0.005;
+
+/** Whether a client's asset fetches are numerous enough to indicate a real browser. */
+export function assetsIndicateBrowser(assets: number, total: number): boolean {
+  return assets >= MIN_ASSETS && assets / Math.max(1, total) >= MIN_ASSET_SHARE;
+}
+
 export type PathKind =
   | 'asset'
   | 'beacon'
@@ -28,14 +44,11 @@ export function pathKind(path: string): PathKind {
   // sub-resource, and counting it as one inverts the strongest tell there is.
   if (/^\/(sitemap[\w-]*\.xml|robots\.txt|llms(-full)?\.txt)$/.test(path))
     return 'crawl';
-  if (
-    path.startsWith('/assets/') ||
-    path.startsWith('/fonts/') ||
-    /\.(css|js|mjs|woff2?|png|jpe?g|svg|ico|webp|avif|json|txt|xml|map)$/.test(
-      path,
-    )
-  )
-    return 'asset';
+  // Extension-driven, NOT prefix-driven. A scanner probing /assets/images/doc.php or bare
+  // /assets/ would otherwise count as a browser fetching a bundle — and because sub-resources
+  // are the evidence that BLOCKS a deny, two webshell probes were enough to shield a scanner.
+  // Every asset this app serves is a hashed bundle carrying one of these extensions.
+  if (ASSET_EXT.test(path)) return 'asset';
   return 'page';
 }
 
@@ -187,13 +200,17 @@ export function tellsFor(input: SignalInput): Tell[] {
     });
 
   const subResource = mix.asset + mix.beacon;
+  // Beacons are decisive on their own (a POST with a payload, so JS ran); assets need a share,
+  // or a scanner that touches two files reads as a browser.
+  const browsery = mix.beacon > 0 || assetsIndicateBrowser(mix.asset, total);
   tells.push({
-    points: subResource === 0 ? 'bot' : 'human',
+    points: browsery ? 'human' : 'bot',
     label: 'sub-resources',
-    detail:
-      subResource === 0
+    detail: browsery
+      ? `${subResource} assets/beacons (${pct(subResource)}) — browsers pull these, raw fetchers never do`
+      : subResource === 0
         ? `0 assets or beacons across ${total} requests — a raw-HTML fetcher. Weak over short windows (browsers cache), conclusive at volume`
-        : `${subResource} assets/beacons (${pct(subResource)}) — browsers pull these, raw fetchers never do`,
+        : `only ${subResource} assets/beacons (${pct(subResource)}) across ${total} requests — too few to be a rendering client`,
   });
 
   if (mix.beacon > 0)

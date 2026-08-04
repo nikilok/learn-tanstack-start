@@ -1,0 +1,206 @@
+// Fixtures are shaped after two measured clients: a real iOS Safari session (one 40-minute burst,
+// heavy sub-resources) and the distributed residential-proxy scraper (level volume, zero assets).
+
+import { describe, expect, test } from 'bun:test';
+
+import {
+  type SignalInput,
+  alpnOf,
+  mixOf,
+  pathKind,
+  shapeOf,
+  tellsFor,
+} from './ip-signals';
+
+/** Build a zero-filled 10-minute series with `counts` starting at `offset` buckets in. */
+function series(counts: number[], offset: number, length: number) {
+  const base = Date.parse('2026-08-03T00:00:00.000Z');
+  return Array.from({ length }, (_, i) => ({
+    t: new Date(base + i * 600_000).toISOString(),
+    c: i >= offset && i - offset < counts.length ? counts[i - offset] : 0,
+  }));
+}
+
+describe('pathKind', () => {
+  test('separates the five kinds', () => {
+    expect(pathKind('/_vercel/insights/view')).toBe('beacon');
+    expect(pathKind('/_vercel/speed-insights/vitals')).toBe('beacon');
+    expect(pathKind('/_serverFn/abc123')).toBe('rpc');
+    expect(pathKind('/api/tiles/alidade_smooth/16/32468/20737@2x')).toBe('tile');
+    expect(pathKind('/assets/index-C1pPKFbU.js')).toBe('asset');
+    expect(pathKind('/fonts/geist-latin.woff2')).toBe('asset');
+    expect(pathKind('/favicon.svg')).toBe('asset');
+    expect(pathKind('/manifest.json')).toBe('asset');
+    expect(pathKind('/')).toBe('page');
+    expect(pathKind('/company/cafe-spice-new-ltd')).toBe('page');
+  });
+
+  test('sitemaps are crawl surface, not browser sub-resources', () => {
+    // .xml/.txt would otherwise read as an asset and invert the sub-resource tell.
+    expect(pathKind('/sitemap-1.xml')).toBe('crawl');
+    expect(pathKind('/sitemap.xml')).toBe('crawl');
+    expect(pathKind('/robots.txt')).toBe('crawl');
+    expect(pathKind('/llms.txt')).toBe('crawl');
+  });
+
+  test('a slug that merely contains a dot is still a page', () => {
+    expect(pathKind('/company/acme-t-a-acme-co-uk')).toBe('page');
+  });
+});
+
+describe('mixOf', () => {
+  test('totals across kinds', () => {
+    const mix = mixOf([
+      ['/_serverFn/a', 104],
+      ['/_vercel/insights/view', 45],
+      ['/assets/index.js', 2],
+      ['/', 4],
+    ]);
+    expect(mix).toMatchObject({ rpc: 104, beacon: 45, asset: 2, page: 4 });
+    expect(mix.total).toBe(155);
+  });
+});
+
+describe('alpnOf', () => {
+  test('reads the ALPN slot', () => {
+    expect(alpnOf('t13d2013h2_a09f3c656075_7f0f34a4126d')).toBe('h2');
+    expect(alpnOf('t13d1715h1_abcabcabcabc_defdefdefdef')).toBe('h1');
+    expect(alpnOf('t13d311200_1d947a95fc68_7e1102d2036b')).toBe('00');
+  });
+
+  test('a malformed digest yields no slot rather than throwing', () => {
+    expect(alpnOf('')).toBe('');
+    expect(alpnOf('short')).toBe('');
+  });
+});
+
+describe('shapeOf', () => {
+  test('one evening burst inside a quiet day reads as a single session', () => {
+    const shape = shapeOf(series([246, 105, 177, 135], 120, 144), 10);
+    expect(shape.sessions).toHaveLength(1);
+    expect(shape.sessions[0].total).toBe(663);
+    expect(shape.sessions[0].buckets).toBe(4);
+    expect(shape.peak).toBe(246);
+    expect(shape.longestRun).toBe(4);
+    expect(shape.concentration).toBe(1);
+    expect(shape.spanMinutes).toBe(40);
+  });
+
+  test('a single idle bucket does not split a session', () => {
+    const shape = shapeOf(series([10, 0, 10], 5, 20), 10);
+    expect(shape.sessions).toHaveLength(1);
+  });
+
+  test('a long gap does split one', () => {
+    const shape = shapeOf(series([10, 0, 0, 0, 10], 5, 20), 10);
+    expect(shape.sessions).toHaveLength(2);
+  });
+
+  test('level traffic spreads concentration across many sessions', () => {
+    const shape = shapeOf(series(Array(144).fill(50), 0, 144), 10);
+    expect(shape.sessions).toHaveLength(1);
+    expect(shape.spanMinutes).toBe(1440);
+    expect(shape.median).toBe(50);
+  });
+
+  test('an empty series is reported, not crashed on', () => {
+    const shape = shapeOf([], 10);
+    expect(shape.sessions).toEqual([]);
+    expect(shape.peak).toBe(0);
+    expect(shape.concentration).toBe(0);
+  });
+});
+
+/** The real iOS Safari session: one burst, RPC-driven, sub-resources present. */
+function humanInput(): SignalInput {
+  const paths: [string, number][] = [
+    ['/_serverFn/a', 106],
+    ['/_serverFn/b', 104],
+    ['/_vercel/insights/view', 45],
+    ['/assets/index.js', 20],
+    ['/api/tiles/x/16/1/1', 87],
+    ['/', 4],
+  ];
+  return {
+    total: 366,
+    mix: mixOf(paths),
+    shape: shapeOf(series([246, 105, 177, 135], 120, 144), 10),
+    ja4: [['t13d2013h2_a09f3c656075_7f0f34a4126d', 362]],
+    userAgents: [['Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)', 366]],
+    asns: [['British Telecommunications Limited', 366]],
+    countries: [['GB', 366]],
+    botVerified: [],
+    windowMinutes: 1440,
+  };
+}
+
+/** The scraper: level across the window, HTML only, no ALPN. */
+function scraperInput(): SignalInput {
+  const paths: [string, number][] = [
+    ['/company/a', 5000],
+    ['/company/b', 5000],
+    ['/sitemap-1.xml', 100],
+  ];
+  return {
+    total: 10100,
+    mix: mixOf(paths),
+    shape: shapeOf(series(Array(144).fill(70), 0, 144), 10),
+    ja4: [['t13d311200_1d947a95fc68_7e1102d2036b', 10100]],
+    userAgents: Array.from(
+      { length: 40 },
+      (_, i) => [`Mozilla/5.0 Chrome/${100 + i}`, 260 - i] as [string, number],
+    ),
+    asns: [['ISP A', 6000], ['ISP B', 4100]],
+    countries: [['DE', 5000], ['BR', 5100]],
+    botVerified: [],
+    windowMinutes: 1440,
+  };
+}
+
+describe('tellsFor', () => {
+  test('the real session reads browser on every strong tell', () => {
+    const tells = tellsFor(humanInput());
+    const by = (label: string) => tells.find((t) => t.label === label);
+    expect(by('sub-resources')?.points).toBe('human');
+    expect(by('analytics beacons')?.points).toBe('human');
+    expect(by('browser TLS')?.points).toBe('human');
+    expect(by('SPA vs SSR')?.points).toBe('human');
+    expect(by('session shape')?.points).toBe('human');
+    expect(by('network spread')).toBeUndefined();
+  });
+
+  test('the scraper reads automated on every strong tell', () => {
+    const tells = tellsFor(scraperInput());
+    const by = (label: string) => tells.find((t) => t.label === label);
+    expect(by('sub-resources')?.points).toBe('bot');
+    expect(by('analytics beacons')).toBeUndefined();
+    expect(by('no ALPN')?.points).toBe('bot');
+    expect(by('UA spread')?.points).toBe('bot');
+    expect(by('network spread')?.points).toBe('bot');
+    expect(by('session shape')?.points).toBe('bot');
+  });
+
+  test('a verified bot is flagged first and never denied on ALPN alone', () => {
+    const input = scraperInput();
+    input.botVerified = [['pass | googlebot | search_engine', 500]];
+    const tells = tellsFor(input);
+    expect(tells[0].label).toBe('verified bot');
+    expect(tells[0].points).toBe('neutral');
+  });
+
+  test('a single request produces tells rather than dividing by zero', () => {
+    const tells = tellsFor({
+      total: 1,
+      mix: mixOf([['/', 1]]),
+      shape: shapeOf(series([1], 10, 144), 10),
+      ja4: [],
+      userAgents: [['WhatsApp/2.22.23.5 i', 1]],
+      asns: [['British Telecommunications Limited', 1]],
+      countries: [['GB', 1]],
+      botVerified: [],
+      windowMinutes: 1440,
+    });
+    expect(tells.length).toBeGreaterThan(0);
+    for (const t of tells) expect(t.detail).not.toContain('NaN');
+  });
+});

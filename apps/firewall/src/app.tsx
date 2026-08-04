@@ -89,12 +89,14 @@ export function App() {
   const ipTabs = useIpTabs({ projectId, teamId, token });
   const [pane, setPane] = useState<PaneKind | null>(null);
   const [focus, setFocus] = useState<
-    'editor' | 'pane' | 'ip-input' | 'confirm'
+    'editor' | 'pane' | 'ip-input' | 'asn-input' | 'confirm'
   >('editor');
   const [ipInput, setIpInput] = useState('');
   const [ipError, setIpError] = useState('');
   // -1 means "use what I typed"; 0+ indexes the filtered suggestions, like a URL bar.
   const [ipCursor, setIpCursor] = useState(-1);
+  const [asnInput, setAsnInput] = useState('');
+  const [asnError, setAsnError] = useState('');
   const topIpList = usePane<[string, number][]>();
   const denyActivity = usePane<Map<string, Activity>>();
   const [denyCursor, setDenyCursor] = useState(0);
@@ -285,8 +287,14 @@ export function App() {
         botVerified: ipTabs.active.data.byBotVerified,
         wafActions: ipTabs.active.data.byWafAction,
         wafRules: ipTabs.active.data.byWafRule,
-        reach: ipTabs.active.data.reach,
-        alreadyDenied: liveJa4.includes(ipTabs.active.data.byJa4[0]?.[0] ?? ''),
+        digestReach: ipTabs.active.data.digestReach,
+        asnReach: ipTabs.active.data.asnReach,
+        alreadyDeniedJa4: liveJa4.includes(
+          ipTabs.active.data.byJa4[0]?.[0] ?? '',
+        ),
+        // AS numbers cannot be derived from the name observability reports, so an ASN already
+        // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
+        alreadyDeniedAsn: false,
         windowMinutes: ipTabs.active.data.windowHours * 60,
       })
     : undefined;
@@ -339,22 +347,24 @@ export function App() {
     else setPane('ip');
   };
 
-  /** Stage a digest into deny-scraper-ja4. Nothing reaches the WAF until the apply. */
-  const stageDeny = (digest: string) => {
+  /** Stage a value into its deny rule. Nothing reaches the WAF until the apply. */
+  const stageDeny = (kind: 'ja4' | 'asn', value: string) => {
+    const ruleName = kind === 'ja4' ? JA4_RULE : ASN_RULE;
+    const spec = kind === 'ja4' ? JA4_DENY : ASN_DENY;
     setItems((prev) =>
       prev.map((it) =>
-        it.rule.name === JA4_RULE
+        it.rule.name === ruleName
           ? {
               ...it,
-              rule: withValue(it.rule, JA4_DENY, digest).rule,
+              rule: withValue(it.rule, spec, value).rule,
               status: 'idle',
               detail: undefined,
             }
           : it,
       ),
     );
-    setStagedDenies((s) => [...new Set([...s, digest])]);
-    setRemovedDenies((s) => s.filter((v) => v !== digest));
+    setStagedDenies((s) => [...new Set([...s, value])]);
+    setRemovedDenies((s) => s.filter((v) => v !== value));
     setApplied(null);
   };
 
@@ -441,6 +451,29 @@ export function App() {
       }
       return;
     }
+    // Digits only: FW_BLOCKED_ASN takes a bare AS number.
+    if (focus === 'asn-input') {
+      if (key.escape) setFocus('pane');
+      else if (key.return) {
+        const num = asnInput.trim();
+        const lever = ipAdvice?.lever;
+        if (!/^[1-9]\d{0,9}$/.test(num)) {
+          setAsnError('AS number must be a positive integer');
+          return;
+        }
+        setAsnError('');
+        setConfirm({
+          prompt: `Deny the whole network AS${num} (${lever?.value ?? ''})?`,
+          detail:
+            'an ASN deny hits EVERY client on that network — cleared only because none of it ever fetched a sub-resource',
+          onYes: () => stageDeny('asn', num),
+        });
+        setFocus('confirm');
+      } else if (key.backspace || key.delete) setAsnInput((s) => s.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta)
+        setAsnInput((s) => (s + input.replace(/\D/g, '')).slice(0, 10));
+      return;
+    }
     // Text entry owns every keystroke, so q/j/k stay typeable inside an IP.
     if (focus === 'ip-input') {
       if (key.escape) setFocus(ipTabs.tabs.length ? 'pane' : 'editor');
@@ -476,17 +509,22 @@ export function App() {
       // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'R') refreshPane();
-      else if (input === 'b' && pane === 'ip' && ipAdvice?.digest) {
-        // Blocked clients are not stageable at all — no keystroke gets past a blocker.
+      else if (input === 'b' && pane === 'ip' && ipAdvice?.lever) {
+        // Only an OFFERED lever is stageable. A blocked client, or one whose every handle is
+        // shared with something legitimate, has no lever and no keystroke gets past that.
         if (ipAdvice.blockers.length) return;
-        const digest = ipAdvice.digest;
+        const lever = ipAdvice.lever;
+        if (lever.kind === 'asn') {
+          // The AS number is not derivable from the name observability reports.
+          setAsnInput('');
+          setAsnError('');
+          setFocus('asn-input');
+          return;
+        }
         setConfirm({
-          prompt: `Deny TLS fingerprint ${digest}?`,
-          detail:
-            ipAdvice.verdict === 'ban'
-              ? `${ipAdvice.reasons.length} tells agree · stages into FW_BLOCKED_JA4`
-              : 'INCONCLUSIVE — only one tell, this may deny real users',
-          onYes: () => stageDeny(digest),
+          prompt: `Deny TLS fingerprint ${lever.value}?`,
+          detail: `${ipAdvice.reasons.length} tells agree · stages into FW_BLOCKED_JA4`,
+          onYes: () => stageDeny('ja4', lever.value),
         });
         setFocus('confirm');
       } else if (input === 'u' && pane === 'denylist') {
@@ -590,6 +628,7 @@ export function App() {
     // The suggestion overlay grows the prompt, so the box has to give back the same rows.
     (focus === 'ip-input' ? 2 + ipMatches.length + (topIpList.loading ? 1 : 0) : 0) +
     (focus === 'confirm' ? 3 : 0) +
+    (focus === 'asn-input' ? 1 : 0) +
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -733,6 +772,16 @@ export function App() {
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
                 </Text>
               )}
+            </Box>
+          )}
+          {focus === 'asn-input' && (
+            <Box>
+              <Text color="cyan">AS number for {ipAdvice?.lever?.value}: </Text>
+              <Text>{asnInput}</Text>
+              <Text color="cyan">▏</Text>
+              <Text dimColor>
+                {asnError ? `  ${asnError}` : '  enter confirm · esc cancel'}
+              </Text>
             </Box>
           )}
           {focus === 'confirm' && confirm && (

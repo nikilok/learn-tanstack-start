@@ -82,7 +82,7 @@ async function main() {
 
   const profile = await fetchIpProfile(creds, args.ip, args.hours);
   // Not required: without a denylist configured nothing is already-denied, which is the truth.
-  const denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  const deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
   const advice = adviseBan({
     total: profile.total,
     mix: profile.mix,
@@ -92,8 +92,11 @@ async function main() {
     botVerified: profile.byBotVerified,
     wafActions: profile.byWafAction,
     wafRules: profile.byWafRule,
-    reach: profile.reach,
-    alreadyDenied: denied.includes(profile.byJa4[0]?.[0] ?? ''),
+    digestReach: profile.digestReach,
+    asnReach: profile.asnReach,
+    alreadyDeniedJa4: deniedJa4.includes(profile.byJa4[0]?.[0] ?? ''),
+    // The CLI cannot map an AS name to its number, so it never claims one is already denied.
+    alreadyDeniedAsn: false,
     windowMinutes: profile.windowHours * 60,
   });
   console.log(

@@ -32,14 +32,26 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
     botVerified: [],
     wafActions: [['log', 9060]],
     wafRules: [],
-    reach: {
-      ja4: 't13d311200_1d947a95fc68_7e1102d2036b',
+    digestReach: {
+      label: 't13d311200_1d947a95fc68_7e1102d2036b',
       ips: 413,
       countries: 205,
-      verifiedNames: [],
       total: 171751,
+      subResources: 0,
+      beacons: 0,
+      verifiedNames: [],
     },
-    alreadyDenied: false,
+    asnReach: {
+      label: 'Consumer ISP',
+      ips: 400,
+      countries: 200,
+      total: 171751,
+      subResources: 9000, // consumer networks obviously serve real browsers
+      beacons: 4000,
+      verifiedNames: [],
+    },
+    alreadyDeniedJa4: false,
+    alreadyDeniedAsn: false,
     windowMinutes: 1440,
     ...over,
   };
@@ -61,14 +73,17 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
     botVerified: [],
     wafActions: [['allow', 662]],
     wafRules: [],
-    reach: {
-      ja4: 't13d2013h2_a09f3c656075_7f0f34a4126d',
+    digestReach: {
+      label: 't13d2013h2_a09f3c656075_7f0f34a4126d',
       ips: 3,
       countries: 1,
-      verifiedNames: [],
       total: 663,
+      subResources: 42,
+      beacons: 60,
+      verifiedNames: [],
     },
-    alreadyDenied: false,
+    alreadyDeniedJa4: false,
+    alreadyDeniedAsn: false,
     windowMinutes: 1440,
     ...over,
   };
@@ -87,9 +102,10 @@ describe('adviseBan — the scraper', () => {
   });
 
   test('an already-denied digest is left alone', () => {
-    const a = adviseBan(scraper({ alreadyDenied: true }));
+    const a = adviseBan(scraper({ alreadyDeniedJa4: true }));
     expect(a.verdict).toBe('leave');
     expect(a.blockers.join(' ')).toContain('already in FW_BLOCKED_JA4');
+    expect(a.lever).toBeUndefined();
   });
 });
 
@@ -118,18 +134,23 @@ describe('adviseBan — the blockers that matter', () => {
     const a = adviseBan(
       scraper({
         ja4: [['t13d1713h1_ab0a1bf427ad_ecd0401ec68b', 9060]],
-        reach: {
-          ja4: 't13d1713h1_ab0a1bf427ad_ecd0401ec68b',
+        digestReach: {
+          label: 't13d1713h1_ab0a1bf427ad_ecd0401ec68b',
           ips: 229,
           countries: 16,
-          verifiedNames: ['claude-user'],
           total: 419,
+          subResources: 0,
+          beacons: 0,
+          verifiedNames: ['claude-user'],
         },
       }),
     );
     expect(a.verdict).toBe('leave');
-    expect(a.blockers.join(' ')).toContain('SHARED client fingerprint');
+    expect(a.blockers.join(' ')).toContain('SHARED identity');
     expect(a.blockers.join(' ')).toContain('claude-user');
+    // Blocking BOTH levers matters: the agent may egress from the same network, so an ASN
+    // deny would catch it too.
+    expect(a.lever).toBeUndefined();
   });
 
   test('a quiet client is not worth a rule', () => {
@@ -153,12 +174,14 @@ describe('adviseBan — the one-tell threshold', () => {
         mix: mixOf([['/company/a', 9060]]),
         shape: shapeOf(series([9060], 10, 144), 10),
         ja4: [['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 9060]],
-        reach: {
-          ja4: 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb',
+        digestReach: {
+          label: 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb',
           ips: 1,
           countries: 1,
-          verifiedNames: [],
           total: 9060,
+          subResources: 0,
+          beacons: 0,
+          verifiedNames: [],
         },
       }),
     );
@@ -172,7 +195,8 @@ describe('adviseBan — the one-tell threshold', () => {
       mix: mixOf([['/company/a', 9060], ['/assets/x.js', 0]]),
       shape: shapeOf(series([9060], 10, 144), 10),
       ja4: [['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 9060]],
-      reach: undefined,
+      digestReach: undefined,
+      asnReach: undefined,
     });
     if (a.verdict === 'watch') expect(a.digest).toBeDefined();
   });
@@ -189,14 +213,17 @@ describe('adviseBan — first-party callers', () => {
     botVerified: [],
     wafActions: [['bypass', 1158]],
     wafRules: [['allow-ch-stream-revalidate', 1158]],
-    reach: {
-      ja4: 't13d1714h1_5b57614c22b0_7baf387fc6ff',
+    digestReach: {
+      label: 't13d1714h1_5b57614c22b0_7baf387fc6ff',
       ips: 1,
       countries: 1,
-      verifiedNames: [],
       total: 1158,
+      subResources: 0,
+      beacons: 0,
+      verifiedNames: [],
     },
-    alreadyDenied: false,
+    alreadyDeniedJa4: false,
+    alreadyDeniedAsn: false,
     windowMinutes: 1440,
   });
 
@@ -224,5 +251,125 @@ describe('adviseBan — first-party callers', () => {
   test('/api/ paths are not counted as page fetches', () => {
     expect(mixOf([['/api/revalidate', 5]]).page).toBe(0);
     expect(mixOf([['/api/revalidate', 5]]).api).toBe(5);
+  });
+});
+
+describe('adviseBan — the ASN lever', () => {
+  // velia.net: 5 rotating JA4s over 4 IPs, walking /company/ alphabetically, ZERO sub-resources
+  // across the whole ASN. The fingerprint rotates, so the network is the handle.
+  const velia = (over: Partial<AdviceInput> = {}): AdviceInput => ({
+    total: 1630,
+    mix: mixOf([['/company/a', 1600], ['/sitemap-1.xml', 30]]),
+    shape: shapeOf(series(Array(144).fill(11), 0, 144), 10),
+    ja4: [['t13d3012h1_1d37bd780c83_882d495ac381', 1630]],
+    asns: [['velia.net Internetdienste GmbH', 1630]],
+    botVerified: [],
+    wafActions: [['log', 1630]],
+    wafRules: [],
+    // Rotating: this digest is shared with real browsers elsewhere, so JA4 is not available.
+    digestReach: {
+      label: 't13d3012h1_1d37bd780c83_882d495ac381',
+      ips: 400,
+      countries: 30,
+      total: 50000,
+      subResources: 900,
+      beacons: 300,
+      verifiedNames: [],
+    },
+    asnReach: {
+      label: 'velia.net Internetdienste GmbH',
+      ips: 4,
+      countries: 1,
+      total: 1630,
+      subResources: 0,
+      beacons: 0,
+      verifiedNames: [],
+    },
+    alreadyDeniedJa4: false,
+    alreadyDeniedAsn: false,
+    windowMinutes: 1440,
+    ...over,
+  });
+
+  test('falls back to the network when the fingerprint is shared with browsers', () => {
+    const a = adviseBan(velia());
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.kind).toBe('asn');
+    expect(a.lever?.value).toBe('velia.net Internetdienste GmbH');
+  });
+
+  test('the ASN lever demands the AS number, which observability cannot supply', () => {
+    expect(adviseBan(velia()).lever?.needsAsNumber).toBe(true);
+  });
+
+  test('it says WHY the network cleared: zero sub-resources across all of it', () => {
+    expect(adviseBan(velia()).lever?.why).toContain('ZERO sub-resources');
+  });
+
+  test('and why the fingerprint did not, so the choice is auditable', () => {
+    expect(adviseBan(velia()).leverNotes.join(' ')).toContain(
+      'real browsers render from it',
+    );
+  });
+
+  test('a network that has EVER served a sub-resource is refused', () => {
+    // DigitalOcean on the generic Chromium digest: 742 sub-resources. Not bannable.
+    const a = adviseBan(
+      velia({
+        asnReach: {
+          label: 'DigitalOcean, LLC',
+          ips: 9,
+          countries: 3,
+          total: 1043,
+          subResources: 742,
+          beacons: 151,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.lever).toBeUndefined();
+    expect(a.leverNotes.join(' ')).toContain('would hit users');
+  });
+
+  test('a network carrying a verified bot is refused even at zero sub-resources', () => {
+    const a = adviseBan(
+      velia({
+        asnReach: {
+          label: 'Google LLC',
+          ips: 40,
+          countries: 1,
+          total: 5000,
+          subResources: 0,
+          beacons: 0,
+          verifiedNames: ['googlebot'],
+        },
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.lever).toBeUndefined();
+  });
+
+  test('an unknown network reach is never cleared by default', () => {
+    const a = adviseBan(velia({ asnReach: undefined }));
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('reach unknown');
+  });
+
+  test('a clean fingerprint still wins — it survives IP rotation', () => {
+    const a = adviseBan(
+      velia({
+        digestReach: {
+          label: 't13d3012h1_1d37bd780c83_882d495ac381',
+          ips: 4,
+          countries: 1,
+          total: 1630,
+          subResources: 0,
+          beacons: 0,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.lever?.kind).toBe('ja4');
   });
 });

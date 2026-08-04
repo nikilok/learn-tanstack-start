@@ -95,33 +95,55 @@ function tellLines(tells: Tell[]): Line[] {
   );
 }
 
-/** The recommendation block. Blockers are printed even on a `ban`-less verdict — knowing WHY something is untouchable is the useful part. */
-function adviceLines(a: Advice, reach: IpProfile['reach']): Line[] {
-  const tone = a.verdict === 'ban' ? 'bad' : a.verdict === 'watch' ? 'warn' : 'good';
+function reachLine(what: string, r: IpProfile['digestReach']): Line[] {
+  if (!r) return [];
+  return [
+    line(
+      seg(
+        `  ${what}: ${r.ips} IPs · ${r.countries} countries · ${r.total} req · ` +
+          `${r.subResources + r.beacons} sub-resources` +
+          (r.verifiedNames.length
+            ? ` · verified: ${r.verifiedNames.join(', ')}`
+            : ''),
+        'dim',
+      ),
+    ),
+  ];
+}
+
+/** The recommendation block. Blockers and rejected levers print even on a `ban`-less verdict — knowing WHY something is untouchable is the useful part. */
+function adviceLines(a: Advice, p: IpProfile): Line[] {
+  const tone =
+    a.verdict === 'ban' ? 'bad' : a.verdict === 'watch' ? 'warn' : 'good';
   const headline =
     a.verdict === 'ban'
-      ? 'DENY RECOMMENDED — press b to stage, a to apply'
+      ? `DENY RECOMMENDED (${a.lever?.kind.toUpperCase()}) — press b to stage, a to apply`
       : a.verdict === 'watch'
-        ? 'INCONCLUSIVE — one tell only, not enough to deny'
+        ? 'INCONCLUSIVE — no safe lever, do not deny'
         : 'DO NOT DENY';
   const L: Line[] = [blank(), line(seg('RECOMMENDATION', 'bold'))];
   L.push(line('  ', seg(headline, tone)));
-  if (a.digest && a.verdict === 'ban')
-    L.push(line(seg('  target  ', 'dim'), seg(a.digest, 'key'), seg('  (FW_BLOCKED_JA4)', 'dim')));
-  if (reach)
+  if (a.lever)
     L.push(
       line(
+        seg('  target  ', 'dim'),
+        seg(a.lever.value, 'key'),
         seg(
-          `  digest reach: ${reach.ips} IPs · ${reach.countries} countries · ${reach.total} req` +
-            (reach.verifiedNames.length
-              ? ` · verified: ${reach.verifiedNames.join(', ')}`
-              : ' · no verified bots'),
+          a.lever.kind === 'ja4'
+            ? '  (FW_BLOCKED_JA4)'
+            : '  (FW_BLOCKED_ASN — needs the AS number)',
           'dim',
         ),
       ),
     );
-  for (const b of a.blockers) L.push(line('  ', seg('blocker  ', 'good'), seg(b, 'dim')));
-  for (const r of a.reasons) L.push(line('  ', seg('evidence ', 'dim'), seg(r, 'dim')));
+  L.push(...reachLine('fingerprint', p.digestReach));
+  L.push(...reachLine('network', p.asnReach));
+  for (const b of a.blockers)
+    L.push(line('  ', seg('blocker  ', 'good'), seg(b, 'dim')));
+  for (const n of a.leverNotes)
+    L.push(line('  ', seg('lever    ', 'warn'), seg(n, 'dim')));
+  for (const r of a.reasons)
+    L.push(line('  ', seg('evidence ', 'dim'), seg(r, 'dim')));
   return L;
 }
 
@@ -142,7 +164,7 @@ export function profileLines(
   );
 
   L.push(...heading('SIGNALS'), ...tellLines(p.tells));
-  if (advice) L.push(...adviceLines(advice, p.reach));
+  if (advice) L.push(...adviceLines(advice, p));
 
   L.push(...heading(`SESSION SHAPE (${p.shape.bucketMinutes}-min buckets)`));
   L.push(...sessionLines(p.shape));

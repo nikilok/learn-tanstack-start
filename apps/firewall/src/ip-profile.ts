@@ -1,7 +1,7 @@
 // Data layer for `firewall:ip` — everything about one client IP that bears on "scraper or human".
 // Read-only by design: this reports, it never bans (see the watch-branch post-mortem).
 
-import type { DigestReach } from './ban-advice';
+import type { Reach } from './ban-advice';
 import {
   type Mix,
   type Shape,
@@ -46,9 +46,11 @@ export type IpProfile = {
   shape: Shape;
   buckets: { t: string; c: number }[]; // zero-filled series behind `shape`
   tells: Tell[];
-  // What the dominant digest does BEYOND this IP. Without it a deny recommendation cannot tell a
-  // single automated host from a shared client library that verified agents also use.
-  reach?: DigestReach;
+  // What the dominant fingerprint and network do BEYOND this IP. Without these a deny
+  // recommendation cannot tell a single automated host from a shared identity that real
+  // browsers, verified agents or our own services also use.
+  digestReach?: Reach;
+  asnReach?: Reach;
   errors: string[];
 };
 
@@ -156,32 +158,62 @@ export async function fetchIpProfile(
     }
   }
 
-  // One extra fan-out for the dominant digest. Only worth it when there IS one, and it is what
-  // makes a deny recommendation safe to act on.
-  const topDigest = byJa4[0]?.[0];
-  let reach: DigestReach | undefined;
-  if (topDigest && topDigest !== '(none)') {
-    const df = `clientJa4Digest eq '${topDigest}'`;
-    const [reachIps, reachCountries, reachBots] = await pool(
+  // What an identity does BEYOND this IP. Both levers need it: a deny is only safe when nothing
+  // else riding the same handle has ever rendered a page.
+  const reachOf = async (
+    label: string,
+    filter: string,
+  ): Promise<Reach | undefined> => {
+    const [ips, countries, bots, paths] = await pool(
       [
-        () => group(ctx, errors, 'reach ips', ['clientIp'], df),
-        () => group(ctx, errors, 'reach countries', ['clientIpCountry'], df),
-        () => group(ctx, errors, 'reach bots', ['botVerified', 'botName'], df),
+        () => group(ctx, errors, `reach ips ${label}`, ['clientIp'], filter),
+        () =>
+          group(ctx, errors, `reach geo ${label}`, ['clientIpCountry'], filter),
+        () =>
+          group(
+            ctx,
+            errors,
+            `reach bots ${label}`,
+            ['botVerified', 'botName'],
+            filter,
+          ),
+        () => group(ctx, errors, `reach paths ${label}`, ['requestPath'], filter),
       ],
-      3,
+      4,
     );
-    if (reachIps.length)
-      reach = {
-        ja4: topDigest,
-        ips: reachIps.length,
-        countries: reachCountries.length,
-        verifiedNames: reachBots
-          .filter(([k]) => k.startsWith('pass'))
-          .map(([k]) => k.split(' | ')[1] ?? 'verified')
-          .filter((n, i, a) => a.indexOf(n) === i),
-        total: reachIps.reduce((s, [, c]) => s + c, 0),
-      };
-  }
+    if (!ips.length) return undefined;
+    const kinds = mixOf(paths);
+    return {
+      label,
+      ips: ips.length,
+      countries: countries.length,
+      total: ips.reduce((s, [, c]) => s + c, 0),
+      subResources: kinds.asset,
+      beacons: kinds.beacon,
+      verifiedNames: bots
+        .filter(([k]) => k.startsWith('pass'))
+        .map(([k]) => k.split(' | ')[1] ?? 'verified')
+        .filter((n, i, a) => a.indexOf(n) === i),
+    };
+  };
+
+  const topDigest = byJa4[0]?.[0];
+  const topAsn = byAsn[0]?.[0];
+  const [digestReach, asnReach] = await pool(
+    [
+      () =>
+        topDigest && topDigest !== '(none)'
+          ? reachOf(topDigest, `clientJa4Digest eq '${topDigest}'`)
+          : Promise.resolve(undefined),
+      // Interpolated into the filter DSL and the API has no escape syntax, so an ASN name
+      // containing a quote is skipped rather than sent.
+      () =>
+        topAsn && topAsn !== '(none)' && !topAsn.includes("'")
+          ? reachOf(topAsn, `asnName eq '${topAsn}'`)
+          : Promise.resolve(undefined),
+    ],
+    2,
+  );
 
   const mix = mixOf(byPath);
   const shape = shapeOf(buckets, bucketMinutes);
@@ -211,7 +243,8 @@ export async function fetchIpProfile(
     mix,
     shape,
     buckets,
-    reach,
+    digestReach,
+    asnReach,
     tells: tellsFor({
       total,
       mix,

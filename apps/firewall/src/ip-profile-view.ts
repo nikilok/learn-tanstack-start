@@ -116,7 +116,7 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
   const tone =
     a.verdict === 'ban'
       ? 'bad'
-      : a.verdict === 'watch'
+      : a.verdict === 'watch' || a.verdict === 'staged'
         ? 'warn'
         : a.verdict === 'already'
           ? 'dim'
@@ -124,11 +124,13 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
   const headline =
     a.verdict === 'ban'
       ? `DENY RECOMMENDED (${a.lever?.kind.toUpperCase()}) — press b to stage, a to apply`
-      : a.verdict === 'watch'
-        ? 'INCONCLUSIVE — no safe lever, do not deny'
-        : a.verdict === 'already'
-          ? 'ALREADY DENIED — the evidence stands, the rule is in place'
-          : 'DO NOT DENY';
+      : a.verdict === 'staged'
+        ? 'STAGED — not live yet; press a to apply, or u in the denylist to drop it'
+        : a.verdict === 'watch'
+          ? 'INCONCLUSIVE — no safe lever, do not deny'
+          : a.verdict === 'already'
+            ? 'ALREADY DENIED — the evidence stands, the rule is in place'
+            : 'DO NOT DENY';
   const L: Line[] = [blank(), line(seg('RECOMMENDATION', 'bold'))];
   L.push(line('  ', seg(headline, tone)));
   if (a.lever)

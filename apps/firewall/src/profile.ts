@@ -108,7 +108,13 @@ async function main() {
     statuses: profile.byStatus,
     digestReach: profile.digestReach,
     asnReach: profile.asnReach,
-    alreadyDeniedJa4: deniedJa4.includes(profile.byJa4[0]?.[0] ?? ''),
+    alreadyDeniedJa4: deniedJa4.includes(
+      profile.subject.kind === 'ja4'
+        ? profile.subject.value
+        : (profile.byJa4[0]?.[0] ?? ''),
+    ),
+    stagedJa4: false, // the CLI has no staging step
+
     // The CLI cannot map an AS name to its number, so it never claims one is already denied.
     alreadyDeniedAsn: false,
     windowMinutes: profile.windowHours * 60,

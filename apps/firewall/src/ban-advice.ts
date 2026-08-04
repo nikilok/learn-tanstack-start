@@ -40,9 +40,10 @@ export type Lever = {
 };
 
 export type Advice = {
-  // 'leave' means legitimate; 'already' means correctly denied and nothing left to do. Collapsing
-  // the two made a caught scraper read as innocent.
-  verdict: 'ban' | 'watch' | 'already' | 'leave';
+  // Four distinct states that a coarser verdict kept confusing: act, staged-but-not-live,
+  // live-and-done, and legitimate. 'staged' must never read as 'already' — the WAF has not
+  // been written yet.
+  verdict: 'ban' | 'watch' | 'staged' | 'already' | 'leave';
   lever?: Lever;
   digest?: string;
   reasons: string[];
@@ -63,7 +64,8 @@ export type AdviceInput = {
   statuses: [string, number][];
   digestReach?: Reach;
   asnReach?: Reach;
-  alreadyDeniedJa4: boolean;
+  alreadyDeniedJa4: boolean; // present in the LIVE rule and applied
+  stagedJa4: boolean; // staged this session, not yet written to the WAF
   alreadyDeniedAsn: boolean;
   windowMinutes: number;
 };
@@ -201,6 +203,14 @@ export function adviseBan(input: AdviceInput): Advice {
       verdict: 'leave',
       reasons,
       blockers: [...blockers, ...denied],
+      leverNotes,
+    };
+  if (input.stagedJa4)
+    return {
+      verdict: 'staged',
+      digest,
+      reasons,
+      blockers: [],
       leverNotes,
     };
   if (input.alreadyDeniedJa4)

@@ -288,6 +288,29 @@ export function App() {
       denied: act?.get(v)?.denied,
     })),
   ];
+  const subjectDigest = ipTabs.active?.data
+    ? ipTabs.active.data.subject.kind === 'ja4'
+      ? ipTabs.active.data.subject.value
+      : (ipTabs.active.data.byJa4[0]?.[0] ?? '')
+    : '';
+  // Rules carrying unapplied denylist edits, so the list can say so rather than looking inert.
+  const pendingByRule = new Map<string, string>();
+  for (const [ruleName, spec] of [
+    [JA4_RULE, JA4_DENY],
+    [ASN_RULE, ASN_DENY],
+  ] as const) {
+    const item = denyRuleOf(ruleName);
+    if (!item) continue;
+    const live = valuesOf(item.rule, spec);
+    const added = stagedDenies.filter((v) => live.includes(v)).length;
+    const dropped = removedDenies.filter((v) => !live.includes(v)).length;
+    const parts = [
+      added ? `+${added} staged` : '',
+      dropped ? `−${dropped} unbanned` : '',
+    ].filter(Boolean);
+    if (parts.length) pendingByRule.set(ruleName, `${parts.join(', ')} · a applies`);
+  }
+
   const ipAdvice = ipTabs.active?.data
     ? adviseBan({
         total: ipTabs.active.data.total,
@@ -301,11 +324,11 @@ export function App() {
         statuses: ipTabs.active.data.byStatus,
         digestReach: ipTabs.active.data.digestReach,
         asnReach: ipTabs.active.data.asnReach,
-        alreadyDeniedJa4: liveJa4.includes(
-          ipTabs.active.data.subject.kind === 'ja4'
-            ? ipTabs.active.data.subject.value
-            : (ipTabs.active.data.byJa4[0]?.[0] ?? ''),
-        ),
+        // Live-and-applied, NOT merely present in the rule: a staged digest is in the local
+        // rule but has not been written, and calling that "already denied" is a lie.
+        alreadyDeniedJa4:
+          liveJa4.includes(subjectDigest) && !stagedDenies.includes(subjectDigest),
+        stagedJa4: stagedDenies.includes(subjectDigest),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
         alreadyDeniedAsn: false,
@@ -736,6 +759,7 @@ export function App() {
               phase={phase}
               width={rulesW}
               longestName={longestName}
+              pending={pendingByRule.get(it.rule.name)}
             />
           ))}
         </Box>
@@ -753,6 +777,11 @@ export function App() {
               {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
+              {pendingByRule.size ? (
+                <Text color="yellow"> · {pendingByRule.size} rule(s) unapplied</Text>
+              ) : (
+                ''
+              )}
             </Text>
           </Box>
         )}

@@ -49,11 +49,17 @@ function RowTail({
   item,
   phase,
   width,
+  pending,
 }: {
   item: Item;
   phase: Phase;
   width: number;
+  pending?: string;
 }) {
+  // An edit that is staged but unapplied must announce itself, or the operator cannot tell a
+  // keypress landed. It outranks the description, which never changes.
+  if (phase !== 'applying' && item.status === 'idle' && pending)
+    return <Text color="yellow">{truncate(`● ${pending}`, width)}</Text>;
   if (phase !== 'applying' && item.status === 'idle')
     return <Text dimColor>{truncate(item.rule.description, width)}</Text>;
   const suffix = item.detail ? ` (${item.detail})` : '';
@@ -80,12 +86,14 @@ export function Row({
   phase,
   width,
   longestName,
+  pending,
 }: {
   item: Item;
   isCursor: boolean;
   phase: Phase;
   width: number;
   longestName: number;
+  pending?: string;
 }) {
   const selecting = phase === 'select' || phase === 'action';
   const w = rowWidths(width, longestName);
@@ -99,7 +107,9 @@ export function Row({
       <Text color={item.active ? actionColor(item.action) : 'gray'}>
         {`[${item.action.toUpperCase()}]`.padEnd(11)}{' '}
       </Text>
-      {w.tail > 0 && <RowTail item={item} phase={phase} width={w.tail} />}
+      {w.tail > 0 && (
+        <RowTail item={item} phase={phase} width={w.tail} pending={pending} />
+      )}
     </Box>
   );
 }

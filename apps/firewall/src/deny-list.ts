@@ -112,6 +112,18 @@ export function withoutValue(
   };
 }
 
+// Stripped before re-appending: withValue/withoutValue feed a rule's own description back in, so
+// without this the counts compound into "… 1 denied. 2 denied."
+const COUNT_SUFFIX = /\s*(?:\d+ denied\.|REVOKED — nothing is denied\.)$/;
+
+/** Count-aware description, so the Vercel dashboard list says what a rule is doing without opening it. A revoked rule must say so loudly: it stays active and matching a placeholder, which otherwise reads as "denying something". Idempotent. */
+export function denyDescription(base: string, count: number): string {
+  const clean = base.replace(COUNT_SUFFIX, '');
+  return count === 0
+    ? `${clean} REVOKED — nothing is denied.`
+    : `${clean} ${count} denied.`;
+}
+
 /**
  * One condition group per value (Vercel ORs them). Revocation swaps in the placeholder, never
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is
@@ -130,7 +142,7 @@ export function denyListRule(opts: {
   const values = opts.values.length ? opts.values : [opts.spec.placeholder];
   return {
     name: opts.name,
-    description: opts.description,
+    description: denyDescription(opts.description, opts.values.length),
     active: true,
     conditionGroup: values.map((value) => ({
       conditions: [{ type: opts.spec.type, op: 'eq' as const, value }],

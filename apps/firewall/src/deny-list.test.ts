@@ -4,11 +4,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   ASN_DENY,
+  denyDescription,
   denyListRule,
   envMatching,
   JA4_DENY,
   valuesOf,
   withValue,
+  withoutValue,
 } from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
@@ -219,5 +221,78 @@ describe('valuesOf / withValue', () => {
     const out = withValue(rule, JA4_DENY, JA4_B).rule;
     const vals = out.conditionGroup.flatMap((g) => g.conditions.map((c) => c.value));
     expect(vals).toEqual([JA4_A, JA4_B]);
+  });
+});
+
+describe('denyDescription', () => {
+  test('states the count, so the dashboard list is readable without opening the rule', () => {
+    expect(denyDescription('Deny X.', 2)).toBe('Deny X. 2 denied.');
+    expect(denyDescription('Deny X.', 1)).toBe('Deny X. 1 denied.');
+  });
+
+  test('a revoked rule says so — it stays active and matches a placeholder', () => {
+    // Without this the dashboard shows an active DENY rule that denies nothing.
+    expect(denyDescription('Deny X.', 0)).toContain('REVOKED');
+    expect(denyDescription('Deny X.', 0)).not.toContain('1 denied');
+  });
+
+  test('the built rule carries the count, not the bare base text', () => {
+    const r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A, JA4_B],
+    });
+    expect(r.description).toBe('Deny X. 2 denied.');
+  });
+
+  test('the placeholder is never counted as a denied entry', () => {
+    const r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [],
+    });
+    expect(r.description).toContain('REVOKED');
+    expect(r.conditionGroup).toHaveLength(1); // the placeholder is still there
+  });
+
+  test('staging a value updates the count in the description', () => {
+    const base = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(base, JA4_DENY, JA4_B).rule.description).toBe('Deny X. 2 denied.');
+  });
+
+  test('descriptions stay inside the 256-char cap Vercel enforces', () => {
+    expect(denyDescription('x'.repeat(200), 99).length).toBeLessThanOrEqual(256);
+  });
+});
+
+describe('denyDescription — idempotence', () => {
+  test('re-decorating a decorated description replaces the count, never appends', () => {
+    expect(denyDescription('Deny X. 1 denied.', 2)).toBe('Deny X. 2 denied.');
+    expect(denyDescription('Deny X. REVOKED — nothing is denied.', 3)).toBe(
+      'Deny X. 3 denied.',
+    );
+    expect(denyDescription('Deny X. 5 denied.', 0)).toBe(
+      'Deny X. REVOKED — nothing is denied.',
+    );
+  });
+
+  test('repeated staging never compounds the suffix', () => {
+    let r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    r = withValue(r, JA4_DENY, JA4_B).rule;
+    r = withoutValue(r, JA4_DENY, JA4_A).rule;
+    expect(r.description).toBe('Deny X. 1 denied.');
+    expect(r.description.match(/denied/g)).toHaveLength(1);
   });
 });

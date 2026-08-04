@@ -11,7 +11,20 @@ import {
 } from 'ink';
 import { useEffect, useRef, useState } from 'react';
 
+import { fileURLToPath } from 'node:url';
+
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
+import { type Advice, adviseBan } from './ban-advice';
+import {
+  ASN_DENY,
+  JA4_DENY,
+  valuesOf,
+  withValue,
+  withoutValue,
+} from './deny-list';
+import { type Activity, fetchDenyActivity } from './denylist-data';
+import { type DenyEntry, denylistLines } from './denylist-view';
+import { persistEnvVar } from './env-file';
 import {
   type ApplyStatus,
   type Item,
@@ -36,12 +49,18 @@ import { type IpTab, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
 
-type PaneKind = 'report' | 'ip' | 'sitemap';
+type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
 const PANE_KEY: Record<string, PaneKind> = {
   r: 'report',
   i: 'ip',
   s: 'sitemap',
+  d: 'denylist',
 };
+const JA4_RULE = 'deny-scraper-ja4';
+const ASN_RULE = 'deny-scraper-asn';
+const DENY_ACTIVITY_HOURS = 144;
+// Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
+const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
 const IP_WINDOW_HOURS = 24;
 const SITEMAP_WINDOW_HOURS = 144;
 const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
@@ -69,12 +88,25 @@ export function App() {
   const sitemap = usePane<SitemapReport>();
   const ipTabs = useIpTabs({ projectId, teamId, token });
   const [pane, setPane] = useState<PaneKind | null>(null);
-  const [focus, setFocus] = useState<'editor' | 'pane' | 'ip-input'>('editor');
+  const [focus, setFocus] = useState<
+    'editor' | 'pane' | 'ip-input' | 'confirm'
+  >('editor');
   const [ipInput, setIpInput] = useState('');
   const [ipError, setIpError] = useState('');
   // -1 means "use what I typed"; 0+ indexes the filtered suggestions, like a URL bar.
   const [ipCursor, setIpCursor] = useState(-1);
   const topIpList = usePane<[string, number][]>();
+  const denyActivity = usePane<Map<string, Activity>>();
+  const [denyCursor, setDenyCursor] = useState(0);
+  // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
+  // on screen as a pending change until applied.
+  const [removedDenies, setRemovedDenies] = useState<string[]>([]);
+  const [stagedDenies, setStagedDenies] = useState<string[]>([]);
+  const [confirm, setConfirm] = useState<{
+    prompt: string;
+    detail: string;
+    onYes: () => void;
+  } | null>(null);
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
@@ -176,12 +208,87 @@ export function App() {
       exit(); // deferred to here so no write is still in flight
       return;
     }
+    // The rules are rebuilt from env on every apply, so a digest that lives only in the WAF is
+    // un-banned by the next CI run. Write it back, or the ban quietly expires.
+    let persisted = '';
+    if (!anyError && (stagedDenies.length || removedDenies.length)) {
+      try {
+        const ja4 = snapshot.find((it) => it.rule.name === JA4_RULE);
+        const asn = snapshot.find((it) => it.rule.name === ASN_RULE);
+        if (ja4)
+          persistEnvVar(
+            ENV_PATH,
+            'FW_BLOCKED_JA4',
+            valuesOf(ja4.rule, JA4_DENY).join(','),
+          );
+        if (asn)
+          persistEnvVar(
+            ENV_PATH,
+            'FW_BLOCKED_ASN',
+            valuesOf(asn.rule, ASN_DENY).join(','),
+          );
+        setStagedDenies([]);
+        setRemovedDenies([]);
+        persisted = ' · denylist saved to .env.local';
+      } catch (e) {
+        persisted = ` · WARNING: applied but NOT saved to .env.local (${errMsg(e)}) — the next CI apply will undo it`;
+      }
+    }
     // Back to the editor, not a terminal screen — an apply is a step in a session.
-    setApplied({ summary: summaryLine(statuses), ok: !anyError });
+    setApplied({ summary: summaryLine(statuses) + persisted, ok: !anyError });
     setPhase('select');
   };
 
   const creds = { projectId, teamId, token };
+
+  const denyRuleOf = (name: string) => items.find((it) => it.rule.name === name);
+  const liveJa4 = denyRuleOf(JA4_RULE)
+    ? valuesOf((denyRuleOf(JA4_RULE) as Item).rule, JA4_DENY)
+    : [];
+  const liveAsn = denyRuleOf(ASN_RULE)
+    ? valuesOf((denyRuleOf(ASN_RULE) as Item).rule, ASN_DENY)
+    : [];
+  const act = denyActivity.data;
+  const denyEntries: DenyEntry[] = [
+    ...liveJa4.map((v) => ({
+      kind: 'ja4' as const,
+      value: v,
+      staged: stagedDenies.includes(v),
+      removed: false,
+      requests: act?.get(v)?.requests,
+      denied: act?.get(v)?.denied,
+    })),
+    ...liveAsn.map((v) => ({
+      kind: 'asn' as const,
+      value: v,
+      staged: stagedDenies.includes(v),
+      removed: false,
+      requests: act?.get(v)?.requests,
+      denied: act?.get(v)?.denied,
+    })),
+    ...removedDenies.map((v) => ({
+      kind: (v.includes('_') ? 'ja4' : 'asn') as 'ja4' | 'asn',
+      value: v,
+      staged: false,
+      removed: true,
+      requests: act?.get(v)?.requests,
+      denied: act?.get(v)?.denied,
+    })),
+  ];
+  const ipAdvice = ipTabs.active?.data
+    ? adviseBan({
+        total: ipTabs.active.data.total,
+        mix: ipTabs.active.data.mix,
+        shape: ipTabs.active.data.shape,
+        ja4: ipTabs.active.data.byJa4,
+        asns: ipTabs.active.data.byAsn,
+        botVerified: ipTabs.active.data.byBotVerified,
+        wafActions: ipTabs.active.data.byWafAction,
+        reach: ipTabs.active.data.reach,
+        alreadyDenied: liveJa4.includes(ipTabs.active.data.byJa4[0]?.[0] ?? ''),
+        windowMinutes: ipTabs.active.data.windowHours * 60,
+      })
+    : undefined;
 
   // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
   const ipMatches = (topIpList.data ?? [])
@@ -211,6 +318,16 @@ export function App() {
       void report.load(() => fetchReport(creds));
     if (kind === 'sitemap' && !sitemap.data)
       void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
+    if (kind === 'denylist' && !denyActivity.data)
+      void denyActivity.load(async () => {
+        const { activity, error } = await fetchDenyActivity(
+          creds,
+          DENY_ACTIVITY_HOURS,
+          liveJa4,
+        );
+        if (error && !activity.size) throw new Error(error);
+        return activity;
+      });
   };
 
   /** Tab from elsewhere surfaces the IP tabs at the one you were last on; only a second press moves. Advancing straight away would skip a tab you had not seen yet. */
@@ -221,12 +338,61 @@ export function App() {
     else setPane('ip');
   };
 
+  /** Stage a digest into deny-scraper-ja4. Nothing reaches the WAF until the apply. */
+  const stageDeny = (digest: string) => {
+    setItems((prev) =>
+      prev.map((it) =>
+        it.rule.name === JA4_RULE
+          ? {
+              ...it,
+              rule: withValue(it.rule, JA4_DENY, digest).rule,
+              status: 'idle',
+              detail: undefined,
+            }
+          : it,
+      ),
+    );
+    setStagedDenies((s) => [...new Set([...s, digest])]);
+    setRemovedDenies((s) => s.filter((v) => v !== digest));
+    setApplied(null);
+  };
+
+  /** Lift a deny. Same staging discipline: visible as pending until applied. */
+  const unstageDeny = (entry: DenyEntry) => {
+    const ruleName = entry.kind === 'ja4' ? JA4_RULE : ASN_RULE;
+    const spec = entry.kind === 'ja4' ? JA4_DENY : ASN_DENY;
+    setItems((prev) =>
+      prev.map((it) =>
+        it.rule.name === ruleName
+          ? {
+              ...it,
+              rule: withoutValue(it.rule, spec, entry.value).rule,
+              status: 'idle',
+              detail: undefined,
+            }
+          : it,
+      ),
+    );
+    setStagedDenies((s) => s.filter((v) => v !== entry.value));
+    setRemovedDenies((s) => [...new Set([...s, entry.value])]);
+    setApplied(null);
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
     else if (pane === 'sitemap')
       void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
     else if (pane === 'ip') ipTabs.refresh();
+    else if (pane === 'denylist')
+      void denyActivity.load(async () => {
+        const { activity } = await fetchDenyActivity(
+          creds,
+          DENY_ACTIVITY_HOURS,
+          liveJa4,
+        );
+        return activity;
+      });
   };
 
   /** Open `value` as a tab; keeps focus in the field when it is not an IP. Takes the value rather than reading state, so a paste that ends in a newline can submit what it just appended. */
@@ -262,6 +428,18 @@ export function App() {
     }));
 
   useInput((input, key) => {
+    // A deny can take real users offline, so it never happens on one keystroke.
+    if (focus === 'confirm') {
+      if (input === 'y' || input === 'Y') {
+        confirm?.onYes();
+        setConfirm(null);
+        setFocus('pane');
+      } else if (input === 'n' || input === 'N' || key.escape) {
+        setConfirm(null);
+        setFocus('pane');
+      }
+      return;
+    }
     // Text entry owns every keystroke, so q/j/k stay typeable inside an IP.
     if (focus === 'ip-input') {
       if (key.escape) setFocus(ipTabs.tabs.length ? 'pane' : 'editor');
@@ -297,11 +475,37 @@ export function App() {
       // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'R') refreshPane();
-      else if (input === 'x' && pane === 'ip') {
+      else if (input === 'b' && pane === 'ip' && ipAdvice?.digest) {
+        // Blocked clients are not stageable at all — no keystroke gets past a blocker.
+        if (ipAdvice.blockers.length) return;
+        const digest = ipAdvice.digest;
+        setConfirm({
+          prompt: `Deny TLS fingerprint ${digest}?`,
+          detail:
+            ipAdvice.verdict === 'ban'
+              ? `${ipAdvice.reasons.length} tells agree · stages into FW_BLOCKED_JA4`
+              : 'INCONCLUSIVE — only one tell, this may deny real users',
+          onYes: () => stageDeny(digest),
+        });
+        setFocus('confirm');
+      } else if (input === 'u' && pane === 'denylist') {
+        const entry = denyEntries[denyCursor];
+        if (!entry || entry.removed) return;
+        setConfirm({
+          prompt: `Lift the deny on ${entry.value}?`,
+          detail: `${entry.kind.toUpperCase()} · takes effect on apply`,
+          onYes: () => unstageDeny(entry),
+        });
+        setFocus('confirm');
+      } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
       } else if (PANE_KEY[input]) openPane(PANE_KEY[input]);
       else if (key.escape) setFocus('editor');
+      else if (pane === 'denylist' && (key.upArrow || input === 'k'))
+        setDenyCursor((c) => Math.max(0, c - 1));
+      else if (pane === 'denylist' && (key.downArrow || input === 'j'))
+        setDenyCursor((c) => Math.min(denyEntries.length - 1, c + 1));
       else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
       else if (key.downArrow || input === 'j')
@@ -384,6 +588,7 @@ export function App() {
     (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
     // The suggestion overlay grows the prompt, so the box has to give back the same rows.
     (focus === 'ip-input' ? 2 + ipMatches.length + (topIpList.loading ? 1 : 0) : 0) +
+    (focus === 'confirm' ? 3 : 0) +
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -422,7 +627,7 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · s sitemap
+              ip · s sitemap · d denylist
               {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
@@ -492,6 +697,10 @@ export function App() {
                 report={report}
                 ipTab={ipTabs.active}
                 sitemap={sitemap}
+                advice={ipAdvice}
+                denyEntries={denyEntries}
+                denyCursor={denyCursor}
+                denyActivity={denyActivity}
               />
             </Box>
           </Box>
@@ -514,10 +723,33 @@ export function App() {
               )}
               {focus === 'pane' && (
                 <Text dimColor>
-                  j/k scroll · R refresh · i new ip
+                  j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
+                  new ip
+                  {pane === 'ip' && ipAdvice && !ipAdvice.blockers.length
+                    ? ' · b deny fingerprint'
+                    : ''}
+                  {pane === 'denylist' ? ' · u unban' : ''}
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
                 </Text>
               )}
+            </Box>
+          )}
+          {focus === 'confirm' && confirm && (
+            <Box flexDirection="column">
+              <Text color="yellow" bold>
+                {confirm.prompt}
+              </Text>
+              <Box>
+                <Text dimColor>{confirm.detail}</Text>
+              </Box>
+              <Text>
+                <Text color="yellow" bold>
+                  y
+                </Text>
+                <Text dimColor> yes · </Text>
+                <Text bold>n</Text>
+                <Text dimColor> no (esc cancels)</Text>
+              </Text>
             </Box>
           )}
           {focus === 'ip-input' && (
@@ -566,12 +798,20 @@ function PaneBody({
   report,
   ipTab,
   sitemap,
+  advice,
+  denyEntries,
+  denyCursor,
+  denyActivity,
 }: {
   kind: PaneKind;
   width: number;
   report: Pane<ReportData>;
   ipTab: IpTab | undefined;
   sitemap: Pane<SitemapReport>;
+  advice: Advice | undefined;
+  denyEntries: DenyEntry[];
+  denyCursor: number;
+  denyActivity: Pane<Map<string, Activity>>;
 }) {
   if (kind === 'report')
     return (
@@ -579,6 +819,20 @@ function PaneBody({
         report={report.data}
         error={report.error}
         loading={report.loading}
+      />
+    );
+  if (kind === 'denylist')
+    return (
+      <Lines
+        lines={denylistLines(
+          {
+            windowHours: DENY_ACTIVITY_HOURS,
+            entries: denyEntries,
+            error: denyActivity.error || undefined,
+          },
+          denyCursor,
+        )}
+        width={width}
       />
     );
   const what = kind === 'ip' ? 'IP profile' : 'sitemap readers';
@@ -596,7 +850,7 @@ function PaneBody({
       <Lines
         lines={
           kind === 'ip'
-            ? profileLines((ipTab as IpTab).data as IpProfile, width)
+            ? profileLines((ipTab as IpTab).data as IpProfile, width, advice)
             : sitemapLines(sitemap.data as SitemapReport)
         }
         width={width}

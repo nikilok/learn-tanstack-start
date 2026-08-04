@@ -1,6 +1,7 @@
 // Data layer for `firewall:ip` — everything about one client IP that bears on "scraper or human".
 // Read-only by design: this reports, it never bans (see the watch-branch post-mortem).
 
+import type { DigestReach } from './ban-advice';
 import {
   type Mix,
   type Shape,
@@ -45,6 +46,9 @@ export type IpProfile = {
   shape: Shape;
   buckets: { t: string; c: number }[]; // zero-filled series behind `shape`
   tells: Tell[];
+  // What the dominant digest does BEYOND this IP. Without it a deny recommendation cannot tell a
+  // single automated host from a shared client library that verified agents also use.
+  reach?: DigestReach;
   errors: string[];
 };
 
@@ -152,6 +156,33 @@ export async function fetchIpProfile(
     }
   }
 
+  // One extra fan-out for the dominant digest. Only worth it when there IS one, and it is what
+  // makes a deny recommendation safe to act on.
+  const topDigest = byJa4[0]?.[0];
+  let reach: DigestReach | undefined;
+  if (topDigest && topDigest !== '(none)') {
+    const df = `clientJa4Digest eq '${topDigest}'`;
+    const [reachIps, reachCountries, reachBots] = await pool(
+      [
+        () => group(ctx, errors, 'reach ips', ['clientIp'], df),
+        () => group(ctx, errors, 'reach countries', ['clientIpCountry'], df),
+        () => group(ctx, errors, 'reach bots', ['botVerified', 'botName'], df),
+      ],
+      3,
+    );
+    if (reachIps.length)
+      reach = {
+        ja4: topDigest,
+        ips: reachIps.length,
+        countries: reachCountries.length,
+        verifiedNames: reachBots
+          .filter(([k]) => k.startsWith('pass'))
+          .map(([k]) => k.split(' | ')[1] ?? 'verified')
+          .filter((n, i, a) => a.indexOf(n) === i),
+        total: reachIps.reduce((s, [, c]) => s + c, 0),
+      };
+  }
+
   const mix = mixOf(byPath);
   const shape = shapeOf(buckets, bucketMinutes);
   const total = byStatus.reduce((s, [, c]) => s + c, 0) || mix.total;
@@ -180,6 +211,7 @@ export async function fetchIpProfile(
     mix,
     shape,
     buckets,
+    reach,
     tells: tellsFor({
       total,
       mix,

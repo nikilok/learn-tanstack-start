@@ -64,6 +64,54 @@ export function envMatching(
   return values;
 }
 
+/** The values a deny rule currently matches, with the revocation placeholder dropped — it stands for "nothing", not for a real entry. */
+export function valuesOf(rule: Rule, spec: DenySpec): string[] {
+  return rule.conditionGroup
+    .flatMap((g) => g.conditions.map((c) => c.value))
+    .filter((v): v is string => typeof v === 'string')
+    .filter((v) => v !== spec.placeholder);
+}
+
+/** Rule with `value` added. Rejects a malformed one rather than shipping a condition that matches nothing, and de-duplicates so staging the same digest twice is a no-op. */
+export function withValue(
+  rule: Rule,
+  spec: DenySpec,
+  value: string,
+): { rule: Rule; values: string[] } {
+  const v = spec.normalize(value.trim());
+  if (!spec.valid(v))
+    throw new Error(`not ${spec.example} — refusing to add it to ${rule.name}`);
+  const values = [...new Set([...valuesOf(rule, spec), v])];
+  return {
+    rule: denyListRule({
+      name: rule.name,
+      description: rule.description,
+      spec,
+      values,
+    }),
+    values,
+  };
+}
+
+/** Rule with `value` removed. Removing the last entry yields the revocation placeholder, never an empty rule — an omitted rule keeps denying, unrevokably (applyRule is upsert-only). */
+export function withoutValue(
+  rule: Rule,
+  spec: DenySpec,
+  value: string,
+): { rule: Rule; values: string[] } {
+  const v = spec.normalize(value.trim());
+  const values = valuesOf(rule, spec).filter((x) => x !== v);
+  return {
+    rule: denyListRule({
+      name: rule.name,
+      description: rule.description,
+      spec,
+      values,
+    }),
+    values,
+  };
+}
+
 /**
  * One condition group per value (Vercel ORs them). Revocation swaps in the placeholder, never
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is

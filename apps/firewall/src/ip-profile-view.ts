@@ -1,6 +1,7 @@
 // Lays out an IpProfile as lines. Free of both ANSI and Ink, so the CLI and the TUI pane render
 // the same layout through their own backends.
 
+import type { Advice } from './ban-advice';
 import type { IpProfile } from './ip-profile';
 import type { Shape, Tell } from './ip-signals';
 import {
@@ -94,8 +95,42 @@ function tellLines(tells: Tell[]): Line[] {
   );
 }
 
+/** The recommendation block. Blockers are printed even on a `ban`-less verdict — knowing WHY something is untouchable is the useful part. */
+function adviceLines(a: Advice, reach: IpProfile['reach']): Line[] {
+  const tone = a.verdict === 'ban' ? 'bad' : a.verdict === 'watch' ? 'warn' : 'good';
+  const headline =
+    a.verdict === 'ban'
+      ? 'DENY RECOMMENDED — press b to stage, a to apply'
+      : a.verdict === 'watch'
+        ? 'INCONCLUSIVE — one tell only, not enough to deny'
+        : 'DO NOT DENY';
+  const L: Line[] = [blank(), line(seg('RECOMMENDATION', 'bold'))];
+  L.push(line('  ', seg(headline, tone)));
+  if (a.digest && a.verdict === 'ban')
+    L.push(line(seg('  target  ', 'dim'), seg(a.digest, 'key'), seg('  (FW_BLOCKED_JA4)', 'dim')));
+  if (reach)
+    L.push(
+      line(
+        seg(
+          `  digest reach: ${reach.ips} IPs · ${reach.countries} countries · ${reach.total} req` +
+            (reach.verifiedNames.length
+              ? ` · verified: ${reach.verifiedNames.join(', ')}`
+              : ' · no verified bots'),
+          'dim',
+        ),
+      ),
+    );
+  for (const b of a.blockers) L.push(line('  ', seg('blocker  ', 'good'), seg(b, 'dim')));
+  for (const r of a.reasons) L.push(line('  ', seg('evidence ', 'dim'), seg(r, 'dim')));
+  return L;
+}
+
 /** Full profile layout. `paneWidth` only scales the bar chart; everything else is clipped by the renderer. */
-export function profileLines(p: IpProfile, paneWidth?: number): Line[] {
+export function profileLines(
+  p: IpProfile,
+  paneWidth?: number,
+  advice?: Advice,
+): Line[] {
   const L: Line[] = [];
 
   L.push(
@@ -107,6 +142,7 @@ export function profileLines(p: IpProfile, paneWidth?: number): Line[] {
   );
 
   L.push(...heading('SIGNALS'), ...tellLines(p.tells));
+  if (advice) L.push(...adviceLines(advice, p.reach));
 
   L.push(...heading(`SESSION SHAPE (${p.shape.bucketMinutes}-min buckets)`));
   L.push(...sessionLines(p.shape));

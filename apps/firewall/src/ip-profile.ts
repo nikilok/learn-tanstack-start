@@ -28,6 +28,14 @@ import { errMsg } from './util';
 const FINE_BUCKET_HOURS = 48;
 // The observability API's hard groupBy cap. At it, the tail is silently dropped.
 const GROUP_CAP = 500;
+/**
+ * Reach is ALWAYS measured over at least this long, whatever window the operator picked for the
+ * subject. The safety test asks "has a real browser ever rendered from this identity?" and its
+ * strength scales with the window: the generic Chromium fingerprint shows 18 sub-resources over
+ * 2h, 355 over 24h and 3,875 over 6d. A short window manufactures the absence that clears a
+ * blanket deny — so urgency gets a short window, safety never does.
+ */
+const REACH_MIN_HOURS = 144;
 
 /** What is being profiled. A JA4 digest is the handle that survives IP rotation, so it gets the same view. */
 export type Subject = { kind: 'ip' | 'ja4'; value: string };
@@ -69,6 +77,8 @@ export type IpProfile = {
   // browsers, verified agents or our own services also use.
   digestReach?: Reach;
   asnReach?: Reach;
+  /** Hours the reach queries covered — never shorter than REACH_MIN_HOURS. */
+  reachHours: number;
   errors: string[];
 };
 
@@ -121,6 +131,12 @@ export async function fetchIpProfile(
   const { ctx } = makeCtx(creds, window);
   const dim = subjectDim(subject);
   const filter = subjectFilter(subject);
+  // Separate context: the subject's behaviour is a "what is happening now" question, its
+  // identity's character is not.
+  const { ctx: reachCtx } = makeCtx(
+    creds,
+    hours >= REACH_MIN_HOURS ? window : { hours: REACH_MIN_HOURS },
+  );
   const errors: string[] = [];
   const g = (label: string, dims: string[], event?: string) => () =>
     group(ctx, errors, label, dims, filter, event);
@@ -158,7 +174,11 @@ export async function fetchIpProfile(
     4,
   );
 
-  const bucketMinutes = hours <= FINE_BUCKET_HOURS ? 10 : 60;
+  // Never finer than the window's own alignment, or the API rejects the range.
+  const bucketMinutes = Math.max(
+    window.granularityMinutes,
+    hours <= FINE_BUCKET_HOURS ? 10 : 60,
+  );
   let buckets: { t: string; c: number }[] = [];
   try {
     buckets =
@@ -205,7 +225,13 @@ export async function fetchIpProfile(
     const failed: string[] = [];
     const run = async (what: string, dims: string[]) => {
       const before = errors.length;
-      const rows = await group(ctx, errors, `reach ${what} ${label}`, dims, filter);
+      const rows = await group(
+        reachCtx,
+        errors,
+        `reach ${what} ${label}`,
+        dims,
+        filter,
+      );
       if (errors.length > before) failed.push(what);
       return rows;
     };
@@ -293,6 +319,7 @@ export async function fetchIpProfile(
     buckets,
     digestReach,
     asnReach,
+    reachHours: Math.max(hours, REACH_MIN_HOURS),
     tells: tellsFor({
       total,
       mix,

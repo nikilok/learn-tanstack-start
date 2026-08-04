@@ -95,12 +95,16 @@ function tellLines(tells: Tell[]): Line[] {
   );
 }
 
-function reachLine(what: string, r: IpProfile['digestReach']): Line[] {
+function reachLine(
+  what: string,
+  r: IpProfile['digestReach'],
+  hours: number,
+): Line[] {
   if (!r) return [];
   return [
     line(
       seg(
-        `  ${what}: ${r.ips} IPs · ${r.countries} countries · ${r.total} req · ` +
+        `  ${what} (${hours}h): ${r.ips} IPs · ${r.countries} countries · ${r.total} req · ` +
           `${r.subResources + r.beacons} sub-resources` +
           (r.verifiedNames.length
             ? ` · verified: ${r.verifiedNames.join(', ')}`
@@ -146,8 +150,8 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
         ),
       ),
     );
-  L.push(...reachLine('fingerprint', p.digestReach));
-  L.push(...reachLine('network', p.asnReach));
+  L.push(...reachLine('fingerprint', p.digestReach, p.reachHours));
+  L.push(...reachLine('network', p.asnReach, p.reachHours));
   for (const b of a.blockers)
     L.push(line('  ', seg('blocker  ', 'good'), seg(b, 'dim')));
   for (const n of a.leverNotes)

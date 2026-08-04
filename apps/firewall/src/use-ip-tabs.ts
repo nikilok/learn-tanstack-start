@@ -22,7 +22,8 @@ export type IpTabs = {
   index: number;
   active: IpTab | undefined;
   /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
-  open: (subject: Subject, window: Window) => void;
+  /** Focus `subject`, fetching only if new — or always when `force`, which a window change needs. */
+  open: (subject: Subject, window: Window, force?: boolean) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. */
   refresh: () => void;
   /** Move `dir` tabs, wrapping. */
@@ -117,13 +118,20 @@ export function useIpTabs(creds: Creds): IpTabs {
   );
 
   const open = useCallback(
-    (subject: Subject, window: Window) => {
+    (subject: Subject, window: Window, force = false) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
       const existing = tabs.findIndex(
         (t) => t.subject.kind === subject.kind && t.subject.value === subject.value,
       );
       if (existing !== -1) {
         setIndex(existing);
+        if (force) {
+          // The window changed under it, so its data is for a period no longer on screen.
+          setTabs((prev) =>
+            prev.map((t, i) => (i === existing ? { ...t, window } : t)),
+          );
+          void run(subject, window);
+        }
         return;
       }
       setTabs((prev) => [

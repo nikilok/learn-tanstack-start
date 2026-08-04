@@ -9,9 +9,22 @@ export const MAX_WINDOW_DAYS = 7;
 export type Window = {
   fromISO: string;
   toISO: string;
-  hours: number;
-  label: string; // what the UI shows, e.g. "01 Aug - 04 Aug"
+  hours: number; // may be fractional for a sub-hour window
+  minutes: number; // the canonical duration
+  /** Start/end must be multiples of the query granularity, so a sub-hour window needs 10-minute buckets. */
+  granularityMinutes: number;
+  label: string; // what the UI shows, e.g. "live" or "01 Aug - 04 Aug"
 };
+
+/** Presets cycled with a single key. `live` is the "is it happening right now" view. */
+export const WINDOW_PRESETS: { label: string; minutes: number }[] = [
+  { label: 'live', minutes: 20 },
+  { label: 'last 1h', minutes: 60 },
+  { label: 'last 3h', minutes: 180 },
+  { label: 'last 6h', minutes: 360 },
+  { label: 'last 24h', minutes: 1440 },
+  { label: 'last 6d', minutes: 6 * 1440 },
+];
 
 const MONTHS = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -41,12 +54,16 @@ function stamp(d: Date): string {
   return `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]}`;
 }
 
-/** Hour-aligned, because the API requires start/end to be multiples of the granularity. */
-function ceilHour(d: Date): Date {
-  const out = new Date(d);
-  out.setUTCMinutes(0, 0, 0);
-  if (out.getTime() < d.getTime()) out.setUTCHours(out.getUTCHours() + 1);
-  return out;
+/** Round up to the next `step`-minute boundary; the API rejects a start or end that is not a multiple of the granularity. */
+function ceilTo(d: Date, step: number): Date {
+  const ms = step * 60_000;
+  return new Date(Math.ceil(d.getTime() / ms) * ms);
+}
+const ceilHour = (d: Date) => ceilTo(d, 60);
+
+/** Under two hours the query needs 10-minute buckets, or an hour-aligned window would swallow the whole point of asking for a short one. */
+function granularityFor(minutes: number): number {
+  return minutes <= 120 ? 10 : 60;
 }
 
 /**
@@ -97,25 +114,39 @@ export function resolveWindow(
       error: `the API only serves the last ${MAX_WINDOW_DAYS} days — earliest is ${stamp(earliest)}`,
     };
 
-  const hours = Math.round((end.getTime() - start.getTime()) / 3600_000);
+  const minutes = Math.round((end.getTime() - start.getTime()) / 60_000);
   return {
     window: {
       fromISO: start.toISOString(),
       toISO: end.toISOString(),
-      hours,
+      hours: minutes / 60,
+      minutes,
+      granularityMinutes: granularityFor(minutes),
       label: `${stamp(start)} - ${stamp(new Date(end.getTime() - 1))}`,
     },
   };
 }
 
-/** The rolling default: the last `hours` up to now. */
-export function rollingWindow(hours: number, now: Date): Window {
-  const end = ceilHour(now);
-  const start = new Date(end.getTime() - hours * 3600_000);
+/** The rolling default: the last `minutes` up to now, aligned to what the API will accept. */
+export function rollingMinutes(
+  minutes: number,
+  now: Date,
+  label?: string,
+): Window {
+  const g = granularityFor(minutes);
+  const end = ceilTo(now, g);
+  const start = new Date(end.getTime() - minutes * 60_000);
   return {
     fromISO: start.toISOString(),
     toISO: end.toISOString(),
-    hours,
-    label: `last ${hours}h`,
+    hours: minutes / 60,
+    minutes,
+    granularityMinutes: g,
+    label: label ?? (minutes < 60 ? `last ${minutes}m` : `last ${minutes / 60}h`),
   };
+}
+
+/** The rolling default: the last `hours` up to now. */
+export function rollingWindow(hours: number, now: Date): Window {
+  return rollingMinutes(hours * 60, now, `last ${hours}h`);
 }

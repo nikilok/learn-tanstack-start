@@ -46,7 +46,13 @@ import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
-import { type Window, resolveWindow, rollingWindow } from './time-window';
+import {
+  type Window,
+  WINDOW_PRESETS,
+  resolveWindow,
+  rollingMinutes,
+  rollingWindow,
+} from './time-window';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
@@ -105,6 +111,10 @@ export function App() {
   const [asnInput, setAsnInput] = useState('');
   const [asnError, setAsnError] = useState('');
   // The window IP lookups use. Rolling by default; `w` switches it to a typed date range.
+  // Index into WINDOW_PRESETS; -1 means a custom typed range is in force.
+  const [presetIdx, setPresetIdx] = useState(() =>
+    WINDOW_PRESETS.findIndex((p) => p.minutes === IP_WINDOW_HOURS * 60),
+  );
   const [ipWindow, setIpWindow] = useState<Window>(() =>
     rollingWindow(IP_WINDOW_HOURS, new Date()),
   );
@@ -479,6 +489,28 @@ export function App() {
     });
   };
 
+  /** Switch the window: refetch the picker list and re-profile the tab on screen, so flipping timelines is one key. */
+  const applyWindow = (w: Window) => {
+    setIpWindow(w);
+    setRangeError('');
+    topIpList.reset();
+    topJa4List.reset();
+    loadPickList(pickKind, w);
+    // Re-profile what is on screen at the new window — that IS the point of switching.
+    if (ipTabs.active) ipTabs.open(ipTabs.active.subject, w, true);
+  };
+
+  /** Step through the presets. One key, no typing — the common case by far. */
+  const cyclePreset = (dir: 1 | -1) => {
+    const next =
+      presetIdx < 0
+        ? WINDOW_PRESETS.length - 1
+        : (presetIdx + dir + WINDOW_PRESETS.length) % WINDOW_PRESETS.length;
+    setPresetIdx(next);
+    const p = WINDOW_PRESETS[next];
+    applyWindow(rollingMinutes(p.minutes, new Date(), p.label));
+  };
+
   /** Apply a typed date range to IP lookups. Blank reverts to the rolling default. */
   const submitRange = (raw: string) => {
     const text = raw.trim();
@@ -489,14 +521,8 @@ export function App() {
       setRangeError(next.error);
       return;
     }
-    setRangeError('');
-    setIpWindow(next.window);
-    // The list is window-scoped, so it has to be refetched, not filtered.
-    void topIpList.load(async () => {
-      const { rows, error } = await topIps(creds, next.window, TOP_IPS_LIMIT);
-      if (error) throw new Error(error);
-      return rows;
-    });
+    setPresetIdx(-1); // a typed range is not a preset
+    applyWindow(next.window);
     // Back to the picker: choosing a range is a step in choosing an IP, not the end of it.
     setIpInput('');
     setIpCursor(-1);
@@ -629,7 +655,8 @@ export function App() {
         setIpCursor(-1);
       }
       // `w` cannot occur in an IP, so intercepting it here costs nothing and saves an esc.
-      else if (input === 'w') {
+      else if (input === 'w') cyclePreset(1);
+      else if (input === 'W') {
         setRangeInput('');
         setRangeError('');
         setFocus('range-input');
@@ -944,7 +971,7 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
-                  new ip · f ja4 · w range
+                  new ip · f ja4 · w window · W dates
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
@@ -1013,7 +1040,7 @@ export function App() {
                         (ipFiltered.length > ipMatches.length
                           ? `, showing ${ipMatches.length}`
                           : '')
-                      : `top ${ipMatches.length} of ${pickList.data.length}, type to filter · w changes range`}
+                      : `top ${ipMatches.length} of ${pickList.data.length}, type to filter · w cycles window`}
                   </Text>
                 )
               )}

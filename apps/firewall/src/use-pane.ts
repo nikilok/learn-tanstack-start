@@ -11,6 +11,8 @@ export type Pane<T> = {
   loading: boolean;
   /** Run `fetcher`, deduping concurrent calls. Resolves once the state has settled. */
   load: (fetcher: () => Promise<T>) => Promise<void>;
+  /** Drop the cached result so the next load actually refetches — a window change invalidates it. */
+  reset: () => void;
 };
 
 export function usePane<T>(): Pane<T> {
@@ -34,5 +36,10 @@ export function usePane<T>(): Pane<T> {
     }
   }, []);
 
-  return { data, error, loading, load };
+  const reset = useCallback(() => {
+    setData(null);
+    setError('');
+  }, []);
+
+  return { data, error, loading, load, reset };
 }

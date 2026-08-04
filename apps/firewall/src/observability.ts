@@ -12,6 +12,8 @@ export type Ctx = {
   qs: string;
   startTime: string;
   endTime: string;
+  /** Default bucket size for every query on this context. Start/end must be multiples of it. */
+  granularity: Record<string, number>;
 };
 
 export const MAX_CONCURRENT = 6; // simultaneous observability calls (they 429 if fanned out wide)
@@ -74,7 +76,7 @@ export async function metrics(
     rollups: { count_sum: { measure: 'count', aggregation: 'sum' } },
     startTime: opts.startTime ?? ctx.startTime,
     endTime: opts.endTime ?? ctx.endTime,
-    granularity: opts.granularity ?? { hours: 1 },
+    granularity: opts.granularity ?? ctx.granularity,
     groupBy,
     ...(opts.filter ? { filter: opts.filter } : {}),
     limit: opts.limit ?? 500, // hard max
@@ -193,8 +195,10 @@ export function makeCtx(
   span: { days?: number; hours?: number } | Window,
 ): { ctx: Ctx; now: Date } {
   const now = new Date();
-  const w =
-    'fromISO' in span ? span : rollingWindow(span.days ? span.days * 24 : (span.hours ?? 24), now);
+  const w: Window =
+    'fromISO' in span
+      ? span
+      : rollingWindow(span.days ? span.days * 24 : (span.hours ?? 24), now);
   const start = new Date(w.fromISO);
   const end = new Date(w.toISO);
   return {
@@ -209,6 +213,10 @@ export function makeCtx(
       qs: `teamId=${creds.teamId}&projectId=${creds.projectId}`,
       startTime: start.toISOString(),
       endTime: end.toISOString(),
+      granularity:
+        w.granularityMinutes && w.granularityMinutes < 60
+          ? { minutes: w.granularityMinutes }
+          : { hours: 1 },
     },
   };
 }

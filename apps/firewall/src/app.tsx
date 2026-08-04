@@ -109,7 +109,13 @@ export function App() {
   const ipTabs = useIpTabs({ projectId, teamId, token });
   const [pane, setPane] = useState<PaneKind | null>(null);
   const [focus, setFocus] = useState<
-    'editor' | 'pane' | 'ip-input' | 'asn-input' | 'range-input' | 'confirm'
+    | 'editor'
+    | 'pane'
+    | 'ip-input'
+    | 'asn-input'
+    | 'range-input'
+    | 'window-pick'
+    | 'confirm'
   >('editor');
   // Which identity the picker and new tabs address. `i` and `f` set it.
   const [pickKind, setPickKind] = useState<'ip' | 'ja4'>('ip');
@@ -127,6 +133,10 @@ export function App() {
   const [ipWindow, setIpWindow] = useState<Window>(() =>
     rollingWindow(IP_WINDOW_HOURS, new Date()),
   );
+  const [windowCursor, setWindowCursor] = useState(0);
+  // Where `w` was pressed, so choosing a timeline returns there. Picking a window while
+  // choosing an IP is a step in choosing that IP, not a reason to leave the picker.
+  const windowReturn = useRef<'pane' | 'ip-input'>('pane');
   const [rangeInput, setRangeInput] = useState('');
   const [rangeError, setRangeError] = useState('');
   const topIpList = usePane<[string, number][]>();
@@ -539,10 +549,10 @@ export function App() {
     setApplied(null);
   };
 
-  /** Load the picker list for `kind`. Cached per kind so switching back is instant. */
-  const loadPickList = (kind: 'ip' | 'ja4', w: Window) => {
+  /** Load the picker list for `kind`. Cached per kind so switching back is instant. `force` is required after a window change: reset() is an async state update, so the cache check would still see the old window's rows and skip the fetch. */
+  const loadPickList = (kind: 'ip' | 'ja4', w: Window, force = false) => {
     const cache = kind === 'ip' ? topIpList : topJa4List;
-    if (cache.data) return;
+    if (cache.data && !force) return;
     void cache.load(async () => {
       const { rows, error } =
         kind === 'ip'
@@ -559,20 +569,30 @@ export function App() {
     setRangeError('');
     topIpList.reset();
     topJa4List.reset();
-    loadPickList(pickKind, w);
+    loadPickList(pickKind, w, true);
     // Re-profile what is on screen at the new window — that IS the point of switching.
     if (ipTabs.active) ipTabs.open(ipTabs.active.subject, w, true);
   };
 
-  /** Step through the presets. One key, no typing — the common case by far. */
-  const cyclePreset = (dir: 1 | -1) => {
-    const next =
-      presetIdx < 0
-        ? WINDOW_PRESETS.length - 1
-        : (presetIdx + dir + WINDOW_PRESETS.length) % WINDOW_PRESETS.length;
-    setPresetIdx(next);
-    const p = WINDOW_PRESETS[next];
+  /** Open the timeline list, starting on whatever is in force. */
+  const openWindowPick = () => {
+    setWindowCursor(presetIdx >= 0 ? presetIdx : WINDOW_PRESETS.length);
+    windowReturn.current = focus === 'ip-input' ? 'ip-input' : 'pane';
+    setFocus('window-pick');
+  };
+
+  /** Apply the highlighted timeline. The row past the presets is the custom date range. */
+  const chooseWindow = () => {
+    if (windowCursor >= WINDOW_PRESETS.length) {
+      setRangeInput('');
+      setRangeError('');
+      setFocus('range-input');
+      return;
+    }
+    const p = WINDOW_PRESETS[windowCursor];
+    setPresetIdx(windowCursor);
     applyWindow(rollingMinutes(p.minutes, new Date(), p.label));
+    setFocus(windowReturn.current);
   };
 
   /** Apply a typed date range to IP lookups. Blank reverts to the rolling default. */
@@ -663,6 +683,15 @@ export function App() {
       }
       return;
     }
+    if (focus === 'window-pick') {
+      if (key.escape) setFocus(windowReturn.current);
+      else if (key.upArrow || input === 'k')
+        setWindowCursor((c) => Math.max(0, c - 1));
+      else if (key.downArrow || input === 'j')
+        setWindowCursor((c) => Math.min(WINDOW_PRESETS.length, c + 1));
+      else if (key.return) chooseWindow();
+      return;
+    }
     if (focus === 'range-input') {
       if (key.escape) setFocus(pane ? 'pane' : 'editor');
       else if (key.return) submitRange(rangeInput);
@@ -719,12 +748,8 @@ export function App() {
         setIpCursor(-1);
       }
       // `w` cannot occur in an IP, so intercepting it here costs nothing and saves an esc.
-      else if (input === 'w') cyclePreset(1);
-      else if (input === 'W') {
-        setRangeInput('');
-        setRangeError('');
-        setFocus('range-input');
-      } else if (input && !key.ctrl && !key.meta) {
+      else if (input === 'w' || input === 'W') openWindowPick();
+      else if (input && !key.ctrl && !key.meta) {
         setIpCursor(-1); // typing re-asserts the typed text over any highlight
         // A paste arrives as ONE chunk, so filter within it rather than testing the whole
         // string — requiring the chunk to match meant pasting an IP silently did nothing.
@@ -873,6 +898,8 @@ export function App() {
     (focus === 'confirm' ? 3 : 0) +
     (focus === 'asn-input' ? 1 : 0) +
     (focus === 'range-input' ? 1 : 0) +
+    // header + one row per preset + the custom row + the hint
+    (focus === 'window-pick' ? WINDOW_PRESETS.length + 3 : 0) +
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -1035,7 +1062,7 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
-                  new ip · f ja4 · w window · W dates
+                  new ip · f ja4 · w timeline
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
@@ -1044,6 +1071,47 @@ export function App() {
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
                 </Text>
               )}
+            </Box>
+          )}
+          {focus === 'window-pick' && (
+            <Box flexDirection="column">
+              <Text dimColor>{'  '}timeline</Text>
+              {WINDOW_PRESETS.map((p, i) => (
+                <Box key={p.label}>
+                  <Text color="cyan">{i === windowCursor ? '▶ ' : '  '}</Text>
+                  <Text
+                    bold={i === windowCursor}
+                    color={i === windowCursor ? 'cyan' : undefined}
+                    dimColor={i !== windowCursor}
+                  >
+                    {p.label.padEnd(10)}
+                  </Text>
+                  <Text dimColor>
+                    {p.minutes < 60
+                      ? `${p.minutes}m`
+                      : `${p.minutes / 60}h`}
+                    {i === presetIdx ? '  ·  in force' : ''}
+                  </Text>
+                </Box>
+              ))}
+              <Box>
+                <Text color="cyan">
+                  {windowCursor >= WINDOW_PRESETS.length ? '▶ ' : '  '}
+                </Text>
+                <Text
+                  bold={windowCursor >= WINDOW_PRESETS.length}
+                  color={
+                    windowCursor >= WINDOW_PRESETS.length ? 'cyan' : undefined
+                  }
+                  dimColor={windowCursor < WINDOW_PRESETS.length}
+                >
+                  {'custom…'.padEnd(10)}
+                </Text>
+                <Text dimColor>
+                  type dates{presetIdx < 0 ? '  ·  in force' : ''}
+                </Text>
+              </Box>
+              <Text dimColor>{'  '}↑↓ choose · enter apply · esc cancel</Text>
             </Box>
           )}
           {focus === 'range-input' && (
@@ -1108,7 +1176,7 @@ export function App() {
                         (isLive
                           ? ` · auto-refresh ${LIVE_REFRESH_MS / 1000}s${failuresRef.current ? ' (backing off)' : ''}`
                           : ', type to filter') +
-                        ' · w cycles window'}
+                        ' · w timeline'}
                   </Text>
                 )
               )}

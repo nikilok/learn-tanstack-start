@@ -11,6 +11,7 @@ import {
   metrics,
   pool,
 } from './observability';
+import type { Window } from './time-window';
 import { errMsg } from './util';
 
 // Enriching every digest would be one query each; the tail is single-fetch noise.
@@ -42,6 +43,7 @@ export type SitemapReport = {
   start: string;
   end: string;
   windowHours: number;
+  windowLabel: string;
   fetches: number;
   ips: number;
   paths: [string, number][]; // which sitemap shards were fetched
@@ -103,9 +105,10 @@ async function group(
 /** Sitemap readers over the last `hours`, split by verified status and enriched with what each unverified fingerprint did across the whole window. */
 export async function fetchSitemapReport(
   creds: { projectId: string; teamId: string; token: string },
-  hours: number,
+  window: Window,
 ): Promise<SitemapReport> {
-  const { ctx } = makeCtx(creds, { hours });
+  const { ctx } = makeCtx(creds, window);
+  const hours = window.hours;
   const errors: string[] = [];
   const paths = sitemapPaths();
   const filter = `requestPath in (${paths.map((p) => `'${p}'`).join(',')})`;
@@ -223,6 +226,7 @@ export async function fetchSitemapReport(
     start: ctx.startTime,
     end: ctx.endTime,
     windowHours: hours,
+    windowLabel: window.label,
     fetches,
     ips: allIps.size,
     paths: shardRows.map(([[p], n]) => [p, n]),

@@ -3,6 +3,7 @@
 
 import { resolveVercelCredentials } from './credentials';
 import { toAnsi } from './line-model';
+import { rollingWindow } from './time-window';
 import { fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import { errMsg } from './util';
@@ -24,7 +25,10 @@ async function main() {
   if (!Number.isInteger(hours) || hours < 1 || hours > MAX_HOURS)
     throw new Error(`hours must be an integer from 1 to ${MAX_HOURS}`);
 
-  const report = await fetchSitemapReport(resolveVercelCredentials(), hours);
+  const report = await fetchSitemapReport(
+    resolveVercelCredentials(),
+    rollingWindow(hours, new Date()),
+  );
   console.log(
     toAnsi(sitemapLines(report), {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,

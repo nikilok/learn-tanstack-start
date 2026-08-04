@@ -48,13 +48,13 @@ export function verdictOf(d: SitemapDigest): Verdict {
   return { label: 'unreviewed', tone: 'warn' };
 }
 
-function digestLines(d: SitemapDigest): Line[] {
+function digestLines(d: SitemapDigest, isCursor: boolean): Line[] {
   const v = verdictOf(d);
   const out: Line[] = [
     line(
-      '  ',
+      seg(isCursor ? '▶ ' : '  ', 'key'),
       seg(v.label.toUpperCase().padEnd(11), v.tone),
-      seg(d.ja4, 'key'),
+      seg(d.ja4, isCursor ? 'bold' : 'key'),
       seg(`  ${d.fetches} sitemap fetch${d.fetches === 1 ? '' : 'es'}`, 'dim'),
     ),
   ];
@@ -89,11 +89,11 @@ function digestLines(d: SitemapDigest): Line[] {
   return out;
 }
 
-/** Full sitemap-reader layout. */
-export function sitemapLines(r: SitemapReport): Line[] {
+/** Full sitemap-reader layout. `cursor` indexes `r.digests`. */
+export function sitemapLines(r: SitemapReport, cursor = -1): Line[] {
   const L: Line[] = [
     line(
-      seg(`Sitemap readers — last ${r.windowHours}h`, 'bold'),
+      seg(`Sitemap readers — ${r.windowLabel}`, 'bold'),
       seg(`  (${r.start.slice(0, 16)}Z → ${r.end.slice(0, 16)}Z)`, 'dim'),
     ),
     line(
@@ -126,8 +126,16 @@ export function sitemapLines(r: SitemapReport): Line[] {
       ),
     );
 
-  L.push(blank(), line(seg('FINGERPRINTS', 'bold')));
-  for (const d of r.digests) L.push(...digestLines(d), blank());
+  L.push(
+    blank(),
+    line(
+      seg('FINGERPRINTS', 'bold'),
+      seg('   ↑↓ select · enter copies the digest', 'dim'),
+    ),
+  );
+  r.digests.forEach((d, i) =>
+    L.push(...digestLines(d, i === cursor), blank()),
+  );
 
   if (r.verified.length) {
     L.push(line(seg('VERIFIED CRAWLERS', 'bold')));

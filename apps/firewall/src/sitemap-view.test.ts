@@ -88,6 +88,7 @@ describe('sitemapLines', () => {
     start: '2026-07-29T09:00:00.000Z',
     end: '2026-08-04T09:00:00.000Z',
     windowHours: 144,
+    windowLabel: 'last 6d',
     fetches: 190,
     ips: 151,
     paths: [['/sitemap.xml', 50]] as [string, number][],
@@ -129,5 +130,44 @@ describe('sitemapLines', () => {
     expect(text).toContain('176900 req total');
     expect(text).toContain('≥705 /company/');
     expect(text).toContain('truncated');
+  });
+});
+
+describe('sitemapLines — selection', () => {
+  const report = (digests: SitemapDigest[]) => ({
+    start: '2026-07-29T09:00:00.000Z',
+    end: '2026-08-04T09:00:00.000Z',
+    windowHours: 144,
+    windowLabel: 'last 6d',
+    fetches: 190,
+    ips: 151,
+    paths: [] as [string, number][],
+    verified: [] as [string, number][],
+    digests,
+    errors: [],
+  });
+  const two = [digest(), digest({ ja4: 't13d311200_1d947a95fc68_7e1102d2036b' })];
+
+  test('exactly one row is marked, and it is the cursor', () => {
+    const text = sitemapLines(report(two), 1).map(lineText).join('\n');
+    expect(text.split('▶').length - 1).toBe(1);
+    expect(
+      text.split('\n').find((l) => l.includes('▶')),
+    ).toContain('t13d311200');
+  });
+
+  test('no cursor marks nothing — the CLI renders the same view', () => {
+    expect(sitemapLines(report(two)).map(lineText).join('\n')).not.toContain('▶');
+  });
+
+  test('the window label is shown, so a re-scoped report cannot read as the old one', () => {
+    const text = sitemapLines(report(two), 0).map(lineText).join('\n');
+    expect(text).toContain('last 6d');
+  });
+
+  test('the list advertises that it is navigable', () => {
+    expect(sitemapLines(report(two), 0).map(lineText).join('\n')).toContain(
+      '↑↓ select',
+    );
   });
 });

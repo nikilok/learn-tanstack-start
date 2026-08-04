@@ -22,6 +22,7 @@ import {
   withValue,
   withoutValue,
 } from './deny-list';
+import { copyToClipboard } from './clipboard';
 import { type Activity, fetchDenyActivity } from './denylist-data';
 import { type DenyEntry, denylistLines } from './denylist-view';
 import { persistEnvVar } from './env-file';
@@ -85,7 +86,6 @@ const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 // to sustain. Refreshing four background tabs every tick would be ~340/min and would rate-limit
 // the tool against itself.
 const LIVE_TAB_EVERY = 2;
-const SITEMAP_WINDOW_HOURS = 144;
 const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
 const IP_SUGGESTIONS = 8; // rows shown at once
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
@@ -148,6 +148,8 @@ export function App() {
   const topJa4List = usePane<[string, number][]>();
   const denyActivity = usePane<Map<string, Activity>>();
   const [denyCursor, setDenyCursor] = useState(0);
+  const [sitemapCursor, setSitemapCursor] = useState(0);
+  const [copied, setCopied] = useState('');
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removedDenies, setRemovedDenies] = useState<string[]>([]);
@@ -520,7 +522,7 @@ export function App() {
     if (kind === 'report' && !report.data)
       void report.load(() => fetchReport(creds));
     if (kind === 'sitemap' && !sitemap.data)
-      void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
+      void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     if (kind === 'denylist' && !denyActivity.data)
       void denyActivity.load(async () => {
         const { activity, error } = await fetchDenyActivity(
@@ -604,6 +606,12 @@ export function App() {
     topIpList.reset();
     topJa4List.reset();
     loadPickList(pickKind, w, true);
+    // The sitemap pane is window-scoped too; without this it stayed frozen on whatever window
+    // it was first opened with, whatever the header said.
+    sitemap.reset();
+    setSitemapCursor(0);
+    if (pane === 'sitemap')
+      void sitemap.load(() => fetchSitemapReport(creds, w));
     // Re-profile what is on screen at the new window — that IS the point of switching.
     if (ipTabs.active) ipTabs.open(ipTabs.active.subject, w, true);
   };
@@ -651,7 +659,7 @@ export function App() {
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
     else if (pane === 'sitemap')
-      void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
+      void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     else if (pane === 'ip') ipTabs.refresh();
     else if (pane === 'denylist')
       void denyActivity.load(async () => {
@@ -830,6 +838,33 @@ export function App() {
           onYes: () => unstageDeny(entry),
         });
         setFocus('confirm');
+      } else if (pane === 'sitemap' && key.return) {
+        // A JA4 is 37 characters that must be exact; retyping one is how a deny rule ends up
+        // matching nothing.
+        const d = sitemap.data?.digests[sitemapCursor];
+        if (d) {
+          void copyToClipboard(d.ja4).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${d.ja4}`),
+          );
+        }
+      } else if (pane === 'sitemap' && (key.upArrow || input === 'k')) {
+        setSitemapCursor((c) => Math.max(0, c - 1));
+        setCopied('');
+      } else if (pane === 'sitemap' && (key.downArrow || input === 'j')) {
+        setSitemapCursor((c) =>
+          Math.min((sitemap.data?.digests.length ?? 1) - 1, c + 1),
+        );
+        setCopied('');
+      } else if (input === 'o' && pane === 'sitemap') {
+        // Straight to a profile: the copy exists so the digest can be pasted, but opening it
+        // here skips the paste entirely.
+        const d = sitemap.data?.digests[sitemapCursor];
+        if (d) {
+          setPickKind('ja4');
+          setPane('ip');
+          setReportScroll(0);
+          ipTabs.open({ kind: 'ja4', value: d.ja4 }, ipWindow);
+        }
       } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
@@ -935,7 +970,8 @@ export function App() {
     (focus === 'range-input' ? 1 : 0) +
     // header + one row per preset + the custom row + the hint
     (focus === 'window-pick' ? WINDOW_PRESETS.length + 3 : 0) +
-    (paneFooter ? 1 : 0);
+    (paneFooter ? 1 : 0) +
+    (copied ? 1 : 0);
   return (
     <Box flexDirection="row">
       <Box
@@ -1076,12 +1112,18 @@ export function App() {
                 ipTab={ipTabs.active}
                 sitemap={sitemap}
                 advice={ipAdvice}
+                sitemapCursor={sitemapCursor}
                 denyEntries={denyEntries}
                 denyCursor={denyCursor}
                 denyActivity={denyActivity}
               />
             </Box>
           </Box>
+          {copied && (
+            <Text color={copied.startsWith('copy failed') ? 'red' : 'green'}>
+              {copied}
+            </Text>
+          )}
           {paneFooter && (
             <Box>
               {showTabNav && (
@@ -1108,6 +1150,7 @@ export function App() {
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
                     : ''}
                   {pane === 'denylist' ? ' · u unban' : ''}
+                  {pane === 'sitemap' ? ' · enter copy · o profile it' : ''}
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
                 </Text>
               )}
@@ -1271,6 +1314,7 @@ function PaneBody({
   ipTab,
   sitemap,
   advice,
+  sitemapCursor,
   denyEntries,
   denyCursor,
   denyActivity,
@@ -1281,6 +1325,7 @@ function PaneBody({
   ipTab: IpTab | undefined;
   sitemap: Pane<SitemapReport>;
   advice: Advice | undefined;
+  sitemapCursor: number;
   denyEntries: DenyEntry[];
   denyCursor: number;
   denyActivity: Pane<Map<string, Activity>>;
@@ -1323,7 +1368,7 @@ function PaneBody({
         lines={
           kind === 'ip'
             ? profileLines((ipTab as IpTab).data as IpProfile, width, advice)
-            : sitemapLines(sitemap.data as SitemapReport)
+            : sitemapLines(sitemap.data as SitemapReport, sitemapCursor)
         }
         width={width}
       />

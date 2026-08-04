@@ -25,6 +25,7 @@ import {
 import { type Activity, fetchDenyActivity } from './denylist-data';
 import { type DenyEntry, denylistLines } from './denylist-view';
 import { persistEnvVar } from './env-file';
+import { unboundedPreviewBypass } from './preview-bypass';
 import {
   type ApplyStatus,
   type Item,
@@ -187,6 +188,9 @@ export function App() {
     let anyError = false;
     let cancelled = false;
     const statuses: ApplyStatus[] = [];
+    // Per rule, not just a global flag: a deny that reached the WAF must be written back to
+    // .env.local even if an unrelated rule later fails, or the next apply silently lifts it.
+    const outcome = new Map<string, ApplyStatus>();
     for (let i = 0; i < snapshot.length; i++) {
       // Checked between rules, never mid-request, so a quit can't leave one rule half-written.
       if (cancelApply.current) {
@@ -200,6 +204,7 @@ export function App() {
         const res = await applyItem(snapshot[i], ids);
         if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
         statuses.push(res.status);
+        outcome.set(snapshot[i].rule.name, res.status);
         setItems((prev) =>
           prev.map((it, j) =>
             j === i ? { ...it, status: res.status, detail: res.detail } : it,
@@ -208,6 +213,7 @@ export function App() {
       } catch (e) {
         anyError = true;
         statuses.push('error');
+        outcome.set(snapshot[i].rule.name, 'error');
         const detail = errMsg(e);
         setItems((prev) =>
           prev.map((it, j) =>
@@ -220,49 +226,82 @@ export function App() {
     process.exitCode = anyError ? 1 : 0;
     applying.current = false;
     if (cancelled) {
+      // Persist first: quitting mid-apply after the deny rule was written would otherwise
+      // strand a live ban that the next session lifts.
+      persistDenies(outcome, snapshot);
       exit(); // deferred to here so no write is still in flight
       return;
     }
     // The rules are rebuilt from env on every apply, so a digest that lives only in the WAF is
-    // un-banned by the next CI run. Write it back, or the ban quietly expires.
-    let persisted = '';
-    if (!anyError && (stagedDenies.length || removedDenies.length)) {
-      try {
-        const ja4 = snapshot.find((it) => it.rule.name === JA4_RULE);
-        const asn = snapshot.find((it) => it.rule.name === ASN_RULE);
-        if (ja4)
-          persistEnvVar(
-            ENV_PATH,
-            'FW_BLOCKED_JA4',
-            valuesOf(ja4.rule, JA4_DENY).join(','),
-          );
-        if (asn)
-          persistEnvVar(
-            ENV_PATH,
-            'FW_BLOCKED_ASN',
-            valuesOf(asn.rule, ASN_DENY).join(','),
-          );
-        setStagedDenies([]);
-        setRemovedDenies([]);
-        persisted = ' · denylist saved to .env.local';
-      } catch (e) {
-        persisted = ` · WARNING: applied but NOT saved to .env.local (${errMsg(e)}) — the next CI apply will undo it`;
-      }
-    }
+    // un-banned by the next CI run. Write back whatever ACTUALLY landed — keyed off each deny
+    // rule's own outcome, because an unrelated rule failing must not strand a live ban.
+    const persisted = persistDenies(outcome, snapshot);
+    // The detector exists for exactly this path: an operator deactivating the ceiling in the
+    // TUI and leaving the bypass live. It was only wired into the headless apply.
+    const unbounded = unboundedPreviewBypass(
+      snapshot.map((i) => ({
+        name: i.rule.name,
+        active: i.active,
+        action: i.action,
+      })),
+    );
     // Back to the editor, not a terminal screen — an apply is a step in a session.
-    setApplied({ summary: summaryLine(statuses) + persisted, ok: !anyError });
+    setApplied({
+      summary:
+        summaryLine(statuses) + persisted + (unbounded ? ` · WARNING: ${unbounded}` : ''),
+      ok: !anyError && !unbounded,
+    });
     setPhase('select');
   };
 
   const creds = { projectId, teamId, token };
 
+  /** Write each deny rule that actually reached the WAF back to .env.local. Returns a summary suffix; never silently skips, because an unpersisted ban is lifted by the next apply. */
+  const persistDenies = (
+    outcome: Map<string, ApplyStatus>,
+    snapshot: Item[],
+  ): string => {
+    if (!stagedDenies.length && !removedDenies.length) return '';
+    const notes: string[] = [];
+    let wrote = false;
+    for (const [ruleName, spec, envKey] of [
+      [JA4_RULE, JA4_DENY, 'FW_BLOCKED_JA4'],
+      [ASN_RULE, ASN_DENY, 'FW_BLOCKED_ASN'],
+    ] as const) {
+      const item = snapshot.find((it) => it.rule.name === ruleName);
+      const status = outcome.get(ruleName);
+      if (!item || !status) continue;
+      if (status === 'error') {
+        notes.push(`${envKey} NOT saved — ${ruleName} failed to apply`);
+        continue;
+      }
+      try {
+        persistEnvVar(ENV_PATH, envKey, valuesOf(item.rule, spec).join(','));
+        wrote = true;
+      } catch (e) {
+        notes.push(
+          `${envKey} NOT saved (${errMsg(e)}) — the next apply will undo it`,
+        );
+      }
+    }
+    if (wrote && !notes.length) {
+      setStagedDenies([]);
+      setRemovedDenies([]);
+      return ' · denylist saved to .env.local';
+    }
+    return notes.length ? ` · WARNING: ${notes.join('; ')}` : '';
+  };
+
   const denyRuleOf = (name: string) => items.find((it) => it.rule.name === name);
-  const liveJa4 = denyRuleOf(JA4_RULE)
-    ? valuesOf((denyRuleOf(JA4_RULE) as Item).rule, JA4_DENY)
-    : [];
-  const liveAsn = denyRuleOf(ASN_RULE)
-    ? valuesOf((denyRuleOf(ASN_RULE) as Item).rule, ASN_DENY)
-    : [];
+  // A rule can sit in the WAF with active:false — the state runHeadless prints a WARNING for.
+  // Reporting ALREADY DENIED for it tells the operator a scraper is handled while it is being
+  // served normally, which is the most costly kind of wrong.
+  const ja4Item = denyRuleOf(JA4_RULE);
+  const ja4Enforcing = Boolean(ja4Item?.active);
+  const liveJa4 =
+    ja4Item && ja4Enforcing ? valuesOf(ja4Item.rule, JA4_DENY) : [];
+  const asnItem = denyRuleOf(ASN_RULE);
+  const liveAsn = asnItem?.active ? valuesOf(asnItem.rule, ASN_DENY) : [];
   const act = denyActivity.data;
   const denyEntries: DenyEntry[] = [
     ...liveJa4.map((v) => ({
@@ -560,9 +599,9 @@ export function App() {
         }
         setAsnError('');
         setConfirm({
-          prompt: `Deny the whole network AS${num} (${lever?.value ?? ''})?`,
+          prompt: `Deny AS${num}? The evidence was measured on "${lever?.value ?? ''}"`,
           detail:
-            'an ASN deny hits EVERY client on that network — cleared only because none of it ever fetched a sub-resource',
+            'NOTHING can reconcile that number with that name — the API exposes no AS-number dimension, so check it yourself. Large operators announce many ASNs. An ASN deny hits EVERY client on the network you type.',
           onYes: () => stageDeny('asn', num),
         });
         setFocus('confirm');

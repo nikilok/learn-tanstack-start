@@ -16,8 +16,19 @@ import type { Mix, Shape } from './ip-signals';
 
 // Below this an IP is not worth a rule — rules are evaluated on every request forever.
 const MIN_VOLUME = 200;
+// A token asset fetch must not immunise a scraper, but a real browser's share is far above this.
+const MIN_ASSETS = 5;
+const MIN_ASSET_SHARE = 0.005;
+// Names of rules gated on a bespoke secret header — the only ones that prove a first-party
+// caller. Kept here rather than matched by prefix so a future allow-* rule cannot join by accident.
+export const HEADER_GATED_RULES = [
+  'allow-ch-stream-revalidate',
+  'allow-desktop-release-record',
+];
 // A fingerprint spread wider than this is a proxy pool or a shared client library, not one host.
 const WIDE_SPREAD = 8;
+// The top digest must own this share of the subject's traffic before its evidence is attributable.
+const DOMINANT_SHARE = 0.9;
 
 /** What an identity does across ALL of its traffic, not just the IP being profiled. */
 export type Reach = {
@@ -25,11 +36,26 @@ export type Reach = {
   ips: number;
   countries: number;
   total: number;
-  /** The safety test. Non-zero means a real browser has rendered from this identity. */
+  // Every kind only a rendering client produces. Assets and beacons are NOT enough on their own:
+  // hashed bundles are cached for a year so a returning browser re-fetches none, and beacons are
+  // blocked by uBlock/Brave/ITP for a large share of real users. Map tiles and server-fn RPCs are
+  // the same proof and are far harder to suppress.
   subResources: number;
   beacons: number;
+  tiles: number;
+  rpcs: number;
+  /**
+   * False when ANY sub-query failed or the path sample was truncated by the 500-group cap.
+   * Without it, absent evidence reads as measured zero and clears a blanket deny.
+   */
+  complete: boolean;
   verifiedNames: string[];
 };
+
+/** Evidence that a real browser has rendered from an identity. */
+export function browserEvidence(r: Reach): number {
+  return r.subResources + r.beacons + r.tiles + r.rpcs;
+}
 
 export type Lever = {
   kind: 'ja4' | 'asn';
@@ -80,7 +106,12 @@ function blockersFor(input: AdviceInput): string[] {
     );
   // An authentication fact, not a heuristic: our allow rules match on PRESENCE of a bespoke
   // secret header, so a hit means the caller held our credential.
-  const allowRule = input.wafRules.find(([name]) => name.startsWith('allow-'));
+  // Only rules that authenticate with a bespoke secret header prove a first-party caller. A
+  // name prefix is not enough: allow-social-preview matches a caller-controlled User-Agent, so
+  // trusting it would certify any UA-spoofing scraper as first-party AND make it unbannable.
+  const allowRule = input.wafRules.find(([name]) =>
+    HEADER_GATED_RULES.includes(name),
+  );
   if (allowRule)
     out.push(
       `matched ${allowRule[0]} (${allowRule[1]}x) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
@@ -95,9 +126,17 @@ function blockersFor(input: AdviceInput): string[] {
     out.push(
       `${input.mix.beacon} analytics beacons — JavaScript executed, so a real rendering client`,
     );
-  if (input.mix.asset > 0)
+  // Share-based, not absolute: one deliberate /favicon.svg per 10,000 page fetches would
+  // otherwise immunise a scraper against the whole advisory forever.
+  const assetShare = input.mix.asset / Math.max(1, input.total);
+  if (input.mix.asset >= MIN_ASSETS && assetShare >= MIN_ASSET_SHARE)
     out.push(
-      `${input.mix.asset} sub-resource fetches — browsers pull these, raw fetchers never do`,
+      `${input.mix.asset} sub-resource fetches (${(assetShare * 100).toFixed(1)}%) — browsers pull these, raw fetchers never do`,
+    );
+  // Tiles and RPCs are rendering proof too, and far harder to suppress than assets or beacons.
+  if (input.mix.tile > 0 || input.mix.rpc > 0)
+    out.push(
+      `${input.mix.rpc} server-fn RPCs and ${input.mix.tile} map tiles — it is running the app, which is what a real session looks like here`,
     );
   if (input.mix.page === 0)
     out.push(
@@ -127,15 +166,23 @@ export function qualifyLever(
       ok: false,
       note: `${kind} ${reach.label} carries verified ${reach.verifiedNames.join(', ')} — shared, not one actor`,
     };
-  const browsery = reach.subResources + reach.beacons;
+  // The decisive guard. "No browser has ever rendered from it" is an affirmative claim, and a
+  // failed query or a truncated sample produces the same zeros as a genuine absence. Clearing a
+  // blanket deny on evidence that was never fetched is how real networks get denied.
+  if (!reach.complete)
+    return {
+      ok: false,
+      note: `${kind} ${reach.label} could not be fully measured (a query failed or the path sample hit the API's 500-group cap) — absence of evidence is not evidence, so it is not cleared`,
+    };
+  const browsery = browserEvidence(reach);
   if (browsery > 0)
     return {
       ok: false,
-      note: `${kind} ${reach.label} shows ${browsery} sub-resource/beacon fetches — real browsers render from it, so a blanket deny would hit users`,
+      note: `${kind} ${reach.label} shows ${browsery} rendering requests (assets/beacons/tiles/RPCs) — real browsers render from it, so a blanket deny would hit users`,
     };
   return {
     ok: true,
-    note: `${kind} ${reach.label} has ZERO sub-resources across ${reach.total} requests from ${reach.ips} IPs — no browser has ever rendered from it`,
+    note: `${kind} ${reach.label} has ZERO rendering requests across ${reach.total} requests from ${reach.ips} IPs — no browser has ever rendered from it`,
   };
 }
 
@@ -151,30 +198,47 @@ export function adviseBan(input: AdviceInput): Advice {
   const denied = input.alreadyDeniedJa4
     ? ['fingerprint is already in FW_BLOCKED_JA4 — nothing to add']
     : [];
+  // Axis-tagged: "zero sub-resources" and "pages but no RPCs" are both entailed by the single
+  // fact that a client does not run the app, so counting them as two tells made the threshold
+  // "one tell is coincidence" meaningless. Two tells must now come from two INDEPENDENT axes.
   const reasons: string[] = [];
+  const axes = new Set<string>();
+  const tell = (axis: string, text: string) => {
+    axes.add(axis);
+    reasons.push(text);
+  };
   const { mix, shape } = input;
 
-  if (mix.asset === 0 && mix.beacon === 0)
-    reasons.push(
-      `zero sub-resources across ${input.total} requests — a raw-HTML fetcher`,
+  if (mix.asset === 0 && mix.beacon === 0 && mix.tile === 0 && mix.rpc === 0)
+    tell(
+      'rendering',
+      `zero rendering requests across ${input.total} requests — a raw-HTML fetcher`,
     );
-  if (input.ja4.some(([d]) => alpnOf(d) === '00'))
-    reasons.push('offers no ALPN — no mainstream browser does that');
   if (mix.page > 0 && mix.rpc === 0)
-    reasons.push(
+    tell(
+      'rendering',
       `${mix.page} page fetches and no RPCs — reading HTML directly, not running the app`,
     );
+  if (input.ja4.some(([d]) => alpnOf(d) === '00'))
+    tell('tls', 'offers no ALPN — no mainstream browser does that');
   if (mix.crawl > 0 && mix.page > mix.crawl * 10)
-    reasons.push(
+    tell(
+      'crawl',
       `read the sitemap then fetched ${mix.page} pages — the enumeration pattern`,
     );
-  const duty = shape.spanMinutes / Math.max(1, input.windowMinutes);
+  // Active minutes, NOT first-to-last span. Span measures how long a client was AROUND, so any
+  // repeat visitor with traffic in both halves of the window scored as automated — and the wider
+  // the operator's chosen range, the more often that fired.
+  const activeMinutes = shape.active * shape.bucketMinutes;
+  const duty = activeMinutes / Math.max(1, input.windowMinutes);
   if (duty > 0.5 && shape.concentration < 0.5)
-    reasons.push(
-      `level across ${(duty * 100).toFixed(0)}% of the window — machines run flat, people burst and idle`,
+    tell(
+      'pacing',
+      `busy in ${(duty * 100).toFixed(0)}% of all ${shape.bucketMinutes}-minute buckets in the window — machines run flat, people burst and idle`,
     );
   if (input.digestReach && input.digestReach.ips > WIDE_SPREAD)
-    reasons.push(
+    tell(
+      'spread',
       `the fingerprint spans ${input.digestReach.ips} IPs across ${input.digestReach.countries} countries — per-IP limits cannot see it`,
     );
 
@@ -215,8 +279,20 @@ export function adviseBan(input: AdviceInput): Advice {
     };
   if (input.alreadyDeniedJa4)
     return { verdict: 'already', digest, reasons, blockers: denied, leverNotes };
-  if (reasons.length < 2)
+  if (axes.size < 2)
     return { verdict: 'watch', digest, reasons, blockers, leverNotes };
+
+  // Reasons are computed over the subject's WHOLE traffic, but the ja4 lever denies one digest.
+  // If the subject carries several, the evidence cannot be attributed to the one being denied —
+  // a co-resident scraper's no-ALPN tell would otherwise ban a browser-negotiating fingerprint.
+  const ja4Total = input.ja4.reduce((n, [, c]) => n + c, 0);
+  const topShare = ja4Total ? (input.ja4[0]?.[1] ?? 0) / ja4Total : 0;
+  if (input.ja4.length > 1 && topShare < DOMINANT_SHARE) {
+    leverNotes.push(
+      `evidence spans ${input.ja4.length} fingerprints (top one is only ${(topShare * 100).toFixed(0)}% of traffic) — it cannot be attributed to the digest a deny would target`,
+    );
+    return { verdict: 'watch', digest, reasons, blockers, leverNotes };
+  }
 
   // Fingerprint first: it survives IP rotation, which is why it beat the per-IP rules.
   const ja4Ok = qualifyLever(input.digestReach, 'fingerprint');

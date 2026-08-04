@@ -26,6 +26,8 @@ import { errMsg } from './util';
 
 // 10-minute buckets resolve a session; hourly hides it. Past 2 days that is too many rows to read.
 const FINE_BUCKET_HOURS = 48;
+// The observability API's hard groupBy cap. At it, the tail is silently dropped.
+const GROUP_CAP = 500;
 
 /** What is being profiled. A JA4 digest is the handle that survives IP rotation, so it gets the same view. */
 export type Subject = { kind: 'ip' | 'ja4'; value: string };
@@ -173,13 +175,22 @@ export async function fetchIpProfile(
   }
 
   // Rule ids are opaque; label them, but never fail the profile over a missing label.
+  // The first-party blocker keys on rule NAMES, so a failed lookup silently deletes it. Say so
+  // rather than leaving opaque ids that quietly match nothing.
   let byWafRule = wafRuleRows;
   if (wafRuleRows.length) {
     try {
       const names = await ruleNames(ctx);
-      byWafRule = wafRuleRows.map(([id, c]) => [names.get(id) ?? id, c]);
-    } catch {
-      // keep the raw ids
+      const labelled = wafRuleRows.map(
+        ([id, c]) => [names.get(id) ?? id, c] as [string, number],
+      );
+      if (!names.size || labelled.some(([n]) => n.startsWith('rule_')))
+        errors.push(
+          'waf rule names: lookup failed — rules show as opaque ids, so the first-party allow-rule check cannot run',
+        );
+      byWafRule = labelled;
+    } catch (e) {
+      errors.push(`waf rule names: ${errMsg(e)}`);
     }
   }
 
@@ -189,32 +200,41 @@ export async function fetchIpProfile(
     label: string,
     filter: string,
   ): Promise<Reach | undefined> => {
+    // Tracked per query: group() degrades a failure to [], which is indistinguishable from a
+    // genuine zero. A safety test that clears a blanket deny must never read absence as measured.
+    const failed: string[] = [];
+    const run = async (what: string, dims: string[]) => {
+      const before = errors.length;
+      const rows = await group(ctx, errors, `reach ${what} ${label}`, dims, filter);
+      if (errors.length > before) failed.push(what);
+      return rows;
+    };
     const [ips, countries, bots, paths] = await pool(
       [
-        () => group(ctx, errors, `reach ips ${label}`, ['clientIp'], filter),
-        () =>
-          group(ctx, errors, `reach geo ${label}`, ['clientIpCountry'], filter),
-        () =>
-          group(
-            ctx,
-            errors,
-            `reach bots ${label}`,
-            ['botVerified', 'botName'],
-            filter,
-          ),
-        () => group(ctx, errors, `reach paths ${label}`, ['requestPath'], filter),
+        () => run('ips', ['clientIp']),
+        () => run('geo', ['clientIpCountry']),
+        () => run('bots', ['botVerified', 'botName']),
+        () => run('paths', ['requestPath']),
       ],
       4,
     );
     if (!ips.length) return undefined;
     const kinds = mixOf(paths);
+    const total = ips.reduce((s, [, c]) => s + c, 0);
+    // The path grouping is capped at 500 groups, so a busy identity's tail — including its
+    // /assets, /fonts and /_vercel/insights rows — is silently dropped. Detect it the same way
+    // sitemap-readers does, by comparing the sample against the exact per-IP total.
+    const pathsTruncated = paths.length >= GROUP_CAP || kinds.total < total;
     return {
       label,
       ips: ips.length,
       countries: countries.length,
-      total: ips.reduce((s, [, c]) => s + c, 0),
+      total,
       subResources: kinds.asset,
       beacons: kinds.beacon,
+      tiles: kinds.tile,
+      rpcs: kinds.rpc,
+      complete: failed.length === 0 && !pathsTruncated,
       verifiedNames: bots
         .filter(([k]) => k.startsWith('pass'))
         .map(([k]) => k.split(' | ')[1] ?? 'verified')

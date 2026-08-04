@@ -168,12 +168,22 @@ export function tellsFor(input: SignalInput): Tell[] {
   const tells: Tell[] = [];
   const pct = (n: number) => `${((n / Math.max(1, total)) * 100).toFixed(1)}%`;
 
-  const verified = input.botVerified.filter(([v]) => v && v !== 'undefined');
+  // Only 'pass' is a verification. A 'fail' row is a client that CLAIMED to be a known crawler
+  // and failed Vercel's reverse check — presenting that as "verified" told the operator, in the
+  // tool's own words, to discount the strongest tells against a confirmed impersonator.
+  const verified = input.botVerified.filter(([v]) => v === 'pass');
+  const failedCheck = input.botVerified.filter(([v]) => v && v.startsWith('fail'));
   if (verified.length)
     tells.push({
       points: 'neutral',
       label: 'verified bot',
       detail: `${verified.map(([v, c]) => `${v} (${c})`).join(', ')} — a verified crawler inverts the sub-resource and ALPN tells; do not deny on those alone`,
+    });
+  if (failedCheck.length)
+    tells.push({
+      points: 'bot',
+      label: 'failed bot check',
+      detail: `${failedCheck.map(([v, c]) => `${v} (${c})`).join(', ')} — it claimed to be a known crawler and Vercel's reverse check refused it, so the UA is a lie`,
     });
 
   const subResource = mix.asset + mix.beacon;

@@ -40,6 +40,9 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
       total: 171751,
       subResources: 0,
       beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     asnReach: {
@@ -49,6 +52,9 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
       total: 171751,
       subResources: 9000, // consumer networks obviously serve real browsers
       beacons: 4000,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
@@ -83,6 +89,9 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
       total: 663,
       subResources: 42,
       beacons: 60,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
@@ -156,6 +165,9 @@ describe('adviseBan — the blockers that matter', () => {
           total: 419,
           subResources: 0,
           beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
           verifiedNames: ['claude-user'],
         },
       }),
@@ -196,6 +208,9 @@ describe('adviseBan — the one-tell threshold', () => {
           total: 9060,
           subResources: 0,
           beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
           verifiedNames: [],
         },
       }),
@@ -236,6 +251,9 @@ describe('adviseBan — first-party callers', () => {
       total: 1158,
       subResources: 0,
       beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
@@ -293,6 +311,9 @@ describe('adviseBan — the ASN lever', () => {
       total: 50000,
       subResources: 900,
       beacons: 300,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     asnReach: {
@@ -302,6 +323,9 @@ describe('adviseBan — the ASN lever', () => {
       total: 1630,
       subResources: 0,
       beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
@@ -323,7 +347,7 @@ describe('adviseBan — the ASN lever', () => {
   });
 
   test('it says WHY the network cleared: zero sub-resources across all of it', () => {
-    expect(adviseBan(velia()).lever?.why).toContain('ZERO sub-resources');
+    expect(adviseBan(velia()).lever?.why).toContain('ZERO rendering requests');
   });
 
   test('and why the fingerprint did not, so the choice is auditable', () => {
@@ -343,6 +367,9 @@ describe('adviseBan — the ASN lever', () => {
           total: 1043,
           subResources: 742,
           beacons: 151,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
           verifiedNames: [],
         },
       }),
@@ -362,6 +389,9 @@ describe('adviseBan — the ASN lever', () => {
           total: 5000,
           subResources: 0,
           beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
           verifiedNames: ['googlebot'],
         },
       }),
@@ -386,6 +416,9 @@ describe('adviseBan — the ASN lever', () => {
           total: 1630,
           subResources: 0,
           beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
           verifiedNames: [],
         },
       }),
@@ -414,6 +447,9 @@ describe('adviseBan — is acting worth it', () => {
       total: 490,
       subResources: 0,
       beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: [],
     },
     asnReach: {
@@ -423,6 +459,9 @@ describe('adviseBan — is acting worth it', () => {
       total: 4828,
       subResources: 221,
       beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
       verifiedNames: ['bingbot', 'gptbot'],
     },
     alreadyDeniedJa4: false,
@@ -458,5 +497,116 @@ describe('adviseBan — is acting worth it', () => {
   test('a client that actually gets 200s is not called a prober', () => {
     const a = adviseBan({ ...prober(), statuses: [['200', 490]], wafActions: [['log', 490]] });
     expect(a.leverNotes.join(' ')).not.toContain('probing rather than harvesting');
+  });
+});
+
+// Every case below is a defect the max-effort review found. Each would clear, or fail to clear,
+// a deny that takes real users offline.
+describe('adviseBan — review regressions', () => {
+  const reach = (over = {}) => ({
+    label: 'x',
+    ips: 400,
+    countries: 30,
+    total: 50000,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+    ...over,
+  });
+
+  test('an unmeasured identity is never cleared — absent evidence is not evidence', () => {
+    // A 429 on the reach-paths query, or a 500-group truncation, yields the same zeros as a
+    // genuine absence. Clearing on that is how a network full of browsers gets denied.
+    const a = adviseBan(scraper({ digestReach: reach({ complete: false }) }));
+    expect(a.lever).toBeUndefined();
+    expect(a.leverNotes.join(' ')).toContain('could not be fully measured');
+  });
+
+  test('map tiles alone prove a browser rendered, even with assets and beacons at zero', () => {
+    // Hashed bundles cache for a year and beacons are ad-blocked; tiles and RPCs are not.
+    const a = adviseBan(scraper({ digestReach: reach({ tiles: 340 }) }));
+    expect(a.lever).toBeUndefined();
+    expect(a.leverNotes.join(' ')).toContain('would hit users');
+  });
+
+  test('server-fn RPCs alone do the same', () => {
+    expect(adviseBan(scraper({ digestReach: reach({ rpcs: 900 }) })).lever).toBeUndefined();
+  });
+
+  test('two tells on the same axis are one tell', () => {
+    // "zero rendering requests" and "pages but no RPCs" are both entailed by not running the
+    // app, so they must not clear a threshold whose whole point is independence.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([['/company/a', 9060]]),
+        ja4: [['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 9060]], // has ALPN
+        shape: shapeOf(series([9060], 10, 144), 10), // one burst, not level
+        digestReach: reach({ ips: 1, countries: 1 }),
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+  });
+
+  test('a real SPA user browsing three times a day is not automated', () => {
+    // The duty-cycle tell measured presence, not levelness, so any repeat visitor tripped it.
+    const buckets = series([], 0, 144).map((b, i) => ({
+      ...b,
+      c: [48, 49, 50, 78, 79, 80, 126, 127, 128].includes(i) ? 30 : 0,
+    }));
+    const a = adviseBan(
+      scraper({
+        total: 270,
+        mix: mixOf([['/_serverFn/a', 230], ['/company/x', 40]]),
+        shape: shapeOf(buckets, 10),
+        ja4: [['t13d2013h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 270]],
+        digestReach: reach({ ips: 1, countries: 1, total: 270 }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+  });
+
+  test('evidence spanning several fingerprints cannot ban one of them', () => {
+    // A co-resident scraper's no-ALPN tell must not deny a browser-negotiating fingerprint.
+    const a = adviseBan(
+      scraper({
+        ja4: [
+          ['t13d2013h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 5000],
+          ['t13d201100_cccccccccccc_dddddddddddd', 4060],
+        ],
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('cannot be attributed');
+  });
+
+  test('a UA-matched preview bypass never certifies a caller as first-party', () => {
+    // allow-social-preview fires on a caller-controlled User-Agent. Trusting the allow- prefix
+    // made every UA-spoofing scraper both invisible and unbannable.
+    const a = adviseBan(scraper({ wafRules: [['allow-social-preview', 400]] }));
+    expect(a.blockers.join(' ')).not.toContain('first-party');
+    expect(a.verdict).toBe('ban');
+  });
+
+  test('a secret-header allow rule still certifies first-party', () => {
+    const a = adviseBan(scraper({ wafRules: [['allow-ch-stream-revalidate', 400]] }));
+    expect(a.blockers.join(' ')).toContain('first-party');
+  });
+
+  test('one token asset fetch does not immunise a scraper forever', () => {
+    const a = adviseBan(
+      scraper({ mix: mixOf([['/company/a', 9059], ['/favicon.svg', 1]]) }),
+    );
+    expect(a.verdict).toBe('ban');
+  });
+
+  test('a real browser share of assets still blocks', () => {
+    const a = adviseBan(
+      scraper({ mix: mixOf([['/company/a', 9000], ['/assets/x.js', 400]]) }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.blockers.join(' ')).toContain('sub-resource');
   });
 });

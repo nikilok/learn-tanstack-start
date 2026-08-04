@@ -182,7 +182,9 @@ describe('tellsFor', () => {
 
   test('a verified bot is flagged first and never denied on ALPN alone', () => {
     const input = scraperInput();
-    input.botVerified = [['pass | googlebot | search_engine', 500]];
+    // Bare values: byBotVerified comes from a single-dimension query in ip-profile.ts, not the
+    // joined botVerified|botName|botCategory row used for display.
+    input.botVerified = [['pass', 500]];
     const tells = tellsFor(input);
     expect(tells[0].label).toBe('verified bot');
     expect(tells[0].points).toBe('neutral');
@@ -202,5 +204,26 @@ describe('tellsFor', () => {
     });
     expect(tells.length).toBeGreaterThan(0);
     for (const t of tells) expect(t.detail).not.toContain('NaN');
+  });
+});
+
+describe('tellsFor — review regression', () => {
+  test("a FAILED bot check is a bot signal, never presented as verified", () => {
+    // Presenting 'fail' as verified told the operator, in the tool's own words, to discount the
+    // strongest tells against a client Vercel had explicitly judged to be spoofing.
+    const input = scraperInput();
+    input.botVerified = [['fail', 900]];
+    const tells = tellsFor(input);
+    const verified = tells.find((t) => t.label === 'verified bot');
+    const failed = tells.find((t) => t.label === 'failed bot check');
+    expect(verified).toBeUndefined();
+    expect(failed?.points).toBe('bot');
+    expect(failed?.detail).toContain('the UA is a lie');
+  });
+
+  test("only 'pass' counts as verification", () => {
+    const input = scraperInput();
+    input.botVerified = [['pass', 500]];
+    expect(tellsFor(input).find((t) => t.label === 'verified bot')?.points).toBe('neutral');
   });
 });

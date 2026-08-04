@@ -10,6 +10,7 @@ import {
   withAction,
 } from './actions';
 import { resolveVercelCredentials } from './credentials';
+import { unboundedPreviewBypass } from './preview-bypass';
 import { type ActionChoice, type Rule, dryRun, rules } from './rules';
 import { errMsg } from './util';
 
@@ -115,7 +116,8 @@ export async function applyItem(
 export async function runHeadless() {
   const live = await fetchLive();
   let anyError = false;
-  for (const item of seedItems(live)) {
+  const items = seedItems(live);
+  for (const item of items) {
     try {
       const { status, detail } = await applyItem(item, live.idByName);
       if (status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
@@ -137,6 +139,14 @@ export async function runHeadless() {
       console.log(`error (${errMsg(e)})  ${item.rule.name}`);
     }
   }
+  const unbounded = unboundedPreviewBypass(
+    items.map((i) => ({
+      name: i.rule.name,
+      active: i.active,
+      action: i.action,
+    })),
+  );
+  if (unbounded) console.log(`\nWARNING: ${unbounded}`);
   if (anyError) process.exitCode = 1;
   console.log(
     '\nApplied. Live enforcement preserved; new rules inserted with code defaults. Tune actions in the TUI.',

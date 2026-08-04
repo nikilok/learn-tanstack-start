@@ -80,6 +80,11 @@ const LIVE_REFRESH_MS = 15_000;
 // Consecutive failures double the interval, up to this. A watcher left running for days must
 // never turn into a retry storm against an endpoint that has started refusing it.
 const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
+// A profile is ~21 queries against the list's 1, so the tab on screen refreshes every Nth tick,
+// and only that one. That is ~46 queries/min all in, under the ~60/min the endpoint was measured
+// to sustain. Refreshing four background tabs every tick would be ~340/min and would rate-limit
+// the tool against itself.
+const LIVE_TAB_EVERY = 2;
 const SITEMAP_WINDOW_HOURS = 144;
 const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
 const IP_SUGGESTIONS = 8; // rows shown at once
@@ -160,6 +165,11 @@ export function App() {
   const topJa4ListRef = useRef(topJa4List);
   topJa4ListRef.current = topJa4List;
   const failuresRef = useRef(0); // consecutive live-refresh failures, drives the backoff
+  const tickRef = useRef(0);
+  const activeTabRef = useRef(ipTabs.active);
+  activeTabRef.current = ipTabs.active;
+  const refreshTabRef = useRef(ipTabs.refresh);
+  refreshTabRef.current = ipTabs.refresh;
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
@@ -168,6 +178,7 @@ export function App() {
   const reportRef = useRef<DOMElement | null>(null);
 
   const isLive = ipWindow.label === 'live';
+  const [blink, setBlink] = useState(true);
   const paneLoading =
     pane === 'report'
       ? report.loading
@@ -215,8 +226,25 @@ export function App() {
     reportH,
   ]);
 
-  // The live window re-queries itself, so the tool can be left open as a watch screen. Only the
-  // busiest list refreshes: re-fetching a profile under someone reading it would be hostile.
+  // A blinking marker, so a watch screen left on a desk reads as live at a glance rather than
+  // looking like a frozen snapshot.
+  useEffect(() => {
+    if (!isLive || pane !== 'ip') return;
+    const id = setInterval(() => setBlink((b) => !b), 800);
+    return () => clearInterval(id);
+  }, [isLive, pane]);
+
+  // Switching tabs while live must start updating the newly-visible one immediately, rather
+  // than leaving it on its old snapshot until the next qualifying tick.
+  useEffect(() => {
+    if (!isLive || pane !== 'ip' || !ipTabs.active) return;
+    refreshTabRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, pane, ipTabs.index]);
+
+  // The live window re-queries itself, so the tool can be left open as a watch screen. The list
+  // every tick; the tab you are looking at every LIVE_TAB_EVERY ticks. Background tabs are left
+  // frozen deliberately — they show their snapshot age instead, so stale data never reads current.
   useEffect(() => {
     if (!isLive || pane !== 'ip') return;
     let stopped = false;
@@ -244,6 +272,12 @@ export function App() {
           return rows;
         });
         if (stopped) return;
+        // Only the visible tab, and only every Nth tick — a profile costs ~21 queries.
+        tickRef.current += 1;
+        if (tickRef.current % LIVE_TAB_EVERY === 0) {
+          const active = activeTabRef.current;
+          if (active) refreshTabRef.current();
+        }
         failuresRef.current = ok ? 0 : failuresRef.current + 1;
         schedule(
           Math.min(
@@ -768,6 +802,7 @@ export function App() {
       // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'R') refreshPane();
+      else if (input === 'w' || input === 'W') openWindowPick();
       else if (input === 'b' && pane === 'ip' && ipAdvice?.lever) {
         // Only an OFFERED lever is stageable. A blocked client, or one whose every handle is
         // shared with something legitimate, has no lever and no keystroke gets past that.
@@ -981,6 +1016,11 @@ export function App() {
         <Box flexDirection="column" width={reportW}>
           {pane === 'ip' && ipTabs.tabs.length > 0 && (
             <Box>
+              {isLive && (
+                <Text color={blink ? 'red' : 'gray'} bold>
+                  ●{' '}
+                </Text>
+              )}
               {tabBar.left && (
                 <Text color="cyan" bold>
                   ‹{' '}

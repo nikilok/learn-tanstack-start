@@ -25,6 +25,16 @@ export function barWidth(paneWidth: number | undefined): number {
   return Math.max(BAR_MIN, Math.min(BAR_MAX, paneWidth - BAR_GUTTER));
 }
 
+/** How stale a snapshot is. A tab keeps its data until refreshed, so a "live" label alone would imply a currency it does not have. */
+export function ageLabel(fetchedAt: string, now: number): string {
+  const secs = Math.max(0, Math.round((now - Date.parse(fetchedAt)) / 1000));
+  if (secs < 45) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h${mins % 60 ? ` ${mins % 60}m` : ''} ago`;
+}
+
 /** `2026-08-03T20:00:00.000Z` → `08-03 20:00Z`, the only part of a bucket stamp worth reading. */
 function stamp(iso: string): string {
   return `${iso.slice(5, 10)} ${iso.slice(11, 16)}Z`;
@@ -169,10 +179,13 @@ export function profileLines(
 ): Line[] {
   const L: Line[] = [];
 
+  const age = ageLabel(p.fetchedAt, Date.now());
   L.push(
     line(
       seg(`${p.ip} — ${p.windowLabel}`, 'bold'),
       seg(`  (${p.start.slice(0, 16)}Z → ${p.end.slice(0, 16)}Z)`, 'dim'),
+      // Never let a "live" window imply the numbers below it are current.
+      seg(`  fetched ${age}`, age === 'just now' ? 'dim' : 'warn'),
     ),
     line(`${p.total} requests`),
   );

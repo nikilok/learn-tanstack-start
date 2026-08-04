@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { type AdviceInput, adviseBan } from './ban-advice';
+import { type AdviceInput, adviseBan, volumeFloor } from './ban-advice';
 import { type Mix, mixOf, shapeOf } from './ip-signals';
 
 function series(counts: number[], offset: number, length: number) {
@@ -180,16 +180,38 @@ describe('adviseBan — the blockers that matter', () => {
     expect(a.lever).toBeUndefined();
   });
 
-  test('a quiet client is not worth a rule', () => {
+  test('too little traffic to judge is INCONCLUSIVE, never a green all-clear', () => {
+    // Rendering "too few requests" as DO NOT DENY told the operator the client was fine when
+    // the truth was that the window was too narrow to say anything.
     const a = adviseBan(scraper({ total: 40 }));
-    expect(a.verdict).toBe('leave');
-    expect(a.blockers.join(' ')).toContain('not worth a rule');
+    expect(a.verdict).toBe('watch');
+    expect(a.blockers).toEqual([]);
+    expect(a.leverNotes.join(' ')).toContain('too little to judge');
+    expect(a.leverNotes.join(' ')).toContain('Widen the window');
   });
 
-  test('no fingerprint means nothing to deny on', () => {
+  test('an already-denied fingerprint stays ALREADY DENIED in a narrow window', () => {
+    // Live view of a banned scraper: 16 requests. It must not read as DO NOT DENY.
+    const a = adviseBan(
+      scraper({ total: 16, alreadyDeniedJa4: true, windowMinutes: 20 }),
+    );
+    expect(a.verdict).toBe('already');
+    expect(a.blockers.join(' ')).toContain('already in FW_BLOCKED_JA4');
+  });
+
+  test('the volume bar scales with the window', () => {
+    // 200 requests in 24h is quiet; the same 200 in 20 minutes is a scrape.
+    expect(volumeFloor(1440)).toBe(200);
+    expect(volumeFloor(360)).toBe(50);
+    expect(volumeFloor(20)).toBe(50);
+    // A scraper's 20-minute volume clears it easily.
+    expect(volumeFloor(20)).toBeLessThan(1700);
+  });
+
+  test('no fingerprint means nothing to identify it by', () => {
     const a = adviseBan(scraper({ ja4: [] }));
-    expect(a.verdict).toBe('leave');
-    expect(a.blockers.join(' ')).toContain('no TLS fingerprint');
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('no TLS fingerprint');
   });
 });
 

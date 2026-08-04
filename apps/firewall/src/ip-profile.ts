@@ -55,6 +55,8 @@ export type IpProfile = {
   end: string;
   windowHours: number;
   windowLabel: string;
+  /** When this snapshot was taken. A profile is a still, even when the window says "live". */
+  fetchedAt: string;
   total: number;
   byStatus: [string, number][];
   byUserAgent: [string, number][];
@@ -301,6 +303,7 @@ export async function fetchIpProfile(
     end: ctx.endTime,
     windowHours: hours,
     windowLabel: window.label,
+    fetchedAt: new Date().toISOString(),
     total,
     byStatus,
     byUserAgent,

@@ -21,3 +21,25 @@ describe('barWidth', () => {
     for (const w of [60, 100, 140]) expect(barWidth(w) + 26).toBeLessThanOrEqual(w);
   });
 });
+
+import { ageLabel } from './ip-profile-view';
+
+describe('ageLabel', () => {
+  const t0 = Date.parse('2026-08-04T12:00:00.000Z');
+  const at = (secs: number) => ageLabel('2026-08-04T12:00:00.000Z', t0 + secs * 1000);
+
+  test('a fresh snapshot reads as current', () => {
+    expect(at(0)).toBe('just now');
+    expect(at(30)).toBe('just now');
+  });
+
+  test('a stale one says how stale — a live window must not imply currency', () => {
+    expect(at(300)).toBe('5m ago');
+    expect(at(3600)).toBe('1h ago');
+    expect(at(5400)).toBe('1h 30m ago');
+  });
+
+  test('a clock skewed backwards does not produce a negative age', () => {
+    expect(at(-120)).toBe('just now');
+  });
+});

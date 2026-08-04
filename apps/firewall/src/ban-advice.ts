@@ -14,8 +14,19 @@
 import { alpnOf, assetsIndicateBrowser } from './ip-signals';
 import type { Mix, Shape } from './ip-signals';
 
-// Below this an IP is not worth a rule — rules are evaluated on every request forever.
-const MIN_VOLUME = 200;
+// Worth-a-rule is a question about sustained volume, so the bar scales with the window: 200
+// requests in 24h is quiet, the same 200 in 20 minutes is a scrape. The floor stops a handful of
+// requests in a narrow window ever reading as enough to judge.
+const MIN_VOLUME_PER_DAY = 200;
+const MIN_VOLUME_FLOOR = 50;
+
+/** Requests needed before a window says anything about sustained volume. */
+export function volumeFloor(windowMinutes: number): number {
+  return Math.max(
+    MIN_VOLUME_FLOOR,
+    Math.round((MIN_VOLUME_PER_DAY * windowMinutes) / 1440),
+  );
+}
 // Names of rules gated on a bespoke secret header — the only ones that prove a first-party
 // caller. Kept here rather than matched by prefix so a future allow-* rule cannot join by accident.
 export const HEADER_GATED_RULES = [
@@ -93,7 +104,7 @@ export type AdviceInput = {
   windowMinutes: number;
 };
 
-/** Reasons nothing at all should be denied, whatever the shape looks like. */
+/** Reasons this client is LEGITIMATE — statements about the client itself, which outrank everything. */
 function blockersFor(input: AdviceInput): string[] {
   const out: string[] = [];
   const verified = input.botVerified.filter(([v]) => v === 'pass');
@@ -139,9 +150,20 @@ function blockersFor(input: AdviceInput): string[] {
     out.push(
       `fetches no content pages (${input.mix.api} API, ${input.mix.rpc} RPC) — there is nothing here to enumerate`,
     );
-  if (input.total < MIN_VOLUME)
+  return out;
+}
+
+/**
+ * Reasons the EVIDENCE cannot support a decision. Deliberately separate from legitimacy: "too
+ * few requests to tell" is a fact about the window, not a finding that the client is innocent,
+ * and rendering it as a green DO NOT DENY told the operator the opposite of the truth.
+ */
+function unjudgeableFor(input: AdviceInput): string[] {
+  const out: string[] = [];
+  const floor = volumeFloor(input.windowMinutes);
+  if (input.total < floor)
     out.push(
-      `only ${input.total} requests — below ${MIN_VOLUME}, not worth a rule evaluated on every request`,
+      `only ${input.total} requests in this window — under ${floor}, too little to judge sustained volume. Widen the window.`,
     );
   if (!input.ja4.length)
     out.push('no TLS fingerprint recorded — nothing to identify it by');
@@ -259,12 +281,26 @@ export function adviseBan(input: AdviceInput): Advice {
 
   const digest = input.ja4[0]?.[0];
   const leverNotes: string[] = [...context];
+  // Legitimacy first: it is the only class that means "this client is fine".
   if (blockers.length)
     return {
       verdict: 'leave',
       reasons,
       blockers: [...blockers, ...denied],
       leverNotes,
+    };
+  // Already handled outranks "cannot tell" — a denied scraper seen through a narrow window is
+  // still denied, and showing it as DO NOT DENY invited the operator to undo the ban.
+  if (input.alreadyDeniedJa4)
+    return { verdict: 'already', digest, reasons, blockers: denied, leverNotes };
+  const unjudgeable = unjudgeableFor(input);
+  if (unjudgeable.length)
+    return {
+      verdict: 'watch',
+      digest,
+      reasons,
+      blockers: [],
+      leverNotes: [...leverNotes, ...unjudgeable],
     };
   if (input.stagedJa4)
     return {
@@ -274,8 +310,6 @@ export function adviseBan(input: AdviceInput): Advice {
       blockers: [],
       leverNotes,
     };
-  if (input.alreadyDeniedJa4)
-    return { verdict: 'already', digest, reasons, blockers: denied, leverNotes };
   if (axes.size < 2)
     return { verdict: 'watch', digest, reasons, blockers, leverNotes };
 

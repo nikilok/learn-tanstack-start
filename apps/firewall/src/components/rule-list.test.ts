@@ -48,3 +48,26 @@ describe('rowWidths', () => {
     expect(rowWidths(120, 10).name).toBe(10);
   });
 });
+
+describe('rowWidths — unapplied state must stay visible', () => {
+  test('a narrow column still reserves room for a pending marker', () => {
+    // 120-col terminal -> 34-col rules column. Without forceTail the tail was 0, so a staged
+    // deny rendered as an unchanged row and the keypress looked lost.
+    const plain = rowWidths(34, LONGEST);
+    const forced = rowWidths(34, LONGEST, true);
+    expect(plain.tail).toBe(0);
+    expect(forced.tail).toBeGreaterThan(0);
+  });
+
+  test('forcing the tail never overflows the column', () => {
+    for (const width of [24, 30, 34, 40, 60, 120]) {
+      const w = rowWidths(width, LONGEST, true);
+      if (width >= 34) expect(w.name + w.tail + FIXED).toBeLessThanOrEqual(width);
+      expect(w.tail).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test('a wide column is unaffected by forcing', () => {
+    expect(rowWidths(120, LONGEST, true)).toEqual(rowWidths(120, LONGEST));
+  });
+});

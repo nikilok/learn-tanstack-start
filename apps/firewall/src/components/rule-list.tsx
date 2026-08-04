@@ -30,17 +30,28 @@ const ROW_FIXED = 19;
 const MIN_NAME = 8;
 const MIN_TAIL = 8; // below this a description says nothing, so the name gets the room instead
 
-/** Name and tail widths for a row of `width` columns. Names keep their full length while there is room, then shrink before the tail does — the name is what identifies the rule. */
+/**
+ * Name and tail widths for a row of `width` columns. Names keep their full length while there is
+ * room, then shrink before the tail does — the name identifies the rule. `forceTail` inverts that
+ * for rows carrying unapplied state: a description is optional, but "this rule has a pending
+ * change" is not, and dropping it made a staged deny look like nothing had happened.
+ */
 export function rowWidths(
   width: number,
   longestName: number,
+  forceTail = false,
 ): { name: number; tail: number } {
   const avail = Math.max(0, width - ROW_FIXED);
   const name = Math.max(MIN_NAME, Math.min(longestName, avail - MIN_TAIL));
   const tail = avail - name;
-  // A sliver of description reads as noise, so drop it and spend the room on the name.
-  if (tail < MIN_TAIL)
+  if (tail < MIN_TAIL) {
+    if (forceTail) {
+      const forced = Math.min(MIN_TAIL, Math.max(0, avail - MIN_NAME));
+      return { name: Math.max(MIN_NAME, avail - forced), tail: forced };
+    }
+    // A sliver of description reads as noise, so drop it and spend the room on the name.
     return { name: Math.max(MIN_NAME, Math.min(longestName, avail)), tail: 0 };
+  }
   return { name, tail };
 }
 
@@ -96,7 +107,7 @@ export function Row({
   pending?: string;
 }) {
   const selecting = phase === 'select' || phase === 'action';
-  const w = rowWidths(width, longestName);
+  const w = rowWidths(width, longestName, Boolean(pending));
   return (
     <Box>
       <Text color="cyan">{isCursor && selecting ? '▶ ' : '  '}</Text>

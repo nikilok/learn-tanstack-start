@@ -68,7 +68,9 @@ const SITEMAP_WINDOW_HOURS = 144;
 const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
 const IP_SUGGESTIONS = 8; // rows shown at once
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
-const MIN_RULES_W = 34; // enough for a truncated name plus its action tag
+// Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
+// truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
+const MIN_RULES_W = 46;
 const PANE_GAP = 2; // marginRight between the two columns
 const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
@@ -304,11 +306,11 @@ export function App() {
     const live = valuesOf(item.rule, spec);
     const added = stagedDenies.filter((v) => live.includes(v)).length;
     const dropped = removedDenies.filter((v) => !live.includes(v)).length;
-    const parts = [
-      added ? `+${added} staged` : '',
-      dropped ? `−${dropped} unbanned` : '',
-    ].filter(Boolean);
-    if (parts.length) pendingByRule.set(ruleName, `${parts.join(', ')} · a applies`);
+    // Kept terse so it survives a narrow rules column; the footer and denylist pane carry detail.
+    const parts = [added ? `+${added}` : '', dropped ? `−${dropped}` : ''].filter(
+      Boolean,
+    );
+    if (parts.length) pendingByRule.set(ruleName, parts.join(' '));
   }
 
   const ipAdvice = ipTabs.active?.data

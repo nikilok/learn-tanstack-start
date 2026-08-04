@@ -50,8 +50,37 @@ describe('previewTokens', () => {
 });
 
 describe('previewRules', () => {
-  test('no UA list means no rules at all', () => {
-    expect(previewRules(undefined, 20)).toEqual([]);
+  // Regression: returning [] here left an already-applied bypass live forever. applyRule is
+  // upsert-only, so the off-switch has to emit a rule that matches nothing, not no rule.
+  test('no UA list revokes the pair rather than omitting it', () => {
+    const rules = previewRules(undefined, 20);
+    expect(rules.map((r) => r.name)).toEqual([
+      PREVIEW_CEILING_RULE,
+      PREVIEW_BYPASS_RULE,
+    ]);
+    for (const r of rules) expect(r.description).toContain('REVOKED');
+  });
+
+  test('the revoked bypass cannot match any request', () => {
+    const [, bypass] = previewRules('', null);
+    // Vercel ANDs within a group, and one path cannot be two values.
+    expect(bypass.conditionGroup).toHaveLength(1);
+    const paths = bypass.conditionGroup[0].conditions.map((c) => c.value);
+    expect(paths).toHaveLength(2);
+    expect(new Set(paths).size).toBe(2);
+    for (const c of bypass.conditionGroup[0].conditions) {
+      expect(c.type).toBe('path');
+      expect(c.op).toBe('eq');
+    }
+    // No user_agent condition at all: a spoofed UA has nothing to match.
+    expect(
+      bypass.conditionGroup.flatMap((g) => g.conditions).some((c) => c.type === 'user_agent'),
+    ).toBe(false);
+  });
+
+  test('revoking does not demand a ceiling — the documented off-switch must not throw', () => {
+    expect(() => previewRules(undefined, null)).not.toThrow();
+    expect(() => previewRules('', null)).not.toThrow();
   });
 
   test('a UA list without a ceiling throws rather than shipping a bare bypass', () => {
@@ -115,7 +144,7 @@ describe('previewRules', () => {
   });
 
   test('both descriptions stay inside the 256-char cap', () => {
-    for (const r of previewRules(UA, 20))
+    for (const r of [...previewRules(UA, 20), ...previewRules(undefined, null)])
       expect(r.description.length).toBeLessThanOrEqual(256);
   });
 });

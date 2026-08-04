@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { MAX_WINDOW_DAYS, parseDate, resolveWindow, rollingWindow } from './time-window';
+import { bucketMinutesFor } from './ip-profile';
+import {
+  MAX_WINDOW_DAYS,
+  WINDOW_PRESETS,
+  parseDate,
+  resolveWindow,
+  rollingMinutes,
+  rollingWindow,
+} from './time-window';
 
 const NOW = new Date('2026-08-04T12:30:00.000Z');
 const ok = (r: ReturnType<typeof resolveWindow>) => {
@@ -135,5 +143,38 @@ describe('resolveWindow — forgiving input', () => {
 
   test('a two-digit year is refused rather than read as year 26', () => {
     expect(err(resolveWindow('08 01 26', NOW))).toContain('not a real date');
+  });
+});
+
+// Regression: bucketMinutes was max(window.granularityMinutes, fine), which forced 60-minute
+// buckets on every window over 2h. On the 6h preset that is six buckets, so a person touching the
+// site in four separate hours scored 67% duty — one of the two independent axes a ban needs.
+describe('bucketMinutesFor', () => {
+  test('every preset up to 24h resolves a session at 10-minute buckets', () => {
+    for (const p of WINDOW_PRESETS.filter((p) => p.minutes <= 1440)) {
+      const w = rollingMinutes(p.minutes, NOW, p.label);
+      expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(10);
+    }
+  });
+
+  test('the 6d preset falls back to hourly — 864 fine buckets would blow the group cap', () => {
+    const w = rollingMinutes(6 * 1440, NOW, 'last 6d');
+    expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(60);
+  });
+
+  test('a typed date range gets the same treatment as a preset of the same length', () => {
+    const w = ok(resolveWindow('08 04 2026', NOW));
+    expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(
+      bucketMinutesFor(w.hours, w.granularityMinutes),
+    );
+    // 12h30 rounded up: well inside the fine range.
+    expect(w.hours).toBeLessThan(48);
+    expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(10);
+  });
+
+  test('never finer than the window can be aligned to', () => {
+    // A hypothetical 15-minute alignment cannot serve 10-minute buckets: the API rejects a
+    // start that is not a multiple of the granularity.
+    expect(bucketMinutesFor(6, 15)).toBe(60);
   });
 });

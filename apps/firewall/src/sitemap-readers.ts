@@ -5,6 +5,7 @@
 import { readdirSync } from 'node:fs';
 
 import { JA4_DENY, envMatching } from './deny-list';
+import { type PathKind, pathKind } from './ip-signals';
 import {
   type Ctx,
   makeCtx,
@@ -16,6 +17,10 @@ import { errMsg } from './util';
 
 // Enriching every digest would be one query each; the tail is single-fetch noise.
 const MAX_ENRICHED = 10;
+// The API silently drops groups past this, so a path sample at the cap is a floor, not a total.
+const GROUP_CAP = 500;
+// What only a rendering client produces. Matches ban-advice's pooled definition.
+const RENDERING_KINDS = new Set<PathKind>(['asset', 'beacon', 'tile', 'rpc']);
 const SHARD_FALLBACK = 10; // used only when the public dir cannot be read
 
 export type SitemapDigest = {
@@ -36,6 +41,9 @@ export type SitemapDigest = {
   subResources?: number; // floor when pathsPartial
   distinctPaths?: number; // floor when pathsPartial
   pathsPartial?: boolean; // path sample covers less than `total`
+  // False when the exact wafAction grouping failed, so `total` fell back to the path sum and is
+  // itself a floor. Printing it bare would present a truncated count as a measurement.
+  totalExact?: boolean;
   wafActions?: [string, number][]; // so a denied digest reads as attempts, not successes
 };
 
@@ -202,17 +210,19 @@ export async function fetchSitemapReport(
       const pathSum = rows.reduce((s, [, n]) => s + n, 0);
       const wafSum = wafRows.reduce((s, [, n]) => s + n, 0);
       d.total = wafSum || pathSum;
-      d.pathsPartial = pathSum < d.total;
+      // Cap check FIRST: comparing the path sum against the waf sum only detects truncation while
+      // the waf query succeeded. When it fails, wafSum is 0, total falls back to pathSum, and a
+      // truncated sample would compare equal to itself and print as exact.
+      d.pathsPartial = rows.length >= GROUP_CAP || pathSum < d.total || !wafSum;
+      d.totalExact = wafSum > 0;
       d.distinctPaths = rows.length;
       d.companyPages = rows
         .filter(([[p]]) => p.startsWith('/company/'))
         .reduce((s, [, n]) => s + n, 0);
+      // pathKind, not a prefix test: the same extension rule ip-signals uses, so a webshell probe
+      // under /assets/ cannot read as browser evidence in one pane and a raw fetcher in the other.
       d.subResources = rows
-        .filter(([[p]]) =>
-          p.startsWith('/assets/') ||
-          p.startsWith('/fonts/') ||
-          p.startsWith('/_vercel/'),
-        )
+        .filter(([[p]]) => RENDERING_KINDS.has(pathKind(p)))
         .reduce((s, [, n]) => s + n, 0);
     }),
     4,

@@ -8,6 +8,7 @@ import {
   denyListRule,
   envMatching,
   JA4_DENY,
+  pendingEdits,
   valuesOf,
   withValue,
   withoutValue,
@@ -294,5 +295,51 @@ describe('denyDescription — idempotence', () => {
     r = withoutValue(r, JA4_DENY, JA4_A).rule;
     expect(r.description).toBe('Deny X. 1 denied.');
     expect(r.description.match(/denied/g)).toHaveLength(1);
+  });
+});
+
+// Regression: `dropped` counted every removedDenies entry absent from the rule under examination.
+// removedDenies is ONE flat list across both denylists, so lifting an ASN ban rendered a yellow
+// "−1" on deny-scraper-ja4 — a rule nothing had been removed from — and the footer claimed two
+// rules were unapplied.
+describe('pendingEdits', () => {
+  const DIGEST = 't13d311200_1d947a95fc68_7e1102d2036b';
+  const OTHER = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
+
+  test('a removed ASN does not mark the JA4 rule', () => {
+    const e = pendingEdits([DIGEST], [], ['29066'], JA4_DENY);
+    expect(e.dropped).toBe(0);
+    expect(e.added).toBe(0);
+  });
+
+  test('a removed digest does not mark the ASN rule', () => {
+    expect(pendingEdits(['29066'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
+  });
+
+  test('each rule still counts its own removal', () => {
+    expect(pendingEdits([], [], ['29066'], ASN_DENY).dropped).toBe(1);
+    expect(pendingEdits([], [], [DIGEST], JA4_DENY).dropped).toBe(1);
+  });
+
+  test('a staged addition counts only once it is in the rule', () => {
+    expect(pendingEdits([DIGEST], [DIGEST], [], JA4_DENY).added).toBe(1);
+    expect(pendingEdits([], [DIGEST], [], JA4_DENY).added).toBe(0);
+  });
+
+  test('a value still live is not counted as dropped', () => {
+    expect(pendingEdits([DIGEST], [], [DIGEST], JA4_DENY).dropped).toBe(0);
+  });
+
+  test('both kinds staged and removed at once stay on their own rules', () => {
+    const staged = [DIGEST, '29066'];
+    const removed = [OTHER, '64500'];
+    expect(pendingEdits([DIGEST], staged, removed, JA4_DENY)).toEqual({
+      added: 1,
+      dropped: 1,
+    });
+    expect(pendingEdits(['29066'], staged, removed, ASN_DENY)).toEqual({
+      added: 1,
+      dropped: 1,
+    });
   });
 });

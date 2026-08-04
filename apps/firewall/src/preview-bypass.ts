@@ -16,6 +16,26 @@ const SCOPES: Condition[] = [
 // Matched as a case-sensitive substring of the UA, so tokens must be spelled as they appear.
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9 ._/-]{1,63}$/;
 
+// Vercel ANDs the conditions within a group, and one request path cannot be two values, so this
+// group can never match. Revocation needs it: applyRule is upsert-only, so an omitted bypass
+// stays live and keeps skipping bot protection, unrevokably and invisible to the TUI.
+const UNMATCHABLE = [
+  {
+    conditions: [
+      { type: 'path' as const, op: 'eq' as const, value: '/' },
+      { type: 'path' as const, op: 'eq' as const, value: '/.preview-revoked' },
+    ],
+  },
+];
+
+const REVOKED = ' REVOKED — FW_PREVIEW_UA is unset, so this matches nothing.';
+
+/** Marks a revoked rule in the dashboard list, which otherwise reads as still doing something. Idempotent. */
+function previewDescription(base: string, active: boolean): string {
+  const clean = base.replace(REVOKED, '');
+  return active ? clean : `${clean}${REVOKED}`;
+}
+
 /** Parse FW_PREVIEW_UA. Absent or blank disables the feature entirely (no rules, no error); a malformed entry throws naming its position, never its value. */
 export function previewTokens(raw: string | undefined): string[] {
   if (raw === undefined || raw.trim() === '') return [];
@@ -37,12 +57,16 @@ export function previewTokens(raw: string | undefined): string[] {
 function previewCeilingRule(tokens: string[], limit: number): Rule {
   return {
     name: 'rl-preview-ua',
-    description:
+    description: previewDescription(
       'Per-IP ceiling on link-preview user agents (FW_PREVIEW_UA/FW_PREVIEW_LIMIT). Bounds what allow-social-preview can be used for. Must stay ordered BEFORE it.',
+      tokens.length > 0,
+    ),
     active: true,
-    conditionGroup: tokens.map((value) => ({
-      conditions: [{ type: 'user_agent' as const, op: 'sub' as const, value }],
-    })),
+    conditionGroup: tokens.length
+      ? tokens.map((value) => ({
+          conditions: [{ type: 'user_agent' as const, op: 'sub' as const, value }],
+        }))
+      : UNMATCHABLE,
     action: {
       mitigate: {
         action: 'rate_limit',
@@ -64,17 +88,21 @@ function previewCeilingRule(tokens: string[], limit: number): Rule {
 function previewBypassRule(tokens: string[]): Rule {
   return {
     name: 'allow-social-preview',
-    description:
+    description: previewDescription(
       'Bypass bot protection for link-preview crawlers (FW_PREVIEW_UA) on the shared page and og: image only, so shared links render a card. Bounded by rl-preview-ua.',
-    active: true,
-    conditionGroup: tokens.flatMap((value) =>
-      SCOPES.map((scope) => ({
-        conditions: [
-          { type: 'user_agent' as const, op: 'sub' as const, value },
-          scope,
-        ],
-      })),
+      tokens.length > 0,
     ),
+    active: true,
+    conditionGroup: tokens.length
+      ? tokens.flatMap((value) =>
+          SCOPES.map((scope) => ({
+            conditions: [
+              { type: 'user_agent' as const, op: 'sub' as const, value },
+              scope,
+            ],
+          })),
+        )
+      : UNMATCHABLE,
     action: { mitigate: { action: 'bypass' } },
   };
 }
@@ -82,14 +110,17 @@ function previewBypassRule(tokens: string[]): Rule {
 /**
  * Both rules, or neither. A UA list without a ceiling is a published bypass with nothing bounding
  * it, so that combination throws rather than shipping half the control. Order is load-bearing:
- * the caller must splice these in as returned.
+ * the caller must splice these in as returned. Clearing FW_PREVIEW_UA emits the pair revoked
+ * rather than omitting it — an omitted rule is never deleted, so it would stay live.
  */
 export function previewRules(
   raw: string | undefined,
   limit: number | null,
 ): Rule[] {
   const tokens = previewTokens(raw);
-  if (!tokens.length) return [];
+  // The ceiling is only load-bearing while the bypass matches something; a revoked pair needs no
+  // limit, and demanding one would make the documented off-switch throw.
+  if (!tokens.length) return [previewCeilingRule([], 1), previewBypassRule([])];
   // `<= 0` too: a zero ceiling would deny every preview, and it is what a placeholder looks like.
   if (limit === null || !Number.isInteger(limit) || limit <= 0)
     throw new Error(

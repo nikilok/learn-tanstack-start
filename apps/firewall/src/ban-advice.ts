@@ -4,14 +4,11 @@
 // whole window, which is what application knowledge buys: we know what our own callers look like,
 // what a real session of ours looks like, and which identities are shared.
 //
-// Two levers, and the choice is not stylistic. A residential-proxy scraper spends one IP per
-// request, so its TLS fingerprint is the only stable handle. But a fingerprint can be SHARED — by
-// verified agents, by our own services, or by every Chromium on earth — and then the network is
-// the tighter handle instead. Each lever passes the same test before it is offered: no verified
-// bot, and NO SUB-RESOURCES ANYWHERE ON IT. Anything that ever rendered a page pulled CSS, fonts
-// and analytics; an identity showing none of that has never served a real user.
+// Two levers, and the choice is not stylistic: a fingerprint survives IP rotation, but it can be
+// SHARED, and then the network is the tighter handle. Each passes the same safety test before it
+// is offered — nothing legitimate may be riding it.
 
-import { alpnOf, assetsIndicateBrowser } from './ip-signals';
+import { alpnOf, renderingRequests, rendersIndicateBrowser } from './ip-signals';
 import type { Mix, Shape } from './ip-signals';
 
 // Worth-a-rule is a question about sustained volume, so the bar scales with the window: 200
@@ -102,6 +99,12 @@ export type AdviceInput = {
   stagedJa4: boolean; // staged this session, not yet written to the WAF
   alreadyDeniedAsn: boolean;
   windowMinutes: number;
+  /** Queries that degraded to [] rather than returning nothing. A failed lookup deletes the
+   * blocker it feeds, so the advisory must treat it as unmeasured, not as an absence. */
+  failedQueries?: string[];
+  /** True when byPath hit the group cap, so every count in `mix` is a floor and a zero
+   * rendering count is a truncation artefact rather than a measurement. */
+  mixPartial?: boolean;
 };
 
 /** Reasons this client is LEGITIMATE — statements about the client itself, which outrank everything. */
@@ -130,22 +133,17 @@ function blockersFor(input: AdviceInput): string[] {
     out.push(
       `the fingerprint also carries verified ${input.digestReach.verifiedNames.join(', ')} — a SHARED identity, not one actor; no lever is safe`,
     );
-  if (input.mix.beacon > 0)
+  // Share-based and POOLED, never absolute. One deliberate /favicon.svg per 10,000 page fetches
+  // would otherwise immunise a scraper forever — and so would one /_serverFn ping, one map tile
+  // or one forged POST to /_vercel/insights, which the three separate `> 0` tests all allowed.
+  // Pooling also means a light-but-real session still clears the floor on the sum.
+  const renders = renderingRequests(input.mix);
+  if (rendersIndicateBrowser(renders, input.total)) {
+    const share = ((renders / Math.max(1, input.total)) * 100).toFixed(1);
     out.push(
-      `${input.mix.beacon} analytics beacons — JavaScript executed, so a real rendering client`,
+      `${renders} rendering requests (${share}%: ${input.mix.asset} sub-resources, ${input.mix.rpc} server-fn RPCs, ${input.mix.tile} map tiles, ${input.mix.beacon} analytics beacons) — it is running the app, which is what a real session looks like here`,
     );
-  // Share-based, not absolute: one deliberate /favicon.svg per 10,000 page fetches would
-  // otherwise immunise a scraper against the whole advisory forever.
-  const assetShare = input.mix.asset / Math.max(1, input.total);
-  if (assetsIndicateBrowser(input.mix.asset, input.total))
-    out.push(
-      `${input.mix.asset} sub-resource fetches (${(assetShare * 100).toFixed(1)}%) — browsers pull these, raw fetchers never do`,
-    );
-  // Tiles and RPCs are rendering proof too, and far harder to suppress than assets or beacons.
-  if (input.mix.tile > 0 || input.mix.rpc > 0)
-    out.push(
-      `${input.mix.rpc} server-fn RPCs and ${input.mix.tile} map tiles — it is running the app, which is what a real session looks like here`,
-    );
+  }
   if (input.mix.page === 0)
     out.push(
       `fetches no content pages (${input.mix.api} API, ${input.mix.rpc} RPC) — there is nothing here to enumerate`,
@@ -160,6 +158,18 @@ function blockersFor(input: AdviceInput): string[] {
  */
 function unjudgeableFor(input: AdviceInput): string[] {
   const out: string[] = [];
+  // Before anything measured: a blocker fed by a failed query is silently absent, and absence is
+  // what this advisory reads as innocence. qualifyLever already refuses on incomplete reach; the
+  // legitimacy blockers had no equivalent, so a timed-out rule-name lookup deleted the
+  // first-party blocker while the pane still rendered DENY RECOMMENDED.
+  if (input.failedQueries?.length)
+    out.push(
+      `${input.failedQueries.join(', ')} could not be measured — a blocker that depends on them would be silently absent, so this is unjudged, not cleared`,
+    );
+  if (input.mixPartial)
+    out.push(
+      'the path sample hit the API group cap, so the rendering counts are floors — a zero here may be a dropped tail rather than a raw-HTML fetcher',
+    );
   const floor = volumeFloor(input.windowMinutes);
   if (input.total < floor)
     out.push(

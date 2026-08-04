@@ -31,8 +31,11 @@ export function persistEnvVar(path: string, key: string, value: string): void {
   let current = '';
   try {
     current = readFileSync(path, 'utf8');
-  } catch {
-    // absent is fine — the upsert creates the assignment
+  } catch (e) {
+    // Only a genuinely absent file is safe to read as empty — the upsert then creates the
+    // assignment. Any other failure and we would write a one-line file over a real one,
+    // destroying every unrelated secret in it.
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
   }
   writeFileSync(path, upsertEnvLine(current, key, value), 'utf8');
 }

@@ -18,6 +18,9 @@ export type DenyEntry = {
 export type DenylistReport = {
   windowHours: number;
   entries: DenyEntry[];
+  // Deny rules that exist but are not denying — deactivated, or cycled to log/challenge. Their
+  // values are withheld from `entries` because listing them as `live` would read as enforced.
+  notEnforcing?: { rule: string; why: string }[];
   error?: string;
 };
 
@@ -54,8 +57,25 @@ export function denylistLines(r: DenylistReport, cursor: number): Line[] {
   const L: Line[] = [
     line(seg('Denylist', 'bold'), seg(`  last ${r.windowHours}h activity`, 'dim')),
   ];
+  // Before the counts: a rule that is not denying makes every number below it a lie.
+  for (const n of r.notEnforcing ?? [])
+    L.push(
+      blank(),
+      line(seg(`  ${n.rule} IS NOT DENYING — ${n.why}`, 'bad')),
+      line(
+        seg(
+          '  its entries are withheld below; nothing it lists is being blocked',
+          'bad',
+        ),
+      ),
+    );
   if (!r.entries.length) {
-    L.push(blank(), line(seg('  nothing is denied', 'good')));
+    L.push(
+      blank(),
+      r.notEnforcing?.length
+        ? line(seg('  nothing is being denied', 'bad'))
+        : line(seg('  nothing is denied', 'good')),
+    );
     return L;
   }
   const pending = r.entries.filter((e) => e.staged || e.removed).length;

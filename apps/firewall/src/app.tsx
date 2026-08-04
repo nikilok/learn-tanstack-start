@@ -18,6 +18,7 @@ import { type Advice, adviseBan } from './ban-advice';
 import {
   ASN_DENY,
   JA4_DENY,
+  pendingEdits,
   valuesOf,
   withValue,
   withoutValue,
@@ -240,7 +241,7 @@ export function App() {
   // than leaving it on its old snapshot until the next qualifying tick.
   useEffect(() => {
     if (!isLive || pane !== 'ip' || !ipTabs.active) return;
-    refreshTabRef.current();
+    refreshTabRef.current(ipWindow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, pane, ipTabs.index]);
 
@@ -278,7 +279,9 @@ export function App() {
         tickRef.current += 1;
         if (tickRef.current % LIVE_TAB_EVERY === 0) {
           const active = activeTabRef.current;
-          if (active) refreshTabRef.current();
+          // `w`, not the tab's stored window: live advances every tick, and re-querying the
+          // period the tab was opened in would render stale traffic under a "live" header.
+          if (active) refreshTabRef.current(w);
         }
         failuresRef.current = ok ? 0 : failuresRef.current + 1;
         schedule(
@@ -382,6 +385,9 @@ export function App() {
     snapshot: Item[],
   ): string => {
     if (!stagedDenies.length && !removedDenies.length) return '';
+    // A dry run reaches no WAF, so writing the denylist back would enforce or lift a ban the
+    // operator only previewed — .env.local is what the next real apply and CI rebuild from.
+    if (dryRun) return ' · dry-run: .env.local NOT written';
     const notes: string[] = [];
     let wrote = false;
     for (const [ruleName, spec, envKey] of [
@@ -413,15 +419,37 @@ export function App() {
   };
 
   const denyRuleOf = (name: string) => items.find((it) => it.rule.name === name);
-  // A rule can sit in the WAF with active:false — the state runHeadless prints a WARNING for.
-  // Reporting ALREADY DENIED for it tells the operator a scraper is handled while it is being
-  // served normally, which is the most costly kind of wrong.
+  // A rule can sit in the WAF with active:false, or cycled to log/challenge — both states leave
+  // the traffic served normally. Reporting ALREADY DENIED for either tells the operator a
+  // scraper is handled while it is not, which is the most costly kind of wrong. seedItems
+  // prefers the LIVE action, so a stray ←/→ that once reached the WAF persists across applies.
+  const enforcing = (it: Item | undefined) =>
+    Boolean(it?.active && it.action === 'deny');
   const ja4Item = denyRuleOf(JA4_RULE);
-  const ja4Enforcing = Boolean(ja4Item?.active);
+  const ja4Enforcing = enforcing(ja4Item);
   const liveJa4 =
     ja4Item && ja4Enforcing ? valuesOf(ja4Item.rule, JA4_DENY) : [];
   const asnItem = denyRuleOf(ASN_RULE);
-  const liveAsn = asnItem?.active ? valuesOf(asnItem.rule, ASN_DENY) : [];
+  const liveAsn =
+    asnItem && enforcing(asnItem) ? valuesOf(asnItem.rule, ASN_DENY) : [];
+  // Only worth saying for a rule that actually carries denies — a revoked one denying nothing is
+  // the intended resting state, not a fault.
+  const denyNotEnforcing = (
+    [
+      [ja4Item, JA4_DENY],
+      [asnItem, ASN_DENY],
+    ] as const
+  )
+    .filter(
+      ([it, spec]) =>
+        it && !enforcing(it) && valuesOf(it.rule, spec).length > 0,
+    )
+    .map(([it]) => ({
+      rule: it!.rule.name,
+      why: !it!.active
+        ? 'the rule is DEACTIVATED'
+        : `its action is ${it!.action}, not deny — matching traffic is still served`,
+    }));
   const act = denyActivity.data;
   const denyEntries: DenyEntry[] = [
     ...liveJa4.map((v) => ({
@@ -441,7 +469,8 @@ export function App() {
       denied: act?.get(v)?.denied,
     })),
     ...removedDenies.map((v) => ({
-      kind: (v.includes('_') ? 'ja4' : 'asn') as 'ja4' | 'asn',
+      // By shape, not by a substring guess: the two denylists share one flat removal list.
+      kind: (JA4_DENY.valid(v) ? 'ja4' : 'asn') as 'ja4' | 'asn',
       value: v,
       staged: false,
       removed: true,
@@ -462,9 +491,12 @@ export function App() {
   ] as const) {
     const item = denyRuleOf(ruleName);
     if (!item) continue;
-    const live = valuesOf(item.rule, spec);
-    const added = stagedDenies.filter((v) => live.includes(v)).length;
-    const dropped = removedDenies.filter((v) => !live.includes(v)).length;
+    const { added, dropped } = pendingEdits(
+      valuesOf(item.rule, spec),
+      stagedDenies,
+      removedDenies,
+      spec,
+    );
     // Kept terse so it survives a narrow rules column; the footer and denylist pane carry detail.
     const parts = [added ? `+${added}` : '', dropped ? `−${dropped}` : ''].filter(
       Boolean,
@@ -494,6 +526,10 @@ export function App() {
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
         alreadyDeniedAsn: false,
         windowMinutes: ipTabs.active.data.windowHours * 60,
+        // Absent evidence is not evidence of absence: a query that failed must read as unjudged,
+        // never as a clean client.
+        failedQueries: ipTabs.active.data.failedQueries,
+        mixPartial: ipTabs.active.data.mixPartial,
       })
     : undefined;
 
@@ -547,6 +583,12 @@ export function App() {
   const stageDeny = (kind: 'ja4' | 'asn', value: string) => {
     const ruleName = kind === 'ja4' ? JA4_RULE : ASN_RULE;
     const spec = kind === 'ja4' ? JA4_DENY : ASN_DENY;
+    // Validated here, not inside the updater: a throw in a setItems callback escapes the keypress
+    // handler with no error boundary and every deny staged this session dies with the process.
+    if (!spec.valid(spec.normalize(value.trim()))) {
+      setAsnError(`refused — not ${spec.example}`);
+      return;
+    }
     setItems((prev) =>
       prev.map((it) =>
         it.rule.name === ruleName
@@ -754,8 +796,10 @@ export function App() {
       else if (key.return) {
         const num = asnInput.trim();
         const lever = ipAdvice?.lever;
-        if (!/^[1-9]\d{0,9}$/.test(num)) {
-          setAsnError('AS number must be a positive integer');
+        // The spec itself, not a copy of its regex: withValue throws inside a setItems updater,
+        // which takes the whole TUI down and loses every deny staged this session.
+        if (!ASN_DENY.valid(num)) {
+          setAsnError(`AS number must be ${ASN_DENY.example}`);
           return;
         }
         setAsnError('');
@@ -1114,6 +1158,7 @@ export function App() {
                 advice={ipAdvice}
                 sitemapCursor={sitemapCursor}
                 denyEntries={denyEntries}
+                denyNotEnforcing={denyNotEnforcing}
                 denyCursor={denyCursor}
                 denyActivity={denyActivity}
               />
@@ -1316,6 +1361,7 @@ function PaneBody({
   advice,
   sitemapCursor,
   denyEntries,
+  denyNotEnforcing,
   denyCursor,
   denyActivity,
 }: {
@@ -1327,6 +1373,7 @@ function PaneBody({
   advice: Advice | undefined;
   sitemapCursor: number;
   denyEntries: DenyEntry[];
+  denyNotEnforcing: { rule: string; why: string }[];
   denyCursor: number;
   denyActivity: Pane<Map<string, Activity>>;
 }) {
@@ -1345,6 +1392,7 @@ function PaneBody({
           {
             windowHours: DENY_ACTIVITY_HOURS,
             entries: denyEntries,
+            notEnforcing: denyNotEnforcing,
             error: denyActivity.error || undefined,
           },
           denyCursor,

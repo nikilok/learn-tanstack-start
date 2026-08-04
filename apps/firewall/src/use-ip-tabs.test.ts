@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { indexAfterClose, nextIndex } from './use-ip-tabs';
+import { indexAfterClose, nextIndex, runDisposition} from './use-ip-tabs';
 
 describe('nextIndex', () => {
   test('advances and wraps past the end', () => {
@@ -41,5 +41,30 @@ describe('indexAfterClose', () => {
 
   test('closing the first of many stays at the front', () => {
     expect(indexAfterClose(0, 3)).toBe(0);
+  });
+});
+
+// Regression: a window change while a fetch was running was swallowed by the in-flight guard, so
+// the tab kept rendering the OLD window's profile and advice under the NEW window's label, with
+// no error and no retry. The operator's only recovery was to guess at R.
+describe('runDisposition', () => {
+  const busy = new Set(['ip:1.2.3.4']);
+
+  test('nothing in flight always runs', () => {
+    expect(runDisposition(new Set(), 'ip:1.2.3.4', false)).toBe('run');
+    expect(runDisposition(new Set(), 'ip:1.2.3.4', true)).toBe('run');
+  });
+
+  test('an unforced duplicate is dropped — that is the point of the guard', () => {
+    expect(runDisposition(busy, 'ip:1.2.3.4', false)).toBe('drop');
+  });
+
+  test('a FORCED call is queued, never dropped — it carries a new window', () => {
+    expect(runDisposition(busy, 'ip:1.2.3.4', true)).toBe('queue');
+  });
+
+  test('a different subject is unaffected by another one loading', () => {
+    expect(runDisposition(busy, 'ip:5.6.7.8', false)).toBe('run');
+    expect(runDisposition(busy, 'ja4:1.2.3.4', false)).toBe('run');
   });
 });

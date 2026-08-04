@@ -125,6 +125,24 @@ export function denyDescription(base: string, count: number): string {
 }
 
 /**
+ * Unapplied edits to ONE deny rule, given the flat staged/removed lists the TUI keeps across both
+ * denylists. `spec.valid` is the filter that matters: absence from this rule's live values is
+ * otherwise indistinguishable from a removal staged against it, so lifting an ASN ban marked the
+ * JA4 rule as having a pending removal too.
+ */
+export function pendingEdits(
+  live: string[],
+  staged: string[],
+  removed: string[],
+  spec: DenySpec,
+): { added: number; dropped: number } {
+  return {
+    added: staged.filter((v) => live.includes(v)).length,
+    dropped: removed.filter((v) => spec.valid(v) && !live.includes(v)).length,
+  };
+}
+
+/**
  * One condition group per value (Vercel ORs them). Revocation swaps in the placeholder, never
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is
  * upsert-only, so it would keep denying, unrevokable).

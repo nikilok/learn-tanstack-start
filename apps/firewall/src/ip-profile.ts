@@ -30,12 +30,26 @@ const FINE_BUCKET_HOURS = 48;
 const GROUP_CAP = 500;
 /**
  * Reach is ALWAYS measured over at least this long, whatever window the operator picked for the
- * subject. The safety test asks "has a real browser ever rendered from this identity?" and its
- * strength scales with the window: the generic Chromium fingerprint shows 18 sub-resources over
- * 2h, 355 over 24h and 3,875 over 6d. A short window manufactures the absence that clears a
- * blanket deny — so urgency gets a short window, safety never does.
+ * subject. The safety test asks whether a real browser has ever rendered from this identity, and
+ * a short window manufactures the absence that clears a blanket deny. Urgency gets a short
+ * window; safety never does.
  */
 const REACH_MIN_HOURS = 144;
+
+/**
+ * Bucket size for the session series. The API needs start/end to be multiples of the bucket, so
+ * 10-minute buckets only require the window's own alignment to be a multiple of 10 — an
+ * hour-aligned range already is. Taking `max(granularity, …)` instead pinned every window over 2h
+ * to 60-minute buckets and inflated the pacing tell: over 6h that is 6 buckets, so a person
+ * touching the site in 4 separate hours reads as busy 67% of the time, which is one of the two
+ * independent axes a ban needs.
+ */
+export function bucketMinutesFor(
+  hours: number,
+  granularityMinutes: number,
+): number {
+  return hours <= FINE_BUCKET_HOURS && granularityMinutes % 10 === 0 ? 10 : 60;
+}
 
 /** What is being profiled. A JA4 digest is the handle that survives IP rotation, so it gets the same view. */
 export type Subject = { kind: 'ip' | 'ja4'; value: string };
@@ -71,6 +85,10 @@ export type IpProfile = {
   byPath: [string, number][];
   byReferrer: [string, number][];
   mix: Mix;
+  /** True when byPath hit the 500-group cap, so every count in `mix` is a floor. The rendering
+   * counts are the ones that matter: a dropped /assets or /_serverFn tail reads as an affirmative
+   * zero, which is the absence-of-evidence error the reach `complete` flag exists to prevent. */
+  mixPartial: boolean;
   shape: Shape;
   buckets: { t: string; c: number }[]; // zero-filled series behind `shape`
   tells: Tell[];
@@ -82,6 +100,9 @@ export type IpProfile = {
   /** Hours the reach queries covered — never shorter than REACH_MIN_HOURS. */
   reachHours: number;
   errors: string[];
+  /** Labels of the queries that degraded to []. The advisory needs these by name: a blocker fed
+   * by a failed lookup is silently absent, which reads as "this client is clean". */
+  failedQueries: string[];
 };
 
 /** One grouped query, degraded to [] plus an error note rather than failing the whole profile. */
@@ -92,6 +113,7 @@ async function group(
   dims: string[],
   filter: string,
   event?: string,
+  failed?: string[],
 ): Promise<[string, number][]> {
   try {
     const resp = await metrics(ctx, dims, { filter, event, limit: 500 });
@@ -114,6 +136,7 @@ async function group(
       .sort((a, b) => b[1] - a[1]);
   } catch (e) {
     errors.push(`${label}: ${errMsg(e)}`);
+    failed?.push(label);
     return [];
   }
 }
@@ -140,8 +163,9 @@ export async function fetchIpProfile(
     hours >= REACH_MIN_HOURS ? window : { hours: REACH_MIN_HOURS },
   );
   const errors: string[] = [];
+  const failedQueries: string[] = [];
   const g = (label: string, dims: string[], event?: string) => () =>
-    group(ctx, errors, label, dims, filter, event);
+    group(ctx, errors, label, dims, filter, event, failedQueries);
 
   const [
     byStatus,
@@ -176,11 +200,7 @@ export async function fetchIpProfile(
     4,
   );
 
-  // Never finer than the window's own alignment, or the API rejects the range.
-  const bucketMinutes = Math.max(
-    window.granularityMinutes,
-    hours <= FINE_BUCKET_HOURS ? 10 : 60,
-  );
+  const bucketMinutes = bucketMinutesFor(hours, window.granularityMinutes);
   let buckets: { t: string; c: number }[] = [];
   try {
     buckets =
@@ -194,6 +214,7 @@ export async function fetchIpProfile(
       ).get(ip) ?? [];
   } catch (e) {
     errors.push(`series: ${errMsg(e)}`);
+    failedQueries.push('series');
   }
 
   // Rule ids are opaque; label them, but never fail the profile over a missing label.
@@ -206,13 +227,16 @@ export async function fetchIpProfile(
       const labelled = wafRuleRows.map(
         ([id, c]) => [names.get(id) ?? id, c] as [string, number],
       );
-      if (!names.size || labelled.some(([n]) => n.startsWith('rule_')))
+      if (!names.size || labelled.some(([n]) => n.startsWith('rule_'))) {
         errors.push(
           'waf rule names: lookup failed — rules show as opaque ids, so the first-party allow-rule check cannot run',
         );
+        failedQueries.push('waf rule names');
+      }
       byWafRule = labelled;
     } catch (e) {
       errors.push(`waf rule names: ${errMsg(e)}`);
+      failedQueries.push('waf rule names');
     }
   }
 
@@ -291,6 +315,9 @@ export async function fetchIpProfile(
   const mix = mixOf(byPath);
   const shape = shapeOf(buckets, bucketMinutes);
   const total = byStatus.reduce((s, [, c]) => s + c, 0) || mix.total;
+  // Same detection reachOf and the sitemap pane already do. byStatus is low-cardinality and so
+  // exact; byPath is not, so a busy identity's low-count sub-resource rows fall off the tail.
+  const mixPartial = byPath.length >= GROUP_CAP || mix.total < total;
   // Vercel leaves botVerified blank for everything it has not verified; only `pass` counts.
   const byBotVerified = byBotVerifiedRaw.filter(
     ([v]) => v && v !== '(none)' && v !== 'undefined',
@@ -318,11 +345,13 @@ export async function fetchIpProfile(
     byPath,
     byReferrer,
     mix,
+    mixPartial,
     shape,
     buckets,
     digestReach,
     asnReach,
     reachHours: Math.max(hours, REACH_MIN_HOURS),
+    failedQueries,
     tells: tellsFor({
       total,
       mix,

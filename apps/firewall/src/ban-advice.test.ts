@@ -631,4 +631,48 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('leave');
     expect(a.blockers.join(' ')).toContain('sub-resource');
   });
+
+  // Regression: the asset axis was share-gated but tiles, RPCs and beacons were gated at `> 0`,
+  // so one request of any of them cleared the whole advisory permanently.
+  test.each([
+    ['server-fn RPC', '/_serverFn/x'],
+    ['map tile', '/api/tiles/1/2/3.png'],
+    ['analytics beacon', '/_vercel/insights/view'],
+  ])('one token %s does not immunise a scraper', (_label, path) => {
+    const a = adviseBan(
+      scraper({ mix: mixOf([['/company/a', 9059], [path, 1]]) }),
+    );
+    expect(a.verdict).toBe('ban');
+  });
+
+  test('a real share of RPCs still blocks — the SPA signal is unchanged', () => {
+    const a = adviseBan(
+      scraper({ mix: mixOf([['/company/a', 9000], ['/_serverFn/x', 400]]) }),
+    );
+    expect(a.verdict).toBe('leave');
+  });
+
+  // Regression: qualifyLever refused on incomplete reach but blockersFor read a failed query as
+  // a measured absence, so a timed-out rule-name lookup silently deleted the first-party blocker
+  // while the pane still rendered DENY RECOMMENDED.
+  test('a failed query makes the client unjudged, never cleared for a ban', () => {
+    const a = adviseBan(scraper({ failedQueries: ['waf rule names'] }));
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('waf rule names');
+    expect(a.leverNotes.join(' ')).toContain('unjudged');
+  });
+
+  test('a truncated path sample makes the rendering counts unjudgeable', () => {
+    const a = adviseBan(scraper({ mixPartial: true }));
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('floors');
+  });
+
+  test('a failed query does not override a real legitimacy blocker', () => {
+    // Legitimacy outranks "cannot tell": a verified bot stays DO NOT DENY either way.
+    const a = adviseBan(
+      human({ failedQueries: ['waf rule names'], botVerified: [['pass', 100]] }),
+    );
+    expect(a.verdict).toBe('leave');
+  });
 });

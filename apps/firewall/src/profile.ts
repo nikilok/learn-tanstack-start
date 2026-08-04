@@ -118,6 +118,8 @@ async function main() {
     // The CLI cannot map an AS name to its number, so it never claims one is already denied.
     alreadyDeniedAsn: false,
     windowMinutes: profile.windowHours * 60,
+    failedQueries: profile.failedQueries,
+    mixPartial: profile.mixPartial,
   });
   console.log(
     toAnsi(profileLines(profile, process.stdout.columns, advice), {

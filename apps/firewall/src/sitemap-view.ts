@@ -66,7 +66,7 @@ function digestLines(d: SitemapDigest, isCursor: boolean): Line[] {
     // is 200x low. The floors are still enough to convict — they can only understate.
     const ge = d.pathsPartial ? '≥' : '';
     detail.push(
-      `${d.total} req total`,
+      `${d.totalExact ? '' : ge}${d.total} req total`,
       `${ge}${d.companyPages} /company/`,
       `${ge}${d.subResources} sub-resources`,
       `${ge}${d.distinctPaths} paths`,

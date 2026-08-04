@@ -24,12 +24,22 @@ export type IpTabs = {
   /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
   /** Focus `subject`, fetching only if new — or always when `force`, which a window change needs. */
   open: (subject: Subject, window: Window, force?: boolean) => void;
-  /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. */
-  refresh: () => void;
+  /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. Pass a window to re-scope it too — live mode advances every tick, and the tab's stored window would otherwise pin it to the period it was opened in. */
+  refresh: (window?: Window) => void;
   /** Move `dir` tabs, wrapping. */
   cycle: (dir: 1 | -1) => void;
   close: () => void;
 };
+
+/** What to do with a run request for `key`. A forced call carries a NEW window, so dropping it leaves the tab rendering one period under another's label with no error and no retry — it is queued behind the in-flight fetch instead. */
+export function runDisposition(
+  inFlight: ReadonlySet<string>,
+  key: string,
+  force: boolean,
+): 'run' | 'queue' | 'drop' {
+  if (!inFlight.has(key)) return 'run';
+  return force ? 'queue' : 'drop';
+}
 
 /** Wrapping tab index. Empty list stays at 0 so the caller never indexes past the end. */
 export function nextIndex(current: number, length: number, dir: 1 | -1): number {
@@ -87,11 +97,22 @@ export function useIpTabs(creds: Creds): IpTabs {
   const [index, setIndex] = useState(0);
   // Keyed by IP, so two tabs can load at once without either clobbering the other's state.
   const inFlight = useRef(new Set<string>());
+  // A forced re-profile that arrives mid-fetch, held until the running one lands.
+  const queued = useRef(new Map<string, Window>());
 
   const run = useCallback(
-    async (subject: Subject, window: Window) => {
+    async function run(
+      subject: Subject,
+      window: Window,
+      force = false,
+    ): Promise<void> {
       const key = `${subject.kind}:${subject.value}`;
-      if (inFlight.current.has(key)) return;
+      const disposition = runDisposition(inFlight.current, key, force);
+      if (disposition !== 'run') {
+        // Last one wins: only the newest window is worth running when this finally lands.
+        if (disposition === 'queue') queued.current.set(key, window);
+        return;
+      }
       inFlight.current.add(key);
       const patch = (p: Partial<IpTab>) =>
         // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
@@ -112,6 +133,11 @@ export function useIpTabs(creds: Creds): IpTabs {
         patch({ error: errMsg(e), loading: false });
       } finally {
         inFlight.current.delete(key);
+        const next = queued.current.get(key);
+        if (next) {
+          queued.current.delete(key);
+          void run(subject, next, true);
+        }
       }
     },
     [creds],
@@ -130,7 +156,7 @@ export function useIpTabs(creds: Creds): IpTabs {
           setTabs((prev) =>
             prev.map((t, i) => (i === existing ? { ...t, window } : t)),
           );
-          void run(subject, window);
+          void run(subject, window, true);
         }
         return;
       }
@@ -144,10 +170,18 @@ export function useIpTabs(creds: Creds): IpTabs {
     [run, tabs],
   );
 
-  const refresh = useCallback(() => {
-    const t = tabs[index];
-    if (t) void run(t.subject, t.window);
-  }, [tabs, index, run]);
+  const refresh = useCallback(
+    (window?: Window) => {
+      const t = tabs[index];
+      if (!t) return;
+      if (window)
+        setTabs((prev) =>
+          prev.map((x, i) => (i === index ? { ...x, window } : x)),
+        );
+      void run(t.subject, window ?? t.window, Boolean(window));
+    },
+    [tabs, index, run],
+  );
 
   const cycle = useCallback(
     (dir: 1 | -1) => setIndex((i) => nextIndex(i, tabs.length, dir)),

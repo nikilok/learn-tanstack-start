@@ -3,14 +3,11 @@
 
 import type { Bucket } from './observability';
 
-// Static-asset extensions this app actually serves. Anything under /assets/ without one is a
-// probe, not a bundle.
+// Static-asset extensions this app actually serves.
 const ASSET_EXT =
   /\.(css|js|mjs|woff2?|png|jpe?g|svg|ico|webp|avif|json|txt|xml|map)$/;
 
-// A token number of asset fetches is not evidence of a browser: one deliberate /favicon.svg
-// would otherwise read as "a real user is here". Shared with ban-advice so the SIGNALS line and
-// the blocker cannot contradict each other on the same screen.
+// Shared with ban-advice so the SIGNALS line and the blocker cannot contradict each other.
 export const MIN_ASSETS = 5;
 export const MIN_ASSET_SHARE = 0.005;
 
@@ -19,9 +16,13 @@ export function assetsIndicateBrowser(assets: number, total: number): boolean {
   return assets >= MIN_ASSETS && assets / Math.max(1, total) >= MIN_ASSET_SHARE;
 }
 
-// True compute providers only. Deliberately EXCLUDES Cloudflare, Akamai, Fastly and Apple: iCloud
-// Private Relay and WARP egress real consumer traffic through them, and a 1,612-request iPhone
-// Safari session on Cloudflare in this very dataset is a person, not a farm.
+/** Whether a client's rendering requests are numerous enough to indicate a real browser. Pooled and share-gated: an unconditional `> 0` on any single axis is not evidence. */
+export function rendersIndicateBrowser(renders: number, total: number): boolean {
+  return renders >= MIN_ASSETS && renders / Math.max(1, total) >= MIN_ASSET_SHARE;
+}
+
+// Networks people rent servers on. Some large CDNs carry real consumer traffic and are
+// deliberately absent; check what a name actually serves before adding it.
 const COMPUTE_ASNS = [
   'amazon',
   'amazon.com',
@@ -85,10 +86,9 @@ export function pathKind(path: string): PathKind {
   // sub-resource, and counting it as one inverts the strongest tell there is.
   if (/^\/(sitemap[\w-]*\.xml|robots\.txt|llms(-full)?\.txt)$/.test(path))
     return 'crawl';
-  // Extension-driven, NOT prefix-driven. A scanner probing /assets/images/doc.php or bare
-  // /assets/ would otherwise count as a browser fetching a bundle — and because sub-resources
-  // are the evidence that BLOCKS a deny, two webshell probes were enough to shield a scanner.
-  // Every asset this app serves is a hashed bundle carrying one of these extensions.
+  // Extension-driven, NOT prefix-driven: every asset this app serves is a hashed bundle with one
+  // of these extensions, and a prefix test let non-assets under the same path count as browser
+  // evidence — which is the evidence that BLOCKS a deny.
   if (ASSET_EXT.test(path)) return 'asset';
   return 'page';
 }
@@ -112,6 +112,11 @@ export function mixOf(paths: [string, number][]): Mix {
     mix.total += count;
   }
   return mix;
+}
+
+/** Every request only a rendering client produces. Pooled because each axis alone is cheap to fake and cheap to miss: assets cache for a year, beacons are ad-blocked, tiles need the map in view. */
+export function renderingRequests(mix: Mix): number {
+  return mix.asset + mix.beacon + mix.tile + mix.rpc;
 }
 
 export type Session = { start: string; end: string; buckets: number; total: number };
@@ -242,18 +247,19 @@ export function tellsFor(input: SignalInput): Tell[] {
       detail: `${failedCheck.map(([v, c]) => `${v} (${c})`).join(', ')} — it claimed to be a known crawler and Vercel's reverse check refused it, so the UA is a lie`,
     });
 
-  const subResource = mix.asset + mix.beacon;
-  // Beacons are decisive on their own (a POST with a payload, so JS ran); assets need a share,
-  // or a scanner that touches two files reads as a browser.
-  const browsery = mix.beacon > 0 || assetsIndicateBrowser(mix.asset, total);
+  // Every axis, on the same floor blockersFor uses, so SIGNALS and RECOMMENDATION cannot
+  // contradict each other on one screen — they did, and the pane that said 'raw-HTML fetcher'
+  // sat directly above a green DO NOT DENY.
+  const subResource = renderingRequests(mix);
+  const browsery = rendersIndicateBrowser(subResource, total);
   tells.push({
     points: browsery ? 'human' : 'bot',
     label: 'sub-resources',
     detail: browsery
-      ? `${subResource} assets/beacons (${pct(subResource)}) — browsers pull these, raw fetchers never do`
+      ? `${subResource} assets/beacons/tiles/RPCs (${pct(subResource)}) — browsers pull these, raw fetchers never do`
       : subResource === 0
-        ? `0 assets or beacons across ${total} requests — a raw-HTML fetcher. Weak over short windows (browsers cache), conclusive at volume`
-        : `only ${subResource} assets/beacons (${pct(subResource)}) across ${total} requests — too few to be a rendering client`,
+        ? `0 rendering requests across ${total} — a raw-HTML fetcher. Weak over short windows (browsers cache), conclusive at volume`
+        : `only ${subResource} rendering requests (${pct(subResource)}) across ${total} — too few to be a rendering client`,
   });
 
   if (mix.beacon > 0)
@@ -328,9 +334,7 @@ export function tellsFor(input: SignalInput): Tell[] {
       detail: `${mix.page} page fetches, zero RPCs, zero sub-resources — HTML enumeration`,
     });
 
-  // The headless-browser tell, and the only one a stealth plugin cannot patch away: it is about
-  // where the packets come from, not what the page's JavaScript reports. A driven Chromium looks
-  // exactly like a browser because it IS one — but nobody browses a job-search site from EC2.
+  // Where the packets come from, not what the page reports about itself.
   const computeAsns = input.asns.filter(([a]) => isComputeNetwork(a));
   if (computeAsns.length && browsery)
     tells.push({

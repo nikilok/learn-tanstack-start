@@ -25,12 +25,13 @@ import {
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
-import { type IpProfile, fetchIpProfile } from './ip-profile';
+import type { IpProfile } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
+import { type IpTab, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
 
@@ -59,8 +60,8 @@ export function App() {
     ok: boolean;
   } | null>(null);
   const report = usePane<ReportData>();
-  const ipPane = usePane<IpProfile>();
   const sitemap = usePane<SitemapReport>();
+  const ipTabs = useIpTabs({ projectId, teamId, token });
   const [pane, setPane] = useState<PaneKind | null>(null);
   const [focus, setFocus] = useState<'editor' | 'pane' | 'ip-input'>('editor');
   const [ipInput, setIpInput] = useState('');
@@ -72,9 +73,14 @@ export function App() {
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
   const reportRef = useRef<DOMElement | null>(null);
 
-  const active =
-    pane === 'report' ? report : pane === 'ip' ? ipPane : sitemap;
-  const paneLoading = pane !== null && active.loading;
+  const paneLoading =
+    pane === 'report'
+      ? report.loading
+      : pane === 'sitemap'
+        ? sitemap.loading
+        : pane === 'ip'
+          ? Boolean(ipTabs.active?.loading)
+          : false;
 
   // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
   // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
@@ -105,7 +111,14 @@ export function App() {
     );
     setReportMaxScroll(max);
     setReportScroll((s) => Math.min(s, max));
-  }, [pane, report.data, ipPane.data, sitemap.data, reportH]);
+  }, [
+    pane,
+    report.data,
+    sitemap.data,
+    ipTabs.active?.data,
+    ipTabs.index,
+    reportH,
+  ]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -161,33 +174,42 @@ export function App() {
 
   const creds = { projectId, teamId, token };
 
-  /** Open a pane, loading it on first view; pressing the same key again refreshes it. */
-  const openPane = (kind: PaneKind, refresh: boolean) => {
+  /** Open a pane, loading it on first view. `i` always prompts for another IP — tab is how you get back to one already open. */
+  const openPane = (kind: PaneKind) => {
     setPane(kind);
+    setReportScroll(0);
     if (kind === 'ip') {
-      // No IP yet, or an explicit re-open: ask for one rather than showing a stale profile.
-      if (refresh || !ipPane.data) {
-        setIpInput('');
-        setIpError('');
-        setFocus('ip-input');
-        return;
-      }
-      setFocus('pane');
+      setIpInput('');
+      setIpError('');
+      setFocus('ip-input');
       return;
     }
     setFocus('pane');
-    setReportScroll(0);
-    if (kind === 'report' && (refresh || !report.data))
+    if (kind === 'report' && !report.data)
       void report.load(() => fetchReport(creds));
-    if (kind === 'sitemap' && (refresh || !sitemap.data))
-      void sitemap.load(() =>
-        fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS),
-      );
+    if (kind === 'sitemap' && !sitemap.data)
+      void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
   };
 
-  /** Validate and profile the typed IP; keeps focus in the field when it is not an IP. */
-  const submitIp = () => {
-    const ip = ipInput.trim();
+  /** Tab from elsewhere surfaces the IP tabs at the one you were last on; only a second press moves. Advancing straight away would skip a tab you had not seen yet. */
+  const gotoIpTabs = (dir: 1 | -1) => {
+    setReportScroll(0);
+    setFocus('pane');
+    if (pane === 'ip') ipTabs.cycle(dir);
+    else setPane('ip');
+  };
+
+  /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
+  const refreshPane = () => {
+    if (pane === 'report') void report.load(() => fetchReport(creds));
+    else if (pane === 'sitemap')
+      void sitemap.load(() => fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS));
+    else if (pane === 'ip') ipTabs.refresh();
+  };
+
+  /** Open `value` as a tab; keeps focus in the field when it is not an IP. Takes the value rather than reading state, so a paste that ends in a newline can submit what it just appended. */
+  const submitIp = (value: string) => {
+    const ip = value.trim();
     if (!ip || !IP_CHARS.test(ip)) {
       setIpError('not an IP address');
       return;
@@ -195,7 +217,7 @@ export function App() {
     setIpError('');
     setFocus('pane');
     setReportScroll(0);
-    void ipPane.load(() => fetchIpProfile(creds, ip, IP_WINDOW_HOURS));
+    ipTabs.open(ip, IP_WINDOW_HOURS);
   };
 
   /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
@@ -220,19 +242,30 @@ export function App() {
   useInput((input, key) => {
     // Text entry owns every keystroke, so q/j/k stay typeable inside an IP.
     if (focus === 'ip-input') {
-      if (key.escape) setFocus(ipPane.data ? 'pane' : 'editor');
-      else if (key.return) submitIp();
-      else if (key.backspace || key.delete)
-        setIpInput((s) => s.slice(0, -1));
-      else if (input && !key.ctrl && !key.meta && IP_CHARS.test(input))
-        setIpInput((s) => (s + input).slice(0, 45)); // longest IPv6 literal
+      if (key.escape) setFocus(ipTabs.tabs.length ? 'pane' : 'editor');
+      else if (key.return) submitIp(ipInput);
+      else if (key.backspace || key.delete) setIpInput((s) => s.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta) {
+        // A paste arrives as ONE chunk, so filter within it rather than testing the whole
+        // string — requiring the chunk to match meant pasting an IP silently did nothing.
+        const next = (ipInput + input.replace(/[^0-9a-fA-F.:]/g, '')).slice(
+          0,
+          45, // longest IPv6 literal
+        );
+        setIpInput(next);
+        if (/[\r\n]/.test(input)) submitIp(next); // pasted with a trailing newline
+      }
       return;
     }
     if (focus === 'pane') {
       if (input === 'q') exit();
-      else if (PANE_KEY[input])
-        // Same key again = refresh; a different one switches pane.
-        openPane(PANE_KEY[input], PANE_KEY[input] === pane);
+      // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
+      else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
+      else if (input === 'R') refreshPane();
+      else if (input === 'x' && pane === 'ip') {
+        ipTabs.close();
+        setReportScroll(0);
+      } else if (PANE_KEY[input]) openPane(PANE_KEY[input]);
       else if (key.escape) setFocus('editor');
       else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
@@ -256,7 +289,8 @@ export function App() {
       } else if (input === ' ')
         editCursorItem((it) => ({ ...it, active: !it.active }));
       // Lazy: fetch once, cached after, so re-opening a pane is instant.
-      else if (PANE_KEY[input]) openPane(PANE_KEY[input], false);
+      else if (PANE_KEY[input]) openPane(PANE_KEY[input]);
+      else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'a') {
         if (applying.current) return;
         applying.current = true;
@@ -298,6 +332,16 @@ export function App() {
   const target = phase === 'action' ? items[cursor] : null;
   const cols = process.stdout.columns ?? 120;
   const reportW = Math.max(46, Math.floor(cols * 0.5)); // ≥50% on wide terminals; 46-col floor keeps it readable when narrow
+  // ◂ n/m ▸ stays visible whenever there is somewhere to cycle to, even with the rules focused —
+  // otherwise nothing on screen says the other lookups are still open.
+  const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
+  const paneFooter = showTabNav || focus === 'pane';
+  // Rows the pane spends on its own tab bar / prompt / footer, so the bordered box stays inside the
+  // viewport — an over-tall frame makes the terminal scroll and hides the editor cursor.
+  const paneChrome =
+    (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
+    (focus === 'ip-input' ? 2 : 0) +
+    (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
       <Box flexDirection="column" flexGrow={1} marginRight={pane ? 2 : 0}>
@@ -328,8 +372,10 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · s sitemap{paneLoading ? ' (loading…)' : ''} · a apply · q quit
-              ({onCount}/{items.length} on)
+              ip · s sitemap
+              {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
+              {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
+              {items.length} on)
             </Text>
           </Box>
         )}
@@ -361,9 +407,24 @@ export function App() {
       </Box>
       {pane && (
         <Box flexDirection="column" width={reportW}>
+          {pane === 'ip' && ipTabs.tabs.length > 0 && (
+            <Box>
+              {ipTabs.tabs.map((t, i) => (
+                <Text
+                  key={t.ip}
+                  bold={i === ipTabs.index}
+                  color={i === ipTabs.index ? 'cyan' : undefined}
+                  dimColor={i !== ipTabs.index}
+                >
+                  {i === ipTabs.index ? `[${t.ip}]` : ` ${t.ip} `}
+                  {t.loading ? '…' : ''}{' '}
+                </Text>
+              ))}
+            </Box>
+          )}
           <Box
             flexDirection="column"
-            height={reportH - (focus === 'ip-input' ? 2 : 0)}
+            height={reportH - paneChrome}
             borderStyle="round"
             borderColor={focus === 'editor' ? 'gray' : 'cyan'}
             paddingX={1}
@@ -379,11 +440,36 @@ export function App() {
                 kind={pane}
                 width={reportW - 4}
                 report={report}
-                ipPane={ipPane}
+                ipTab={ipTabs.active}
                 sitemap={sitemap}
               />
             </Box>
           </Box>
+          {paneFooter && (
+            <Box>
+              {showTabNav && (
+                <Text>
+                  <Text color="cyan" bold>
+                    ◂{' '}
+                  </Text>
+                  <Text bold>
+                    {ipTabs.index + 1}/{ipTabs.tabs.length}
+                  </Text>
+                  <Text color="cyan" bold>
+                    {' '}
+                    ▸
+                  </Text>
+                  <Text dimColor> tab/shift-tab · </Text>
+                </Text>
+              )}
+              {focus === 'pane' && (
+                <Text dimColor>
+                  j/k scroll · R refresh · i new ip
+                  {pane === 'ip' ? ' · x close tab' : ''} · esc rules
+                </Text>
+              )}
+            </Box>
+          )}
           {focus === 'ip-input' && (
             <Box>
               <Text color="cyan">IP: </Text>
@@ -405,13 +491,13 @@ function PaneBody({
   kind,
   width,
   report,
-  ipPane,
+  ipTab,
   sitemap,
 }: {
   kind: PaneKind;
   width: number;
   report: Pane<ReportData>;
-  ipPane: Pane<IpProfile>;
+  ipTab: IpTab | undefined;
   sitemap: Pane<SitemapReport>;
 }) {
   if (kind === 'report')
@@ -422,18 +508,22 @@ function PaneBody({
         loading={report.loading}
       />
     );
-  const p = kind === 'ip' ? ipPane : sitemap;
   const what = kind === 'ip' ? 'IP profile' : 'sitemap readers';
-  if (p.error) return <Text color="red">{p.error}</Text>;
-  if (!p.data)
-    return <Text dimColor>{p.loading ? `Loading ${what}…` : `no ${what} yet`}</Text>;
+  const state = kind === 'ip' ? ipTab : sitemap;
+  if (!state)
+    return <Text dimColor>no {what} yet — i to look one up</Text>;
+  if (state.error) return <Text color="red">{state.error}</Text>;
+  if (!state.data)
+    return (
+      <Text dimColor>{state.loading ? `Loading ${what}…` : `no ${what} yet`}</Text>
+    );
   return (
     <Box flexDirection="column">
-      {p.loading && <Text dimColor>refreshing…</Text>}
+      {state.loading && <Text dimColor>refreshing…</Text>}
       <Lines
         lines={
           kind === 'ip'
-            ? profileLines(ipPane.data as IpProfile)
+            ? profileLines((ipTab as IpTab).data as IpProfile)
             : sitemapLines(sitemap.data as SitemapReport)
         }
         width={width}

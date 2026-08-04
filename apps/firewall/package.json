@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "ip": "bun --env-file=../../.env.local src/profile.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
+    "setup": "bun --env-file=../../.env.local src/setup.tsx",
+    "sitemap": "bun --env-file=../../.env.local src/sitemap.ts",
     "test": "bun test"
   },
   "dependencies": {

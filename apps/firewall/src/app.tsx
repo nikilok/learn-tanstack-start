@@ -22,11 +22,27 @@ import {
   teamId,
   token,
 } from './client';
+import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
+import { type IpProfile, fetchIpProfile } from './ip-profile';
+import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
+import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
+import { sitemapLines } from './sitemap-view';
+import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
+
+type PaneKind = 'report' | 'ip' | 'sitemap';
+const PANE_KEY: Record<string, PaneKind> = {
+  r: 'report',
+  i: 'ip',
+  s: 'sitemap',
+};
+const IP_WINDOW_HOURS = 24;
+const SITEMAP_WINDOW_HOURS = 144;
+const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
 export function App() {
@@ -42,18 +58,23 @@ export function App() {
     summary: string;
     ok: boolean;
   } | null>(null);
-  const [report, setReport] = useState<ReportData | null>(null);
-  const [reportError, setReportError] = useState('');
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false); // report pane visible on the right
-  const [focus, setFocus] = useState<'editor' | 'report'>('editor');
+  const report = usePane<ReportData>();
+  const ipPane = usePane<IpProfile>();
+  const sitemap = usePane<SitemapReport>();
+  const [pane, setPane] = useState<PaneKind | null>(null);
+  const [focus, setFocus] = useState<'editor' | 'pane' | 'ip-input'>('editor');
+  const [ipInput, setIpInput] = useState('');
+  const [ipError, setIpError] = useState('');
   const applying = useRef(false); // re-entrancy guard: 'a' fires before the phase re-render lands
   // Quit requested mid-apply: exit() only unmounts, so the loop must stop itself first.
   const cancelApply = useRef(false);
-  const loadingReport = useRef(false); // dedupe concurrent report fetches
   const [reportScroll, setReportScroll] = useState(0);
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
   const reportRef = useRef<DOMElement | null>(null);
+
+  const active =
+    pane === 'report' ? report : pane === 'ip' ? ipPane : sitemap;
+  const paneLoading = pane !== null && active.loading;
 
   // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
   // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
@@ -74,17 +95,17 @@ export function App() {
       });
   }, []);
 
-  // Measure the report content (post-render) to clamp how far it can scroll: content height minus
+  // Measure the pane content (post-render) to clamp how far it can scroll: content height minus
   // the visible area (reportH minus the box's top+bottom border).
   useEffect(() => {
-    if (!reportOpen || !report || !reportRef.current) return;
+    if (!pane || !reportRef.current) return;
     const max = Math.max(
       0,
       measureElement(reportRef.current).height - (reportH - 2),
     );
     setReportMaxScroll(max);
     setReportScroll((s) => Math.min(s, max));
-  }, [report, reportOpen, reportH]);
+  }, [pane, report.data, ipPane.data, sitemap.data, reportH]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -138,21 +159,43 @@ export function App() {
     setPhase('select');
   };
 
-  /** Fetch the firewall report for the side pane; dedupes concurrent loads and keeps the prior result visible while refreshing. */
-  const loadReport = async () => {
-    if (loadingReport.current) return;
-    loadingReport.current = true;
-    setReportLoading(true);
-    setReportError('');
-    setReportScroll(0);
-    try {
-      setReport(await fetchReport({ projectId, teamId, token }));
-    } catch (e) {
-      setReportError(errMsg(e));
-    } finally {
-      loadingReport.current = false;
-      setReportLoading(false);
+  const creds = { projectId, teamId, token };
+
+  /** Open a pane, loading it on first view; pressing the same key again refreshes it. */
+  const openPane = (kind: PaneKind, refresh: boolean) => {
+    setPane(kind);
+    if (kind === 'ip') {
+      // No IP yet, or an explicit re-open: ask for one rather than showing a stale profile.
+      if (refresh || !ipPane.data) {
+        setIpInput('');
+        setIpError('');
+        setFocus('ip-input');
+        return;
+      }
+      setFocus('pane');
+      return;
     }
+    setFocus('pane');
+    setReportScroll(0);
+    if (kind === 'report' && (refresh || !report.data))
+      void report.load(() => fetchReport(creds));
+    if (kind === 'sitemap' && (refresh || !sitemap.data))
+      void sitemap.load(() =>
+        fetchSitemapReport(creds, SITEMAP_WINDOW_HOURS),
+      );
+  };
+
+  /** Validate and profile the typed IP; keeps focus in the field when it is not an IP. */
+  const submitIp = () => {
+    const ip = ipInput.trim();
+    if (!ip || !IP_CHARS.test(ip)) {
+      setIpError('not an IP address');
+      return;
+    }
+    setIpError('');
+    setFocus('pane');
+    setReportScroll(0);
+    void ipPane.load(() => fetchIpProfile(creds, ip, IP_WINDOW_HOURS));
   };
 
   /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
@@ -175,15 +218,29 @@ export function App() {
     }));
 
   useInput((input, key) => {
-    if (focus === 'report') {
+    // Text entry owns every keystroke, so q/j/k stay typeable inside an IP.
+    if (focus === 'ip-input') {
+      if (key.escape) setFocus(ipPane.data ? 'pane' : 'editor');
+      else if (key.return) submitIp();
+      else if (key.backspace || key.delete)
+        setIpInput((s) => s.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta && IP_CHARS.test(input))
+        setIpInput((s) => (s + input).slice(0, 45)); // longest IPv6 literal
+      return;
+    }
+    if (focus === 'pane') {
       if (input === 'q') exit();
-      else if (input === 'r')
-        void loadReport(); // refresh
+      else if (PANE_KEY[input])
+        // Same key again = refresh; a different one switches pane.
+        openPane(PANE_KEY[input], PANE_KEY[input] === pane);
       else if (key.escape) setFocus('editor');
       else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
       else if (key.downArrow || input === 'j')
         setReportScroll((s) => Math.min(reportMaxScroll, s + 1));
+      else if (key.pageUp) setReportScroll((s) => Math.max(0, s - reportH + 2));
+      else if (key.pageDown)
+        setReportScroll((s) => Math.min(reportMaxScroll, s + reportH - 2));
       return;
     }
     if (phase === 'select') {
@@ -198,11 +255,9 @@ export function App() {
         setPhase('action');
       } else if (input === ' ')
         editCursorItem((it) => ({ ...it, active: !it.active }));
-      else if (input === 'r') {
-        setReportOpen(true);
-        setFocus('report');
-        if (!report) void loadReport(); // lazy: fetch once; cached after, so re-opening is instant
-      } else if (input === 'a') {
+      // Lazy: fetch once, cached after, so re-opening a pane is instant.
+      else if (PANE_KEY[input]) openPane(PANE_KEY[input], false);
+      else if (input === 'a') {
         if (applying.current) return;
         applying.current = true;
         cancelApply.current = false; // a prior cancelled run must not abort this one
@@ -245,7 +300,7 @@ export function App() {
   const reportW = Math.max(46, Math.floor(cols * 0.5)); // ≥50% on wide terminals; 46-col floor keeps it readable when narrow
   return (
     <Box flexDirection="row">
-      <Box flexDirection="column" flexGrow={1} marginRight={reportOpen ? 2 : 0}>
+      <Box flexDirection="column" flexGrow={1} marginRight={pane ? 2 : 0}>
         <Box>
           <Text bold>Vercel firewall rules </Text>
           <Text color={dryRun ? 'yellow' : 'green'}>
@@ -272,9 +327,9 @@ export function App() {
               </Text>
             )}
             <Text dimColor>
-              ↑/↓ move · ←/→ action · enter menu · space on/off · r report
-              {reportLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}
-              /{items.length} on)
+              ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
+              ip · s sitemap{paneLoading ? ' (loading…)' : ''} · a apply · q quit
+              ({onCount}/{items.length} on)
             </Text>
           </Box>
         )}
@@ -304,30 +359,85 @@ export function App() {
           <Text color="yellow">applying… · q stops after the current rule</Text>
         )}
       </Box>
-      {reportOpen && (
-        <Box
-          flexDirection="column"
-          width={reportW}
-          height={reportH}
-          borderStyle="round"
-          borderColor={focus === 'report' ? 'cyan' : 'gray'}
-          paddingX={1}
-          overflowY="hidden"
-        >
+      {pane && (
+        <Box flexDirection="column" width={reportW}>
           <Box
-            ref={reportRef}
             flexDirection="column"
-            flexShrink={0}
-            marginTop={-reportScroll}
+            height={reportH - (focus === 'ip-input' ? 2 : 0)}
+            borderStyle="round"
+            borderColor={focus === 'editor' ? 'gray' : 'cyan'}
+            paddingX={1}
+            overflowY="hidden"
           >
-            <ReportView
-              report={report}
-              error={reportError}
-              loading={reportLoading}
-            />
+            <Box
+              ref={reportRef}
+              flexDirection="column"
+              flexShrink={0}
+              marginTop={-reportScroll}
+            >
+              <PaneBody
+                kind={pane}
+                width={reportW - 4}
+                report={report}
+                ipPane={ipPane}
+                sitemap={sitemap}
+              />
+            </Box>
           </Box>
+          {focus === 'ip-input' && (
+            <Box>
+              <Text color="cyan">IP: </Text>
+              <Text>{ipInput}</Text>
+              <Text color="cyan">▏</Text>
+              <Text dimColor>
+                {ipError ? `  ${ipError}` : '  enter profile · esc cancel'}
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
+    </Box>
+  );
+}
+
+/** Body of whichever side pane is open. Report keeps its bespoke Ink view; the other two share the line model. */
+function PaneBody({
+  kind,
+  width,
+  report,
+  ipPane,
+  sitemap,
+}: {
+  kind: PaneKind;
+  width: number;
+  report: Pane<ReportData>;
+  ipPane: Pane<IpProfile>;
+  sitemap: Pane<SitemapReport>;
+}) {
+  if (kind === 'report')
+    return (
+      <ReportView
+        report={report.data}
+        error={report.error}
+        loading={report.loading}
+      />
+    );
+  const p = kind === 'ip' ? ipPane : sitemap;
+  const what = kind === 'ip' ? 'IP profile' : 'sitemap readers';
+  if (p.error) return <Text color="red">{p.error}</Text>;
+  if (!p.data)
+    return <Text dimColor>{p.loading ? `Loading ${what}…` : `no ${what} yet`}</Text>;
+  return (
+    <Box flexDirection="column">
+      {p.loading && <Text dimColor>refreshing…</Text>}
+      <Lines
+        lines={
+          kind === 'ip'
+            ? profileLines(ipPane.data as IpProfile)
+            : sitemapLines(sitemap.data as SitemapReport)
+        }
+        width={width}
+      />
     </Box>
   );
 }

@@ -8,7 +8,8 @@
 
 import { resolveVercelCredentials } from './credentials';
 import { fetchIpProfile, topIps } from './ip-profile';
-import { renderProfile } from './ip-profile-view';
+import { profileLines } from './ip-profile-view';
+import { toAnsi } from './line-model';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 24;
@@ -78,8 +79,11 @@ async function main() {
   }
 
   const profile = await fetchIpProfile(creds, args.ip, args.hours);
-  const useColour = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-  console.log(renderProfile(profile, useColour));
+  console.log(
+    toAnsi(profileLines(profile), {
+      colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
+    }),
+  );
 }
 
 // Guarded so the arg parser above can be imported by tests without running a query.

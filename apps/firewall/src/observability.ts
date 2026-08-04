@@ -16,7 +16,7 @@ export type Ctx = {
 export const MAX_CONCURRENT = 6; // simultaneous observability calls (they 429 if fanned out wide)
 
 /** `fetch` AND the body read under one abort timeout — `await fetch` settles at headers, so timing only the fetch leaves a stalled body with no deadline. */
-export async function fetchWithTimeout(
+async function fetchWithTimeout(
   input: string,
   init: RequestInit,
   timeoutMs = 30000,
@@ -108,7 +108,7 @@ export async function metrics(
 }
 
 /** Extract the summed count from an observability summary row (scalar or {value|sum}). */
-export function cnt(row: Row): number {
+function cnt(row: Row): number {
   const v = (row.count_sum ?? row.count) as unknown;
   if (v && typeof v === 'object') {
     const o = v as { value?: number; sum?: number };

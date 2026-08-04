@@ -167,7 +167,7 @@ export function profileLines(
   L.push(
     ...heading('TRAFFIC MIX'),
     line(
-      `  page ${m.page} · rpc ${m.rpc} · asset ${m.asset} · beacon ${m.beacon} · tile ${m.tile} · crawl ${m.crawl}`,
+      `  page ${m.page} · rpc ${m.rpc} · api ${m.api} · asset ${m.asset} · beacon ${m.beacon} · tile ${m.tile} · crawl ${m.crawl}`,
     ),
   );
 

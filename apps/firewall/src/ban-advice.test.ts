@@ -31,6 +31,7 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
     asns: [['Consumer ISP', 9060]],
     botVerified: [],
     wafActions: [['log', 9060]],
+    wafRules: [],
     reach: {
       ja4: 't13d311200_1d947a95fc68_7e1102d2036b',
       ips: 413,
@@ -59,6 +60,7 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
     asns: [['British Telecommunications Limited', 663]],
     botVerified: [],
     wafActions: [['allow', 662]],
+    wafRules: [],
     reach: {
       ja4: 't13d2013h2_a09f3c656075_7f0f34a4126d',
       ips: 3,
@@ -173,5 +175,54 @@ describe('adviseBan — the one-tell threshold', () => {
       reach: undefined,
     });
     if (a.verdict === 'watch') expect(a.digest).toBeDefined();
+  });
+});
+
+describe('adviseBan — first-party callers', () => {
+  // ch-stream: Bun on Railway, POST /api/revalidate, matched by allow-ch-stream-revalidate.
+  const chStream = (): AdviceInput => ({
+    total: 1158,
+    mix: mixOf([['/api/revalidate', 1158]]),
+    shape: shapeOf(series(Array(144).fill(8), 0, 144), 10),
+    ja4: [['t13d1714h1_5b57614c22b0_7baf387fc6ff', 1158]],
+    asns: [['Railway', 1158]],
+    botVerified: [],
+    wafActions: [['bypass', 1158]],
+    wafRules: [['allow-ch-stream-revalidate', 1158]],
+    reach: {
+      ja4: 't13d1714h1_5b57614c22b0_7baf387fc6ff',
+      ips: 1,
+      countries: 1,
+      verifiedNames: [],
+      total: 1158,
+    },
+    alreadyDenied: false,
+    windowMinutes: 1440,
+  });
+
+  test('our own cache-invalidation caller is never recommended for a deny', () => {
+    const a = adviseBan(chStream());
+    expect(a.verdict).toBe('leave');
+  });
+
+  test('the matched allow rule is named, and treated as an authentication fact', () => {
+    const b = adviseBan(chStream()).blockers.join(' ');
+    expect(b).toContain('allow-ch-stream-revalidate');
+    expect(b).toContain('our own secret header');
+  });
+
+  test('an API-only client is blocked for having nothing to enumerate', () => {
+    const a = adviseBan({
+      ...chStream(),
+      wafActions: [['log', 1158]],
+      wafRules: [],
+    });
+    expect(a.verdict).toBe('leave');
+    expect(a.blockers.join(' ')).toContain('nothing here to enumerate');
+  });
+
+  test('/api/ paths are not counted as page fetches', () => {
+    expect(mixOf([['/api/revalidate', 5]]).page).toBe(0);
+    expect(mixOf([['/api/revalidate', 5]]).api).toBe(5);
   });
 });

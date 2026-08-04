@@ -284,6 +284,7 @@ export function App() {
         asns: ipTabs.active.data.byAsn,
         botVerified: ipTabs.active.data.byBotVerified,
         wafActions: ipTabs.active.data.byWafAction,
+        wafRules: ipTabs.active.data.byWafRule,
         reach: ipTabs.active.data.reach,
         alreadyDenied: liveJa4.includes(ipTabs.active.data.byJa4[0]?.[0] ?? ''),
         windowMinutes: ipTabs.active.data.windowHours * 60,

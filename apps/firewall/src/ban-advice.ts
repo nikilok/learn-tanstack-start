@@ -36,6 +36,7 @@ export type AdviceInput = {
   asns: [string, number][];
   botVerified: [string, number][];
   wafActions: [string, number][];
+  wafRules: [string, number][]; // custom rules that acted, by name
   reach?: DigestReach;
   alreadyDenied: boolean; // digest is already in FW_BLOCKED_JA4
   windowMinutes: number;
@@ -66,6 +67,24 @@ function blockersFor(input: AdviceInput): string[] {
   if (input.total < MIN_VOLUME)
     out.push(
       `only ${input.total} requests — below ${MIN_VOLUME}, not worth a rule evaluated on every request`,
+    );
+  // Conclusive, and it is an authentication fact rather than a heuristic: our allow rules match
+  // on PRESENCE of a bespoke secret header, so a bypass means the caller held our credential.
+  const allowRule = input.wafRules.find(([name]) => name.startsWith('allow-'));
+  if (allowRule)
+    out.push(
+      `matched ${allowRule[0]} (${allowRule[1]}x) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
+    );
+  const bypassed = input.wafActions.find(([a]) => a === 'bypass');
+  if (!allowRule && bypassed && bypassed[1] > 0)
+    out.push(
+      `${bypassed[1]} requests bypassed by one of our own allow rules — a first-party caller, not a scraper`,
+    );
+  // Nothing to scrape. A client that never fetches content cannot be enumerating it, whatever
+  // its TLS or session shape looks like.
+  if (input.mix.page === 0)
+    out.push(
+      `fetches no content pages (${input.mix.api} API, ${input.mix.rpc} RPC) — there is nothing here to enumerate`,
     );
   if (input.alreadyDenied) out.push('already in FW_BLOCKED_JA4 — nothing to add');
   if (!input.ja4.length) out.push('no TLS fingerprint recorded — nothing to deny on');

@@ -3,7 +3,14 @@
 
 import type { Bucket } from './observability';
 
-export type PathKind = 'asset' | 'beacon' | 'rpc' | 'tile' | 'crawl' | 'page';
+export type PathKind =
+  | 'asset'
+  | 'beacon'
+  | 'rpc'
+  | 'tile'
+  | 'crawl'
+  | 'api'
+  | 'page';
 
 /** Classify a request path. `asset`+`beacon` are the sub-resources a raw-HTML fetcher never pulls. */
 export function pathKind(path: string): PathKind {
@@ -14,6 +21,9 @@ export function pathKind(path: string): PathKind {
     return 'beacon';
   if (path.startsWith('/_serverFn')) return 'rpc';
   if (path.startsWith('/api/tiles')) return 'tile';
+  // Our own API surface. NOT a page: counting /api/revalidate as a page fetch made a
+  // server-to-server caller read as HTML enumeration and got ch-stream recommended for a deny.
+  if (path.startsWith('/api/')) return 'api';
   // Ahead of the extension test below: a sitemap is .xml but is the opposite of a browser
   // sub-resource, and counting it as one inverts the strongest tell there is.
   if (/^\/(sitemap[\w-]*\.xml|robots\.txt|llms(-full)?\.txt)$/.test(path))
@@ -31,7 +41,7 @@ export function pathKind(path: string): PathKind {
 
 export type Mix = Record<PathKind, number> & { total: number };
 
-/** Bucket a path→count list into the six kinds. */
+/** Bucket a path→count list into the seven kinds. */
 export function mixOf(paths: [string, number][]): Mix {
   const mix: Mix = {
     asset: 0,
@@ -39,6 +49,7 @@ export function mixOf(paths: [string, number][]): Mix {
     rpc: 0,
     tile: 0,
     crawl: 0,
+    api: 0,
     page: 0,
     total: 0,
   };

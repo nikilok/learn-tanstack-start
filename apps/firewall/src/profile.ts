@@ -6,7 +6,9 @@
 //   bun run firewall:ip --top            busiest IPs in the last 24h
 //   bun run firewall:ip --top 6 --limit 40
 
+import { adviseBan } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
+import { JA4_DENY, envMatching } from './deny-list';
 import { fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
@@ -79,8 +81,23 @@ async function main() {
   }
 
   const profile = await fetchIpProfile(creds, args.ip, args.hours);
+  // Not required: without a denylist configured nothing is already-denied, which is the truth.
+  const denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  const advice = adviseBan({
+    total: profile.total,
+    mix: profile.mix,
+    shape: profile.shape,
+    ja4: profile.byJa4,
+    asns: profile.byAsn,
+    botVerified: profile.byBotVerified,
+    wafActions: profile.byWafAction,
+    wafRules: profile.byWafRule,
+    reach: profile.reach,
+    alreadyDenied: denied.includes(profile.byJa4[0]?.[0] ?? ''),
+    windowMinutes: profile.windowHours * 60,
+  });
   console.log(
-    toAnsi(profileLines(profile, process.stdout.columns), {
+    toAnsi(profileLines(profile, process.stdout.columns, advice), {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
     }),
   );

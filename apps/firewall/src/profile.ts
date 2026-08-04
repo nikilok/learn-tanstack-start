@@ -12,6 +12,7 @@ import { JA4_DENY, envMatching } from './deny-list';
 import { fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
+import { rollingWindow } from './time-window';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 24;
@@ -71,7 +72,11 @@ async function main() {
   const creds = resolveVercelCredentials();
 
   if (args.mode === 'top') {
-    const { rows, error } = await topIps(creds, args.hours, args.limit);
+    const { rows, error } = await topIps(
+      creds,
+      rollingWindow(args.hours, new Date()),
+      args.limit,
+    );
     if (error) throw new Error(error);
     console.log(`Busiest IPs, last ${args.hours}h\n`);
     for (const [ip, count] of rows)
@@ -80,7 +85,11 @@ async function main() {
     return;
   }
 
-  const profile = await fetchIpProfile(creds, args.ip, args.hours);
+  const profile = await fetchIpProfile(
+    creds,
+    args.ip,
+    rollingWindow(args.hours, new Date()),
+  );
   // Not required: without a denylist configured nothing is already-denied, which is the truth.
   const deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
   const advice = adviseBan({

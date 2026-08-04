@@ -45,6 +45,7 @@ import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
+import { type Window, resolveWindow, rollingWindow } from './time-window';
 import { type IpTab, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
@@ -89,7 +90,7 @@ export function App() {
   const ipTabs = useIpTabs({ projectId, teamId, token });
   const [pane, setPane] = useState<PaneKind | null>(null);
   const [focus, setFocus] = useState<
-    'editor' | 'pane' | 'ip-input' | 'asn-input' | 'confirm'
+    'editor' | 'pane' | 'ip-input' | 'asn-input' | 'range-input' | 'confirm'
   >('editor');
   const [ipInput, setIpInput] = useState('');
   const [ipError, setIpError] = useState('');
@@ -97,6 +98,12 @@ export function App() {
   const [ipCursor, setIpCursor] = useState(-1);
   const [asnInput, setAsnInput] = useState('');
   const [asnError, setAsnError] = useState('');
+  // The window IP lookups use. Rolling by default; `w` switches it to a typed date range.
+  const [ipWindow, setIpWindow] = useState<Window>(() =>
+    rollingWindow(IP_WINDOW_HOURS, new Date()),
+  );
+  const [rangeInput, setRangeInput] = useState('');
+  const [rangeError, setRangeError] = useState('');
   const topIpList = usePane<[string, number][]>();
   const denyActivity = usePane<Map<string, Activity>>();
   const [denyCursor, setDenyCursor] = useState(0);
@@ -300,9 +307,10 @@ export function App() {
     : undefined;
 
   // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
-  const ipMatches = (topIpList.data ?? [])
-    .filter(([ip]) => !ipInput || ip.includes(ipInput))
-    .slice(0, IP_SUGGESTIONS);
+  const ipFiltered = (topIpList.data ?? []).filter(
+    ([ip]) => !ipInput || ip.includes(ipInput),
+  );
+  const ipMatches = ipFiltered.slice(0, IP_SUGGESTIONS);
 
   /** Open a pane, loading it on first view. `i` always prompts for another IP — tab is how you get back to one already open. */
   const openPane = (kind: PaneKind) => {
@@ -316,7 +324,7 @@ export function App() {
       // Picking from live traffic beats typing an address from memory. Fetched once per session.
       if (!topIpList.data)
         void topIpList.load(async () => {
-          const { rows, error } = await topIps(creds, IP_WINDOW_HOURS, TOP_IPS_LIMIT);
+          const { rows, error } = await topIps(creds, ipWindow, TOP_IPS_LIMIT);
           if (error) throw new Error(error);
           return rows;
         });
@@ -389,6 +397,30 @@ export function App() {
     setApplied(null);
   };
 
+  /** Apply a typed date range to IP lookups. Blank reverts to the rolling default. */
+  const submitRange = (raw: string) => {
+    const text = raw.trim();
+    const next = text
+      ? resolveWindow(text, new Date())
+      : { window: rollingWindow(IP_WINDOW_HOURS, new Date()) };
+    if ('error' in next) {
+      setRangeError(next.error);
+      return;
+    }
+    setRangeError('');
+    setIpWindow(next.window);
+    // The list is window-scoped, so it has to be refetched, not filtered.
+    void topIpList.load(async () => {
+      const { rows, error } = await topIps(creds, next.window, TOP_IPS_LIMIT);
+      if (error) throw new Error(error);
+      return rows;
+    });
+    // Back to the picker: choosing a range is a step in choosing an IP, not the end of it.
+    setIpInput('');
+    setIpCursor(-1);
+    setFocus('ip-input');
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
@@ -416,7 +448,7 @@ export function App() {
     setIpError('');
     setFocus('pane');
     setReportScroll(0);
-    ipTabs.open(ip, IP_WINDOW_HOURS);
+    ipTabs.open(ip, ipWindow);
   };
 
   /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
@@ -448,6 +480,20 @@ export function App() {
       } else if (input === 'n' || input === 'N' || key.escape) {
         setConfirm(null);
         setFocus('pane');
+      }
+      return;
+    }
+    if (focus === 'range-input') {
+      if (key.escape) setFocus(pane ? 'pane' : 'editor');
+      else if (key.return) submitRange(rangeInput);
+      else if (key.backspace || key.delete)
+        setRangeInput((s) => s.slice(0, -1));
+      else if (input && !key.ctrl && !key.meta) {
+        // Filter within the chunk and submit on an embedded newline: a pasted range arrives
+        // whole, and testing the whole string would reject every paste.
+        const next = (rangeInput + input.replace(/[^\d\s/.-]/g, '')).slice(0, 32);
+        setRangeInput(next);
+        if (/[\r\n]/.test(input)) submitRange(next);
       }
       return;
     }
@@ -491,6 +537,12 @@ export function App() {
       else if (key.backspace || key.delete) {
         setIpInput((s) => s.slice(0, -1));
         setIpCursor(-1);
+      }
+      // `w` cannot occur in an IP, so intercepting it here costs nothing and saves an esc.
+      else if (input === 'w') {
+        setRangeInput('');
+        setRangeError('');
+        setFocus('range-input');
       } else if (input && !key.ctrl && !key.meta) {
         setIpCursor(-1); // typing re-asserts the typed text over any highlight
         // A paste arrives as ONE chunk, so filter within it rather than testing the whole
@@ -626,9 +678,10 @@ export function App() {
   const paneChrome =
     (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
     // The suggestion overlay grows the prompt, so the box has to give back the same rows.
-    (focus === 'ip-input' ? 2 + ipMatches.length + (topIpList.loading ? 1 : 0) : 0) +
+    (focus === 'ip-input' ? 3 + ipMatches.length : 0) +
     (focus === 'confirm' ? 3 : 0) +
     (focus === 'asn-input' ? 1 : 0) +
+    (focus === 'range-input' ? 1 : 0) +
     (paneFooter ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -764,7 +817,7 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
-                  new ip
+                  new ip · w range
                   {pane === 'ip' && ipAdvice && !ipAdvice.blockers.length
                     ? ' · b deny fingerprint'
                     : ''}
@@ -772,6 +825,18 @@ export function App() {
                   {pane === 'ip' ? ' · x close tab' : ''} · esc rules
                 </Text>
               )}
+            </Box>
+          )}
+          {focus === 'range-input' && (
+            <Box>
+              <Text color="cyan">range: </Text>
+              <Text>{rangeInput}</Text>
+              <Text color="cyan">▏</Text>
+              <Text dimColor>
+                {rangeError
+                  ? `  ${rangeError}`
+                  : `  e.g. 08 02 2026 - 08 04 2026 · one date = that day to now · blank = last ${IP_WINDOW_HOURS}h`}
+              </Text>
             </Box>
           )}
           {focus === 'asn-input' && (
@@ -804,8 +869,20 @@ export function App() {
           )}
           {focus === 'ip-input' && (
             <Box flexDirection="column">
-              {topIpList.loading && !topIpList.data && (
+              {topIpList.loading && !topIpList.data ? (
                 <Text dimColor>  loading busiest IPs…</Text>
+              ) : (
+                topIpList.data && (
+                  <Text dimColor>
+                    {'  '}busiest IPs · {ipWindow.label} ·{' '}
+                    {ipInput
+                      ? `${ipFiltered.length} match` +
+                        (ipFiltered.length > ipMatches.length
+                          ? `, showing ${ipMatches.length}`
+                          : '')
+                      : `top ${ipMatches.length} of ${topIpList.data.length}, type to filter · w changes range`}
+                  </Text>
+                )
               )}
               {ipMatches.map(([ip, count], i) => {
                 const open = ipTabs.tabs.some((t) => t.ip === ip);

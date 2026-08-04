@@ -157,7 +157,7 @@ export function profileLines(
 
   L.push(
     line(
-      seg(`${p.ip} — last ${p.windowHours}h`, 'bold'),
+      seg(`${p.ip} — ${p.windowLabel}`, 'bold'),
       seg(`  (${p.start.slice(0, 16)}Z → ${p.end.slice(0, 16)}Z)`, 'dim'),
     ),
     line(`${p.total} requests`),

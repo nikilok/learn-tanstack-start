@@ -1,6 +1,7 @@
 // Client for Vercel's dashboard observability endpoint, shared by the report pane and the IP
 // profiler. Window is capped at ~7 days by the `observability_chart_free` reason.
 
+import { type Window, rollingWindow } from './time-window';
 import { errMsg } from './util';
 
 export type Row = Record<string, unknown>;
@@ -183,18 +184,16 @@ export async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
   return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
 }
 
-/** Build the request context for a window ending now, `days` back. Ceils to a whole hour so the API's granularity-alignment rule is satisfied. */
+/** Build the request context for an explicit window. Callers pass a resolved Window, which has already been hour-aligned and clamped to what the API will serve. */
 export function makeCtx(
   creds: { projectId: string; teamId: string; token: string },
-  span: { days?: number; hours?: number },
+  span: { days?: number; hours?: number } | Window,
 ): { ctx: Ctx; now: Date } {
   const now = new Date();
-  const end = new Date(now);
-  end.setUTCMinutes(0, 0, 0);
-  end.setUTCHours(end.getUTCHours() + 1); // ceil to next whole hour so the API window is aligned
-  const start = new Date(end);
-  if (span.days) start.setUTCDate(start.getUTCDate() - span.days);
-  if (span.hours) start.setUTCHours(start.getUTCHours() - span.hours);
+  const w =
+    'fromISO' in span ? span : rollingWindow(span.days ? span.days * 24 : (span.hours ?? 24), now);
+  const start = new Date(w.fromISO);
+  const end = new Date(w.toISO);
   return {
     now,
     ctx: {

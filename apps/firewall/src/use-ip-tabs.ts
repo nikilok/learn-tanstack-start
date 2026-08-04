@@ -4,13 +4,14 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { type IpProfile, fetchIpProfile } from './ip-profile';
+import type { Window } from './time-window';
 import { errMsg } from './util';
 
 export type Creds = { projectId: string; teamId: string; token: string };
 
 export type IpTab = {
   ip: string;
-  hours: number;
+  window: Window;
   data: IpProfile | null;
   error: string;
   loading: boolean;
@@ -21,7 +22,7 @@ export type IpTabs = {
   index: number;
   active: IpTab | undefined;
   /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
-  open: (ip: string, hours: number) => void;
+  open: (ip: string, window: Window) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. */
   refresh: () => void;
   /** Move `dir` tabs, wrapping. */
@@ -47,7 +48,7 @@ export function useIpTabs(creds: Creds): IpTabs {
   const inFlight = useRef(new Set<string>());
 
   const run = useCallback(
-    async (ip: string, hours: number) => {
+    async (ip: string, window: Window) => {
       if (inFlight.current.has(ip)) return;
       inFlight.current.add(ip);
       const patch = (p: Partial<IpTab>) =>
@@ -57,7 +58,7 @@ export function useIpTabs(creds: Creds): IpTabs {
         );
       patch({ loading: true, error: '' });
       try {
-        patch({ data: await fetchIpProfile(creds, ip, hours), loading: false });
+        patch({ data: await fetchIpProfile(creds, ip, window), loading: false });
       } catch (e) {
         patch({ error: errMsg(e), loading: false });
       } finally {
@@ -68,7 +69,7 @@ export function useIpTabs(creds: Creds): IpTabs {
   );
 
   const open = useCallback(
-    (ip: string, hours: number) => {
+    (ip: string, window: Window) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
       const existing = tabs.findIndex((t) => t.ip === ip);
       if (existing !== -1) {
@@ -77,17 +78,17 @@ export function useIpTabs(creds: Creds): IpTabs {
       }
       setTabs((prev) => [
         ...prev,
-        { ip, hours, data: null, error: '', loading: true },
+        { ip, window, data: null, error: '', loading: true },
       ]);
       setIndex(tabs.length); // where the append lands
-      void run(ip, hours);
+      void run(ip, window);
     },
     [run, tabs],
   );
 
   const refresh = useCallback(() => {
     const t = tabs[index];
-    if (t) void run(t.ip, t.hours);
+    if (t) void run(t.ip, t.window);
   }, [tabs, index, run]);
 
   const cycle = useCallback(

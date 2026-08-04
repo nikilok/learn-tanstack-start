@@ -20,6 +20,7 @@ import {
   seriesByIp,
   top,
 } from './observability';
+import type { Window } from './time-window';
 import { errMsg } from './util';
 
 // 10-minute buckets resolve a session; hourly hides it. Past 2 days that is too many rows to read.
@@ -30,6 +31,7 @@ export type IpProfile = {
   start: string;
   end: string;
   windowHours: number;
+  windowLabel: string;
   total: number;
   byStatus: [string, number][];
   byUserAgent: [string, number][];
@@ -92,10 +94,11 @@ async function group(
 export async function fetchIpProfile(
   creds: { projectId: string; teamId: string; token: string },
   ip: string,
-  hours: number,
+  window: Window,
 ): Promise<IpProfile> {
   if (!safeIp(ip)) throw new Error(`"${ip}" is not a valid IP address`);
-  const { ctx } = makeCtx(creds, { hours });
+  const hours = window.hours;
+  const { ctx } = makeCtx(creds, window);
   const filter = `clientIp eq '${ip}'`;
   const errors: string[] = [];
   const g = (label: string, dims: string[], event?: string) => () =>
@@ -228,6 +231,7 @@ export async function fetchIpProfile(
     start: ctx.startTime,
     end: ctx.endTime,
     windowHours: hours,
+    windowLabel: window.label,
     total,
     byStatus,
     byUserAgent,
@@ -263,10 +267,10 @@ export async function fetchIpProfile(
 /** Top IPs by volume over the window — the entry point when you do not yet have an IP to profile. */
 export async function topIps(
   creds: { projectId: string; teamId: string; token: string },
-  hours: number,
+  window: Window,
   limit: number,
 ): Promise<{ rows: [string, number][]; error?: string }> {
-  const { ctx } = makeCtx(creds, { hours });
+  const { ctx } = makeCtx(creds, window);
   try {
     return {
       rows: top(await metrics(ctx, ['clientIp'], { limit: 500 }), 'clientIp', limit),

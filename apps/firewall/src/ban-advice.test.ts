@@ -32,14 +32,14 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
     total: 9060,
     mix: scraperMix,
     shape: shapeOf(series(Array(144).fill(63), 0, 144), 10),
-    ja4: [['t13d311200_1d947a95fc68_7e1102d2036b', 9060]],
+    ja4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', 9060]],
     asns: [['Consumer ISP', 9060]],
     botVerified: [],
     wafActions: [['log', 9060]],
     wafRules: [],
     statuses: [['200', 9000]],
     digestReach: {
-      label: 't13d311200_1d947a95fc68_7e1102d2036b',
+      label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
       ips: 413,
       countries: 205,
       total: 171751,
@@ -81,14 +81,14 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
     total: 663,
     mix,
     shape: shapeOf(series([246, 105, 177, 135], 120, 144), 10),
-    ja4: [['t13d2013h2_a09f3c656075_7f0f34a4126d', 662]],
+    ja4: [['t13dhumnh2_cccccccccccc_dddddddddddd', 662]],
     asns: [['British Telecommunications Limited', 663]],
     botVerified: [],
     wafActions: [['allow', 662]],
     wafRules: [],
     statuses: [['200', 9000]],
     digestReach: {
-      label: 't13d2013h2_a09f3c656075_7f0f34a4126d',
+      label: 't13dhumnh2_cccccccccccc_dddddddddddd',
       ips: 3,
       countries: 1,
       total: 663,
@@ -111,7 +111,7 @@ describe('adviseBan — the scraper', () => {
   test('recommends a deny on its digest, not its IP', () => {
     const a = adviseBan(scraper());
     expect(a.verdict).toBe('ban');
-    expect(a.digest).toBe('t13d311200_1d947a95fc68_7e1102d2036b');
+    expect(a.digest).toBe('t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb');
     expect(a.blockers).toEqual([]);
   });
 
@@ -162,9 +162,9 @@ describe('adviseBan — the blockers that matter', () => {
     // t13d1713h1_…: 229 IPs, zero sub-resources, 336 /company/ — and carries claude-user.
     const a = adviseBan(
       scraper({
-        ja4: [['t13d1713h1_ab0a1bf427ad_ecd0401ec68b', 9060]],
+        ja4: [['t13dshrdh1_111111111111_222222222222', 9060]],
         digestReach: {
-          label: 't13d1713h1_ab0a1bf427ad_ecd0401ec68b',
+          label: 't13dshrdh1_111111111111_222222222222',
           ips: 229,
           countries: 16,
           total: 419,
@@ -273,14 +273,14 @@ describe('adviseBan — first-party callers', () => {
     total: 1158,
     mix: mixOf([['/api/revalidate', 1158]]),
     shape: shapeOf(series(Array(144).fill(8), 0, 144), 10),
-    ja4: [['t13d1714h1_5b57614c22b0_7baf387fc6ff', 1158]],
+    ja4: [['t13dpolah1_777777777777_888888888888', 1158]],
     asns: [['Railway', 1158]],
     botVerified: [],
     wafActions: [['bypass', 1158]],
     wafRules: [['allow-ch-stream-revalidate', 1158]],
     statuses: [['202', 1158]],
     digestReach: {
-      label: 't13d1714h1_5b57614c22b0_7baf387fc6ff',
+      label: 't13dpolah1_777777777777_888888888888',
       ips: 1,
       countries: 1,
       total: 1158,
@@ -335,7 +335,7 @@ describe('adviseBan — the ASN lever', () => {
       ['/sitemap-1.xml', 30],
     ]),
     shape: shapeOf(series(Array(144).fill(11), 0, 144), 10),
-    ja4: [['t13d3012h1_1d37bd780c83_882d495ac381', 1630]],
+    ja4: [['t13dvelah1_eeeeeeeeeeee_ffffffffffff', 1630]],
     asns: [['velia.net Internetdienste GmbH', 1630]],
     botVerified: [],
     wafActions: [['log', 1630]],
@@ -343,7 +343,7 @@ describe('adviseBan — the ASN lever', () => {
     statuses: [['200', 9000]],
     // Rotating: this digest is shared with real browsers elsewhere, so JA4 is not available.
     digestReach: {
-      label: 't13d3012h1_1d37bd780c83_882d495ac381',
+      label: 't13dvelah1_eeeeeeeeeeee_ffffffffffff',
       ips: 400,
       countries: 30,
       total: 50000,
@@ -457,7 +457,7 @@ describe('adviseBan — the ASN lever', () => {
     const a = adviseBan(
       velia({
         digestReach: {
-          label: 't13d3012h1_1d37bd780c83_882d495ac381',
+          label: 't13dvelah1_eeeeeeeeeeee_ffffffffffff',
           ips: 40,
           countries: 5,
           total: 1630,
@@ -474,7 +474,7 @@ describe('adviseBan — the ASN lever', () => {
   });
 
   const concentrated = (over: Partial<Reach> = {}): Reach => ({
-    label: 't13d3012h1_1d37bd780c83_882d495ac381',
+    label: 't13dvelah1_eeeeeeeeeeee_ffffffffffff',
     ips: 4,
     countries: 1,
     total: 1630,
@@ -605,14 +605,14 @@ describe('adviseBan — is acting worth it', () => {
       ['/admin.php', 290],
     ]),
     shape: shapeOf(series(Array(144).fill(4), 0, 144), 10),
-    ja4: [['t13d201100_2b729b4bf6f3_36bf25f296df', 490]],
+    ja4: [['t13dscan00_555555555555_666666666666', 490]],
     asns: [['Microsoft Corporation', 490]],
     botVerified: [],
     wafActions: [['challenge', 490]],
     wafRules: [],
     statuses: [['429', 490]],
     digestReach: {
-      label: 't13d201100_2b729b4bf6f3_36bf25f296df',
+      label: 't13dscan00_555555555555_666666666666',
       ips: 8,
       countries: 5,
       total: 490,

@@ -348,7 +348,7 @@ describe('denyDescription — idempotence', () => {
 // "−1" on deny-scraper-ja4 — a rule nothing had been removed from — and the footer claimed two
 // rules were unapplied.
 describe('pendingEdits', () => {
-  const DIGEST = 't13d311200_1d947a95fc68_7e1102d2036b';
+  const DIGEST = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
   const OTHER = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
 
   test('a removed ASN does not mark the JA4 rule', () => {
@@ -402,7 +402,7 @@ describe('pendingEdits', () => {
 
 // The two staging directions pull opposite ways, and both were reported backwards at some point.
 describe('enforcedNow', () => {
-  const DIGEST = 't13d311200_1d947a95fc68_7e1102d2036b';
+  const DIGEST = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
 
   test('a live digest with no pending edit is denied', () => {
     expect(enforcedNow([DIGEST], [], [], DIGEST, JA4_DENY)).toBe(true);

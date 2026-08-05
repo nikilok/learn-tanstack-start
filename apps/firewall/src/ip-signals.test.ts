@@ -70,9 +70,9 @@ describe('mixOf', () => {
 
 describe('alpnOf', () => {
   test('reads the ALPN slot', () => {
-    expect(alpnOf('t13d2013h2_a09f3c656075_7f0f34a4126d')).toBe('h2');
-    expect(alpnOf('t13d1715h1_abcabcabcabc_defdefdefdef')).toBe('h1');
-    expect(alpnOf('t13d311200_1d947a95fc68_7e1102d2036b')).toBe('00');
+    expect(alpnOf('t13dhumnh2_cccccccccccc_dddddddddddd')).toBe('h2');
+    expect(alpnOf('t13dpolbh1_999999999999_aaaaaaaaaaaa')).toBe('h1');
+    expect(alpnOf('t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb')).toBe('00');
   });
 
   test('a malformed digest yields no slot rather than throwing', () => {
@@ -132,7 +132,7 @@ function humanInput(): SignalInput {
     total: 366,
     mix: mixOf(paths),
     shape: shapeOf(series([246, 105, 177, 135], 120, 144), 10),
-    ja4: [['t13d2013h2_a09f3c656075_7f0f34a4126d', 362]],
+    ja4: [['t13dhumnh2_cccccccccccc_dddddddddddd', 362]],
     userAgents: [
       ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)', 366],
     ],
@@ -154,7 +154,7 @@ function scraperInput(): SignalInput {
     total: 10100,
     mix: mixOf(paths),
     shape: shapeOf(series(Array(144).fill(70), 0, 144), 10),
-    ja4: [['t13d311200_1d947a95fc68_7e1102d2036b', 10100]],
+    ja4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', 10100]],
     userAgents: Array.from(
       { length: 40 },
       (_, i) => [`Mozilla/5.0 Chrome/${100 + i}`, 260 - i] as [string, number],

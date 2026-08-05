@@ -1,5 +1,5 @@
 // The verdict is the whole point of this view: it is what an operator acts on. The `shared` case
-// is modelled on t13d1713h1_ab0a1bf427ad_ecd0401ec68b, which reads as a textbook scraper on shape
+// is modelled on t13dshrdh1_111111111111_222222222222, which reads as a textbook scraper on shape
 // alone but carries verified claude-user — denying it would take out verified agents.
 
 import { describe, expect, test } from 'bun:test';
@@ -10,7 +10,7 @@ import { sitemapLines, verdictOf } from './sitemap-view';
 
 function digest(over: Partial<SitemapDigest> = {}): SitemapDigest {
   return {
-    ja4: 't13d1713h1_ab0a1bf427ad_ecd0401ec68b',
+    ja4: 't13dshrdh1_111111111111_222222222222',
     fetches: 5,
     ips: ['47.79.13.37'],
     asns: ['Alibaba (US) Technology Co., Ltd.'],
@@ -204,14 +204,14 @@ describe('sitemapLines — selection', () => {
   });
   const two = [
     digest(),
-    digest({ ja4: 't13d311200_1d947a95fc68_7e1102d2036b' }),
+    digest({ ja4: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb' }),
   ];
 
   test('exactly one row is marked, and it is the cursor', () => {
     const text = sitemapLines(report(two), 1).map(lineText).join('\n');
     expect(text.split('▶').length - 1).toBe(1);
     expect(text.split('\n').find((l) => l.includes('▶'))).toContain(
-      't13d311200',
+      't13dscrp00',
     );
   });
 

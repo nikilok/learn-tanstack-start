@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { type DenyEntry, denylistLines } from './denylist-view';
 import { lineText } from './line-model';
 
-const JA4 = 't13d311200_1d947a95fc68_7e1102d2036b';
+const JA4 = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
 const entry = (over: Partial<DenyEntry> = {}): DenyEntry => ({
   kind: 'ja4',
   value: JA4,

@@ -66,7 +66,7 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
     total: 5000,
     byStatus: [['200', 5000]],
     byUserAgent: [],
-    byJa4: [['t13d311200_1d947a95fc68_7e1102d2036b', 5000]],
+    byJa4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', 5000]],
     byIp: [],
     byAsn: [],
     byCountry: [],
@@ -116,7 +116,7 @@ describe('profileLines — partial data', () => {
     const text = render(
       profile({
         digestReach: {
-          label: 't13d311200_1d947a95fc68_7e1102d2036b',
+          label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
           ips: 400,
           countries: 200,
           total: 171751,
@@ -137,7 +137,7 @@ describe('profileLines — partial data', () => {
     const text = render(
       profile({
         digestReach: {
-          label: 't13d311200_1d947a95fc68_7e1102d2036b',
+          label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
           ips: 400,
           countries: 200,
           total: 171751,
@@ -161,7 +161,7 @@ describe('profileLines — partial data', () => {
     const text = render(
       profile({
         digestReach: {
-          label: 't13d311200_1d947a95fc68_7e1102d2036b',
+          label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
           ips: 12,
           countries: 2,
           total: 9000,

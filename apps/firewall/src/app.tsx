@@ -382,12 +382,16 @@ export function App() {
       }
     }
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
-    process.exitCode = anyError ? 1 : 0;
     applying.current = false;
     if (cancelled) {
       // Persist first: quitting mid-apply after the deny rule was written would otherwise
       // strand a live ban that the next session lifts.
-      persistDenies(outcome, snapshot);
+      const cancelledPersist = persistDenies(outcome, snapshot);
+      // The TUI is about to tear down, so the shell's exit code is the only channel left. A
+      // deny live in the WAF but missing from .env.local must not look like a clean quit.
+      process.exitCode = anyError || !cancelledPersist.ok ? 1 : 0;
+      if (!cancelledPersist.ok)
+        console.error(`firewall:setup${cancelledPersist.summary}`);
       exit(); // deferred to here so no write is still in flight
       return;
     }
@@ -395,6 +399,8 @@ export function App() {
     // un-banned by the next CI run. Write back whatever ACTUALLY landed — keyed off each deny
     // rule's own outcome, because an unrelated rule failing must not strand a live ban.
     const persisted = persistDenies(outcome, snapshot);
+    // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
+    process.exitCode = anyError || !persisted.ok ? 1 : 0;
     // Re-checked against what LANDED, not what was intended: the preflight above cleared the
     // snapshot, but a ceiling whose write failed is not in force.
     const unbounded = unboundedPreviewBypass(
@@ -408,24 +414,26 @@ export function App() {
     setApplied({
       summary:
         summaryLine(statuses) +
-        persisted +
+        persisted.summary +
         (unbounded ? ` · WARNING: ${unbounded}` : ''),
-      ok: !anyError && !unbounded,
+      ok: !anyError && persisted.ok && !unbounded,
     });
     setPhase('select');
   };
 
   const creds = { projectId, teamId, token };
 
-  /** Write each deny rule that actually reached the WAF back to .env.local. Returns a summary suffix; never silently skips, because an unpersisted ban is lifted by the next apply. */
+  /** Write each deny rule that actually reached the WAF back to .env.local. Returns whether every pending edit was persisted plus a summary suffix — `ok` is load-bearing: a deny live in the WAF but absent from .env.local is lifted by the next apply, so it must fail the run rather than only warn. */
   const persistDenies = (
     outcome: Map<string, ApplyStatus>,
     snapshot: Item[],
-  ): string => {
-    if (!stagedDenies.length && !removedDenies.length) return '';
+  ): { ok: boolean; summary: string } => {
+    if (!stagedDenies.length && !removedDenies.length)
+      return { ok: true, summary: '' };
     // A dry run reaches no WAF, so writing the denylist back would enforce or lift a ban the
     // operator only previewed — .env.local is what the next real apply and CI rebuild from.
-    if (dryRun) return ' · dry-run: .env.local NOT written';
+    if (dryRun)
+      return { ok: true, summary: ' · dry-run: .env.local NOT written' };
     const notes: string[] = [];
     let wrote = false;
     // A cancelled run breaks out of applyAll part-way, so `outcome` can hold one deny rule and
@@ -459,13 +467,16 @@ export function App() {
     if (wrote && !notes.length && !unreached) {
       setStagedDenies([]);
       setRemovedDenies([]);
-      return ' · denylist saved to .env.local';
+      return { ok: true, summary: ' · denylist saved to .env.local' };
     }
     if (unreached)
       notes.push(
         'a deny rule was never reached, so its staged edits are still unapplied',
       );
-    return notes.length ? ` · WARNING: ${notes.join('; ')}` : '';
+    return {
+      ok: !notes.length,
+      summary: notes.length ? ` · WARNING: ${notes.join('; ')}` : '',
+    };
   };
 
   const denyRuleOf = (name: string) =>

@@ -5,7 +5,12 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { type AdviceInput, adviseBan, volumeFloor } from './ban-advice';
+import {
+  type AdviceInput,
+  type Reach,
+  adviseBan,
+  volumeFloor,
+} from './ban-advice';
 import { type Mix, mixOf, shapeOf } from './ip-signals';
 
 function series(counts: number[], offset: number, length: number) {
@@ -468,34 +473,55 @@ describe('adviseBan — the ASN lever', () => {
     expect(a.lever?.kind).toBe('ja4');
   });
 
-  test('a raw-HTML enumerator on few IPs is watch, not ban — one axis is not enough', () => {
-    // This client reads a sitemap then walks /company/ with zero rendering requests, which is
-    // damning but is ONE fact: `crawl` forces mix.page > 0 and nothing that walks a sitemap
-    // drives RPCs, so it is entailed by `rendering` and no longer counts separately.
-    //
-    // It would have a genuine second axis — 144 flat 10-minute buckets is the textbook machine
-    // pacing — except the `pacing` axis also requires concentration < 0.5, and level traffic is
-    // ONE unbroken session whose concentration is 1.0. That axis is therefore dead for exactly
-    // the clients it describes. Fixing it changes who gets denied, so it is left as an operator
-    // decision; if it is ever fixed, this expectation becomes `ban`.
+  const concentrated = (over: Partial<Reach> = {}): Reach => ({
+    label: 't13d3012h1_1d37bd780c83_882d495ac381',
+    ips: 4,
+    countries: 1,
+    total: 1630,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+    ...over,
+  });
+
+  test('a raw-HTML enumerator on few IPs bans on rendering + pacing', () => {
+    // 144 flat 10-minute buckets from an identity on 4 IPs. `crawl` is entailed by `rendering`
+    // so it cannot be the second axis; `pacing` is, and only became reachable once its
+    // self-contradictory `concentration < 0.5` clause was dropped.
+    const a = adviseBan(velia({ digestReach: concentrated() }));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.kind).toBe('ja4');
+    expect(a.reasons.join(' ')).toContain('busy in 100%');
+  });
+
+  test('pacing does NOT fire for a wide-spread identity — that rhythm is a population', () => {
+    // The same flat traffic on 400 IPs is a shared fingerprint, not one machine. It still bans,
+    // but on `spread`, and the reasons must not claim a pacing observation about one actor.
+    const a = adviseBan(
+      velia({ digestReach: concentrated({ ips: 400, countries: 30 }) }),
+    );
+    expect(a.reasons.join(' ')).not.toContain('busy in');
+    expect(a.reasons.join(' ')).toContain('spans 400 IPs');
+  });
+
+  test('pacing does NOT fire when reach is unknown', () => {
+    // Unknown is not narrow. Without reach there is no basis for "this is one actor".
+    const a = adviseBan(velia({ digestReach: undefined }));
+    expect(a.reasons.join(' ')).not.toContain('busy in');
+  });
+
+  test('a concentrated identity that is NOT level keeps its pacing axis quiet', () => {
+    // One 40-minute burst out of 24h — 3% duty. Level is the claim, not merely "few IPs".
     const a = adviseBan(
       velia({
-        digestReach: {
-          label: 't13d3012h1_1d37bd780c83_882d495ac381',
-          ips: 4,
-          countries: 1,
-          total: 1630,
-          subResources: 0,
-          beacons: 0,
-          tiles: 0,
-          rpcs: 0,
-          complete: true,
-          verifiedNames: [],
-        },
+        shape: shapeOf(series([246, 105, 177, 135], 120, 144), 10),
+        digestReach: concentrated(),
       }),
     );
-    expect(a.verdict).toBe('watch');
-    expect(a.lever).toBeUndefined();
+    expect(a.reasons.join(' ')).not.toContain('busy in');
   });
 
   test('a polite unverified crawler is not banned on the sitemap pattern alone', () => {

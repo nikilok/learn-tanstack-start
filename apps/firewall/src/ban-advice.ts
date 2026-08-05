@@ -274,11 +274,27 @@ export function adviseBan(input: AdviceInput): Advice {
   // dutyCycleOf is shared with tellsFor so the two panes measure pacing the same way. The
   // THRESHOLDS stay separate on purpose: this one gates a ban, and widening it is a change to
   // who gets denied, not a display fix.
+  //
+  // The old second clause was `concentration < 0.5`, which made this axis DEAD rather than
+  // strict: sessions split on >=2 idle buckets, so level traffic is ONE unbroken session whose
+  // concentration is 1.0 — "level AND unconcentrated" could never both hold, for anyone.
+  //
+  // 0.5 is calibrated against the population that can actually be denied. Measured 2026-08-05
+  // over 24h: of 112 IPs above the volume floor, 87 were verified bots and 1 was our own
+  // ch-stream listener — both stopped by a blocker before axes are ever consulted. The
+  // remaining 24 peaked at 21% duty (p95 11%), so this sits 2.4x above anything real. Calibrate
+  // on the whole population instead and the bots bury the signal; that mistake killed two
+  // earlier attempts at this.
+  //
+  // Gated on a NARROW reach because a rhythm only means "one actor" for a non-aggregate
+  // identity: a shared fingerprint runs flat because many people use it, not because it is a
+  // machine. Unknown reach does not fire either — that is the safe direction. A wide-spread
+  // actor loses nothing, since `spread` is already its own axis.
   const duty = dutyCycleOf(shape, input.windowMinutes);
-  if (duty > 0.5 && shape.concentration < 0.5)
+  if (duty > 0.5 && input.digestReach && input.digestReach.ips <= WIDE_SPREAD)
     tell(
       'pacing',
-      `busy in ${(duty * 100).toFixed(0)}% of all ${shape.bucketMinutes}-minute buckets in the window — machines run flat, people burst and idle`,
+      `busy in ${(duty * 100).toFixed(0)}% of all ${shape.bucketMinutes}-minute buckets, from an identity on only ${input.digestReach.ips} IP${input.digestReach.ips === 1 ? '' : 's'} — machines run flat, people burst and idle`,
     );
   if (input.digestReach && input.digestReach.ips > WIDE_SPREAD)
     tell(

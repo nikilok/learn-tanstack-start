@@ -142,8 +142,20 @@ async function group(
  * RPC count can only be asked as `requestPath in (...)`. Site-wide rather than per-subject on
  * purpose: the fn set is a property of the deployment, and a scraper's own traffic contains none.
  */
-async function serverFnPaths(ctx: Ctx, errors: string[]): Promise<string[]> {
-  const rows = await group(ctx, errors, 'server fns', ['requestPath'], '');
+async function serverFnPaths(
+  ctx: Ctx,
+  errors: string[],
+  failedQueries: string[],
+): Promise<string[]> {
+  const rows = await group(
+    ctx,
+    errors,
+    'server fns',
+    ['requestPath'],
+    '',
+    undefined, // no event override
+    failedQueries,
+  );
   return (
     rows
       .map(([p]) => p)
@@ -179,7 +191,17 @@ export async function fetchIpProfile(
     group(ctx, errors, label, dims, filter, event, failedQueries);
   // Discovered once, before anything that needs it: both the subject mix and each reach count
   // RPCs against this list, because `route` cannot separate them from SSR pages.
-  const fnPaths = await serverFnPaths(ctx, errors);
+  //
+  // Over reachCtx, NOT the display window: the fn set is a property of the deployment, not of
+  // whatever range is on screen, and a 20-minute live window can miss hashes. A short list
+  // undercounts a subject's RPCs, which is the direction that makes a real SPA session read as
+  // a raw-HTML fetcher.
+  const fnPaths = await serverFnPaths(reachCtx, errors, failedQueries);
+  // Without a list the RPC axis cannot be measured for ANY subject, and a zero there is read as
+  // "runs no app code". reachOf already refuses to clear a lever on that (rpcsMeasured); the
+  // subject mix has to say so too, or a failed discovery passes as a measured absence.
+  if (!fnPaths.length && !failedQueries.includes('server fns'))
+    failedQueries.push('server fns');
   const rpcFilterFor = (subjectFilter: string) =>
     fnPaths.length
       ? `${subjectFilter} and requestPath in (${fnPaths.map((p) => `'${p}'`).join(',')})`

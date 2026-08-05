@@ -527,7 +527,9 @@ describe('adviseBan — the ASN lever', () => {
         },
       }),
     );
-    expect(a.verdict).not.toBe('ban');
+    // Exact: `not.toBe('ban')` also passes on leave/already/staged, which would hide a change in
+    // how a polite unverified crawler is classified. One rendering axis means `watch`.
+    expect(a.verdict).toBe('watch');
   });
 });
 
@@ -683,7 +685,9 @@ describe('adviseBan — review regressions', () => {
         digestReach: reach({ ips: 1, countries: 1, total: 270 }),
       }),
     );
-    expect(a.verdict).not.toBe('ban');
+    // Exact for the same reason: a real session is cleared by a legitimacy blocker, not merely
+    // left unbanned, and those are different guarantees.
+    expect(a.verdict).toBe('leave');
   });
 
   test('evidence spanning several fingerprints cannot ban one of them', () => {

@@ -18,6 +18,7 @@
     "firewall:ip": "bun --env-file=.env.local apps/firewall/src/profile.ts",
     "firewall:setup": "bun --env-file=.env.local apps/firewall/src/setup.tsx",
     "firewall:sitemap": "bun --env-file=.env.local apps/firewall/src/sitemap.ts",
+    "firewall:watch": "bun --env-file=.env.local apps/firewall/src/watch.ts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "knip": "knip",

@@ -8,6 +8,7 @@
     "lint:fix": "oxlint --fix",
     "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "sitemap": "bun --env-file=../../.env.local src/sitemap.ts",
+    "watch": "bun --env-file=../../.env.local src/watch.ts",
     "test": "bun test"
   },
   "dependencies": {

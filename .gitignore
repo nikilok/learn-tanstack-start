@@ -20,3 +20,6 @@ src/data/sic-codes.json
 
 # Hand-labelling samples: company-to-URL pairs, i.e. the dataset itself
 apps/web/.precision-samples
+
+# Local operator notes — deliberately not published (the repo is public).
+.claude/skills/

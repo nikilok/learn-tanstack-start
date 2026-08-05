@@ -2,7 +2,18 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
+import {
+  ASN_DENY,
+  denyDescription,
+  denyListRule,
+  envMatching,
+  JA4_DENY,
+  enforcedNow,
+  pendingEdits,
+  valuesOf,
+  withValue,
+  withoutValue,
+} from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
 afterEach(() => {
@@ -171,5 +182,254 @@ describe('denyListRule', () => {
   test('always denies', () => {
     expect(build([]).action.mitigate.action).toBe('deny');
     expect(build([JA4_A]).action.mitigate.action).toBe('deny');
+  });
+});
+
+describe('valuesOf / withValue', () => {
+  test('the revocation placeholder is not reported as a real entry', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [],
+    });
+    expect(valuesOf(rule, JA4_DENY)).toEqual([]);
+  });
+
+  test('adding to an empty (revoked) rule replaces the placeholder', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [],
+    });
+    const { values } = withValue(rule, JA4_DENY, JA4_A);
+    expect(values).toEqual([JA4_A]);
+  });
+
+  test('adding keeps what was already there', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(rule, JA4_DENY, JA4_B).values).toEqual([JA4_A, JA4_B]);
+  });
+
+  test('staging the same digest twice is a no-op', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(rule, JA4_DENY, JA4_A).values).toEqual([JA4_A]);
+  });
+
+  test('case is normalised, so a dashboard-cased digest cannot double up', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(rule, JA4_DENY, JA4_A.toUpperCase()).values).toEqual([
+      JA4_A,
+    ]);
+  });
+
+  test('a malformed digest is refused rather than added as a match-nothing condition', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(() => withValue(rule, JA4_DENY, 'nonsense')).toThrow(
+      /refusing to add/,
+    );
+  });
+
+  test('every staged value reaches the rebuilt conditions', () => {
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    const out = withValue(rule, JA4_DENY, JA4_B).rule;
+    const vals = out.conditionGroup.flatMap((g) =>
+      g.conditions.map((c) => c.value),
+    );
+    expect(vals).toEqual([JA4_A, JA4_B]);
+  });
+});
+
+describe('denyDescription', () => {
+  test('states the count, so the dashboard list is readable without opening the rule', () => {
+    expect(denyDescription('Deny X.', 2)).toBe('Deny X. 2 denied.');
+    expect(denyDescription('Deny X.', 1)).toBe('Deny X. 1 denied.');
+  });
+
+  test('a revoked rule says so — it stays active and matches a placeholder', () => {
+    // Without this the dashboard shows an active DENY rule that denies nothing.
+    expect(denyDescription('Deny X.', 0)).toContain('REVOKED');
+    expect(denyDescription('Deny X.', 0)).not.toContain('1 denied');
+  });
+
+  test('the built rule carries the count, not the bare base text', () => {
+    const r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A, JA4_B],
+    });
+    expect(r.description).toBe('Deny X. 2 denied.');
+  });
+
+  test('the placeholder is never counted as a denied entry', () => {
+    const r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [],
+    });
+    expect(r.description).toContain('REVOKED');
+    expect(r.conditionGroup).toHaveLength(1); // the placeholder is still there
+  });
+
+  test('staging a value updates the count in the description', () => {
+    const base = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(base, JA4_DENY, JA4_B).rule.description).toBe(
+      'Deny X. 2 denied.',
+    );
+  });
+
+  test('descriptions stay inside the 256-char cap Vercel enforces', () => {
+    expect(denyDescription('x'.repeat(200), 99).length).toBeLessThanOrEqual(
+      256,
+    );
+  });
+});
+
+describe('denyDescription — idempotence', () => {
+  test('re-decorating a decorated description replaces the count, never appends', () => {
+    expect(denyDescription('Deny X. 1 denied.', 2)).toBe('Deny X. 2 denied.');
+    expect(denyDescription('Deny X. REVOKED — nothing is denied.', 3)).toBe(
+      'Deny X. 3 denied.',
+    );
+    expect(denyDescription('Deny X. 5 denied.', 0)).toBe(
+      'Deny X. REVOKED — nothing is denied.',
+    );
+  });
+
+  test('repeated staging never compounds the suffix', () => {
+    let r = denyListRule({
+      name: 'r',
+      description: 'Deny X.',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    r = withValue(r, JA4_DENY, JA4_B).rule;
+    r = withoutValue(r, JA4_DENY, JA4_A).rule;
+    expect(r.description).toBe('Deny X. 1 denied.');
+    expect(r.description.match(/denied/g)).toHaveLength(1);
+  });
+});
+
+// Regression: `dropped` counted every removedDenies entry absent from the rule under examination.
+// removedDenies is ONE flat list across both denylists, so lifting an ASN ban rendered a yellow
+// "−1" on deny-scraper-ja4 — a rule nothing had been removed from — and the footer claimed two
+// rules were unapplied.
+describe('pendingEdits', () => {
+  const DIGEST = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
+  const OTHER = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
+
+  test('a removed ASN does not mark the JA4 rule', () => {
+    const e = pendingEdits([DIGEST], [], ['29066'], JA4_DENY);
+    expect(e.dropped).toBe(0);
+    expect(e.added).toBe(0);
+  });
+
+  test('a removed digest does not mark the ASN rule', () => {
+    expect(pendingEdits(['29066'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
+  });
+
+  test('each rule still counts its own removal', () => {
+    expect(pendingEdits([], [], ['29066'], ASN_DENY).dropped).toBe(1);
+    expect(pendingEdits([], [], [DIGEST], JA4_DENY).dropped).toBe(1);
+  });
+
+  test('a staged addition counts only once it is in the rule', () => {
+    expect(pendingEdits([DIGEST], [DIGEST], [], JA4_DENY).added).toBe(1);
+    expect(pendingEdits([], [DIGEST], [], JA4_DENY).added).toBe(0);
+  });
+
+  test('a digest pasted upper-case from the dashboard still counts', () => {
+    // The TUI stages the value as typed; the rule stores it normalized. Comparing raw made an
+    // upper-case entry count as neither added nor dropped, so the rule showed no pending change.
+    expect(
+      pendingEdits([DIGEST], [DIGEST.toUpperCase()], [], JA4_DENY).added,
+    ).toBe(1);
+    expect(pendingEdits([], [], [DIGEST.toUpperCase()], JA4_DENY).dropped).toBe(
+      1,
+    );
+  });
+
+  test('a value still live is not counted as dropped', () => {
+    expect(pendingEdits([DIGEST], [], [DIGEST], JA4_DENY).dropped).toBe(0);
+  });
+
+  test('both kinds staged and removed at once stay on their own rules', () => {
+    const staged = [DIGEST, '29066'];
+    const removed = [OTHER, '64500'];
+    expect(pendingEdits([DIGEST], staged, removed, JA4_DENY)).toEqual({
+      added: 1,
+      dropped: 1,
+    });
+    expect(pendingEdits(['29066'], staged, removed, ASN_DENY)).toEqual({
+      added: 1,
+      dropped: 1,
+    });
+  });
+});
+
+// The two staging directions pull opposite ways, and both were reported backwards at some point.
+describe('enforcedNow', () => {
+  const DIGEST = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
+
+  test('a live digest with no pending edit is denied', () => {
+    expect(enforcedNow([DIGEST], [], [], DIGEST, JA4_DENY)).toBe(true);
+  });
+
+  test('a STAGED addition is not denied yet — it has not been written', () => {
+    expect(enforcedNow([DIGEST], [DIGEST], [], DIGEST, JA4_DENY)).toBe(false);
+  });
+
+  test('a STAGED removal is still denied — the WAF keeps denying until the apply lands', () => {
+    // unstageDeny edits the local rule immediately, so `live` no longer carries it.
+    expect(enforcedNow([], [], [DIGEST], DIGEST, JA4_DENY)).toBe(true);
+  });
+
+  test('an unknown digest is not denied', () => {
+    expect(enforcedNow([DIGEST], [], [], 'tttttttttt_a_b', JA4_DENY)).toBe(
+      false,
+    );
+  });
+
+  test('an empty subject never reads as denied', () => {
+    expect(enforcedNow([DIGEST], [], [], '', JA4_DENY)).toBe(false);
+  });
+
+  test('case does not change the answer', () => {
+    expect(enforcedNow([DIGEST], [], [], DIGEST.toUpperCase(), JA4_DENY)).toBe(
+      true,
+    );
   });
 });

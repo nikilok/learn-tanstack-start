@@ -115,7 +115,8 @@ export async function applyItem(
 export async function runHeadless() {
   const live = await fetchLive();
   let anyError = false;
-  for (const item of seedItems(live)) {
+  const items = seedItems(live);
+  for (const item of items) {
     try {
       const { status, detail } = await applyItem(item, live.idByName);
       if (status === 'error') anyError = true; // a returned (not thrown) error must still fail the run

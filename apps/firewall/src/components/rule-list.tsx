@@ -25,47 +25,110 @@ export function summaryLine(statuses: ApplyStatus[]): string {
   return parts.join(', ') || 'no changes';
 }
 
+// Cursor (2) + checkbox (4) + a space after the name (1) + the action tag (12).
+const ROW_FIXED = 19;
+const MIN_NAME = 8;
+const MIN_TAIL = 8; // below this a description says nothing, so the name gets the room instead
+
+/**
+ * Name and tail widths for a row of `width` columns. Names keep their full length while there is
+ * room, then shrink before the tail does — the name identifies the rule. `forceTail` inverts that
+ * for rows carrying unapplied state: a description is optional, but "this rule has a pending
+ * change" is not, and dropping it made a staged deny look like nothing had happened.
+ */
+export function rowWidths(
+  width: number,
+  longestName: number,
+  forceTail = false,
+): { name: number; tail: number } {
+  const avail = Math.max(0, width - ROW_FIXED);
+  const name = Math.max(MIN_NAME, Math.min(longestName, avail - MIN_TAIL));
+  const tail = avail - name;
+  if (tail < MIN_TAIL) {
+    if (forceTail) {
+      const forced = Math.min(MIN_TAIL, Math.max(0, avail - MIN_NAME));
+      return { name: Math.max(MIN_NAME, avail - forced), tail: forced };
+    }
+    // A sliver of description reads as noise, so drop it and spend the room on the name.
+    return { name: Math.max(MIN_NAME, Math.min(longestName, avail)), tail: 0 };
+  }
+  return { name, tail };
+}
+
 /** A row's tail: its apply status once it has one, else its description. An edited row resets to idle, marking it unapplied. */
-function RowTail({ item, phase }: { item: Item; phase: Phase }) {
+function RowTail({
+  item,
+  phase,
+  width,
+  pending,
+}: {
+  item: Item;
+  phase: Phase;
+  width: number;
+  pending?: string;
+}) {
+  // An edit that is staged but unapplied must announce itself, or the operator cannot tell a
+  // keypress landed. It outranks the description, which never changes.
+  if (phase !== 'applying' && item.status === 'idle' && pending)
+    return <Text color="yellow">{truncate(`● ${pending}`, width)}</Text>;
   if (phase !== 'applying' && item.status === 'idle')
-    return <Text dimColor>{truncate(item.rule.description, 50)}</Text>;
+    return <Text dimColor>{truncate(item.rule.description, width)}</Text>;
   const suffix = item.detail ? ` (${item.detail})` : '';
   switch (item.status) {
     case 'applying':
-      return <Text color="yellow">… applying</Text>;
+      // Clipped like every other branch: tail can be as narrow as 7, and an unclipped 10-char
+      // string makes Ink wrap the row — the desync the responsive sizing exists to prevent.
+      return <Text color="yellow">{truncate('… applying', width)}</Text>;
     case 'inserted':
-      return <Text color="green">＋ inserted{suffix}</Text>;
+      return (
+        <Text color="green">{truncate(`＋ inserted${suffix}`, width)}</Text>
+      );
     case 'overwrote':
-      return <Text color="green">✔ overwrote{suffix}</Text>;
+      return (
+        <Text color="green">{truncate(`✔ overwrote${suffix}`, width)}</Text>
+      );
     case 'error':
-      return <Text color="red">✖ {item.detail ?? 'error'}</Text>;
+      return (
+        <Text color="red">
+          {truncate(`✖ ${item.detail ?? 'error'}`, width)}
+        </Text>
+      );
     default:
-      return <Text dimColor>pending</Text>;
+      return <Text dimColor>{truncate('pending', width)}</Text>;
   }
 }
 
-/** A single rule row: cursor marker, active checkbox, name, action tag, then description/status. */
+/** A single rule row: cursor marker, active checkbox, name, action tag, then description/status. Sized to `width` so it stays on one line — a wrapped row desyncs the list from the cursor. */
 export function Row({
   item,
   isCursor,
   phase,
+  width,
+  longestName,
+  pending,
 }: {
   item: Item;
   isCursor: boolean;
   phase: Phase;
+  width: number;
+  longestName: number;
+  pending?: string;
 }) {
   const selecting = phase === 'select' || phase === 'action';
+  const w = rowWidths(width, longestName, Boolean(pending));
   return (
     <Box>
       <Text color="cyan">{isCursor && selecting ? '▶ ' : '  '}</Text>
       <Text color={item.active ? 'green' : 'gray'}>
         {item.active ? '[x]' : '[ ]'}{' '}
       </Text>
-      <Text bold>{item.rule.name.padEnd(20)} </Text>
+      <Text bold>{truncate(item.rule.name, w.name).padEnd(w.name)} </Text>
       <Text color={item.active ? actionColor(item.action) : 'gray'}>
         {`[${item.action.toUpperCase()}]`.padEnd(11)}{' '}
       </Text>
-      <RowTail item={item} phase={phase} />
+      {w.tail > 0 && (
+        <RowTail item={item} phase={phase} width={w.tail} pending={pending} />
+      )}
     </Box>
   );
 }

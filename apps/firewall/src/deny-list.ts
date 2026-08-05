@@ -64,6 +64,109 @@ export function envMatching(
   return values;
 }
 
+/** The values a deny rule currently matches, with the revocation placeholder dropped — it stands for "nothing", not for a real entry. */
+export function valuesOf(rule: Rule, spec: DenySpec): string[] {
+  return rule.conditionGroup
+    .flatMap((g) => g.conditions.map((c) => c.value))
+    .filter((v): v is string => typeof v === 'string')
+    .filter((v) => v !== spec.placeholder);
+}
+
+/** Rule with `value` added. Rejects a malformed one rather than shipping a condition that matches nothing, and de-duplicates so staging the same digest twice is a no-op. */
+export function withValue(
+  rule: Rule,
+  spec: DenySpec,
+  value: string,
+): { rule: Rule; values: string[] } {
+  const v = spec.normalize(value.trim());
+  if (!spec.valid(v))
+    throw new Error(`not ${spec.example} — refusing to add it to ${rule.name}`);
+  const values = [...new Set([...valuesOf(rule, spec), v])];
+  return {
+    rule: denyListRule({
+      name: rule.name,
+      description: rule.description,
+      spec,
+      values,
+    }),
+    values,
+  };
+}
+
+/** Rule with `value` removed. Removing the last entry yields the revocation placeholder, never an empty rule — an omitted rule keeps denying, unrevokably (applyRule is upsert-only). */
+export function withoutValue(
+  rule: Rule,
+  spec: DenySpec,
+  value: string,
+): { rule: Rule; values: string[] } {
+  const v = spec.normalize(value.trim());
+  const values = valuesOf(rule, spec).filter((x) => x !== v);
+  return {
+    rule: denyListRule({
+      name: rule.name,
+      description: rule.description,
+      spec,
+      values,
+    }),
+    values,
+  };
+}
+
+// Stripped before re-appending: withValue/withoutValue feed a rule's own description back in, so
+// without this the counts compound into "… 1 denied. 2 denied."
+const COUNT_SUFFIX = /\s*(?:\d+ denied\.|REVOKED — nothing is denied\.)$/;
+
+/** Count-aware description, so the Vercel dashboard list says what a rule is doing without opening it. A revoked rule must say so loudly: it stays active and matching a placeholder, which otherwise reads as "denying something". Idempotent. */
+export function denyDescription(base: string, count: number): string {
+  const clean = base.replace(COUNT_SUFFIX, '');
+  return count === 0
+    ? `${clean} REVOKED — nothing is denied.`
+    : `${clean} ${count} denied.`;
+}
+
+/**
+ * Whether `value` is denied BY THE WAF right now, as opposed to in the local edit buffer. The
+ * two staging states pull in opposite directions and both were wrong at some point: a staged
+ * ADDITION has not been written, so it is not denied yet; a staged REMOVAL has not been written
+ * either, so it still is. Reporting either backwards invites the operator to act twice.
+ */
+export function enforcedNow(
+  live: string[],
+  staged: string[],
+  removed: string[],
+  value: string,
+  spec: DenySpec,
+): boolean {
+  const norm = (v: string) => spec.normalize(v.trim());
+  const v = norm(value);
+  if (!v) return false;
+  if (staged.some((x) => norm(x) === v)) return false;
+  return live.some((x) => norm(x) === v) || removed.some((x) => norm(x) === v);
+}
+
+/**
+ * Unapplied edits to ONE deny rule, given the flat staged/removed lists the TUI keeps across both
+ * denylists. `spec.valid` is the filter that matters: absence from this rule's live values is
+ * otherwise indistinguishable from a removal staged against it, so lifting an ASN ban marked the
+ * JA4 rule as having a pending removal too.
+ */
+export function pendingEdits(
+  live: string[],
+  staged: string[],
+  removed: string[],
+  spec: DenySpec,
+): { added: number; dropped: number } {
+  // Normalized on both sides: the TUI stages the value as typed, while the rule stores it
+  // normalized, so an upper-case digest pasted from the dashboard counted as neither.
+  const norm = (v: string) => spec.normalize(v.trim());
+  const liveSet = new Set(live.map(norm));
+  return {
+    added: staged.filter((v) => liveSet.has(norm(v))).length,
+    dropped: removed.filter((v) => spec.valid(norm(v)) && !liveSet.has(norm(v)))
+      .length,
+  };
+}
+
 /**
  * One condition group per value (Vercel ORs them). Revocation swaps in the placeholder, never
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is
@@ -82,7 +185,7 @@ export function denyListRule(opts: {
   const values = opts.values.length ? opts.values : [opts.spec.placeholder];
   return {
     name: opts.name,
-    description: opts.description,
+    description: denyDescription(opts.description, opts.values.length),
     active: true,
     conditionGroup: values.map((value) => ({
       conditions: [{ type: opts.spec.type, op: 'eq' as const, value }],

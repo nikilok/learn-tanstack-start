@@ -523,3 +523,56 @@ describe('withRpcs', () => {
     expect(m.total).toBe(1010);
   });
 });
+
+// The catalogue-walk branch was structurally dead: it needs >=200 distinct paths, but
+// distinctPaths was suppressed whenever the sample truncated — and a >=200-path subject ALWAYS
+// truncates. It reads plausibly and could never run, the same shape as the pacing axis.
+describe('path diversity — floor vs ratio', () => {
+  const walker = (over: Partial<SignalInput> = {}): SignalInput => ({
+    ...scraperInput(),
+    total: 9000,
+    mix: mixOf([['/company/a', 9000]]),
+    distinctPaths: 480,
+    distinctPathsPartial: true,
+    ...over,
+  });
+  const diversity = (i: SignalInput) =>
+    tellsFor(i).find((t) => t.label === 'path diversity');
+
+  test('a truncated count still reaches the catalogue-walk branch', () => {
+    const t = diversity(walker());
+    expect(t?.points).toBe('bot');
+    expect(t?.detail).toContain('walking the catalogue');
+    // Marked as the floor it is, never stated as an exact count.
+    expect(t?.detail).toContain('at least 480');
+  });
+
+  test('a truncated count never drives the RATIO branch', () => {
+    // Dividing 9000 by a floor of 480 gives 19x and would read as "repetition, monitoring
+    // rather than harvesting" for an actual harvester — the line this pane printed for a
+    // 177k-request scraper.
+    const t = diversity(walker({ total: 9000, distinctPaths: 400 }));
+    expect(t?.detail).not.toContain('monitoring');
+  });
+
+  test('a complete sample still gets the ratio branch', () => {
+    const t = diversity(
+      walker({ distinctPaths: 3, distinctPathsPartial: false, total: 9000 }),
+    );
+    expect(t?.points).toBe('neutral');
+    expect(t?.detail).toContain('monitoring');
+  });
+
+  test('a complete count that is neither repetitive nor a walk says nothing', () => {
+    // 150 paths under 200, and 6.7x each is well under the repetition line — normal browsing.
+    expect(
+      diversity(
+        walker({
+          distinctPaths: 150,
+          distinctPathsPartial: false,
+          total: 1000,
+        }),
+      ),
+    ).toBeUndefined();
+  });
+});

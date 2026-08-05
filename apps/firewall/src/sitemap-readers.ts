@@ -200,10 +200,16 @@ export async function fetchSitemapReport(
       const pathSum = rows.reduce((s, [, n]) => s + n, 0);
       const wafSum = wafRows.reduce((s, [, n]) => s + n, 0);
       d.total = wafSum || pathSum;
-      // Cap check FIRST: comparing the path sum against the waf sum only detects truncation while
-      // the waf query succeeded. When it fails, wafSum is 0, total falls back to pathSum, and a
-      // truncated sample would compare equal to itself and print as exact.
-      d.pathsPartial = rows.length >= GROUP_CAP || pathSum < d.total || !wafSum;
+      // A denied or challenged request never reaches routing, so it carries no requestPath and
+      // cannot appear in `rows`. Comparing the sample against the RAW total therefore marks
+      // every partially-blocked digest as truncated forever — which is precisely the digests
+      // this pane exists to surface. Compare against what actually reached the app instead.
+      const blocked = wafRows
+        .filter(([[a]]) => a === 'deny' || a === 'challenge')
+        .reduce((n, [, c]) => n + c, 0);
+      const reachedApp = Math.max(0, d.total - blocked);
+      d.pathsPartial =
+        rows.length >= GROUP_CAP || !wafSum || pathSum < reachedApp;
       d.totalExact = wafSum > 0;
       d.distinctPaths = rows.length;
       d.companyPages = rows

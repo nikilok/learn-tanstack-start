@@ -377,9 +377,15 @@ export async function fetchIpProfile(
     // Only the cap. A coverage cross-check against `total` cannot work here: a denied or
     // challenged request never reaches routing, so it carries no route and is absent from this
     // grouping by construction — measured on the banned scraper, routes summed to 168,785 of
-    // 177,657, and the 8,872 gap was exactly its deny + challenge count. Routes are genuinely
-    // low-cardinality (that same 177k-request identity produced 8 rows), so the cap is the only
-    // way this sample can be short.
+    // 177,657, and the 8,872 gap was exactly its deny + challenge count.
+    //
+    // This detects the cap and nothing else, which is a real limit rather than a proof: the API
+    // also truncates high-cardinality groupings BELOW the cap (measured on requestPath, 185 rows
+    // covering 0.5%). Routes were low-cardinality when measured — that same 177k identity
+    // produced 8 rows — but asset routes are per-file and multiply with every deploy, so a busy
+    // browser fingerprint's 6-day reach is files x deploys. If that ever approaches the cap this
+    // check stops being sufficient. The direction is the safe one for now: a browsery reach's
+    // head rows still show evidence and refuse the lever.
     const routesTruncated = routes.length >= GROUP_CAP;
     // No fn list means the RPC axis was never measured, and a zero on it is what clears a deny.
     const rpcsMeasured = Boolean(rpcFilter);
@@ -488,8 +494,12 @@ export async function fetchIpProfile(
       asns: byAsn,
       countries: byCountry,
       botVerified: byBotVerified,
-      // Omitted when the sample is a floor: the tell's whole conclusion is a ratio.
-      distinctPaths: pathsPartial ? undefined : byPath.length,
+      // Passed even when truncated, with the flag, because the two branches need different
+      // things from it: the ratio needs an exact count, the catalogue-walk threshold only a
+      // lower bound — and suppressing it entirely made that branch dead for the very
+      // enumerators it describes, whose samples always truncate.
+      distinctPaths: byPath.length,
+      distinctPathsPartial: pathsPartial,
       windowMinutes: hours * 60,
     }),
     errors,

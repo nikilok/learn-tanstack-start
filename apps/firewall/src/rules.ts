@@ -321,10 +321,6 @@ export const rules: Rule[] = [
     actionDuration: '1h',
     action: 'log',
   }),
-  // LAST, and the pair stays in this order. A bypass short-circuits everything after it, so
-  // keeping it behind the denies and the per-IP ceilings is what stops a spoofed preview UA
-  // from becoming a way around them. Holds under both orderings: appended to the live config
-  // (insertion order) or rebuilt from scratch (array order).
 ];
 
 // Vercel caps a rule's description at 256 chars; over-length ones fail the apply

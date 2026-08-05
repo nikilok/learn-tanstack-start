@@ -261,6 +261,8 @@ export type SignalInput = {
   total: number;
   /** Distinct request paths seen. Low against high volume means repetition, not exploration. */
   distinctPaths?: number;
+  /** True when `distinctPaths` is a floor — the API truncated the sample. */
+  distinctPathsPartial?: boolean;
   mix: Mix;
   shape: Shape;
   ja4: [string, number][];
@@ -399,8 +401,15 @@ export function tellsFor(input: SignalInput): Tell[] {
 
   // Repetition vs exploration. A monitor reloads a handful of URLs; a farm walks thousands.
   if (input.distinctPaths && total >= 100) {
+    // A truncated sample is a FLOOR, and the two branches can use it differently. The ratio
+    // divides by the count, so a floor inflates it — that is how a 177k-request harvester came
+    // to be described as "1077x each, monitoring rather than harvesting". The >= 200 test only
+    // needs a lower bound, and a floor at or above 200 proves at least 200 distinct paths. So
+    // the ratio is gated on a complete sample and the catalogue-walk branch is not, which is
+    // what makes it reachable for the enumerators it describes — their samples ALWAYS truncate.
+    const partial = input.distinctPathsPartial === true;
     const perPath = total / input.distinctPaths;
-    if (perPath >= 20)
+    if (!partial && perPath >= 20)
       tells.push({
         points: 'neutral',
         label: 'path diversity',
@@ -410,7 +419,7 @@ export function tellsFor(input: SignalInput): Tell[] {
       tells.push({
         points: 'bot',
         label: 'path diversity',
-        detail: `${input.distinctPaths} distinct paths, page-heavy — walking the catalogue rather than using it`,
+        detail: `${partial ? 'at least ' : ''}${input.distinctPaths} distinct paths, page-heavy — walking the catalogue rather than using it`,
       });
   }
 

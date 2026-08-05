@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { indexAfterClose, nextIndex, runDisposition } from './use-ip-tabs';
+import {
+  indexAfterClose,
+  newSubjects,
+  nextIndex,
+  runDisposition,
+} from './use-ip-tabs';
 
 describe('nextIndex', () => {
   test('advances and wraps past the end', () => {
@@ -66,5 +71,42 @@ describe('runDisposition', () => {
   test('a different subject is unaffected by another one loading', () => {
     expect(runDisposition(busy, 'ip:5.6.7.8', false)).toBe('run');
     expect(runDisposition(busy, 'ja4:1.2.3.4', false)).toBe('run');
+  });
+});
+
+// `o` in the picker opens the whole shortlist. Opening a subject twice would give one identity
+// two tabs racing the same fetch, and the second would win an in-flight guard it never asked for.
+describe('newSubjects', () => {
+  const ip = (v: string) => ({ kind: 'ip' as const, value: v });
+  const ja4 = (v: string) => ({ kind: 'ja4' as const, value: v });
+
+  test('returns everything when nothing is open', () => {
+    expect(newSubjects([], [ip('1.1.1.1'), ip('2.2.2.2')])).toHaveLength(2);
+  });
+
+  test('skips subjects already open', () => {
+    expect(
+      newSubjects([ip('1.1.1.1')], [ip('1.1.1.1'), ip('2.2.2.2')]),
+    ).toEqual([ip('2.2.2.2')]);
+  });
+
+  test('collapses duplicates WITHIN the incoming list', () => {
+    expect(newSubjects([], [ip('1.1.1.1'), ip('1.1.1.1')])).toEqual([
+      ip('1.1.1.1'),
+    ]);
+  });
+
+  test('an IP and a JA4 of the same text are different subjects', () => {
+    // The key is kind-scoped; collapsing these would silently drop one.
+    expect(newSubjects([ip('abc')], [ja4('abc')])).toEqual([ja4('abc')]);
+  });
+
+  test('preserves the listed order — the picker is ranked by volume', () => {
+    const want = [ip('3.3.3.3'), ip('1.1.1.1'), ip('2.2.2.2')];
+    expect(newSubjects([], want)).toEqual(want);
+  });
+
+  test('everything already open yields nothing, so the keypress is a no-op', () => {
+    expect(newSubjects([ip('1.1.1.1')], [ip('1.1.1.1')])).toEqual([]);
   });
 });

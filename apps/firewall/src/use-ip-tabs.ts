@@ -26,10 +26,27 @@ export type IpTabs = {
   open: (subject: Subject, window: Window, force?: boolean) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. Pass a window to re-scope it too — live mode advances every tick, and the tab's stored window would otherwise pin it to the period it was opened in. */
   refresh: (window?: Window) => void;
+  /** Open every subject at once, focusing the first new one. Already-open subjects are skipped rather than duplicated, and each tab fetches independently — the observability client's process-wide gate keeps the fan-out from a burst of 429s. */
+  openMany: (subjects: Subject[], window: Window) => void;
   /** Move `dir` tabs, wrapping. */
   cycle: (dir: 1 | -1) => void;
   close: () => void;
 };
+
+const subjectKey = (s: Subject) => `${s.kind}:${s.value}`;
+
+/** The subjects not already open, in order, with duplicates inside `incoming` collapsed. Opening a tab twice would give one identity two tabs racing the same fetch. */
+export function newSubjects(open: Subject[], incoming: Subject[]): Subject[] {
+  const seen = new Set(open.map(subjectKey));
+  const out: Subject[] = [];
+  for (const s of incoming) {
+    const k = subjectKey(s);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  return out;
+}
 
 /** What to do with a run request for `key`. A forced call carries a NEW window, so dropping it leaves the tab rendering one period under another's label with no error and no retry — it is queued behind the in-flight fetch instead. */
 export function runDisposition(
@@ -176,6 +193,31 @@ export function useIpTabs(creds: Creds): IpTabs {
     [run, tabs],
   );
 
+  const openMany = useCallback(
+    (subjects: Subject[], window: Window) => {
+      const toAdd = newSubjects(
+        tabs.map((t) => t.subject),
+        subjects,
+      );
+      if (!toAdd.length) return;
+      setTabs((prev) => [
+        ...prev,
+        ...toAdd.map((subject) => ({
+          subject,
+          window,
+          data: null,
+          error: '',
+          loading: true,
+        })),
+      ]);
+      setIndex(tabs.length); // the first of the appended block
+      // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
+      // so these queue rather than stampede, and every tab has its data by the time you reach it.
+      for (const s of toAdd) void run(s, window);
+    },
+    [run, tabs],
+  );
+
   const refresh = useCallback(
     (window?: Window) => {
       const t = tabs[index];
@@ -201,5 +243,14 @@ export function useIpTabs(creds: Creds): IpTabs {
     setTabs((prev) => prev.filter((_, i) => i !== index));
   }, [index, tabs.length]);
 
-  return { tabs, index, active: tabs[index], open, refresh, cycle, close };
+  return {
+    tabs,
+    index,
+    active: tabs[index],
+    open,
+    openMany,
+    refresh,
+    cycle,
+    close,
+  };
 }

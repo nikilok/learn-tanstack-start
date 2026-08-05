@@ -746,6 +746,19 @@ export function App() {
     setFocus(windowReturn.current);
   };
 
+  /** Open every match currently listed, so a shortlist can be compared by tabbing rather than typed one at a time. Skips anything already open. */
+  const submitAll = () => {
+    const subjects = ipMatches.map(([value]) => ({
+      kind: pickKind,
+      value: pickKind === 'ja4' ? value.toLowerCase() : value,
+    }));
+    if (!subjects.length) return;
+    setIpError('');
+    setFocus('pane');
+    setReportScroll(0);
+    ipTabs.openMany(subjects, ipWindow);
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
@@ -888,6 +901,9 @@ export function App() {
       }
       // `w` cannot occur in an IP, so intercepting it here costs nothing and saves an esc.
       else if (input === 'w' || input === 'W') openWindowPick();
+      // Same reasoning for `o`: no IP contains it (the filter strips non-hex anyway) and no JA4
+      // digest does either, so filtering by it could only ever match nothing.
+      else if (input === 'o' || input === 'O') submitAll();
       else if (input && !key.ctrl && !key.meta) {
         setIpCursor(-1); // typing re-asserts the typed text over any highlight
         // A paste arrives as ONE chunk, so filter within it rather than testing the whole
@@ -1368,7 +1384,7 @@ export function App() {
                         (isLive
                           ? ` · auto-refresh ${LIVE_REFRESH_MS / 1000}s${failuresRef.current ? ' (backing off)' : ''}`
                           : ', type to filter') +
-                        ' · w timeline'}
+                        ' · o open all · w timeline'}
                   </Text>
                 )
               )}

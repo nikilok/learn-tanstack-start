@@ -37,6 +37,7 @@ import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
 import { THEME_INIT_SCRIPT } from '../scripts/theme-init';
 import { APP_DESCRIPTION, APP_SHORT_NAME, APP_TITLE } from '../utils/app-meta';
 import { isDesktopPreview } from '../utils/desktop-preview';
+import { ogImageMeta } from '../utils/social-meta';
 
 import appCss from '../styles.css?url';
 
@@ -70,15 +71,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           property: 'og:description',
           content: APP_DESCRIPTION,
         },
-        { property: 'og:image', content: 'https://sponsorsearch.co.uk/og.png' },
-        { property: 'og:image:width', content: '1200' },
-        { property: 'og:image:height', content: '630' },
-        {
-          property: 'og:image',
-          content: 'https://sponsorsearch.co.uk/og-square.png',
-        },
-        { property: 'og:image:width', content: '1200' },
-        { property: 'og:image:height', content: '1200' },
+        ...ogImageMeta(),
         { property: 'og:url', content: 'https://sponsorsearch.co.uk' },
         { property: 'og:site_name', content: APP_SHORT_NAME },
         { name: 'twitter:card', content: 'summary_large_image' },

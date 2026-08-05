@@ -185,42 +185,82 @@ describe('denyListRule', () => {
 });
 
 describe('valuesOf / withValue', () => {
-
   test('the revocation placeholder is not reported as a real entry', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [] });
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [],
+    });
     expect(valuesOf(rule, JA4_DENY)).toEqual([]);
   });
 
   test('adding to an empty (revoked) rule replaces the placeholder', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [] });
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [],
+    });
     const { values } = withValue(rule, JA4_DENY, JA4_A);
     expect(values).toEqual([JA4_A]);
   });
 
   test('adding keeps what was already there', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [JA4_A] });
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
     expect(withValue(rule, JA4_DENY, JA4_B).values).toEqual([JA4_A, JA4_B]);
   });
 
   test('staging the same digest twice is a no-op', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [JA4_A] });
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
     expect(withValue(rule, JA4_DENY, JA4_A).values).toEqual([JA4_A]);
   });
 
   test('case is normalised, so a dashboard-cased digest cannot double up', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [JA4_A] });
-    expect(withValue(rule, JA4_DENY, JA4_A.toUpperCase()).values).toEqual([JA4_A]);
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(withValue(rule, JA4_DENY, JA4_A.toUpperCase()).values).toEqual([
+      JA4_A,
+    ]);
   });
 
   test('a malformed digest is refused rather than added as a match-nothing condition', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [JA4_A] });
-    expect(() => withValue(rule, JA4_DENY, 'nonsense')).toThrow(/refusing to add/);
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
+    expect(() => withValue(rule, JA4_DENY, 'nonsense')).toThrow(
+      /refusing to add/,
+    );
   });
 
   test('every staged value reaches the rebuilt conditions', () => {
-    const rule = denyListRule({ name: 'r', description: 'd', spec: JA4_DENY, values: [JA4_A] });
+    const rule = denyListRule({
+      name: 'r',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [JA4_A],
+    });
     const out = withValue(rule, JA4_DENY, JA4_B).rule;
-    const vals = out.conditionGroup.flatMap((g) => g.conditions.map((c) => c.value));
+    const vals = out.conditionGroup.flatMap((g) =>
+      g.conditions.map((c) => c.value),
+    );
     expect(vals).toEqual([JA4_A, JA4_B]);
   });
 });
@@ -265,11 +305,15 @@ describe('denyDescription', () => {
       spec: JA4_DENY,
       values: [JA4_A],
     });
-    expect(withValue(base, JA4_DENY, JA4_B).rule.description).toBe('Deny X. 2 denied.');
+    expect(withValue(base, JA4_DENY, JA4_B).rule.description).toBe(
+      'Deny X. 2 denied.',
+    );
   });
 
   test('descriptions stay inside the 256-char cap Vercel enforces', () => {
-    expect(denyDescription('x'.repeat(200), 99).length).toBeLessThanOrEqual(256);
+    expect(denyDescription('x'.repeat(200), 99).length).toBeLessThanOrEqual(
+      256,
+    );
   });
 });
 

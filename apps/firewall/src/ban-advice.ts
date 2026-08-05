@@ -306,7 +306,13 @@ export function adviseBan(input: AdviceInput): Advice {
   // Already handled outranks "cannot tell" — a denied scraper seen through a narrow window is
   // still denied, and showing it as DO NOT DENY invited the operator to undo the ban.
   if (input.alreadyDeniedJa4)
-    return { verdict: 'already', digest, reasons, blockers: denied, leverNotes };
+    return {
+      verdict: 'already',
+      digest,
+      reasons,
+      blockers: denied,
+      leverNotes,
+    };
   const unjudgeable = unjudgeableFor(input);
   if (unjudgeable.length)
     return {
@@ -356,7 +362,9 @@ export function adviseBan(input: AdviceInput): Advice {
   // never served a sub-resource has never served a real browser.
   const asnOk = qualifyLever(input.asnReach, 'network');
   leverNotes.push(
-    input.alreadyDeniedAsn ? 'network is already in FW_BLOCKED_ASN' : asnOk.note,
+    input.alreadyDeniedAsn
+      ? 'network is already in FW_BLOCKED_ASN'
+      : asnOk.note,
   );
   const asn = input.asnReach?.label ?? input.asns[0]?.[0];
   if (asnOk.ok && !input.alreadyDeniedAsn && asn)

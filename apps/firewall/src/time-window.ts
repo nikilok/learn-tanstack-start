@@ -30,8 +30,18 @@ export const WINDOW_PRESETS: { label: string; minutes: number }[] = [
 ];
 
 const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /** UTC midnight from three already-extracted numeric parts, or null when they are not a real date. */
@@ -145,7 +155,8 @@ export function rollingMinutes(
     hours: minutes / 60,
     minutes,
     granularityMinutes: g,
-    label: label ?? (minutes < 60 ? `last ${minutes}m` : `last ${minutes / 60}h`),
+    label:
+      label ?? (minutes < 60 ? `last ${minutes}m` : `last ${minutes / 60}h`),
   };
 }
 

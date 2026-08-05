@@ -40,9 +40,11 @@ describe('verdictOf', () => {
     expect(v.note).toContain('claude-user');
     // Leads with the instruction: the TUI pane truncates, and this must survive the cut.
     expect(v.note?.startsWith('DO NOT DENY')).toBe(true);
-    expect(truncate(line(seg(v.note ?? '')), 30).map((s) => s.text).join('')).toContain(
-      'DO NOT DENY',
-    );
+    expect(
+      truncate(line(seg(v.note ?? '')), 30)
+        .map((s) => s.text)
+        .join(''),
+    ).toContain('DO NOT DENY');
   });
 
   test('a verified crawler that did not enumerate is just verified', () => {
@@ -106,7 +108,9 @@ describe('sitemapLines', () => {
 
   test('a shared fingerprint raises the check-before-denying banner', () => {
     const text = sitemapLines(
-      report([digest({ verifiedAs: ['claude-user'], verifiedOffSitemap: true })]),
+      report([
+        digest({ verifiedAs: ['claude-user'], verifiedOffSitemap: true }),
+      ]),
     )
       .map(lineText)
       .join('\n');
@@ -118,12 +122,16 @@ describe('sitemapLines', () => {
     const text = sitemapLines(report([digest()]))
       .map(lineText)
       .join('\n');
-    expect(text).toContain('1 unverified fingerprint(s) read a sitemap then enumerated');
+    expect(text).toContain(
+      '1 unverified fingerprint(s) read a sitemap then enumerated',
+    );
   });
 
   test('truncated path samples are marked as floors, not totals', () => {
     const text = sitemapLines(
-      report([digest({ total: 176900, companyPages: 705, pathsPartial: true })]),
+      report([
+        digest({ total: 176900, companyPages: 705, pathsPartial: true }),
+      ]),
     )
       .map(lineText)
       .join('\n');
@@ -146,18 +154,23 @@ describe('sitemapLines — selection', () => {
     digests,
     errors: [],
   });
-  const two = [digest(), digest({ ja4: 't13d311200_1d947a95fc68_7e1102d2036b' })];
+  const two = [
+    digest(),
+    digest({ ja4: 't13d311200_1d947a95fc68_7e1102d2036b' }),
+  ];
 
   test('exactly one row is marked, and it is the cursor', () => {
     const text = sitemapLines(report(two), 1).map(lineText).join('\n');
     expect(text.split('▶').length - 1).toBe(1);
-    expect(
-      text.split('\n').find((l) => l.includes('▶')),
-    ).toContain('t13d311200');
+    expect(text.split('\n').find((l) => l.includes('▶'))).toContain(
+      't13d311200',
+    );
   });
 
   test('no cursor marks nothing — the CLI renders the same view', () => {
-    expect(sitemapLines(report(two)).map(lineText).join('\n')).not.toContain('▶');
+    expect(sitemapLines(report(two)).map(lineText).join('\n')).not.toContain(
+      '▶',
+    );
   });
 
   test('the window label is shown, so a re-scoped report cannot read as the old one', () => {

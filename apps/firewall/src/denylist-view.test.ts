@@ -2,8 +2,8 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { lineText } from './line-model';
 import { type DenyEntry, denylistLines } from './denylist-view';
+import { lineText } from './line-model';
 
 const JA4 = 't13d311200_1d947a95fc68_7e1102d2036b';
 const entry = (over: Partial<DenyEntry> = {}): DenyEntry => ({
@@ -25,13 +25,17 @@ describe('denylistLines', () => {
   });
 
   test('a genuinely quiet ban is flagged as retirable', () => {
-    expect(text([entry({ requests: 0, denied: 0 })])).toContain('safe to retire');
+    expect(text([entry({ requests: 0, denied: 0 })])).toContain(
+      'safe to retire',
+    );
   });
 
   test('UNKNOWN activity never reads as quiet — that would retire a live ban', () => {
     // Regression: zero-filling an unqueryable value said "safe to retire" for AS29066,
     // which was doing 1,206 req at the time.
-    const out = text([entry({ kind: 'asn', value: '29066', requests: undefined })]);
+    const out = text([
+      entry({ kind: 'asn', value: '29066', requests: undefined }),
+    ]);
     expect(out).not.toContain('safe to retire');
     expect(out).toContain('not measurable');
   });
@@ -87,7 +91,8 @@ describe('denylistLines — not enforcing', () => {
     expect(text).toContain('IS NOT DENYING');
     expect(text).toContain('deny-scraper-ja4');
     expect(text).toContain('nothing is being denied');
-    expect(text).not.toContain('nothing is denied\n');
+    // 'nothing is denied' is a substring of neither — the good-state string must be absent.
+    expect(text.split('\n')).not.toContain('  nothing is denied');
   });
 
   test('a genuinely empty denylist still reads as the good state', () => {
@@ -99,17 +104,27 @@ describe('denylistLines — not enforcing', () => {
   test('the warning precedes the counts, so it cannot be scrolled past', () => {
     const lines = denylistLines(
       report({
-        notEnforcing: [{ rule: 'deny-scraper-asn', why: 'the rule is DEACTIVATED' }],
+        notEnforcing: [
+          { rule: 'deny-scraper-asn', why: 'the rule is DEACTIVATED' },
+        ],
         entries: [
-          { kind: 'ja4' as const, value: 'x', staged: false, removed: false, requests: 5, denied: 5 },
+          {
+            kind: 'ja4' as const,
+            value: 'x',
+            staged: false,
+            removed: false,
+            requests: 5,
+            denied: 5,
+          },
         ],
       }),
       0,
     ).map(lineText);
     const warn = lines.findIndex((l) => l.includes('IS NOT DENYING'));
-    const count = lines.findIndex((l) => l.includes('denied'));
+    const count = lines.findIndex((l) => /^\d+ denied/.test(l));
     expect(warn).toBeGreaterThanOrEqual(0);
-    expect(warn).toBeLessThan(lines.length);
-    expect(count).toBeGreaterThan(-1);
+    expect(count).toBeGreaterThanOrEqual(0);
+    // The actual guarantee the test name makes.
+    expect(warn).toBeLessThan(count);
   });
 });

@@ -244,7 +244,10 @@ describe('adviseBan — the one-tell threshold', () => {
   test('watch still reports the digest, so it can be staged deliberately', () => {
     const a = adviseBan({
       ...scraper(),
-      mix: mixOf([['/company/a', 9060], ['/assets/x.js', 0]]),
+      mix: mixOf([
+        ['/company/a', 9060],
+        ['/assets/x.js', 0],
+      ]),
       shape: shapeOf(series([9060], 10, 144), 10),
       ja4: [['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 9060]],
       digestReach: undefined,
@@ -300,7 +303,7 @@ describe('adviseBan — first-party callers', () => {
       ...chStream(),
       wafActions: [['log', 1158]],
       wafRules: [],
-    statuses: [['200', 9000]],
+      statuses: [['200', 9000]],
     });
     expect(a.verdict).toBe('leave');
     expect(a.blockers.join(' ')).toContain('nothing here to enumerate');
@@ -317,7 +320,10 @@ describe('adviseBan — the ASN lever', () => {
   // across the whole ASN. The fingerprint rotates, so the network is the handle.
   const velia = (over: Partial<AdviceInput> = {}): AdviceInput => ({
     total: 1630,
-    mix: mixOf([['/company/a', 1600], ['/sitemap-1.xml', 30]]),
+    mix: mixOf([
+      ['/company/a', 1600],
+      ['/sitemap-1.xml', 30],
+    ]),
     shape: shapeOf(series(Array(144).fill(11), 0, 144), 10),
     ja4: [['t13d3012h1_1d37bd780c83_882d495ac381', 1630]],
     asns: [['velia.net Internetdienste GmbH', 1630]],
@@ -454,7 +460,10 @@ describe('adviseBan — is acting worth it', () => {
   // finding nothing. Still deniable, but the operator should know a deny buys very little.
   const prober = (): AdviceInput => ({
     total: 490,
-    mix: mixOf([['/1.php', 200], ['/admin.php', 290]]),
+    mix: mixOf([
+      ['/1.php', 200],
+      ['/admin.php', 290],
+    ]),
     shape: shapeOf(series(Array(144).fill(4), 0, 144), 10),
     ja4: [['t13d201100_2b729b4bf6f3_36bf25f296df', 490]],
     asns: [['Microsoft Corporation', 490]],
@@ -517,8 +526,14 @@ describe('adviseBan — is acting worth it', () => {
   });
 
   test('a client that actually gets 200s is not called a prober', () => {
-    const a = adviseBan({ ...prober(), statuses: [['200', 490]], wafActions: [['log', 490]] });
-    expect(a.leverNotes.join(' ')).not.toContain('probing rather than harvesting');
+    const a = adviseBan({
+      ...prober(),
+      statuses: [['200', 490]],
+      wafActions: [['log', 490]],
+    });
+    expect(a.leverNotes.join(' ')).not.toContain(
+      'probing rather than harvesting',
+    );
   });
 });
 
@@ -555,7 +570,9 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('server-fn RPCs alone do the same', () => {
-    expect(adviseBan(scraper({ digestReach: reach({ rpcs: 900 }) })).lever).toBeUndefined();
+    expect(
+      adviseBan(scraper({ digestReach: reach({ rpcs: 900 }) })).lever,
+    ).toBeUndefined();
   });
 
   test('two tells on the same axis are one tell', () => {
@@ -581,7 +598,10 @@ describe('adviseBan — review regressions', () => {
     const a = adviseBan(
       scraper({
         total: 270,
-        mix: mixOf([['/_serverFn/a', 230], ['/company/x', 40]]),
+        mix: mixOf([
+          ['/_serverFn/a', 230],
+          ['/company/x', 40],
+        ]),
         shape: shapeOf(buckets, 10),
         ja4: [['t13d2013h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 270]],
         digestReach: reach({ ips: 1, countries: 1, total: 270 }),
@@ -613,20 +633,32 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('a secret-header allow rule still certifies first-party', () => {
-    const a = adviseBan(scraper({ wafRules: [['allow-ch-stream-revalidate', 400]] }));
+    const a = adviseBan(
+      scraper({ wafRules: [['allow-ch-stream-revalidate', 400]] }),
+    );
     expect(a.blockers.join(' ')).toContain('first-party');
   });
 
   test('one token asset fetch does not immunise a scraper forever', () => {
     const a = adviseBan(
-      scraper({ mix: mixOf([['/company/a', 9059], ['/favicon.svg', 1]]) }),
+      scraper({
+        mix: mixOf([
+          ['/company/a', 9059],
+          ['/favicon.svg', 1],
+        ]),
+      }),
     );
     expect(a.verdict).toBe('ban');
   });
 
   test('a real browser share of assets still blocks', () => {
     const a = adviseBan(
-      scraper({ mix: mixOf([['/company/a', 9000], ['/assets/x.js', 400]]) }),
+      scraper({
+        mix: mixOf([
+          ['/company/a', 9000],
+          ['/assets/x.js', 400],
+        ]),
+      }),
     );
     expect(a.verdict).toBe('leave');
     expect(a.blockers.join(' ')).toContain('sub-resource');
@@ -640,14 +672,24 @@ describe('adviseBan — review regressions', () => {
     ['analytics beacon', '/_vercel/insights/view'],
   ])('one token %s does not immunise a scraper', (_label, path) => {
     const a = adviseBan(
-      scraper({ mix: mixOf([['/company/a', 9059], [path, 1]]) }),
+      scraper({
+        mix: mixOf([
+          ['/company/a', 9059],
+          [path, 1],
+        ]),
+      }),
     );
     expect(a.verdict).toBe('ban');
   });
 
   test('a real share of RPCs still blocks — the SPA signal is unchanged', () => {
     const a = adviseBan(
-      scraper({ mix: mixOf([['/company/a', 9000], ['/_serverFn/x', 400]]) }),
+      scraper({
+        mix: mixOf([
+          ['/company/a', 9000],
+          ['/_serverFn/x', 400],
+        ]),
+      }),
     );
     expect(a.verdict).toBe('leave');
   });
@@ -671,7 +713,10 @@ describe('adviseBan — review regressions', () => {
   test('a failed query does not override a real legitimacy blocker', () => {
     // Legitimacy outranks "cannot tell": a verified bot stays DO NOT DENY either way.
     const a = adviseBan(
-      human({ failedQueries: ['waf rule names'], botVerified: [['pass', 100]] }),
+      human({
+        failedQueries: ['waf rule names'],
+        botVerified: [['pass', 100]],
+      }),
     );
     expect(a.verdict).toBe('leave');
   });

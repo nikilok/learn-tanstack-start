@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { indexAfterClose, nextIndex, runDisposition} from './use-ip-tabs';
+import { indexAfterClose, nextIndex, runDisposition } from './use-ip-tabs';
 
 describe('nextIndex', () => {
   test('advances and wraps past the end', () => {

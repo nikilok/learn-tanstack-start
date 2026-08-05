@@ -42,7 +42,11 @@ export function runDisposition(
 }
 
 /** Wrapping tab index. Empty list stays at 0 so the caller never indexes past the end. */
-export function nextIndex(current: number, length: number, dir: 1 | -1): number {
+export function nextIndex(
+  current: number,
+  length: number,
+  dir: 1 | -1,
+): number {
   if (length <= 0) return 0;
   return (current + dir + length) % length;
 }
@@ -66,7 +70,8 @@ export function tabWindow(
   const n = widths.length;
   if (!n) return { start: 0, end: 0, left: false, right: false };
   const total = widths.reduce((a, b) => a + b, 0);
-  if (total <= available) return { start: 0, end: n, left: false, right: false };
+  if (total <= available)
+    return { start: 0, end: n, left: false, right: false };
 
   // Both arrows are budgeted for even when only one shows, so the window does not resize as it
   // slides — a bar that reflows on every tab press is harder to read than one that is stable.
@@ -147,7 +152,8 @@ export function useIpTabs(creds: Creds): IpTabs {
     (subject: Subject, window: Window, force = false) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
       const existing = tabs.findIndex(
-        (t) => t.subject.kind === subject.kind && t.subject.value === subject.value,
+        (t) =>
+          t.subject.kind === subject.kind && t.subject.value === subject.value,
       );
       if (existing !== -1) {
         setIndex(existing);
@@ -189,12 +195,11 @@ export function useIpTabs(creds: Creds): IpTabs {
   );
 
   const close = useCallback(() => {
-    setTabs((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      setIndex(indexAfterClose(index, next.length));
-      return next;
-    });
-  }, [index]);
+    // Both computed from `tabs`, not from inside the updater: React may invoke an updater twice,
+    // and a state setter called from within one is a side effect it is not allowed to have.
+    setIndex(indexAfterClose(index, Math.max(0, tabs.length - 1)));
+    setTabs((prev) => prev.filter((_, i) => i !== index));
+  }, [index, tabs.length]);
 
   return { tabs, index, active: tabs[index], open, refresh, cycle, close };
 }

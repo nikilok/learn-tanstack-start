@@ -1,6 +1,8 @@
 // The interactive rule-manager TUI: a stateful Ink container wiring the data layer
 // (client.ts, report-data.ts) to the presentational components in ./components.
 
+import { fileURLToPath } from 'node:url';
+
 import {
   type DOMElement,
   Box,
@@ -11,23 +13,8 @@ import {
 } from 'ink';
 import { useEffect, useRef, useState } from 'react';
 
-import { fileURLToPath } from 'node:url';
-
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import { type Advice, adviseBan } from './ban-advice';
-import {
-  ASN_DENY,
-  JA4_DENY,
-  pendingEdits,
-  valuesOf,
-  withValue,
-  withoutValue,
-} from './deny-list';
-import { copyToClipboard } from './clipboard';
-import { type Activity, fetchDenyActivity } from './denylist-data';
-import { type DenyEntry, denylistLines } from './denylist-view';
-import { persistEnvVar } from './env-file';
-import { unboundedPreviewBypass } from './preview-bypass';
 import {
   type ApplyStatus,
   type Item,
@@ -38,12 +25,25 @@ import {
   teamId,
   token,
 } from './client';
+import { copyToClipboard } from './clipboard';
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
+import {
+  ASN_DENY,
+  JA4_DENY,
+  pendingEdits,
+  valuesOf,
+  withValue,
+  withoutValue,
+} from './deny-list';
+import { type Activity, fetchDenyActivity } from './denylist-data';
+import { type DenyEntry, denylistLines } from './denylist-view';
+import { persistEnvVar } from './env-file';
 import { resolveIpEntry } from './ip-entry';
 import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
+import { unboundedPreviewBypass } from './preview-bypass';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
@@ -262,7 +262,9 @@ export function App() {
         const w = rollingMinutes(LIVE_MINUTES, new Date(), 'live');
         setIpWindow(w);
         const cache =
-          pickKindRef.current === 'ip' ? topIpListRef.current : topJa4ListRef.current;
+          pickKindRef.current === 'ip'
+            ? topIpListRef.current
+            : topJa4ListRef.current;
         cache.reset();
         // The outcome comes from load itself: it catches every rejection, so a flag set inside
         // the fetcher cannot see a request the pane dropped as a duplicate, and that reset the
@@ -374,7 +376,9 @@ export function App() {
     // Back to the editor, not a terminal screen — an apply is a step in a session.
     setApplied({
       summary:
-        summaryLine(statuses) + persisted + (unbounded ? ` · WARNING: ${unbounded}` : ''),
+        summaryLine(statuses) +
+        persisted +
+        (unbounded ? ` · WARNING: ${unbounded}` : ''),
       ok: !anyError && !unbounded,
     });
     setPhase('select');
@@ -433,7 +437,8 @@ export function App() {
     return notes.length ? ` · WARNING: ${notes.join('; ')}` : '';
   };
 
-  const denyRuleOf = (name: string) => items.find((it) => it.rule.name === name);
+  const denyRuleOf = (name: string) =>
+    items.find((it) => it.rule.name === name);
   // A rule can sit in the WAF with active:false, or cycled to log/challenge — both states leave
   // the traffic served normally. Reporting ALREADY DENIED for either tells the operator a
   // scraper is handled while it is not, which is the most costly kind of wrong. seedItems
@@ -513,9 +518,10 @@ export function App() {
       spec,
     );
     // Kept terse so it survives a narrow rules column; the footer and denylist pane carry detail.
-    const parts = [added ? `+${added}` : '', dropped ? `−${dropped}` : ''].filter(
-      Boolean,
-    );
+    const parts = [
+      added ? `+${added}` : '',
+      dropped ? `−${dropped}` : '',
+    ].filter(Boolean);
     if (parts.length) pendingByRule.set(ruleName, parts.join(' '));
   }
 
@@ -535,7 +541,8 @@ export function App() {
         // Live-and-applied, NOT merely present in the rule: a staged digest is in the local
         // rule but has not been written, and calling that "already denied" is a lie.
         alreadyDeniedJa4:
-          liveJa4.includes(subjectDigest) && !stagedDenies.includes(subjectDigest),
+          liveJa4.includes(subjectDigest) &&
+          !stagedDenies.includes(subjectDigest),
         stagedJa4: stagedDenies.includes(subjectDigest),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
@@ -736,9 +743,7 @@ export function App() {
     const valid =
       pickKind === 'ip' ? IP_CHARS.test(ip) : JA4_DENY.valid(ip.toLowerCase());
     if (!ip || !valid) {
-      setIpError(
-        pickKind === 'ip' ? 'not an IP address' : 'not a JA4 digest',
-      );
+      setIpError(pickKind === 'ip' ? 'not an IP address' : 'not a JA4 digest');
       return;
     }
     setIpError('');
@@ -799,7 +804,10 @@ export function App() {
       else if (input && !key.ctrl && !key.meta) {
         // Filter within the chunk and submit on an embedded newline: a pasted range arrives
         // whole, and testing the whole string would reject every paste.
-        const next = (rangeInput + input.replace(/[^\d\s/.-]/g, '')).slice(0, 32);
+        const next = (rangeInput + input.replace(/[^\d\s/.-]/g, '')).slice(
+          0,
+          32,
+        );
         setRangeInput(next);
         if (/[\r\n]/.test(input)) submitRange(next);
       }
@@ -825,7 +833,8 @@ export function App() {
           onYes: () => stageDeny('asn', num),
         });
         setFocus('confirm');
-      } else if (key.backspace || key.delete) setAsnInput((s) => s.slice(0, -1));
+      } else if (key.backspace || key.delete)
+        setAsnInput((s) => s.slice(0, -1));
       else if (input && !key.ctrl && !key.meta)
         setAsnInput((s) => (s + input.replace(/\D/g, '')).slice(0, 10));
       return;
@@ -1019,7 +1028,10 @@ export function App() {
     reportW,
   );
   const rulesW = showPane ? cols - reportW - PANE_GAP : cols;
-  const longestName = items.reduce((n, it) => Math.max(n, it.rule.name.length), 0);
+  const longestName = items.reduce(
+    (n, it) => Math.max(n, it.rule.name.length),
+    0,
+  );
   // ◂ n/m ▸ stays visible whenever there is somewhere to cycle to, even with the rules focused —
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
@@ -1080,7 +1092,10 @@ export function App() {
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
               {pendingByRule.size ? (
-                <Text color="yellow"> · {pendingByRule.size} rule(s) unapplied</Text>
+                <Text color="yellow">
+                  {' '}
+                  · {pendingByRule.size} rule(s) unapplied
+                </Text>
               ) : (
                 ''
               )}
@@ -1130,9 +1145,7 @@ export function App() {
               {ipTabs.tabs.slice(tabBar.start, tabBar.end).map((t, j) => {
                 const i = tabBar.start + j;
                 const chip =
-                  i === ipTabs.index
-                    ? `[${tabLabel(t)}]`
-                    : ` ${tabLabel(t)} `;
+                  i === ipTabs.index ? `[${tabLabel(t)}]` : ` ${tabLabel(t)} `;
                 return (
                   <Text
                     key={`${t.subject.kind}:${t.subject.value}`}
@@ -1209,8 +1222,8 @@ export function App() {
               )}
               {focus === 'pane' && (
                 <Text dimColor>
-                  j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh · i
-                  new ip · f ja4 · w timeline
+                  j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh ·
+                  i new ip · f ja4 · w timeline
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
@@ -1236,9 +1249,7 @@ export function App() {
                     {p.label.padEnd(10)}
                   </Text>
                   <Text dimColor>
-                    {p.minutes < 60
-                      ? `${p.minutes}m`
-                      : `${p.minutes / 60}h`}
+                    {p.minutes < 60 ? `${p.minutes}m` : `${p.minutes / 60}h`}
                     {i === presetIdx ? '  ·  in force' : ''}
                   </Text>
                 </Box>
@@ -1330,14 +1341,15 @@ export function App() {
                 )
               )}
               {ipMatches.map(([ip, count], i) => {
-                const open = ipTabs.tabs.some(
-                  (t) => t.subject.value === ip,
-                );
+                const open = ipTabs.tabs.some((t) => t.subject.value === ip);
                 return (
                   <Box key={ip}>
                     <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
                     <Text dimColor>{String(count).padStart(7)} </Text>
-                    <Text bold={i === ipCursor} color={i === ipCursor ? 'cyan' : undefined}>
+                    <Text
+                      bold={i === ipCursor}
+                      color={i === ipCursor ? 'cyan' : undefined}
+                    >
                       {ip}
                     </Text>
                     {open && <Text dimColor> (open)</Text>}
@@ -1345,7 +1357,10 @@ export function App() {
                 );
               })}
               {Boolean(topIpList.data) && !ipMatches.length && ipInput && (
-                <Text dimColor>  no busy IP matches — enter profiles it anyway</Text>
+                <Text dimColor>
+                  {' '}
+                  no busy IP matches — enter profiles it anyway
+                </Text>
               )}
               <Box>
                 <Text color="cyan">{pickKind === 'ip' ? 'IP: ' : 'JA4: '}</Text>
@@ -1423,12 +1438,13 @@ function PaneBody({
     );
   const what = kind === 'ip' ? 'IP profile' : 'sitemap readers';
   const state = kind === 'ip' ? ipTab : sitemap;
-  if (!state)
-    return <Text dimColor>no {what} yet — i to look one up</Text>;
+  if (!state) return <Text dimColor>no {what} yet — i to look one up</Text>;
   if (state.error) return <Text color="red">{state.error}</Text>;
   if (!state.data)
     return (
-      <Text dimColor>{state.loading ? `Loading ${what}…` : `no ${what} yet`}</Text>
+      <Text dimColor>
+        {state.loading ? `Loading ${what}…` : `no ${what} yet`}
+      </Text>
     );
   return (
     <Box flexDirection="column">

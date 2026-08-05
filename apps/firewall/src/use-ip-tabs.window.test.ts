@@ -35,7 +35,9 @@ describe('tabWindow', () => {
   test('the window fits, except when even one tab cannot — then it keeps exactly one', () => {
     for (const avail of [20, 40, 84, 120]) {
       const r = tabWindow(w(8), 4, avail);
-      const used = w(8).slice(r.start, r.end).reduce((a, b) => a + b, 0);
+      const used = w(8)
+        .slice(r.start, r.end)
+        .reduce((a, b) => a + b, 0);
       const fits = used <= Math.max(0, avail - 4);
       // The renderer clips an oversized lone chip; the window's job is never to return zero.
       expect(fits || r.end - r.start === 1).toBe(true);

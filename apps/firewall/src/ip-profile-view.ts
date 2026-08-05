@@ -45,7 +45,8 @@ function heading(text: string): Line[] {
 }
 
 function sessionLines(shape: Shape): Line[] {
-  if (!shape.sessions.length) return [line(seg('  (no traffic in the window)', 'dim'))];
+  if (!shape.sessions.length)
+    return [line(seg('  (no traffic in the window)', 'dim'))];
   const unit = `${shape.bucketMinutes}min`;
   const out: Line[] = [
     line(
@@ -85,7 +86,9 @@ function bucketChart(
   );
   if (active.length > shown.length)
     out.push(
-      line(seg(`  … +${active.length - shown.length} more active buckets`, 'dim')),
+      line(
+        seg(`  … +${active.length - shown.length} more active buckets`, 'dim'),
+      ),
     );
   return out;
 }
@@ -111,17 +114,31 @@ function reachLine(
   hours: number,
 ): Line[] {
   if (!r) return [];
+  // `complete` is the flag that stops absent evidence reading as a measured zero, and this is
+  // the block an operator reads to decide a blanket deny — so it has to appear here, not only
+  // in the advisory's reasoning.
+  const ge = r.complete ? '' : '≥';
   return [
     line(
       seg(
-        `  ${what} (${hours}h): ${r.ips} IPs · ${r.countries} countries · ${r.total} req · ` +
-          `${r.subResources + r.beacons} sub-resources` +
+        `  ${what} (${hours}h): ${r.ips} IPs · ${r.countries} countries · ${ge}${r.total} req · ` +
+          `${ge}${r.subResources + r.beacons} sub-resources` +
           (r.verifiedNames.length
             ? ` · verified: ${r.verifiedNames.join(', ')}`
             : ''),
-        'dim',
+        r.complete ? 'dim' : 'warn',
       ),
     ),
+    ...(r.complete
+      ? []
+      : [
+          line(
+            seg(
+              '    sample incomplete — a query failed or the tail was truncated, so these are floors',
+              'warn',
+            ),
+          ),
+        ]),
   ];
 }
 
@@ -213,17 +230,35 @@ export function profileLines(
   L.push(...labelledRows('verified', p.byBotVerified, 4));
 
   const m = p.mix;
+  const ge = p.mixPartial ? '≥' : '';
   L.push(
     ...heading('TRAFFIC MIX'),
     line(
-      `  page ${m.page} · rpc ${m.rpc} · api ${m.api} · asset ${m.asset} · beacon ${m.beacon} · tile ${m.tile} · crawl ${m.crawl}`,
+      `  page ${ge}${m.page} · rpc ${ge}${m.rpc} · api ${ge}${m.api} · asset ${ge}${m.asset} · beacon ${ge}${m.beacon} · tile ${ge}${m.tile} · crawl ${ge}${m.crawl}`,
     ),
   );
+  // A zero here is the evidence that BLOCKS a deny, so a truncated sample must never present
+  // one as measured.
+  if (p.mixPartial)
+    L.push(
+      line(
+        seg(
+          '  path sample truncated by the API — every count above is a floor, and a zero may be a dropped tail',
+          'warn',
+        ),
+      ),
+    );
 
   L.push(...heading('FIREWALL'));
   L.push(...labelledRows('action', p.byWafAction, 6));
   // Managed rulesets carry no custom rule id, so the unnamed bucket is noise here.
-  L.push(...labelledRows('rule', p.byWafRule.filter(([k]) => k !== '(none)'), 6));
+  L.push(
+    ...labelledRows(
+      'rule',
+      p.byWafRule.filter(([k]) => k !== '(none)'),
+      6,
+    ),
+  );
 
   L.push(...heading('STATUS'), ...countRows(p.byStatus, 8));
   L.push(...heading('TOP PATHS'), ...countRows(p.byPath, TOP_ROWS));

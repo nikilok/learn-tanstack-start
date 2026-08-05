@@ -27,10 +27,9 @@ describe('previewTokens', () => {
   });
 
   test('accepts the punctuation real preview UAs use', () => {
-    expect(previewTokens('Slackbot-LinkExpanding 1.0,SkypeUriPreview')).toEqual([
-      'Slackbot-LinkExpanding 1.0',
-      'SkypeUriPreview',
-    ]);
+    expect(previewTokens('Slackbot-LinkExpanding 1.0,SkypeUriPreview')).toEqual(
+      ['Slackbot-LinkExpanding 1.0', 'SkypeUriPreview'],
+    );
   });
 
   test('rejects a stray comma by position, not value', () => {
@@ -74,7 +73,9 @@ describe('previewRules', () => {
     }
     // No user_agent condition at all: a spoofed UA has nothing to match.
     expect(
-      bypass.conditionGroup.flatMap((g) => g.conditions).some((c) => c.type === 'user_agent'),
+      bypass.conditionGroup
+        .flatMap((g) => g.conditions)
+        .some((c) => c.type === 'user_agent'),
     ).toBe(false);
   });
 

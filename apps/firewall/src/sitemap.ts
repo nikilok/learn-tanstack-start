@@ -3,9 +3,9 @@
 
 import { resolveVercelCredentials } from './credentials';
 import { toAnsi } from './line-model';
-import { rollingWindow } from './time-window';
 import { fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
+import { rollingWindow } from './time-window';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 144;

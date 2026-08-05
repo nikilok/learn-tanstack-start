@@ -1,6 +1,11 @@
-import { describe, expect, test } from 'bun:test';
-
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,7 +13,11 @@ import { persistEnvVar, upsertEnvLine } from './env-file';
 
 describe('upsertEnvLine', () => {
   test('replaces an existing assignment in place', () => {
-    const out = upsertEnvLine('A=1\nFW_BLOCKED_JA4=old\nB=2\n', 'FW_BLOCKED_JA4', 'new');
+    const out = upsertEnvLine(
+      'A=1\nFW_BLOCKED_JA4=old\nB=2\n',
+      'FW_BLOCKED_JA4',
+      'new',
+    );
     expect(out).toBe('A=1\nFW_BLOCKED_JA4=new\nB=2\n');
   });
 
@@ -22,7 +31,8 @@ describe('upsertEnvLine', () => {
   });
 
   test('leaves comments and unrelated keys untouched', () => {
-    const src = '# firewall\nFW_SERVERFN_LIMIT=300\n\n# denies\nFW_BLOCKED_ASN=29066\n';
+    const src =
+      '# firewall\nFW_SERVERFN_LIMIT=300\n\n# denies\nFW_BLOCKED_ASN=29066\n';
     const out = upsertEnvLine(src, 'FW_BLOCKED_JA4', 'abc');
     expect(out).toContain('# firewall');
     expect(out).toContain('FW_SERVERFN_LIMIT=300');
@@ -31,7 +41,11 @@ describe('upsertEnvLine', () => {
   });
 
   test('does not match a key that merely shares a prefix', () => {
-    const out = upsertEnvLine('FW_BLOCKED_JA4_EXTRA=x\n', 'FW_BLOCKED_JA4', 'v');
+    const out = upsertEnvLine(
+      'FW_BLOCKED_JA4_EXTRA=x\n',
+      'FW_BLOCKED_JA4',
+      'v',
+    );
     expect(out).toContain('FW_BLOCKED_JA4_EXTRA=x');
     expect(out).toContain('FW_BLOCKED_JA4=v');
   });
@@ -60,6 +74,7 @@ describe('upsertEnvLine', () => {
 // FW_* ceiling live in it. A read failure that was treated as "absent" replaced the lot.
 describe('persistEnvVar', () => {
   const dir = mkdtempSync(join(tmpdir(), 'fw-env-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   test('creates the file when it genuinely does not exist', () => {
     const path = join(dir, 'created.env');

@@ -12,7 +12,10 @@ export function upsertEnvLine(
   value: string,
 ): string {
   const lines = content.split('\n');
-  const assign = new RegExp(`^\\s*(export\\s+)?${key}\\s*=`);
+  // Escaped: every caller passes an FW_* literal today, but a key containing . or + would
+  // silently match a different line.
+  const safe = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const assign = new RegExp(`^\\s*(export\\s+)?${safe}\\s*=`);
   // Last match wins, mirroring how dotenv-style loaders resolve a duplicated key.
   let at = -1;
   for (const [i, l] of lines.entries()) if (assign.test(l)) at = i;

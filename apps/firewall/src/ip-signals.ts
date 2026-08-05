@@ -17,8 +17,13 @@ export function assetsIndicateBrowser(assets: number, total: number): boolean {
 }
 
 /** Whether a client's rendering requests are numerous enough to indicate a real browser. Pooled and share-gated: an unconditional `> 0` on any single axis is not evidence. */
-export function rendersIndicateBrowser(renders: number, total: number): boolean {
-  return renders >= MIN_ASSETS && renders / Math.max(1, total) >= MIN_ASSET_SHARE;
+export function rendersIndicateBrowser(
+  renders: number,
+  total: number,
+): boolean {
+  return (
+    renders >= MIN_ASSETS && renders / Math.max(1, total) >= MIN_ASSET_SHARE
+  );
 }
 
 // Networks people rent servers on. Some large CDNs carry real consumer traffic and are
@@ -119,7 +124,12 @@ export function renderingRequests(mix: Mix): number {
   return mix.asset + mix.beacon + mix.tile + mix.rpc;
 }
 
-export type Session = { start: string; end: string; buckets: number; total: number };
+export type Session = {
+  start: string;
+  end: string;
+  buckets: number;
+  total: number;
+};
 export type Shape = {
   bucketMinutes: number;
   active: number; // buckets with any traffic
@@ -192,7 +202,8 @@ export function shapeOf(buckets: Bucket[], bucketMinutes: number): Shape {
   const busiest = Math.max(0, ...sessions.map((s) => s.total));
   const spanMinutes =
     active.length > 1
-      ? (Date.parse(active[active.length - 1].t) - Date.parse(active[0].t)) / 60_000 +
+      ? (Date.parse(active[active.length - 1].t) - Date.parse(active[0].t)) /
+          60_000 +
         bucketMinutes
       : active.length * bucketMinutes;
 
@@ -248,7 +259,9 @@ export function tellsFor(input: SignalInput): Tell[] {
   // and failed Vercel's reverse check — presenting that as "verified" told the operator, in the
   // tool's own words, to discount the strongest tells against a confirmed impersonator.
   const verified = input.botVerified.filter(([v]) => v === 'pass');
-  const failedCheck = input.botVerified.filter(([v]) => v && v.startsWith('fail'));
+  const failedCheck = input.botVerified.filter(
+    ([v]) => v && v.startsWith('fail'),
+  );
   if (verified.length)
     tells.push({
       points: 'neutral',

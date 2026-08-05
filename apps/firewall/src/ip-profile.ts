@@ -397,7 +397,11 @@ export async function topIps(
   const { ctx } = makeCtx(creds, window);
   try {
     return {
-      rows: top(await metrics(ctx, ['clientIp'], { limit: 500 }), 'clientIp', limit),
+      rows: top(
+        await metrics(ctx, ['clientIp'], { limit: 500 }),
+        'clientIp',
+        limit,
+      ),
     };
   } catch (e) {
     return { rows: [], error: errMsg(e) };

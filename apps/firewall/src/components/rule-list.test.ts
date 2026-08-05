@@ -34,7 +34,8 @@ describe('rowWidths', () => {
       expect(w.name).toBeGreaterThanOrEqual(0);
       expect(w.tail).toBeGreaterThanOrEqual(0);
       // The name floor can exceed a tiny column; the tail must then be zero, not negative.
-      if (width >= 34) expect(w.name + w.tail + FIXED).toBeLessThanOrEqual(width);
+      if (width >= 34)
+        expect(w.name + w.tail + FIXED).toBeLessThanOrEqual(width);
     }
   });
 
@@ -62,7 +63,8 @@ describe('rowWidths — unapplied state must stay visible', () => {
   test('forcing the tail never overflows the column', () => {
     for (const width of [24, 30, 34, 40, 60, 120]) {
       const w = rowWidths(width, LONGEST, true);
-      if (width >= 34) expect(w.name + w.tail + FIXED).toBeLessThanOrEqual(width);
+      if (width >= 34)
+        expect(w.name + w.tail + FIXED).toBeLessThanOrEqual(width);
       expect(w.tail).toBeGreaterThanOrEqual(0);
     }
   });

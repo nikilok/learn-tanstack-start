@@ -1,12 +1,6 @@
 // Lays out a SitemapReport as lines, shared by the CLI and the TUI pane.
 
-import {
-  type Line,
-  blank,
-  countRows,
-  line,
-  seg,
-} from './line-model';
+import { type Line, blank, countRows, line, seg } from './line-model';
 import type { SitemapDigest, SitemapReport } from './sitemap-readers';
 
 const ENUMERATION_RATIO = 10; // page fetches per sitemap fetch before it reads as a walk
@@ -59,8 +53,11 @@ function digestLines(d: SitemapDigest, isCursor: boolean): Line[] {
     ),
   ];
   const pad = ' '.repeat(15);
-  const detail: string[] = [`${d.ips.length} IP${d.ips.length === 1 ? '' : 's'}`];
-  if (d.verifiedAs.length) detail.push(`verified as ${d.verifiedAs.join(', ')}`);
+  const detail: string[] = [
+    `${d.ips.length} IP${d.ips.length === 1 ? '' : 's'}`,
+  ];
+  if (d.verifiedAs.length)
+    detail.push(`verified as ${d.verifiedAs.join(', ')}`);
   if (d.enriched) {
     // The API under-reports groups at high cardinality, so say so rather than print a total that
     // is 200x low. The floors are still enough to convict — they can only understate.
@@ -133,9 +130,7 @@ export function sitemapLines(r: SitemapReport, cursor = -1): Line[] {
       seg('   ↑↓ select · enter copies the digest', 'dim'),
     ),
   );
-  r.digests.forEach((d, i) =>
-    L.push(...digestLines(d, i === cursor), blank()),
-  );
+  r.digests.forEach((d, i) => L.push(...digestLines(d, i === cursor), blank()));
 
   if (r.verified.length) {
     L.push(line(seg('VERIFIED CRAWLERS', 'bold')));

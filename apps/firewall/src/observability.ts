@@ -183,10 +183,16 @@ export async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
     { headers: ctx.headers },
   );
   if (!res.ok) return new Map();
-  const cfg = JSON.parse(res.text) as {
-    rules?: { id: string; name: string }[];
-  };
-  return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
+  // Documented to degrade to an empty map, never to throw: the caller treats missing names as a
+  // failed lookup, and a 200 carrying an HTML error page would otherwise take the profile down.
+  try {
+    const cfg = JSON.parse(res.text) as {
+      rules?: { id: string; name: string }[];
+    };
+    return new Map((cfg.rules ?? []).map((r) => [r.id, r.name]));
+  } catch {
+    return new Map();
+  }
 }
 
 /** Build the request context for an explicit window. Callers pass a resolved Window, which has already been hour-aligned and clamped to what the API will serve. */

@@ -55,7 +55,10 @@ function entryLines(e: DenyEntry, isCursor: boolean): Line[] {
 /** Full bans layout. `cursor` indexes `entries`. */
 export function denylistLines(r: DenylistReport, cursor: number): Line[] {
   const L: Line[] = [
-    line(seg('Denylist', 'bold'), seg(`  last ${r.windowHours}h activity`, 'dim')),
+    line(
+      seg('Denylist', 'bold'),
+      seg(`  last ${r.windowHours}h activity`, 'dim'),
+    ),
   ];
   // Before the counts: a rule that is not denying makes every number below it a lie.
   for (const n of r.notEnforcing ?? [])
@@ -76,6 +79,10 @@ export function denylistLines(r: DenylistReport, cursor: number): Line[] {
         ? line(seg('  nothing is being denied', 'bad'))
         : line(seg('  nothing is denied', 'good')),
     );
+    // An empty list plus a failed lookup is unknown, not clean — the same distinction the rest
+    // of this tool exists to preserve.
+    if (r.error)
+      L.push(blank(), line(seg(`  activity lookup: ${r.error}`, 'warn')));
     return L;
   }
   const pending = r.entries.filter((e) => e.staged || e.removed).length;
@@ -83,14 +90,21 @@ export function denylistLines(r: DenylistReport, cursor: number): Line[] {
     line(
       seg(
         `${r.entries.filter((e) => !e.removed).length} denied` +
-          (pending ? ` · ${pending} unapplied change${pending === 1 ? '' : 's'}` : ''),
+          (pending
+            ? ` · ${pending} unapplied change${pending === 1 ? '' : 's'}`
+            : ''),
       ),
     ),
   );
   if (pending)
-    L.push(line(seg('  press a to apply — nothing reaches the WAF until then', 'warn')));
+    L.push(
+      line(
+        seg('  press a to apply — nothing reaches the WAF until then', 'warn'),
+      ),
+    );
   L.push(blank());
   r.entries.forEach((e, i) => L.push(...entryLines(e, i === cursor)));
-  if (r.error) L.push(blank(), line(seg(`  activity lookup: ${r.error}`, 'warn')));
+  if (r.error)
+    L.push(blank(), line(seg(`  activity lookup: ${r.error}`, 'warn')));
   return L;
 }

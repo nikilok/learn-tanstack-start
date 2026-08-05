@@ -78,12 +78,18 @@ function RowTail({
     case 'applying':
       return <Text color="yellow">… applying</Text>;
     case 'inserted':
-      return <Text color="green">{truncate(`＋ inserted${suffix}`, width)}</Text>;
+      return (
+        <Text color="green">{truncate(`＋ inserted${suffix}`, width)}</Text>
+      );
     case 'overwrote':
-      return <Text color="green">{truncate(`✔ overwrote${suffix}`, width)}</Text>;
+      return (
+        <Text color="green">{truncate(`✔ overwrote${suffix}`, width)}</Text>
+      );
     case 'error':
       return (
-        <Text color="red">{truncate(`✖ ${item.detail ?? 'error'}`, width)}</Text>
+        <Text color="red">
+          {truncate(`✖ ${item.detail ?? 'error'}`, width)}
+        </Text>
       );
     default:
       return <Text dimColor>pending</Text>;

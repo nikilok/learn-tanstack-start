@@ -71,7 +71,9 @@ describe('resolveWindow', () => {
   });
 
   test('the label reads as the range the operator typed', () => {
-    expect(ok(resolveWindow('08 01 2026 - 08 02 2026', NOW)).label).toBe('01 Aug - 02 Aug');
+    expect(ok(resolveWindow('08 01 2026 - 08 02 2026', NOW)).label).toBe(
+      '01 Aug - 02 Aug',
+    );
   });
 
   test('anything past the API limit is refused with the earliest date named', () => {
@@ -115,12 +117,16 @@ describe('rollingWindow', () => {
 describe('resolveWindow — forgiving input', () => {
   const okw = (t: string) => {
     const r = resolveWindow(t, NOW);
-    if ('error' in r) throw new Error(`expected a window for "${t}", got: ${r.error}`);
+    if ('error' in r)
+      throw new Error(`expected a window for "${t}", got: ${r.error}`);
     return r.window;
   };
 
   test('a range works with a dash, with slashes, or with nothing but spaces', () => {
-    const want = { from: '2026-08-01T00:00:00.000Z', to: '2026-08-03T00:00:00.000Z' };
+    const want = {
+      from: '2026-08-01T00:00:00.000Z',
+      to: '2026-08-03T00:00:00.000Z',
+    };
     for (const t of [
       '08 01 2026 - 08 02 2026',
       '08/01/2026 - 08/02/2026',
@@ -163,13 +169,13 @@ describe('bucketMinutesFor', () => {
   });
 
   test('a typed date range gets the same treatment as a preset of the same length', () => {
-    const w = ok(resolveWindow('08 04 2026', NOW));
-    expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(
-      bucketMinutesFor(w.hours, w.granularityMinutes),
+    const typed = ok(resolveWindow('08 04 2026', NOW));
+    expect(typed.hours).toBeLessThan(48);
+    const preset = rollingMinutes(typed.minutes, NOW, 'same length');
+    expect(bucketMinutesFor(typed.hours, typed.granularityMinutes)).toBe(
+      bucketMinutesFor(preset.hours, preset.granularityMinutes),
     );
-    // 12h30 rounded up: well inside the fine range.
-    expect(w.hours).toBeLessThan(48);
-    expect(bucketMinutesFor(w.hours, w.granularityMinutes)).toBe(10);
+    expect(bucketMinutesFor(typed.hours, typed.granularityMinutes)).toBe(10);
   });
 
   test('never finer than the window can be aligned to', () => {

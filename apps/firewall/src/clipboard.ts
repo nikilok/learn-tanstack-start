@@ -15,7 +15,11 @@ export async function copyToClipboard(text: string): Promise<string | null> {
   const cmd = clipboardCommand();
   if (!cmd) return `no clipboard command known for ${process.platform}`;
   try {
-    const proc = Bun.spawn(cmd, { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' });
+    const proc = Bun.spawn(cmd, {
+      stdin: 'pipe',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
     proc.stdin.write(text);
     await proc.stdin.end();
     const code = await proc.exited;

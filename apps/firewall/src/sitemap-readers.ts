@@ -6,13 +6,7 @@ import { readdirSync } from 'node:fs';
 
 import { JA4_DENY, envMatching } from './deny-list';
 import { type PathKind, pathKind } from './ip-signals';
-import {
-  type Ctx,
-  countOf,
-  makeCtx,
-  metrics,
-  pool,
-} from './observability';
+import { type Ctx, countOf, makeCtx, metrics, pool } from './observability';
 import type { Window } from './time-window';
 import { errMsg } from './util';
 
@@ -68,7 +62,9 @@ export function sitemapPaths(): string[] {
     const found = readdirSync(dir)
       .filter((f) => /^sitemap[\w-]*\.xml$/.test(f))
       .map((f) => `/${f}`);
-    if (found.length) return found.sort();
+    // The index is always watched, even when it is served by a route rather than a static file:
+    // it is the most-fetched sitemap URL and the tripwire this whole report hangs off.
+    if (found.length) return [...new Set(['/sitemap.xml', ...found])].sort();
   } catch {
     // fall through to the fixed range
   }
@@ -92,8 +88,7 @@ async function group(
     const resp = await metrics(ctx, dims, { filter, limit: 500 });
     return (resp.summary ?? [])
       .map(
-        (r) =>
-          [dims.map((d) => String(r[d] ?? '').trim()), countOf(r)] as Row,
+        (r) => [dims.map((d) => String(r[d] ?? '').trim()), countOf(r)] as Row,
       )
       .sort((a, b) => b[1] - a[1]);
   } catch (e) {
@@ -183,7 +178,8 @@ export async function fetchSitemapReport(
       const [rows, botRows, wafRows] = await pool(
         [
           () => group(ctx, errors, `paths ${tag}`, ['requestPath'], f),
-          () => group(ctx, errors, `bots ${tag}`, ['botVerified', 'botName'], f),
+          () =>
+            group(ctx, errors, `bots ${tag}`, ['botVerified', 'botName'], f),
           () => group(ctx, errors, `waf ${tag}`, ['wafAction'], f),
         ],
         3,

@@ -64,7 +64,9 @@ function previewCeilingRule(tokens: string[], limit: number): Rule {
     active: true,
     conditionGroup: tokens.length
       ? tokens.map((value) => ({
-          conditions: [{ type: 'user_agent' as const, op: 'sub' as const, value }],
+          conditions: [
+            { type: 'user_agent' as const, op: 'sub' as const, value },
+          ],
         }))
       : UNMATCHABLE,
     action: {

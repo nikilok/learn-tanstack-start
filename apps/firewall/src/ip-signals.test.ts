@@ -29,7 +29,9 @@ describe('pathKind', () => {
     expect(pathKind('/_vercel/insights/view')).toBe('beacon');
     expect(pathKind('/_vercel/speed-insights/vitals')).toBe('beacon');
     expect(pathKind('/_serverFn/abc123')).toBe('rpc');
-    expect(pathKind('/api/tiles/alidade_smooth/16/32468/20737@2x')).toBe('tile');
+    expect(pathKind('/api/tiles/alidade_smooth/16/32468/20737@2x')).toBe(
+      'tile',
+    );
     expect(pathKind('/assets/index-C1pPKFbU.js')).toBe('asset');
     expect(pathKind('/fonts/geist-latin.woff2')).toBe('asset');
     expect(pathKind('/favicon.svg')).toBe('asset');
@@ -129,7 +131,9 @@ function humanInput(): SignalInput {
     mix: mixOf(paths),
     shape: shapeOf(series([246, 105, 177, 135], 120, 144), 10),
     ja4: [['t13d2013h2_a09f3c656075_7f0f34a4126d', 362]],
-    userAgents: [['Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)', 366]],
+    userAgents: [
+      ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X)', 366],
+    ],
     asns: [['British Telecommunications Limited', 366]],
     countries: [['GB', 366]],
     botVerified: [],
@@ -153,8 +157,14 @@ function scraperInput(): SignalInput {
       { length: 40 },
       (_, i) => [`Mozilla/5.0 Chrome/${100 + i}`, 260 - i] as [string, number],
     ),
-    asns: [['ISP A', 6000], ['ISP B', 4100]],
-    countries: [['DE', 5000], ['BR', 5100]],
+    asns: [
+      ['ISP A', 6000],
+      ['ISP B', 4100],
+    ],
+    countries: [
+      ['DE', 5000],
+      ['BR', 5100],
+    ],
     botVerified: [],
     windowMinutes: 1440,
   };
@@ -211,7 +221,7 @@ describe('tellsFor', () => {
 });
 
 describe('tellsFor — review regression', () => {
-  test("a FAILED bot check is a bot signal, never presented as verified", () => {
+  test('a FAILED bot check is a bot signal, never presented as verified', () => {
     // Presenting 'fail' as verified told the operator, in the tool's own words, to discount the
     // strongest tells against a client Vercel had explicitly judged to be spoofing.
     const input = scraperInput();
@@ -227,7 +237,9 @@ describe('tellsFor — review regression', () => {
   test("only 'pass' counts as verification", () => {
     const input = scraperInput();
     input.botVerified = [['pass', 500]];
-    expect(tellsFor(input).find((t) => t.label === 'verified bot')?.points).toBe('neutral');
+    expect(
+      tellsFor(input).find((t) => t.label === 'verified bot')?.points,
+    ).toBe('neutral');
   });
 });
 
@@ -260,7 +272,10 @@ describe('assetsIndicateBrowser', () => {
 
   test('the SIGNALS tell and the blocker agree on the same numbers', () => {
     const input = scraperInput();
-    input.mix = mixOf([['/company/a', 585], ['/assets/x.js', 2]]);
+    input.mix = mixOf([
+      ['/company/a', 585],
+      ['/assets/x.js', 2],
+    ]);
     input.total = 587;
     const tell = tellsFor(input).find((t) => t.label === 'sub-resources');
     // Same threshold the blocker uses, so one screen cannot say browser while the other acts.

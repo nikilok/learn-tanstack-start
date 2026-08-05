@@ -61,7 +61,9 @@ describe('toAnsi', () => {
   });
 
   test('blank lines survive as empty output lines', () => {
-    expect(toAnsi([line('a'), [], line('b')], { colour: false })).toBe('a\n\nb');
+    expect(toAnsi([line('a'), [], line('b')], { colour: false })).toBe(
+      'a\n\nb',
+    );
   });
 });
 
@@ -87,7 +89,14 @@ describe('countRows', () => {
 
 describe('labelledRows', () => {
   test('shows the label once, then indents', () => {
-    const out = labelledRows('JA4', [['x', 2], ['y', 1]], 4).map(lineText);
+    const out = labelledRows(
+      'JA4',
+      [
+        ['x', 2],
+        ['y', 1],
+      ],
+      4,
+    ).map(lineText);
     expect(out[0]).toContain('JA4');
     expect(out[1]).not.toContain('JA4');
     expect(out[1].startsWith('  '.padEnd(11))).toBe(true);

@@ -7,7 +7,9 @@
  * Output:
  *   public/og.png           — 1200x630  (Facebook, WhatsApp, LinkedIn)
  *   public/og-twitter.png   — 1200x675  (Twitter/X summary_large_image)
- *   public/og-square.png    — 1200x1200 (Instagram, Telegram, fallback)
+ *   public/og-square.png    — 1200x1200. Still generated for direct use, but deliberately NOT
+ *                             declared as an og:image: a second og:image wins over the first in
+ *                             practice, so it took over every shared link's card.
  *
  * If you change the logo design, update the SVG string below and re-run.
  */

@@ -8,7 +8,12 @@
 // SHARED, and then the network is the tighter handle. Each passes the same safety test before it
 // is offered — nothing legitimate may be riding it.
 
-import { alpnOf, renderingRequests, rendersIndicateBrowser } from './ip-signals';
+import {
+  alpnOf,
+  dutyCycleOf,
+  renderingRequests,
+  rendersIndicateBrowser,
+} from './ip-signals';
 import type { Mix, Shape } from './ip-signals';
 
 // Worth-a-rule is a question about sustained volume, so the bar scales with the window: 200
@@ -255,11 +260,10 @@ export function adviseBan(input: AdviceInput): Advice {
       'crawl',
       `read the sitemap then fetched ${mix.page} pages — the enumeration pattern`,
     );
-  // Active minutes, NOT first-to-last span. Span measures how long a client was AROUND, so any
-  // repeat visitor with traffic in both halves of the window scored as automated — and the wider
-  // the operator's chosen range, the more often that fired.
-  const activeMinutes = shape.active * shape.bucketMinutes;
-  const duty = activeMinutes / Math.max(1, input.windowMinutes);
+  // dutyCycleOf is shared with tellsFor so the two panes measure pacing the same way. The
+  // THRESHOLDS stay separate on purpose: this one gates a ban, and widening it is a change to
+  // who gets denied, not a display fix.
+  const duty = dutyCycleOf(shape, input.windowMinutes);
   if (duty > 0.5 && shape.concentration < 0.5)
     tell(
       'pacing',

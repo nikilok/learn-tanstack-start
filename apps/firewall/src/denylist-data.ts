@@ -6,7 +6,7 @@
 // therefore reports UNKNOWN, never zero: zero reads as "safe to retire", and AS29066 was doing
 // 1,206 requests when a zero-filled version of this said exactly that.
 
-import { makeCtx, metrics } from './observability';
+import { countOf, makeCtx, metrics } from './observability';
 import { errMsg } from './util';
 
 export type Activity = { requests: number; denied: number };
@@ -32,12 +32,7 @@ export async function fetchDenyActivity(
     for (const row of resp.summary ?? []) {
       const key = String(row.clientJa4Digest ?? '');
       if (!key) continue;
-      const v = row.count_sum as unknown;
-      const n =
-        v && typeof v === 'object'
-          ? ((v as { value?: number; sum?: number }).value ?? 0)
-          : Number(v ?? 0);
-      const count = Number.isFinite(n) ? n : 0;
+      const count = countOf(row);
       const cur = activity.get(key) ?? { requests: 0, denied: 0 };
       cur.requests += count;
       if (String(row.wafAction ?? '') === 'deny') cur.denied += count;

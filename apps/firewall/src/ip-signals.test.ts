@@ -7,6 +7,7 @@ import {
   type SignalInput,
   alpnOf,
   assetsIndicateBrowser,
+  dutyCycleOf,
   isComputeNetwork,
   mixOf,
   pathKind,
@@ -320,5 +321,71 @@ describe('headless browsers', () => {
     const tell = tellsFor(input).find((t) => t.label === 'path diversity');
     expect(tell?.points).toBe('bot');
     expect(tell?.detail).toContain('walking the catalogue');
+  });
+});
+
+// Regression: tellsFor measured the duty cycle from spanMinutes (first-to-last activity) while
+// adviseBan measured it from active minutes. A repeat visitor therefore got "spread level across
+// the window, the automated pattern" in SIGNALS directly above a RECOMMENDATION that had already
+// cleared them — the two-panes-disagree failure this codebase keeps having to close.
+describe('dutyCycleOf', () => {
+  const shape = (activeBuckets: number[], length = 144) =>
+    shapeOf(
+      series([], 0, length).map((b, i) => ({
+        ...b,
+        c: activeBuckets.includes(i) ? 30 : 0,
+      })),
+      10,
+    );
+
+  test('measures how much of the window was active, not how long the client was around', () => {
+    // Three visits spread across a day: 9 active 10-minute buckets in 1440 minutes.
+    const s = shape([48, 49, 50, 78, 79, 80, 126, 127, 128]);
+    expect(dutyCycleOf(s, 1440)).toBeCloseTo(90 / 1440, 5);
+    // The span between the first and last visit is ~810 minutes — 9x the real figure.
+    expect(s.spanMinutes).toBeGreaterThan(700);
+  });
+
+  test('a genuinely level client still reads as level', () => {
+    const s = shape(Array.from({ length: 144 }, (_, i) => i));
+    expect(dutyCycleOf(s, 1440)).toBe(1);
+  });
+
+  test('never divides by zero on an empty window', () => {
+    expect(dutyCycleOf(shape([]), 0)).toBe(0);
+  });
+
+  test('a flat scraper still reads automated', () => {
+    const input: SignalInput = {
+      ...scraperInput(),
+      shape: shape(Array.from({ length: 144 }, (_, i) => i)),
+    };
+    const t = tellsFor(input).find((x) => x.label === 'session shape');
+    expect(t?.points).toBe('bot');
+    expect(t?.detail).toContain('automated pattern');
+  });
+
+  test('one long burst still reads human', () => {
+    const input: SignalInput = {
+      ...humanInput(),
+      shape: shape([60, 61, 62, 63]),
+      windowMinutes: 1440,
+    };
+    const t = tellsFor(input).find((x) => x.label === 'session shape');
+    expect(t?.points).toBe('human');
+    expect(t?.detail).toContain('burst-and-idle');
+  });
+
+  test('a repeat visitor is not called automated by the session-shape tell', () => {
+    const input: SignalInput = {
+      ...humanInput(),
+      total: 270,
+      shape: shape([48, 49, 50, 78, 79, 80, 126, 127, 128]),
+      windowMinutes: 1440,
+    };
+    const shapeTell = tellsFor(input).find((t) => t.label === 'session shape');
+    expect(shapeTell?.detail).not.toContain('automated pattern');
+    expect(shapeTell?.points).toBe('neutral');
+    expect(shapeTell?.detail).toContain('6% of the window');
   });
 });

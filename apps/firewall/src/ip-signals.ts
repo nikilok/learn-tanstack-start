@@ -134,6 +134,21 @@ export type Shape = {
 const GAP_BUCKETS = 2; // idle buckets that end a session — 2 keeps a brief pause from splitting one
 
 /**
+ * Share of the window a client was ACTIVE in. Active minutes, never first-to-last span: span
+ * measures how long a client was around, so any repeat visitor with traffic in both halves of
+ * the window scores as level. Shared with adviseBan so the SIGNALS pane and the RECOMMENDATION
+ * pane cannot disagree about pacing on the same screen.
+ */
+export function dutyCycleOf(shape: Shape, windowMinutes: number): number {
+  return (shape.active * shape.bucketMinutes) / Math.max(1, windowMinutes);
+}
+
+// Busy across most of the window is the automated shape; people are absent from most of theirs.
+const LEVEL_DUTY = 0.5;
+// A single sitting holding nearly all the traffic — the classic burst-and-idle human shape.
+const BURST_CONCENTRATION = 0.9;
+
+/**
  * Session structure from a zero-filled bucket series. Humans burst then idle, so a few dense
  * sessions inside a long quiet window reads human; level traffic across the whole window reads
  * automated. Intensity AND duration both matter — either alone misclassifies.
@@ -360,9 +375,14 @@ export function tellsFor(input: SignalInput): Tell[] {
       });
   }
 
-  const dutyCycle = shape.spanMinutes / Math.max(1, input.windowMinutes);
+  const dutyCycle = dutyCycleOf(shape, input.windowMinutes);
+  const level = dutyCycle > LEVEL_DUTY;
+  const burst = shape.concentration >= BURST_CONCENTRATION && !level;
+  // Three-way, because "not a textbook burst" is not the same as "automated". Reading anything
+  // under a 90% concentration as automated called every repeat visitor a machine, on the same
+  // screen as a RECOMMENDATION that had already cleared them.
   tells.push({
-    points: shape.concentration >= 0.9 && dutyCycle < 0.5 ? 'human' : 'bot',
+    points: level ? 'bot' : burst ? 'human' : 'neutral',
     label: 'session shape',
     detail:
       shape.sessions.length === 0
@@ -370,9 +390,11 @@ export function tellsFor(input: SignalInput): Tell[] {
         : `${shape.sessions.length} session${shape.sessions.length === 1 ? '' : 's'}, ` +
           `${(shape.concentration * 100).toFixed(0)}% of requests in the busiest, ` +
           `active across ${(dutyCycle * 100).toFixed(0)}% of the window — ` +
-          (shape.concentration >= 0.9 && dutyCycle < 0.5
-            ? 'burst-and-idle, the human pattern'
-            : 'spread level across the window, the automated pattern'),
+          (level
+            ? 'spread level across the window, the automated pattern'
+            : burst
+              ? 'burst-and-idle, the human pattern'
+              : 'a few separate visits, which is neither pattern'),
   });
 
   return tells;

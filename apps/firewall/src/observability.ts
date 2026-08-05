@@ -110,8 +110,8 @@ export async function metrics(
   }
 }
 
-/** Extract the summed count from an observability summary row (scalar or {value|sum}). */
-function cnt(row: Row): number {
+/** Extract the summed count from an observability summary row (scalar or {value|sum}). Exported because every reader needs it and three hand-rolled copies had already drifted — one read only `.value`, so a rollup returned as `{sum}` made a live ban read as "safe to retire". */
+export function countOf(row: Row): number {
   const v = (row.count_sum ?? row.count) as unknown;
   if (v && typeof v === 'object') {
     const o = v as { value?: number; sum?: number };
@@ -128,7 +128,7 @@ export function top(
   n: number,
 ): [string, number][] {
   return (resp.summary ?? [])
-    .map((r) => [String(r[key] ?? '?'), cnt(r)] as [string, number])
+    .map((r) => [String(r[key] ?? '?'), countOf(r)] as [string, number])
     .sort((a, b) => b[1] - a[1])
     .slice(0, n);
 }
@@ -164,8 +164,8 @@ export function seriesBy(
     const t = String(r.timestamp ?? '');
     if (!t) continue;
     const list = byIp.get(ip);
-    if (list) list.push({ t, c: cnt(r) });
-    else byIp.set(ip, [{ t, c: cnt(r) }]);
+    if (list) list.push({ t, c: countOf(r) });
+    else byIp.set(ip, [{ t, c: countOf(r) }]);
   }
   for (const list of byIp.values()) list.sort((a, b) => a.t.localeCompare(b.t)); // ISO strings sort chronologically
   return byIp;

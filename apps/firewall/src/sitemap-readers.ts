@@ -8,6 +8,7 @@ import { JA4_DENY, envMatching } from './deny-list';
 import { type PathKind, pathKind } from './ip-signals';
 import {
   type Ctx,
+  countOf,
   makeCtx,
   metrics,
   pool,
@@ -90,19 +91,10 @@ async function group(
   try {
     const resp = await metrics(ctx, dims, { filter, limit: 500 });
     return (resp.summary ?? [])
-      .map((r) => {
-        const v = r.count_sum as unknown;
-        const n =
-          v && typeof v === 'object'
-            ? ((v as { value?: number; sum?: number }).value ??
-              (v as { sum?: number }).sum ??
-              0)
-            : Number(v ?? 0);
-        return [
-          dims.map((d) => String(r[d] ?? '').trim()),
-          Number.isFinite(n) ? n : 0,
-        ] as Row;
-      })
+      .map(
+        (r) =>
+          [dims.map((d) => String(r[d] ?? '').trim()), countOf(r)] as Row,
+      )
       .sort((a, b) => b[1] - a[1]);
   } catch (e) {
     errors.push(`${label}: ${errMsg(e)}`);

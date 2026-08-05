@@ -13,6 +13,7 @@ import {
 } from './ip-signals';
 import {
   type Ctx,
+  countOf,
   makeCtx,
   metrics,
   pool,
@@ -124,14 +125,7 @@ async function group(
           .map((d) => String(r[d] ?? '').trim())
           .filter(Boolean)
           .join(' | ');
-        const v = r.count_sum as unknown;
-        const n =
-          v && typeof v === 'object'
-            ? ((v as { value?: number; sum?: number }).value ??
-              (v as { sum?: number }).sum ??
-              0)
-            : Number(v ?? 0);
-        return [key || '(none)', Number.isFinite(n) ? n : 0] as [string, number];
+        return [key || '(none)', countOf(r)] as [string, number];
       })
       .sort((a, b) => b[1] - a[1]);
   } catch (e) {
@@ -270,7 +264,13 @@ export async function fetchIpProfile(
       ],
       4,
     );
-    if (!ips.length) return undefined;
+    // Undefined reach already refuses a lever (qualifyLever calls it "reach unknown"), but the
+    // reason matters: "this identity has no traffic" and "the lookup for it failed" are
+    // different facts and only one of them is about the client.
+    if (!ips.length) {
+      if (failed.length) failedQueries.push(`reach ${label}`);
+      return undefined;
+    }
     const kinds = mixOf(paths);
     const total = ips.reduce((s, [, c]) => s + c, 0);
     // The path grouping is capped at 500 groups, so a busy identity's tail — including its

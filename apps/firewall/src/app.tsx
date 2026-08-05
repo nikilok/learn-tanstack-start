@@ -93,6 +93,8 @@ const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and 
 // Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
 // truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
 const MIN_RULES_W = 46;
+// Below this the data pane cannot say anything useful, so it is hidden rather than squeezed.
+const MIN_PANE_W = 46;
 const PANE_GAP = 2; // marginRight between the two columns
 const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
@@ -262,16 +264,15 @@ export function App() {
         const cache =
           pickKindRef.current === 'ip' ? topIpListRef.current : topJa4ListRef.current;
         cache.reset();
-        let ok = true;
-        await cache.load(async () => {
+        // The outcome comes from load itself: it catches every rejection, so a flag set inside
+        // the fetcher cannot see a request the pane dropped as a duplicate, and that reset the
+        // backoff to zero on the exact ticks it was supposed to be lengthening.
+        const outcome = await cache.load(async () => {
           const { rows, error } =
             pickKindRef.current === 'ip'
               ? await topIps(creds, w, TOP_IPS_LIMIT)
               : await topJa4(creds, w, TOP_IPS_LIMIT);
-          if (error) {
-            ok = false;
-            throw new Error(error);
-          }
+          if (error) throw new Error(error);
           return rows;
         });
         if (stopped) return;
@@ -283,7 +284,9 @@ export function App() {
           // period the tab was opened in would render stale traffic under a "live" header.
           if (active) refreshTabRef.current(w);
         }
-        failuresRef.current = ok ? 0 : failuresRef.current + 1;
+        // A skipped load neither succeeded nor failed, so it must not clear the backoff.
+        if (outcome === 'ok') failuresRef.current = 0;
+        else if (outcome === 'error') failuresRef.current += 1;
         schedule(
           Math.min(
             LIVE_REFRESH_MS * 2 ** failuresRef.current,
@@ -390,13 +393,21 @@ export function App() {
     if (dryRun) return ' · dry-run: .env.local NOT written';
     const notes: string[] = [];
     let wrote = false;
+    // A cancelled run breaks out of applyAll part-way, so `outcome` can hold one deny rule and
+    // not the other. Clearing the staged lists on the strength of the one that landed would
+    // drop the other's values unpersisted, and the next apply rebuilds from env and lifts them.
+    let unreached = false;
     for (const [ruleName, spec, envKey] of [
       [JA4_RULE, JA4_DENY, 'FW_BLOCKED_JA4'],
       [ASN_RULE, ASN_DENY, 'FW_BLOCKED_ASN'],
     ] as const) {
       const item = snapshot.find((it) => it.rule.name === ruleName);
       const status = outcome.get(ruleName);
-      if (!item || !status) continue;
+      if (!item) continue;
+      if (!status) {
+        unreached = true;
+        continue;
+      }
       if (status === 'error') {
         notes.push(`${envKey} NOT saved — ${ruleName} failed to apply`);
         continue;
@@ -410,11 +421,15 @@ export function App() {
         );
       }
     }
-    if (wrote && !notes.length) {
+    if (wrote && !notes.length && !unreached) {
       setStagedDenies([]);
       setRemovedDenies([]);
       return ' · denylist saved to .env.local';
     }
+    if (unreached)
+      notes.push(
+        'a deny rule was never reached, so its staged edits are still unapplied',
+      );
     return notes.length ? ` · WARNING: ${notes.join('; ')}` : '';
   };
 
@@ -986,10 +1001,16 @@ export function App() {
   const cols = process.stdout.columns ?? 120;
   // 70% to the pane: it carries the reports, profiles and charts, while the rules list is names
   // and a tag. Floors both ways so a narrow terminal still shows a usable rule row.
-  const reportW = Math.max(
-    46,
-    Math.min(cols - MIN_RULES_W - PANE_GAP, Math.floor(cols * PANE_SHARE)),
+  // MIN_RULES_W is reserved BEFORE the pane takes its share. Flooring the pane at MIN_PANE_W
+  // after the cap inverted that: below 94 columns the floor won and the rules column shrank
+  // past the width its rows are sized against, so Ink wrapped every row.
+  const reportW = Math.min(
+    cols - MIN_RULES_W - PANE_GAP,
+    Math.max(MIN_PANE_W, Math.floor(cols * PANE_SHARE)),
   );
+  // Too narrow for both: the rules list is the thing you cannot work without, so it keeps the
+  // terminal and the pane waits for a wider window.
+  const showPane = pane !== null && reportW >= MIN_PANE_W;
   // Tab chips are sized here so the bar can be windowed: overflowing the row makes Ink wrap it
   // and the entire bar disappears, leaving no sign of which tab is active.
   const tabBar = tabWindow(
@@ -997,7 +1018,7 @@ export function App() {
     ipTabs.index,
     reportW,
   );
-  const rulesW = pane ? cols - reportW - PANE_GAP : cols;
+  const rulesW = showPane ? cols - reportW - PANE_GAP : cols;
   const longestName = items.reduce((n, it) => Math.max(n, it.rule.name.length), 0);
   // ◂ n/m ▸ stays visible whenever there is somewhere to cycle to, even with the rules focused —
   // otherwise nothing on screen says the other lookups are still open.
@@ -1022,7 +1043,7 @@ export function App() {
         flexDirection="column"
         width={rulesW}
         flexShrink={0}
-        marginRight={pane ? PANE_GAP : 0}
+        marginRight={showPane ? PANE_GAP : 0}
       >
         <Box>
           <Text bold>Vercel firewall rules </Text>
@@ -1092,7 +1113,7 @@ export function App() {
           <Text color="yellow">applying… · q stops after the current rule</Text>
         )}
       </Box>
-      {pane && (
+      {showPane && (
         <Box flexDirection="column" width={reportW}>
           {pane === 'ip' && ipTabs.tabs.length > 0 && (
             <Box>

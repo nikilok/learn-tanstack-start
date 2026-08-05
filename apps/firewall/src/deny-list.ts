@@ -125,6 +125,26 @@ export function denyDescription(base: string, count: number): string {
 }
 
 /**
+ * Whether `value` is denied BY THE WAF right now, as opposed to in the local edit buffer. The
+ * two staging states pull in opposite directions and both were wrong at some point: a staged
+ * ADDITION has not been written, so it is not denied yet; a staged REMOVAL has not been written
+ * either, so it still is. Reporting either backwards invites the operator to act twice.
+ */
+export function enforcedNow(
+  live: string[],
+  staged: string[],
+  removed: string[],
+  value: string,
+  spec: DenySpec,
+): boolean {
+  const norm = (v: string) => spec.normalize(v.trim());
+  const v = norm(value);
+  if (!v) return false;
+  if (staged.some((x) => norm(x) === v)) return false;
+  return live.some((x) => norm(x) === v) || removed.some((x) => norm(x) === v);
+}
+
+/**
  * Unapplied edits to ONE deny rule, given the flat staged/removed lists the TUI keeps across both
  * denylists. `spec.valid` is the filter that matters: absence from this rule's live values is
  * otherwise indistinguishable from a removal staged against it, so lifting an ASN ban marked the

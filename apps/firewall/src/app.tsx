@@ -32,6 +32,7 @@ import { type Phase, Row, summaryLine } from './components/rule-list';
 import {
   ASN_DENY,
   JA4_DENY,
+  enforcedNow,
   pendingEdits,
   valuesOf,
   withValue,
@@ -151,6 +152,9 @@ export function App() {
   const topJa4List = usePane<[string, number][]>();
   const denyActivity = usePane<Map<string, Activity>>();
   const [denyCursor, setDenyCursor] = useState(0);
+  // An error that arrived WITH partial data. usePane.error only carries a total failure, so
+  // without this a partial activity map renders as a complete one.
+  const [denyActivityNote, setDenyActivityNote] = useState('');
   const [sitemapCursor, setSitemapCursor] = useState(0);
   const [copied, setCopied] = useState('');
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
@@ -313,9 +317,32 @@ export function App() {
     } catch {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
     }
+    // Preflight, BEFORE anything is written: the bypass and its ceiling are an interlock, and
+    // running the check after the loop meant an unbounded bypass was already live in the WAF by
+    // the time the warning appeared. Refusing costs one apply; publishing it does not.
+    const preflight = unboundedPreviewBypass(
+      snapshot.map((i) => ({
+        name: i.rule.name,
+        active: i.active,
+        action: i.action,
+      })),
+    );
+    if (preflight) {
+      applying.current = false;
+      process.exitCode = 1;
+      setApplied({
+        summary: `nothing applied — ${preflight}`,
+        ok: false,
+      });
+      setPhase('select');
+      return;
+    }
     let anyError = false;
     let cancelled = false;
     const statuses: ApplyStatus[] = [];
+    // Rules that did not land. The post-apply check must judge what is IN FORCE, not what was
+    // intended: a ceiling that failed to write leaves the bypass unbounded.
+    const failedRules = new Set<string>();
     // Per rule, not just a global flag: a deny that reached the WAF must be written back to
     // .env.local even if an unrelated rule later fails, or the next apply silently lifts it.
     const outcome = new Map<string, ApplyStatus>();
@@ -330,7 +357,10 @@ export function App() {
       );
       try {
         const res = await applyItem(snapshot[i], ids);
-        if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
+        if (res.status === 'error') {
+          anyError = true; // a returned (not thrown) error must still fail the run
+          failedRules.add(snapshot[i].rule.name);
+        }
         statuses.push(res.status);
         outcome.set(snapshot[i].rule.name, res.status);
         setItems((prev) =>
@@ -340,6 +370,7 @@ export function App() {
         );
       } catch (e) {
         anyError = true;
+        failedRules.add(snapshot[i].rule.name);
         statuses.push('error');
         outcome.set(snapshot[i].rule.name, 'error');
         const detail = errMsg(e);
@@ -364,12 +395,12 @@ export function App() {
     // un-banned by the next CI run. Write back whatever ACTUALLY landed — keyed off each deny
     // rule's own outcome, because an unrelated rule failing must not strand a live ban.
     const persisted = persistDenies(outcome, snapshot);
-    // The detector exists for exactly this path: an operator deactivating the ceiling in the
-    // TUI and leaving the bypass live. It was only wired into the headless apply.
+    // Re-checked against what LANDED, not what was intended: the preflight above cleared the
+    // snapshot, but a ceiling whose write failed is not in force.
     const unbounded = unboundedPreviewBypass(
       snapshot.map((i) => ({
         name: i.rule.name,
-        active: i.active,
+        active: i.active && !failedRules.has(i.rule.name),
         action: i.action,
       })),
     );
@@ -540,9 +571,13 @@ export function App() {
         asnReach: ipTabs.active.data.asnReach,
         // Live-and-applied, NOT merely present in the rule: a staged digest is in the local
         // rule but has not been written, and calling that "already denied" is a lie.
-        alreadyDeniedJa4:
-          liveJa4.includes(subjectDigest) &&
-          !stagedDenies.includes(subjectDigest),
+        alreadyDeniedJa4: enforcedNow(
+          liveJa4,
+          stagedDenies,
+          removedDenies,
+          subjectDigest,
+          JA4_DENY,
+        ),
         stagedJa4: stagedDenies.includes(subjectDigest),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
@@ -589,6 +624,9 @@ export function App() {
           liveJa4,
         );
         if (error && !activity.size) throw new Error(error);
+        // Partial is not complete: a nonempty map with an error behind it must still say so, or
+        // a digest missing from it reads as "no traffic — safe to retire".
+        setDenyActivityNote(error ?? '');
         return activity;
       });
   };
@@ -645,7 +683,11 @@ export function App() {
       ),
     );
     setStagedDenies((s) => s.filter((v) => v !== entry.value));
-    setRemovedDenies((s) => [...new Set([...s, entry.value])]);
+    // Only a value that actually reached the WAF can be unbanned. Undoing a staged addition is
+    // just dropping the stage; recording it as a removal invents an unban of something that was
+    // never denied, and pendingEdits then counts it against the rule.
+    if (!entry.staged)
+      setRemovedDenies((s) => [...new Set([...s, entry.value])]);
     setApplied(null);
   };
 
@@ -719,10 +761,13 @@ export function App() {
         : WINDOW_PRESETS.findIndex((p) => p.minutes === IP_WINDOW_HOURS * 60),
     );
     applyWindow(next.window);
-    // Back to the picker: choosing a range is a step in choosing an IP, not the end of it.
-    setIpInput('');
-    setIpCursor(-1);
-    setFocus('ip-input');
+    // Back to whoever opened the picker, matching preset selection. Choosing a range from the
+    // report or sitemap pane used to drop the operator into the IP picker instead.
+    if (windowReturn.current === 'ip-input') {
+      setIpInput('');
+      setIpCursor(-1);
+    }
+    setFocus(windowReturn.current);
   };
 
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
@@ -733,11 +778,13 @@ export function App() {
     else if (pane === 'ip') ipTabs.refresh();
     else if (pane === 'denylist')
       void denyActivity.load(async () => {
-        const { activity } = await fetchDenyActivity(
+        const { activity, error } = await fetchDenyActivity(
           creds,
           DENY_ACTIVITY_HOURS,
           liveJa4,
         );
+        if (error && !activity.size) throw new Error(error);
+        setDenyActivityNote(error ?? '');
         return activity;
       });
   };
@@ -1029,7 +1076,9 @@ export function App() {
   // Tab chips are sized here so the bar can be windowed: overflowing the row makes Ink wrap it
   // and the entire bar disappears, leaving no sign of which tab is active.
   const tabBar = tabWindow(
-    ipTabs.tabs.map((t) => tabLabel(t).length + 3), // brackets/spaces + trailing gap
+    // brackets/spaces + trailing gap, plus the '…' a loading tab renders — a group that exactly
+    // fits while idle would otherwise wrap the moment one of them refreshes.
+    ipTabs.tabs.map((t) => tabLabel(t).length + (t.loading ? 4 : 3)),
     ipTabs.index,
     reportW,
   );
@@ -1199,6 +1248,7 @@ export function App() {
                 sitemapCursor={sitemapCursor}
                 denyEntries={denyEntries}
                 denyNotEnforcing={denyNotEnforcing}
+                denyActivityNote={denyActivityNote}
                 denyCursor={denyCursor}
                 denyActivity={denyActivity}
               />
@@ -1405,6 +1455,7 @@ function PaneBody({
   sitemapCursor,
   denyEntries,
   denyNotEnforcing,
+  denyActivityNote,
   denyCursor,
   denyActivity,
 }: {
@@ -1417,6 +1468,7 @@ function PaneBody({
   sitemapCursor: number;
   denyEntries: DenyEntry[];
   denyNotEnforcing: { rule: string; why: string }[];
+  denyActivityNote: string;
   denyCursor: number;
   denyActivity: Pane<Map<string, Activity>>;
 }) {
@@ -1436,7 +1488,7 @@ function PaneBody({
             windowHours: DENY_ACTIVITY_HOURS,
             entries: denyEntries,
             notEnforcing: denyNotEnforcing,
-            error: denyActivity.error || undefined,
+            error: denyActivity.error || denyActivityNote || undefined,
           },
           denyCursor,
         )}

@@ -8,6 +8,7 @@ import {
   denyListRule,
   envMatching,
   JA4_DENY,
+  enforcedNow,
   pendingEdits,
   valuesOf,
   withValue,
@@ -396,5 +397,39 @@ describe('pendingEdits', () => {
       added: 1,
       dropped: 1,
     });
+  });
+});
+
+// The two staging directions pull opposite ways, and both were reported backwards at some point.
+describe('enforcedNow', () => {
+  const DIGEST = 't13d311200_1d947a95fc68_7e1102d2036b';
+
+  test('a live digest with no pending edit is denied', () => {
+    expect(enforcedNow([DIGEST], [], [], DIGEST, JA4_DENY)).toBe(true);
+  });
+
+  test('a STAGED addition is not denied yet — it has not been written', () => {
+    expect(enforcedNow([DIGEST], [DIGEST], [], DIGEST, JA4_DENY)).toBe(false);
+  });
+
+  test('a STAGED removal is still denied — the WAF keeps denying until the apply lands', () => {
+    // unstageDeny edits the local rule immediately, so `live` no longer carries it.
+    expect(enforcedNow([], [], [DIGEST], DIGEST, JA4_DENY)).toBe(true);
+  });
+
+  test('an unknown digest is not denied', () => {
+    expect(enforcedNow([DIGEST], [], [], 'tttttttttt_a_b', JA4_DENY)).toBe(
+      false,
+    );
+  });
+
+  test('an empty subject never reads as denied', () => {
+    expect(enforcedNow([DIGEST], [], [], '', JA4_DENY)).toBe(false);
+  });
+
+  test('case does not change the answer', () => {
+    expect(enforcedNow([DIGEST], [], [], DIGEST.toUpperCase(), JA4_DENY)).toBe(
+      true,
+    );
   });
 });

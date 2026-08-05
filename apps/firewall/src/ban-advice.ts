@@ -149,7 +149,12 @@ function blockersFor(input: AdviceInput): string[] {
       `${renders} rendering requests (${share}%: ${input.mix.asset} sub-resources, ${input.mix.rpc} server-fn RPCs, ${input.mix.tile} map tiles, ${input.mix.beacon} analytics beacons) — it is running the app, which is what a real session looks like here`,
     );
   }
-  if (input.mix.page === 0)
+  // Gated on the mix having been MEASURED. A failed paths/routes query degrades to [], so every
+  // count reads 0 and this blocker fires purely because nothing was fetched — returning a green
+  // DO NOT DENY on a 9,000-request scraper, and short-circuiting before unjudgeableFor could
+  // ever mention that the measurement failed.
+  const mixMeasured = !input.mixPartial && !input.failedQueries?.length;
+  if (mixMeasured && input.mix.page === 0)
     out.push(
       `fetches no content pages (${input.mix.api} API, ${input.mix.rpc} RPC) — there is nothing here to enumerate`,
     );
@@ -243,21 +248,26 @@ export function adviseBan(input: AdviceInput): Advice {
   };
   const { mix, shape } = input;
 
-  if (mix.asset === 0 && mix.beacon === 0 && mix.tile === 0 && mix.rpc === 0)
+  // The same share-gated predicate blockersFor uses, not an absolute zero on each kind: one
+  // stray RPC used to delete this axis entirely while the blocker two functions up correctly
+  // held that one request proves nothing. The advisory cannot have it both ways.
+  const renders = renderingRequests(mix);
+  if (!rendersIndicateBrowser(renders, input.total))
     tell(
       'rendering',
-      `zero rendering requests across ${input.total} requests — a raw-HTML fetcher`,
-    );
-  if (mix.page > 0 && mix.rpc === 0)
-    tell(
-      'rendering',
-      `${mix.page} page fetches and no RPCs — reading HTML directly, not running the app`,
+      renders === 0
+        ? `zero rendering requests across ${input.total} requests — a raw-HTML fetcher`
+        : `only ${renders} rendering requests across ${input.total} — too few to be running the app`,
     );
   if (input.ja4.some(([d]) => alpnOf(d) === '00'))
     tell('tls', 'offers no ALPN — no mainstream browser does that');
+  // Tagged 'rendering', NOT its own axis: this test forces mix.page > 0, and nothing that walks
+  // a sitemap also drives RPCs, so it is entailed by the rendering axis above. Counting it
+  // separately let the single fact "a crawler that does not run JavaScript" satisfy the
+  // two-independent-axes rule on its own and ban a polite unverified search engine.
   if (mix.crawl > 0 && mix.page > mix.crawl * 10)
     tell(
-      'crawl',
+      'rendering',
       `read the sitemap then fetched ${mix.page} pages — the enumeration pattern`,
     );
   // dutyCycleOf is shared with tellsFor so the two panes measure pacing the same way. The
@@ -313,6 +323,11 @@ export function adviseBan(input: AdviceInput): Advice {
       blockers: denied,
       leverNotes,
     };
+  // Staged outranks "cannot tell" for the same reason 'already' does: the operator has decided,
+  // and flipping their screen back to INCONCLUSIVE because one of ~21 queries failed reads as
+  // "your keypress was rejected" — so they never press `a` and the deny is never written.
+  if (input.stagedJa4)
+    return { verdict: 'staged', digest, reasons, blockers: [], leverNotes };
   const unjudgeable = unjudgeableFor(input);
   if (unjudgeable.length)
     return {
@@ -321,14 +336,6 @@ export function adviseBan(input: AdviceInput): Advice {
       reasons,
       blockers: [],
       leverNotes: [...leverNotes, ...unjudgeable],
-    };
-  if (input.stagedJa4)
-    return {
-      verdict: 'staged',
-      digest,
-      reasons,
-      blockers: [],
-      leverNotes,
     };
   if (axes.size < 2)
     return { verdict: 'watch', digest, reasons, blockers, leverNotes };

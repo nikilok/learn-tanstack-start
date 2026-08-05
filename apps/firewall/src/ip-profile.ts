@@ -402,6 +402,16 @@ export async function fetchIpProfile(
   // routing, so it carries no route and cannot appear here — a coverage cross-check against the
   // raw total would mark every WAF-actioned identity permanently truncated.
   const mixPartial = byRoute.length >= GROUP_CAP;
+  // byPath is a different question and IS routinely truncated: on the measured scraper it
+  // returned 185 rows covering 859 of 168,752 requests. `distinctPaths` drawn from it is a
+  // floor, and the path-diversity tell divides by it — which described a 177k-request harvester
+  // as "repetition, so monitoring rather than harvesting". Feed it nothing rather than a floor.
+  const blocked = byWafAction
+    .filter(([a]) => a === 'deny' || a === 'challenge')
+    .reduce((n, [, c]) => n + c, 0);
+  const pathSample = byPath.reduce((n, [, c]) => n + c, 0);
+  const pathsPartial =
+    byPath.length >= GROUP_CAP || pathSample < Math.max(0, total - blocked);
   // Vercel leaves botVerified blank for everything it has not verified; only `pass` counts.
   const byBotVerified = byBotVerifiedRaw.filter(
     ([v]) => v && v !== '(none)' && v !== 'undefined',
@@ -445,7 +455,8 @@ export async function fetchIpProfile(
       asns: byAsn,
       countries: byCountry,
       botVerified: byBotVerified,
-      distinctPaths: byPath.length,
+      // Omitted when the sample is a floor: the tell's whole conclusion is a ratio.
+      distinctPaths: pathsPartial ? undefined : byPath.length,
       windowMinutes: hours * 60,
     }),
     errors,

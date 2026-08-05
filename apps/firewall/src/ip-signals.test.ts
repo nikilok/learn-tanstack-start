@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  type PathKind,
   type SignalInput,
   alpnOf,
   assetsIndicateBrowser,
@@ -421,7 +422,7 @@ describe('pathKind on route strings', () => {
     ['/icon-192.png', 'asset'],
     ['/robots.txt', 'crawl'],
     ['/api/revalidate', 'api'],
-  ])('%s is %s', (route, kind) => {
+  ] as [string, PathKind][])('%s is %s', (route, kind) => {
     expect(pathKind(route)).toBe(kind);
   });
 

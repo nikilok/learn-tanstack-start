@@ -20,6 +20,7 @@ import {
   type Item,
   applyItem,
   fetchLive,
+  previewStateOf,
   projectId,
   seedItems,
   teamId,
@@ -107,6 +108,9 @@ export function App() {
   const [cursor, setCursor] = useState(0);
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
+  // Live evaluation order. The interlock cannot be judged without it: a bypass short-circuits
+  // everything ordered after it, so a ceiling appended later never runs.
+  const [liveOrder, setLiveOrder] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState('');
   // Last apply's outcome; cleared by the next edit so it can't describe stale state.
   const [applied, setApplied] = useState<{
@@ -206,6 +210,7 @@ export function App() {
     fetchLive()
       .then((live) => {
         setIdByName(live.idByName);
+        setLiveOrder(live.orderByName);
         setItems(seedItems(live));
         setPhase('select');
       })
@@ -312,8 +317,12 @@ export function App() {
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
     let ids = idByName;
+    let order = liveOrder;
     try {
-      ids = (await fetchLive()).idByName;
+      const fresh = await fetchLive();
+      ids = fresh.idByName;
+      order = fresh.orderByName;
+      setLiveOrder(order);
     } catch {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
     }
@@ -321,11 +330,7 @@ export function App() {
     // running the check after the loop meant an unbounded bypass was already live in the WAF by
     // the time the warning appeared. Refusing costs one apply; publishing it does not.
     const preflight = unboundedPreviewBypass(
-      snapshot.map((i) => ({
-        name: i.rule.name,
-        active: i.active,
-        action: i.action,
-      })),
+      snapshot.map((i) => previewStateOf(i, order)),
     );
     if (preflight) {
       applying.current = false;
@@ -401,14 +406,12 @@ export function App() {
     const persisted = persistDenies(outcome, snapshot);
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
     process.exitCode = anyError || !persisted.ok ? 1 : 0;
-    // Re-checked against what LANDED, not what was intended: the preflight above cleared the
-    // snapshot, but a ceiling whose write failed is not in force.
+    // A failed write is UNKNOWN, not off: applyRule is an upsert, so a failed update leaves the
+    // previous rule live. Treating it as inactive suppressed the warning in exactly that state.
     const unbounded = unboundedPreviewBypass(
-      snapshot.map((i) => ({
-        name: i.rule.name,
-        active: i.active && !failedRules.has(i.rule.name),
-        action: i.action,
-      })),
+      snapshot.map((i) =>
+        previewStateOf(i, order, failedRules.has(i.rule.name)),
+      ),
     );
     // Back to the editor, not a terminal screen — an apply is a step in a session.
     setApplied({
@@ -513,11 +516,16 @@ export function App() {
         : `its action is ${it!.action}, not deny — matching traffic is still served`,
     }));
   const act = denyActivity.data;
+  const stagedNormalized = (spec: typeof JA4_DENY) =>
+    new Set(stagedDenies.map((v) => spec.normalize(v.trim())));
   const denyEntries: DenyEntry[] = [
     ...liveJa4.map((v) => ({
       kind: 'ja4' as const,
       value: v,
-      staged: stagedDenies.includes(v),
+      // Normalized both sides: the rule stores the digest normalized while stageDeny keeps what
+      // was typed, so a raw `includes` rendered a staged deny as `live` and hid the
+      // "press a to apply" banner.
+      staged: stagedNormalized(JA4_DENY).has(JA4_DENY.normalize(v)),
       removed: false,
       requests: act?.get(v)?.requests,
       denied: act?.get(v)?.denied,
@@ -525,7 +533,7 @@ export function App() {
     ...liveAsn.map((v) => ({
       kind: 'asn' as const,
       value: v,
-      staged: stagedDenies.includes(v),
+      staged: stagedNormalized(ASN_DENY).has(ASN_DENY.normalize(v)),
       removed: false,
       requests: act?.get(v)?.requests,
       denied: act?.get(v)?.denied,

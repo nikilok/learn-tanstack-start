@@ -37,8 +37,19 @@ export function verdictOf(d: SitemapDigest): Verdict {
         ? `verified in wider traffic (${d.verifiedAs.join(', ')}), not on the sitemap fetch itself`
         : undefined,
     };
+  // Enumeration is evaluated BEFORE the deny label, and `denied` here comes from bare
+  // FW_BLOCKED_JA4 membership — it says a digest is LISTED, not that the rule is active and set
+  // to deny. Returning early on it dropped a fingerprint that is walking the catalogue right
+  // now out of `walked`, and the pane printed the green all-clear over it.
+  if (enumerated(d))
+    return {
+      label: 'ENUMERATED',
+      tone: 'bad',
+      note: d.denied
+        ? 'listed in FW_BLOCKED_JA4 yet still enumerating — check the rule is active and set to deny'
+        : undefined,
+    };
   if (d.denied) return { label: 'denied', tone: 'dim' };
-  if (enumerated(d)) return { label: 'ENUMERATED', tone: 'bad' };
   return { label: 'unreviewed', tone: 'warn' };
 }
 

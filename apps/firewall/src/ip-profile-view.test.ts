@@ -130,7 +130,7 @@ describe('profileLines — partial data', () => {
       }),
     );
     expect(text).toContain('sample incomplete');
-    expect(text).toContain('≥0 sub-resources');
+    expect(text).toContain('≥0 rendering requests');
   });
 
   test('a complete reach prints its figures plainly', () => {
@@ -151,6 +151,31 @@ describe('profileLines — partial data', () => {
       }),
     );
     expect(text).not.toContain('sample incomplete');
-    expect(text).toContain('15 sub-resources');
+    expect(text).toContain('15 rendering requests');
+  });
+
+  test('the reach line counts tiles and RPCs, not just assets and beacons', () => {
+    // Regression: it summed subResources + beacons only, so a returning user with a warm cache
+    // and an ad-blocker — no assets, no beacons, but thousands of tiles and RPCs — rendered as
+    // '0 sub-resources' on the one line an operator reads before a blanket deny.
+    const text = render(
+      profile({
+        digestReach: {
+          label: 't13d311200_1d947a95fc68_7e1102d2036b',
+          ips: 12,
+          countries: 2,
+          total: 9000,
+          subResources: 0,
+          beacons: 0,
+          tiles: 400,
+          rpcs: 3000,
+          complete: true,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(text).toContain('3400 rendering requests');
+    // The old line summed assets + beacons only, which for this reach is exactly zero.
+    expect(text).not.toMatch(/[^\d]0 rendering requests/);
   });
 });

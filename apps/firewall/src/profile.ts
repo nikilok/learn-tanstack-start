@@ -117,10 +117,15 @@ async function main() {
     statuses: profile.byStatus,
     digestReach: profile.digestReach,
     asnReach: profile.asnReach,
+    // Normalized: the API echoes digests in either case and FW_BLOCKED_JA4 is stored lowercase.
+    // NOTE this is env membership only — unlike the TUI, the CLI does not read the live rule, so
+    // it cannot know the rule is active and set to deny. See the caveat printed below.
     alreadyDeniedJa4: deniedJa4.includes(
-      profile.subject.kind === 'ja4'
-        ? profile.subject.value
-        : (profile.byJa4[0]?.[0] ?? ''),
+      JA4_DENY.normalize(
+        profile.subject.kind === 'ja4'
+          ? profile.subject.value
+          : (profile.byJa4[0]?.[0] ?? ''),
+      ),
     ),
     stagedJa4: false, // the CLI has no staging step
 
@@ -135,6 +140,13 @@ async function main() {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
     }),
   );
+  // "ALREADY DENIED" here means "listed in FW_BLOCKED_JA4", which is not the same as being
+  // enforced: the rule can be deactivated or cycled to log, and this command never reads the
+  // live config. Saying so beats implying a scraper is handled when it is being served.
+  if (advice.verdict === 'already')
+    console.log(
+      '\nNote: read from FW_BLOCKED_JA4 only. Confirm deny-scraper-ja4 is active and set to deny (bun run firewall:setup) — a deactivated or log-only rule denies nothing.',
+    );
 }
 
 // Guarded so the arg parser above can be imported by tests without running a query.

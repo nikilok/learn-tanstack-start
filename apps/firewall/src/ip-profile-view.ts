@@ -122,7 +122,7 @@ function reachLine(
     line(
       seg(
         `  ${what} (${hours}h): ${r.ips} IPs · ${r.countries} countries · ${ge}${r.total} req · ` +
-          `${ge}${r.subResources + r.beacons} sub-resources` +
+          `${ge}${r.subResources + r.beacons + r.tiles + r.rpcs} rendering requests` +
           (r.verifiedNames.length
             ? ` · verified: ${r.verifiedNames.join(', ')}`
             : ''),

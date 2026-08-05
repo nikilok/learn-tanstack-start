@@ -66,8 +66,20 @@ describe('verdictOf', () => {
     expect(v.note).toContain('wider traffic');
   });
 
-  test('an already-denied digest is not re-flagged as a new find', () => {
-    expect(verdictOf(digest({ denied: true })).label).toBe('denied');
+  test('a listed digest that stopped enumerating is not re-flagged as a new find', () => {
+    expect(
+      verdictOf(digest({ denied: true, companyPages: 0, total: 9 })).label,
+    ).toBe('denied');
+  });
+
+  test('a listed digest STILL enumerating is flagged, because listed is not enforced', () => {
+    // Regression: `denied` returned early and hid this. It is read from FW_BLOCKED_JA4
+    // membership alone, so it says the digest is listed — not that deny-scraper-ja4 is active
+    // and set to deny. A digest walking the catalogue while listed is the alarming case, and
+    // the pane used to print the green all-clear over it.
+    const v = verdictOf(digest({ denied: true }));
+    expect(v.label).toBe('ENUMERATED');
+    expect(v.note).toContain('check the rule is active');
   });
 
   test('a sitemap read with no follow-up is unreviewed, not a conviction', () => {

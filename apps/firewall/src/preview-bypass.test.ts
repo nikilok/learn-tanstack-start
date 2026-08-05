@@ -151,8 +151,21 @@ describe('previewRules', () => {
 });
 
 describe('unboundedPreviewBypass', () => {
-  const bypass = { name: PREVIEW_BYPASS_RULE, active: true, action: 'bypass' };
-  const ceiling = { name: PREVIEW_CEILING_RULE, active: true, action: 'deny' };
+  // Ordered ceiling-then-bypass, matching, which is the safe arrangement.
+  const bypass = {
+    name: PREVIEW_BYPASS_RULE,
+    active: true,
+    action: 'bypass',
+    matches: true,
+    order: 1,
+  };
+  const ceiling = {
+    name: PREVIEW_CEILING_RULE,
+    active: true,
+    action: 'deny',
+    matches: true,
+    order: 0,
+  };
 
   test('quiet when the pair is intact', () => {
     expect(unboundedPreviewBypass([ceiling, bypass])).toBeUndefined();
@@ -182,5 +195,53 @@ describe('unboundedPreviewBypass', () => {
     expect(
       unboundedPreviewBypass([{ ...ceiling, action: 'log' }, bypass]),
     ).toMatch(/log-only/);
+  });
+
+  test('a REVOKED bypass is not a risk — it matches nothing', () => {
+    // Regression: the preflight could not tell a revoked bypass from a live one, so it refused
+    // every apply (including an urgent deny) over a rule that bounds nothing.
+    expect(
+      unboundedPreviewBypass([
+        { ...ceiling, active: false },
+        { ...bypass, matches: false },
+      ]),
+    ).toBeUndefined();
+  });
+
+  test('a ceiling that matches nothing does not bound a live bypass', () => {
+    expect(
+      unboundedPreviewBypass([{ ...ceiling, matches: false }, bypass]),
+    ).toMatch(/matches nothing/);
+  });
+
+  test('a ceiling ordered AFTER the bypass never evaluates', () => {
+    // A bypass short-circuits everything below it, so both rules being present and active is
+    // not enough — an inserted ceiling is appended to the END of the live config.
+    expect(unboundedPreviewBypass([{ ...ceiling, order: 9 }, bypass])).toMatch(
+      /ordered AFTER/,
+    );
+  });
+
+  test('a ceiling not live yet counts as appended last', () => {
+    expect(
+      unboundedPreviewBypass([{ ...ceiling, order: undefined }, bypass]),
+    ).toMatch(/ordered AFTER/);
+  });
+
+  test('a FAILED bypass write is treated as still live — an upsert leaves the old rule', () => {
+    // Regression: marking a failed write inactive suppressed the warning in exactly the state
+    // that creates the risk, because applyRule never deletes.
+    expect(
+      unboundedPreviewBypass([
+        { ...ceiling, active: false },
+        { ...bypass, unknown: true, active: false, matches: false },
+      ]),
+    ).toMatch(/DEACTIVATED/);
+  });
+
+  test('a FAILED ceiling write is treated as not in force', () => {
+    expect(
+      unboundedPreviewBypass([{ ...ceiling, unknown: true }, bypass]),
+    ).toMatch(/unknown/);
   });
 });

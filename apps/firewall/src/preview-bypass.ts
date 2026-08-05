@@ -134,19 +134,68 @@ export function previewRules(
 export const PREVIEW_BYPASS_RULE = 'allow-social-preview';
 export const PREVIEW_CEILING_RULE = 'rl-preview-ua';
 
+/** True when every condition group holds a contradiction, so the rule can never match a request. Recognises the revocation placeholder by its shape rather than its literal value. */
+export function ruleMatchesNothing(rule: Rule): boolean {
+  if (!rule.conditionGroup.length) return true;
+  return rule.conditionGroup.every((g) => {
+    const seen = new Map<string, Set<string>>();
+    for (const c of g.conditions) {
+      if (c.op !== 'eq' || typeof c.value !== 'string') continue;
+      const set = seen.get(c.type) ?? new Set<string>();
+      set.add(c.value);
+      seen.set(c.type, set);
+    }
+    // Two different `eq` values for one dimension, ANDed together, can never both hold.
+    return [...seen.values()].some((s) => s.size > 1);
+  });
+}
+
+export type PreviewRuleState = {
+  name: string;
+  active: boolean;
+  action: string;
+  /** False when the rule's conditions cannot match anything (the revoked placeholder). */
+  matches: boolean;
+  /** Position in the LIVE config. Undefined means "not live yet", and an insert appends to the END. */
+  order?: number;
+  /** True when a write failed, so what is actually live is unknown. Judged worst-case per role. */
+  unknown?: boolean;
+};
+
 /**
- * The code-level pairing cannot stop an operator deactivating the ceiling in the TUI and leaving
- * the bypass live. Detects that state so the caller can say so out loud.
+ * The code-level pairing cannot stop an operator deactivating the ceiling, cycling it to log,
+ * revoking it, or leaving it ordered after the bypass. Detects every state in which the bypass
+ * is live and matching while nothing bounds it.
  */
 export function unboundedPreviewBypass(
-  items: { name: string; active: boolean; action: string }[],
+  items: PreviewRuleState[],
 ): string | undefined {
   const bypass = items.find((i) => i.name === PREVIEW_BYPASS_RULE);
-  if (!bypass?.active || bypass.action !== 'bypass') return undefined;
+  if (!bypass) return undefined;
+  // A failed write leaves the PREVIOUS rule live, so "we could not write it" is not "it is off".
+  // Worst case for the bypass is that it is live and matching.
+  const bypassLive =
+    bypass.unknown || (bypass.active && bypass.action === 'bypass');
+  const bypassMatches = bypass.unknown || bypass.matches;
+  if (!bypassLive || !bypassMatches) return undefined;
+
   const ceiling = items.find((i) => i.name === PREVIEW_CEILING_RULE);
-  if (!ceiling || !ceiling.active)
-    return `${PREVIEW_BYPASS_RULE} is live but ${PREVIEW_CEILING_RULE} is ${ceiling ? 'DEACTIVATED' : 'MISSING'} — a spoofed preview User-Agent now skips bot protection with nothing bounding it`;
+  const lead = `${PREVIEW_BYPASS_RULE} is live but ${PREVIEW_CEILING_RULE}`;
+  if (!ceiling)
+    return `${lead} is MISSING — a spoofed preview User-Agent now skips bot protection with nothing bounding it`;
+  // Worst case for the ceiling is the opposite: assume it did NOT land.
+  if (ceiling.unknown)
+    return `${lead} failed to write, so what is live is unknown — treat the bypass as unbounded until it is confirmed`;
+  if (!ceiling.active)
+    return `${lead} is DEACTIVATED — a spoofed preview User-Agent now skips bot protection with nothing bounding it`;
   if (ceiling.action === 'log')
-    return `${PREVIEW_BYPASS_RULE} is live but ${PREVIEW_CEILING_RULE} is log-only — the ceiling counts but never blocks, so the bypass is effectively unbounded`;
+    return `${lead} is log-only — the ceiling counts but never blocks, so the bypass is effectively unbounded`;
+  if (!ceiling.matches)
+    return `${lead} matches nothing — it is present and active but bounds no request`;
+  // Live priority is insertion order and a bypass short-circuits everything after it, so a
+  // ceiling ordered later never evaluates. Undefined order means "will be appended last".
+  const at = (i: PreviewRuleState) => i.order ?? Number.POSITIVE_INFINITY;
+  if (at(ceiling) > at(bypass))
+    return `${lead} is ordered AFTER it — a bypass short-circuits everything below, so the ceiling never evaluates`;
   return undefined;
 }

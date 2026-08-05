@@ -439,7 +439,45 @@ describe('adviseBan — the ASN lever', () => {
     expect(a.leverNotes.join(' ')).toContain('reach unknown');
   });
 
-  test('a clean fingerprint still wins — it survives IP rotation', () => {
+  test('the shared fingerprint falls through to the network lever', () => {
+    // velia's digest carries 1,200 rendering requests elsewhere, so a ja4 deny would take real
+    // browsers with it; the network is the tighter handle.
+    const a = adviseBan(velia({}));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.kind).toBe('asn');
+  });
+
+  test('a clean fingerprint wins the lever when a second axis is present', () => {
+    // Clean reach AND wide spread (40 IPs), so rendering + spread are two independent axes.
+    const a = adviseBan(
+      velia({
+        digestReach: {
+          label: 't13d3012h1_1d37bd780c83_882d495ac381',
+          ips: 40,
+          countries: 5,
+          total: 1630,
+          subResources: 0,
+          beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.lever?.kind).toBe('ja4');
+  });
+
+  test('a raw-HTML enumerator on few IPs is watch, not ban — one axis is not enough', () => {
+    // This client reads a sitemap then walks /company/ with zero rendering requests, which is
+    // damning but is ONE fact: `crawl` forces mix.page > 0 and nothing that walks a sitemap
+    // drives RPCs, so it is entailed by `rendering` and no longer counts separately.
+    //
+    // It would have a genuine second axis — 144 flat 10-minute buckets is the textbook machine
+    // pacing — except the `pacing` axis also requires concentration < 0.5, and level traffic is
+    // ONE unbroken session whose concentration is 1.0. That axis is therefore dead for exactly
+    // the clients it describes. Fixing it changes who gets denied, so it is left as an operator
+    // decision; if it is ever fixed, this expectation becomes `ban`.
     const a = adviseBan(
       velia({
         digestReach: {
@@ -456,7 +494,40 @@ describe('adviseBan — the ASN lever', () => {
         },
       }),
     );
-    expect(a.lever?.kind).toBe('ja4');
+    expect(a.verdict).toBe('watch');
+    expect(a.lever).toBeUndefined();
+  });
+
+  test('a polite unverified crawler is not banned on the sitemap pattern alone', () => {
+    // Regression: crawl and rendering were separate axes, so "a crawler that does not run
+    // JavaScript" satisfied the two-axes rule by itself and DENY RECOMMENDED a niche search
+    // engine or an llms.txt-respecting agent.
+    const a = adviseBan(
+      velia({
+        total: 1800,
+        mix: mixOf([
+          ['/robots.txt', 2],
+          ['/sitemap.xml', 3],
+          ['/company/aaa', 900],
+          ['/company/bbb', 895],
+        ]),
+        ja4: [['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb', 1800]],
+        shape: shapeOf(series([1800], 10, 144), 10),
+        digestReach: {
+          label: 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb',
+          ips: 1,
+          countries: 1,
+          total: 1800,
+          subResources: 0,
+          beacons: 0,
+          tiles: 0,
+          rpcs: 0,
+          complete: true,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
   });
 });
 

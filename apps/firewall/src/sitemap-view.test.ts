@@ -127,6 +127,42 @@ describe('sitemapLines', () => {
     );
   });
 
+  test('a total that fell back to the path sum is marked as a floor too', () => {
+    // totalExact is false when the exact wafAction query failed, so `total` IS the truncated
+    // path sum — printing it bare presents a floor as a measurement.
+    const text = sitemapLines(
+      report([
+        digest({
+          total: 12000,
+          companyPages: 9000,
+          pathsPartial: true,
+          totalExact: false,
+        }),
+      ]),
+    )
+      .map(lineText)
+      .join('\n');
+    expect(text).toContain('≥12000 req total');
+  });
+
+  test('an exact total is printed bare even when the path sample was cut', () => {
+    const text = sitemapLines(
+      report([
+        digest({
+          total: 176900,
+          companyPages: 705,
+          pathsPartial: true,
+          totalExact: true,
+        }),
+      ]),
+    )
+      .map(lineText)
+      .join('\n');
+    expect(text).toContain('176900 req total');
+    expect(text).not.toContain('≥176900');
+    expect(text).toContain('≥705 /company/');
+  });
+
   test('truncated path samples are marked as floors, not totals', () => {
     const text = sitemapLines(
       report([

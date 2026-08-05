@@ -711,7 +711,13 @@ export function App() {
       setRangeError(next.error);
       return;
     }
-    setPresetIdx(-1); // a typed range is not a preset
+    // Blank reverts to the rolling default, which IS a preset — marking it custom left the
+    // timeline list showing "custom… · in force" over a preset window.
+    setPresetIdx(
+      text
+        ? -1
+        : WINDOW_PRESETS.findIndex((p) => p.minutes === IP_WINDOW_HOURS * 60),
+    );
     applyWindow(next.window);
     // Back to the picker: choosing a range is a step in choosing an IP, not the end of it.
     setIpInput('');
@@ -1356,10 +1362,11 @@ export function App() {
                   </Box>
                 );
               })}
-              {Boolean(topIpList.data) && !ipMatches.length && ipInput && (
+              {Boolean(pickList.data) && !ipMatches.length && ipInput && (
                 <Text dimColor>
                   {' '}
-                  no busy IP matches — enter profiles it anyway
+                  no busy {pickKind === 'ip' ? 'IP' : 'fingerprint'} matches —
+                  enter profiles it anyway
                 </Text>
               )}
               <Box>

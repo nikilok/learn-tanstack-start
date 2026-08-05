@@ -32,6 +32,15 @@ describe('resolveIpEntry', () => {
     expect(resolveIpEntry('66.249.66.68', 2, MATCHES)).toBe('66.249.66.67');
   });
 
+  test('a cursor past the end of the list falls back rather than yielding undefined', () => {
+    // The list reflows as the filter narrows, so the cursor can outlive the row it pointed at.
+    expect(resolveIpEntry('66.249.66.68', MATCHES.length, MATCHES)).toBe(
+      '66.249.66.68',
+    );
+    expect(resolveIpEntry('66', MATCHES.length + 5, MATCHES)).toBe(MATCHES[0]);
+    expect(resolveIpEntry('', 99, [])).toBe('');
+  });
+
   test('typing a fragment then Enter resolves to the top match — that is what searching means', () => {
     expect(resolveIpEntry('66', -1, MATCHES)).toBe('66.249.66.68');
   });

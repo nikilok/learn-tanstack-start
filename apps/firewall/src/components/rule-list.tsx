@@ -76,7 +76,9 @@ function RowTail({
   const suffix = item.detail ? ` (${item.detail})` : '';
   switch (item.status) {
     case 'applying':
-      return <Text color="yellow">… applying</Text>;
+      // Clipped like every other branch: tail can be as narrow as 7, and an unclipped 10-char
+      // string makes Ink wrap the row — the desync the responsive sizing exists to prevent.
+      return <Text color="yellow">{truncate('… applying', width)}</Text>;
     case 'inserted':
       return (
         <Text color="green">{truncate(`＋ inserted${suffix}`, width)}</Text>
@@ -92,7 +94,7 @@ function RowTail({
         </Text>
       );
     default:
-      return <Text dimColor>pending</Text>;
+      return <Text dimColor>{truncate('pending', width)}</Text>;
   }
 }
 

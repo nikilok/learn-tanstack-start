@@ -136,9 +136,14 @@ export function pendingEdits(
   removed: string[],
   spec: DenySpec,
 ): { added: number; dropped: number } {
+  // Normalized on both sides: the TUI stages the value as typed, while the rule stores it
+  // normalized, so an upper-case digest pasted from the dashboard counted as neither.
+  const norm = (v: string) => spec.normalize(v.trim());
+  const liveSet = new Set(live.map(norm));
   return {
-    added: staged.filter((v) => live.includes(v)).length,
-    dropped: removed.filter((v) => spec.valid(v) && !live.includes(v)).length,
+    added: staged.filter((v) => liveSet.has(norm(v))).length,
+    dropped: removed.filter((v) => spec.valid(norm(v)) && !liveSet.has(norm(v)))
+      .length,
   };
 }
 

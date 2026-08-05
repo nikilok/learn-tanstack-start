@@ -238,7 +238,10 @@ describe('adviseBan — the one-tell threshold', () => {
       }),
     );
     expect(a.reasons.length).toBeGreaterThan(0);
-    expect(['watch', 'ban']).toContain(a.verdict);
+    // Exact: one axis (rendering) is all that fires here — pages-only mix, an ALPN-negotiating
+    // digest, no crawl, a near-zero duty cycle and a single-IP reach. Accepting 'ban' would let
+    // a change that made ONE axis sufficient slip through green.
+    expect(a.verdict).toBe('watch');
   });
 
   test('watch still reports the digest, so it can be staged deliberately', () => {
@@ -253,7 +256,9 @@ describe('adviseBan — the one-tell threshold', () => {
       digestReach: undefined,
       asnReach: undefined,
     });
-    if (a.verdict === 'watch') expect(a.digest).toBeDefined();
+    // Unconditional: the guard made the assertion vacuous in exactly the case that matters.
+    expect(a.verdict).toBe('watch');
+    expect(a.digest).toBeDefined();
   });
 });
 

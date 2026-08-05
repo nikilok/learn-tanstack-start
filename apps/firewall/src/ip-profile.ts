@@ -197,15 +197,19 @@ export async function fetchIpProfile(
   const bucketMinutes = bucketMinutesFor(hours, window.granularityMinutes);
   let buckets: { t: string; c: number }[] = [];
   try {
-    buckets =
-      seriesBy(
-        await metrics(ctx, [dim], {
-          filter,
-          limit: 500,
-          granularity: { minutes: bucketMinutes },
-        }),
-        dim,
-      ).get(ip) ?? [];
+    // The filter selects ONE value, so the response holds one group — read it by position, not
+    // by keying on the input. If the API echoed the value with different case the lookup missed,
+    // buckets silently became [], and shapeOf then reported no traffic against a positive total,
+    // which drops the pacing axis out of the ban advice with nothing recorded.
+    const series = seriesBy(
+      await metrics(ctx, [dim], {
+        filter,
+        limit: 500,
+        granularity: { minutes: bucketMinutes },
+      }),
+      dim,
+    );
+    buckets = series.get(ip) ?? [...series.values()][0] ?? [];
   } catch (e) {
     errors.push(`series: ${errMsg(e)}`);
     failedQueries.push('series');

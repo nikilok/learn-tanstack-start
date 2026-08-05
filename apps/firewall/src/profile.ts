@@ -95,7 +95,16 @@ async function main() {
     rollingWindow(args.hours, new Date()),
   );
   // Not required: without a denylist configured nothing is already-denied, which is the truth.
-  const deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  // Non-fatal too, matching fetchSitemapReport: this only sets one boolean, and throwing here
+  // would discard a profile the operator has already paid ~21 observability queries for.
+  let deniedJa4: string[] = [];
+  try {
+    deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  } catch (e) {
+    // Surfaced in the profile's own INCOMPLETE block rather than swallowed: "nothing is denied"
+    // and "the denylist could not be read" are different facts.
+    profile.errors.push(`FW_BLOCKED_JA4: ${errMsg(e)}`);
+  }
   const advice = adviseBan({
     total: profile.total,
     mix: profile.mix,

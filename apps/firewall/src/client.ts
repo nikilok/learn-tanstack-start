@@ -117,10 +117,16 @@ export async function runHeadless() {
   const live = await fetchLive();
   let anyError = false;
   const items = seedItems(live);
+  // Rules that did not land. The interlock warning below must judge what is IN FORCE, not what
+  // was seeded.
+  const failedRules = new Set<string>();
   for (const item of items) {
     try {
       const { status, detail } = await applyItem(item, live.idByName);
-      if (status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
+      if (status === 'error') {
+        anyError = true; // a returned (not thrown) error must still fail the run
+        failedRules.add(item.rule.name);
+      }
       console.log(
         `${status}${detail ? ` (${detail})` : ''}  ${item.rule.name}`,
       );
@@ -136,13 +142,17 @@ export async function runHeadless() {
         );
     } catch (e) {
       anyError = true;
+      failedRules.add(item.rule.name);
       console.log(`error (${errMsg(e)})  ${item.rule.name}`);
     }
   }
+  // `items` is seeded state plus code defaults, not what actually landed. A ceiling that FAILED
+  // to apply is not in force, so it is reported as inactive here — otherwise the one warning an
+  // operator reads for this risk stays silent in exactly the case that creates it.
   const unbounded = unboundedPreviewBypass(
     items.map((i) => ({
       name: i.rule.name,
-      active: i.active,
+      active: i.active && !failedRules.has(i.rule.name),
       action: i.action,
     })),
   );

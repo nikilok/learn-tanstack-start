@@ -137,7 +137,7 @@ export async function fetchSitemapReport(
   const allIps = new Set<string>();
   for (const [[ja4, ip, asn, botVerified, botName], count] of ipRows) {
     fetches += count;
-    allIps.add(ip);
+    if (ip) allIps.add(ip);
     const key = ja4 || '(none)';
     const d = byDigest.get(key) ?? {
       ja4: key,
@@ -150,7 +150,9 @@ export async function fetchSitemapReport(
       enriched: false,
     };
     d.fetches += count;
-    if (!d.ips.includes(ip)) d.ips.push(ip);
+    // group() maps a missing dimension to '', which is not a client — counting it inflates the
+    // header's IP total and puts an empty string in the digest's own list.
+    if (ip && !d.ips.includes(ip)) d.ips.push(ip);
     if (asn && !d.asns.includes(asn)) d.asns.push(asn);
     if (botVerified === 'pass' && botName && !d.verifiedAs.includes(botName))
       d.verifiedAs.push(botName);

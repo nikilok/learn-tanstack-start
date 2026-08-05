@@ -370,6 +370,17 @@ describe('pendingEdits', () => {
     expect(pendingEdits([], [DIGEST], [], JA4_DENY).added).toBe(0);
   });
 
+  test('a digest pasted upper-case from the dashboard still counts', () => {
+    // The TUI stages the value as typed; the rule stores it normalized. Comparing raw made an
+    // upper-case entry count as neither added nor dropped, so the rule showed no pending change.
+    expect(
+      pendingEdits([DIGEST], [DIGEST.toUpperCase()], [], JA4_DENY).added,
+    ).toBe(1);
+    expect(pendingEdits([], [], [DIGEST.toUpperCase()], JA4_DENY).dropped).toBe(
+      1,
+    );
+  });
+
   test('a value still live is not counted as dropped', () => {
     expect(pendingEdits([DIGEST], [], [DIGEST], JA4_DENY).dropped).toBe(0);
   });

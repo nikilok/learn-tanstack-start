@@ -471,10 +471,50 @@ describe('withRpcs', () => {
     expect(m.page).toBe(1000);
   });
 
-  test('never drives page negative if a count overshoots', () => {
+  test('an overshooting count cannot break the Mix invariant', () => {
+    // page never goes negative, AND rpc never exceeds total — otherwise renderingRequests can
+    // report more requests than the client made and the blocker prints a share above 100%.
     const m = withRpcs(routeMix(), 5000, 0);
     expect(m.page).toBe(0);
-    expect(m.rpc).toBe(5000);
+    expect(m.rpc).toBeLessThanOrEqual(m.total);
+    expect(m.asset + m.beacon + m.tile + m.rpc + m.page).toBe(m.total);
+  });
+
+  test('routes that already classify as rpc are kept, not overwritten', () => {
+    // Regression measured in production: 4 requests were classified rpc by the route grouping,
+    // and replacing the value instead of adding the delta dropped them from the mix entirely.
+    const m = withRpcs(
+      mixOf([
+        ['/__server', 1000],
+        ['/_serverFn/abc', 4],
+      ]),
+      300,
+      0,
+    );
+    expect(m.rpc).toBe(300);
+    expect(m.asset + m.beacon + m.tile + m.rpc + m.page + m.crawl + m.api).toBe(
+      m.total,
+    );
+  });
+
+  test('an already-classified count above both estimates survives', () => {
+    const m = withRpcs(
+      mixOf([
+        ['/__server', 100],
+        ['/_serverFn/abc', 90],
+      ]),
+      5,
+      5,
+    );
+    expect(m.rpc).toBe(90);
+    expect(m.page).toBe(100);
+  });
+
+  test('a normal count is untouched by the cap', () => {
+    // The cap must only bind in the degenerate case, never shave a real RPC count.
+    expect(withRpcs(routeMix(), 300, 0).rpc).toBe(300);
+    // /__server is 1000 of the 1010, so that is the ceiling — the 10 assets were never RPCs.
+    expect(withRpcs(routeMix(), 1000, 0).rpc).toBe(1000);
   });
 
   test('leaves the other rendering axes untouched', () => {

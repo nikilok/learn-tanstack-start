@@ -131,8 +131,18 @@ export function mixOf(paths: [string, number][]): Mix {
  * so whichever estimate saw more is the one to trust.
  */
 export function withRpcs(mix: Mix, discovered: number, fromPaths: number): Mix {
-  const rpc = Math.max(0, discovered, fromPaths);
-  return { ...mix, rpc, page: Math.max(0, mix.page - rpc) };
+  // Moves the DELTA out of `page`, never overwrites. A route can already classify as rpc on its
+  // own (measured in production: 4 such requests on one fingerprint), and replacing the value
+  // instead of adding to it silently dropped them from the mix — parts summed to 11,200 against
+  // a total of 11,204.
+  //
+  // Capped at `page`, which is where the rest live: RPCs are a subset of the /__server route, so
+  // they can only be moved OUT of that bucket, never conjured beside it. Capping at `total`
+  // instead still lets the parts out-sum the whole once assets are counted, and a blocker that
+  // reads "5010 rendering requests (496%)" is not a number an operator can act on.
+  const target = Math.max(0, mix.rpc, discovered, fromPaths);
+  const moved = Math.min(mix.page, target - mix.rpc);
+  return { ...mix, rpc: mix.rpc + moved, page: mix.page - moved };
 }
 
 /** Every request only a rendering client produces. Pooled because each axis alone is cheap to fake and cheap to miss: assets cache for a year, beacons are ad-blocked, tiles need the map in view. */

@@ -20,7 +20,6 @@ import {
   type Item,
   applyItem,
   fetchLive,
-  previewStateOf,
   projectId,
   seedItems,
   teamId,
@@ -45,7 +44,6 @@ import { persistEnvVar } from './env-file';
 import { resolveIpEntry } from './ip-entry';
 import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
-import { unboundedPreviewBypass } from './preview-bypass';
 import { type ReportData, fetchReport } from './report-data';
 import { dryRun } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
@@ -108,9 +106,6 @@ export function App() {
   const [cursor, setCursor] = useState(0);
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
-  // Live evaluation order. The interlock cannot be judged without it: a bypass short-circuits
-  // everything ordered after it, so a ceiling appended later never runs.
-  const [liveOrder, setLiveOrder] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState('');
   // Last apply's outcome; cleared by the next edit so it can't describe stale state.
   const [applied, setApplied] = useState<{
@@ -210,7 +205,6 @@ export function App() {
     fetchLive()
       .then((live) => {
         setIdByName(live.idByName);
-        setLiveOrder(live.orderByName);
         setItems(seedItems(live));
         setPhase('select');
       })
@@ -317,37 +311,14 @@ export function App() {
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
     let ids = idByName;
-    let order = liveOrder;
     try {
-      const fresh = await fetchLive();
-      ids = fresh.idByName;
-      order = fresh.orderByName;
-      setLiveOrder(order);
+      ids = (await fetchLive()).idByName;
     } catch {
       // keep the mount snapshot if the refresh fails — better than aborting the apply.
-    }
-    // Preflight, BEFORE anything is written: the bypass and its ceiling are an interlock, and
-    // running the check after the loop meant an unbounded bypass was already live in the WAF by
-    // the time the warning appeared. Refusing costs one apply; publishing it does not.
-    const preflight = unboundedPreviewBypass(
-      snapshot.map((i) => previewStateOf(i, order)),
-    );
-    if (preflight) {
-      applying.current = false;
-      process.exitCode = 1;
-      setApplied({
-        summary: `nothing applied — ${preflight}`,
-        ok: false,
-      });
-      setPhase('select');
-      return;
     }
     let anyError = false;
     let cancelled = false;
     const statuses: ApplyStatus[] = [];
-    // Rules that did not land. The post-apply check must judge what is IN FORCE, not what was
-    // intended: a ceiling that failed to write leaves the bypass unbounded.
-    const failedRules = new Set<string>();
     // Per rule, not just a global flag: a deny that reached the WAF must be written back to
     // .env.local even if an unrelated rule later fails, or the next apply silently lifts it.
     const outcome = new Map<string, ApplyStatus>();
@@ -362,10 +333,7 @@ export function App() {
       );
       try {
         const res = await applyItem(snapshot[i], ids);
-        if (res.status === 'error') {
-          anyError = true; // a returned (not thrown) error must still fail the run
-          failedRules.add(snapshot[i].rule.name);
-        }
+        if (res.status === 'error') anyError = true; // a returned (not thrown) error must still fail the run
         statuses.push(res.status);
         outcome.set(snapshot[i].rule.name, res.status);
         setItems((prev) =>
@@ -375,7 +343,6 @@ export function App() {
         );
       } catch (e) {
         anyError = true;
-        failedRules.add(snapshot[i].rule.name);
         statuses.push('error');
         outcome.set(snapshot[i].rule.name, 'error');
         const detail = errMsg(e);
@@ -406,20 +373,10 @@ export function App() {
     const persisted = persistDenies(outcome, snapshot);
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
     process.exitCode = anyError || !persisted.ok ? 1 : 0;
-    // A failed write is UNKNOWN, not off: applyRule is an upsert, so a failed update leaves the
-    // previous rule live. Treating it as inactive suppressed the warning in exactly that state.
-    const unbounded = unboundedPreviewBypass(
-      snapshot.map((i) =>
-        previewStateOf(i, order, failedRules.has(i.rule.name)),
-      ),
-    );
     // Back to the editor, not a terminal screen — an apply is a step in a session.
     setApplied({
-      summary:
-        summaryLine(statuses) +
-        persisted.summary +
-        (unbounded ? ` · WARNING: ${unbounded}` : ''),
-      ok: !anyError && persisted.ok && !unbounded,
+      summary: summaryLine(statuses) + persisted.summary,
+      ok: !anyError && persisted.ok,
     });
     setPhase('select');
   };

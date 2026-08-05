@@ -1,7 +1,6 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
 import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
-import { previewRules } from './preview-bypass';
 import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
@@ -71,14 +70,6 @@ const SERVERFN_SUSTAINED_LIMIT = envLimit('FW_SERVERFN_SUSTAINED_LIMIT');
 const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
 // Opt-in: no burst tier depends on this one, so a missing var drops just this rule.
 const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
-// Empty (feature off) unless FW_PREVIEW_UA is set; setting it without a ceiling throws.
-// envCeiling, NOT optionalLimit: the dry-run placeholder would satisfy the pairing check and
-// preview an apply that the real run rejects.
-const socialPreviewRules = previewRules(
-  process.env.FW_PREVIEW_UA,
-  envCeiling('FW_PREVIEW_LIMIT') ?? null,
-);
-
 // Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
 const SUSTAINED_WINDOW = 600;
 
@@ -334,7 +325,6 @@ export const rules: Rule[] = [
   // keeping it behind the denies and the per-IP ceilings is what stops a spoofed preview UA
   // from becoming a way around them. Holds under both orderings: appended to the live config
   // (insertion order) or rebuilt from scratch (array order).
-  ...socialPreviewRules,
 ];
 
 // Vercel caps a rule's description at 256 chars; over-length ones fail the apply

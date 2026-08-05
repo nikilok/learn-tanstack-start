@@ -123,8 +123,9 @@ function blockersFor(input: AdviceInput): string[] {
   // An authentication fact, not a heuristic: our allow rules match on PRESENCE of a bespoke
   // secret header, so a hit means the caller held our credential.
   // Only rules that authenticate with a bespoke secret header prove a first-party caller. A
-  // name prefix is not enough: allow-social-preview matches a caller-controlled User-Agent, so
-  // trusting it would certify any UA-spoofing scraper as first-party AND make it unbannable.
+  // name prefix is not enough: an allow-* rule that matches on anything the caller controls (a
+  // User-Agent, say) would certify every spoofer as first-party AND make them unbannable, so
+  // membership of this list is explicit and a new allow-* rule cannot join it by accident.
   const allowRule = input.wafRules.find(([name]) =>
     HEADER_GATED_RULES.includes(name),
   );

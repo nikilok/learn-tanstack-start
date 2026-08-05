@@ -700,10 +700,10 @@ describe('adviseBan — review regressions', () => {
     expect(a.leverNotes.join(' ')).toContain('cannot be attributed');
   });
 
-  test('a UA-matched preview bypass never certifies a caller as first-party', () => {
-    // allow-social-preview fires on a caller-controlled User-Agent. Trusting the allow- prefix
-    // made every UA-spoofing scraper both invisible and unbannable.
-    const a = adviseBan(scraper({ wafRules: [['allow-social-preview', 400]] }));
+  test('an allow-* rule outside HEADER_GATED_RULES never certifies a caller as first-party', () => {
+    // The near-miss this encodes: a rule matching on a caller-controlled User-Agent. Trusting
+    // the allow- prefix made every spoofing scraper both invisible and unbannable.
+    const a = adviseBan(scraper({ wafRules: [['allow-ua-matched', 400]] }));
     expect(a.blockers.join(' ')).not.toContain('first-party');
     expect(a.verdict).toBe('ban');
   });

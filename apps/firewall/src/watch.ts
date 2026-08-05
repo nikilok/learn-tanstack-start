@@ -51,6 +51,9 @@ export type WatchReport = {
 /** True when a human should look. Kept separate from rendering so the exit code and the text cannot disagree. */
 export function isActionable(r: WatchReport): boolean {
   return (
+    // Errors count. Exit 0 tells a loop to go back to sleep, so a watch that could not read its
+    // own inputs must not report quiet — unknown escalates, it does not pass.
+    r.errors.length > 0 ||
     r.enforcement.length > 0 ||
     r.findings.some((f) => f.advice.verdict === 'ban')
   );
@@ -140,16 +143,33 @@ export function worthProfiling(
     .map(([digest, allowed]) => ({ digest, allowed }));
 }
 
-/** Deny rules that are present but not actually denying — the state that reads as handled while traffic is served normally. */
+/**
+ * Deny rules that are present but not actually denying — the state that reads as handled while
+ * traffic is served normally.
+ *
+ * `values: null` means the denylist could not be READ. That is not the same as empty, and
+ * collapsing the two is the exact defect this tool exists to catch elsewhere: an unreadable
+ * list scored 0, 0 is the revoked resting state, and a broken rule went unreported.
+ */
 export function notEnforcing(
-  rules: { name: string; active: boolean; action: string; values: number }[],
+  rules: {
+    name: string;
+    active: boolean;
+    action: string;
+    values: number | null;
+  }[],
 ): string[] {
-  return rules
-    .filter((r) => r.values > 0 && !(r.active && r.action === 'deny'))
-    .map(
-      (r) =>
-        `${r.name} carries ${r.values} entr${r.values === 1 ? 'y' : 'ies'} but is ${r.active ? `set to ${r.action}` : 'DEACTIVATED'} — nothing it lists is being blocked`,
-    );
+  return rules.flatMap((r) => {
+    if (r.values === null)
+      return [
+        `${r.name}: its denylist could not be read, so whether it is enforcing anything is UNKNOWN — not empty`,
+      ];
+    if (r.values === 0) return []; // revoked is the intended resting state
+    if (r.active && r.action === 'deny') return [];
+    return [
+      `${r.name} carries ${r.values} entr${r.values === 1 ? 'y' : 'ies'} but is ${r.active ? `set to ${r.action}` : 'DEACTIVATED'} — nothing it lists is being blocked`,
+    ];
+  });
 }
 
 /** The digests Vercel classified as impersonating a browser and then allowed through. */
@@ -251,7 +271,8 @@ async function main() {
 async function enforcementIssues(): Promise<string[]> {
   const { fetchLive } = await import('./client');
   const live = await fetchLive();
-  const count = (name: string, spec: typeof JA4_DENY) => {
+  // null, never 0, when the list cannot be parsed — see notEnforcing.
+  const count = (name: string, spec: typeof JA4_DENY): number | null => {
     try {
       return envMatching(
         name === 'deny-scraper-ja4' ? 'FW_BLOCKED_JA4' : 'FW_BLOCKED_ASN',
@@ -259,7 +280,7 @@ async function enforcementIssues(): Promise<string[]> {
         false,
       ).length;
     } catch {
-      return 0;
+      return null;
     }
   };
   return notEnforcing(

@@ -216,10 +216,19 @@ describe('watchLines', () => {
     expect(isActionable(r)).toBe(true);
   });
 
-  test('errors are surfaced, not swallowed', () => {
-    expect(
-      text(report({ errors: ['FW_BLOCKED_JA4 unreadable: boom'] })),
-    ).toContain('unreadable');
+  test('errors are surfaced AND make the run actionable', () => {
+    // Rendering the error was never enough: exit 0 tells a loop to go back to sleep, so a watch
+    // that could not read its own inputs would have gone quiet about it forever.
+    const r = report({
+      screened: 0,
+      fingerprints: 0,
+      candidates: 0,
+      findings: [],
+      errors: ['FW_BLOCKED_JA4 unreadable: boom'],
+    });
+    expect(text(r)).toContain('unreadable');
+    expect(text(r)).not.toContain('nothing wants a human');
+    expect(isActionable(r)).toBe(true);
   });
 });
 

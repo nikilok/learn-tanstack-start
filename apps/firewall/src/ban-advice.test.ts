@@ -11,7 +11,7 @@ import {
   adviseBan,
   volumeFloor,
 } from './ban-advice';
-import { type Mix, mixOf, shapeOf } from './ip-signals';
+import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
 
 function series(counts: number[], offset: number, length: number) {
   const base = Date.parse('2026-08-03T00:00:00.000Z');
@@ -505,6 +505,42 @@ describe('adviseBan — the ASN lever', () => {
     );
     expect(a.reasons.join(' ')).not.toContain('busy in');
     expect(a.reasons.join(' ')).toContain('spans 400 IPs');
+  });
+
+  test('pacing does NOT fire on a SHORT window, where duty degenerates', () => {
+    // The live preset is 20 minutes = TWO 10-minute buckets, so a human active in both scores
+    // 100% duty. The 0.5 threshold was calibrated over 24h and does not transfer down — without
+    // a bucket floor this fires on ordinary browsing on the watch screen.
+    const buckets = series([30, 25], 0, 2);
+    const a = adviseBan(
+      velia({
+        total: 55,
+        shape: shapeOf(buckets, 10),
+        windowMinutes: 20,
+        digestReach: concentrated(),
+      }),
+    );
+    expect(dutyCycleOf(shapeOf(buckets, 10), 20)).toBe(1); // the degeneracy is real
+    expect(a.reasons.join(' ')).not.toContain('busy in');
+  });
+
+  test('pacing does NOT fire on the 1h preset either', () => {
+    // A 35-minute visit across six buckets is 67% duty — over the threshold, under the floor.
+    const a = adviseBan(
+      velia({
+        total: 60,
+        shape: shapeOf(series([10, 10, 10, 10, 0, 0], 0, 6), 10),
+        windowMinutes: 60,
+        digestReach: concentrated(),
+      }),
+    );
+    expect(a.reasons.join(' ')).not.toContain('busy in');
+  });
+
+  test('pacing DOES fire once the window holds enough buckets', () => {
+    // 24h at 10-minute granularity is 144 buckets — the span the threshold was calibrated on.
+    const a = adviseBan(velia({ digestReach: concentrated() }));
+    expect(a.reasons.join(' ')).toContain('busy in 100%');
   });
 
   test('pacing does NOT fire when reach is unknown', () => {

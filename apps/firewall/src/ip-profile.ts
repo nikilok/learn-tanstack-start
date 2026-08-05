@@ -10,6 +10,7 @@ import {
   mixOf,
   shapeOf,
   tellsFor,
+  withRpcs,
 } from './ip-signals';
 import {
   type Ctx,
@@ -338,26 +339,30 @@ export async function fetchIpProfile(
     // fold those into one `/__server` entry while keeping assets, fonts, tiles and beacons
     // separate, which is what the browser-evidence question actually needs.
     const rpcFilter = rpcFilterFor(filter);
-    const [ips, countries, bots, routes, rpcRows, statuses] = await pool(
-      [
-        () => run('ips', ['clientIp']),
-        () => run('geo', ['clientIpCountry']),
-        () => run('bots', ['botVerified', 'botName']),
-        () => run('routes', ['route']),
-        // `/__server` covers SSR pages AND every RPC, so routes alone cannot see RPCs — and an
-        // SPA user always makes them, which makes a missing RPC count the one absence that
-        // wrongly clears a deny. Counted exactly against the discovered fn list instead.
-        () =>
-          rpcFilter
-            ? run('rpcs', ['requestPath'], rpcFilter)
-            : Promise.resolve([] as [string, number][]),
-        // The identity's TOTAL, from a low-cardinality grouping that cannot be capped. Summing
-        // the clientIp rows instead under-reported a residential proxy by 50x (3,459 against an
-        // actual 177,653), which made every per-request share computed from it meaningless.
-        () => run('status', ['httpStatus']),
-      ],
-      6,
-    );
+    const [ips, countries, bots, routes, rpcRows, pathRows, statuses] =
+      await pool(
+        [
+          () => run('ips', ['clientIp']),
+          () => run('geo', ['clientIpCountry']),
+          () => run('bots', ['botVerified', 'botName']),
+          () => run('routes', ['route']),
+          // `/__server` covers SSR pages AND every RPC, so routes alone cannot see RPCs — and an
+          // SPA user always makes them, which makes a missing RPC count the one absence that
+          // wrongly clears a deny. Counted exactly against the discovered fn list instead.
+          () =>
+            rpcFilter
+              ? run('rpcs', ['requestPath'], rpcFilter)
+              : Promise.resolve([] as [string, number][]),
+          // A second RPC floor. Used ONLY to raise the count, never to judge completeness: this
+          // grouping truncates for exactly the enumerators whose reach must stay measurable.
+          () => run('paths', ['requestPath']),
+          // The identity's TOTAL, from a low-cardinality grouping that cannot be capped. Summing
+          // the clientIp rows instead under-reported a residential proxy by 50x (3,459 against an
+          // actual 177,653), which made every per-request share computed from it meaningless.
+          () => run('status', ['httpStatus']),
+        ],
+        7,
+      );
     // Undefined reach already refuses a lever (qualifyLever calls it "reach unknown"), but the
     // reason matters: "this identity has no traffic" and "the lookup for it failed" are
     // different facts and only one of them is about the client.
@@ -386,7 +391,10 @@ export async function fetchIpProfile(
       subResources: kinds.asset,
       beacons: kinds.beacon,
       tiles: kinds.tile,
-      rpcs: rpcRows.reduce((n, [, c]) => n + c, 0),
+      rpcs: Math.max(
+        rpcRows.reduce((n, [, c]) => n + c, 0),
+        mixOf(pathRows).rpc,
+      ),
       complete: failed.length === 0 && !routesTruncated && rpcsMeasured,
       verifiedNames: bots
         .filter(([k]) => k.startsWith('pass'))
@@ -413,11 +421,14 @@ export async function fetchIpProfile(
     2,
   );
 
-  const mix = mixOf(byRoute);
-  // /__server lands in `page`, so move the measured RPCs across rather than double-counting them.
-  const subjectRpcs = rpcRows.reduce((n, [, c]) => n + c, 0);
-  mix.rpc = subjectRpcs;
-  mix.page = Math.max(0, mix.page - subjectRpcs);
+  // Two independent floors: the exact count against the discovered fn list, and whatever the
+  // subject's own path sample saw. The discovered list can be incomplete after a deploy, and an
+  // undercounted RPC axis is what turns a real session into a raw-HTML fetcher.
+  const mix = withRpcs(
+    mixOf(byRoute),
+    rpcRows.reduce((n, [, c]) => n + c, 0),
+    mixOf(byPath).rpc,
+  );
   const shape = shapeOf(buckets, bucketMinutes);
   const total = byStatus.reduce((s, [, c]) => s + c, 0) || mix.total;
   // Only the cap, for the same reason as reachOf: a denied or challenged request never reaches

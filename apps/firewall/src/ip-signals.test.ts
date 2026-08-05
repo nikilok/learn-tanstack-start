@@ -14,6 +14,7 @@ import {
   pathKind,
   shapeOf,
   tellsFor,
+  withRpcs,
 } from './ip-signals';
 
 /** Build a zero-filled 10-minute series with `counts` starting at `offset` buckets in. */
@@ -430,5 +431,55 @@ describe('pathKind on route strings', () => {
     // If this ever became 'asset' or 'beacon' the whole catalogue walk would read as browser
     // evidence and no enumerator could ever be denied.
     expect(pathKind('/__server')).toBe('page');
+  });
+});
+
+// The discovered /_serverFn list can be incomplete — fn ids rotate per build, so a fresh
+// deploy's hashes are the youngest, lowest-count entrants in a site-wide grouping that truncates
+// below its cap. Undercounting RPCs is what turns a real SPA session into a "raw-HTML fetcher",
+// so two independent floors are kept and the larger wins.
+describe('withRpcs', () => {
+  const routeMix = () =>
+    mixOf([
+      ['/__server', 1000],
+      ['/assets/x.js', 10],
+    ]);
+
+  test('moves RPCs out of page rather than double-counting them', () => {
+    const m = withRpcs(routeMix(), 300, 0);
+    expect(m.rpc).toBe(300);
+    expect(m.page).toBe(700);
+    expect(m.rpc + m.page).toBe(1000); // /__server is SSR pages AND RPCs
+  });
+
+  test('the path sample wins when the discovered list came back short', () => {
+    // The failure this exists for: a deploy an hour ago, so the current build's hashes are
+    // missing from the list and the exact count reads 40 when the client really made 300.
+    const m = withRpcs(routeMix(), 40, 300);
+    expect(m.rpc).toBe(300);
+    expect(m.page).toBe(700);
+  });
+
+  test('the discovered list wins when the path sample was truncated', () => {
+    const m = withRpcs(routeMix(), 300, 0);
+    expect(m.rpc).toBe(300);
+  });
+
+  test('both zero leaves the mix alone — a genuine raw-HTML fetcher', () => {
+    const m = withRpcs(routeMix(), 0, 0);
+    expect(m.rpc).toBe(0);
+    expect(m.page).toBe(1000);
+  });
+
+  test('never drives page negative if a count overshoots', () => {
+    const m = withRpcs(routeMix(), 5000, 0);
+    expect(m.page).toBe(0);
+    expect(m.rpc).toBe(5000);
+  });
+
+  test('leaves the other rendering axes untouched', () => {
+    const m = withRpcs(routeMix(), 300, 0);
+    expect(m.asset).toBe(10);
+    expect(m.total).toBe(1010);
   });
 });

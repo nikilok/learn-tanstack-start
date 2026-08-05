@@ -119,6 +119,22 @@ export function mixOf(paths: [string, number][]): Mix {
   return mix;
 }
 
+/**
+ * Fold an RPC count into a route-derived mix. `/__server` carries SSR pages AND every RPC, so
+ * the RPCs move out of `page` rather than being double-counted.
+ *
+ * Takes the BEST FLOOR of two independent estimates. Both under-report: the discovered
+ * `/_serverFn` list can be incomplete (fn ids rotate per build, so a fresh deploy's hashes are
+ * the youngest and lowest-count entrants in a site-wide grouping that truncates below its cap),
+ * and the per-subject path sample truncates for anything walking a catalogue. Undercounting RPCs
+ * is the dangerous direction — it is what makes a real SPA session read as a raw-HTML fetcher —
+ * so whichever estimate saw more is the one to trust.
+ */
+export function withRpcs(mix: Mix, discovered: number, fromPaths: number): Mix {
+  const rpc = Math.max(0, discovered, fromPaths);
+  return { ...mix, rpc, page: Math.max(0, mix.page - rpc) };
+}
+
 /** Every request only a rendering client produces. Pooled because each axis alone is cheap to fake and cheap to miss: assets cache for a year, beacons are ad-blocked, tiles need the map in view. */
 export function renderingRequests(mix: Mix): number {
   return mix.asset + mix.beacon + mix.tile + mix.rpc;

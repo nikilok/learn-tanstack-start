@@ -37,6 +37,8 @@ export const HEADER_GATED_RULES = [
 ];
 // A fingerprint spread wider than this is a proxy pool or a shared client library, not one host.
 const WIDE_SPREAD = 8;
+// Below this, `duty` degenerates from "runs level" into "was present in both halves".
+const MIN_PACING_BUCKETS = 12;
 // The top digest must own this share of the subject's traffic before its evidence is attributable.
 const DOMINANT_SHARE = 0.9;
 
@@ -291,7 +293,18 @@ export function adviseBan(input: AdviceInput): Advice {
   // machine. Unknown reach does not fire either — that is the safe direction. A wide-spread
   // actor loses nothing, since `spread` is already its own axis.
   const duty = dutyCycleOf(shape, input.windowMinutes);
-  if (duty > 0.5 && input.digestReach && input.digestReach.ips <= WIDE_SPREAD)
+  // "Level" is only distinguishable from "present at all" when the window holds enough buckets.
+  // The live preset is 20 minutes = TWO 10-minute buckets, so a human active in both scores
+  // 100% duty; on `last 1h` a 35-minute visit scores 67%. The 0.5 threshold was calibrated over
+  // 24h and does not transfer down. Twelve buckets is two hours at 10-minute granularity and
+  // twelve hours at 60-minute, which is the shortest span where a duty cycle means anything.
+  const bucketCount = input.windowMinutes / Math.max(1, shape.bucketMinutes);
+  if (
+    bucketCount >= MIN_PACING_BUCKETS &&
+    duty > 0.5 &&
+    input.digestReach &&
+    input.digestReach.ips <= WIDE_SPREAD
+  )
     tell(
       'pacing',
       `busy in ${(duty * 100).toFixed(0)}% of all ${shape.bucketMinutes}-minute buckets, from an identity on only ${input.digestReach.ips} IP${input.digestReach.ips === 1 ? '' : 's'} — machines run flat, people burst and idle`,

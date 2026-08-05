@@ -281,12 +281,12 @@ export function adviseBan(input: AdviceInput): Advice {
   // strict: sessions split on >=2 idle buckets, so level traffic is ONE unbroken session whose
   // concentration is 1.0 — "level AND unconcentrated" could never both hold, for anyone.
   //
-  // 0.5 is calibrated against the population that can actually be denied. Measured 2026-08-05
-  // over 24h: of 112 IPs above the volume floor, 87 were verified bots and 1 was our own
-  // ch-stream listener — both stopped by a blocker before axes are ever consulted. The
-  // remaining 24 peaked at 21% duty (p95 11%), so this sits 2.4x above anything real. Calibrate
-  // on the whole population instead and the bots bury the signal; that mistake killed two
-  // earlier attempts at this.
+  // The threshold is calibrated, not chosen — measured against the population that can ACTUALLY
+  // be denied, with verified bots and first-party services excluded because a blocker stops
+  // those before axes are consulted. Calibrating on the whole population instead lets them bury
+  // the signal; that mistake killed two earlier attempts at this. Re-measure before changing it,
+  // and exclude the same two classes when you do. The figures are deliberately not recorded
+  // here: this repo is public, and a distribution is a map of where to sit to stay under it.
   //
   // Gated on a NARROW reach because a rhythm only means "one actor" for a non-aggregate
   // identity: a shared fingerprint runs flat because many people use it, not because it is a
@@ -294,10 +294,10 @@ export function adviseBan(input: AdviceInput): Advice {
   // actor loses nothing, since `spread` is already its own axis.
   const duty = dutyCycleOf(shape, input.windowMinutes);
   // "Level" is only distinguishable from "present at all" when the window holds enough buckets.
-  // The live preset is 20 minutes = TWO 10-minute buckets, so a human active in both scores
-  // 100% duty; on `last 1h` a 35-minute visit scores 67%. The 0.5 threshold was calibrated over
-  // 24h and does not transfer down. Twelve buckets is two hours at 10-minute granularity and
-  // twelve hours at 60-minute, which is the shortest span where a duty cycle means anything.
+  // On the shortest presets a duty cycle degenerates into "was present throughout", which is
+  // what an ordinary visit looks like, so the threshold cannot transfer down to them. Twelve
+  // buckets is two hours at 10-minute granularity and twelve at 60-minute — the shortest span
+  // where the measure means what its name says. See the tests for the degenerate cases.
   const bucketCount = input.windowMinutes / Math.max(1, shape.bucketMinutes);
   if (
     bucketCount >= MIN_PACING_BUCKETS &&

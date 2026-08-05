@@ -404,3 +404,30 @@ describe('dutyCycleOf', () => {
     expect(shapeTell?.detail).toContain('6% of the window');
   });
 });
+
+// The ban decision's mix is built from the `route` dimension, not `requestPath`: measured on a
+// live 177k-request scraper the path grouping covered 0.5% of its traffic, while routes covered
+// all of it in 8 rows. That only works if pathKind reads route strings the same way, so these
+// are the exact strings the API returns.
+describe('pathKind on route strings', () => {
+  test.each([
+    ['/api/tiles/[theme]/[z]/[x]/[y]', 'tile'],
+    ['/_vercel/insights/view', 'beacon'],
+    ['/_vercel/speed-insights/vitals', 'beacon'],
+    ['/assets/index-C1pPKFbU.js', 'asset'],
+    ['/assets/index-DkIQfbF5.css', 'asset'],
+    ['/fonts/geist-latin.woff2', 'asset'],
+    ['/favicon.svg', 'asset'],
+    ['/icon-192.png', 'asset'],
+    ['/robots.txt', 'crawl'],
+    ['/api/revalidate', 'api'],
+  ])('%s is %s', (route, kind) => {
+    expect(pathKind(route)).toBe(kind);
+  });
+
+  test('/__server is a page — it is SSR plus RPCs, and the RPCs are moved out by an exact count', () => {
+    // If this ever became 'asset' or 'beacon' the whole catalogue walk would read as browser
+    // evidence and no enumerator could ever be denied.
+    expect(pathKind('/__server')).toBe('page');
+  });
+});

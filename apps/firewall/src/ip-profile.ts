@@ -135,6 +135,23 @@ async function group(
   }
 }
 
+/**
+ * The app's own /_serverFn paths, discovered from SITE-WIDE top traffic. Needed because the
+ * observability filter DSL has no prefix operator (`like` is rejected) and the `route` dimension
+ * folds every /_serverFn/<hash> into `/__server` alongside SSR pages — so an exact per-identity
+ * RPC count can only be asked as `requestPath in (...)`. Site-wide rather than per-subject on
+ * purpose: the fn set is a property of the deployment, and a scraper's own traffic contains none.
+ */
+async function serverFnPaths(ctx: Ctx, errors: string[]): Promise<string[]> {
+  const rows = await group(ctx, errors, 'server fns', ['requestPath'], '');
+  return (
+    rows
+      .map(([p]) => p)
+      // Interpolated into the filter DSL, which has no escape syntax, so anything exotic is dropped.
+      .filter((p) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p))
+  );
+}
+
 /** Profile one IP over the last `hours`. Fans out one grouped query per dimension plus a bucket series, then scores the result with the pure tells. */
 export async function fetchIpProfile(
   creds: { projectId: string; teamId: string; token: string },
@@ -160,6 +177,13 @@ export async function fetchIpProfile(
   const failedQueries: string[] = [];
   const g = (label: string, dims: string[], event?: string) => () =>
     group(ctx, errors, label, dims, filter, event, failedQueries);
+  // Discovered once, before anything that needs it: both the subject mix and each reach count
+  // RPCs against this list, because `route` cannot separate them from SSR pages.
+  const fnPaths = await serverFnPaths(ctx, errors);
+  const rpcFilterFor = (subjectFilter: string) =>
+    fnPaths.length
+      ? `${subjectFilter} and requestPath in (${fnPaths.map((p) => `'${p}'`).join(',')})`
+      : '';
 
   const [
     byStatus,
@@ -173,6 +197,8 @@ export async function fetchIpProfile(
     byWafAction,
     wafRuleRows,
     byPath,
+    byRoute,
+    rpcRows,
     byReferrer,
   ] = await pool(
     [
@@ -189,6 +215,26 @@ export async function fetchIpProfile(
       g('waf action', ['wafAction']),
       g('waf rule', ['wafRuleId'], 'firewallAction'),
       g('paths', ['requestPath']),
+      // The mix that DECIDES comes from here, not from requestPath. Measured on a live scraper,
+      // the requestPath grouping returned 185 rows covering 859 of 168,752 requests — 0.5% —
+      // because each /company/<slug> is fetched a handful of times and the API keeps only a
+      // sliver of the head. `route` folds them into one /__server row and covers the lot.
+      g('routes', ['route']),
+      // Exact RPC count. /__server covers SSR pages AND every RPC, so without this the mix would
+      // report rpc:0 for everyone — which reads as "HTML enumeration" for real users and strips
+      // the one rendering axis an SPA session can never be missing.
+      () =>
+        rpcFilterFor(filter)
+          ? group(
+              ctx,
+              errors,
+              'subject rpcs',
+              ['requestPath'],
+              rpcFilterFor(filter),
+              undefined,
+              failedQueries,
+            )
+          : Promise.resolve([] as [string, number][]),
       g('referrer', ['referrerUrl']),
     ],
     4,
@@ -247,26 +293,48 @@ export async function fetchIpProfile(
     // Tracked per query: group() degrades a failure to [], which is indistinguishable from a
     // genuine zero. A safety test that clears a blanket deny must never read absence as measured.
     const failed: string[] = [];
-    const run = async (what: string, dims: string[]) => {
-      const before = errors.length;
+    const run = async (what: string, dims: string[], f = filter) => {
+      // Its OWN sink, not a length-diff on the shared `errors` array: eight of these run
+      // concurrently across both reaches, so a length comparison marked every in-flight query
+      // failed whenever any one of them failed.
+      const mine: string[] = [];
       const rows = await group(
         reachCtx,
         errors,
         `reach ${what} ${label}`,
         dims,
-        filter,
+        f,
+        undefined, // no event override
+        mine,
       );
-      if (errors.length > before) failed.push(what);
+      if (mine.length) failed.push(what);
       return rows;
     };
-    const [ips, countries, bots, paths] = await pool(
+    // `route`, NOT `requestPath`: an enumerator has thousands of distinct /company/<slug> paths
+    // and always hit the 500-group cap, which made `complete` false for the exact population
+    // this measurement exists to judge — so `ban` was unreachable for every real scraper. Routes
+    // fold those into one `/__server` entry while keeping assets, fonts, tiles and beacons
+    // separate, which is what the browser-evidence question actually needs.
+    const rpcFilter = rpcFilterFor(filter);
+    const [ips, countries, bots, routes, rpcRows, statuses] = await pool(
       [
         () => run('ips', ['clientIp']),
         () => run('geo', ['clientIpCountry']),
         () => run('bots', ['botVerified', 'botName']),
-        () => run('paths', ['requestPath']),
+        () => run('routes', ['route']),
+        // `/__server` covers SSR pages AND every RPC, so routes alone cannot see RPCs — and an
+        // SPA user always makes them, which makes a missing RPC count the one absence that
+        // wrongly clears a deny. Counted exactly against the discovered fn list instead.
+        () =>
+          rpcFilter
+            ? run('rpcs', ['requestPath'], rpcFilter)
+            : Promise.resolve([] as [string, number][]),
+        // The identity's TOTAL, from a low-cardinality grouping that cannot be capped. Summing
+        // the clientIp rows instead under-reported a residential proxy by 50x (3,459 against an
+        // actual 177,653), which made every per-request share computed from it meaningless.
+        () => run('status', ['httpStatus']),
       ],
-      4,
+      6,
     );
     // Undefined reach already refuses a lever (qualifyLever calls it "reach unknown"), but the
     // reason matters: "this identity has no traffic" and "the lookup for it failed" are
@@ -275,12 +343,19 @@ export async function fetchIpProfile(
       if (failed.length) failedQueries.push(`reach ${label}`);
       return undefined;
     }
-    const kinds = mixOf(paths);
-    const total = ips.reduce((s, [, c]) => s + c, 0);
-    // The path grouping is capped at 500 groups, so a busy identity's tail — including its
-    // /assets, /fonts and /_vercel/insights rows — is silently dropped. Detect it the same way
-    // sitemap-readers does, by comparing the sample against the exact per-IP total.
-    const pathsTruncated = paths.length >= GROUP_CAP || kinds.total < total;
+    const kinds = mixOf(routes);
+    const total =
+      statuses.reduce((s, [, c]) => s + c, 0) ||
+      ips.reduce((s, [, c]) => s + c, 0);
+    // Only the cap. A coverage cross-check against `total` cannot work here: a denied or
+    // challenged request never reaches routing, so it carries no route and is absent from this
+    // grouping by construction — measured on the banned scraper, routes summed to 168,785 of
+    // 177,657, and the 8,872 gap was exactly its deny + challenge count. Routes are genuinely
+    // low-cardinality (that same 177k-request identity produced 8 rows), so the cap is the only
+    // way this sample can be short.
+    const routesTruncated = routes.length >= GROUP_CAP;
+    // No fn list means the RPC axis was never measured, and a zero on it is what clears a deny.
+    const rpcsMeasured = Boolean(rpcFilter);
     return {
       label,
       ips: ips.length,
@@ -289,8 +364,8 @@ export async function fetchIpProfile(
       subResources: kinds.asset,
       beacons: kinds.beacon,
       tiles: kinds.tile,
-      rpcs: kinds.rpc,
-      complete: failed.length === 0 && !pathsTruncated,
+      rpcs: rpcRows.reduce((n, [, c]) => n + c, 0),
+      complete: failed.length === 0 && !routesTruncated && rpcsMeasured,
       verifiedNames: bots
         .filter(([k]) => k.startsWith('pass'))
         .map(([k]) => k.split(' | ')[1] ?? 'verified')
@@ -316,12 +391,17 @@ export async function fetchIpProfile(
     2,
   );
 
-  const mix = mixOf(byPath);
+  const mix = mixOf(byRoute);
+  // /__server lands in `page`, so move the measured RPCs across rather than double-counting them.
+  const subjectRpcs = rpcRows.reduce((n, [, c]) => n + c, 0);
+  mix.rpc = subjectRpcs;
+  mix.page = Math.max(0, mix.page - subjectRpcs);
   const shape = shapeOf(buckets, bucketMinutes);
   const total = byStatus.reduce((s, [, c]) => s + c, 0) || mix.total;
-  // Same detection reachOf and the sitemap pane already do. byStatus is low-cardinality and so
-  // exact; byPath is not, so a busy identity's low-count sub-resource rows fall off the tail.
-  const mixPartial = byPath.length >= GROUP_CAP || mix.total < total;
+  // Only the cap, for the same reason as reachOf: a denied or challenged request never reaches
+  // routing, so it carries no route and cannot appear here — a coverage cross-check against the
+  // raw total would mark every WAF-actioned identity permanently truncated.
+  const mixPartial = byRoute.length >= GROUP_CAP;
   // Vercel leaves botVerified blank for everything it has not verified; only `pass` counts.
   const byBotVerified = byBotVerifiedRaw.filter(
     ([v]) => v && v !== '(none)' && v !== 'undefined',

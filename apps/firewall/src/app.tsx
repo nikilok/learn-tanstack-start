@@ -43,6 +43,7 @@ import { type DenyEntry, denylistLines } from './denylist-view';
 import { persistEnvVar } from './env-file';
 import {
   QUIET_FLOOR,
+  columnWidth,
   noAlpn,
   pickable,
   pickerLayout,
@@ -106,8 +107,21 @@ const MIN_RULES_W = 46;
 // Below this the data pane cannot say anything useful, so it is hidden rather than squeezed.
 const MIN_PANE_W = 46;
 const PANE_GAP = 2; // marginRight between the two columns
+// Every part of a picker row, so the width test cannot drift from what is drawn. Derived rather
+// than written as one number: the space after the count lives in the JSX and was missed once.
+const CURSOR_W = 2; // '▶ ' / '  '
 const COUNT_W = 7; // right-aligned request count
-const ROW_W = COUNT_W + 2; // ... plus the cursor gutter and the space before the identity
+const ROW_W = CURSOR_W + COUNT_W + 1; // ... and the space before the identity
+const FLAG_W = 3; // ' ⚑' — budgeted at 2 cells, since the glyph is ambiguous-width
+const OPEN_W = 7; // ' (open)'
+const CAP_BUSIEST = 'busiest';
+const CAP_QUIET = `quietest over ${QUIET_FLOOR}`;
+const ROW_CHROME = {
+  row: ROW_W,
+  cursor: CURSOR_W,
+  flag: FLAG_W,
+  open: OPEN_W,
+};
 const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
@@ -592,12 +606,17 @@ export function App() {
   // One flat list, so the cursor, Enter and what is on screen cannot disagree.
   const ipPickable = pickable(ipMatches, quietMatches);
 
+  // Shared with the width measurement above, so a row can never be drawn wider than it was
+  // measured — which is what wraps a row and costs the pane an unreserved line.
+  const isOpen = (id: string) =>
+    ipTabs.tabs.some((t) => t.subject.value === id);
+  /** Free, and independent of volume. Not a verdict — a verified crawler inverts the same tell. */
+  const isFlagged = (id: string) => pickKind === 'ja4' && noAlpn(id);
+
   /** One picker row. `i` indexes ipPickable, so the cursor means the same thing in both columns. */
   const pickerRow = ([id, count]: [string, number], i: number) => {
-    const open = ipTabs.tabs.some((t) => t.subject.value === id);
-    // Free, and independent of volume — which is the whole point of the quiet column. Not a
-    // verdict: a verified crawler inverts this tell, so it marks a row worth profiling.
-    const tell = pickKind === 'ja4' && noAlpn(id);
+    const open = isOpen(id);
+    const tell = isFlagged(id);
     return (
       <Box key={id}>
         <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
@@ -1135,13 +1154,12 @@ export function App() {
   // Measured, not assumed: an IPv4 is 15 chars and a JA4 digest 36, so whether two columns fit
   // depends on what is actually listed. A row that wraps takes the whole Ink list with it, so
   // the quiet band stacks underneath when the width is not there.
-  const idW = ipPickable.reduce((w, [v]) => Math.max(w, v.length), 0);
   const { twoCol, rows: pickerRows } = pickerLayout(
     ipMatches.length,
     quietMatches.length,
-    idW,
+    columnWidth(ipMatches, CAP_BUSIEST, isFlagged, isOpen, ROW_CHROME),
+    columnWidth(quietMatches, CAP_QUIET, isFlagged, isOpen, ROW_CHROME),
     reportW - 4, // the pane's border and padding
-    ROW_W,
     PANE_GAP,
   );
   // Rows the pane spends on its own tab bar / prompt / footer, so the bordered box stays inside the
@@ -1459,12 +1477,16 @@ export function App() {
               {twoCol ? (
                 <Box>
                   <Box flexDirection="column" marginRight={PANE_GAP}>
-                    <Text dimColor>{'  '}busiest</Text>
+                    <Text dimColor>
+                      {'  '}
+                      {CAP_BUSIEST}
+                    </Text>
                     {ipMatches.map(pickerRow)}
                   </Box>
                   <Box flexDirection="column">
                     <Text dimColor>
-                      {'  '}quietest over {QUIET_FLOOR}
+                      {'  '}
+                      {CAP_QUIET}
                     </Text>
                     {quietMatches.map((r, i) =>
                       pickerRow(r, ipMatches.length + i),
@@ -1476,7 +1498,8 @@ export function App() {
                   {ipMatches.map(pickerRow)}
                   {quietMatches.length > 0 && (
                     <Text dimColor>
-                      {'  '}quietest over {QUIET_FLOOR} requests, lowest first
+                      {'  '}
+                      {CAP_QUIET} requests, lowest first
                     </Text>
                   )}
                   {quietMatches.map((r, i) =>

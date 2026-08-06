@@ -61,15 +61,56 @@ export function pickable(busiest: Row[], quiet: Row[]): Row[] {
  * reserving overflows the frame, which scrolls the terminal and hides the editor cursor, so this
  * has to count the captions as well as the rows.
  */
+/** Widths of the fixed parts of a picker row, so measuring and drawing cannot drift apart. */
+export type RowChrome = {
+  /** cursor gutter + count + the space before the identity */
+  row: number;
+  /** cursor gutter alone, which is all a caption is indented by */
+  cursor: number;
+  flag: number;
+  open: number;
+};
+
+/** Rendered width of one row: its chrome, the identity, and whichever markers it draws. */
+export function rowWidth(
+  id: string,
+  flagged: boolean,
+  open: boolean,
+  c: RowChrome,
+): number {
+  return c.row + id.length + (flagged ? c.flag : 0) + (open ? c.open : 0);
+}
+
+/**
+ * Width a column needs: its widest rendered row, or its caption if that is wider. Passing the
+ * predicates in keeps one definition of "flagged" and "open" shared with the renderer.
+ */
+export function columnWidth(
+  rows: Row[],
+  caption: string,
+  flagged: (id: string) => boolean,
+  open: (id: string) => boolean,
+  c: RowChrome,
+): number {
+  return rows.reduce(
+    (w, [id]) => Math.max(w, rowWidth(id, flagged(id), open(id), c)),
+    c.cursor + caption.length,
+  );
+}
+
 export function pickerLayout(
   busiest: number,
   quiet: number,
-  idWidth: number,
+  leftWidth: number,
+  rightWidth: number,
   width: number,
-  rowChrome: number,
   gap: number,
 ): { twoCol: boolean; rows: number } {
-  const twoCol = quiet > 0 && width >= 2 * (rowChrome + idWidth) + gap;
+  // Rendered widths, not an identity length plus an assumed chrome: a row also carries the
+  // cursor gutter, the count, its markers and any "(open)" suffix, and a column has to fit its
+  // caption too. Under-measuring any of those wraps a row, and a wrapped row costs a line the
+  // reservation below did not account for.
+  const twoCol = quiet > 0 && leftWidth + gap + rightWidth <= width;
   return {
     twoCol,
     rows:

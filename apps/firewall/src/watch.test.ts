@@ -86,25 +86,19 @@ describe('impersonators', () => {
 
   test('keeps only the impersonation rows', () => {
     expect(
-      impersonators(
-        [
-          row(A, 'search_engine_crawler', 9000),
-          row(B, 'browser_impersonation', 30),
-        ],
-        10,
-      ),
+      impersonators([
+        row(A, 'search_engine_crawler', 9000),
+        row(B, 'browser_impersonation', 30),
+      ]),
     ).toEqual([[B, 30]]);
   });
 
   test('busiest first, whatever order the API returned', () => {
     expect(
-      impersonators(
-        [
-          row(A, 'browser_impersonation', 30),
-          row(B, 'browser_impersonation', 900),
-        ],
-        10,
-      ),
+      impersonators([
+        row(A, 'browser_impersonation', 30),
+        row(B, 'browser_impersonation', 900),
+      ]),
     ).toEqual([
       [B, 900],
       [A, 30],
@@ -113,16 +107,19 @@ describe('impersonators', () => {
 
   test('an empty category is not impersonation', () => {
     // Most rows carry no category at all; treating blank as a match would flag the whole site.
-    expect(impersonators([row(A, '', 9000)], 10)).toEqual([]);
+    expect(impersonators([row(A, '', 9000)])).toEqual([]);
   });
 
   test('a missing category field is not impersonation either', () => {
-    expect(
-      impersonators([{ clientJa4Digest: A, count_sum: 9000 }], 10),
-    ).toEqual([]);
+    expect(impersonators([{ clientJa4Digest: A, count_sum: 9000 }])).toEqual(
+      [],
+    );
   });
 
-  test('caps what it returns', () => {
+  test('does NOT cap — the denylist filter runs after this', () => {
+    // A cap here runs before worthProfiling drops what is already denied. With the busiest
+    // fingerprints denied, which is what a working denylist produces, everything still eligible
+    // would sit below the cut and never be looked at.
     const many = Array.from({ length: 80 }, (_, i) =>
       row(
         `t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`,
@@ -130,11 +127,26 @@ describe('impersonators', () => {
         500,
       ),
     );
-    expect(impersonators(many, 50)).toHaveLength(50);
+    expect(impersonators(many)).toHaveLength(80);
+  });
+
+  test('a low-volume eligible row survives a wall of denied ones above it', () => {
+    const denied = Array.from({ length: 60 }, (_, i) =>
+      row(
+        `t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`,
+        'browser_impersonation',
+        9000,
+      ),
+    );
+    const out = impersonators([
+      ...denied,
+      row(B, 'browser_impersonation', 120),
+    ]);
+    expect(out.map(([d]) => d)).toContain(B);
   });
 
   test('an empty summary yields nothing, not a crash', () => {
-    expect(impersonators([], 10)).toEqual([]);
+    expect(impersonators([])).toEqual([]);
   });
 });
 

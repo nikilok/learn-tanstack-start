@@ -246,7 +246,12 @@ const GROUP_CAP = 500;
  * selection happens here, and a selection that silently matches nothing is the failure this whole
  * tool exists to notice.
  */
-export function impersonators(summary: Row[], n: number): [string, number][] {
+export function impersonators(summary: Row[]): [string, number][] {
+  // Deliberately uncapped. `worthProfiling` bounds the expensive work, but it does so AFTER
+  // dropping what is already denied — so a cap here would run first, and with the busiest
+  // fingerprints denied, which is exactly what a working denylist produces, everything still
+  // eligible sits below the cut and is never looked at. The result is bounded by the group cap
+  // regardless.
   return (
     summary
       .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
@@ -259,7 +264,6 @@ export function impersonators(summary: Row[], n: number): [string, number][] {
       // identity that does not exist, counted in the report as a candidate.
       .filter(([digest]) => digest && digest !== '(none)' && digest !== '?')
       .sort((a, b) => b[1] - a[1])
-      .slice(0, n)
   );
 }
 
@@ -287,7 +291,7 @@ export async function screen(
   });
   const summary = resp.summary ?? [];
   return {
-    rows: impersonators(summary, 50),
+    rows: impersonators(summary),
     // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
     // same 500 slots — so a capped response can have dropped the very rows this screen exists to
     // find, and would then report a quiet window.

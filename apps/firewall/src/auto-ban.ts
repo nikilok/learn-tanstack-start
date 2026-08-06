@@ -100,11 +100,29 @@ export function autoBanRefusal(
 ): string | null {
   if (c.verdict !== 'ban') return `verdict is ${c.verdict}, not ban`;
   if (c.blockers.length) return `advisory blocked it: ${c.blockers[0]}`;
+
+  // Fail closed on anything unmeasured. A `>` comparison against NaN is false, so a metric that
+  // could not be read would slip past every ceiling below and be treated as a small blast radius
+  // — the exact shape of failure this tool exists to catch, in the one place that can deny live
+  // traffic unattended.
+  for (const [what, v] of [
+    ['rendering requests', c.renderingRequests],
+    ['IP count', c.ips],
+    ['request total', c.total],
+    ['window total', c.windowTotal],
+  ] as const)
+    if (!Number.isFinite(v) || v < 0)
+      return `${what} is not a usable number (${v}) — cannot size the blast radius`;
+
   if (c.renderingRequests > limits.maxRenderingRequests)
     return `${c.renderingRequests} rendering request(s) — a browser has run the app from it`;
   if (c.ips > limits.maxIps)
     return `spans ${c.ips} IPs — too broad to deny unattended`;
-  const share = c.windowTotal > 0 ? c.total / c.windowTotal : 0;
+  // Zero is a refusal, not a share of zero. Without a window total there is nothing to measure
+  // the population against, and an unmeasurable population is not a small one.
+  if (c.windowTotal <= 0)
+    return 'no traffic recorded for the window — nothing to size the share against';
+  const share = c.total / c.windowTotal;
   if (share > limits.maxShareOfTraffic)
     return `${(share * 100).toFixed(1)}% of window traffic — too large a population`;
   return null;

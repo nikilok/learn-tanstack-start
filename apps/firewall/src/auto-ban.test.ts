@@ -90,8 +90,34 @@ describe('autoBanRefusal', () => {
     ).toContain('% of window traffic');
   });
 
-  test('a zero-traffic window cannot divide by zero into a pass', () => {
-    expect(autoBanRefusal(candidate({ total: 10, windowTotal: 0 }))).toBeNull();
+  test('a zero-traffic window is a refusal, not a share of zero', () => {
+    // This test previously asserted the opposite, and encoded the bug: with no window total
+    // there is nothing to measure the population against, and an unmeasurable population is not
+    // a small one. Fail closed.
+    expect(autoBanRefusal(candidate({ total: 10, windowTotal: 0 }))).toContain(
+      'nothing to size the share against',
+    );
+  });
+
+  test('an unmeasurable metric refuses it rather than slipping past every ceiling', () => {
+    // `NaN > n` is false, so an unread metric would clear each limit in turn and read as a small
+    // blast radius — in the one place in the tool that can deny live traffic unattended.
+    for (const field of [
+      'renderingRequests',
+      'ips',
+      'total',
+      'windowTotal',
+    ] as const) {
+      expect(autoBanRefusal(candidate({ [field]: Number.NaN }))).toContain(
+        'not a usable number',
+      );
+      expect(
+        autoBanRefusal(candidate({ [field]: Number.POSITIVE_INFINITY })),
+      ).toContain('not a usable number');
+      expect(autoBanRefusal(candidate({ [field]: -1 }))).toContain(
+        'not a usable number',
+      );
+    }
   });
 
   test('the refusal names one reason, so a log line says which gate stopped it', () => {

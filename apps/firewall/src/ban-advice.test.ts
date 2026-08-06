@@ -777,9 +777,12 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('ban');
   });
 
-  test('a secret-header allow rule still certifies first-party', () => {
+  test('a secret-header allow rule certifies first-party when it dominates', () => {
+    // Was a small count when written, because the blocker keyed on presence. That is now a
+    // minority share and no longer certifies.
+    const s = scraper();
     const a = adviseBan(
-      scraper({ wafRules: [['allow-ch-stream-revalidate', 400]] }),
+      scraper({ wafRules: [['allow-ch-stream-revalidate', s.total]] }),
     );
     expect(a.blockers.join(' ')).toContain('first-party');
   });
@@ -892,13 +895,34 @@ describe('first-party protection', () => {
     expect(advice.verdict).not.toBe('ban');
   });
 
-  test('a matched header-gated rule blocks the ban', () => {
+  test('a header-gated rule blocks the ban when it is what the caller does', () => {
+    const s = scraper();
     const advice = adviseBan({
-      ...scraper(),
-      wafRules: [[HEADER_GATED_RULES[0] as string, 224]],
+      ...s,
+      wafRules: [[HEADER_GATED_RULES[0] as string, s.total]],
     });
     expect(advice.blockers.join(' ')).toContain('first-party service');
     expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('a handful of hits on a header-gated rule certifies nothing', () => {
+    // A certificate a few requests can earn is one an identity collects cheaply and keeps
+    // forever. Same rule as the rendering blocker: share, never presence.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[HEADER_GATED_RULES[0] as string, 1]],
+    });
+    expect(advice.blockers.join(' ')).not.toContain('first-party service');
+    expect(advice.verdict).toBe('ban');
+  });
+
+  test('a minority of header-gated traffic is not first-party either', () => {
+    const s = scraper();
+    const advice = adviseBan({
+      ...s,
+      wafRules: [[HEADER_GATED_RULES[0] as string, Math.floor(s.total / 2)]],
+    });
+    expect(advice.blockers.join(' ')).not.toContain('first-party service');
   });
 
   test('an unrelated failed query does not fabricate the blocker', () => {

@@ -136,14 +136,18 @@ function blockersFor(input: AdviceInput): string[] {
   const allowRule = input.wafRules.find(([name]) =>
     HEADER_GATED_RULES.includes(name),
   );
-  if (allowRule)
+  // Share, never presence — the same rule as the rendering blocker below, and for the same
+  // reason: a certificate that a handful of requests can earn is one an identity can collect
+  // cheaply and then keep forever. A genuine first-party caller does nothing but this, so
+  // requiring dominance costs it nothing and cannot be picked up in passing. Do not relax this
+  // to a presence test.
+  const allowShare = allowRule ? allowRule[1] / Math.max(1, input.total) : 0;
+  if (allowRule && allowShare >= DOMINANT_SHARE)
     out.push(
-      `matched ${allowRule[0]} (${allowRule[1]}x) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
+      `matched ${allowRule[0]} (${allowRule[1]}x, ${(allowShare * 100).toFixed(1)}% of its traffic) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
     );
-  // A failed lookup deletes this blocker, and this is the blocker protecting first-party
-  // services: our own ch-stream listener renders nothing, verifies as nothing and does steady
-  // volume, so it is indistinguishable from a harvester on every axis EXCEPT this one. If the
-  // rule query did not run, that is unmeasured rather than absent, and it must fail closed.
+  // A failed lookup deletes this blocker, and it is the one protecting our own services — which
+  // resemble the thing being hunted on every other axis. Unmeasured is not absent: fail closed.
   else if (input.failedQueries?.includes(WAF_RULE_QUERY))
     out.push(
       'the WAF-rule lookup failed, so whether this caller holds one of our secret headers is UNKNOWN — a first-party service is indistinguishable from a harvester without it',

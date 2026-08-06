@@ -120,6 +120,13 @@ export function investigationPrompt(f: Suspicious): string {
 export const INVESTIGATION_MODEL = 'opus';
 export const INVESTIGATION_EFFORT = 'max';
 
+/**
+ * Hard ceiling on one investigation. Generous, because `max` effort over a dozen observability
+ * queries is genuinely slow — but finite, because the alternative is a hung child that every
+ * later screen queues behind.
+ */
+export const INVESTIGATION_TIMEOUT_MS = 10 * 60_000;
+
 /** Argv for the investigation. Read-only work, JSON out so the pane can render the verdict. */
 export function investigationArgs(f: Suspicious): string[] {
   return [
@@ -176,13 +183,24 @@ export function provenanceOf(parsed: unknown): string {
 export async function runInvestigation(
   f: Suspicious,
   cwd: string,
+  onStart?: (child: {
+    kill: (signal?: number | NodeJS.Signals) => void;
+  }) => void,
 ): Promise<Investigation> {
   try {
     const proc = Bun.spawn(['claude', ...investigationArgs(f)], {
       cwd,
       stdout: 'pipe',
-      stderr: 'pipe',
+      // NOT piped. A pipe nobody reads fills its buffer and blocks the child forever, which for
+      // this process means the watch never screens again.
+      stderr: 'ignore',
+      // An investigation that hangs must not outlive the loop that started it. Without this the
+      // next screen waits behind it indefinitely and the watch is silently dead.
+      timeout: INVESTIGATION_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
+    // Hand the child up so disarm and unmount can stop it; the timeout only bounds the worst case.
+    onStart?.(proc);
     const [stdout, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
       proc.exited,

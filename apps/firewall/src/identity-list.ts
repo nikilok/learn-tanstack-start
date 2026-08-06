@@ -9,6 +9,37 @@ import { alpnOf } from './ip-signals';
 export type Row = [string, number];
 
 /**
+ * Share of the busiest identity's traffic below which a row stops counting as a leader. An order
+ * of magnitude: comparable to the top means the same rough scale, not the same number.
+ */
+export const TOP_SHARE = 0.1;
+
+/**
+ * How many of the busiest to show. At least `min`, and more while the rows past it are still
+ * within `share` of the busiest — a fixed cut is arbitrary exactly when several identities
+ * compete at the top, and it hides whichever one happened to land in ninth place.
+ *
+ * Measured against the top row rather than the middle of the list. A median or mean moves with
+ * the population: the same cluster of leaders would extend the list on a site with a long quiet
+ * tail and not on one without, which is the opposite of the intent. Against the leader, "high
+ * traffic" means the same thing whatever sits underneath it.
+ */
+export function busiestCount(
+  rows: Row[],
+  min: number,
+  cap: number,
+  share = TOP_SHARE,
+): number {
+  if (rows.length <= min) return rows.length;
+  const top = rows[0][1];
+  if (top <= 0) return min; // no traffic to be a share of
+  const floor = top * share;
+  let n = min;
+  while (n < Math.min(cap, rows.length) && rows[n][1] >= floor) n++;
+  return n;
+}
+
+/**
  * Floor for the quiet band. Below this an identity cannot clear the ban advisory's own volume
  * requirement, so it could not be adjudicated even if it looked wrong — offering it would offer
  * a decision that cannot be made. It also excludes the real bottom of the list, which is one-off

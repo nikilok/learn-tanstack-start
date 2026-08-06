@@ -6,6 +6,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   QUIET_FLOOR,
+  busiestCount,
   columnWidth,
   noAlpn,
   pickable,
@@ -15,6 +16,66 @@ import {
 
 const rows = (...counts: number[]): [string, number][] =>
   counts.map((c, i) => [`ip-${i}`, c]);
+
+// A fixed top-N is arbitrary exactly when it matters: several identities competing at the top,
+// and the cut falls between two that are barely different.
+describe('busiestCount', () => {
+  /** A head of `n` comparable leaders, then a cliff, then a flat tail. */
+  const cliffAt = (n: number, len = 60): [string, number][] =>
+    Array.from({ length: len }, (_, i) => [`id-${i}`, i < n ? 9000 - i : 50]);
+
+  test('only the minimum when nothing past it is near the leader', () => {
+    expect(busiestCount(cliffAt(3), 10, 20)).toBe(10);
+  });
+
+  test('extends to keep a cluster of leaders together', () => {
+    // 14 competing, so cutting at 10 would hide four that belong with the ones shown.
+    expect(busiestCount(cliffAt(14), 10, 20)).toBe(14);
+  });
+
+  test('stops at the cap however long the cluster runs', () => {
+    expect(busiestCount(cliffAt(40), 10, 20)).toBe(20);
+  });
+
+  test('the boundary is a share of the leader, not an absolute count', () => {
+    const at = (n: number): [string, number][] => [
+      ['top', 1000],
+      ...Array.from(
+        { length: 20 },
+        (_, i) => [`r-${i}`, n] as [string, number],
+      ),
+    ];
+    expect(busiestCount(at(100), 10, 20)).toBe(20); // exactly a tenth still counts
+    expect(busiestCount(at(99), 10, 20)).toBe(10); // just under does not
+  });
+
+  test('the same cluster extends the list whatever tail sits under it', () => {
+    // A median-based rule would move with the population, so an identical set of leaders would
+    // count as high traffic on a site with a long quiet tail and not on one without.
+    const head = Array.from(
+      { length: 14 },
+      (_, i) => [`h-${i}`, 9000 - i] as [string, number],
+    );
+    const tail = (n: number): [string, number][] =>
+      Array.from({ length: n }, (_, i) => [`t-${i}`, 50] as [string, number]);
+    expect(busiestCount([...head, ...tail(5)], 10, 20)).toBe(14);
+    expect(busiestCount([...head, ...tail(400)], 10, 20)).toBe(14);
+  });
+
+  test('a list shorter than the minimum is shown whole', () => {
+    expect(busiestCount(cliffAt(2, 4), 10, 20)).toBe(4);
+    expect(busiestCount([], 10, 20)).toBe(0);
+  });
+
+  test('a window with no traffic at all falls back to the minimum', () => {
+    // Every row is zero, so "a share of the busiest" has nothing to mean.
+    const none: [string, number][] = Array.from({ length: 30 }, (_, i) => [
+      `id-${i}`,
+      0,
+    ]);
+    expect(busiestCount(none, 10, 20)).toBe(10);
+  });
+});
 
 describe('quietBand', () => {
   test('takes the lowest above the floor, lowest first', () => {

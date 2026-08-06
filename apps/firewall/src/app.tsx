@@ -43,6 +43,7 @@ import { type DenyEntry, denylistLines } from './denylist-view';
 import { persistEnvVar } from './env-file';
 import {
   QUIET_FLOOR,
+  busiestCount,
   columnWidth,
   noAlpn,
   pickable,
@@ -98,8 +99,15 @@ const LIVE_TAB_EVERY = 2;
 // The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
 // paid for. Everything below the top few is what the quiet band is drawn from.
 const TOP_IPS_LIMIT = 500;
-const IP_SUGGESTIONS = 8; // busiest rows shown at once
+const MIN_BUSIEST = 10; // busiest rows always shown
+// Grows past the minimum while the leaders are still competing. Bounded because the picker eats
+// into the pane it sits under, and because every extra row is one more identity to read.
+const MAX_BUSIEST = 20;
 const QUIET_ROWS = 10; // quiet-band rows shown beside them
+// `o` opens each listed subject at ~21 observability queries, against an endpoint measured to
+// sustain ~60/min. It stays fixed while the list above it grows, or one keypress rate-limits the
+// tool against itself.
+const OPEN_ALL_MAX = 8;
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
 // Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
 // truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
@@ -597,12 +605,21 @@ export function App() {
   const ipFiltered = (pickList.data ?? []).filter(
     ([ip]) => !ipInput || ip.includes(ipInput),
   );
-  const ipMatches = ipFiltered.slice(0, IP_SUGGESTIONS);
+  // How many count as busy is a property of the traffic, not a constant: a fixed cut hides the
+  // ninth of nine competing leaders. Bounded by the viewport too, since these rows are taken from
+  // the pane below and reportH can be as little as 8.
+  const busiest = busiestCount(
+    ipFiltered,
+    MIN_BUSIEST,
+    Math.min(MAX_BUSIEST, Math.max(MIN_BUSIEST, reportH - QUIET_ROWS)),
+  );
+  const ipMatches = ipFiltered.slice(0, busiest);
   // Only when browsing. Under a filter the list is already the answer to a question, and a
   // second column drawn from the same matches would just repeat its tail.
+  // Skips exactly what the busiest column drew, so the two can never overlap as it grows.
   const quietMatches = ipInput
     ? []
-    : quietBand(ipFiltered, IP_SUGGESTIONS, QUIET_ROWS);
+    : quietBand(ipFiltered, ipMatches.length, QUIET_ROWS);
   // One flat list, so the cursor, Enter and what is on screen cannot disagree.
   const ipPickable = pickable(ipMatches, quietMatches);
 
@@ -815,7 +832,7 @@ export function App() {
    * row worth a look, not for opening wholesale.
    */
   const submitAll = () => {
-    const subjects = ipMatches.map(([value]) => ({
+    const subjects = ipMatches.slice(0, OPEN_ALL_MAX).map(([value]) => ({
       kind: pickKind,
       value: pickKind === 'ja4' ? value.toLowerCase() : value,
     }));
@@ -1297,7 +1314,9 @@ export function App() {
           )}
           <Box
             flexDirection="column"
-            height={reportH - paneChrome}
+            // Floored: reportH bottoms out at 8 while the picker's chrome can exceed that on a
+            // short terminal, and a negative height is not a smaller box, it is a broken frame.
+            height={Math.max(0, reportH - paneChrome)}
             borderStyle="round"
             borderColor={focus === 'editor' ? 'gray' : 'cyan'}
             paddingX={1}
@@ -1470,7 +1489,9 @@ export function App() {
                         (isLive
                           ? ` · auto-refresh ${LIVE_REFRESH_MS / 1000}s${failuresRef.current ? ' (backing off)' : ''}`
                           : ', type to filter') +
-                        ' · o open all · w timeline'}
+                        // Names the bound rather than saying "all": the list above can now be
+                        // longer than what one keypress will open.
+                        ` · o open top ${Math.min(OPEN_ALL_MAX, ipMatches.length)} · w timeline`}
                   </Text>
                 )
               )}

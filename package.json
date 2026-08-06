@@ -24,7 +24,8 @@
     "knip": "knip",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "firewall:verify": "bun --env-file=.env.local apps/firewall/src/verify.ts"
   },
   "dependencies": {},
   "devDependencies": {

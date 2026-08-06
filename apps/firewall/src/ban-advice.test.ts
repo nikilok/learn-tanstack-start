@@ -281,6 +281,7 @@ describe('adviseBan — first-party callers', () => {
     botVerified: [],
     wafActions: [['bypass', 1158]],
     wafRules: [['allow-ch-stream-revalidate', 1158]],
+    trustedAllowRules: [CH_STREAM_REVALIDATE],
     statuses: [['202', 1158]],
     digestReach: {
       label: 't13dpolah1_777777777777_888888888888',
@@ -305,13 +306,13 @@ describe('adviseBan — first-party callers', () => {
     expect(a.verdict).toBe('leave');
   });
 
-  test('the matched allow rule is named, and the claim is about what it does', () => {
-    // Deliberately not "it presented our credential". The rule proves the caller reached that
-    // path; nothing this tool can query sees what was sent, and the endpoint answers the same
-    // either way. Doing nothing else is the evidence, and it is all there is.
+  test('the matched allow rule is named, and the claim is about the RULE', () => {
+    // Deliberately not "it presented our credential" and no longer "it does nothing else".
+    // Nothing here sees what was sent; what it knows is which rule matched, and that only means
+    // something because the rule itself is one an outsider cannot satisfy.
     const b = adviseBan(chStream()).blockers.join(' ');
     expect(b).toContain('allow-ch-stream-revalidate');
-    expect(b).toContain('nothing else is what a first-party caller');
+    expect(b).toContain('only our own callers can satisfy');
   });
 
   test('an API-only client is blocked for having nothing to enumerate', () => {
@@ -780,12 +781,14 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('ban');
   });
 
-  test('a secret-header allow rule certifies first-party when it dominates', () => {
-    // Was a small count when written, because the blocker keyed on presence. That is now a
-    // minority share and no longer certifies.
-    const s = scraper();
+  test('a secret-header allow rule certifies first-party when the rule is trusted', () => {
+    // Was a share test: 400 hits of 9060 certified, then later had to dominate. Both were
+    // reconstructions of trust from traffic, needed only while anyone could match the rule.
     const a = adviseBan(
-      scraper({ wafRules: [['allow-ch-stream-revalidate', s.total]] }),
+      scraper({
+        wafRules: [['allow-ch-stream-revalidate', 3]],
+        trustedAllowRules: ['allow-ch-stream-revalidate'],
+      }),
     );
     expect(a.blockers.join(' ')).toContain('first-party');
   });
@@ -879,78 +882,75 @@ describe('adviseBan — review regressions', () => {
 // are worth pinning individually.
 describe('first-party protection', () => {
   test('the names are shared with the rule definitions, not copied', () => {
-    // rules.ts builds its rules FROM these constants, so a rename cannot desync the two. This
-    // asserts the constants are what the advisory matches on — an agreement test would only
-    // notice the drift afterwards; sharing one definition makes the drift impossible.
     expect(HEADER_GATED_RULES).toContain(CH_STREAM_REVALIDATE);
     expect(HEADER_GATED_RULES).toContain(DESKTOP_RELEASE_RECORD);
   });
 
   test('a failed WAF-rule lookup blocks, rather than reading as no credential', () => {
-    // An unrun query returns no rules, which looks exactly like a caller holding none. Failing
-    // open here would strip first-party protection precisely when the tool is degraded.
     const advice = adviseBan({
       ...scraper(),
       wafRules: [],
       failedQueries: [WAF_RULE_QUERY],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
     });
     expect(advice.blockers.join(' ')).toContain('UNKNOWN');
     expect(advice.verdict).not.toBe('ban');
   });
 
-  test('a header-gated rule blocks the ban when it is what the caller does', () => {
-    const s = scraper();
+  test('a hit on a TRUSTED rule certifies a first-party caller', () => {
     const advice = adviseBan({
-      ...s,
-      wafRules: [[HEADER_GATED_RULES[0] as string, s.total]],
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 3]],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
     });
     expect(advice.blockers.join(' ')).toContain('first-party caller');
     expect(advice.verdict).not.toBe('ban');
   });
 
-  test('a handful of hits on a header-gated rule certifies nothing', () => {
-    // A certificate a few requests can earn is one an identity collects cheaply and keeps
-    // forever. Same rule as the rendering blocker: share, never presence.
+  test('a few hits are enough when the rule is trusted', () => {
+    // No share threshold any more. A rule only our own callers can satisfy is proof on one hit;
+    // reconstructing that from traffic shape was scaffolding for a rule anyone could match.
     const advice = adviseBan({
       ...scraper(),
-      wafRules: [[HEADER_GATED_RULES[0] as string, 1]],
+      wafRules: [[CH_STREAM_REVALIDATE, 1]],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
     });
-    expect(advice.blockers.join(' ')).not.toContain('first-party caller');
-    expect(advice.verdict).toBe('ban');
+    expect(advice.blockers.join(' ')).toContain('first-party caller');
   });
 
-  test('status codes cannot be used here, so the share test stands alone', () => {
-    // These endpoints answer identically whether or not the caller is authentic — neutral by
-    // design, so probing them learns nothing and repeated guessing gets no feedback. That is
-    // right for them, and it means a status-based check here would read as a control while
-    // doing nothing. Both of these must reach the same verdict.
-    const s = scraper();
-    const withRule = (statuses: [string, number][]) =>
-      adviseBan({
-        ...s,
-        wafRules: [[HEADER_GATED_RULES[0] as string, s.total]],
-        statuses,
-      }).blockers.join(' ');
-    expect(withRule([['202', s.total]])).toContain('first-party');
-    expect(withRule([['200', s.total]])).toContain('first-party');
-  });
-
-  test('a minority of header-gated traffic is not first-party either', () => {
-    const s = scraper();
+  test('a hit on an UNTRUSTED rule certifies nothing, and says why', () => {
+    // The rule lost a condition — applied from an older checkout, or edited in the dashboard.
+    // It still matches and still looks identical, so the advisory has to say it means nothing.
     const advice = adviseBan({
-      ...s,
-      wafRules: [[HEADER_GATED_RULES[0] as string, Math.floor(s.total / 2)]],
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 9060]],
+      trustedAllowRules: [],
     });
     expect(advice.blockers.join(' ')).not.toContain('first-party caller');
+    expect(advice.blockers.join(' ')).toContain(
+      'no longer requires everything',
+    );
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('an unread live config is UNKNOWN, not untrusted and not trusted', () => {
+    // undefined must not collapse into []. One means "we looked and it is weakened", the other
+    // means "we never looked" — and only the first is a statement about the rule.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 9060]],
+      trustedAllowRules: undefined,
+    });
+    expect(advice.blockers.join(' ')).toContain('UNKNOWN');
+    expect(advice.verdict).not.toBe('ban');
   });
 
   test('an unrelated failed query does not fabricate the blocker', () => {
-    // Fail closed on the lookup that feeds this blocker, not on every degraded query — otherwise
-    // any partial profile would certify every caller as first-party and nothing could be banned.
     const advice = adviseBan({
       ...scraper(),
       wafRules: [],
       failedQueries: ['country'],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
     });
     expect(advice.blockers.join(' ')).not.toContain('UNKNOWN');
   });

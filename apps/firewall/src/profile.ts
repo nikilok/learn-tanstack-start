@@ -105,6 +105,18 @@ async function main() {
     // and "the denylist could not be read" are different facts.
     profile.errors.push(`FW_BLOCKED_JA4: ${errMsg(e)}`);
   }
+  // One extra call on top of the profile's ~21. It replaces the caveat this command used to
+  // print: a rule hit means nothing unless the live rule still demands what it should.
+  let trusted: string[] | undefined;
+  try {
+    const { fetchLive } = await import('./client');
+    const { trustedRules } = await import('./rule-integrity');
+    const { rules } = await import('./rules');
+    trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
+  } catch (e) {
+    // Undefined, never []: "not read" and "none qualify" are different, and the advisory says so.
+    profile.errors.push(`live firewall config: ${errMsg(e)}`);
+  }
   const advice = adviseBan({
     total: profile.total,
     mix: profile.mix,
@@ -133,6 +145,7 @@ async function main() {
     alreadyDeniedAsn: false,
     windowMinutes: profile.windowHours * 60,
     failedQueries: profile.failedQueries,
+    trustedAllowRules: trusted,
     mixPartial: profile.mixPartial,
   });
   console.log(

@@ -17,6 +17,7 @@ import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
+import { trustedRules } from './rule-integrity';
 import { type Window, rollingWindow } from './time-window';
 import { errMsg } from './util';
 
@@ -292,6 +293,7 @@ export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
   deniedJa4: string[],
+  trustedAllowRules?: string[],
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated } = await screen(creds, window);
   const findings: Finding[] = [];
@@ -321,6 +323,7 @@ export async function findSuspects(
         alreadyDeniedAsn: false,
         windowMinutes: p.windowHours * 60,
         failedQueries: p.failedQueries,
+        trustedAllowRules,
         mixPartial: p.mixPartial,
       }),
     });
@@ -446,10 +449,19 @@ async function main() {
     errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
   }
 
+  // Read the live config once: the same fetch tells us whether the allow rules still mean
+  // anything and whether the deny rules are enforcing.
+  // Imported lazily: rules.ts reads required ceilings from the environment at import time, so a
+  // top-level import would make this module unloadable anywhere those are absent — tests included.
+  const { fetchLive } = await import('./client');
+  const { rules } = await import('./rules');
+  const live = await fetchLive();
+  const trusted = trustedRules(live.headerKeysByName, rules);
   const { rows, findings, truncated } = await findSuspects(
     creds,
     window,
     deniedJa4,
+    trusted,
   );
 
   const report: WatchReport = {

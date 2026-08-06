@@ -55,7 +55,8 @@ import { moveCursor, resolveIpEntry } from './ip-entry';
 import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
-import { dryRun } from './rules';
+import { trustedRules } from './rule-integrity';
+import { dryRun, rules } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import {
@@ -153,6 +154,11 @@ export function App() {
   const [cursor, setCursor] = useState(0);
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
+  // Undefined until the live config loads, and undefined is meaningful: the advisory treats
+  // "not read" differently from "no rule qualifies".
+  const [trustedAllow, setTrustedAllow] = useState<string[] | undefined>(
+    undefined,
+  );
   const [error, setError] = useState('');
   // Last apply's outcome; cleared by the next edit so it can't describe stale state.
   const [applied, setApplied] = useState<{
@@ -276,6 +282,7 @@ export function App() {
     fetchLive()
       .then((live) => {
         setIdByName(live.idByName);
+        setTrustedAllow(trustedRules(live.headerKeysByName, rules));
         setItems(seedItems(live));
         setPhase('select');
       })
@@ -774,6 +781,7 @@ export function App() {
         // Absent evidence is not evidence of absence: a query that failed must read as unjudged,
         // never as a clean client.
         failedQueries: ipTabs.active.data.failedQueries,
+        trustedAllowRules: trustedAllow,
         mixPartial: ipTabs.active.data.mixPartial,
       })
     : undefined;

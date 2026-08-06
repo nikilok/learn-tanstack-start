@@ -1,13 +1,14 @@
 // Entrypoint for `bun run firewall:watch` — what is getting through that should not be.
 // READ-ONLY. It never stages a deny and never applies; it prints a case and a human decides.
 //
-// It does NOT try to find scrapers from first principles. Measured 2026-08-05, Vercel's managed
-// bot protection already challenges ~93% of `automated_browser` and all of `uncategorized_bot`
-// and `client_anomaly`. The gap is `browser_impersonation`, where a large share is still
-// allowed through — and that is the category a driven-browser scraper lands in. So the screen
-// asks Vercel for its own classification and looks only at what it classified and then let
-// past. Adjudicating those is the part Vercel cannot do: deciding a fingerprint is safe to DENY
-// rather than merely challenge needs to know what a real session on this site looks like.
+// It does NOT try to find scrapers from first principles. Vercel's managed bot protection
+// already handles most of what it classifies, so the screen asks for that classification and
+// looks only at what was classified as impersonating a browser and then reached the app anyway.
+// A challenge is a test, not a wall: whatever passes it arrives clean, and something capable of
+// passing is more interesting than something that never faced one.
+//
+// Adjudicating those is the part Vercel cannot do. Deciding a fingerprint is safe to DENY rather
+// than merely challenge needs to know what a real session on this site looks like.
 
 import { type Advice, adviseBan } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
@@ -39,10 +40,12 @@ export type Finding = Screened & { total: number; advice: Advice };
 
 export type WatchReport = {
   window: Window;
-  /** Requests Vercel classified browser_impersonation and then allowed. */
+  /** Requests Vercel classified browser_impersonation that still reached the app. */
   screened: number;
   fingerprints: number;
   candidates: number;
+  /** The screened response hit the group cap, so rows we wanted may have been dropped. */
+  truncated: boolean;
   findings: Finding[];
   enforcement: string[];
   errors: string[];
@@ -51,6 +54,9 @@ export type WatchReport = {
 /** True when a human should look. Kept separate from rendering so the exit code and the text cannot disagree. */
 export function isActionable(r: WatchReport): boolean {
   return (
+    // Truncated AND empty cannot be told apart from genuinely quiet, so it escalates. Truncated
+    // with findings does not: we saw something, and saying so every run is how a watch gets muted.
+    (r.truncated && r.fingerprints === 0) ||
     // Errors count. Exit 0 tells a loop to go back to sleep, so a watch that could not read its
     // own inputs must not report quiet — unknown escalates, it does not pass.
     r.errors.length > 0 ||
@@ -71,10 +77,19 @@ export function watchLines(r: WatchReport): Line[] {
     ),
   ];
   for (const e of r.errors) L.push(line(seg(`  ${e}`, 'warn')));
+  if (r.truncated)
+    L.push(
+      line(
+        seg(
+          `  the screen hit the ${GROUP_CAP}-group cap — impersonation rows may have been dropped`,
+          'warn',
+        ),
+      ),
+    );
   L.push(
     blank(),
     line(
-      `${r.screened} request(s) classified browser_impersonation and ALLOWED, across ${r.fingerprints} fingerprint(s)`,
+      `${r.screened} request(s) classified browser_impersonation reached the app, across ${r.fingerprints} fingerprint(s)`,
     ),
     line(
       seg(
@@ -180,8 +195,12 @@ export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
   deniedJa4: string[],
-): Promise<{ rows: [string, number][]; findings: Finding[] }> {
-  const rows = await screen(creds, window);
+): Promise<{
+  rows: [string, number][];
+  findings: Finding[];
+  truncated: boolean;
+}> {
+  const { rows, truncated } = await screen(creds, window);
   const findings: Finding[] = [];
   for (const c of worthProfiling(rows, deniedJa4)) {
     const p = await fetchIpProfile(
@@ -213,10 +232,12 @@ export async function findSuspects(
       }),
     });
   }
-  return { rows, findings };
+  return { rows, findings, truncated };
 }
 
 const IMPERSONATION = 'browser_impersonation';
+/** The observability group cap. A response at this size may have dropped rows we wanted. */
+const GROUP_CAP = 500;
 
 /**
  * Pick the impersonation rows out of a two-dimension summary, busiest first.
@@ -226,13 +247,20 @@ const IMPERSONATION = 'browser_impersonation';
  * tool exists to notice.
  */
 export function impersonators(summary: Row[], n: number): [string, number][] {
-  return summary
-    .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
-    .map(
-      (r) => [String(r.clientJa4Digest ?? '?'), countOf(r)] as [string, number],
-    )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, n);
+  return (
+    summary
+      .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
+      .map(
+        (r) =>
+          [String(r.clientJa4Digest ?? ''), countOf(r)] as [string, number],
+      )
+      // A row with no digest is dropped, not renamed. Substituting a placeholder would clear the
+      // volume floor and be profiled as if it were a fingerprint — ~21 queries spent on an
+      // identity that does not exist, counted in the report as a candidate.
+      .filter(([digest]) => digest && digest !== '(none)' && digest !== '?')
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+  );
 }
 
 /**
@@ -246,14 +274,25 @@ export function impersonators(summary: Row[], n: number): [string, number][] {
 export async function screen(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
-): Promise<[string, number][]> {
+): Promise<{ rows: [string, number][]; truncated: boolean }> {
   const { ctx } = makeCtx(creds, window);
   const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
-    // `allow` is the point: challenged traffic is already being handled.
-    filter: "wafAction eq 'allow'",
-    limit: 500,
+    // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
+    // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
+    // rules matched, and a filter naming only one of those silently misses the rest — an
+    // observe-only ruleset serves everything as `log`, where `wafAction eq 'allow'` would have
+    // seen a fraction of a percent of the traffic and called the window quiet.
+    filter: "wafAction ne 'deny' and wafAction ne 'challenge'",
+    limit: GROUP_CAP,
   });
-  return impersonators(resp.summary ?? [], 50);
+  const summary = resp.summary ?? [];
+  return {
+    rows: impersonators(summary, 50),
+    // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
+    // same 500 slots — so a capped response can have dropped the very rows this screen exists to
+    // find, and would then report a quiet window.
+    truncated: summary.length >= GROUP_CAP,
+  };
 }
 
 async function main() {
@@ -280,13 +319,18 @@ async function main() {
     errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
   }
 
-  const { rows, findings } = await findSuspects(creds, window, deniedJa4);
+  const { rows, findings, truncated } = await findSuspects(
+    creds,
+    window,
+    deniedJa4,
+  );
 
   const report: WatchReport = {
     window,
     screened: rows.reduce((n, [, c]) => n + c, 0),
     fingerprints: rows.length,
     candidates: findings.length,
+    truncated,
     findings,
     // Cheap and unrelated to the screen: a deny rule that stopped denying reads as handled
     // while the traffic it lists is served normally.

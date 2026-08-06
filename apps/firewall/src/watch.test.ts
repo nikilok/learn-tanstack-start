@@ -199,6 +199,7 @@ describe('watchLines', () => {
     screened: 9060,
     fingerprints: 3,
     candidates: 1,
+    truncated: false,
     findings: [{ digest: DIG, allowed: 9060, total: 9060, advice: advice() }],
     enforcement: [],
     errors: [],
@@ -275,6 +276,7 @@ describe('watchLines', () => {
       screened: 0,
       fingerprints: 0,
       candidates: 0,
+      truncated: false,
       findings: [],
       enforcement: ['deny-scraper-ja4 carries 1 entry but is set to log'],
     });
@@ -305,6 +307,7 @@ describe('isActionable', () => {
     screened: 0,
     fingerprints: 0,
     candidates: 0,
+    truncated: false,
     findings: [],
     enforcement: [],
     errors: [],
@@ -335,5 +338,19 @@ describe('isActionable', () => {
 
   test('an empty report is quiet', () => {
     expect(isActionable(base)).toBe(false);
+  });
+
+  test('a truncated screen that found nothing escalates', () => {
+    // Capped and empty cannot be told apart from genuinely quiet — the rows we wanted may have
+    // been the ones dropped, which is the silent-truncation failure this tool exists to notice.
+    expect(isActionable({ ...base, truncated: true })).toBe(true);
+  });
+
+  test('a truncated screen that DID find fingerprints does not', () => {
+    // We saw something, so the run is not blind. Escalating every capped window is how a watch
+    // gets muted, and a muted watch is worse than none.
+    expect(isActionable({ ...base, truncated: true, fingerprints: 3 })).toBe(
+      false,
+    );
   });
 });

@@ -26,3 +26,25 @@ export function resolveIpEntry(
   if (isCompleteIp(typed)) return typed.trim();
   return matches[0] ?? typed.trim();
 }
+
+/**
+ * Next cursor position, wrapping at both ends so a long list is reachable from whichever end is
+ * closer. The suggestions and the input form one ring in display order: rows `0…count-1`, then
+ * `-1` for the input line beneath them. So down from the last row reaches the input and then the
+ * top, and up from the top row reaches the input and then the bottom.
+ *
+ * Keeping `-1` inside the ring rather than skipping it is what preserves the typed value: it is
+ * the only position `resolveIpEntry` reads the field from, so a cycle that stepped over it would
+ * make a half-typed address unreachable once the arrows had been touched.
+ */
+export function moveCursor(
+  cursor: number,
+  delta: number,
+  count: number,
+): number {
+  if (count <= 0) return -1; // nothing to highlight, so the typed value is all there is
+  const slots = count + 1; // the rows, plus the input line
+  const from = cursor === -1 ? count : cursor;
+  const next = (((from + delta) % slots) + slots) % slots;
+  return next === count ? -1 : next;
+}

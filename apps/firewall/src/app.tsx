@@ -41,7 +41,16 @@ import {
 import { type Activity, fetchDenyActivity } from './denylist-data';
 import { type DenyEntry, denylistLines } from './denylist-view';
 import { persistEnvVar } from './env-file';
-import { resolveIpEntry } from './ip-entry';
+import {
+  QUIET_FLOOR,
+  busiestCount,
+  columnWidth,
+  noAlpn,
+  pickable,
+  pickerLayout,
+  quietBand,
+} from './identity-list';
+import { moveCursor, resolveIpEntry } from './ip-entry';
 import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
@@ -87,8 +96,18 @@ const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 // to sustain. Refreshing four background tabs every tick would be ~340/min and would rate-limit
 // the tool against itself.
 const LIVE_TAB_EVERY = 2;
-const TOP_IPS_LIMIT = 40; // fetched, so filtering still has material to work with
-const IP_SUGGESTIONS = 8; // rows shown at once
+// The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
+// paid for. Everything below the top few is what the quiet band is drawn from.
+const TOP_IPS_LIMIT = 500;
+const MIN_BUSIEST = 10; // busiest rows always shown
+// Grows past the minimum while the leaders are still competing. Bounded because the picker eats
+// into the pane it sits under, and because every extra row is one more identity to read.
+const MAX_BUSIEST = 20;
+const QUIET_ROWS = 10; // quiet-band rows shown beside them
+// `o` opens each listed subject at ~21 observability queries, against an endpoint measured to
+// sustain ~60/min. It stays fixed while the list above it grows, or one keypress rate-limits the
+// tool against itself.
+const OPEN_ALL_MAX = 8;
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
 // Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
 // truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
@@ -96,6 +115,21 @@ const MIN_RULES_W = 46;
 // Below this the data pane cannot say anything useful, so it is hidden rather than squeezed.
 const MIN_PANE_W = 46;
 const PANE_GAP = 2; // marginRight between the two columns
+// Every part of a picker row, so the width test cannot drift from what is drawn. Derived rather
+// than written as one number: the space after the count lives in the JSX and was missed once.
+const CURSOR_W = 2; // '▶ ' / '  '
+const COUNT_W = 7; // right-aligned request count
+const ROW_W = CURSOR_W + COUNT_W + 1; // ... and the space before the identity
+const FLAG_W = 3; // ' ⚑' — budgeted at 2 cells, since the glyph is ambiguous-width
+const OPEN_W = 7; // ' (open)'
+const CAP_BUSIEST = 'busiest';
+const CAP_QUIET = `quietest over ${QUIET_FLOOR}`;
+const ROW_CHROME = {
+  row: ROW_W,
+  cursor: CURSOR_W,
+  flag: FLAG_W,
+  open: OPEN_W,
+};
 const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
@@ -571,7 +605,50 @@ export function App() {
   const ipFiltered = (pickList.data ?? []).filter(
     ([ip]) => !ipInput || ip.includes(ipInput),
   );
-  const ipMatches = ipFiltered.slice(0, IP_SUGGESTIONS);
+  // How many count as busy is a property of the traffic, not a constant: a fixed cut hides the
+  // ninth of nine competing leaders. Bounded by the viewport too, since these rows are taken from
+  // the pane below and reportH can be as little as 8.
+  const busiest = busiestCount(
+    ipFiltered,
+    MIN_BUSIEST,
+    Math.min(MAX_BUSIEST, Math.max(MIN_BUSIEST, reportH - QUIET_ROWS)),
+  );
+  const ipMatches = ipFiltered.slice(0, busiest);
+  // Only when browsing. Under a filter the list is already the answer to a question, and a
+  // second column drawn from the same matches would just repeat its tail.
+  // Skips exactly what the busiest column drew, so the two can never overlap as it grows.
+  const quietMatches = ipInput
+    ? []
+    : quietBand(ipFiltered, ipMatches.length, QUIET_ROWS);
+  // One flat list, so the cursor, Enter and what is on screen cannot disagree.
+  const ipPickable = pickable(ipMatches, quietMatches);
+
+  // Shared with the width measurement above, so a row can never be drawn wider than it was
+  // measured — which is what wraps a row and costs the pane an unreserved line.
+  const isOpen = (id: string) =>
+    ipTabs.tabs.some((t) => t.subject.value === id);
+  /** Free, and independent of volume. Not a verdict — a verified crawler inverts the same tell. */
+  const isFlagged = (id: string) => pickKind === 'ja4' && noAlpn(id);
+
+  /** One picker row. `i` indexes ipPickable, so the cursor means the same thing in both columns. */
+  const pickerRow = ([id, count]: [string, number], i: number) => {
+    const open = isOpen(id);
+    const tell = isFlagged(id);
+    return (
+      <Box key={id}>
+        <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
+        <Text dimColor>{String(count).padStart(COUNT_W)} </Text>
+        <Text
+          bold={i === ipCursor}
+          color={i === ipCursor ? 'cyan' : tell ? 'yellow' : undefined}
+        >
+          {id}
+        </Text>
+        {tell && <Text color="yellow"> ⚑</Text>}
+        {open && <Text dimColor> (open)</Text>}
+      </Box>
+    );
+  };
 
   /** Open a pane, loading it on first view. `i` always prompts for another IP — tab is how you get back to one already open. */
   const openPane = (kind: PaneKind, pick: 'ip' | 'ja4' = 'ip') => {
@@ -746,9 +823,16 @@ export function App() {
     setFocus(windowReturn.current);
   };
 
-  /** Open every match currently listed, so a shortlist can be compared by tabbing rather than typed one at a time. Skips anything already open. */
+  /**
+   * Open every match currently listed, so a shortlist can be compared by tabbing rather than
+   * typed one at a time. Skips anything already open.
+   *
+   * Busiest column only. Each subject costs ~21 observability queries, so folding the quiet band
+   * in would nearly triple what one keypress spends — and the quiet column is for spotting one
+   * row worth a look, not for opening wholesale.
+   */
   const submitAll = () => {
-    const subjects = ipMatches.map(([value]) => ({
+    const subjects = ipMatches.slice(0, OPEN_ALL_MAX).map(([value]) => ({
       kind: pickKind,
       value: pickKind === 'ja4' ? value.toLowerCase() : value,
     }));
@@ -889,12 +973,13 @@ export function App() {
           resolveIpEntry(
             ipInput,
             ipCursor,
-            ipMatches.map(([ip]) => ip),
+            ipPickable.map(([ip]) => ip),
           ),
         );
-      else if (key.upArrow) setIpCursor((c) => Math.max(-1, c - 1));
+      else if (key.upArrow)
+        setIpCursor((c) => moveCursor(c, -1, ipPickable.length));
       else if (key.downArrow)
-        setIpCursor((c) => Math.min(ipMatches.length - 1, c + 1));
+        setIpCursor((c) => moveCursor(c, 1, ipPickable.length));
       else if (key.backspace || key.delete) {
         setIpInput((s) => s.slice(0, -1));
         setIpCursor(-1);
@@ -1083,12 +1168,23 @@ export function App() {
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
   const paneFooter = showTabNav || focus === 'pane';
+  // Measured, not assumed: an IPv4 is 15 chars and a JA4 digest 36, so whether two columns fit
+  // depends on what is actually listed. A row that wraps takes the whole Ink list with it, so
+  // the quiet band stacks underneath when the width is not there.
+  const { twoCol, rows: pickerRows } = pickerLayout(
+    ipMatches.length,
+    quietMatches.length,
+    columnWidth(ipMatches, CAP_BUSIEST, isFlagged, isOpen, ROW_CHROME),
+    columnWidth(quietMatches, CAP_QUIET, isFlagged, isOpen, ROW_CHROME),
+    reportW - 4, // the pane's border and padding
+    PANE_GAP,
+  );
   // Rows the pane spends on its own tab bar / prompt / footer, so the bordered box stays inside the
   // viewport — an over-tall frame makes the terminal scroll and hides the editor cursor.
   const paneChrome =
     (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
     // The suggestion overlay grows the prompt, so the box has to give back the same rows.
-    (focus === 'ip-input' ? 3 + ipMatches.length : 0) +
+    (focus === 'ip-input' ? 3 + pickerRows : 0) +
     (focus === 'confirm' ? 3 : 0) +
     (focus === 'asn-input' ? 1 : 0) +
     (focus === 'range-input' ? 1 : 0) +
@@ -1218,7 +1314,9 @@ export function App() {
           )}
           <Box
             flexDirection="column"
-            height={reportH - paneChrome}
+            // Floored: reportH bottoms out at 8 while the picker's chrome can exceed that on a
+            // short terminal, and a negative height is not a smaller box, it is a broken frame.
+            height={Math.max(0, reportH - paneChrome)}
             borderStyle="round"
             borderColor={focus === 'editor' ? 'gray' : 'cyan'}
             paddingX={1}
@@ -1381,29 +1479,55 @@ export function App() {
                           ? `, showing ${ipMatches.length}`
                           : '')
                       : `top ${ipMatches.length} of ${pickList.data.length}` +
+                        // A full list means the API's group cap was reached, and it truncates
+                        // silently. The quiet band is drawn from the bottom of what came back,
+                        // which is then not the bottom of the traffic — say so rather than let
+                        // a partial answer read as the whole picture.
+                        (pickList.data.length >= TOP_IPS_LIMIT
+                          ? ' (capped)'
+                          : '') +
                         (isLive
                           ? ` · auto-refresh ${LIVE_REFRESH_MS / 1000}s${failuresRef.current ? ' (backing off)' : ''}`
                           : ', type to filter') +
-                        ' · o open all · w timeline'}
+                        // Names the bound rather than saying "all": the list above can now be
+                        // longer than what one keypress will open.
+                        ` · o open top ${Math.min(OPEN_ALL_MAX, ipMatches.length)} · w timeline`}
                   </Text>
                 )
               )}
-              {ipMatches.map(([ip, count], i) => {
-                const open = ipTabs.tabs.some((t) => t.subject.value === ip);
-                return (
-                  <Box key={ip}>
-                    <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
-                    <Text dimColor>{String(count).padStart(7)} </Text>
-                    <Text
-                      bold={i === ipCursor}
-                      color={i === ipCursor ? 'cyan' : undefined}
-                    >
-                      {ip}
+              {twoCol ? (
+                <Box>
+                  <Box flexDirection="column" marginRight={PANE_GAP}>
+                    <Text dimColor>
+                      {'  '}
+                      {CAP_BUSIEST}
                     </Text>
-                    {open && <Text dimColor> (open)</Text>}
+                    {ipMatches.map(pickerRow)}
                   </Box>
-                );
-              })}
+                  <Box flexDirection="column">
+                    <Text dimColor>
+                      {'  '}
+                      {CAP_QUIET}
+                    </Text>
+                    {quietMatches.map((r, i) =>
+                      pickerRow(r, ipMatches.length + i),
+                    )}
+                  </Box>
+                </Box>
+              ) : (
+                <>
+                  {ipMatches.map(pickerRow)}
+                  {quietMatches.length > 0 && (
+                    <Text dimColor>
+                      {'  '}
+                      {CAP_QUIET} requests, lowest first
+                    </Text>
+                  )}
+                  {quietMatches.map((r, i) =>
+                    pickerRow(r, ipMatches.length + i),
+                  )}
+                </>
+              )}
               {Boolean(pickList.data) && !ipMatches.length && ipInput && (
                 <Text dimColor>
                   {' '}

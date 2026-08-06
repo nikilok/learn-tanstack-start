@@ -53,6 +53,18 @@ function envLimit(name: string): number {
   );
 }
 
+/**
+ * A REQUIRED value kept in .env.local, never the repo. Absent throws rather than returning empty:
+ * a rule built without it is the PREVIOUS, weaker rule, and applying that would loosen the
+ * firewall while looking like a successful apply.
+ */
+function envRequired(name: string, why: string): string {
+  const v = process.env[name]?.trim();
+  if (v) return v;
+  if (dryRun) return ''; // dry-run lists rule names only
+  throw new Error(`${name} must be set in .env.local — ${why}`);
+}
+
 /** An OPTIONAL ceiling (FW_*_LIMIT), null when unset so the caller drops just that rule instead of failing the whole apply. */
 function optionalLimit(name: string): number | null {
   const v = envCeiling(name);
@@ -72,6 +84,11 @@ const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
 const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
 // Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
 const SUSTAINED_WINDOW = 600;
+// The header name itself is the value here, so it stays in .env.local like every ceiling above.
+const CH_STREAM_MARKER = envRequired(
+  'REVALIDATE_MARKER_HEADER',
+  'the allow rule requires it and would otherwise be rebuilt without that condition',
+);
 
 /** Build a per-key fixed-window rate-limit rule (60s unless `window` overrides), observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
@@ -116,7 +133,13 @@ function bypassRule(opts: {
   description: string;
   path: string;
   headerKey: string;
+  /** Further header names the caller must also send. Empty entries are a bug, not a no-op. */
+  alsoHeaderKeys?: string[];
 }): Rule {
+  const also = opts.alsoHeaderKeys ?? [];
+  // An empty entry would drop silently and rebuild the looser rule, so it fails the apply.
+  if (also.some((k) => !k) && !dryRun)
+    throw new Error(`${opts.name}: an additional header key resolved to empty`);
   return {
     name: opts.name,
     description: opts.description,
@@ -126,6 +149,9 @@ function bypassRule(opts: {
         conditions: [
           { type: 'path', op: 'eq', value: opts.path },
           { type: 'header', op: 'ex', key: opts.headerKey },
+          ...also
+            .filter(Boolean)
+            .map((key): Condition => ({ type: 'header', op: 'ex', key })),
         ],
       },
     ],
@@ -217,6 +243,7 @@ export const rules: Rule[] = [
       'Bypass bot protection for ch-stream → POST /api/revalidate (trusted server-to-server cache invalidation; endpoint auths via x-revalidate-secret). Skips the managed Bot Protection challenge that blocks non-browser callers.',
     path: '/api/revalidate',
     headerKey: 'x-revalidate-secret',
+    alsoHeaderKeys: [CH_STREAM_MARKER],
   }),
   bypassRule({
     name: 'allow-desktop-release-record',

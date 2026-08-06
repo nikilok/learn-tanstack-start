@@ -30,4 +30,8 @@ export function validateConfig() {
     console.warn(
       '[ch-stream] REVALIDATE_SECRET not set — cache revalidation disabled',
     );
+  // Presence only, never the value: the deploy is otherwise unobservable from outside.
+  console.log(
+    `[ch-stream] REVALIDATE_MARKER_HEADER ${CONFIG.REVALIDATE_MARKER_HEADER ? 'set' : 'not set'}`,
+  );
 }

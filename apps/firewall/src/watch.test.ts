@@ -9,6 +9,7 @@ import { lineText } from './line-model';
 import { rollingWindow } from './time-window';
 import {
   type WatchReport,
+  impersonators,
   isActionable,
   notEnforcing,
   watchLines,
@@ -70,6 +71,70 @@ describe('worthProfiling', () => {
       [],
     );
     expect(out.map((c) => c.digest)).toEqual([A, B]);
+  });
+});
+
+// The screen returned nothing from the day it shipped, because `botCategory eq '…'` is accepted
+// by the API and matches zero rows. It never errored, so every "nothing wants a human" it printed
+// was this. The category is now selected here instead, where it can be tested.
+describe('impersonators', () => {
+  const row = (digest: string, botCategory: string, count_sum: number) => ({
+    clientJa4Digest: digest,
+    botCategory,
+    count_sum,
+  });
+
+  test('keeps only the impersonation rows', () => {
+    expect(
+      impersonators(
+        [
+          row(A, 'search_engine_crawler', 9000),
+          row(B, 'browser_impersonation', 30),
+        ],
+        10,
+      ),
+    ).toEqual([[B, 30]]);
+  });
+
+  test('busiest first, whatever order the API returned', () => {
+    expect(
+      impersonators(
+        [
+          row(A, 'browser_impersonation', 30),
+          row(B, 'browser_impersonation', 900),
+        ],
+        10,
+      ),
+    ).toEqual([
+      [B, 900],
+      [A, 30],
+    ]);
+  });
+
+  test('an empty category is not impersonation', () => {
+    // Most rows carry no category at all; treating blank as a match would flag the whole site.
+    expect(impersonators([row(A, '', 9000)], 10)).toEqual([]);
+  });
+
+  test('a missing category field is not impersonation either', () => {
+    expect(
+      impersonators([{ clientJa4Digest: A, count_sum: 9000 }], 10),
+    ).toEqual([]);
+  });
+
+  test('caps what it returns', () => {
+    const many = Array.from({ length: 80 }, (_, i) =>
+      row(
+        `t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`,
+        'browser_impersonation',
+        500,
+      ),
+    );
+    expect(impersonators(many, 50)).toHaveLength(50);
+  });
+
+  test('an empty summary yields nothing, not a crash', () => {
+    expect(impersonators([], 10)).toEqual([]);
   });
 });
 

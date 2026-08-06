@@ -14,7 +14,7 @@ import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, envMatching } from './deny-list';
 import { fetchIpProfile } from './ip-profile';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
-import { makeCtx, metrics, top } from './observability';
+import { type Row, countOf, makeCtx, metrics } from './observability';
 import { type Window, rollingWindow } from './time-window';
 import { errMsg } from './util';
 
@@ -172,52 +172,18 @@ export function notEnforcing(
   });
 }
 
-/** The digests Vercel classified as impersonating a browser and then allowed through. */
-async function screen(
+/**
+ * Screen the window and adjudicate whatever clears the floor. Shared by the CLI and the TUI's
+ * watch mode so there is one definition of what counts as suspicious, not two that drift.
+ */
+export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
-): Promise<[string, number][]> {
-  const { ctx } = makeCtx(creds, window);
-  return top(
-    await metrics(ctx, ['clientJa4Digest'], {
-      // Vercel's own classification, so the screen inherits its bot detection rather than
-      // re-deriving one. `allow` is the point: challenged traffic is already being handled.
-      filter: "botCategory eq 'browser_impersonation' and wafAction eq 'allow'",
-      limit: 500,
-    }),
-    'clientJa4Digest',
-    50,
-  );
-}
-
-async function main() {
-  const argv = process.argv.slice(2);
-  if (argv.includes('--help') || argv.includes('-h')) {
-    console.log(USAGE);
-    return;
-  }
-  const raw = argv.find((a) => !a.startsWith('--'));
-  const hours = raw === undefined ? DEFAULT_HOURS : Number(raw);
-  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_HOURS)
-    throw new Error(`hours must be an integer from 1 to ${MAX_HOURS}`);
-
-  const creds = resolveVercelCredentials();
-  const window = rollingWindow(hours, new Date());
-  const errors: string[] = [];
-
-  // Not required: an unreadable denylist means nothing is known to be already-denied, which
-  // only ever makes the screen wider.
-  let deniedJa4: string[] = [];
-  try {
-    deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
-  } catch (e) {
-    errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
-  }
-
+  deniedJa4: string[],
+): Promise<{ rows: [string, number][]; findings: Finding[] }> {
   const rows = await screen(creds, window);
-  const candidates = worthProfiling(rows, deniedJa4);
   const findings: Finding[] = [];
-  for (const c of candidates) {
+  for (const c of worthProfiling(rows, deniedJa4)) {
     const p = await fetchIpProfile(
       creds,
       { kind: 'ja4', value: c.digest },
@@ -247,12 +213,80 @@ async function main() {
       }),
     });
   }
+  return { rows, findings };
+}
+
+const IMPERSONATION = 'browser_impersonation';
+
+/**
+ * Pick the impersonation rows out of a two-dimension summary, busiest first.
+ *
+ * Separate from the query because `botCategory` cannot be filtered on — see `screen` — so the
+ * selection happens here, and a selection that silently matches nothing is the failure this whole
+ * tool exists to notice.
+ */
+export function impersonators(summary: Row[], n: number): [string, number][] {
+  return summary
+    .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
+    .map(
+      (r) => [String(r.clientJa4Digest ?? '?'), countOf(r)] as [string, number],
+    )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n);
+}
+
+/**
+ * The digests Vercel classified as impersonating a browser and then allowed through.
+ *
+ * `botCategory` is a groupBy dimension, NOT a filter field: `botCategory eq '…'` returns zero
+ * rows with no error, which is indistinguishable from a quiet window and is why this screen
+ * reported nothing from the day it shipped. Only `wafAction` is filtered — that one works — and
+ * the category is selected from the result.
+ */
+export async function screen(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+): Promise<[string, number][]> {
+  const { ctx } = makeCtx(creds, window);
+  const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
+    // `allow` is the point: challenged traffic is already being handled.
+    filter: "wafAction eq 'allow'",
+    limit: 500,
+  });
+  return impersonators(resp.summary ?? [], 50);
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE);
+    return;
+  }
+  const raw = argv.find((a) => !a.startsWith('--'));
+  const hours = raw === undefined ? DEFAULT_HOURS : Number(raw);
+  if (!Number.isInteger(hours) || hours < 1 || hours > MAX_HOURS)
+    throw new Error(`hours must be an integer from 1 to ${MAX_HOURS}`);
+
+  const creds = resolveVercelCredentials();
+  const window = rollingWindow(hours, new Date());
+  const errors: string[] = [];
+
+  // Not required: an unreadable denylist means nothing is known to be already-denied, which
+  // only ever makes the screen wider.
+  let deniedJa4: string[] = [];
+  try {
+    deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  } catch (e) {
+    errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
+  }
+
+  const { rows, findings } = await findSuspects(creds, window, deniedJa4);
 
   const report: WatchReport = {
     window,
     screened: rows.reduce((n, [, c]) => n + c, 0),
     fingerprints: rows.length,
-    candidates: candidates.length,
+    candidates: findings.length,
     findings,
     // Cheap and unrelated to the screen: a deny rule that stopped denying reads as handled
     // while the traffic it lists is served normally.

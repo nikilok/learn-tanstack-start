@@ -42,6 +42,17 @@ describe('markerHeaders', () => {
     expect(said.join(' ')).toContain('invalid');
   });
 
+  test('a name colliding with the secret header is dropped, in any casing', () => {
+    // Otherwise it displaces the secret and revalidation stops authenticating — silently, since
+    // the endpoint answers the same either way. Two similarly named env vars in one file.
+    for (const collide of [
+      'x-revalidate-secret',
+      'X-Revalidate-Secret',
+      'X-REVALIDATE-SECRET',
+    ])
+      expect(markerHeaders(collide)).toEqual({});
+  });
+
   test('a valid name is sent verbatim', () => {
     // Mangling it here would mean the configured name and the sent name differ.
     const mixed = 'X-9F2a7C4e1B3d';

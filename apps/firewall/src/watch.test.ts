@@ -30,17 +30,17 @@ const B = 't13dbingh2_333333333333_444444444444';
 
 describe('worthProfiling', () => {
   test('keeps a busy fingerprint that is not already denied', () => {
-    expect(worthProfiling([sc(A, 500)], [])).toEqual([sc(A, 500)]);
+    expect(worthProfiling([sc(A, 500)], [], 100)).toEqual([sc(A, 500)]);
   });
 
   test('drops anything already in the denylist — its traffic is deny-actioned, not allowed', () => {
-    expect(worthProfiling([sc(A, 500)], [A])).toEqual([]);
+    expect(worthProfiling([sc(A, 500)], [A], 100)).toEqual([]);
   });
 
   test('matches the denylist case-insensitively', () => {
     // Dashboards render digests upper-case; a raw compare would re-profile a banned identity
     // every single run.
-    expect(worthProfiling([sc(A.toUpperCase(), 500)], [A])).toEqual([]);
+    expect(worthProfiling([sc(A.toUpperCase(), 500)], [A], 100)).toEqual([]);
   });
 
   test('drops anything under the floor — it cannot clear the advisory anyway', () => {
@@ -48,7 +48,9 @@ describe('worthProfiling', () => {
   });
 
   test('drops the empty grouping key', () => {
-    expect(worthProfiling([sc('(none)', 900), sc('', 900)], [])).toEqual([]);
+    expect(worthProfiling([sc('(none)', 900), sc('', 900)], [], 100)).toEqual(
+      [],
+    );
   });
 
   test('caps the number profiled, so a classification change cannot cause a query storm', () => {
@@ -61,7 +63,7 @@ describe('worthProfiling', () => {
   });
 
   test('preserves the screen order — the API returns it ranked by volume', () => {
-    const out = worthProfiling([sc(A, 900), sc(B, 500)], []);
+    const out = worthProfiling([sc(A, 900), sc(B, 500)], [], 100);
     expect(out.map((c) => c.digest)).toEqual([A, B]);
   });
 });

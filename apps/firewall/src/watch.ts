@@ -19,6 +19,7 @@ import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
 import { trustedRules } from './rule-integrity';
 import { type Window, rollingWindow } from './time-window';
+import { screenFloor, watchHours } from './tuning';
 import { errMsg } from './util';
 import { logWatch } from './watch-log';
 import { investigable, runInvestigation, verdictFrom } from './watch-mode';
@@ -34,18 +35,14 @@ import {
   shouldNotify,
 } from './watch-notify';
 
-const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 6; // the free observability window
-// Below this a digest cannot clear the advisory's own volume floor anyway, so profiling it
-// (~21 queries) buys nothing but API budget.
-const SCREEN_FLOOR = 100;
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
 // not that the site is under attack from fifty actors at once.
 const MAX_PROFILES = 6;
 
 const USAGE = `Usage:
   bun run firewall:watch [hours] [--investigate] [--notify]
-                                     default ${DEFAULT_HOURS}h, max ${MAX_HOURS}h
+                                     max ${MAX_HOURS}h
 
 Read-only. Exits 0 quiet, 1 found something, 2 could not run properly.`;
 
@@ -164,7 +161,6 @@ export type WatchReport = {
   errors: string[];
 };
 
-/** True when a human should look. Kept separate from rendering so the exit code and the text cannot disagree. */
 /** 0 quiet, 1 ran and found something, 2 could not run properly. */
 export const EXIT_QUIET = 0;
 export const EXIT_FOUND = 1;
@@ -189,6 +185,7 @@ export function exitCodeFor(r: WatchReport): number {
   return EXIT_QUIET;
 }
 
+/** True when a human should look. Separate from the exit code so the two cannot disagree. */
 export function isActionable(r: WatchReport): boolean {
   return (
     // Truncated AND empty cannot be told apart from genuinely quiet, so it escalates. Truncated
@@ -230,7 +227,7 @@ export function watchLines(r: WatchReport): Line[] {
     ),
     line(
       seg(
-        `  ${r.candidates} above the ${SCREEN_FLOOR}-request floor and not already denied`,
+        `  ${r.candidates} above the volume floor and not already denied`,
         r.candidates ? 'warn' : 'good',
       ),
     ),
@@ -281,7 +278,7 @@ export function watchLines(r: WatchReport): Line[] {
 export function worthProfiling(
   rows: Screened[],
   denied: string[],
-  floor = SCREEN_FLOOR,
+  floor = screenFloor(),
   cap = MAX_PROFILES,
 ): Screened[] {
   const already = new Set(denied.map((d) => JA4_DENY.normalize(d)));
@@ -470,7 +467,7 @@ async function main() {
     return;
   }
   const raw = argv.find((a) => !a.startsWith('--'));
-  const hours = raw === undefined ? DEFAULT_HOURS : Number(raw);
+  const hours = raw === undefined ? watchHours() : Number(raw);
   if (!Number.isInteger(hours) || hours < 1 || hours > MAX_HOURS)
     throw new Error(`hours must be an integer from 1 to ${MAX_HOURS}`);
 

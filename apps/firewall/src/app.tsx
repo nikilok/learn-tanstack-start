@@ -67,14 +67,13 @@ import {
   rollingMinutes,
   rollingWindow,
 } from './time-window';
+import { watchHours, watchIntervalMs } from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
 import { findSuspects } from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
-  WATCH_HOURS,
-  WATCH_INTERVAL_MS,
   caffeinateArgs,
   canKeepAwake,
   recentSpawns,
@@ -420,8 +419,8 @@ export function App() {
     setKeepingAwake(Boolean(awake));
     void logWatch(root, new Date(), {
       kind: 'armed',
-      hours: WATCH_HOURS,
-      everyMin: WATCH_INTERVAL_MS / 60_000,
+      hours: watchHours(),
+      everyMin: watchIntervalMs() / 60_000,
     });
 
     /** One screen, plus an investigation for anything that clears the bar. */
@@ -438,7 +437,7 @@ export function App() {
         }
         const { rows, findings } = await findSuspects(
           creds,
-          rollingWindow(WATCH_HOURS, new Date()),
+          rollingWindow(watchHours(), new Date()),
           denied,
         );
         if (stopped) return;
@@ -538,7 +537,7 @@ export function App() {
       timer = setTimeout(async () => {
         if (stopped) return;
         await tick();
-        if (!stopped) schedule(WATCH_INTERVAL_MS);
+        if (!stopped) schedule(watchIntervalMs());
       }, delay);
     };
     schedule(0); // arming should tell you something now, not in fifteen minutes
@@ -1499,7 +1498,7 @@ export function App() {
                 ◉ watch{' '}
               </Text>
               <Text dimColor>
-                {WATCH_HOURS}h window, every {WATCH_INTERVAL_MS / 60_000}m
+                {watchHours()}h window, every {watchIntervalMs() / 60_000}m
                 {watchAt ? ` · last ${watchAt}` : ' · starting…'}
                 {keepingAwake ? ' · holding the mac awake' : ''}
               </Text>

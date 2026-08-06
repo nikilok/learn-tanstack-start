@@ -7,12 +7,9 @@
 // tick the first time Vercel's classification shifts under us.
 
 import { type Advice } from './ban-advice';
+import { watchHours } from './tuning';
 
-/** Ticks the loop waits between screens. Long, because the screen is cheap but not free. */
-export const WATCH_INTERVAL_MS = 15 * 60_000;
-/** Window each screen looks back over. Wider than the interval, so a slow crawl still clears the floor. */
-export const WATCH_HOURS = 6;
-/** Investigations per hour, whatever the screen says. */
+/** Investigations per hour, whatever the screen says. Caps our spend, not our detection. */
 export const SPAWN_CEILING = 3;
 export const CEILING_WINDOW_MS = 60 * 60_000;
 
@@ -89,11 +86,11 @@ const JA4 = /^t[0-9a-z]{9}_[0-9a-f]{12}_[0-9a-f]{12}$/i;
  * instruction, and no amount of fencing makes that safe. The digest is shape-checked rather than
  * trusted, since it is the one field that crosses over.
  */
-export function investigationPrompt(f: Suspicious): string {
+export function investigationPrompt(f: Suspicious, hours: number): string {
   const digest = JA4.test(f.digest) ? f.digest : '(malformed digest)';
   const reasons = f.advice.reasons.map((r) => `- ${r}`).join('\n');
   return [
-    `The firewall watch flagged JA4 ${digest} over the last ${WATCH_HOURS}h.`,
+    `The firewall watch flagged JA4 ${digest} over the last ${hours}h.`,
     `Vercel classified it browser_impersonation and allowed it: ${f.allowed} of ${f.total} requests.`,
     '',
     'The local advisory returned "ban" on this evidence:',
@@ -135,10 +132,10 @@ export const INVESTIGATION_EFFORT = 'max';
 export const INVESTIGATION_TIMEOUT_MS = 10 * 60_000;
 
 /** Argv for the investigation. Read-only work, JSON out so the pane can render the verdict. */
-export function investigationArgs(f: Suspicious): string[] {
+export function investigationArgs(f: Suspicious, hours: number): string[] {
   return [
     '-p',
-    investigationPrompt(f),
+    investigationPrompt(f, hours),
     '--output-format',
     'json',
     '--model',
@@ -216,7 +213,7 @@ export async function runInvestigation(
   }) => void,
 ): Promise<Investigation> {
   try {
-    const proc = Bun.spawn(['claude', ...investigationArgs(f)], {
+    const proc = Bun.spawn(['claude', ...investigationArgs(f, watchHours())], {
       cwd,
       stdout: 'pipe',
       // NOT piped. A pipe nobody reads fills its buffer and blocks the child forever, which for

@@ -68,9 +68,10 @@ describe('autoBanRefusal', () => {
   });
 
   test('ANY rendering at all refuses it', () => {
-    // This is the tell that saved t13d260900 on 2026-08-06: two tells agreed, and 92.4% of its
-    // requests were map tiles, RPCs and beacons. One rendering request means a browser ran the
-    // app from that fingerprint, which is not something to deny while nobody is watching.
+    // The case this exists for: several tells agreeing while the traffic was overwhelmingly
+    // map tiles, RPCs and analytics beacons — a real session, not a harvester. One rendering
+    // request means a browser has run the app from that fingerprint, which is not something to
+    // deny while nobody is watching.
     expect(autoBanRefusal(candidate({ renderingRequests: 1 }))).toContain(
       'rendering request',
     );

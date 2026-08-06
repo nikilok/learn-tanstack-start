@@ -33,6 +33,7 @@ import {
   ASN_DENY,
   JA4_DENY,
   enforcedNow,
+  envMatching,
   pendingEdits,
   valuesOf,
   withValue,
@@ -68,6 +69,17 @@ import {
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
+import { findSuspects } from './watch';
+import { WATCH_LOG, clockTime, logWatch } from './watch-log';
+import {
+  WATCH_HOURS,
+  WATCH_INTERVAL_MS,
+  caffeinateArgs,
+  canKeepAwake,
+  recentSpawns,
+  runInvestigation,
+  shouldInvestigate,
+} from './watch-mode';
 
 type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
 const PANE_KEY: Record<string, PaneKind> = {
@@ -219,6 +231,22 @@ export function App() {
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
   const reportRef = useRef<DOMElement | null>(null);
 
+  // Watch mode. Runs off the app's own timer whatever pane is open, since the point is to be
+  // left running. State lives in refs where the loop reads it: the effect is armed once and its
+  // closure would otherwise keep whatever the values were at arming.
+  const [watchOn, setWatchOn] = useState(false);
+  const [watchNote, setWatchNote] = useState('');
+  const [watchAt, setWatchAt] = useState('');
+  const [watchBusy, setWatchBusy] = useState(false);
+  const [watchVerdict, setWatchVerdict] = useState('');
+  // Kept even after the verdict is read: an invocation happened whether or not anyone was
+  // looking at this pane when it did.
+  const [invokedAt, setInvokedAt] = useState('');
+  const [invokedCount, setInvokedCount] = useState(0);
+  const [keepingAwake, setKeepingAwake] = useState(false);
+  const investigatedRef = useRef<Set<string>>(new Set());
+  const spawnsRef = useRef<number[]>([]);
+
   const isLive = ipWindow.label === 'live';
   const [blink, setBlink] = useState(true);
   const paneLoading =
@@ -341,6 +369,142 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, pane]);
+
+  // Watch mode's loop. Deliberately not gated on `pane`, unlike the live refresh above: this is
+  // meant to be armed and left alone while you work in another pane.
+  useEffect(() => {
+    if (!watchOn) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const root = process.cwd();
+    // A loop that wakes every fifteen minutes is precisely what idle sleep suspends, so arming
+    // the watch has to hold the machine up. Failing to start it is not fatal: a watch that runs
+    // and may be suspended still beats no watch, and the status line says which one you have.
+    let awake: ReturnType<typeof Bun.spawn> | null = null;
+    if (canKeepAwake(process.platform)) {
+      try {
+        awake = Bun.spawn(['caffeinate', ...caffeinateArgs(process.pid)], {
+          stdout: 'ignore',
+          stderr: 'ignore',
+        });
+      } catch {
+        awake = null;
+      }
+    }
+    setKeepingAwake(Boolean(awake));
+    void logWatch(root, new Date(), {
+      kind: 'armed',
+      hours: WATCH_HOURS,
+      everyMin: WATCH_INTERVAL_MS / 60_000,
+    });
+
+    /** One screen, plus an investigation for anything that clears the bar. */
+    const tick = async () => {
+      setWatchBusy(true);
+      try {
+        // Non-fatal: an unreadable denylist only means nothing is known to be already denied,
+        // which widens the screen rather than narrowing it.
+        let denied: string[] = [];
+        try {
+          denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+        } catch {
+          denied = [];
+        }
+        const { rows, findings } = await findSuspects(
+          creds,
+          rollingWindow(WATCH_HOURS, new Date()),
+          denied,
+        );
+        if (stopped) return;
+        setWatchAt(clockTime(new Date()));
+        const bans = findings.filter((f) => f.advice.verdict === 'ban');
+        setWatchNote(
+          `${rows.length} fingerprint(s) allowed through · ${findings.length} profiled · ${bans.length} would ban`,
+        );
+        // Logged even when it finds nothing: otherwise the log cannot tell "ran and was quiet"
+        // apart from "never ran", which is the first thing you want to know of a background loop.
+        void logWatch(root, new Date(), {
+          kind: 'screen',
+          fingerprints: rows.length,
+          profiled: findings.length,
+          bans: bans.length,
+        });
+
+        const now = Date.now();
+        spawnsRef.current = recentSpawns(spawnsRef.current, now);
+        const next = findings.find((f) =>
+          shouldInvestigate(f, investigatedRef.current, spawnsRef.current, now),
+        );
+        if (!next || stopped) return;
+
+        investigatedRef.current.add(next.digest.toLowerCase());
+        spawnsRef.current = [...spawnsRef.current, now];
+        setInvokedAt(clockTime(new Date()));
+        setInvokedCount((n) => n + 1);
+        setWatchNote(`invoked claude on ${next.digest}…`);
+        void logWatch(root, new Date(), {
+          kind: 'invoke',
+          digest: next.digest,
+          allowed: next.allowed,
+          total: next.total,
+          reasons: next.advice.reasons,
+        });
+        // Repo root, so the spawned agent finds .claude/skills/firewall-operator and the
+        // firewall commands resolve. The TUI is already launched from there.
+        const out = await runInvestigation(next, process.cwd());
+        if (stopped) return;
+        setWatchVerdict(
+          out.ok ? out.verdict : `investigation failed: ${out.error}`,
+        );
+        setWatchNote(
+          out.ok
+            ? `investigated ${next.digest} — read it below`
+            : `investigation failed for ${next.digest}`,
+        );
+        void logWatch(
+          root,
+          new Date(),
+          out.ok
+            ? {
+                kind: 'verdict',
+                digest: next.digest,
+                text: out.verdict,
+                provenance: out.provenance,
+              }
+            : { kind: 'failed', digest: next.digest, error: out.error },
+        );
+      } catch (e) {
+        // A failed screen must not read as a quiet one. The whole point of the mode is that
+        // silence means "nothing found", so silence has to be earned.
+        if (!stopped) setWatchNote(`watch failed: ${errMsg(e)}`);
+        void logWatch(root, new Date(), { kind: 'error', error: errMsg(e) });
+      } finally {
+        if (!stopped) setWatchBusy(false);
+      }
+    };
+
+    // setTimeout, not setInterval: a tick that outruns the period must not queue another behind
+    // it — a screen plus an investigation can take minutes.
+    const schedule = (delay: number) => {
+      timer = setTimeout(async () => {
+        if (stopped) return;
+        await tick();
+        if (!stopped) schedule(WATCH_INTERVAL_MS);
+      }, delay);
+    };
+    schedule(0); // arming should tell you something now, not in fifteen minutes
+    // Runs on disarm AND on unmount, so quitting the app releases the machine too. The `-w` in
+    // caffeinateArgs is the backstop for the ways a process ends without reaching this at all.
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      awake?.kill();
+      setKeepingAwake(false);
+      void logWatch(root, new Date(), { kind: 'disarmed' });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchOn]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -1008,6 +1172,7 @@ export function App() {
       // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'R') refreshPane();
+      else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
       else if (input === 'w' || input === 'W') openWindowPick();
       else if (input === 'b' && pane === 'ip' && ipAdvice?.lever) {
         // Only an OFFERED lever is stageable. A blocked client, or one whose every handle is
@@ -1097,6 +1262,9 @@ export function App() {
       // Lazy: fetch once, cached after, so re-opening a pane is instant.
       else if (PANE_KEY[input])
         openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
+      // Bound here as well as in the pane branch: watch mode is meant to be armed and left, so
+      // it has to be reachable from the view the tool opens on.
+      else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'a') {
         if (applying.current) return;
@@ -1230,7 +1398,10 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist
+              ip · f ja4 · s sitemap · d denylist ·{' '}
+              <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
+                v watch{watchOn ? ' (on)' : ''}
+              </Text>
               {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
@@ -1269,6 +1440,53 @@ export function App() {
         )}
         {phase === 'applying' && (
           <Text color="yellow">applying… · q stops after the current rule</Text>
+        )}
+        {watchOn && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text>
+              <Text color={watchBusy ? 'yellow' : 'green'} bold>
+                ◉ watch{' '}
+              </Text>
+              <Text dimColor>
+                {WATCH_HOURS}h window, every {WATCH_INTERVAL_MS / 60_000}m
+                {watchAt ? ` · last ${watchAt}` : ' · starting…'}
+                {keepingAwake ? ' · holding the mac awake' : ''}
+              </Text>
+            </Text>
+            {Boolean(watchNote) && (
+              <Text dimColor wrap="truncate-end">
+                {'  '}
+                {watchNote}
+              </Text>
+            )}
+            {/* Stays up once it has happened. The loop runs while you are in another pane, so an
+                invocation you were not watching still has to be visible afterwards. */}
+            {invokedCount > 0 && (
+              <Text>
+                <Text color="magenta" bold>
+                  {'  '}⇢ claude invoked{' '}
+                </Text>
+                <Text dimColor>
+                  {invokedCount}× this session · last {invokedAt} · {WATCH_LOG}
+                </Text>
+              </Text>
+            )}
+            {invokedCount === 0 && Boolean(watchAt) && (
+              <Text dimColor>
+                {'  '}logging to {WATCH_LOG}
+              </Text>
+            )}
+            {/* Not truncated: a verdict is the one thing here worth reading in full, and a
+                clipped one is worse than none — it reads as complete. */}
+            {Boolean(watchVerdict) && (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color="cyan" bold>
+                  investigation
+                </Text>
+                <Text>{watchVerdict}</Text>
+              </Box>
+            )}
+          </Box>
         )}
       </Box>
       {showPane && (
@@ -1369,7 +1587,8 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh ·
-                  i new ip · f ja4 · w timeline
+                  i new ip · f ja4 · w timeline · v watch
+                  {watchOn ? ' (on)' : ''}
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`

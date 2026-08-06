@@ -9,13 +9,16 @@
 /** Header keys a rule requires, lower-cased since HTTP field names are case-insensitive. */
 export function headerKeysOf(rule: {
   conditionGroup: {
-    conditions: { type: string; op: string; key?: string }[];
+    conditions: { type: string; op: string; key?: string; neg?: boolean }[];
   }[];
 }): Set<string> {
   const keys = new Set<string>();
   for (const g of rule.conditionGroup ?? [])
     for (const c of g.conditions ?? [])
-      if (c.type === 'header' && c.op === 'ex' && c.key)
+      // `neg` inverts the condition, so a negated `ex` means the header must be ABSENT — satisfied
+      // by every caller that does not send it. Read as a requirement it certifies a rule that
+      // means the opposite of how it reads, which is the one failure this module exists to catch.
+      if (c.type === 'header' && c.op === 'ex' && !c.neg && c.key)
         keys.add(c.key.toLowerCase());
   return keys;
 }

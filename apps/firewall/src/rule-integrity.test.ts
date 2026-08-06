@@ -106,3 +106,50 @@ describe('trustedRules', () => {
     expect(trustedRules(live({ a: [] }), [rule('a', [])])).toEqual(['a']);
   });
 });
+
+describe('negated conditions', () => {
+  const negated = {
+    conditionGroup: [
+      {
+        conditions: [
+          { type: 'path', op: 'eq', value: '/api/x' },
+          { type: 'header', op: 'ex', key: 'marker', neg: true },
+        ],
+      },
+    ],
+  };
+
+  test('a negated header-existence condition is not a requirement', () => {
+    // `neg` inverts it: the header must be ABSENT, which every caller that omits it satisfies.
+    // Read as a requirement it means the exact opposite of how it looks.
+    expect([...headerKeysOf(negated)]).toEqual([]);
+  });
+
+  test('a live rule that negated a required header is NOT trusted', () => {
+    // The failure this guards: a dashboard edit flips the condition, the rule keeps matching, and
+    // the certification it backs keeps reading as proof.
+    const expected = [
+      {
+        name: 'allow-x',
+        conditionGroup: [
+          {
+            conditions: [{ type: 'header', op: 'ex', key: 'marker' }],
+          },
+        ],
+      },
+    ];
+    const live = new Map([['allow-x', headerKeysOf(negated)]]);
+    expect(trustedRules(live, expected)).toEqual([]);
+  });
+
+  test('an explicitly non-negated condition still counts', () => {
+    const r = {
+      conditionGroup: [
+        {
+          conditions: [{ type: 'header', op: 'ex', key: 'marker', neg: false }],
+        },
+      ],
+    };
+    expect([...headerKeysOf(r)]).toEqual(['marker']);
+  });
+});

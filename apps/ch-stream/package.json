@@ -6,7 +6,8 @@
     "start": "bun src/index.ts",
     "dev": "bun --env-file=.env.local --watch src/index.ts --dry-run",
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test": "bun test"
   },
   "dependencies": {
     "@ss/db": "workspace:*",

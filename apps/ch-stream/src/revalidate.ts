@@ -4,6 +4,19 @@ let lastRevalidatedAt = 0;
 let lastThrottleLogAt = 0;
 const THROTTLE_LOG_INTERVAL_MS = 10_000;
 
+// RFC 9110 token. An invalid name makes fetch throw, and this runs inside the stream loop.
+const FIELD_NAME = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$/;
+
+/** The configured extra header, or nothing. Unset is valid and means not sent. */
+export function markerHeaders(name: string): Record<string, string> {
+  if (!name) return {};
+  if (!FIELD_NAME.test(name)) {
+    console.warn('[ch-stream] marker header name is invalid — not sent'); // never echo the name
+    return {};
+  }
+  return { [name]: '1' };
+}
+
 /**
  * POST to the web app's revalidation endpoint so freshly updated Companies
  * House rows invalidate cached responses. Throttled to one call per
@@ -37,7 +50,10 @@ export async function triggerRevalidation(): Promise<void> {
   try {
     await fetch(CONFIG.REVALIDATE_URL, {
       method: 'POST',
-      headers: { 'x-revalidate-secret': CONFIG.REVALIDATE_SECRET },
+      headers: {
+        'x-revalidate-secret': CONFIG.REVALIDATE_SECRET,
+        ...markerHeaders(CONFIG.REVALIDATE_MARKER_HEADER),
+      },
     });
     console.log('[ch-stream] Revalidation triggered');
   } catch (err) {

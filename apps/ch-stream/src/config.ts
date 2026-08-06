@@ -4,6 +4,8 @@ export const CONFIG = {
   API_KEY: process.env.COMPANIES_HOUSE_STREAM_API_KEY ?? '',
   REVALIDATE_URL: process.env.REVALIDATE_URL ?? '',
   REVALIDATE_SECRET: process.env.REVALIDATE_SECRET ?? '',
+  /** Optional extra header name; its value is inert. Unset means not sent. */
+  REVALIDATE_MARKER_HEADER: process.env.REVALIDATE_MARKER_HEADER ?? '',
   RETRY_DELAY_429_MS: 60_000,
   RECONNECT_DELAY_MS: 5_000,
   TIMEPOINT_FLUSH_INTERVAL: 100,

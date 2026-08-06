@@ -15,6 +15,7 @@ import {
   rendersIndicateBrowser,
 } from './ip-signals';
 import type { Mix, Shape } from './ip-signals';
+import { HEADER_GATED_RULES } from './rule-names';
 
 // Worth-a-rule is a question about sustained volume, so the bar scales with the window: 200
 // requests in 24h is quiet, the same 200 in 20 minutes is a scrape. The floor stops a handful of
@@ -29,12 +30,16 @@ export function volumeFloor(windowMinutes: number): number {
     Math.round((MIN_VOLUME_PER_DAY * windowMinutes) / 1440),
   );
 }
-// Names of rules gated on a bespoke secret header — the only ones that prove a first-party
-// caller. Kept here rather than matched by prefix so a future allow-* rule cannot join by accident.
-export const HEADER_GATED_RULES = [
-  'allow-ch-stream-revalidate',
-  'allow-desktop-release-record',
-];
+
+/**
+ * Label of the query these names are matched against. Named rather than inlined because the
+ * blocker below has to know when that lookup FAILED — an unrun query returns no rules, which is
+ * indistinguishable from a caller holding no credential.
+ */
+export const WAF_RULE_QUERY = 'waf rule';
+
+// Re-exported so callers reading the advisory do not need to know where the names live.
+export { HEADER_GATED_RULES };
 // A fingerprint spread wider than this is a proxy pool or a shared client library, not one host.
 const WIDE_SPREAD = 8;
 // Below this, `duty` degenerates from "runs level" into "was present in both halves".
@@ -134,6 +139,14 @@ function blockersFor(input: AdviceInput): string[] {
   if (allowRule)
     out.push(
       `matched ${allowRule[0]} (${allowRule[1]}x) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
+    );
+  // A failed lookup deletes this blocker, and this is the blocker protecting first-party
+  // services: our own ch-stream listener renders nothing, verifies as nothing and does steady
+  // volume, so it is indistinguishable from a harvester on every axis EXCEPT this one. If the
+  // rule query did not run, that is unmeasured rather than absent, and it must fail closed.
+  else if (input.failedQueries?.includes(WAF_RULE_QUERY))
+    out.push(
+      'the WAF-rule lookup failed, so whether this caller holds one of our secret headers is UNKNOWN — a first-party service is indistinguishable from a harvester without it',
     );
   // A hard blocker, not merely a lever disqualifier: the agent could egress from the same
   // network too, so an ASN deny would catch it just as surely as a fingerprint deny.

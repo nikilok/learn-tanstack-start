@@ -6,12 +6,15 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  HEADER_GATED_RULES,
+  WAF_RULE_QUERY,
+  adviseBan,
   type AdviceInput,
   type Reach,
-  adviseBan,
   volumeFloor,
 } from './ban-advice';
 import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
+import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
 
 function series(counts: number[], offset: number, length: number) {
   const base = Date.parse('2026-08-03T00:00:00.000Z');
@@ -861,5 +864,51 @@ describe('adviseBan — review regressions', () => {
       }),
     );
     expect(a.verdict).toBe('leave');
+  });
+});
+
+// These two guards protect our own services from our own tooling. ch-stream renders nothing,
+// verifies as nothing and does steady volume — indistinguishable from a harvester on every axis
+// except the credential it presents. So the ways that credential check can silently stop working
+// are worth pinning individually.
+describe('first-party protection', () => {
+  test('the names are shared with the rule definitions, not copied', () => {
+    // rules.ts builds its rules FROM these constants, so a rename cannot desync the two. This
+    // asserts the constants are what the advisory matches on — an agreement test would only
+    // notice the drift afterwards; sharing one definition makes the drift impossible.
+    expect(HEADER_GATED_RULES).toContain(CH_STREAM_REVALIDATE);
+    expect(HEADER_GATED_RULES).toContain(DESKTOP_RELEASE_RECORD);
+  });
+
+  test('a failed WAF-rule lookup blocks, rather than reading as no credential', () => {
+    // An unrun query returns no rules, which looks exactly like a caller holding none. Failing
+    // open here would strip first-party protection precisely when the tool is degraded.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [],
+      failedQueries: [WAF_RULE_QUERY],
+    });
+    expect(advice.blockers.join(' ')).toContain('UNKNOWN');
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('a matched header-gated rule blocks the ban', () => {
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[HEADER_GATED_RULES[0] as string, 224]],
+    });
+    expect(advice.blockers.join(' ')).toContain('first-party service');
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('an unrelated failed query does not fabricate the blocker', () => {
+    // Fail closed on the lookup that feeds this blocker, not on every degraded query — otherwise
+    // any partial profile would certify every caller as first-party and nothing could be banned.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [],
+      failedQueries: ['country'],
+    });
+    expect(advice.blockers.join(' ')).not.toContain('UNKNOWN');
   });
 });

@@ -1,6 +1,7 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
 import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
+import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
 import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
@@ -212,14 +213,14 @@ const downloadsRules: Rule[] =
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
   bypassRule({
-    name: 'allow-ch-stream-revalidate',
+    name: CH_STREAM_REVALIDATE,
     description:
       'Bypass bot protection for ch-stream → POST /api/revalidate (trusted server-to-server cache invalidation; endpoint auths via x-revalidate-secret). Skips the managed Bot Protection challenge that blocks non-browser callers.',
     path: '/api/revalidate',
     headerKey: 'x-revalidate-secret',
   }),
   bypassRule({
-    name: 'allow-desktop-release-record',
+    name: DESKTOP_RELEASE_RECORD,
     description:
       'Bypass bot protection for the desktop release workflow → POST /api/releases (CI records a release; endpoint auths via x-desktop-release-secret). Skips the managed challenge that 429s non-browser callers.',
     path: '/api/releases',

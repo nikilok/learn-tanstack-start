@@ -30,12 +30,17 @@ export function busiestCount(
   cap: number,
   share = TOP_SHARE,
 ): number {
-  if (rows.length <= min) return rows.length;
+  // `cap` is a ceiling, not a suggestion, so it outranks `min` when a caller passes both. Without
+  // this every return below could exceed it — and a caller states a cap because that is the room
+  // it has, so overshooting it costs rows something else was drawing in.
+  const lo = Math.max(0, Math.min(min, cap));
+  const hi = Math.min(cap, rows.length);
+  if (rows.length <= lo) return rows.length;
   const top = rows[0][1];
-  if (top <= 0) return min; // no traffic to be a share of
+  if (top <= 0) return lo; // no traffic to be a share of
   const floor = top * share;
-  let n = min;
-  while (n < Math.min(cap, rows.length) && rows[n][1] >= floor) n++;
+  let n = lo;
+  while (n < hi && rows[n][1] >= floor) n++;
   return n;
 }
 

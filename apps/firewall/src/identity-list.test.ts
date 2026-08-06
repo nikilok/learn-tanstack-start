@@ -67,6 +67,25 @@ describe('busiestCount', () => {
     expect(busiestCount([], 10, 20)).toBe(0);
   });
 
+  test('the cap outranks the minimum when they conflict', () => {
+    // A caller states a cap because that is the room it has. Every path has to respect it, or the
+    // rows it did not budget for come out of whatever else was drawing on the same viewport.
+    expect(busiestCount(cliffAt(14), 10, 4)).toBe(4); // long list, cluster past the cap
+    expect(busiestCount(cliffAt(3), 10, 4)).toBe(4); // long list, nothing near the leader
+    expect(busiestCount(cliffAt(2, 6), 10, 4)).toBe(4); // list shorter than the minimum
+    expect(busiestCount(cliffAt(2, 3), 10, 4)).toBe(3); // ... and shorter than the cap
+    const none: [string, number][] = Array.from({ length: 30 }, (_, i) => [
+      `id-${i}`,
+      0,
+    ]);
+    expect(busiestCount(none, 10, 4)).toBe(4); // no traffic to take a share of
+  });
+
+  test('a nonsensical cap yields nothing rather than something', () => {
+    expect(busiestCount(cliffAt(14), 10, 0)).toBe(0);
+    expect(busiestCount(cliffAt(14), 10, -5)).toBe(0);
+  });
+
   test('a window with no traffic at all falls back to the minimum', () => {
     // Every row is zero, so "a share of the busiest" has nothing to mean.
     const none: [string, number][] = Array.from({ length: 30 }, (_, i) => [

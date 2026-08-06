@@ -16,7 +16,12 @@ import { alpnOf } from './ip-signals';
 import { type Ctx, type Row, countOf, makeCtx, metrics } from './observability';
 import { rollingWindow } from './time-window';
 import { errMsg } from './util';
-import { impersonators } from './watch';
+import {
+  impersonators,
+  mergeScreens,
+  nonRendering,
+  verifiedDigests,
+} from './watch';
 
 const USAGE = `Usage:
   bun run firewall:verify [hours]    default 144 (the full observability window)
@@ -140,7 +145,24 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
       limit: GROUP_CAP,
     }),
   );
-  const seen = impersonators(twoDim);
+  // Both screens, as the tool itself runs them. Checking only the category screen would count a
+  // fingerprint the behavioural screen surfaces as one the tool missed.
+  const routeRows = rowsOf(
+    await metrics(ctx, ['clientJa4Digest', 'route'], {
+      filter: PASSED_FILTER,
+      limit: GROUP_CAP,
+    }),
+  );
+  const verifiedRows = rowsOf(
+    await metrics(ctx, ['clientJa4Digest', 'botVerified'], {
+      filter: PASSED_FILTER,
+      limit: GROUP_CAP,
+    }),
+  );
+  const seen = mergeScreens(
+    impersonators(twoDim),
+    nonRendering(routeRows, verifiedDigests(verifiedRows)),
+  );
   const noAlpn = seen.filter((s) => alpnOf(s.digest) === '00');
   const busiest = seen[0];
 
@@ -154,6 +176,7 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
     denylistRead = false;
   }
   const known = new Set(denied.map((d) => JA4_DENY.normalize(d)));
+  const surfaced = new Set(seen.map((s) => JA4_DENY.normalize(s.digest)));
   const surfacedAndKnown = seen.filter((s) =>
     known.has(JA4_DENY.normalize(s.digest)),
   );
@@ -191,21 +214,27 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
       // Only the ones still getting through are evidence about the screen. The rest are evidence
       // about the ban, and a window entirely after the ban proves nothing either way — which is
       // inconclusive, not a pass and not a failure.
-      ok:
-        denylistRead &&
-        (stillArriving.length === 0 ||
-          surfacedAndKnown.length >= stillArriving.length),
+      // Membership, not a count. Comparing cardinalities happens to work only while one set is a
+      // subset of the other, which nothing here states or enforces — and the day that stops being
+      // true, the check passes while the screen is missing something a human banned.
+      ok: denylistRead && stillArriving.every((d) => surfaced.has(d)),
+      // ^ vacuously true when nothing is still arriving, which is the ban working, not a pass.
       detail: !denylistRead
         ? 'FW_BLOCKED_JA4 could not be read — cannot check against your own labelling'
         : denied.length === 0
           ? 'nothing is denied, so there is no labelled positive to check against'
           : stillArriving.length === 0
             ? `all ${denied.length} denied fingerprint(s) are fully stopped in this window — the ban is working, so the screen cannot see them. Widen the window past the ban to test the screen.`
-            : `${surfacedAndKnown.length} of ${stillArriving.length} still-arriving denied fingerprint(s) appear in the screen` +
-              (fullyStopped ? ` (${fullyStopped} fully stopped)` : '') +
-              (surfacedAndKnown.length >= stillArriving.length
-                ? ` — busiest ${surfacedAndKnown[0]?.allowed} requests`
-                : ' — the screen would NOT have found what you banned'),
+            : (() => {
+                const missed = stillArriving.filter((d) => !surfaced.has(d));
+                return (
+                  `${stillArriving.length - missed.length} of ${stillArriving.length} still-arriving denied fingerprint(s) appear in the screen` +
+                  (fullyStopped ? ` (${fullyStopped} fully stopped)` : '') +
+                  (missed.length
+                    ? ` — ${missed.length} the screen would NOT have found`
+                    : ` — busiest ${surfacedAndKnown[0]?.allowed} requests`)
+                );
+              })(),
     },
     {
       name: 'at least one surfaced fingerprint carries a volume-independent tell',

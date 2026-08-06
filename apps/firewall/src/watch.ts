@@ -59,7 +59,7 @@ export function verifiedDigests(summary: Row[]): Set<string> {
   return new Set(
     summary
       .filter((r) => String(r.botVerified ?? '') === 'pass')
-      .map((r) => String(r.clientJa4Digest ?? '').toLowerCase())
+      .map((r) => JA4_DENY.normalize(String(r.clientJa4Digest ?? '')))
       .filter(Boolean),
   );
 }
@@ -81,17 +81,25 @@ export function nonRendering(
   verified: ReadonlySet<string>,
   maxShare = MAX_RENDER_SHARE,
 ): Screened[] {
+  // Keyed on the normalised digest. The API echoes digests in either case, and two casings of one
+  // fingerprint would otherwise be totalled separately — splitting its traffic, splitting its
+  // rendering share, and turning one browser session into two apparent harvesters.
   const byDigest = new Map<string, [string, number][]>();
   for (const r of routeRows) {
-    const d = String(r.clientJa4Digest ?? '');
-    if (!d || d === '(none)' || d === '?') continue;
+    const raw = String(r.clientJa4Digest ?? '');
+    if (!raw || raw === '(none)' || raw === '?') continue;
+    const d = JA4_DENY.normalize(raw);
     const paths = byDigest.get(d) ?? [];
     paths.push([String(r.route ?? ''), countOf(r)]);
     byDigest.set(d, paths);
   }
+  // Normalised here rather than trusted from the caller. `verifiedDigests` already does it, but
+  // this exclusion is the only thing keeping legitimate crawlers out of the candidate list, and a
+  // set built any other way would silently fail to match — surfacing Googlebot as a suspect.
+  const crawlers = new Set([...verified].map((d) => JA4_DENY.normalize(d)));
   const out: Screened[] = [];
   for (const [digest, paths] of byDigest) {
-    if (verified.has(digest.toLowerCase())) continue;
+    if (crawlers.has(digest)) continue;
     const total = paths.reduce((n, [, c]) => n + c, 0);
     if (total <= 0) continue;
     const share = renderingRequests(mixOf(paths)) / total;
@@ -390,17 +398,27 @@ export async function screen(
   });
   const summary = resp.summary ?? [];
   const routeRows = routeResp.summary ?? [];
+  const verifiedRows = verifiedResp.summary ?? [];
+  // A capped verification response can omit a confirmed crawler, and the behavioural screen would
+  // then surface it as a candidate purely because we failed to learn it was legitimate. Better to
+  // run only the category screen and say the window was truncated than to invent a suspect.
+  const verifiedComplete = verifiedRows.length < GROUP_CAP;
   return {
     // Both screens, merged. The category screen carries Vercel's own judgement; the behavioural
     // one sees what Vercel never classified, which is where anything that evaded it will sit.
     rows: mergeScreens(
       impersonators(summary),
-      nonRendering(routeRows, verifiedDigests(verifiedResp.summary ?? [])),
+      verifiedComplete
+        ? nonRendering(routeRows, verifiedDigests(verifiedRows))
+        : [],
     ),
     // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
     // same 500 slots — so a capped response can have dropped the very rows this screen exists to
     // find, and would then report a quiet window.
-    truncated: summary.length >= GROUP_CAP || routeRows.length >= GROUP_CAP,
+    truncated:
+      summary.length >= GROUP_CAP ||
+      routeRows.length >= GROUP_CAP ||
+      !verifiedComplete,
   };
 }
 

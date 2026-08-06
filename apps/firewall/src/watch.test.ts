@@ -173,12 +173,6 @@ describe('nonRendering', () => {
     ).toEqual([]);
   });
 
-  test('the exclusion is case-insensitive', () => {
-    expect(
-      nonRendering([r(A.toUpperCase(), PAGE, 9000)], new Set([A])),
-    ).toEqual([]);
-  });
-
   test('rows without a digest are dropped, not grouped under one', () => {
     expect(
       nonRendering([r('', PAGE, 900), r('(none)', PAGE, 900)], new Set()),
@@ -192,6 +186,26 @@ describe('nonRendering', () => {
   test('busiest first', () => {
     const out = nonRendering([r(A, PAGE, 100), r(B, PAGE, 900)], new Set());
     expect(out.map((s) => s.digest)).toEqual([B, A]);
+  });
+
+  test('two casings of one digest are the same fingerprint', () => {
+    // The API echoes digests in either case. Totalled separately, one browser session splits into
+    // two halves that each look like a harvester — its rendering is in one and its pages in the
+    // other. Combined, the share is well above the bar and it is correctly not a candidate.
+    const out = nonRendering(
+      [r(A.toUpperCase(), PAGE, 100), r(A, RPC, 900)],
+      new Set(),
+    );
+    expect(out).toEqual([]);
+  });
+
+  test('a verified crawler is excluded whichever casing it arrives in', () => {
+    expect(
+      nonRendering([r(A.toUpperCase(), PAGE, 9000)], new Set([A])),
+    ).toEqual([]);
+    expect(
+      nonRendering([r(A, PAGE, 9000)], new Set([A.toUpperCase()])),
+    ).toEqual([]);
   });
 });
 

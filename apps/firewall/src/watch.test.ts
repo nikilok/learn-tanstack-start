@@ -52,8 +52,10 @@ describe('worthProfiling', () => {
   });
 
   test('caps the number profiled, so a classification change cannot cause a query storm', () => {
+    // Synthetic, like every other digest in this file. The index varies inside the JA4a segment
+    // so the ALPN slot stays a fixed `h2` and none of these read as a tell.
     const many: [string, number][] = Array.from({ length: 40 }, (_, i) => [
-      `t13d3112${String(i).padStart(2, '0')}_1d947a95fc68_7e1102d2036b`,
+      `t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`,
       500,
     ]);
     expect(worthProfiling(many, [], 100, 6)).toHaveLength(6);

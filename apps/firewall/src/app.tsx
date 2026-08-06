@@ -120,6 +120,7 @@ const QUIET_ROWS = 10; // quiet-band rows shown beside them
 // sustain ~60/min. It stays fixed while the list above it grows, or one keypress rate-limits the
 // tool against itself.
 const OPEN_ALL_MAX = 8;
+const VERDICT_LINES = 12; // rendered inline; the rest stays in the log
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
 // Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
 // truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
@@ -246,6 +247,14 @@ export function App() {
   const [keepingAwake, setKeepingAwake] = useState(false);
   const investigatedRef = useRef<Set<string>>(new Set());
   const spawnsRef = useRef<number[]>([]);
+  // The investigation child, so disarm and unmount can stop it. A hung one would otherwise
+  // outlive the loop and every later screen would queue behind it.
+  const investigationRef = useRef<{ kill: () => void } | null>(null);
+
+  // Enough to carry a verdict and its first reasons; the log has the rest verbatim.
+  const verdictLines = watchVerdict ? watchVerdict.trimEnd().split('\n') : [];
+  const verdictHead = verdictLines.slice(0, VERDICT_LINES).join('\n');
+  const verdictClipped = Math.max(0, verdictLines.length - VERDICT_LINES);
 
   const isLive = ipWindow.label === 'live';
   const [blink, setBlink] = useState(true);
@@ -452,7 +461,10 @@ export function App() {
         });
         // Repo root, so the spawned agent finds .claude/skills/firewall-operator and the
         // firewall commands resolve. The TUI is already launched from there.
-        const out = await runInvestigation(next, process.cwd());
+        const out = await runInvestigation(next, process.cwd(), (child) => {
+          investigationRef.current = child;
+        });
+        investigationRef.current = null;
         if (stopped) return;
         setWatchVerdict(
           out.ok ? out.verdict : `investigation failed: ${out.error}`,
@@ -500,6 +512,8 @@ export function App() {
       stopped = true;
       clearTimeout(timer);
       awake?.kill();
+      investigationRef.current?.kill();
+      investigationRef.current = null;
       setKeepingAwake(false);
       void logWatch(root, new Date(), { kind: 'disarmed' });
     };
@@ -1483,7 +1497,16 @@ export function App() {
                 <Text color="cyan" bold>
                   investigation
                 </Text>
-                <Text>{watchVerdict}</Text>
+                {/* Clamped. This pane's height is reserved in advance, and an unbounded verdict
+                    overflows the frame — which scrolls the terminal and hides the editor cursor,
+                    the same defect reportH and the pane height already exist to prevent. */}
+                <Text>{verdictHead}</Text>
+                {verdictClipped > 0 && (
+                  <Text dimColor>
+                    {'  '}… {verdictClipped} more line(s) — full text in{' '}
+                    {WATCH_LOG}
+                  </Text>
+                )}
               </Box>
             )}
           </Box>

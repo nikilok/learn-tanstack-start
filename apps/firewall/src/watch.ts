@@ -14,6 +14,7 @@ import { type Advice, adviseBan } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, envMatching } from './deny-list';
 import { fetchIpProfile } from './ip-profile';
+import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
 import { type Window, rollingWindow } from './time-window';
@@ -33,7 +34,96 @@ const USAGE = `Usage:
 
 Read-only. Exits 1 when something wants a human, 0 when quiet.`;
 
-export type Screened = { digest: string; allowed: number };
+/** Above this share of rendering requests, a browser has run the app from the fingerprint. */
+const MAX_RENDER_SHARE = 0.05;
+
+export type Screened = {
+  digest: string;
+  allowed: number;
+  /** Which screen surfaced it, and why. Carried so a candidate can say what made it one. */
+  why: string[];
+};
+
+/**
+ * Digests Vercel confirmed as a named crawler.
+ *
+ * `botVerified` is NOT a boolean: the value is `'pass'`, and `botVerified eq 'true'` is accepted
+ * by the API while matching nothing — the same trap as `botCategory`. Worse, `ne 'true'` matches
+ * everything including the verified. So it is selected here, never filtered.
+ *
+ * Verification is reverse DNS with forward confirmation, so it cannot be faked by renting a VM in
+ * the right network: measured 2026-08-06, Google's and Microsoft's own ASNs each carried hundreds
+ * of UNVERIFIED requests alongside their verified crawlers.
+ */
+export function verifiedDigests(summary: Row[]): Set<string> {
+  return new Set(
+    summary
+      .filter((r) => String(r.botVerified ?? '') === 'pass')
+      .map((r) => String(r.clientJa4Digest ?? '').toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Fingerprints doing volume without rendering anything, excluding confirmed crawlers.
+ *
+ * This is the screen that does not depend on Vercel having classified the traffic — the category
+ * is empty for most real users, so anything that evades classification lands in a bucket the
+ * category screen cannot see. Rendering share is the discriminator because it is bimodal on live
+ * traffic rather than a threshold anyone had to tune: browser sessions render 43-78% of their
+ * requests, everything else renders under 2%.
+ *
+ * A crawler is excluded because not rendering IS the job, not a tell. Applied to a live window,
+ * that exclusion took eight candidates down to one.
+ */
+export function nonRendering(
+  routeRows: Row[],
+  verified: ReadonlySet<string>,
+  maxShare = MAX_RENDER_SHARE,
+): Screened[] {
+  const byDigest = new Map<string, [string, number][]>();
+  for (const r of routeRows) {
+    const d = String(r.clientJa4Digest ?? '');
+    if (!d || d === '(none)' || d === '?') continue;
+    const paths = byDigest.get(d) ?? [];
+    paths.push([String(r.route ?? ''), countOf(r)]);
+    byDigest.set(d, paths);
+  }
+  const out: Screened[] = [];
+  for (const [digest, paths] of byDigest) {
+    if (verified.has(digest.toLowerCase())) continue;
+    const total = paths.reduce((n, [, c]) => n + c, 0);
+    if (total <= 0) continue;
+    const share = renderingRequests(mixOf(paths)) / total;
+    if (share > maxShare) continue;
+    out.push({
+      digest,
+      allowed: total,
+      why: [`${(share * 100).toFixed(1)}% rendering, not a verified crawler`],
+    });
+  }
+  return out.sort((a, b) => b.allowed - a.allowed);
+}
+
+/**
+ * One candidate list from several screens. Deduped by digest with the reasons merged, so a
+ * fingerprint both screens found is profiled once and says so.
+ */
+export function mergeScreens(...lists: Screened[][]): Screened[] {
+  const by = new Map<string, Screened>();
+  for (const s of lists.flat()) {
+    const key = s.digest.toLowerCase();
+    const prior = by.get(key);
+    if (!prior) by.set(key, { ...s, why: [...s.why] });
+    else {
+      // The screens count different things — impersonation requests versus all of them — so the
+      // larger is the honest figure for "how much traffic is this".
+      prior.allowed = Math.max(prior.allowed, s.allowed);
+      for (const w of s.why) if (!prior.why.includes(w)) prior.why.push(w);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.allowed - a.allowed);
+}
 
 /** One adjudicated candidate: what the screen saw, and what the advisory made of it. */
 export type Finding = Screened & { total: number; advice: Advice };
@@ -142,20 +232,19 @@ export function watchLines(r: WatchReport): Line[] {
  * not already denied, and capped so a classification change cannot trigger a query storm.
  */
 export function worthProfiling(
-  rows: [string, number][],
+  rows: Screened[],
   denied: string[],
   floor = SCREEN_FLOOR,
   cap = MAX_PROFILES,
 ): Screened[] {
   const already = new Set(denied.map((d) => JA4_DENY.normalize(d)));
   return rows
-    .filter(([digest, allowed]) => {
+    .filter(({ digest, allowed }) => {
       if (!digest || digest === '(none)') return false;
       if (allowed < floor) return false;
       return !already.has(JA4_DENY.normalize(digest));
     })
-    .slice(0, cap)
-    .map(([digest, allowed]) => ({ digest, allowed }));
+    .slice(0, cap);
 }
 
 /**
@@ -195,11 +284,7 @@ export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
   deniedJa4: string[],
-): Promise<{
-  rows: [string, number][];
-  findings: Finding[];
-  truncated: boolean;
-}> {
+): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated } = await screen(creds, window);
   const findings: Finding[] = [];
   for (const c of worthProfiling(rows, deniedJa4)) {
@@ -238,6 +323,9 @@ export async function findSuspects(
 const IMPERSONATION = 'browser_impersonation';
 /** The observability group cap. A response at this size may have dropped rows we wanted. */
 const GROUP_CAP = 500;
+// What reached the app, expressed as what did NOT stop it — a request arrives as log, allow or
+// bypass depending on configuration, and naming one of them misses the rest.
+const PASSED = "wafAction ne 'deny' and wafAction ne 'challenge'";
 
 /**
  * Pick the impersonation rows out of a two-dimension summary, busiest first.
@@ -246,7 +334,7 @@ const GROUP_CAP = 500;
  * selection happens here, and a selection that silently matches nothing is the failure this whole
  * tool exists to notice.
  */
-export function impersonators(summary: Row[]): [string, number][] {
+export function impersonators(summary: Row[]): Screened[] {
   // Deliberately uncapped. `worthProfiling` bounds the expensive work, but it does so AFTER
   // dropping what is already denied — so a cap here would run first, and with the busiest
   // fingerprints denied, which is exactly what a working denylist produces, everything still
@@ -255,15 +343,16 @@ export function impersonators(summary: Row[]): [string, number][] {
   return (
     summary
       .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
-      .map(
-        (r) =>
-          [String(r.clientJa4Digest ?? ''), countOf(r)] as [string, number],
-      )
+      .map((r) => ({
+        digest: String(r.clientJa4Digest ?? ''),
+        allowed: countOf(r),
+        why: ['Vercel classified it as impersonating a browser'],
+      }))
       // A row with no digest is dropped, not renamed. Substituting a placeholder would clear the
       // volume floor and be profiled as if it were a fingerprint — ~21 queries spent on an
       // identity that does not exist, counted in the report as a candidate.
-      .filter(([digest]) => digest && digest !== '(none)' && digest !== '?')
-      .sort((a, b) => b[1] - a[1])
+      .filter(({ digest }) => digest && digest !== '(none)' && digest !== '?')
+      .sort((a, b) => b.allowed - a.allowed)
   );
 }
 
@@ -278,24 +367,40 @@ export function impersonators(summary: Row[]): [string, number][] {
 export async function screen(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
-): Promise<{ rows: [string, number][]; truncated: boolean }> {
+): Promise<{ rows: Screened[]; truncated: boolean }> {
   const { ctx } = makeCtx(creds, window);
+  const [routeResp, verifiedResp] = await Promise.all([
+    metrics(ctx, ['clientJa4Digest', 'route'], {
+      filter: PASSED,
+      limit: GROUP_CAP,
+    }),
+    metrics(ctx, ['clientJa4Digest', 'botVerified'], {
+      filter: PASSED,
+      limit: GROUP_CAP,
+    }),
+  ]);
   const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
     // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
     // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
     // rules matched, and a filter naming only one of those silently misses the rest — an
     // observe-only ruleset serves everything as `log`, where `wafAction eq 'allow'` would have
     // seen a fraction of a percent of the traffic and called the window quiet.
-    filter: "wafAction ne 'deny' and wafAction ne 'challenge'",
+    filter: PASSED,
     limit: GROUP_CAP,
   });
   const summary = resp.summary ?? [];
+  const routeRows = routeResp.summary ?? [];
   return {
-    rows: impersonators(summary),
+    // Both screens, merged. The category screen carries Vercel's own judgement; the behavioural
+    // one sees what Vercel never classified, which is where anything that evaded it will sit.
+    rows: mergeScreens(
+      impersonators(summary),
+      nonRendering(routeRows, verifiedDigests(verifiedResp.summary ?? [])),
+    ),
     // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
     // same 500 slots — so a capped response can have dropped the very rows this screen exists to
     // find, and would then report a quiet window.
-    truncated: summary.length >= GROUP_CAP,
+    truncated: summary.length >= GROUP_CAP || routeRows.length >= GROUP_CAP,
   };
 }
 
@@ -331,7 +436,7 @@ async function main() {
 
   const report: WatchReport = {
     window,
-    screened: rows.reduce((n, [, c]) => n + c, 0),
+    screened: rows.reduce((n, r) => n + r.allowed, 0),
     fingerprints: rows.length,
     candidates: findings.length,
     truncated,

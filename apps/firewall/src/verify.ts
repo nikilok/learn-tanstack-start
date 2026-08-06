@@ -100,7 +100,7 @@ async function categorySelection(ctx: Ctx): Promise<Check[]> {
       limit: GROUP_CAP,
     }),
   );
-  const viaScreen = impersonators(twoDim).reduce((n, [, c]) => n + c, 0);
+  const viaScreen = impersonators(twoDim).reduce((n, s) => n + s.allowed, 0);
 
   return [
     {
@@ -141,7 +141,7 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
     }),
   );
   const seen = impersonators(twoDim);
-  const noAlpn = seen.filter(([d]) => alpnOf(d) === '00');
+  const noAlpn = seen.filter((s) => alpnOf(s.digest) === '00');
   const busiest = seen[0];
 
   // The denylist is the operator's own labelling: a digest in it is one a human decided was a
@@ -154,31 +154,58 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
     denylistRead = false;
   }
   const known = new Set(denied.map((d) => JA4_DENY.normalize(d)));
-  const surfacedAndKnown = seen.filter(([d]) =>
-    known.has(JA4_DENY.normalize(d)),
+  const surfacedAndKnown = seen.filter((s) =>
+    known.has(JA4_DENY.normalize(s.digest)),
   );
+
+  // A working ban erases its own evidence: once a digest is denied its traffic never reaches the
+  // app, so a screen that only looks at what got through cannot see it — and must not be marked
+  // as having missed it. Split the denied into those still arriving and those fully stopped.
+  const byAction = rowsOf(
+    await metrics(ctx, ['clientJa4Digest', 'wafAction'], { limit: GROUP_CAP }),
+  );
+  const passedByDigest = new Map<string, number>();
+  for (const r of byAction) {
+    const action = String(r.wafAction ?? '');
+    if (action === 'deny' || action === 'challenge') continue;
+    const d = JA4_DENY.normalize(String(r.clientJa4Digest ?? ''));
+    passedByDigest.set(d, (passedByDigest.get(d) ?? 0) + countOf(r));
+  }
+  const stillArriving = [...known].filter(
+    (d) => (passedByDigest.get(d) ?? 0) > 0,
+  );
+  const fullyStopped = known.size - stillArriving.length;
 
   return [
     {
       name: 'the screen surfaces fingerprints at all in this window',
       ok: seen.length > 0,
       detail: seen.length
-        ? `${seen.length} impersonation fingerprint(s), busiest ${busiest?.[1]} requests`
+        ? `${seen.length} impersonation fingerprint(s), busiest ${busiest?.allowed} requests`
         : 'NONE — a window known to contain scraping should not be empty',
     },
     {
       // The one end-to-end check available: would the screen have found what a human found?
       // If a digest you banned by hand does not appear here, the screen cannot see its kind.
-      name: 'every fingerprint you banned by hand is one the screen can see',
-      ok: denylistRead && (denied.length === 0 || surfacedAndKnown.length > 0),
+      name: 'every banned fingerprint still reaching the app is one the screen can see',
+      // Only the ones still getting through are evidence about the screen. The rest are evidence
+      // about the ban, and a window entirely after the ban proves nothing either way — which is
+      // inconclusive, not a pass and not a failure.
+      ok:
+        denylistRead &&
+        (stillArriving.length === 0 ||
+          surfacedAndKnown.length >= stillArriving.length),
       detail: !denylistRead
         ? 'FW_BLOCKED_JA4 could not be read — cannot check against your own labelling'
         : denied.length === 0
           ? 'nothing is denied, so there is no labelled positive to check against'
-          : `${surfacedAndKnown.length} of ${denied.length} denied fingerprint(s) appear in this window's screen` +
-            (surfacedAndKnown.length
-              ? ` — ${surfacedAndKnown[0]?.[1]} requests for the busiest`
-              : ' — the screen would NOT have found what you banned'),
+          : stillArriving.length === 0
+            ? `all ${denied.length} denied fingerprint(s) are fully stopped in this window — the ban is working, so the screen cannot see them. Widen the window past the ban to test the screen.`
+            : `${surfacedAndKnown.length} of ${stillArriving.length} still-arriving denied fingerprint(s) appear in the screen` +
+              (fullyStopped ? ` (${fullyStopped} fully stopped)` : '') +
+              (surfacedAndKnown.length >= stillArriving.length
+                ? ` — busiest ${surfacedAndKnown[0]?.allowed} requests`
+                : ' — the screen would NOT have found what you banned'),
     },
     {
       name: 'at least one surfaced fingerprint carries a volume-independent tell',

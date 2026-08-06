@@ -10,66 +10,54 @@ import { rollingWindow } from './time-window';
 import {
   type WatchReport,
   impersonators,
+  mergeScreens,
+  nonRendering,
   isActionable,
   notEnforcing,
+  verifiedDigests,
   watchLines,
   worthProfiling,
 } from './watch';
 
 const A = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
+const why = ['because'];
+const sc = (digest: string, allowed: number) => ({ digest, allowed, why });
 const B = 't13dbingh2_333333333333_444444444444';
 
 describe('worthProfiling', () => {
   test('keeps a busy fingerprint that is not already denied', () => {
-    expect(worthProfiling([[A, 500]], [])).toEqual([
-      { digest: A, allowed: 500 },
-    ]);
+    expect(worthProfiling([sc(A, 500)], [])).toEqual([sc(A, 500)]);
   });
 
   test('drops anything already in the denylist — its traffic is deny-actioned, not allowed', () => {
-    expect(worthProfiling([[A, 500]], [A])).toEqual([]);
+    expect(worthProfiling([sc(A, 500)], [A])).toEqual([]);
   });
 
   test('matches the denylist case-insensitively', () => {
     // Dashboards render digests upper-case; a raw compare would re-profile a banned identity
     // every single run.
-    expect(worthProfiling([[A.toUpperCase(), 500]], [A])).toEqual([]);
+    expect(worthProfiling([sc(A.toUpperCase(), 500)], [A])).toEqual([]);
   });
 
   test('drops anything under the floor — it cannot clear the advisory anyway', () => {
-    expect(worthProfiling([[A, 20]], [], 100)).toEqual([]);
+    expect(worthProfiling([sc(A, 20)], [], 100)).toEqual([]);
   });
 
   test('drops the empty grouping key', () => {
-    expect(
-      worthProfiling(
-        [
-          ['(none)', 900],
-          ['', 900],
-        ],
-        [],
-      ),
-    ).toEqual([]);
+    expect(worthProfiling([sc('(none)', 900), sc('', 900)], [])).toEqual([]);
   });
 
   test('caps the number profiled, so a classification change cannot cause a query storm', () => {
     // Synthetic, like every other digest in this file. The index varies inside the JA4a segment
     // so the ALPN slot stays a fixed `h2` and none of these read as a tell.
-    const many: [string, number][] = Array.from({ length: 40 }, (_, i) => [
-      `t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`,
-      500,
-    ]);
+    const many = Array.from({ length: 40 }, (_, i) =>
+      sc(`t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`, 500),
+    );
     expect(worthProfiling(many, [], 100, 6)).toHaveLength(6);
   });
 
   test('preserves the screen order — the API returns it ranked by volume', () => {
-    const out = worthProfiling(
-      [
-        [A, 900],
-        [B, 500],
-      ],
-      [],
-    );
+    const out = worthProfiling([sc(A, 900), sc(B, 500)], []);
     expect(out.map((c) => c.digest)).toEqual([A, B]);
   });
 });
@@ -89,7 +77,7 @@ describe('impersonators', () => {
       impersonators([
         row(A, 'search_engine_crawler', 9000),
         row(B, 'browser_impersonation', 30),
-      ]),
+      ]).map((s) => [s.digest, s.allowed]),
     ).toEqual([[B, 30]]);
   });
 
@@ -100,8 +88,8 @@ describe('impersonators', () => {
         row(B, 'browser_impersonation', 900),
       ]),
     ).toEqual([
-      [B, 900],
-      [A, 30],
+      expect.objectContaining({ digest: B, allowed: 900 }),
+      expect.objectContaining({ digest: A, allowed: 30 }),
     ]);
   });
 
@@ -142,11 +130,123 @@ describe('impersonators', () => {
       ...denied,
       row(B, 'browser_impersonation', 120),
     ]);
-    expect(out.map(([d]) => d)).toContain(B);
+    expect(out.map((s) => s.digest)).toContain(B);
   });
 
   test('an empty summary yields nothing, not a crash', () => {
     expect(impersonators([])).toEqual([]);
+  });
+});
+
+// The category screen can only see what Vercel labelled, and the category is empty for most real
+// users — so anything that evades classification lands where that screen cannot look. This one
+// asks what the traffic DID instead of what it was called.
+describe('nonRendering', () => {
+  const r = (digest: string, route: string, count_sum: number) => ({
+    clientJa4Digest: digest,
+    route,
+    count_sum,
+  });
+  // Routes the mix classifies as rendering — a browser running the app fetches these.
+  const PAGE = '/company/[slug]';
+  const RPC = '/_serverFn/abc';
+
+  test('a fingerprint that only fetches pages is surfaced', () => {
+    const out = nonRendering([r(A, PAGE, 900)], new Set());
+    expect(out).toHaveLength(1);
+    expect(out[0]?.digest).toBe(A);
+    expect(out[0]?.why[0]).toContain('rendering');
+  });
+
+  test('a browser session is not', () => {
+    // Rendering share is bimodal on live traffic, so this is not a tuned threshold: real
+    // sessions sit far above it and harvesters far below.
+    expect(nonRendering([r(A, PAGE, 100), r(A, RPC, 900)], new Set())).toEqual(
+      [],
+    );
+  });
+
+  test('a verified crawler is excluded however little it renders', () => {
+    // Not rendering IS the job for a crawler. Excluding them is what makes this screen usable.
+    expect(
+      nonRendering([r(A, PAGE, 9000)], new Set([A.toLowerCase()])),
+    ).toEqual([]);
+  });
+
+  test('the exclusion is case-insensitive', () => {
+    expect(
+      nonRendering([r(A.toUpperCase(), PAGE, 9000)], new Set([A])),
+    ).toEqual([]);
+  });
+
+  test('rows without a digest are dropped, not grouped under one', () => {
+    expect(
+      nonRendering([r('', PAGE, 900), r('(none)', PAGE, 900)], new Set()),
+    ).toEqual([]);
+  });
+
+  test('a zero-traffic fingerprint cannot divide by zero into a candidate', () => {
+    expect(nonRendering([r(A, PAGE, 0)], new Set())).toEqual([]);
+  });
+
+  test('busiest first', () => {
+    const out = nonRendering([r(A, PAGE, 100), r(B, PAGE, 900)], new Set());
+    expect(out.map((s) => s.digest)).toEqual([B, A]);
+  });
+});
+
+describe('verifiedDigests', () => {
+  test("only 'pass' counts as verified", () => {
+    // botVerified is not a boolean. `eq 'true'` is accepted by the API and matches nothing, and
+    // `ne 'true'` matches everything including the verified — so it is selected, never filtered.
+    const rows = [
+      { clientJa4Digest: A, botVerified: 'pass' },
+      { clientJa4Digest: B, botVerified: '' },
+      { clientJa4Digest: 'c', botVerified: 'true' },
+    ];
+    expect([...verifiedDigests(rows)]).toEqual([A]);
+  });
+
+  test('normalises case, since the exclusion compares against it', () => {
+    expect([
+      ...verifiedDigests([
+        { clientJa4Digest: A.toUpperCase(), botVerified: 'pass' },
+      ]),
+    ]).toEqual([A]);
+  });
+});
+
+describe('mergeScreens', () => {
+  const s = (digest: string, allowed: number, why: string) => ({
+    digest,
+    allowed,
+    why: [why],
+  });
+
+  test('a fingerprint both screens found is profiled once, with both reasons', () => {
+    const out = mergeScreens(
+      [s(A, 100, 'classified')],
+      [s(A, 900, 'no rendering')],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]?.why).toEqual(['classified', 'no rendering']);
+  });
+
+  test('the larger count wins — the screens measure different things', () => {
+    const out = mergeScreens([s(A, 100, 'x')], [s(A, 900, 'y')]);
+    expect(out[0]?.allowed).toBe(900);
+  });
+
+  test('merging is case-insensitive on the digest', () => {
+    expect(
+      mergeScreens([s(A, 100, 'x')], [s(A.toUpperCase(), 900, 'y')]),
+    ).toHaveLength(1);
+  });
+
+  test('does not mutate its inputs', () => {
+    const a = [s(A, 100, 'x')];
+    mergeScreens(a, [s(A, 900, 'y')]);
+    expect(a[0]?.why).toEqual(['x']);
   });
 });
 
@@ -212,7 +312,9 @@ describe('watchLines', () => {
     fingerprints: 3,
     candidates: 1,
     truncated: false,
-    findings: [{ digest: DIG, allowed: 9060, total: 9060, advice: advice() }],
+    findings: [
+      { digest: DIG, allowed: 9060, total: 9060, why: [], advice: advice() },
+    ],
     enforcement: [],
     errors: [],
     ...over,
@@ -240,6 +342,7 @@ describe('watchLines', () => {
             digest: DIG,
             allowed: 900,
             total: 900,
+            why: [],
             advice: advice({
               lever: {
                 kind: 'asn',
@@ -263,6 +366,7 @@ describe('watchLines', () => {
             digest: DIG,
             allowed: 900,
             total: 900,
+            why: [],
             advice: advice({ verdict: 'watch', lever: undefined }),
           },
         ],
@@ -331,6 +435,7 @@ describe('isActionable', () => {
         digest: 't13dnewx00_abcabcabcabc_defdefdefdef',
         allowed: 500,
         total: 500,
+        why: [],
         advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
       },
     ],

@@ -100,8 +100,15 @@ export function investigationPrompt(f: Suspicious): string {
     reasons || '- (none recorded)',
     '',
     'Load the firewall-operator skill and work its investigation protocol against live data.',
-    'Report the verdict, the evidence behind it, and — if it is a ban — the exact staging',
-    'command and how to roll it back.',
+    '',
+    'Begin your reply with exactly one of these lines, and nothing before it:',
+    '  VERDICT: ban',
+    '  VERDICT: leave',
+    '  VERDICT: unclear',
+    '',
+    'Then the evidence behind it, and — if it is a ban — the exact staging command and how to',
+    'roll it back. Answer "unclear" rather than guessing: it reaches a human either way, and a',
+    'confident wrong answer is the one thing this cannot recover from.',
     '',
     'Do not apply anything. Do not run firewall:setup, do not write .env.local, and do not',
     'change the WAF. A human runs the command.',
@@ -145,6 +152,27 @@ export function investigationArgs(f: Suspicious): string[] {
     'Write',
     'Edit',
   ];
+}
+
+/** What the investigation concluded, read from its own structured first line. */
+export type Verdict = 'ban' | 'leave' | 'unclear';
+
+/**
+ * The verdict line, or `unclear` when there is not one.
+ *
+ * Unparseable is deliberately NOT 'leave'. An investigation that ran and cannot be read is a
+ * result nobody has seen — the one outcome that must reach a human, not be filed as fine.
+ */
+export function verdictFrom(text: string): Verdict {
+  const line = text
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => /^VERDICT:/i.test(l));
+  const word = line
+    ?.replace(/^VERDICT:\s*/i, '')
+    .toLowerCase()
+    .trim();
+  return word === 'ban' || word === 'leave' ? word : 'unclear';
 }
 
 export type Investigation =
@@ -251,4 +279,28 @@ export function parseInvestigation(
     verdict: r.result,
     provenance: provenanceOf(parsed),
   };
+}
+
+/** Investigations one unattended run may start, so a classification change cannot become a bill. */
+export const INVESTIGATIONS_PER_RUN = 2;
+
+/**
+ * Which findings this run should investigate.
+ *
+ * Three gates, in order: the advisory says ban, we have not already bought this answer, and the
+ * run has budget left. `seen` carries history, so it is checked by membership — counting it would
+ * conflate a week of past runs with what this one has started.
+ */
+export function investigable<
+  T extends { digest: string; advice: { verdict: string } },
+>(
+  findings: readonly T[],
+  seen: ReadonlyMap<string, number>,
+  budget = INVESTIGATIONS_PER_RUN,
+): T[] {
+  return findings
+    .filter(
+      (f) => f.advice.verdict === 'ban' && !seen.has(f.digest.toLowerCase()),
+    )
+    .slice(0, Math.max(0, budget));
 }

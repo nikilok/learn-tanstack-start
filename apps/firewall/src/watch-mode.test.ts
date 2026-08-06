@@ -16,7 +16,10 @@ import {
   parseInvestigation,
   provenanceOf,
   recentSpawns,
+  INVESTIGATIONS_PER_RUN,
+  investigable,
   shouldInvestigate,
+  verdictFrom,
 } from './watch-mode';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
@@ -249,5 +252,91 @@ describe('parseInvestigation', () => {
     expect(
       parseInvestigation(JSON.stringify({ is_error: false, result: '' }), 0).ok,
     ).toBe(false);
+  });
+});
+
+// The unattended path notifies on what the investigation CONCLUDED, so that conclusion has to be
+// readable. Prose is not, which is why the prompt demands a line and this reads it.
+describe('verdictFrom', () => {
+  test('reads the verdict line', () => {
+    expect(verdictFrom('VERDICT: ban\nbecause…')).toBe('ban');
+    expect(verdictFrom('VERDICT: leave\nbecause…')).toBe('leave');
+  });
+
+  test('tolerates casing and spacing', () => {
+    expect(verdictFrom('verdict:   BAN\n')).toBe('ban');
+  });
+
+  test('finds it even if something precedes it', () => {
+    // The prompt asks for it first; a model that adds a preamble should still be understood.
+    expect(verdictFrom('Here is my answer.\n\nVERDICT: leave')).toBe('leave');
+  });
+
+  test('prose with no verdict line is unclear, NOT leave', () => {
+    // An investigation that ran and cannot be read is a result nobody has seen. Filing it as
+    // "leave" is how a paid-for answer becomes silence.
+    expect(
+      verdictFrom('I think this is probably fine, no action needed.'),
+    ).toBe('unclear');
+    expect(verdictFrom('')).toBe('unclear');
+  });
+
+  test('an unrecognised verdict word is unclear', () => {
+    expect(verdictFrom('VERDICT: maybe')).toBe('unclear');
+    expect(verdictFrom('VERDICT:')).toBe('unclear');
+  });
+
+  test('the word "ban" in prose does not make it a ban', () => {
+    // Substring matching on free text would turn "I would not ban this" into a ban.
+    expect(verdictFrom('I would not ban this fingerprint.')).toBe('unclear');
+  });
+});
+
+// An unattended run that investigates on its own has two ways to go wrong that nobody sees: it
+// buys the same answer every hour, or a growing history quietly switches it off.
+describe('investigable', () => {
+  const f = (digest: string, verdict: string) => ({
+    digest,
+    advice: { verdict },
+  });
+
+  test('only ban verdicts are worth paying for', () => {
+    const picked = investigable(
+      [f('a', 'ban'), f('b', 'watch'), f('c', 'leave')],
+      new Map(),
+    );
+    expect(picked.map((p) => p.digest)).toEqual(['a']);
+  });
+
+  test('skips what has already been investigated', () => {
+    const picked = investigable([f('a', 'ban')], new Map([['a', 1]]));
+    expect(picked).toEqual([]);
+  });
+
+  test('matches history case-insensitively', () => {
+    expect(investigable([f('AB', 'ban')], new Map([['ab', 1]]))).toEqual([]);
+  });
+
+  test('caps how many one run starts', () => {
+    const many = ['a', 'b', 'c', 'd'].map((d) => f(d, 'ban'));
+    expect(investigable(many, new Map()).length).toBe(INVESTIGATIONS_PER_RUN);
+  });
+
+  test('a long history does not eat the budget', () => {
+    // The bug this pins: counting `seen` conflates a week of past runs with what THIS run has
+    // started, so after enough history the job silently stops investigating anything.
+    const history = new Map(
+      Array.from({ length: 50 }, (_, i) => [`old${i}`, 1] as const),
+    );
+    expect(investigable([f('new', 'ban')], history).length).toBe(1);
+  });
+
+  test('a zero or negative budget investigates nothing', () => {
+    expect(investigable([f('a', 'ban')], new Map(), 0)).toEqual([]);
+    expect(investigable([f('a', 'ban')], new Map(), -1)).toEqual([]);
+  });
+
+  test('nothing to do is empty, not a crash', () => {
+    expect(investigable([], new Map())).toEqual([]);
   });
 });

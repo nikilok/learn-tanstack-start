@@ -20,6 +20,19 @@ import { type Row, countOf, makeCtx, metrics } from './observability';
 import { trustedRules } from './rule-integrity';
 import { type Window, rollingWindow } from './time-window';
 import { errMsg } from './util';
+import { logWatch } from './watch-log';
+import { investigable, runInvestigation, verdictFrom } from './watch-mode';
+import {
+  actionableKey,
+  concludedKey,
+  concludedText,
+  notify,
+  notifyText,
+  readInvestigated,
+  writeInvestigated,
+  rememberNotified,
+  shouldNotify,
+} from './watch-notify';
 
 const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 6; // the free observability window
@@ -31,9 +44,10 @@ const SCREEN_FLOOR = 100;
 const MAX_PROFILES = 6;
 
 const USAGE = `Usage:
-  bun run firewall:watch [hours]     default ${DEFAULT_HOURS}h, max ${MAX_HOURS}h
+  bun run firewall:watch [hours] [--investigate] [--notify]
+                                     default ${DEFAULT_HOURS}h, max ${MAX_HOURS}h
 
-Read-only. Exits 1 when something wants a human, 0 when quiet.`;
+Read-only. Exits 0 quiet, 1 found something, 2 could not run properly.`;
 
 /** Above this share of rendering requests, a browser has run the app from the fingerprint. */
 const MAX_RENDER_SHARE = 0.05;
@@ -151,6 +165,30 @@ export type WatchReport = {
 };
 
 /** True when a human should look. Kept separate from rendering so the exit code and the text cannot disagree. */
+/** 0 quiet, 1 ran and found something, 2 could not run properly. */
+export const EXIT_QUIET = 0;
+export const EXIT_FOUND = 1;
+export const EXIT_BROKEN = 2;
+
+/**
+ * What to exit with.
+ *
+ * "Found something" and "could not look" are opposite outcomes, so they cannot share a code: a
+ * caller unable to tell them apart either ignores real findings or alarms on healthy runs. Note
+ * that 1 is a NORMAL outcome here — this command succeeding at its job is not an error.
+ */
+export function exitCodeFor(r: WatchReport): number {
+  // A screen truncated down to nothing observed nothing, so it cannot claim quiet either.
+  if (r.errors.length > 0 || (r.truncated && r.fingerprints === 0))
+    return EXIT_BROKEN;
+  if (
+    r.enforcement.length > 0 ||
+    r.findings.some((f) => f.advice.verdict === 'ban')
+  )
+    return EXIT_FOUND;
+  return EXIT_QUIET;
+}
+
 export function isActionable(r: WatchReport): boolean {
   return (
     // Truncated AND empty cannot be told apart from genuinely quiet, so it escalates. Truncated
@@ -481,7 +519,60 @@ async function main() {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
     }),
   );
-  process.exitCode = isActionable(report) ? 1 : 0;
+
+  // --notify is for the unattended path: nobody is reading stdout, so the only way a finding
+  // reaches a human is if it goes and finds them. Only on a CHANGE, or an hourly repeat of the
+  // same finding trains you to dismiss it.
+  // --investigate spends money, so it is opt-in and heavily gated. The advisory's `ban` is the
+  // bar to START one; what gets a human out of bed is what the investigation CONCLUDES.
+  const concluded: string[] = [];
+  if (argv.includes('--investigate')) {
+    const now = Date.now();
+    // Persisted across runs, because an hourly job has no memory of its own and the same
+    // fingerprint is still there next hour. Without this it buys the same answer every time.
+    const seen = await readInvestigated(process.cwd(), now);
+    for (const f of investigable(report.findings, seen)) {
+      seen.set(f.digest.toLowerCase(), now);
+      const out = await runInvestigation(f, process.cwd());
+      const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+      await logWatch(
+        process.cwd(),
+        new Date(),
+        out.ok
+          ? {
+              kind: 'verdict',
+              digest: f.digest,
+              text: out.verdict,
+              provenance: out.provenance,
+            }
+          : { kind: 'failed', digest: f.digest, error: out.error },
+      );
+      // `unclear` reaches a human too: an investigation that ran and cannot be read is a result
+      // nobody has seen, which is not the same as one that came back clean.
+      if (verdict !== 'leave')
+        concluded.push(`${verdict}:${f.digest.toLowerCase()}`);
+      console.log(`  investigated ${f.digest} -> ${verdict}`);
+    }
+    // Written even if a notification later fails: the money is already spent either way.
+    await writeInvestigated(process.cwd(), seen);
+  }
+
+  // What is worth a message: the investigation's conclusion when there was one, otherwise the
+  // report itself. Asking for --investigate means you want Claude's answer, not the screen's.
+  if (argv.includes('--notify')) {
+    const investigated = argv.includes('--investigate');
+    const key = investigated ? concludedKey(concluded) : actionableKey(report);
+    if (await shouldNotify(process.cwd(), key)) {
+      const failed = await notify(
+        investigated ? concludedText(concluded) : notifyText(report),
+      );
+      // Only remember it as delivered if it was. Otherwise the next run would treat the same
+      // finding as already reported and stay quiet about something nobody has seen.
+      if (failed) console.error(`  ${failed}`);
+      else await rememberNotified(process.cwd(), key);
+    }
+  }
+  process.exitCode = exitCodeFor(report);
 }
 
 /** Deferred so the observability-only path does not pay for the firewall config read. */
@@ -518,5 +609,7 @@ async function enforcementIssues(): Promise<string[]> {
 if (import.meta.main)
   main().catch((error) => {
     console.error('firewall:watch failed:', errMsg(error));
-    process.exit(1);
+    // Not 1. Failing to start is a failure to LOOK, and 1 is reserved for having looked and found
+    // something — the whole distinction these codes exist for.
+    process.exit(EXIT_BROKEN);
   });

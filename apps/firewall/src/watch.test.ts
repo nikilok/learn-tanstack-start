@@ -12,6 +12,10 @@ import {
   impersonators,
   mergeScreens,
   nonRendering,
+  EXIT_BROKEN,
+  EXIT_FOUND,
+  EXIT_QUIET,
+  exitCodeFor,
   isActionable,
   notEnforcing,
   verifiedDigests,
@@ -483,5 +487,75 @@ describe('isActionable', () => {
     expect(isActionable({ ...base, truncated: true, fingerprints: 3 })).toBe(
       false,
     );
+  });
+});
+
+// The exit code is the only thing a non-interactive caller sees. Collapsing "found a scraper" and
+// "could not run" into one value is what made a KeepAlive plist a hot loop waiting to happen.
+describe('exitCodeFor', () => {
+  const base: WatchReport = {
+    window: rollingWindow(24, new Date('2026-08-05T12:00:00.000Z')),
+    screened: 0,
+    fingerprints: 0,
+    candidates: 0,
+    truncated: false,
+    findings: [],
+    enforcement: [],
+    errors: [],
+  };
+  const withVerdictAt = (v: Advice['verdict']) => ({
+    ...base,
+    findings: [
+      {
+        digest: 'd',
+        allowed: 1,
+        total: 1,
+        why: [],
+        advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
+      },
+    ],
+  });
+
+  test('a quiet run is 0', () => {
+    expect(exitCodeFor(base)).toBe(EXIT_QUIET);
+  });
+
+  test('finding something is 1, which is the command working', () => {
+    expect(exitCodeFor(withVerdictAt('ban'))).toBe(EXIT_FOUND);
+    expect(exitCodeFor({ ...base, enforcement: ['x'] })).toBe(EXIT_FOUND);
+  });
+
+  test('failing to run is 2, NOT 1', () => {
+    // The split this function exists for. A caller that cannot tell these apart either ignores
+    // real findings or alarms every time the watch works correctly.
+    expect(exitCodeFor({ ...base, errors: ['query failed'] })).toBe(
+      EXIT_BROKEN,
+    );
+  });
+
+  test('a screen truncated down to nothing is 2, not quiet', () => {
+    expect(exitCodeFor({ ...base, truncated: true, fingerprints: 0 })).toBe(
+      EXIT_BROKEN,
+    );
+  });
+
+  test('truncated but having seen fingerprints is quiet', () => {
+    expect(exitCodeFor({ ...base, truncated: true, fingerprints: 5 })).toBe(
+      EXIT_QUIET,
+    );
+  });
+
+  test('broken outranks found', () => {
+    // A run that errored cannot vouch for its own findings being the whole picture, so the
+    // weaker claim is the one to report.
+    expect(exitCodeFor({ ...withVerdictAt('ban'), errors: ['boom'] })).toBe(
+      EXIT_BROKEN,
+    );
+  });
+
+  test('a non-ban verdict alone is quiet', () => {
+    for (const v of ['watch', 'leave'] as const) {
+      expect(exitCodeFor(withVerdictAt(v))).toBe(EXIT_QUIET);
+    }
   });
 });

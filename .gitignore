@@ -24,5 +24,7 @@ apps/web/.precision-samples
 # Local operator notes — deliberately not published (the repo is public).
 .claude/skills/
 
-# Watch-mode log: local operator output, and it names live client fingerprints.
+# Watch-mode local operator state. All of it names live client fingerprints.
 firewall-watch.log
+.firewall-watch-state
+.firewall-watch-investigated

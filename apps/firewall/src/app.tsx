@@ -80,7 +80,15 @@ import {
   recentSpawns,
   runInvestigation,
   shouldInvestigate,
+  verdictFrom,
 } from './watch-mode';
+import {
+  concludedKey,
+  concludedText,
+  notify,
+  rememberNotified,
+  shouldNotify,
+} from './watch-notify';
 
 type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
 const PANE_KEY: Record<string, PaneKind> = {
@@ -250,6 +258,7 @@ export function App() {
   // looking at this pane when it did.
   const [invokedAt, setInvokedAt] = useState('');
   const [invokedCount, setInvokedCount] = useState(0);
+  const [notifiedAt, setNotifiedAt] = useState('');
   const [keepingAwake, setKeepingAwake] = useState(false);
   const investigatedRef = useRef<Set<string>>(new Set());
   const spawnsRef = useRef<number[]>([]);
@@ -493,6 +502,26 @@ export function App() {
               }
             : { kind: 'failed', digest: next.digest, error: out.error },
         );
+
+        // The pane above only helps while someone is looking at it. This is the path that reaches
+        // you when nobody is, so it fires on what the investigation CONCLUDED, not on the screen's
+        // suspicion. `unclear` counts: an answer nobody can read is not an answer of "fine".
+        const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+        if (verdict !== 'leave') {
+          const conclusion = [`${verdict}:${next.digest.toLowerCase()}`];
+          const key = concludedKey(conclusion);
+          // Shared with the CLI, on purpose: whichever path saw it first, the other stays quiet,
+          // and quitting the TUI no longer re-notifies about the same fingerprint.
+          if (await shouldNotify(root, key)) {
+            const failed = await notify(concludedText(conclusion));
+            if (stopped) return;
+            if (failed) setWatchNote(failed);
+            else {
+              await rememberNotified(root, key);
+              setNotifiedAt(clockTime(new Date()));
+            }
+          }
+        }
       } catch (e) {
         // A failed screen must not read as a quiet one. The whole point of the mode is that
         // silence means "nothing found", so silence has to be earned.
@@ -1489,7 +1518,8 @@ export function App() {
                   {'  '}⇢ claude invoked{' '}
                 </Text>
                 <Text dimColor>
-                  {invokedCount}× this session · last {invokedAt} · {WATCH_LOG}
+                  {invokedCount}× this session · last {invokedAt}
+                  {notifiedAt ? ` · notified ${notifiedAt}` : ''} · {WATCH_LOG}
                 </Text>
               </Text>
             )}

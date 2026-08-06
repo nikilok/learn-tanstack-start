@@ -34,9 +34,35 @@ const GROUP_CAP = 500;
 
 type Check = {
   name: string;
-  ok: boolean;
+  /**
+   * `null` is INCONCLUSIVE — the check could not be decided. Distinct from `true`, because a
+   * check that never ran is not a check that passed, and rendering it as a tick is how a tool
+   * built to catch silent failure acquires one.
+   */
+  ok: boolean | null;
   detail: string;
 };
+
+/**
+ * The labelled-positive check, or `null` when it cannot be decided.
+ *
+ * Only fingerprints still getting through are evidence about the SCREEN; the rest are evidence
+ * about the ban. So an empty denylist, a window entirely after the ban, or a truncated response
+ * that could hide a still-arriving digest all leave the question open — and `every` over an empty
+ * list is vacuously true, which is exactly how that reads as a pass.
+ */
+export function denylistCheck(input: {
+  denylistRead: boolean;
+  denied: number;
+  stillArriving: readonly string[];
+  surfaced: ReadonlySet<string>;
+  capped: boolean;
+}): boolean | null {
+  if (!input.denylistRead) return false;
+  if (input.capped || input.denied === 0 || input.stillArriving.length === 0)
+    return null;
+  return input.stillArriving.every((d) => input.surfaced.has(d));
+}
 
 const sum = (rows: Row[]) => rows.reduce((n, r) => n + countOf(r), 0);
 const rowsOf = (r: { summary?: Row[] }) => r.summary ?? [];
@@ -194,6 +220,8 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
     const d = JA4_DENY.normalize(String(r.clientJa4Digest ?? ''));
     passedByDigest.set(d, (passedByDigest.get(d) ?? 0) + countOf(r));
   }
+  // At the cap the response may omit a denied digest entirely, which would read as stopped.
+  const byActionCapped = byAction.length >= GROUP_CAP;
   const stillArriving = [...known].filter(
     (d) => (passedByDigest.get(d) ?? 0) > 0,
   );
@@ -217,24 +245,31 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
       // Membership, not a count. Comparing cardinalities happens to work only while one set is a
       // subset of the other, which nothing here states or enforces — and the day that stops being
       // true, the check passes while the screen is missing something a human banned.
-      ok: denylistRead && stillArriving.every((d) => surfaced.has(d)),
-      // ^ vacuously true when nothing is still arriving, which is the ban working, not a pass.
+      ok: denylistCheck({
+        denylistRead,
+        denied: denied.length,
+        stillArriving,
+        surfaced,
+        capped: byActionCapped,
+      }),
       detail: !denylistRead
         ? 'FW_BLOCKED_JA4 could not be read — cannot check against your own labelling'
-        : denied.length === 0
-          ? 'nothing is denied, so there is no labelled positive to check against'
-          : stillArriving.length === 0
-            ? `all ${denied.length} denied fingerprint(s) are fully stopped in this window — the ban is working, so the screen cannot see them. Widen the window past the ban to test the screen.`
-            : (() => {
-                const missed = stillArriving.filter((d) => !surfaced.has(d));
-                return (
-                  `${stillArriving.length - missed.length} of ${stillArriving.length} still-arriving denied fingerprint(s) appear in the screen` +
-                  (fullyStopped ? ` (${fullyStopped} fully stopped)` : '') +
-                  (missed.length
-                    ? ` — ${missed.length} the screen would NOT have found`
-                    : ` — busiest ${surfacedAndKnown[0]?.allowed} requests`)
-                );
-              })(),
+        : byActionCapped
+          ? `the action breakdown hit the ${GROUP_CAP}-group cap — a denied fingerprint could be missing from it and read as fully stopped, so this cannot be decided`
+          : denied.length === 0
+            ? 'nothing is denied, so there is no labelled positive to check against'
+            : stillArriving.length === 0
+              ? `all ${denied.length} denied fingerprint(s) are fully stopped in this window — the ban is working, so the screen cannot see them. Widen the window past the ban to test the screen.`
+              : (() => {
+                  const missed = stillArriving.filter((d) => !surfaced.has(d));
+                  return (
+                    `${stillArriving.length - missed.length} of ${stillArriving.length} still-arriving denied fingerprint(s) appear in the screen` +
+                    (fullyStopped ? ` (${fullyStopped} fully stopped)` : '') +
+                    (missed.length
+                      ? ` — ${missed.length} the screen would NOT have found`
+                      : ` — busiest ${surfacedAndKnown[0]?.allowed} requests`)
+                  );
+                })(),
     },
     {
       name: 'at least one surfaced fingerprint carries a volume-independent tell',
@@ -272,7 +307,9 @@ async function main() {
       const got = await run(ctx);
       checks.push(...got);
       for (const c of got)
-        console.log(`  ${c.ok ? '✔' : '✖'} ${c.name}\n      ${c.detail}`);
+        console.log(
+          `  ${c.ok === null ? '?' : c.ok ? '✔' : '✖'} ${c.name}\n      ${c.detail}`,
+        );
     } catch (e) {
       // A check that could not run is a failure, not a pass. The whole point is that unknown
       // does not get to look like agreement.
@@ -287,7 +324,9 @@ async function main() {
     console.log('');
   }
 
-  const failed = checks.filter((c) => !c.ok);
+  // Inconclusive does not fail the run — a working ban makes one check inconclusive by design,
+  // and crying wolf every time is how a tool gets ignored. It just never renders as a pass.
+  const failed = checks.filter((c) => c.ok === false);
   console.log(
     failed.length
       ? `${failed.length} of ${checks.length} assumptions disagree with live data`

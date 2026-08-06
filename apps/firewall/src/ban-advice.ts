@@ -142,9 +142,15 @@ function blockersFor(input: AdviceInput): string[] {
   // requiring dominance costs it nothing and cannot be picked up in passing. Do not relax this
   // to a presence test.
   const allowShare = allowRule ? allowRule[1] / Math.max(1, input.total) : 0;
+  // Share is the whole test, and status codes deliberately cannot help. These endpoints answer
+  // the same way whether or not the caller is authentic — a neutral 202 either way, so probing
+  // learns nothing. That is the right property for them and it costs us this discrimination:
+  // an identity doing nothing BUT calling one of these paths is, by design, indistinguishable
+  // here. It is also not scraping. Accepted, and not to be papered over with a status check that
+  // would read as a control while doing nothing.
   if (allowRule && allowShare >= DOMINANT_SHARE)
     out.push(
-      `matched ${allowRule[0]} (${allowRule[1]}x, ${(allowShare * 100).toFixed(1)}% of its traffic) — that rule only fires for a caller presenting our own secret header, so this is a first-party service`,
+      `matched ${allowRule[0]} (${allowRule[1]}x, ${(allowShare * 100).toFixed(1)}% of its traffic) — nothing else is what a first-party caller of ours does, so this is one`,
     );
   // A failed lookup deletes this blocker, and it is the one protecting our own services — which
   // resemble the thing being hunted on every other axis. Unmeasured is not absent: fail closed.

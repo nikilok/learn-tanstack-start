@@ -305,10 +305,13 @@ describe('adviseBan — first-party callers', () => {
     expect(a.verdict).toBe('leave');
   });
 
-  test('the matched allow rule is named, and treated as an authentication fact', () => {
+  test('the matched allow rule is named, and the claim is about what it does', () => {
+    // Deliberately not "it presented our credential". The rule proves the caller reached that
+    // path; nothing this tool can query sees what was sent, and the endpoint answers the same
+    // either way. Doing nothing else is the evidence, and it is all there is.
     const b = adviseBan(chStream()).blockers.join(' ');
     expect(b).toContain('allow-ch-stream-revalidate');
-    expect(b).toContain('our own secret header');
+    expect(b).toContain('nothing else is what a first-party caller');
   });
 
   test('an API-only client is blocked for having nothing to enumerate', () => {
@@ -901,7 +904,7 @@ describe('first-party protection', () => {
       ...s,
       wafRules: [[HEADER_GATED_RULES[0] as string, s.total]],
     });
-    expect(advice.blockers.join(' ')).toContain('first-party service');
+    expect(advice.blockers.join(' ')).toContain('first-party caller');
     expect(advice.verdict).not.toBe('ban');
   });
 
@@ -912,8 +915,24 @@ describe('first-party protection', () => {
       ...scraper(),
       wafRules: [[HEADER_GATED_RULES[0] as string, 1]],
     });
-    expect(advice.blockers.join(' ')).not.toContain('first-party service');
+    expect(advice.blockers.join(' ')).not.toContain('first-party caller');
     expect(advice.verdict).toBe('ban');
+  });
+
+  test('status codes cannot be used here, so the share test stands alone', () => {
+    // These endpoints answer identically whether or not the caller is authentic — neutral by
+    // design, so probing them learns nothing and repeated guessing gets no feedback. That is
+    // right for them, and it means a status-based check here would read as a control while
+    // doing nothing. Both of these must reach the same verdict.
+    const s = scraper();
+    const withRule = (statuses: [string, number][]) =>
+      adviseBan({
+        ...s,
+        wafRules: [[HEADER_GATED_RULES[0] as string, s.total]],
+        statuses,
+      }).blockers.join(' ');
+    expect(withRule([['202', s.total]])).toContain('first-party');
+    expect(withRule([['200', s.total]])).toContain('first-party');
   });
 
   test('a minority of header-gated traffic is not first-party either', () => {
@@ -922,7 +941,7 @@ describe('first-party protection', () => {
       ...s,
       wafRules: [[HEADER_GATED_RULES[0] as string, Math.floor(s.total / 2)]],
     });
-    expect(advice.blockers.join(' ')).not.toContain('first-party service');
+    expect(advice.blockers.join(' ')).not.toContain('first-party caller');
   });
 
   test('an unrelated failed query does not fabricate the blocker', () => {

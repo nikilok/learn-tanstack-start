@@ -99,8 +99,11 @@ jobs:
           # Naming it here costs one check and saves the next person the same diagnosis.
           printf '%s' "$REVALIDATE_MARKER_HEADER" | grep -qE '^[A-Za-z0-9!#$%&'"'"'*+.^_`|~-]+$' \
             || { echo "REVALIDATE_MARKER_HEADER is not a valid HTTP field name"; exit 1; }
-          [ "$(printf '%s' "$REVALIDATE_MARKER_HEADER" | tr '[:upper:]' '[:lower:]')" != "x-revalidate-secret" ] \
-            || { echo "REVALIDATE_MARKER_HEADER collides with the secret header"; exit 1; }
+          # Compared in place, never transformed: log masking matches the stored value, so any
+          # derived form of it would print unredacted.
+          if printf '%s' "$REVALIDATE_MARKER_HEADER" | grep -qix 'x-revalidate-secret'; then
+            echo "REVALIDATE_MARKER_HEADER collides with the secret header"; exit 1
+          fi
           body=$(mktemp)
           status=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
             -H "$REVALIDATE_MARKER_HEADER: 1" \

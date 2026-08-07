@@ -10,7 +10,7 @@ import {
   withAction,
 } from './actions';
 import { resolveVercelCredentials } from './credentials';
-import { headerKeysOf } from './rule-integrity';
+import { headerKeysByGroup } from './rule-integrity';
 import { type ActionChoice, type Rule, dryRun, rules } from './rules';
 import { errMsg } from './util';
 
@@ -24,8 +24,8 @@ export type LiveConfig = {
   idByName: Map<string, string>;
   activeByName: Map<string, boolean>;
   actionByName: Map<string, ActionChoice>;
-  /** Header keys each live rule requires — a rule that has lost one is no longer proof of anything. */
-  headerKeysByName: Map<string, Set<string>>;
+  /** Header keys each live rule requires, PER condition group — groups are OR'd, so the weakest one governs. */
+  headerKeysByName: Map<string, Set<string>[]>;
 };
 export type Item = {
   rule: Rule;
@@ -48,11 +48,11 @@ export async function fetchLive(): Promise<LiveConfig> {
   const idByName = new Map<string, string>();
   const activeByName = new Map<string, boolean>();
   const actionByName = new Map<string, ActionChoice>();
-  const headerKeysByName = new Map<string, Set<string>>();
+  const headerKeysByName = new Map<string, Set<string>[]>();
   for (const r of config.rules ?? []) {
     idByName.set(r.name, r.id);
     activeByName.set(r.name, r.active);
-    headerKeysByName.set(r.name, headerKeysOf(r));
+    headerKeysByName.set(r.name, headerKeysByGroup(r));
     const m = r.action.mitigate;
     const c = m ? asChoice(effectiveAction(m)) : undefined;
     if (c) actionByName.set(r.name, c);

@@ -390,7 +390,11 @@ export function impersonators(summary: Row[]): Screened[] {
     summary
       .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
       .map((r) => ({
-        digest: String(r.clientJa4Digest ?? ''),
+        // Lower-cased here, where the value enters, because `fetchIpProfile` validates the
+        // lower-cased digest but filters on the raw one. An upper-cased digest would pass
+        // validation and then match nothing — an empty profile that reads as a quiet identity
+        // rather than as a query that never looked.
+        digest: String(r.clientJa4Digest ?? '').toLowerCase(),
         allowed: countOf(r),
         why: ['Vercel classified it as impersonating a browser'],
       }))

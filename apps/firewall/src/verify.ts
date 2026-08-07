@@ -44,6 +44,22 @@ type Check = {
 };
 
 /**
+ * Whether more than one action reaches the app, or `null` when nothing did.
+ *
+ * A quiet or deny-only window carries no evidence either way: `agrees(0, 0)` is true, so the
+ * binary form reported the assumption as DISAGREEING — a check that could not run, failing, and
+ * exiting non-zero on an idle night. Same shape as `denylistCheck` below, and the twin of it that
+ * was missed when that one was given its third state.
+ */
+export function narrowingCheck(
+  passed: number,
+  allowOnly: number,
+): boolean | null {
+  if (passed === 0) return null;
+  return !agrees(passed, allowOnly);
+}
+
+/**
  * The labelled-positive check, or `null` when it cannot be decided.
  *
  * Only fingerprints still getting through are evidence about the SCREEN; the rest are evidence
@@ -104,8 +120,11 @@ async function actionPartition(ctx: Ctx): Promise<Check[]> {
       // The screen used to name `allow` alone. If a future edit narrows it again, this says by
       // how much — an action that reaches the app and is not named is invisible traffic.
       name: 'no single action accounts for everything that reached the app',
-      ok: agrees(sum(passed), byAction.get('allow') ?? 0) ? false : true,
-      detail: `passed=${sum(passed)} allow-only=${byAction.get('allow') ?? 0} — naming one action would miss ${sum(passed) - (byAction.get('allow') ?? 0)}`,
+      ok: narrowingCheck(sum(passed), byAction.get('allow') ?? 0),
+      detail:
+        sum(passed) === 0
+          ? 'nothing reached the app in this window — not decidable'
+          : `passed=${sum(passed)} allow-only=${byAction.get('allow') ?? 0} — naming one action would miss ${sum(passed) - (byAction.get('allow') ?? 0)}`,
     },
   ];
 }
@@ -279,6 +298,23 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
   ];
 }
 
+/**
+ * The one line an operator actually reads.
+ *
+ * Inconclusive is counted separately rather than folded into the pass, for the reason `Check.ok`
+ * gives: a check that never ran is not a check that passed. Saying "all N agree" while some of
+ * them were undecidable is the silent failure this tool exists to report.
+ */
+export function summaryLine(checks: readonly { ok: boolean | null }[]): string {
+  const failed = checks.filter((c) => c.ok === false).length;
+  const unknown = checks.filter((c) => c.ok === null).length;
+  if (failed)
+    return `${failed} of ${checks.length} assumptions disagree with live data`;
+  if (unknown)
+    return `${checks.length - unknown} of ${checks.length} assumptions agree with live data, ${unknown} could not be checked`;
+  return `all ${checks.length} assumptions agree with live data`;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--help') || argv.includes('-h')) {
@@ -326,13 +362,8 @@ async function main() {
 
   // Inconclusive does not fail the run — a working ban makes one check inconclusive by design,
   // and crying wolf every time is how a tool gets ignored. It just never renders as a pass.
-  const failed = checks.filter((c) => c.ok === false);
-  console.log(
-    failed.length
-      ? `${failed.length} of ${checks.length} assumptions disagree with live data`
-      : `all ${checks.length} assumptions agree with live data`,
-  );
-  process.exitCode = failed.length ? 1 : 0;
+  console.log(summaryLine(checks));
+  process.exitCode = checks.some((c) => c.ok === false) ? 1 : 0;
 }
 
 if (import.meta.main)

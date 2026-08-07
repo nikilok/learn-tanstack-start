@@ -4,7 +4,11 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { headerKeysOf, trustedRules } from './rule-integrity';
+import {
+  headerKeysByGroup,
+  headerKeysOf,
+  trustedRules,
+} from './rule-integrity';
 
 const rule = (name: string, keys: string[]) => ({
   name,
@@ -56,8 +60,13 @@ describe('headerKeysOf', () => {
 });
 
 describe('trustedRules', () => {
+  // One condition group per rule — what the built rules have.
   const live = (m: Record<string, string[]>) =>
-    new Map(Object.entries(m).map(([k, v]) => [k, new Set(v)]));
+    new Map(Object.entries(m).map(([k, v]) => [k, [new Set(v)]]));
+
+  // Several OR'd groups — what a dashboard edit can produce, and what a pooled key set hides.
+  const liveGroups = (m: Record<string, string[][]>) =>
+    new Map(Object.entries(m).map(([k, gs]) => [k, gs.map((g) => new Set(g))]));
 
   test('a live rule requiring everything expected is trusted', () => {
     const expected = [rule('allow-x', ['pub', 'marker'])];
@@ -105,6 +114,34 @@ describe('trustedRules', () => {
     // should certify anyone is HEADER_GATED_RULES' job, not this function's.
     expect(trustedRules(live({ a: [] }), [rule('a', [])])).toEqual(['a']);
   });
+
+  test('an alternative group that drops a header is not trusted', () => {
+    // Groups are OR'd — the live denylist rule is built that way, one digest per group — so a
+    // caller satisfies the rule by matching any ONE. Pooling every group's keys into one set
+    // made the weak group invisible behind the strict one, and certified the rule as proof of a
+    // first-party caller that anyone sending only `pub` could impersonate.
+    const expected = [rule('allow-x', ['pub', 'marker'])];
+    const twoGroups = liveGroups({ 'allow-x': [['pub', 'marker'], ['pub']] });
+    expect(trustedRules(twoGroups, expected)).toEqual([]);
+  });
+
+  test('every group carrying the requirement is still trusted', () => {
+    const expected = [rule('allow-x', ['pub', 'marker'])];
+    const twoGroups = liveGroups({
+      'allow-x': [
+        ['pub', 'marker'],
+        ['pub', 'marker', 'extra'],
+      ],
+    });
+    expect(trustedRules(twoGroups, expected)).toEqual(['allow-x']);
+  });
+
+  test('a live rule carrying no groups at all is not trusted', () => {
+    // `[].every` is true, so an empty group list would certify a rule demanding nothing — the
+    // vacuous pass this module exists to catch, reintroduced by the fix for the one above.
+    const expected = [rule('allow-x', ['pub'])];
+    expect(trustedRules(liveGroups({ 'allow-x': [] }), expected)).toEqual([]);
+  });
 });
 
 describe('negated conditions', () => {
@@ -138,7 +175,7 @@ describe('negated conditions', () => {
         ],
       },
     ];
-    const live = new Map([['allow-x', headerKeysOf(negated)]]);
+    const live = new Map([['allow-x', headerKeysByGroup(negated)]]);
     expect(trustedRules(live, expected)).toEqual([]);
   });
 

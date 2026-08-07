@@ -99,6 +99,17 @@ describe('impersonators', () => {
     ]);
   });
 
+  test('the digest is lower-cased where it enters', () => {
+    // fetchIpProfile validates the lower-cased digest but filters on the raw one, and the filter
+    // is an exact string match. An upper-cased digest would clear validation and then match
+    // nothing — an empty profile that reads as a quiet identity rather than a query that looked
+    // in the wrong place.
+    expect(
+      impersonators([row(A.toUpperCase(), 'browser_impersonation', 30)])[0]
+        ?.digest,
+    ).toBe(A);
+  });
+
   test('an empty category is not impersonation', () => {
     // Most rows carry no category at all; treating blank as a match would flag the whole site.
     expect(impersonators([row(A, '', 9000)])).toEqual([]);

@@ -1,6 +1,6 @@
-# UK Visa Sponsor Search
+# Tanstack Start Learning
 
-Monorepo for [sponsorsearch.co.uk](https://sponsorsearch.co.uk) — search UK skilled worker visa sponsors and view detailed company profiles.
+Tanstack start app
 
 ## Structure
 

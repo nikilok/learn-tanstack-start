@@ -1,7 +1,10 @@
 // An alerting path fails in two silent ways: it repeats until it is ignored, or it stops working
 // and nothing says so. Both look identical to a quiet week.
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { rollingWindow } from './time-window';
 import type { WatchReport } from './watch';
@@ -146,10 +149,24 @@ describe('iMessageArgs', () => {
 // The unattended run has no memory of its own, so this file IS the memory. Getting it wrong
 // either bills for the same answer every hour or hides a finding nobody has seen.
 describe('readInvestigated / writeInvestigated', () => {
-  const DIR =
-    '/private/tmp/claude-501/-Users-nikil-projects-learn-tanstack-start/c6485684-a930-44ef-a9f9-0df59c8768ed/scratchpad';
   const NOW = Date.parse('2026-08-06T20:00:00.000Z');
   const DAY = 24 * 60 * 60_000;
+
+  // Made per test, not hardcoded: writeInvestigated swallows a failed write by design, so a
+  // directory that does not exist turns every setup into a silent no-op and the reads below
+  // assert against nothing.
+  let DIR: string;
+  beforeEach(async () => {
+    DIR = await mkdtemp(join(tmpdir(), 'fw-watch-'));
+  });
+  afterEach(async () => {
+    await rm(DIR, { recursive: true, force: true });
+  });
+
+  test('the fixture directory is real, so a failed write cannot pass as an empty read', async () => {
+    await writeInvestigated(DIR, new Map([[DIG, NOW]]));
+    expect(await Bun.file(`${DIR}/${INVESTIGATED}`).exists()).toBe(true);
+  });
 
   test('round-trips what it was given', async () => {
     await writeInvestigated(DIR, new Map([[DIG, NOW]]));

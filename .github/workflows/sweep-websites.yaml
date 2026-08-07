@@ -90,10 +90,14 @@ jobs:
         shell: bash
         env:
           REVALIDATE_SECRET: ${{ secrets.REVALIDATE_SECRET }}
+          REVALIDATE_MARKER_HEADER: ${{ secrets.REVALIDATE_MARKER_HEADER }}
         run: |
           [ -n "$REVALIDATE_SECRET" ] || { echo "REVALIDATE_SECRET is not set"; exit 1; }
+          # Required, not optional: the request is rejected upstream without it.
+          [ -n "$REVALIDATE_MARKER_HEADER" ] || { echo "REVALIDATE_MARKER_HEADER is not set"; exit 1; }
           body=$(mktemp)
           status=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
+            -H "$REVALIDATE_MARKER_HEADER: 1" \
             -H "x-revalidate-secret: $REVALIDATE_SECRET" \
             "https://sponsorsearch.co.uk/api/revalidate?purge=company-pages") || exit $?
           [ "$status" = "200" ] || { echo "Expected 200, got $status"; cat "$body"; exit 1; }

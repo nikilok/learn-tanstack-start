@@ -95,6 +95,12 @@ jobs:
           [ -n "$REVALIDATE_SECRET" ] || { echo "REVALIDATE_SECRET is not set"; exit 1; }
           # Required, not optional: the request is rejected upstream without it.
           [ -n "$REVALIDATE_MARKER_HEADER" ] || { echo "REVALIDATE_MARKER_HEADER is not set"; exit 1; }
+          # A malformed or colliding name still fails, but as an opaque status from the edge.
+          # Naming it here costs one check and saves the next person the same diagnosis.
+          printf '%s' "$REVALIDATE_MARKER_HEADER" | grep -qE '^[A-Za-z0-9!#$%&'"'"'*+.^_`|~-]+$' \
+            || { echo "REVALIDATE_MARKER_HEADER is not a valid HTTP field name"; exit 1; }
+          [ "$(printf '%s' "$REVALIDATE_MARKER_HEADER" | tr '[:upper:]' '[:lower:]')" != "x-revalidate-secret" ] \
+            || { echo "REVALIDATE_MARKER_HEADER collides with the secret header"; exit 1; }
           body=$(mktemp)
           status=$(curl -sS -o "$body" -w '%{http_code}' -X POST \
             -H "$REVALIDATE_MARKER_HEADER: 1" \

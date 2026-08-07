@@ -352,17 +352,17 @@ describe('pendingEdits', () => {
   const OTHER = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
 
   test('a removed ASN does not mark the JA4 rule', () => {
-    const e = pendingEdits([DIGEST], [], ['29066'], JA4_DENY);
+    const e = pendingEdits([DIGEST], [], ['64512'], JA4_DENY);
     expect(e.dropped).toBe(0);
     expect(e.added).toBe(0);
   });
 
   test('a removed digest does not mark the ASN rule', () => {
-    expect(pendingEdits(['29066'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
+    expect(pendingEdits(['64512'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
   });
 
   test('each rule still counts its own removal', () => {
-    expect(pendingEdits([], [], ['29066'], ASN_DENY).dropped).toBe(1);
+    expect(pendingEdits([], [], ['64512'], ASN_DENY).dropped).toBe(1);
     expect(pendingEdits([], [], [DIGEST], JA4_DENY).dropped).toBe(1);
   });
 
@@ -387,13 +387,13 @@ describe('pendingEdits', () => {
   });
 
   test('both kinds staged and removed at once stay on their own rules', () => {
-    const staged = [DIGEST, '29066'];
+    const staged = [DIGEST, '64512'];
     const removed = [OTHER, '64500'];
     expect(pendingEdits([DIGEST], staged, removed, JA4_DENY)).toEqual({
       added: 1,
       dropped: 1,
     });
-    expect(pendingEdits(['29066'], staged, removed, ASN_DENY)).toEqual({
+    expect(pendingEdits(['64512'], staged, removed, ASN_DENY)).toEqual({
       added: 1,
       dropped: 1,
     });

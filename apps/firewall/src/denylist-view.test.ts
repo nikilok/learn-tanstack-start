@@ -31,10 +31,10 @@ describe('denylistLines', () => {
   });
 
   test('UNKNOWN activity never reads as quiet — that would retire a live ban', () => {
-    // Regression: zero-filling an unqueryable value said "safe to retire" for AS29066,
-    // which was doing 1,206 req at the time.
+    // Regression: zero-filling an unqueryable value said "safe to retire" for a denied
+    // network that was still under load at the time.
     const out = text([
-      entry({ kind: 'asn', value: '29066', requests: undefined }),
+      entry({ kind: 'asn', value: '64512', requests: undefined }),
     ]);
     expect(out).not.toContain('safe to retire');
     expect(out).toContain('not measurable');

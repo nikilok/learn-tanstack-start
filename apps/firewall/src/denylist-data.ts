@@ -3,8 +3,8 @@
 //
 // JA4 only. There is NO AS-number dimension in the observability API — geoAsNumber/asNumber/
 // clientAsn are all rejected — and `asnName` cannot be derived from an AS number. A denied ASN
-// therefore reports UNKNOWN, never zero: zero reads as "safe to retire", and AS29066 was doing
-// 1,206 requests when a zero-filled version of this said exactly that.
+// therefore reports UNKNOWN, never zero: zero reads as "safe to retire", and a zero-filled
+// version of this said exactly that about a denied network still under active load.
 
 import { countOf, makeCtx, metrics } from './observability';
 import { errMsg } from './util';

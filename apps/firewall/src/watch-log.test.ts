@@ -126,3 +126,34 @@ describe('logEntry', () => {
     expect(s).toContain('every 15m');
   });
 });
+
+// Shadow entries record a decision that was NOT acted on. The wording is the whole risk: read at
+// 3am, an ambiguous line is read as an action taken.
+describe('shadow entries', () => {
+  const at = new Date('2026-08-07T04:00:00.000Z');
+  const D = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
+
+  test('a refusal is recorded with its reason', () => {
+    const out = logEntry(at, {
+      kind: 'shadow',
+      digest: D,
+      refusal: 'spans 40 IPs — too broad to deny unattended',
+    });
+    expect(out).toContain('shadow');
+    expect(out).toContain('too broad to deny unattended');
+    expect(out.endsWith('\n')).toBe(true);
+  });
+
+  test('a would-apply says so, and says nothing was applied', () => {
+    // `null` means the gate found no reason to refuse. Rendering that as a bare "would apply" —
+    // or worse, as an empty reason — is how a shadow entry gets read as a ban that happened.
+    const out = logEntry(at, { kind: 'shadow', digest: D, refusal: null });
+    expect(out).toContain('WOULD HAVE APPLIED');
+    expect(out).toContain('nothing was applied');
+  });
+
+  test('it stays one line, so it cannot be read as several events', () => {
+    const out = logEntry(at, { kind: 'shadow', digest: D, refusal: null });
+    expect(out.trimEnd().split('\n')).toHaveLength(1);
+  });
+});

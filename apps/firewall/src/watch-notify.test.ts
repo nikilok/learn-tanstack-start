@@ -43,6 +43,7 @@ const ban = (digest: string) => ({
     blockers: [],
     leverNotes: [],
   },
+  autoBanRefusal: 'fixture: not evaluated',
 });
 
 describe('actionableKey', () => {

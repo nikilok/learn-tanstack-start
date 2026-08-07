@@ -4,11 +4,13 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { type Advice } from './ban-advice';
+import { autoBanRefusal } from './auto-ban';
+import { type Advice, type Reach } from './ban-advice';
 import { lineText } from './line-model';
 import { rollingWindow } from './time-window';
 import {
   type WatchReport,
+  banCandidate,
   impersonators,
   mergeScreens,
   nonRendering,
@@ -344,7 +346,14 @@ describe('watchLines', () => {
     candidates: 1,
     truncated: false,
     findings: [
-      { digest: DIG, allowed: 9060, total: 9060, why: [], advice: advice() },
+      {
+        digest: DIG,
+        allowed: 9060,
+        total: 9060,
+        why: [],
+        advice: advice(),
+        autoBanRefusal: 'fixture: not evaluated',
+      },
     ],
     enforcement: [],
     errors: [],
@@ -382,6 +391,7 @@ describe('watchLines', () => {
                 needsAsNumber: true,
               },
             }),
+            autoBanRefusal: 'fixture: not evaluated',
           },
         ],
       }),
@@ -399,6 +409,7 @@ describe('watchLines', () => {
             total: 900,
             why: [],
             advice: advice({ verdict: 'watch', lever: undefined }),
+            autoBanRefusal: 'fixture: not evaluated',
           },
         ],
       }),
@@ -468,6 +479,7 @@ describe('isActionable', () => {
         total: 500,
         why: [],
         advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
+        autoBanRefusal: 'fixture: not evaluated',
       },
     ],
   });
@@ -525,6 +537,7 @@ describe('exitCodeFor', () => {
         total: 1,
         why: [],
         advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
+        autoBanRefusal: 'fixture: not evaluated',
       },
     ],
   });
@@ -570,5 +583,74 @@ describe('exitCodeFor', () => {
     for (const v of ['watch', 'leave'] as const) {
       expect(exitCodeFor(withVerdictAt(v))).toBe(EXIT_QUIET);
     }
+  });
+});
+
+// Shadow mode: the gate runs and its answer is recorded, but nothing applies it. What matters
+// here is that an unmeasured metric arrives as NaN — autoBanRefusal fails closed on NaN, and
+// would have believed a zero.
+describe('banCandidate', () => {
+  const reach = (over: Partial<Reach> = {}): Reach => ({
+    label: 'fingerprint (144h)',
+    ips: 3,
+    countries: 1,
+    total: 900,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+    ...over,
+  });
+  const advice = { verdict: 'ban', blockers: [] as string[] };
+  const base = { digest: A, advice, total: 900, windowTotal: 100_000 };
+
+  test('a complete reach carries its measured numbers', () => {
+    const c = banCandidate({
+      ...base,
+      reach: reach({ ips: 4, rpcs: 7, tiles: 2 }),
+    });
+    expect(c.ips).toBe(4);
+    expect(c.renderingRequests).toBe(9);
+  });
+
+  test('an INCOMPLETE reach is NaN, never the zero it reports', () => {
+    // A truncated path sample reports zero rendering, and zero rendering is the strongest reason
+    // the gate has to permit a deny. Believing it is how absence clears the gate.
+    const c = banCandidate({ ...base, reach: reach({ complete: false }) });
+    expect(Number.isNaN(c.renderingRequests)).toBe(true);
+    expect(Number.isNaN(c.ips)).toBe(true);
+    expect(autoBanRefusal(c)).toContain('not a usable number');
+  });
+
+  test('an absent reach is refused the same way', () => {
+    const c = banCandidate({ ...base, reach: undefined });
+    expect(autoBanRefusal(c)).toContain('not a usable number');
+  });
+
+  test('an unmeasurable window total is refused, not treated as a small share', () => {
+    const c = banCandidate({
+      ...base,
+      reach: reach(),
+      windowTotal: Number.NaN,
+    });
+    expect(autoBanRefusal(c)).toContain('not a usable number');
+  });
+
+  test('the gate CAN pass, so the refusals above are not vacuous', () => {
+    // Without this every assertion here would hold for a gate that refuses everything.
+    expect(
+      autoBanRefusal(banCandidate({ ...base, reach: reach() })),
+    ).toBeNull();
+  });
+
+  test('the advisory verdict and blockers are carried, not re-derived', () => {
+    const c = banCandidate({
+      ...base,
+      advice: { verdict: 'watch', blockers: ['verified bot'] },
+      reach: reach(),
+    });
+    expect(autoBanRefusal(c)).toContain('not ban');
   });
 });

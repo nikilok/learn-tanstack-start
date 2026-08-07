@@ -10,7 +10,13 @@
 // Adjudicating those is the part Vercel cannot do. Deciding a fingerprint is safe to DENY rather
 // than merely challenge needs to know what a real session on this site looks like.
 
-import { type Advice, adviseBan } from './ban-advice';
+import { type BanCandidate, autoBanRefusal } from './auto-ban';
+import {
+  type Advice,
+  type Reach,
+  adviseBan,
+  browserEvidence,
+} from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, envMatching } from './deny-list';
 import { fetchIpProfile } from './ip-profile';
@@ -146,7 +152,87 @@ export function mergeScreens(...lists: Screened[][]): Screened[] {
 }
 
 /** One adjudicated candidate: what the screen saw, and what the advisory made of it. */
-export type Finding = Screened & { total: number; advice: Advice };
+export type Finding = Screened & {
+  total: number;
+  advice: Advice;
+  /**
+   * What autonomous applying WOULD have done, had it been wired: the refusal reason, or `null`
+   * for a candidate it would have denied. Nothing acts on this — it exists so the gate's answers
+   * accumulate in the log before anything is allowed to act on them, because the screen has never
+   * produced a live `ban` and a rate nobody has measured is not a rate.
+   */
+  autoBanRefusal: string | null;
+};
+
+/**
+ * Record what autonomous applying WOULD have decided. Applies nothing — `auto-ban.ts` is unwired,
+ * deliberately, and this is how the evidence for wiring it gets collected.
+ *
+ * Only `ban` verdicts are recorded. For anything softer the gate's answer is "verdict is X, not
+ * ban", which measures the advisory rather than the gate and would bury the real answers.
+ */
+export async function logShadow(
+  dir: string,
+  findings: readonly Finding[],
+): Promise<void> {
+  for (const f of findings)
+    if (f.advice.verdict === 'ban')
+      await logWatch(dir, new Date(), {
+        kind: 'shadow',
+        digest: f.digest,
+        refusal: f.autoBanRefusal,
+      });
+}
+
+/**
+ * The blast-radius candidate for a finding, shaped so an unmeasured metric arrives as `NaN`.
+ *
+ * Reach that is absent or INCOMPLETE yields NaN rather than its numbers. A truncated path sample
+ * reports zero rendering, and zero rendering is the single strongest reason `autoBanRefusal` has
+ * to permit a deny — so absence must not arrive as the measurement that clears the gate. NaN is
+ * refused by name; a zero would be believed.
+ */
+export function banCandidate(input: {
+  digest: string;
+  advice: { verdict: string; blockers: string[] };
+  reach: Reach | undefined;
+  total: number;
+  windowTotal: number;
+}): BanCandidate {
+  const measured = input.reach?.complete ? input.reach : undefined;
+  return {
+    digest: input.digest,
+    verdict: input.advice.verdict,
+    blockers: input.advice.blockers,
+    renderingRequests: measured ? browserEvidence(measured) : Number.NaN,
+    ips: measured ? measured.ips : Number.NaN,
+    total: input.total,
+    windowTotal: input.windowTotal,
+  };
+}
+
+/**
+ * All traffic in the window — the denominator a candidate's share is measured against.
+ *
+ * Grouped by `wafAction` because it is the lowest-cardinality dimension available, so this one
+ * cannot be silently truncated by the group cap the way a path or IP grouping can. A failed query
+ * returns NaN, never 0: zero is a denominator that makes every candidate's share unmeasurable in
+ * a direction that reads as small, and NaN is what the gate refuses on.
+ */
+export async function windowTotalOf(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+): Promise<number> {
+  try {
+    const { ctx } = makeCtx(creds, window);
+    const rows = (await metrics(ctx, ['wafAction'], { limit: GROUP_CAP }))
+      .summary;
+    if (!rows?.length) return Number.NaN;
+    return rows.reduce((a, r) => a + countOf(r), 0);
+  } catch {
+    return Number.NaN;
+  }
+}
 
 export type WatchReport = {
   window: Window;
@@ -332,35 +418,51 @@ export async function findSuspects(
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated } = await screen(creds, window);
   const findings: Finding[] = [];
-  for (const c of worthProfiling(rows, deniedJa4)) {
+  const candidates = worthProfiling(rows, deniedJa4);
+  // Fetched once, and only when there is something to size — an extra query per run buys nothing
+  // on the quiet nights, which is nearly all of them.
+  const windowTotal = candidates.length
+    ? await windowTotalOf(creds, window)
+    : Number.NaN;
+  for (const c of candidates) {
     const p = await fetchIpProfile(
       creds,
       { kind: 'ja4', value: c.digest },
       window,
     );
+    const advice = adviseBan({
+      total: p.total,
+      mix: p.mix,
+      shape: p.shape,
+      ja4: p.byJa4,
+      asns: p.byAsn,
+      botVerified: p.byBotVerified,
+      wafActions: p.byWafAction,
+      wafRules: p.byWafRule,
+      statuses: p.byStatus,
+      digestReach: p.digestReach,
+      asnReach: p.asnReach,
+      alreadyDeniedJa4: false, // filtered out by worthProfiling
+      stagedJa4: false,
+      alreadyDeniedAsn: false,
+      windowMinutes: p.windowHours * 60,
+      failedQueries: p.failedQueries,
+      trustedAllowRules,
+      mixPartial: p.mixPartial,
+    });
     findings.push({
       ...c,
       total: p.total,
-      advice: adviseBan({
-        total: p.total,
-        mix: p.mix,
-        shape: p.shape,
-        ja4: p.byJa4,
-        asns: p.byAsn,
-        botVerified: p.byBotVerified,
-        wafActions: p.byWafAction,
-        wafRules: p.byWafRule,
-        statuses: p.byStatus,
-        digestReach: p.digestReach,
-        asnReach: p.asnReach,
-        alreadyDeniedJa4: false, // filtered out by worthProfiling
-        stagedJa4: false,
-        alreadyDeniedAsn: false,
-        windowMinutes: p.windowHours * 60,
-        failedQueries: p.failedQueries,
-        trustedAllowRules,
-        mixPartial: p.mixPartial,
-      }),
+      advice,
+      autoBanRefusal: autoBanRefusal(
+        banCandidate({
+          digest: c.digest,
+          advice,
+          reach: p.digestReach,
+          total: p.total,
+          windowTotal,
+        }),
+      ),
     });
   }
   return { rows, findings, truncated };
@@ -502,6 +604,7 @@ async function main() {
     deniedJa4,
     trusted,
   );
+  await logShadow(process.cwd(), findings);
 
   const report: WatchReport = {
     window,

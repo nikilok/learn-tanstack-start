@@ -71,7 +71,7 @@ import { watchHours, watchIntervalMs } from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
-import { findSuspects } from './watch';
+import { findSuspects, logShadow } from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
   caffeinateArgs,
@@ -442,6 +442,7 @@ export function App() {
         );
         if (stopped) return;
         setWatchAt(clockTime(new Date()));
+        await logShadow(root, findings);
         const bans = findings.filter((f) => f.advice.verdict === 'ban');
         setWatchNote(
           `${rows.length} fingerprint(s) allowed through · ${findings.length} profiled · ${bans.length} would ban`,

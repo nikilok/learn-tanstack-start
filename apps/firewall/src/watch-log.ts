@@ -19,6 +19,8 @@ export type WatchEvent =
       total: number;
       reasons: string[];
     }
+  /** What autonomous applying WOULD have done. Nothing is applied — see auto-ban.ts. */
+  | { kind: 'shadow'; digest: string; refusal: string | null }
   | { kind: 'verdict'; digest: string; text: string; provenance: string }
   | { kind: 'failed'; digest: string; error: string }
   | { kind: 'error'; error: string };
@@ -68,6 +70,9 @@ export function logEntry(at: Date, e: WatchEvent): string {
         ...e.reasons.map((r) => `    why: ${r}`),
         '',
       ].join('\n');
+    case 'shadow':
+      // Spelled out because a bare 'would apply' in a log is read as 'applied' at 3am.
+      return `${head('shadow', `${e.digest} — ${e.refusal ?? 'no refusal: WOULD HAVE APPLIED (nothing was applied)'}`)}\n`;
     case 'verdict':
       return `${head('verdict', `${e.digest}  [${e.provenance}]`)}\n${block(e.text)}\n`;
     case 'failed':

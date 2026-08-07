@@ -180,6 +180,9 @@ export async function rememberNotified(
  * Never throws, and never reports success it did not get: a notifier that fails quietly turns
  * the whole watch into a machine that looks like it is working.
  */
+/** Ceiling on one notification. Generous for a GUI call, finite so it cannot outlive the tick. */
+export const NOTIFY_TIMEOUT_MS = 20_000;
+
 export async function notify(body: string): Promise<string | null> {
   if (process.platform !== 'darwin')
     return 'notifications are macOS-only; nothing was sent';
@@ -194,6 +197,12 @@ export async function notify(body: string): Promise<string | null> {
     const proc = Bun.spawn(['osascript', ...argv], {
       stdout: 'ignore',
       stderr: 'pipe',
+      // Bounded for the same reason the investigation is: this runs on the unattended path, and
+      // `await proc.exited` on a wedged osascript blocks the loop that is guarding the site — a
+      // watch that stops screening and never says so. A notification is worth seconds, not a
+      // night.
+      timeout: NOTIFY_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
     const [err, code] = await Promise.all([
       new Response(proc.stderr).text(),

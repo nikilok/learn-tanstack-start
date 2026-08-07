@@ -141,7 +141,10 @@ describe('shadow entries', () => {
     });
     expect(out).toContain('shadow');
     expect(out).toContain('too broad to deny unattended');
+    // Exactly one: `endsWith` alone passes for a trailing blank line, which in this log means
+    // an event separator that isn't there.
     expect(out.endsWith('\n')).toBe(true);
+    expect(out.endsWith('\n\n')).toBe(false);
   });
 
   test('a would-apply says so, and says nothing was applied', () => {

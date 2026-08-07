@@ -435,10 +435,28 @@ export function App() {
         } catch {
           denied = [];
         }
+        // The first-party blocker, which the CLI already passes and this loop did not. Without it
+        // the advisory cannot see that a fingerprint matched a header-gated allow rule, so our own
+        // services lose the one thing that outranks every axis — in the UNATTENDED path, the only
+        // one that spends an investigation and wakes someone up. `undefined`, never `[]`: an
+        // unreadable config means "not known", and an empty list would assert that no rule
+        // qualifies, which is the same wrong answer stated confidently.
+        // Read fresh each tick rather than reusing the `trustedAllow` state: that snapshot is
+        // taken when the TUI starts, and a rule edited in the dashboard hours later is the
+        // exact drift rule-integrity exists to notice.
+        let trusted: string[] | undefined;
+        try {
+          const { fetchLive } = await import('./client');
+          const { rules } = await import('./rules');
+          trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
+        } catch {
+          trusted = undefined;
+        }
         const { rows, findings } = await findSuspects(
           creds,
           rollingWindow(watchHours(), new Date()),
           denied,
+          trusted,
         );
         if (stopped) return;
         setWatchAt(clockTime(new Date()));

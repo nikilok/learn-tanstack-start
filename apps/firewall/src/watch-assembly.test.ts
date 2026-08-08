@@ -17,7 +17,7 @@ import type { IpProfile } from './ip-profile';
 import { mixOf } from './ip-signals';
 import type { Row } from './observability';
 import { rollingWindow } from './time-window';
-import { type ScreenDeps, findSuspects, screen } from './watch';
+import { type ScreenDeps, findSuspects, screen, screenOnce } from './watch';
 
 const CREDS = { projectId: 'p', teamId: 't', token: 'x' };
 const WINDOW = rollingWindow(24, new Date('2026-08-08T12:00:00.000Z'));
@@ -47,9 +47,16 @@ const rows = (make: (c: Client) => Row | Row[] | null, cs: Client[]): Row[] =>
 function fakeMetrics(
   clients: Client[],
   opts: { truncateRoutes?: boolean } = {},
+  /** Every call's options, so a test can assert the filter rather than trust it. */
+  seen: { dims: string[]; filter?: string }[] = [],
 ) {
   const GROUP_CAP = 500;
-  return ((_ctx: unknown, dims: string[]): Promise<{ summary?: Row[] }> => {
+  return ((
+    _ctx: unknown,
+    dims: string[],
+    o?: { filter?: string },
+  ): Promise<{ summary?: Row[] }> => {
+    seen.push({ dims, filter: o?.filter });
     const key = dims.join(',');
     if (key === 'clientJa4Digest,route') {
       const out = rows((c) => {
@@ -196,8 +203,9 @@ function fakeProfile(clients: Client[]): ScreenDeps['fetchIpProfile'] {
 const deps = (
   clients: Client[],
   opts?: { truncateRoutes?: boolean },
+  seen?: { dims: string[]; filter?: string }[],
 ): ScreenDeps => ({
-  metrics: fakeMetrics(clients, opts),
+  metrics: fakeMetrics(clients, opts, seen),
   fetchIpProfile: fakeProfile(clients),
 });
 
@@ -289,6 +297,21 @@ describe('screen — who becomes a candidate', () => {
       deps([HARVESTER]),
     );
     expect([...out.handled]).toContain(HARVESTER.digest);
+  });
+
+  test('the screen asks for what PASSED, never for one named action', async () => {
+    // `wafAction eq 'allow'` was live and wrong: log and bypass reach the app too, and filtering
+    // on allow saw 507 requests where the truth was 167,801. Without asserting the filter, a
+    // regression back to it keeps every test in this file green.
+    const seen: { dims: string[]; filter?: string }[] = [];
+    await screen(CREDS, WINDOW, ['googlebot'], [], deps([HARVESTER], {}, seen));
+    const filtered = seen.filter((c) => c.filter);
+    expect(filtered.length).toBeGreaterThan(0);
+    for (const c of filtered) {
+      expect(c.filter).toContain("ne 'deny'");
+      expect(c.filter).toContain("ne 'challenge'");
+      expect(c.filter).not.toContain("eq 'allow'");
+    }
   });
 
   test('truncation is carried out of the screen, not dropped', async () => {
@@ -439,5 +462,53 @@ describe('findSuspects — screen to verdict, end to end', () => {
       ),
     );
     expect(findings).toHaveLength(0);
+  });
+});
+
+describe('screenOnce — the shared entry both paths use', () => {
+  /**
+   * Runs with the Vercel credentials removed.
+   *
+   * `screenOnce` imports `client.ts`, which resolves credentials at module scope and would
+   * otherwise make a REAL call to the live firewall config. A unit test that reaches production
+   * is slow, flaky, and spends the operator's API budget to assert something local. Removing the
+   * token guarantees the import throws, which is the failure path these tests are about anyway.
+   */
+  async function offline<T>(fn: () => Promise<T>): Promise<T> {
+    const prior = process.env.VERCEL_TOKEN;
+    delete process.env.VERCEL_TOKEN;
+    try {
+      return await fn();
+    } finally {
+      if (prior !== undefined) process.env.VERCEL_TOKEN = prior;
+    }
+  }
+
+  test('config failures are collected, never thrown', async () => {
+    // Every gate it reads can fail: the denylist, the live firewall config, the allowlist. It
+    // must degrade to the permissive value and hand the failures BACK, because the CLI escalates
+    // them to exit 2 and the TUI shows them — and a throw here kills the loop instead.
+    const out = await offline(() =>
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([HARVESTER]))),
+    );
+    expect(out.configErrors.length).toBeGreaterThan(0);
+    // Degraded, not dead: it still screened.
+    expect(out.rows.length).toBeGreaterThan(0);
+  });
+
+  test('an unreadable allowlist exempts every verified crawler', async () => {
+    // The fail-safe direction. screenOnce cannot read FW_ALLOWED_BOTS here, so a verified
+    // crawler must NOT become a candidate — a config that did not load must never turn
+    // Googlebot into one.
+    const crawler: Client = {
+      ...HARVESTER,
+      digest: 't13dgoog00_cccccccccccc_dddddddddddd',
+      ua: 'Googlebot/2.1',
+      verified: { name: 'googlebot' },
+      category: undefined,
+    };
+    const out = await atFloor(() => screenOnce(CREDS, WINDOW, deps([crawler])));
+    expect(out.rows).toHaveLength(0);
+    expect(out.configErrors.join(' ')).toContain('FW_ALLOWED_BOTS');
   });
 });

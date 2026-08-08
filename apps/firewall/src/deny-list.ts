@@ -1,5 +1,6 @@
 // Env-driven identity denylists. Never put a value in an error or log line: --apply output is public.
 
+import { isRecoverableRule } from './rule-names';
 import type { Condition, Rule } from './rules';
 
 // Narrower than Condition['type']: header/query need a `key` this factory never forwards.
@@ -17,7 +18,7 @@ export type DenySpec = {
 
 /** What a list rule does on a match. Narrower than ActionChoice: a list never logs or bypasses. */
 export type ListAction = 'deny' | 'challenge';
-type ListVerb = 'denied' | 'challenged';
+type ListVerb = 'denied' | 'challenged' | 'listed';
 
 const MAX_ASN = 4_294_967_295;
 
@@ -187,6 +188,9 @@ export function listShapeOf(rule: Rule): {
   action: ListAction;
   exemptPaths: string[];
 } {
+  // From the rule's IDENTITY, not its current action. A recoverable rule switched to `log` fell
+  // through to 'deny' here, so merely staging an entry on a disabled tier rebuilt it as a hard
+  // deny — an escalation needing no action keypress at all.
   const action = rule.action.mitigate.action;
   const exempt = new Set<string>();
   for (const g of rule.conditionGroup)
@@ -194,7 +198,10 @@ export function listShapeOf(rule: Rule): {
       if (c.type === 'path' && c.neg && typeof c.value === 'string')
         exempt.add(c.value);
   return {
-    action: action === 'challenge' ? 'challenge' : 'deny',
+    action:
+      isRecoverableRule(rule.name) || action === 'challenge'
+        ? 'challenge'
+        : 'deny',
     exemptPaths: [...exempt],
   };
 }
@@ -244,7 +251,7 @@ export function withoutValue(
 // Stripped before re-appending: withValue/withoutValue feed a rule's own description back in, so
 // without this the counts compound into "… 1 denied. 2 denied."
 const COUNT_SUFFIX =
-  /\s*(?:\d+ (?:denied|challenged)\.|REVOKED — nothing is (?:denied|challenged)\.)$/;
+  /\s*(?:\d+ (?:denied|challenged|listed)\.|REVOKED — nothing is (?:denied|challenged|listed)\.)$/;
 
 /** Count-aware description, so the Vercel dashboard list says what a rule is doing without opening it. A revoked rule must say so loudly: it stays active and matching a placeholder, which otherwise reads as "denying something". Idempotent. */
 export function denyDescription(
@@ -345,10 +352,19 @@ export function retitledForAction(
   description: string,
   action: Rule['action']['mitigate']['action'],
 ): string {
-  if (action !== 'deny' && action !== 'challenge') return description;
+  // `log` gets its own verb rather than being left alone: a rule switched off kept announcing
+  // "3 challenged" in the dashboard, which is a claim to be doing something it is not. "listed" is
+  // the honest word for holding entries and acting on none of them.
+  if (action !== 'deny' && action !== 'challenge' && action !== 'log')
+    return description;
   const m = description.match(COUNT_SUFFIX);
   if (!m) return description;
-  const verb: ListVerb = action === 'challenge' ? 'challenged' : 'denied';
+  const verb: ListVerb =
+    action === 'challenge'
+      ? 'challenged'
+      : action === 'log'
+        ? 'listed'
+        : 'denied';
   const count = m[0].match(/\d+/);
   return denyDescription(description, count ? Number(count[0]) : 0, verb);
 }

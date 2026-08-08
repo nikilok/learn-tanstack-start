@@ -9,7 +9,12 @@ import {
   denyListRule,
   envMatching,
 } from './deny-list';
-import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
+import {
+  CHALLENGE_SCRAPER_JA4,
+  CH_STREAM_REVALIDATE,
+  DESKTOP_RELEASE_RECORD,
+  isRecoverableRule,
+} from './rule-names';
 import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
@@ -236,7 +241,7 @@ const blockedJa4Rule = denyListRule({
  * Promotion to `deny` is a human moving the digest to FW_BLOCKED_JA4, never a keystroke here.
  */
 const challengedJa4Rule = challengeListRule({
-  name: 'challenge-scraper-ja4',
+  name: CHALLENGE_SCRAPER_JA4,
   description: 'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4).',
   spec: JA4_DENY,
   values: envMatching('FW_CHALLENGE_JA4', JA4_DENY, !dryRun),
@@ -478,10 +483,7 @@ for (const r of rules) {
   // The recoverable tier, checked where it cannot be missed. Its entries are the ones an
   // unattended writer may add, so they must never be enforced by a deny: a wrong deny takes real
   // people offline silently. Refuse to apply rather than ship the escalation.
-  if (
-    r.name.startsWith('challenge-') &&
-    r.action.mitigate.action !== 'challenge'
-  )
+  if (isRecoverableRule(r.name) && r.action.mitigate.action !== 'challenge')
     throw new Error(
       `Firewall rule "${r.name}" is the recoverable tier but its action is "${r.action.mitigate.action}" — it must be "challenge". Use challengeListRule.`,
     );

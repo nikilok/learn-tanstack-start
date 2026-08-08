@@ -1,6 +1,7 @@
 // Pure helpers for a rule's switchable action (log / challenge / deny / bypass). No Vercel/Ink deps.
 
 import { retitledForAction } from './deny-list';
+import { isRecoverableRule } from './rule-names';
 import type { ActionChoice, RateLimitAction, Rule } from './rules';
 
 const ACTIONS: ActionChoice[] = ['log', 'challenge', 'deny', 'bypass'];
@@ -53,9 +54,13 @@ export function isBypassOnly(rule: Rule): boolean {
  * everyone sharing those TLS stacks, and `seedItems` prefers the live action so it would survive
  * every later apply. `log` stays available — disabling the tier without an env edit is a real
  * operational need, and it errs toward serving traffic.
+ *
+ * Keyed on the rule's NAME, never on its current action. Deriving it from the action made the
+ * guarantee self-defeating: switching the tier off removed the very thing marking it as needing
+ * protection, so challenge -> log -> deny took two presses.
  */
 export function isChallengeOnly(rule: Rule): boolean {
-  return rule.action.mitigate.action === 'challenge';
+  return isRecoverableRule(rule.name);
 }
 
 /**
@@ -87,10 +92,16 @@ export function withAction(rule: Rule, action: ActionChoice): Rule {
       },
     };
   }
+  // Enforced here, not just offered by actionOptions: seedItems reads the LIVE action and hands it
+  // straight to this function, so a rule escalated in the dashboard would otherwise be re-applied
+  // as a deny forever. Coercing back is the fail-safe direction and makes the escalation heal on
+  // the next apply; notEnforcing still reports that it happened, so it is corrected, not hidden.
+  const safe: ActionChoice =
+    action === 'deny' && isRecoverableRule(rule.name) ? 'challenge' : action;
   return {
     ...rule,
-    description: retitledForAction(rule.description, action),
-    action: { mitigate: { ...m, action } },
+    description: retitledForAction(rule.description, safe),
+    action: { mitigate: { ...m, action: safe } },
   };
 }
 

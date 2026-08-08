@@ -13,7 +13,13 @@ import {
   isLogOnly,
   withAction,
 } from './actions';
-import { JA4_DENY, challengeListRule } from './deny-list';
+import {
+  JA4_DENY,
+  challengeListRule,
+  listShapeOf,
+  withValue,
+} from './deny-list';
+import { CHALLENGE_SCRAPER_JA4 } from './rule-names';
 import type { ActionChoice, Condition, Rule } from './rules';
 
 function rule(
@@ -53,7 +59,19 @@ describe('the challenge tier cannot be escalated to deny', () => {
   // person offline silently, a wrong challenge costs them an interstitial their browser solves. An
   // unattended writer is only allowed to touch it BECAUSE of that, so if it can become a deny the
   // safety argument for automating writes disappears entirely.
-  const challenge = rule('challenge', [JA4]);
+  const challenge = {
+    ...rule('challenge', [JA4]),
+    name: CHALLENGE_SCRAPER_JA4,
+  };
+
+  // The distinction the name-keyed guard draws, stated outright: protection follows membership of
+  // the tier, not the action a rule happens to carry. An unrelated rule set to challenge is an
+  // ordinary switchable rule, and must stay one.
+  test('an unrelated rule that merely challenges is NOT locked', () => {
+    const coincidental = rule('challenge', [JA4]);
+    expect(isChallengeOnly(coincidental)).toBe(false);
+    expect(actionOptions(coincidental)).toEqual(['log', 'challenge', 'deny']);
+  });
 
   test('offers log and challenge only', () => {
     expect(isChallengeOnly(challenge)).toBe(true);
@@ -209,5 +227,64 @@ describe('withAction keeps the description honest', () => {
   test('leaves a description with no count clause alone', () => {
     const plain = { ...rule('deny', [JA4]), description: 'Some rate limit.' };
     expect(withAction(plain, 'challenge').description).toBe('Some rate limit.');
+  });
+});
+
+// Each of these is a hole the first version of the lock had. It keyed off `mitigate.action`, so
+// switching the tier OFF removed the very property marking it as needing protection: the guard
+// disappeared exactly when the rule looked most harmless.
+describe('the lock survives the tier being switched off', () => {
+  const tier = challengeListRule({
+    name: CHALLENGE_SCRAPER_JA4,
+    description: 'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4).',
+    spec: JA4_DENY,
+    values: ['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb'],
+    exemptPaths: ['/robots.txt', '/llms.txt'],
+  });
+  const logged = withAction(tier, 'log');
+
+  // Two keypresses: challenge -> log -> deny.
+  test('a disabled tier is still the tier, and still cannot reach deny', () => {
+    expect(isChallengeOnly(logged)).toBe(true);
+    expect(actionOptions(logged)).toEqual(['log', 'challenge']);
+    expect([...reachable(logged)].sort()).toEqual(['challenge', 'log']);
+  });
+
+  // No action keypress at all — just staging an entry on a disabled tier rebuilt it as a deny,
+  // because listShapeOf mapped anything that was not 'challenge' onto 'deny'.
+  test('staging an entry on a disabled tier does not rebuild it as a deny', () => {
+    expect(listShapeOf(logged).action).toBe('challenge');
+    const rebuilt = withValue(
+      logged,
+      JA4_DENY,
+      't13d1516h2_cccccccccccc_dddddddddddd',
+    ).rule;
+    expect(rebuilt.action.mitigate.action).toBe('challenge');
+    // And the exemption still survives the rebuild.
+    for (const g of rebuilt.conditionGroup)
+      expect(
+        g.conditions.filter((c) => c.type === 'path' && c.neg).length,
+      ).toBe(2);
+  });
+
+  // actionOptions only ADVISES. seedItems reads the live action and hands it straight to
+  // withAction, so a rule escalated in the dashboard would be re-applied as a deny forever.
+  test('withAction refuses deny for the tier, however it is called', () => {
+    expect(withAction(tier, 'deny').action.mitigate.action).toBe('challenge');
+    expect(withAction(logged, 'deny').action.mitigate.action).toBe('challenge');
+  });
+
+  test('an ordinary deny rule is untouched by all of this', () => {
+    const deny = withAction({ ...tier, name: 'deny-scraper-ja4' }, 'deny');
+    expect(isChallengeOnly(deny)).toBe(false);
+    expect(deny.action.mitigate.action).toBe('deny');
+    expect(listShapeOf(deny).action).toBe('deny');
+    expect(actionOptions(deny)).toEqual(['log', 'challenge', 'deny']);
+  });
+
+  // A rule holding entries while doing nothing to them must not claim otherwise in the dashboard.
+  test('a switched-off tier stops claiming to challenge', () => {
+    expect(logged.description).toContain('1 listed.');
+    expect(logged.description).not.toContain('challenged.');
   });
 });

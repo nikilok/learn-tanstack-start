@@ -24,6 +24,7 @@ import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
 import { trustedRules } from './rule-integrity';
+import { isRecoverableRule } from './rule-names';
 import { type Window, rollingWindow } from './time-window';
 import { allowedBots, screenFloor, watchHours } from './tuning';
 import { errMsg } from './util';
@@ -970,7 +971,7 @@ async function enforcementIssues(): Promise<string[]> {
       values: count(name, spec),
       // The challenge tier is enforcing when it CHALLENGES. Defaulting to 'deny' would report a
       // correctly-working recoverable tier as blocking nothing.
-      expected: name === 'challenge-scraper-ja4' ? 'challenge' : 'deny',
+      expected: isRecoverableRule(name) ? 'challenge' : 'deny',
     })),
   );
 }

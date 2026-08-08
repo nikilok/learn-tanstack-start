@@ -37,11 +37,7 @@ type Client = {
   allowRule?: string;
 };
 
-const rows = (
-  dims: string[],
-  make: (c: Client) => Row | Row[] | null,
-  cs: Client[],
-): Row[] =>
+const rows = (make: (c: Client) => Row | Row[] | null, cs: Client[]): Row[] =>
   cs.flatMap((c) => {
     const r = make(c);
     return r === null ? [] : Array.isArray(r) ? r : [r];
@@ -56,26 +52,22 @@ function fakeMetrics(
   return ((_ctx: unknown, dims: string[]): Promise<{ summary?: Row[] }> => {
     const key = dims.join(',');
     if (key === 'clientJa4Digest,route') {
-      const out = rows(
-        dims,
-        (c) => {
-          const pages = Math.round(c.requests * c.pageShare);
-          const renders = c.requests - pages;
-          return [
-            { clientJa4Digest: c.digest, route: '/__server', count_sum: pages },
-            ...(renders > 0
-              ? [
-                  {
-                    clientJa4Digest: c.digest,
-                    route: '/assets/x.js',
-                    count_sum: renders,
-                  },
-                ]
-              : []),
-          ];
-        },
-        clients,
-      );
+      const out = rows((c) => {
+        const pages = Math.round(c.requests * c.pageShare);
+        const renders = c.requests - pages;
+        return [
+          { clientJa4Digest: c.digest, route: '/__server', count_sum: pages },
+          ...(renders > 0
+            ? [
+                {
+                  clientJa4Digest: c.digest,
+                  route: '/assets/x.js',
+                  count_sum: renders,
+                },
+              ]
+            : []),
+        ];
+      }, clients);
       // Padding to the cap is how a real response signals it may have dropped rows.
       return Promise.resolve({
         summary: opts.truncateRoutes
@@ -93,7 +85,6 @@ function fakeMetrics(
     if (key === 'clientJa4Digest,botVerified,botName')
       return Promise.resolve({
         summary: rows(
-          dims,
           (c) =>
             c.verified
               ? {
@@ -109,7 +100,6 @@ function fakeMetrics(
     if (key === 'clientJa4Digest,botCategory')
       return Promise.resolve({
         summary: rows(
-          dims,
           (c) =>
             c.category
               ? {
@@ -124,7 +114,6 @@ function fakeMetrics(
     if (key === 'clientJa4Digest,clientUserAgent')
       return Promise.resolve({
         summary: rows(
-          dims,
           (c) => ({
             clientJa4Digest: c.digest,
             clientUserAgent: c.ua,

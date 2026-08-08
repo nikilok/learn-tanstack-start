@@ -18,7 +18,7 @@ import {
   browserEvidence,
 } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
-import { ASN_DENY, JA4_DENY, envMatching } from './deny-list';
+import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
 import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
@@ -442,12 +442,21 @@ export async function findSuspects(
   trustedAllowRules?: string[],
   /** Verified crawlers we want. Undefined = every verified one is exempt, as before the list. */
   allowedBots?: string[],
+  /** User-agent tokens already denied at the WAF. */
+  deniedUa: readonly string[] = [],
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
-  const { rows, truncated } = await screen(creds, window, allowedBots);
+  const { rows, truncated, handled } = await screen(
+    creds,
+    window,
+    allowedBots,
+    deniedUa,
+  );
   const findings: Finding[] = [];
+  // Both levers. An identity denied by either is handled, and profiling it again spends ~21
+  // queries — and, unattended, a paid investigation — to rediscover a ban already in place.
   const candidates = worthProfiling(
     rows,
-    deniedJa4,
+    [...deniedJa4, ...handled],
     screenFloor(window.minutes),
   );
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
@@ -554,8 +563,62 @@ export async function screenOnce(
     configErrors.push(`FW_ALLOWED_BOTS: ${errMsg(e)}`);
   }
 
-  const found = await findSuspects(creds, window, denied, trusted, allowed);
+  // Read like the JA4 list: unreadable means "none known", which only widens the screen.
+  let deniedUa: string[] = [];
+  try {
+    deniedUa = envMatching('FW_BLOCKED_UA', UA_DENY, false);
+  } catch (e) {
+    configErrors.push(`FW_BLOCKED_UA unreadable: ${errMsg(e)}`);
+  }
+  const found = await findSuspects(
+    creds,
+    window,
+    denied,
+    trusted,
+    allowed,
+    deniedUa,
+  );
   return { ...found, configErrors };
+}
+
+/** Share of an identity's traffic a denied name must own before the identity counts as handled. */
+const HANDLED_SHARE = 0.5;
+
+/**
+ * Fingerprints already denied by NAME, so the screen stops re-nominating them.
+ *
+ * The screen filters on what PASSED, and a window that mostly predates a ban is still full of
+ * the traffic that passed before it. So a UA-denied crawler keeps arriving as a candidate for a
+ * whole window: profiled at ~21 queries, and with --investigate, a paid agent spent to conclude
+ * it should be denied. It already is.
+ *
+ * Dominance, not presence. A digest is a client BUILD and can carry several callers; dropping it
+ * because 1% of its traffic is a denied bot would blind the screen to the other 99%. Only when
+ * the denied name owns the majority is the identity genuinely handled.
+ */
+export function deniedByUa(
+  uaRows: Row[],
+  tokens: readonly string[],
+  share = HANDLED_SHARE,
+): Set<string> {
+  const out = new Set<string>();
+  if (!tokens.length) return out;
+  const total = new Map<string, number>();
+  const denied = new Map<string, number>();
+  for (const r of uaRows) {
+    const digest = JA4_DENY.normalize(String(r.clientJa4Digest ?? ''));
+    if (!digest) continue;
+    const n = countOf(r);
+    total.set(digest, (total.get(digest) ?? 0) + n);
+    const ua = String(r.clientUserAgent ?? '');
+    if (tokens.some((t) => t && ua.includes(t)))
+      denied.set(digest, (denied.get(digest) ?? 0) + n);
+  }
+  for (const [digest, n] of denied) {
+    const all = total.get(digest) ?? 0;
+    if (all > 0 && n / all > share) out.add(digest);
+  }
+  return out;
 }
 
 const IMPERSONATION = 'browser_impersonation';
@@ -611,7 +674,9 @@ export async function screen(
   window: Window,
   /** Verified crawlers to keep off the candidate list. Undefined = skip every verified one. */
   allowed?: readonly string[],
-): Promise<{ rows: Screened[]; truncated: boolean }> {
+  /** Denied user-agent tokens, so an identity already banned by name is not re-nominated. */
+  deniedUa: readonly string[] = [],
+): Promise<{ rows: Screened[]; truncated: boolean; handled: Set<string> }> {
   const { ctx } = makeCtx(creds, window);
   const [routeResp, verifiedResp] = await Promise.all([
     metrics(ctx, ['clientJa4Digest', 'route'], {
@@ -626,6 +691,14 @@ export async function screen(
       limit: GROUP_CAP,
     }),
   ]);
+  // Only when there is a name list to check against — otherwise it is a query that can only
+  // answer "nothing is handled".
+  const uaResp = deniedUa.length
+    ? await metrics(ctx, ['clientJa4Digest', 'clientUserAgent'], {
+        filter: PASSED,
+        limit: GROUP_CAP,
+      })
+    : undefined;
   const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
     // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
     // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
@@ -658,6 +731,7 @@ export async function screen(
       summary.length >= GROUP_CAP ||
       routeRows.length >= GROUP_CAP ||
       !verifiedComplete,
+    handled: deniedByUa(uaResp?.summary ?? [], deniedUa),
   };
 }
 

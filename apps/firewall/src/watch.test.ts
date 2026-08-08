@@ -11,6 +11,7 @@ import { rollingWindow } from './time-window';
 import {
   type WatchReport,
   banCandidate,
+  deniedByUa,
   impersonators,
   mergeScreens,
   nonRendering,
@@ -652,5 +653,67 @@ describe('banCandidate', () => {
       reach: reach(),
     });
     expect(autoBanRefusal(c)).toContain('not ban');
+  });
+});
+
+// A window that mostly predates a ban is still full of the traffic that passed before it, so a
+// name-denied crawler keeps arriving as a candidate — profiled at ~21 queries, and unattended, a
+// paid agent spent to conclude it should be denied. It already is.
+describe('deniedByUa', () => {
+  const row = (digest: string, ua: string, count_sum: number) => ({
+    clientJa4Digest: digest,
+    clientUserAgent: ua,
+    count_sum,
+  });
+
+  test('an identity whose traffic is mostly a denied name is handled', () => {
+    const out = deniedByUa(
+      [row(A, 'Mozilla/5.0 (compatible; ShapBot/0.1.0)', 900)],
+      ['ShapBot'],
+    );
+    expect([...out]).toEqual([A]);
+  });
+
+  test('a token that matches nothing handles nothing', () => {
+    expect(
+      deniedByUa(
+        [row(A, 'Mozilla/5.0 (compatible; ShapBot/0.1.0)', 900)],
+        ['OtherBot'],
+      ).size,
+    ).toBe(0);
+  });
+
+  test('a shared fingerprint is NOT handled by a minority denied caller', () => {
+    // A digest is a client BUILD and can carry several callers. Dropping it because 1% of its
+    // traffic is a denied bot would blind the screen to the other 99% — which on this site is
+    // how our own ch-stream shares a cipher hash with two AI crawlers.
+    const out = deniedByUa(
+      [
+        row(A, 'Mozilla/5.0 (compatible; ShapBot/0.1.0)', 10),
+        row(A, 'Mozilla/5.0 (Macintosh) Safari/605.1.15', 990),
+      ],
+      ['ShapBot'],
+    );
+    expect(out.size).toBe(0);
+  });
+
+  test('an empty token list handles nothing, and asks no question', () => {
+    expect(deniedByUa([row(A, 'anything', 900)], []).size).toBe(0);
+  });
+
+  test('digests are normalised, so casing cannot hide a handled identity', () => {
+    const out = deniedByUa(
+      [row(A.toUpperCase(), 'compatible; ShapBot/0.1.0', 900)],
+      ['ShapBot'],
+    );
+    expect([...out]).toEqual([A]);
+  });
+
+  test('the match is case-sensitive, like the WAF rule it mirrors', () => {
+    // If this ever diverges, the screen believes an identity is handled that the WAF is letting
+    // straight through — the worst direction for this to be wrong in.
+    expect(
+      deniedByUa([row(A, 'compatible; shapbot/0.1.0', 900)], ['ShapBot']).size,
+    ).toBe(0);
   });
 });

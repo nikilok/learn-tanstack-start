@@ -20,6 +20,7 @@ import {
   investigable,
   shouldInvestigate,
   verdictFrom,
+  investigationChangedConfig,
 } from './watch-mode';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
@@ -339,5 +340,61 @@ describe('investigable', () => {
 
   test('nothing to do is empty, not a crash', () => {
     expect(investigable([], new Map())).toEqual([]);
+  });
+});
+
+describe('the prompt cannot be mistaken for an answer', () => {
+  const f = {
+    digest: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
+    allowed: 900,
+    total: 900,
+    advice: {
+      verdict: 'ban' as const,
+      reasons: [],
+      blockers: [],
+      leverNotes: [],
+    },
+  };
+
+  test('no line of the prompt parses as a verdict', () => {
+    // It used to list `VERDICT: ban` / `leave` / `unclear` as literal lines. verdictFrom
+    // tolerates a preamble by design, so a reply that echoed the instructions back returned the
+    // first one it found — reporting a deny recommendation the investigation never made.
+    const prompt = investigationPrompt(f, 24);
+    expect(prompt).toContain('VERDICT');
+    expect(prompt.split('\n').some((l) => /^\s*VERDICT:/i.test(l))).toBe(false);
+  });
+
+  test('a reply that echoes the whole prompt is unclear, not a ban', () => {
+    expect(verdictFrom(investigationPrompt(f, 24))).toBe('unclear');
+  });
+});
+
+// The disallow list cannot stop a ban — adding one is an append plus an apply, and Bash has to
+// stay available for the protocol's read-only queries. So the run is checked, not trusted.
+describe('investigationChangedConfig', () => {
+  const fp = (size: number, mtimeMs: number) => ({ size, mtimeMs });
+
+  test('an unchanged file is not an alarm', () => {
+    expect(investigationChangedConfig(fp(100, 5), fp(100, 5))).toBe(false);
+  });
+
+  test('a changed size is', () => {
+    expect(investigationChangedConfig(fp(100, 5), fp(140, 5))).toBe(true);
+  });
+
+  test('a rewrite at the same length is caught by the timestamp', () => {
+    // Swapping one banned digest for another leaves the byte count identical.
+    expect(investigationChangedConfig(fp(100, 5), fp(100, 9))).toBe(true);
+  });
+
+  test('unreadable on both sides is not evidence of a change', () => {
+    expect(investigationChangedConfig(null, null)).toBe(false);
+  });
+
+  test('appearing or vanishing mid-run is an alarm', () => {
+    // A file that did not exist and now does is exactly the write being guarded against.
+    expect(investigationChangedConfig(null, fp(100, 5))).toBe(true);
+    expect(investigationChangedConfig(fp(100, 5), null)).toBe(true);
   });
 });

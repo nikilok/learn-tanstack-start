@@ -10,6 +10,12 @@ import { errMsg } from './util';
 import type { WatchReport } from './watch';
 
 /** Beside the log, and gitignored with it. */
+/**
+ * How long a delivered notification silences an identical one. Matched to the investigation
+ * memory in `readInvestigated` so the two decay together — they were 7 days and forever.
+ */
+export const NOTIFY_MEMORY_MS = 7 * 24 * 60 * 60_000;
+
 export const NOTIFY_STATE = '.firewall-watch-state';
 
 /**
@@ -152,11 +158,26 @@ export async function writeInvestigated(
  * An unreadable state file means notify. Staying quiet because we could not remember is the one
  * outcome that turns a missed read into a missed scraper.
  */
-export async function shouldNotify(dir: string, key: string): Promise<boolean> {
+export async function shouldNotify(
+  dir: string,
+  key: string,
+  now = Date.now(),
+  maxAgeMs = NOTIFY_MEMORY_MS,
+): Promise<boolean> {
   if (!key) return false;
   try {
-    const prev = (await readFile(`${dir}/${NOTIFY_STATE}`, 'utf8')).trim();
-    return prev !== key;
+    const raw = (await readFile(`${dir}/${NOTIFY_STATE}`, 'utf8')).trim();
+    const [at, ...rest] = raw.split('\n');
+    const stamped = Number(at);
+    // Old format (key only, no stamp) is treated as expired: re-reporting once is the cheap
+    // mistake, and the alternative is a key from an unknown time silencing a live finding.
+    if (!Number.isFinite(stamped) || !rest.length) return true;
+    // Decays with the investigation memory. Without this the two disagreed: a fingerprint gone
+    // for eight days had its INVESTIGATED entry expire, so it was investigated again and PAID
+    // for again — and then matched a notification key that never expired, so the answer was
+    // silently never delivered. "Still here this hour" is not news; "went away and came back" is.
+    if (now - stamped > maxAgeMs) return true;
+    return rest.join('\n') !== key;
   } catch {
     return true;
   }
@@ -166,9 +187,10 @@ export async function shouldNotify(dir: string, key: string): Promise<boolean> {
 export async function rememberNotified(
   dir: string,
   key: string,
+  now = Date.now(),
 ): Promise<void> {
   try {
-    await writeFile(`${dir}/${NOTIFY_STATE}`, key, 'utf8');
+    await writeFile(`${dir}/${NOTIFY_STATE}`, `${now}\n${key}`, 'utf8');
   } catch {
     // Deliberately swallowed.
   }

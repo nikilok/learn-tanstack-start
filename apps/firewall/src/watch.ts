@@ -28,7 +28,13 @@ import { type Window, rollingWindow } from './time-window';
 import { allowedBots, screenFloor, watchHours } from './tuning';
 import { errMsg } from './util';
 import { logWatch } from './watch-log';
-import { investigable, runInvestigation, verdictFrom } from './watch-mode';
+import {
+  investigable,
+  runInvestigation,
+  verdictFrom,
+  fingerprintConfig,
+  investigationChangedConfig,
+} from './watch-mode';
 import {
   actionableKey,
   concludedKey,
@@ -704,7 +710,21 @@ async function main() {
     const seen = await readInvestigated(process.cwd(), now);
     for (const f of investigable(report.findings, seen)) {
       seen.set(f.digest.toLowerCase(), now);
+      // Taken either side of the spawn. The investigation is instructed not to apply anything
+      // and cannot be prevented from it, so the honest position is to check rather than trust.
+      const envPath = `${process.cwd()}/.env.local`;
+      const before = await fingerprintConfig(envPath);
       const out = await runInvestigation(f, process.cwd());
+      if (
+        investigationChangedConfig(before, await fingerprintConfig(envPath))
+      ) {
+        const alarm = `.env.local CHANGED during the investigation of ${f.digest} — the run was told not to apply anything. Check FW_BLOCKED_JA4 and the live WAF.`;
+        report.errors.push(alarm);
+        await logWatch(process.cwd(), new Date(), {
+          kind: 'error',
+          error: alarm,
+        });
+      }
       const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
       await logWatch(
         process.cwd(),
@@ -728,14 +748,25 @@ async function main() {
     await writeInvestigated(process.cwd(), seen);
   }
 
-  // What is worth a message: the investigation's conclusion when there was one, otherwise the
-  // report itself. Asking for --investigate means you want Claude's answer, not the screen's.
+  // What is worth a message: the investigation's conclusion AND anything else actionable.
+  //
+  // These used to be either/or, on the reasoning that asking for --investigate means you want
+  // Claude's answer rather than the screen's. But the screen also carries alarms an
+  // investigation says nothing about — a deny rule that stopped enforcing, a query that failed,
+  // a truncated window where the tool was blind — and choosing the conclusion silently dropped
+  // every one of them, on precisely the flag combination an unattended cron runs.
   if (argv.includes('--notify')) {
-    const investigated = argv.includes('--investigate');
-    const key = investigated ? concludedKey(concluded) : actionableKey(report);
+    const key = [concludedKey(concluded), actionableKey(report)]
+      .filter(Boolean)
+      .join('|');
     if (await shouldNotify(process.cwd(), key)) {
       const failed = await notify(
-        investigated ? concludedText(concluded) : notifyText(report),
+        [
+          concluded.length ? concludedText(concluded) : '',
+          isActionable(report) ? notifyText(report) : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
       );
       // Only remember it as delivered if it was. Otherwise the next run would treat the same
       // finding as already reported and stay quiet about something nobody has seen.

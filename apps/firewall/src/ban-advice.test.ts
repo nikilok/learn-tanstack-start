@@ -808,6 +808,25 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('a real browser share of assets still blocks', () => {
+    // The original guard, with a fixture that is actually a browser. Measured on this site, a
+    // real session renders ~33 requests per page; anything at or above one per page keeps the
+    // blocker, so an ordinary visitor cannot be tuned into a candidate.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([
+          ['/company/a', 400],
+          ['/assets/x.js', 9000],
+        ]),
+      }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.blockers.join(' ')).toContain('sub-resource');
+  });
+
+  test('rendering that does not scale with pages is not a browser', () => {
+    // Supersedes the earlier rule that any 0.5% rendering share blocks. 400 renders across 9000
+    // pages means 8600 pages rendered nothing, which no browser does — it is a headless client
+    // executing just enough JS to clear a share threshold.
     const a = adviseBan(
       scraper({
         mix: mixOf([
@@ -816,8 +835,7 @@ describe('adviseBan — review regressions', () => {
         ]),
       }),
     );
-    expect(a.verdict).toBe('leave');
-    expect(a.blockers.join(' ')).toContain('sub-resource');
+    expect(a.verdict).toBe('ban');
   });
 
   // Regression: the asset axis was share-gated but tiles, RPCs and beacons were gated at `> 0`,
@@ -838,7 +856,24 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('ban');
   });
 
-  test('a real share of RPCs still blocks — the SPA signal is unchanged', () => {
+  test('an RPC-dominant client still blocks — the SPA direction is unchanged', () => {
+    // A real user makes MANY RPCs and FEW page loads. That invariant is untouched.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([
+          ['/company/a', 400],
+          ['/_serverFn/x', 9000],
+        ]),
+      }),
+    );
+    expect(a.verdict).toBe('leave');
+  });
+
+  test('a page-dominant client with a token RPC share does not block', () => {
+    // The live case, 2026-08-08: a fingerprint carrying oai-searchbot/claudebot/gptbot read the
+    // sitemap, fetched 2008 company pages, drew ZERO map tiles, and made 332 RPCs — 0.18 per
+    // page against a real session's ~33. The advisory called it "running the app" while its own
+    // SPA signal said "fetching HTML directly". Both now agree.
     const a = adviseBan(
       scraper({
         mix: mixOf([
@@ -847,7 +882,7 @@ describe('adviseBan — review regressions', () => {
         ]),
       }),
     );
-    expect(a.verdict).toBe('leave');
+    expect(a.verdict).toBe('ban');
   });
 
   // Regression: qualifyLever refused on incomplete reach but blockersFor read a failed query as

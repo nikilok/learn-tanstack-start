@@ -66,7 +66,7 @@ import {
   rollingMinutes,
   rollingWindow,
 } from './time-window';
-import { watchHours, watchIntervalMs } from './tuning';
+import { watchHours, watchIntervalMs, watchTiming } from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
@@ -416,14 +416,24 @@ export function App() {
       }
     }
     setKeepingAwake(Boolean(awake));
-    void logWatch(root, new Date(), {
-      kind: 'armed',
-      hours: watchHours(),
-      everyMin: watchIntervalMs() / 60_000,
-    });
+    if (watchTiming() !== null)
+      void logWatch(root, new Date(), {
+        kind: 'armed',
+        hours: watchHours(),
+        everyMin: watchIntervalMs() / 60_000,
+      });
 
     /** One screen, plus an investigation for anything that clears the bar. */
     const tick = async () => {
+      // Guarded, not assumed: watchHours() throws when unconfigured, and an unhandled throw in
+      // here kills the loop silently rather than saying why.
+      if (watchTiming() === null) {
+        setWatchNote(
+          'FW_WATCH_HOURS / FW_WATCH_INTERVAL_MIN are not set — nothing screened',
+        );
+        setWatchBusy(false);
+        return;
+      }
       setWatchBusy(true);
       try {
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
@@ -1505,7 +1515,8 @@ export function App() {
                 ◉ watch{' '}
               </Text>
               <Text dimColor>
-                {watchHours()}h window, every {watchIntervalMs() / 60_000}m
+                {watchTiming() ??
+                  'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN'}
                 {watchAt ? ` · last ${watchAt}` : ' · starting…'}
                 {keepingAwake ? ' · holding the mac awake' : ''}
               </Text>

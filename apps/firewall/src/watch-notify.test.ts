@@ -19,6 +19,7 @@ import {
   readInvestigated,
   shouldNotify,
   writeInvestigated,
+  rememberNotified,
 } from './watch-notify';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
@@ -247,5 +248,47 @@ describe('watch state files are gitignored', () => {
     const root = `${import.meta.dir}/../../..`;
     const ignore = await Bun.file(`${root}/.gitignore`).text();
     expect(ignore.split('\n').map((l) => l.trim())).toContain(name);
+  });
+});
+
+// The two memories have to decay together. They were 7 days and forever, so a fingerprint that
+// went away and came back was investigated again — paid for again — and then silenced.
+describe('notification memory decays', () => {
+  let DIR: string;
+  beforeEach(async () => {
+    DIR = await mkdtemp(join(tmpdir(), 'fw-notify-'));
+  });
+  afterEach(async () => {
+    await rm(DIR, { recursive: true, force: true });
+  });
+  const NOW = Date.parse('2026-08-08T09:00:00.000Z');
+  const DAY = 24 * 60 * 60_000;
+  const KEY = 'concluded:ban:abc';
+
+  test('the same finding stays quiet inside the window', () => {
+    return (async () => {
+      await rememberNotified(DIR, KEY, NOW);
+      expect(await shouldNotify(DIR, KEY, NOW + DAY)).toBe(false);
+    })();
+  });
+
+  test('the same finding notifies again once the memory has decayed', async () => {
+    await rememberNotified(DIR, KEY, NOW);
+    expect(await shouldNotify(DIR, KEY, NOW + 8 * DAY)).toBe(true);
+  });
+
+  test('a different finding always notifies', async () => {
+    await rememberNotified(DIR, KEY, NOW);
+    expect(await shouldNotify(DIR, 'concluded:ban:other', NOW + DAY)).toBe(
+      true,
+    );
+  });
+
+  test('a state file with no timestamp is treated as expired', async () => {
+    // The pre-TTL format. Re-reporting once is the cheap mistake; a key from an unknown time
+    // silencing a live finding is not.
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(`${DIR}/${NOTIFY_STATE}`, KEY, 'utf8');
+    expect(await shouldNotify(DIR, KEY, NOW)).toBe(true);
   });
 });

@@ -55,3 +55,18 @@ export function allowedBots(): string[] {
     );
   return names;
 }
+
+/**
+ * The watch window as a display string, or null when it is not configured.
+ *
+ * The readers above throw by design — a missing threshold must not silently become a default.
+ * But the TUI calls them during render, where a throw takes down the whole session including
+ * staged denies, so it needs to ask the question without being punished for the answer.
+ */
+export function watchTiming(): string | null {
+  try {
+    return `${watchHours()}h window, every ${watchIntervalMs() / 60_000}m`;
+  } catch {
+    return null;
+  }
+}

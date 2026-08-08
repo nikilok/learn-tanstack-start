@@ -98,10 +98,12 @@ export function investigationPrompt(f: Suspicious, hours: number): string {
     '',
     'Load the firewall-operator skill and work its investigation protocol against live data.',
     '',
-    'Begin your reply with exactly one of these lines, and nothing before it:',
-    '  VERDICT: ban',
-    '  VERDICT: leave',
-    '  VERDICT: unclear',
+    // Described rather than shown. Listing the options as literal `VERDICT: x` lines put three
+    // parseable verdicts inside the prompt itself, so any reply quoting the instructions back —
+    // a refusal, an error, a restatement — parsed as the first one, `ban`. The reader tolerates
+    // a preamble by design, which is what made an echoed menu indistinguishable from an answer.
+    'Begin your reply with one line: the word VERDICT, a colon, then exactly one of',
+    'ban / leave / unclear. Nothing before that line, and do not restate these options.',
     '',
     'Then the evidence behind it, and — if it is a ban — the exact staging command and how to',
     'roll it back. Answer "unclear" rather than guessing: it reaches a human either way, and a',
@@ -143,8 +145,9 @@ export function investigationArgs(f: Suspicious, hours: number): string[] {
     '--effort',
     INVESTIGATION_EFFORT,
     // Not a sandbox — a spawned agent has been observed reaching a shell through a tool outside
-    // this list. It narrows the default surface and states the intent; the instruction above is
-    // what actually holds, and the config check after the run is what notices if it did not.
+    // this list, and Bash cannot be disallowed because the investigation needs it for read-only
+    // queries. It narrows the default surface and states the intent; the instruction above is
+    // what holds, and `investigationChangedConfig` is what notices if it did not.
     '--disallowed-tools',
     'Write',
     'Edit',
@@ -300,4 +303,42 @@ export function investigable<
       (f) => f.advice.verdict === 'ban' && !seen.has(f.digest.toLowerCase()),
     )
     .slice(0, Math.max(0, budget));
+}
+
+/**
+ * Whether the investigation left the firewall config as it found it.
+ *
+ * The disallow list above cannot stop a ban: adding one is an append to `.env.local` followed by
+ * an apply, and `Bash` has to stay available for the read-only queries the protocol requires. The
+ * comment beside that list used to claim a post-run check noticed — it did not exist, and the
+ * only config read in the loop ran BEFORE the spawn. A safeguard asserted in a comment and absent
+ * in the code is worse than none, because it stops the next reader from adding it.
+ *
+ * Cheap and blunt on purpose: a byte length and a modification time, taken either side. It cannot
+ * say what changed, only that something did — which is the whole question for an unattended run.
+ */
+export type ConfigFingerprint = { size: number; mtimeMs: number } | null;
+
+export async function fingerprintConfig(
+  path: string,
+): Promise<ConfigFingerprint> {
+  try {
+    const { stat } = await import('node:fs/promises');
+    const s = await stat(path);
+    return { size: s.size, mtimeMs: s.mtimeMs };
+  } catch {
+    // Unreadable BEFORE and unreadable AFTER agree, and that is the honest answer. A file that
+    // could not be read either side is not evidence of a change.
+    return null;
+  }
+}
+
+/** True when the two fingerprints disagree — including one side being unreadable. */
+export function investigationChangedConfig(
+  before: ConfigFingerprint,
+  after: ConfigFingerprint,
+): boolean {
+  if (before === null && after === null) return false;
+  if (before === null || after === null) return true;
+  return before.size !== after.size || before.mtimeMs !== after.mtimeMs;
 }

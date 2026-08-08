@@ -231,7 +231,7 @@ function blockersFor(input: AdviceInput): string[] {
   // or one forged POST to /_vercel/insights, which the three separate `> 0` tests all allowed.
   // Pooling also means a light-but-real session still clears the floor on the sum.
   const renders = renderingRequests(input.mix);
-  if (rendersIndicateBrowser(renders, input.total)) {
+  if (rendersIndicateBrowser(renders, input.total, input.mix.page)) {
     const share = ((renders / Math.max(1, input.total)) * 100).toFixed(1);
     out.push(
       `${renders} rendering requests (${share}%: ${input.mix.asset} sub-resources, ${input.mix.rpc} server-fn RPCs, ${input.mix.tile} map tiles, ${input.mix.beacon} analytics beacons) — it is running the app, which is what a real session looks like here`,
@@ -343,7 +343,7 @@ export function adviseBan(input: AdviceInput): Advice {
   // stray RPC used to delete this axis entirely while the blocker two functions up correctly
   // held that one request proves nothing. The advisory cannot have it both ways.
   const renders = renderingRequests(mix);
-  if (!rendersIndicateBrowser(renders, input.total))
+  if (!rendersIndicateBrowser(renders, input.total, input.mix.page))
     tell(
       'rendering',
       renders === 0

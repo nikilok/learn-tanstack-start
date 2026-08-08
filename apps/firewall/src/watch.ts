@@ -247,10 +247,11 @@ export function banCandidate(input: {
 export async function windowTotalOf(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
+  deps: ScreenDeps = LIVE_DEPS,
 ): Promise<number> {
   try {
     const { ctx } = makeCtx(creds, window);
-    const rows = (await metrics(ctx, ['wafAction'], { limit: GROUP_CAP }))
+    const rows = (await deps.metrics(ctx, ['wafAction'], { limit: GROUP_CAP }))
       .summary;
     if (!rows?.length) return Number.NaN;
     return rows.reduce((a, r) => a + countOf(r), 0);
@@ -444,12 +445,14 @@ export async function findSuspects(
   allowedBots?: string[],
   /** User-agent tokens already denied at the WAF. */
   deniedUa: readonly string[] = [],
+  deps: ScreenDeps = LIVE_DEPS,
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated, handled } = await screen(
     creds,
     window,
     allowedBots,
     deniedUa,
+    deps,
   );
   const findings: Finding[] = [];
   // Both levers. An identity denied by either is handled, and profiling it again spends ~21
@@ -462,10 +465,10 @@ export async function findSuspects(
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
   // on the quiet nights, which is nearly all of them.
   const windowTotal = candidates.length
-    ? await windowTotalOf(creds, window)
+    ? await windowTotalOf(creds, window, deps)
     : Number.NaN;
   for (const c of candidates) {
-    const p = await fetchIpProfile(
+    const p = await deps.fetchIpProfile(
       creds,
       { kind: 'ja4', value: c.digest },
       window,
@@ -525,6 +528,7 @@ export async function findSuspects(
 export async function screenOnce(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
+  deps: ScreenDeps = LIVE_DEPS,
 ): Promise<{
   rows: Screened[];
   findings: Finding[];
@@ -577,6 +581,7 @@ export async function screenOnce(
     trusted,
     allowed,
     deniedUa,
+    deps,
   );
   return { ...found, configErrors };
 }
@@ -620,6 +625,21 @@ export function deniedByUa(
   }
   return out;
 }
+
+/**
+ * The two calls that reach the network, injectable so the ASSEMBLY can be tested.
+ *
+ * The decision modules beneath this file carry 238 tests between them; `screen`, `findSuspects`
+ * and `screenOnce` carried none, because driving them needed production. Every defect found in
+ * this package today lived in that gap — four gates present on one path and missing on the
+ * other, a truncation flag dropped, a guard applied to the tick but not the reschedule.
+ */
+export type ScreenDeps = {
+  metrics: typeof metrics;
+  fetchIpProfile: typeof fetchIpProfile;
+};
+
+const LIVE_DEPS: ScreenDeps = { metrics, fetchIpProfile };
 
 const IMPERSONATION = 'browser_impersonation';
 /** The observability group cap. A response at this size may have dropped rows we wanted. */
@@ -676,7 +696,9 @@ export async function screen(
   allowed?: readonly string[],
   /** Denied user-agent tokens, so an identity already banned by name is not re-nominated. */
   deniedUa: readonly string[] = [],
+  deps: ScreenDeps = LIVE_DEPS,
 ): Promise<{ rows: Screened[]; truncated: boolean; handled: Set<string> }> {
+  const { metrics } = deps;
   const { ctx } = makeCtx(creds, window);
   const [routeResp, verifiedResp] = await Promise.all([
     metrics(ctx, ['clientJa4Digest', 'route'], {

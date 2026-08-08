@@ -171,28 +171,25 @@ describe('concurrent appends do not interleave', () => {
     const dir = await mkdtemp(join(tmpdir(), 'fw-log-'));
     try {
       const at = new Date('2026-08-08T09:00:00.000Z');
+      const entry = (i: number) => ({
+        kind: 'verdict' as const,
+        digest: `t13dtest0${i}_aaaaaaaaaaaa_bbbbbbbbbbbb`,
+        text: `VERDICT: leave\nline two of ${i}\nline three of ${i}`,
+        provenance: 'test',
+      });
       // Verdicts are the multi-line case — the one that can be torn in half.
       await Promise.all(
-        Array.from({ length: 12 }, (_, i) =>
-          logWatch(dir, at, {
-            kind: 'verdict',
-            digest: `t13dtest0${i}_aaaaaaaaaaaa_bbbbbbbbbbbb`,
-            text: `VERDICT: leave\nline two of ${i}\nline three of ${i}`,
-            provenance: 'test',
-          }),
-        ),
+        Array.from({ length: 12 }, (_, i) => logWatch(dir, at, entry(i))),
       );
       const body = await readFile(`${dir}/${WATCH_LOG}`, 'utf8');
-      // Every entry starts with a timestamp. A torn write leaves body text on a line that should
-      // have been a header, or a header spliced mid-block.
-      const headers = body
-        .split('\n')
-        .filter((l) => /^\d{4}-\d{2}-\d{2}T/.test(l));
-      expect(headers).toHaveLength(12);
-      for (let i = 0; i < 12; i++) {
-        expect(body).toContain(`line two of ${i}`);
-        expect(body).toContain(`line three of ${i}`);
-      }
+      // Whole entries, in call order. Counting headers and grepping for payload text is NOT
+      // enough: an interleaved write keeps every header and every line while splicing the
+      // blocks into each other, so those assertions pass on precisely the corruption this
+      // exists to catch. Only exact concatenation rules it out.
+      const expected = Array.from({ length: 12 }, (_, i) =>
+        logEntry(at, entry(i)),
+      ).join('');
+      expect(body).toBe(expected);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -13,6 +13,7 @@ import {
   isLogOnly,
   withAction,
 } from './actions';
+import { JA4_DENY, challengeListRule } from './deny-list';
 import type { ActionChoice, Condition, Rule } from './rules';
 
 function rule(
@@ -143,5 +144,70 @@ describe('ordinary deny rules are unaffected', () => {
   // exact identity it was written to refuse.
   test('cycling never reaches bypass', () => {
     expect(reachable(deny).has('bypass')).toBe(false);
+  });
+});
+
+// The fixtures above are synthetic, so on their own they assert nothing about the rule that ships.
+// Importing rules.ts here would be the obvious fix and is the wrong one: it reads required config
+// at module scope, so the test would depend on env and on which file imported it first — the same
+// order-dependence watch-assembly.test.ts documents. The invariant is instead enforced two ways
+// that need neither: challengeListRule takes no `action` to lose, and rules.ts throws at import if
+// any `challenge-*` rule is not challenging.
+describe('challengeListRule cannot produce anything but a challenge', () => {
+  const built = challengeListRule({
+    name: 'challenge-scraper-ja4',
+    description: 'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4).',
+    spec: JA4_DENY,
+    values: ['t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb'],
+    exemptPaths: ['/robots.txt', '/llms.txt'],
+  });
+
+  test('builds a challenge, and the TUI cannot cycle it to deny', () => {
+    expect(built.action.mitigate.action).toBe('challenge');
+    expect(isChallengeOnly(built)).toBe(true);
+    expect([...reachable(built)].sort()).toEqual(['challenge', 'log']);
+  });
+
+  // The type has no `action` key, so this is a compile-time guarantee as much as a runtime one.
+  // The assertion is here so the intent survives a refactor of the signature.
+  test('exposes no action option to drop', () => {
+    expect('action' in built.action.mitigate).toBe(true);
+    const opts = {
+      name: 'challenge-x',
+      description: 'd',
+      spec: JA4_DENY,
+      values: [],
+    };
+    expect(challengeListRule(opts).action.mitigate.action).toBe('challenge');
+  });
+
+  test('carries the policy-doc exemption into every group', () => {
+    for (const g of built.conditionGroup)
+      expect(
+        g.conditions.filter((c) => c.type === 'path' && c.neg).length,
+      ).toBe(2);
+  });
+});
+
+// FINDING 10: the verb became a claim in this commit, so it has to follow the action. A rule cycled
+// in the TUI and applied kept a description asserting the opposite of what it does.
+describe('withAction keeps the description honest', () => {
+  const denyRule = {
+    ...rule('deny', [JA4]),
+    description: 'Deny scraper TLS fingerprints (FW_BLOCKED_JA4). 3 denied.',
+  };
+
+  test('re-verbs a count clause when the action changes', () => {
+    expect(withAction(denyRule, 'challenge').description).toContain(
+      '3 challenged.',
+    );
+    expect(withAction(denyRule, 'challenge').description).not.toContain(
+      '3 denied.',
+    );
+  });
+
+  test('leaves a description with no count clause alone', () => {
+    const plain = { ...rule('deny', [JA4]), description: 'Some rate limit.' };
+    expect(withAction(plain, 'challenge').description).toBe('Some rate limit.');
   });
 });

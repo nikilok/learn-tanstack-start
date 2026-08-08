@@ -319,6 +319,40 @@ export function pendingEdits(
  */
 export const POLICY_PATHS = ['/robots.txt', '/llms.txt'];
 
+/**
+ * A list rule that CHALLENGES, for the tier an unattended writer may reach.
+ *
+ * Deliberately a separate builder taking no `action`, rather than an option on denyListRule. The
+ * safety property is that nothing turns this list into a deny, and an option is exactly the kind
+ * of thing a refactor or a merge drops in silence — a test asserting it would then still pass
+ * against its own fixture. With no option there is nothing to drop.
+ */
+export function challengeListRule(
+  opts: Omit<Parameters<typeof denyListRule>[0], 'action'>,
+): Rule {
+  return denyListRule({ ...opts, action: 'challenge' });
+}
+
+/**
+ * The same description with its trailing count clause re-verbed for `action`.
+ *
+ * The verb used to be a fixed string; making it follow the action turned it into a claim, and a
+ * rule cycled in the TUI then applied kept a description asserting the opposite of what it does —
+ * "3 denied." on a rule that only interstitials. A no-op on any description without a count
+ * clause, so rate-limit and allow rules pass through untouched.
+ */
+export function retitledForAction(
+  description: string,
+  action: Rule['action']['mitigate']['action'],
+): string {
+  if (action !== 'deny' && action !== 'challenge') return description;
+  const m = description.match(COUNT_SUFFIX);
+  if (!m) return description;
+  const verb: ListVerb = action === 'challenge' ? 'challenged' : 'denied';
+  const count = m[0].match(/\d+/);
+  return denyDescription(description, count ? Number(count[0]) : 0, verb);
+}
+
 export function denyListRule(opts: {
   name: string;
   description: string;

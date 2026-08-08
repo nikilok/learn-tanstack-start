@@ -1,5 +1,6 @@
 // Pure helpers for a rule's switchable action (log / challenge / deny / bypass). No Vercel/Ink deps.
 
+import { retitledForAction } from './deny-list';
 import type { ActionChoice, RateLimitAction, Rule } from './rules';
 
 const ACTIONS: ActionChoice[] = ['log', 'challenge', 'deny', 'bypass'];
@@ -86,7 +87,11 @@ export function withAction(rule: Rule, action: ActionChoice): Rule {
       },
     };
   }
-  return { ...rule, action: { mitigate: { ...m, action } } };
+  return {
+    ...rule,
+    description: retitledForAction(rule.description, action),
+    action: { mitigate: { ...m, action } },
+  };
 }
 
 /** Next/previous valid action for a rule, wrapping around its option list. */

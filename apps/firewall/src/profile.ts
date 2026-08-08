@@ -106,6 +106,15 @@ async function main() {
     // and "the denylist could not be read" are different facts.
     profile.errors.push(`FW_BLOCKED_JA4: ${errMsg(e)}`);
   }
+  // Read separately and NOT folded into deniedJa4: the advisory's `already` verdict means
+  // "denied", and a challenged digest is being mitigated recoverably, which is a different fact.
+  // Folding it in would tell the operator a fingerprint is blocked when it is being interstitialed.
+  let challengedJa4: string[] = [];
+  try {
+    challengedJa4 = envMatching('FW_CHALLENGE_JA4', JA4_DENY, false);
+  } catch (e) {
+    profile.errors.push(`FW_CHALLENGE_JA4: ${errMsg(e)}`);
+  }
   // One extra call on top of the profile's ~21. It replaces the caveat this command used to
   // print: a rule hit means nothing unless the live rule still demands what it should.
   let trusted: string[] | undefined;
@@ -170,6 +179,18 @@ async function main() {
   if (advice.verdict === 'already')
     console.log(
       '\nNote: read from FW_BLOCKED_JA4 only. Confirm deny-scraper-ja4 is active and set to deny (bun run firewall:setup) — a deactivated or log-only rule denies nothing.',
+    );
+  // Said whatever the verdict is. A `ban` recommendation on a digest already being challenged is
+  // still a legitimate promotion, but the operator should know they are promoting rather than
+  // acting on something untouched.
+  if (
+    subject.kind === 'ja4' &&
+    challengedJa4
+      .map(JA4_DENY.normalize)
+      .includes(JA4_DENY.normalize(subject.value))
+  )
+    console.log(
+      '\nNote: this fingerprint is on FW_CHALLENGE_JA4 — already challenged, not denied. Adding it to FW_BLOCKED_JA4 promotes it; remove the challenge entry when you do.',
     );
 }
 

@@ -5,6 +5,7 @@ import {
   JA4_DENY,
   POLICY_PATHS,
   UA_DENY,
+  challengeListRule,
   denyListRule,
   envMatching,
 } from './deny-list';
@@ -226,17 +227,20 @@ const blockedJa4Rule = denyListRule({
  * strangers. An ASN is a hosting network and a user-agent token is the bot's own name — both far
  * narrower, both a human decision already.
  *
- * Optional, like FW_BLOCKED_UA: an unset var drops the rule rather than throwing the whole apply.
+ * Required like FW_BLOCKED_JA4, NOT optional like FW_BLOCKED_UA. Set it empty to revoke. An absent
+ * var reads as an empty list, and an empty list rewrites the live rule to the unmatchable
+ * placeholder — so a typo in the key would silently un-challenge everything on it, with the apply
+ * printing success. That is the failure `required` exists to stop, and it matters most on the one
+ * list an unattended process is allowed to write.
+ *
  * Promotion to `deny` is a human moving the digest to FW_BLOCKED_JA4, never a keystroke here.
  */
-const challengedJa4Rule = denyListRule({
+const challengedJa4Rule = challengeListRule({
   name: 'challenge-scraper-ja4',
-  description:
-    'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4). Recoverable for a browser, fatal to a headless client.',
+  description: 'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4).',
   spec: JA4_DENY,
-  values: envMatching('FW_CHALLENGE_JA4', JA4_DENY, false),
+  values: envMatching('FW_CHALLENGE_JA4', JA4_DENY, !dryRun),
   exemptPaths: POLICY_PATHS,
-  action: 'challenge',
 });
 
 const blockedAsnRule = denyListRule({
@@ -470,5 +474,15 @@ for (const r of rules) {
   if (len > 256)
     throw new Error(
       `Firewall rule "${r.name}" description is ${len} chars — Vercel's limit is 256. Shorten it.`,
+    );
+  // The recoverable tier, checked where it cannot be missed. Its entries are the ones an
+  // unattended writer may add, so they must never be enforced by a deny: a wrong deny takes real
+  // people offline silently. Refuse to apply rather than ship the escalation.
+  if (
+    r.name.startsWith('challenge-') &&
+    r.action.mitigate.action !== 'challenge'
+  )
+    throw new Error(
+      `Firewall rule "${r.name}" is the recoverable tier but its action is "${r.action.mitigate.action}" — it must be "challenge". Use challengeListRule.`,
     );
 }

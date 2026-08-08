@@ -216,12 +216,11 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
   let denied: string[] = [];
   let denylistRead = true;
   try {
-    // Both tiers. A challenged digest still arriving is the effectiveness check that watch mode
-    // deliberately does not make — it drops them from candidacy on the assumption this runs.
-    denied = [
-      ...envMatching('FW_BLOCKED_JA4', JA4_DENY, false),
-      ...envMatching('FW_CHALLENGE_JA4', JA4_DENY, false),
-    ];
+    // FW_BLOCKED_JA4 only, and the challenge list stays out on purpose. This set is ground truth
+    // because a HUMAN decided each entry was a scraper; folding in a machine-written list would
+    // charge the screen with failing to find a digest nothing has confirmed, and the check exists
+    // to measure the screen, not to grade a guess.
+    denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
   } catch {
     denylistRead = false;
   }

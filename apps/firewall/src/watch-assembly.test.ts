@@ -467,20 +467,30 @@ describe('findSuspects — screen to verdict, end to end', () => {
 
 describe('screenOnce — the shared entry both paths use', () => {
   /**
-   * Runs with the Vercel credentials removed.
+   * Runs with every ambient config value removed.
    *
-   * `screenOnce` imports `client.ts`, which resolves credentials at module scope and would
-   * otherwise make a REAL call to the live firewall config. A unit test that reaches production
-   * is slow, flaky, and spends the operator's API budget to assert something local. Removing the
-   * token guarantees the import throws, which is the failure path these tests are about anyway.
+   * `bun test` does not load `.env.local`, so these are absent in practice — but the tests must
+   * not DEPEND on that. Exporting the vars in a shell, or running through `bun --env-file`,
+   * would otherwise change what they assert: a readable allowlist removes the very failure the
+   * second one exists to check, and a present token lets `screenOnce` reach the LIVE firewall
+   * config from a unit test.
+   *
+   * Stated rather than inherited, which is the property this whole file was written for.
    */
+  const AMBIENT = [
+    'VERCEL_TOKEN',
+    'VERCEL_OIDC_TOKEN',
+    'FW_ALLOWED_BOTS',
+    'FW_BLOCKED_JA4',
+    'FW_BLOCKED_UA',
+  ];
   async function offline<T>(fn: () => Promise<T>): Promise<T> {
-    const prior = process.env.VERCEL_TOKEN;
-    delete process.env.VERCEL_TOKEN;
+    const prior = new Map(AMBIENT.map((k) => [k, process.env[k]]));
+    for (const k of AMBIENT) delete process.env[k];
     try {
       return await fn();
     } finally {
-      if (prior !== undefined) process.env.VERCEL_TOKEN = prior;
+      for (const [k, v] of prior) if (v !== undefined) process.env[k] = v;
     }
   }
 
@@ -507,7 +517,9 @@ describe('screenOnce — the shared entry both paths use', () => {
       verified: { name: 'googlebot' },
       category: undefined,
     };
-    const out = await atFloor(() => screenOnce(CREDS, WINDOW, deps([crawler])));
+    const out = await offline(() =>
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([crawler]))),
+    );
     expect(out.rows).toHaveLength(0);
     expect(out.configErrors.join(' ')).toContain('FW_ALLOWED_BOTS');
   });

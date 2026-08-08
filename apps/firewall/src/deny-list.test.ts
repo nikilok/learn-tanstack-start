@@ -14,6 +14,7 @@ import {
   withValue,
   withoutValue,
   UA_DENY,
+  POLICY_PATHS,
 } from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
@@ -493,5 +494,43 @@ describe('UA_DENY', () => {
     expect(c?.type).toBe('user_agent');
     expect(c?.op).toBe('sub');
     expect(c?.value).toBe('ShapBot');
+  });
+});
+
+// A crawler denied on every path can never fetch the robots.txt naming it. It cannot comply,
+// cannot stop, and retries forever — and "we asked them not to" stops being true.
+describe('policy paths stay readable through a deny', () => {
+  const rule = (exempt?: readonly string[]) =>
+    denyListRule({
+      name: 'deny-scraper-ua',
+      description: 'x',
+      spec: UA_DENY,
+      values: ['ShapBot'],
+      exemptPaths: exempt,
+    });
+
+  test('the deny is conditioned on NOT being a policy document', () => {
+    const conds = rule(POLICY_PATHS).conditionGroup[0]?.conditions ?? [];
+    const paths = conds.filter((c) => c.type === 'path');
+    expect(paths).toHaveLength(POLICY_PATHS.length);
+    // Negated, so the rule reads "matches the identity AND is not robots.txt". A non-negated
+    // condition here would mean "deny ONLY robots.txt", which is the exact inversion.
+    for (const c of paths) expect(c.neg).toBe(true);
+    expect(paths.map((c) => c.value).sort()).toEqual([...POLICY_PATHS].sort());
+  });
+
+  test('the identity condition survives alongside them', () => {
+    const conds = rule(POLICY_PATHS).conditionGroup[0]?.conditions ?? [];
+    expect(conds.find((c) => c.type === 'user_agent')?.value).toBe('ShapBot');
+  });
+
+  test('omitting them changes nothing — the JA4 and ASN rules are untouched', () => {
+    expect(rule().conditionGroup[0]?.conditions).toHaveLength(1);
+  });
+
+  test('the sitemap is NOT exempt', () => {
+    // It is the corpus index. Handing it to a denied harvester would publish the thing the
+    // denial exists to protect.
+    expect(POLICY_PATHS).not.toContain('/sitemap.xml');
   });
 });

@@ -3,6 +3,7 @@
 import {
   ASN_DENY,
   JA4_DENY,
+  POLICY_PATHS,
   UA_DENY,
   denyListRule,
   envMatching,
@@ -167,12 +168,37 @@ function bypassRule(opts: {
 }
 
 // Both REQUIRED (absent throws — see envMatching); values stay in .env.local, never this repo.
+/**
+ * The stated policy, readable by ANYTHING — verified or not, denied or not.
+ *
+ * Exempting these paths from our own deny rules was only half of it: a client that cannot pass
+ * the managed bot challenge still could not read them, so a JA4-denied scraper had no way to
+ * learn why. A refusal nobody can read is not a refusal, it is just a wall.
+ *
+ * Two static files, a couple of KB, edge-cached, containing nothing that is not already public
+ * by design. The upside is that voluntary compliance becomes possible at all, and compliance is
+ * cheaper than enforcement for both sides.
+ */
+const policyDocsRule: Rule = {
+  name: 'allow-policy-docs',
+  description:
+    'Allow /robots.txt and /llms.txt for every client, including denied ones. A crawler that cannot read the refusal cannot comply with it.',
+  active: true,
+  // One group per path: groups are OR-ed, conditions within a group are AND-ed.
+  conditionGroup: POLICY_PATHS.map((path) => ({
+    conditions: [{ type: 'path' as const, op: 'eq' as const, value: path }],
+  })),
+  action: { mitigate: { action: 'bypass' } },
+};
+
 const blockedUaRule = denyListRule({
   name: 'deny-scraper-ua',
   description:
     'Deny crawlers by the name they call themselves (FW_BLOCKED_UA). Substring match on user-agent.',
   spec: UA_DENY,
   values: envMatching('FW_BLOCKED_UA', UA_DENY, false),
+  // A crawler denied on every path can never read the robots.txt that names it.
+  exemptPaths: POLICY_PATHS,
 });
 
 // Unlike observe-ja4-serverfn these match a digest rather than rate-limiting keyed by one, so
@@ -268,6 +294,9 @@ export const rules: Rule[] = [
     headerKey: 'x-desktop-release-secret',
   }),
   // Position here is documentation only: live priority is INSERTION order (applyRule appends).
+  // BEFORE the denies: bypass is terminal and live priority is insertion order, so a policy
+  // document has to be matched before anything gets a chance to refuse it.
+  policyDocsRule,
   blockedJa4Rule,
   blockedAsnRule,
   blockedUaRule,

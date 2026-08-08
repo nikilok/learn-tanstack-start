@@ -1,6 +1,6 @@
 // Env-driven identity denylists. Never put a value in an error or log line: --apply output is public.
 
-import type { Rule } from './rules';
+import type { Condition, Rule } from './rules';
 
 // Narrower than Condition['type']: header/query need a `key` this factory never forwards.
 export type DenyType = 'ja4_digest' | 'geo_as_number' | 'user_agent';
@@ -241,11 +241,26 @@ export function pendingEdits(
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is
  * upsert-only, so it would keep denying, unrevokable).
  */
+/**
+ * Paths a denied client may still read: the documents that TELL it why it is denied.
+ *
+ * Without this the refusal is unreachable. A crawler denied on every path can never fetch the
+ * robots.txt naming it, so it cannot comply, cannot stop, and retries forever — and "we asked
+ * them not to" is not true in any sense that matters. Voluntary compliance is cheaper than
+ * enforcement for both sides, and it costs two small static files to make it possible.
+ *
+ * Deliberately NOT the sitemap. That is the corpus index, and handing it to a denied harvester
+ * would be publishing the thing the denial exists to protect.
+ */
+export const POLICY_PATHS = ['/robots.txt', '/llms.txt'];
+
 export function denyListRule(opts: {
   name: string;
   description: string;
   spec: DenySpec;
   values: string[];
+  /** Paths exempt from the deny, so the stated policy stays readable. */
+  exemptPaths?: readonly string[];
 }): Rule {
   if (!opts.spec.valid(opts.spec.placeholder))
     throw new Error(
@@ -256,8 +271,20 @@ export function denyListRule(opts: {
     name: opts.name,
     description: denyDescription(opts.description, opts.values.length),
     active: true,
+    // AND-ed within a group: matches the identity AND is not one of the policy documents. The
+    // negation is what makes them readable — see POLICY_PATHS.
     conditionGroup: values.map((value) => ({
-      conditions: [{ type: opts.spec.type, op: opts.spec.op ?? 'eq', value }],
+      conditions: [
+        { type: opts.spec.type, op: opts.spec.op ?? 'eq', value },
+        ...(opts.exemptPaths ?? []).map(
+          (path): Condition => ({
+            type: 'path',
+            op: 'eq',
+            value: path,
+            neg: true,
+          }),
+        ),
+      ],
     })),
     action: { mitigate: { action: 'deny' } },
   };

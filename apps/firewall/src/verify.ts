@@ -216,7 +216,12 @@ async function knownBadPeriod(ctx: Ctx): Promise<Check[]> {
   let denied: string[] = [];
   let denylistRead = true;
   try {
-    denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+    // Both tiers. A challenged digest still arriving is the effectiveness check that watch mode
+    // deliberately does not make — it drops them from candidacy on the assumption this runs.
+    denied = [
+      ...envMatching('FW_BLOCKED_JA4', JA4_DENY, false),
+      ...envMatching('FW_CHALLENGE_JA4', JA4_DENY, false),
+    ];
   } catch {
     denylistRead = false;
   }

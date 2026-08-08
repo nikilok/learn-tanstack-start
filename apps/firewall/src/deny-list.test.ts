@@ -4,17 +4,18 @@ import { afterEach, describe, expect, test } from 'bun:test';
 
 import {
   ASN_DENY,
+  JA4_DENY,
+  POLICY_PATHS,
+  UA_DENY,
   denyDescription,
   denyListRule,
-  envMatching,
-  JA4_DENY,
   enforcedNow,
+  envMatching,
+  listShapeOf,
   pendingEdits,
   valuesOf,
   withValue,
   withoutValue,
-  UA_DENY,
-  POLICY_PATHS,
 } from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
@@ -532,5 +533,71 @@ describe('policy paths stay readable through a deny', () => {
     // It is the corpus index. Handing it to a denied harvester would publish the thing the
     // denial exists to protect.
     expect(POLICY_PATHS).not.toContain('/sitemap.xml');
+  });
+});
+
+// The challenge tier exists so that being WRONG is survivable. Each of these locks one half of
+// that: it must actually challenge, and nothing may quietly turn it into a deny.
+describe('the challenge tier', () => {
+  const build = (values: string[], action?: 'deny' | 'challenge') =>
+    denyListRule({
+      name: 'challenge-scraper-ja4',
+      description: 'Challenge scraper TLS fingerprints.',
+      spec: JA4_DENY,
+      values,
+      exemptPaths: POLICY_PATHS,
+      action,
+    });
+  const digest = 't13d1516h2_abcdef123456_abcdef123456';
+
+  test('challenges rather than denies, and says so in its description', () => {
+    const r = build([digest], 'challenge');
+    expect(r.action.mitigate.action).toBe('challenge');
+    expect(r.description).toContain('1 challenged.');
+    expect(r.description).not.toContain('denied');
+  });
+
+  test('defaults to deny, so no existing list changes behaviour', () => {
+    expect(build([digest]).action.mitigate.action).toBe('deny');
+    expect(build([digest]).description).toContain('1 denied.');
+  });
+
+  test('a revoked challenge tier says nothing is challenged, not denied', () => {
+    expect(build([], 'challenge').description).toContain(
+      'REVOKED — nothing is challenged.',
+    );
+  });
+
+  // The regression this whole shape exists to prevent: withValue/withoutValue rebuild a rule from
+  // its name and values, so anything they do not read is dropped. Before listShapeOf, staging a
+  // digest turned the challenge tier into a DENY and silently discarded the policy-doc exemption.
+  test('a rebuild preserves the action and the policy-doc exemption', () => {
+    const other = 't13d1516h2_111111111111_222222222222';
+    for (const rebuilt of [
+      withValue(build([digest], 'challenge'), JA4_DENY, other).rule,
+      withoutValue(build([digest, other], 'challenge'), JA4_DENY, other).rule,
+    ]) {
+      expect(rebuilt.action.mitigate.action).toBe('challenge');
+      for (const g of rebuilt.conditionGroup) {
+        const exempt = g.conditions.filter((c) => c.type === 'path' && c.neg);
+        expect(exempt.map((c) => c.value).sort()).toEqual(
+          [...POLICY_PATHS].sort(),
+        );
+      }
+    }
+  });
+
+  test('valuesOf reads the digests, never the exempt paths', () => {
+    expect(valuesOf(build([digest], 'challenge'), JA4_DENY)).toEqual([digest]);
+  });
+
+  test('listShapeOf reports a plain deny rule as deny with no exemptions', () => {
+    const plain = denyListRule({
+      name: 'deny-scraper-ja4',
+      description: 'x',
+      spec: JA4_DENY,
+      values: [digest],
+    });
+    expect(listShapeOf(plain)).toEqual({ action: 'deny', exemptPaths: [] });
   });
 });

@@ -218,6 +218,27 @@ const blockedJa4Rule = denyListRule({
   exemptPaths: POLICY_PATHS,
 });
 
+/**
+ * The recoverable tier, and the ONLY list an unattended process may write to.
+ *
+ * JA4 only, deliberately. The blast radius is what decides where this matters: a fingerprint is a
+ * client BUILD shared by everyone who compiled the same TLS stack, so a wrong entry here hits
+ * strangers. An ASN is a hosting network and a user-agent token is the bot's own name — both far
+ * narrower, both a human decision already.
+ *
+ * Optional, like FW_BLOCKED_UA: an unset var drops the rule rather than throwing the whole apply.
+ * Promotion to `deny` is a human moving the digest to FW_BLOCKED_JA4, never a keystroke here.
+ */
+const challengedJa4Rule = denyListRule({
+  name: 'challenge-scraper-ja4',
+  description:
+    'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4). Recoverable for a browser, fatal to a headless client.',
+  spec: JA4_DENY,
+  values: envMatching('FW_CHALLENGE_JA4', JA4_DENY, false),
+  exemptPaths: POLICY_PATHS,
+  action: 'challenge',
+});
+
 const blockedAsnRule = denyListRule({
   name: 'deny-scraper-asn',
   description:
@@ -307,6 +328,11 @@ export const rules: Rule[] = [
   blockedJa4Rule,
   blockedAsnRule,
   blockedUaRule,
+  // AFTER the denies, and this one is not just documentation. Live priority is insertion order,
+  // so a digest on BOTH lists is denied rather than challenged — the human's explicit call beats
+  // the machine's cautious one, which is the right way round. enforcementIssues reports the
+  // overlap so it does not sit there reading as recoverable when it is not.
+  challengedJa4Rule,
   // Two tiers per path: BURST (60s) sized well above a real session so humans never trip it,
   // SUSTAINED (10m) holding the flat rate. Humans burst then idle; scrapers run level.
   rateLimitRule({

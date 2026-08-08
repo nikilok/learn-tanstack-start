@@ -45,6 +45,19 @@ export function isBypassOnly(rule: Rule): boolean {
 }
 
 /**
+ * A rule authored as `challenge` — the tier an automated writer is allowed to reach.
+ *
+ * Its whole purpose is that being wrong is survivable, so it must not be cyclable to `deny`: one
+ * LEFT press would convert a machine-written list of unproven digests into silent outages for
+ * everyone sharing those TLS stacks, and `seedItems` prefers the live action so it would survive
+ * every later apply. `log` stays available — disabling the tier without an env edit is a real
+ * operational need, and it errs toward serving traffic.
+ */
+export function isChallengeOnly(rule: Rule): boolean {
+  return rule.action.mitigate.action === 'challenge';
+}
+
+/**
  * Switchable actions valid for a rule. JA4-keyed rate-limit rules are locked to log; `bypass` is
  * offered only to rules authored as one, since cycling a deny past `deny` would invert it into an
  * exemption — and seedItems prefers the live action, so that would survive every later apply.
@@ -52,6 +65,7 @@ export function isBypassOnly(rule: Rule): boolean {
 export function actionOptions(rule: Rule): ActionChoice[] {
   if (isLogOnly(rule)) return ['log'];
   if (isBypassOnly(rule)) return ['bypass'];
+  if (isChallengeOnly(rule)) return ['log', 'challenge'];
   return rule.action.mitigate.action === 'bypass'
     ? ['log', 'challenge', 'deny', 'bypass']
     : ['log', 'challenge', 'deny'];

@@ -417,6 +417,8 @@ export function notEnforcing(
     active: boolean;
     action: string;
     values: number | null;
+    /** What this rule is supposed to be doing. A challenge tier set to `deny` is not "enforcing". */
+    expected?: string;
   }[],
 ): string[] {
   return rules.flatMap((r) => {
@@ -425,7 +427,7 @@ export function notEnforcing(
         `${r.name}: its denylist could not be read, so whether it is enforcing anything is UNKNOWN — not empty`,
       ];
     if (r.values === 0) return []; // revoked is the intended resting state
-    if (r.active && r.action === 'deny') return [];
+    if (r.active && r.action === (r.expected ?? 'deny')) return [];
     return [
       `${r.name} carries ${r.values} entr${r.values === 1 ? 'y' : 'ies'} but is ${r.active ? `set to ${r.action}` : 'DEACTIVATED'} — nothing it lists is being blocked`,
     ];
@@ -545,6 +547,21 @@ export async function screenOnce(
     denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
   } catch (e) {
     configErrors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
+  }
+  // Challenged counts as handled for CANDIDACY only: re-surfacing a digest already being mitigated
+  // every tick is what trains an operator to dismiss the report. Whether the mitigation actually
+  // WORKS is a different question, and `firewall:verify` is what answers it — a challenged digest
+  // whose traffic still reaches the app shows up there as still-arriving. Do not treat this as
+  // proof the challenge landed.
+  try {
+    denied = [
+      ...new Set([
+        ...denied,
+        ...envMatching('FW_CHALLENGE_JA4', JA4_DENY, false),
+      ]),
+    ];
+  } catch (e) {
+    configErrors.push(`FW_CHALLENGE_JA4 unreadable: ${errMsg(e)}`);
   }
 
   // Read fresh, not cached at startup: a rule edited in the dashboard hours into a watch is the
@@ -917,6 +934,7 @@ async function enforcementIssues(): Promise<string[]> {
     'deny-scraper-ja4': 'FW_BLOCKED_JA4',
     'deny-scraper-asn': 'FW_BLOCKED_ASN',
     'deny-scraper-ua': 'FW_BLOCKED_UA',
+    'challenge-scraper-ja4': 'FW_CHALLENGE_JA4',
   };
   const count = (name: string, spec: typeof JA4_DENY): number | null => {
     try {
@@ -925,22 +943,45 @@ async function enforcementIssues(): Promise<string[]> {
       return null;
     }
   };
-  return notEnforcing(
-    (
-      [
-        ['deny-scraper-ja4', JA4_DENY],
-        ['deny-scraper-asn', ASN_DENY],
-        // The name lever too. Without it a token could sit in FW_BLOCKED_UA un-applied, or be
-        // cycled to `log` in the TUI, while `deniedByUa` treated the crawler as handled and
-        // dropped it from candidacy — a crawler nothing was stopping and nothing was reporting.
-        ['deny-scraper-ua', UA_DENY],
-      ] as const
-    ).map(([name, spec]) => ({
-      name,
-      active: live.activeByName.get(name) ?? false,
-      action: live.actionByName.get(name) ?? 'log',
-      values: count(name, spec),
-    })),
+  const overlap = (() => {
+    try {
+      const denied = new Set(
+        envMatching('FW_BLOCKED_JA4', JA4_DENY, false).map(JA4_DENY.normalize),
+      );
+      return envMatching('FW_CHALLENGE_JA4', JA4_DENY, false)
+        .map(JA4_DENY.normalize)
+        .filter((d) => denied.has(d));
+    } catch {
+      return [];
+    }
+  })();
+  const overlapIssue = overlap.length
+    ? [
+        `${overlap.length} digest${overlap.length === 1 ? '' : 's'} on BOTH FW_BLOCKED_JA4 and FW_CHALLENGE_JA4 — the deny is matched first, so the challenge entry is inert. Drop it from the challenge list.`,
+      ]
+    : [];
+  return overlapIssue.concat(
+    notEnforcing(
+      (
+        [
+          ['deny-scraper-ja4', JA4_DENY],
+          ['deny-scraper-asn', ASN_DENY],
+          // The name lever too. Without it a token could sit in FW_BLOCKED_UA un-applied, or be
+          // cycled to `log` in the TUI, while `deniedByUa` treated the crawler as handled and
+          // dropped it from candidacy — a crawler nothing was stopping and nothing was reporting.
+          ['deny-scraper-ua', UA_DENY],
+          ['challenge-scraper-ja4', JA4_DENY],
+        ] as const
+      ).map(([name, spec]) => ({
+        name,
+        active: live.activeByName.get(name) ?? false,
+        action: live.actionByName.get(name) ?? 'log',
+        values: count(name, spec),
+        // The challenge tier is enforcing when it CHALLENGES. Defaulting to 'deny' would report a
+        // correctly-working recoverable tier as blocking nothing.
+        expected: name === 'challenge-scraper-ja4' ? 'challenge' : 'deny',
+      })),
+    ),
   );
 }
 

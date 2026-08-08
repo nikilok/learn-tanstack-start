@@ -274,6 +274,30 @@ describe('the lock survives the tier being switched off', () => {
     expect(withAction(logged, 'deny').action.mitigate.action).toBe('challenge');
   });
 
+  // The rate-limit branch of withAction returns EARLY, so a guard placed after it does not run.
+  // Nothing in the tier is rate-limited today, which is exactly the reasoning that let the previous
+  // three holes through — the guarantee has to hold for whatever shape the rule turns up in.
+  test('refuses deny even when the protected rule is rate-limited', () => {
+    const rateLimited: Rule = {
+      ...rule('rate_limit', [JA4], {
+        algo: 'fixed_window',
+        window: 60,
+        limit: 100,
+        keys: ['ip'],
+        action: 'log',
+      }),
+      name: CHALLENGE_SCRAPER_JA4,
+    };
+    const escalated = withAction(rateLimited, 'deny');
+    expect(escalated.action.mitigate.rateLimit?.action).toBe('challenge');
+    expect(effectiveAction(escalated.action.mitigate)).toBe('challenge');
+    // An unprotected rate limit still escalates normally.
+    const ordinary = { ...rateLimited, name: 'rl-company-ip' };
+    expect(withAction(ordinary, 'deny').action.mitigate.rateLimit?.action).toBe(
+      'deny',
+    );
+  });
+
   test('an ordinary deny rule is untouched by all of this', () => {
     const deny = withAction({ ...tier, name: 'deny-scraper-ja4' }, 'deny');
     expect(isChallengeOnly(deny)).toBe(false);

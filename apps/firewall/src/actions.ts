@@ -80,24 +80,29 @@ export function actionOptions(rule: Rule): ActionChoice[] {
 /** Copy of the rule with its governing action set: rate-limit rules update rateLimit.action, others mitigate.action. */
 export function withAction(rule: Rule, action: ActionChoice): Rule {
   const m = rule.action.mitigate;
-  if (m.action === 'rate_limit' && m.rateLimit) {
-    // actionOptions() never offers bypass for rate-limit rules, so action is log/challenge/deny here.
-    return {
-      ...rule,
-      action: {
-        mitigate: {
-          ...m,
-          rateLimit: { ...m.rateLimit, action: action as RateLimitAction },
-        },
-      },
-    };
-  }
   // Enforced here, not just offered by actionOptions: seedItems reads the LIVE action and hands it
   // straight to this function, so a rule escalated in the dashboard would otherwise be re-applied
   // as a deny forever. Coercing back is the fail-safe direction and makes the escalation heal on
   // the next apply; notEnforcing still reports that it happened, so it is corrected, not hidden.
+  //
+  // Computed BEFORE the rate-limit branch, which returns early. Nothing in the tier is rate-limited
+  // today so that branch is unreachable for it — but the guarantee is meant to hold whatever shape
+  // the rule has, and every hole found in it so far began as a path that looked unreachable.
   const safe: ActionChoice =
     action === 'deny' && isRecoverableRule(rule.name) ? 'challenge' : action;
+  if (m.action === 'rate_limit' && m.rateLimit) {
+    // actionOptions() never offers bypass for rate-limit rules, so action is log/challenge/deny here.
+    return {
+      ...rule,
+      description: retitledForAction(rule.description, safe),
+      action: {
+        mitigate: {
+          ...m,
+          rateLimit: { ...m.rateLimit, action: safe as RateLimitAction },
+        },
+      },
+    };
+  }
   return {
     ...rule,
     description: retitledForAction(rule.description, safe),

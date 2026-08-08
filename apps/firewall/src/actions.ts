@@ -1,5 +1,7 @@
 // Pure helpers for a rule's switchable action (log / challenge / deny / bypass). No Vercel/Ink deps.
 
+import { retitledForAction } from './deny-list';
+import { isRecoverableRule } from './rule-names';
 import type { ActionChoice, RateLimitAction, Rule } from './rules';
 
 const ACTIONS: ActionChoice[] = ['log', 'challenge', 'deny', 'bypass'];
@@ -45,6 +47,23 @@ export function isBypassOnly(rule: Rule): boolean {
 }
 
 /**
+ * A rule authored as `challenge` — the tier an automated writer is allowed to reach.
+ *
+ * Its whole purpose is that being wrong is survivable, so it must not be cyclable to `deny`: one
+ * LEFT press would convert a machine-written list of unproven digests into silent outages for
+ * everyone sharing those TLS stacks, and `seedItems` prefers the live action so it would survive
+ * every later apply. `log` stays available — disabling the tier without an env edit is a real
+ * operational need, and it errs toward serving traffic.
+ *
+ * Keyed on the rule's NAME, never on its current action. Deriving it from the action made the
+ * guarantee self-defeating: switching the tier off removed the very thing marking it as needing
+ * protection, so challenge -> log -> deny took two presses.
+ */
+export function isChallengeOnly(rule: Rule): boolean {
+  return isRecoverableRule(rule.name);
+}
+
+/**
  * Switchable actions valid for a rule. JA4-keyed rate-limit rules are locked to log; `bypass` is
  * offered only to rules authored as one, since cycling a deny past `deny` would invert it into an
  * exemption — and seedItems prefers the live action, so that would survive every later apply.
@@ -52,6 +71,7 @@ export function isBypassOnly(rule: Rule): boolean {
 export function actionOptions(rule: Rule): ActionChoice[] {
   if (isLogOnly(rule)) return ['log'];
   if (isBypassOnly(rule)) return ['bypass'];
+  if (isChallengeOnly(rule)) return ['log', 'challenge'];
   return rule.action.mitigate.action === 'bypass'
     ? ['log', 'challenge', 'deny', 'bypass']
     : ['log', 'challenge', 'deny'];
@@ -60,19 +80,34 @@ export function actionOptions(rule: Rule): ActionChoice[] {
 /** Copy of the rule with its governing action set: rate-limit rules update rateLimit.action, others mitigate.action. */
 export function withAction(rule: Rule, action: ActionChoice): Rule {
   const m = rule.action.mitigate;
+  // Enforced here, not just offered by actionOptions: seedItems reads the LIVE action and hands it
+  // straight to this function, so a rule escalated in the dashboard would otherwise be re-applied
+  // as a deny forever. Coercing back is the fail-safe direction and makes the escalation heal on
+  // the next apply; notEnforcing still reports that it happened, so it is corrected, not hidden.
+  //
+  // Computed BEFORE the rate-limit branch, which returns early. Nothing in the tier is rate-limited
+  // today so that branch is unreachable for it — but the guarantee is meant to hold whatever shape
+  // the rule has, and every hole found in it so far began as a path that looked unreachable.
+  const safe: ActionChoice =
+    action === 'deny' && isRecoverableRule(rule.name) ? 'challenge' : action;
   if (m.action === 'rate_limit' && m.rateLimit) {
     // actionOptions() never offers bypass for rate-limit rules, so action is log/challenge/deny here.
     return {
       ...rule,
+      description: retitledForAction(rule.description, safe),
       action: {
         mitigate: {
           ...m,
-          rateLimit: { ...m.rateLimit, action: action as RateLimitAction },
+          rateLimit: { ...m.rateLimit, action: safe as RateLimitAction },
         },
       },
     };
   }
-  return { ...rule, action: { mitigate: { ...m, action } } };
+  return {
+    ...rule,
+    description: retitledForAction(rule.description, safe),
+    action: { mitigate: { ...m, action: safe } },
+  };
 }
 
 /** Next/previous valid action for a rule, wrapping around its option list. */

@@ -1,5 +1,6 @@
 // Env-driven identity denylists. Never put a value in an error or log line: --apply output is public.
 
+import { isRecoverableRule } from './rule-names';
 import type { Condition, Rule } from './rules';
 
 // Narrower than Condition['type']: header/query need a `key` this factory never forwards.
@@ -14,6 +15,10 @@ export type DenySpec = {
   example: string; // describes the shape; never paste-able, or the error becomes a match-nothing template
   placeholder: string; // valid, unmatchable; asserted against `valid` in denyListRule
 };
+
+/** What a list rule does on a match. Narrower than ActionChoice: a list never logs or bypasses. */
+export type ListAction = 'deny' | 'challenge';
+type ListVerb = 'denied' | 'challenged' | 'listed';
 
 const MAX_ASN = 4_294_967_295;
 
@@ -158,10 +163,47 @@ export function envMatching(
 
 /** The values a deny rule currently matches, with the revocation placeholder dropped — it stands for "nothing", not for a real entry. */
 export function valuesOf(rule: Rule, spec: DenySpec): string[] {
-  return rule.conditionGroup
-    .flatMap((g) => g.conditions.map((c) => c.value))
-    .filter((v): v is string => typeof v === 'string')
-    .filter((v) => v !== spec.placeholder);
+  return (
+    rule.conditionGroup
+      // The identity condition only. Exempt paths are negated conditions in the same group, so
+      // reading every condition's value would return /robots.txt as though it were a denied digest.
+      .flatMap((g) =>
+        g.conditions.filter((c) => c.type === spec.type).map((c) => c.value),
+      )
+      .filter((v): v is string => typeof v === 'string')
+      .filter((v) => v !== spec.placeholder)
+  );
+}
+
+/**
+ * The parts of a list rule that a rebuild must carry over, read back off the rule itself.
+ *
+ * withValue/withoutValue reconstruct a rule from name + description + values, so anything they do
+ * not read is DROPPED. That already cost the policy-document exemption: it was added to the rule
+ * definitions, and staging a digest in the TUI rebuilt the rule without it, so the next apply
+ * removed the exemption from the live WAF with nothing reporting a change. Deriving beats
+ * re-passing — a caller cannot forget what it never has to supply.
+ */
+export function listShapeOf(rule: Rule): {
+  action: ListAction;
+  exemptPaths: string[];
+} {
+  // From the rule's IDENTITY, not its current action. A recoverable rule switched to `log` fell
+  // through to 'deny' here, so merely staging an entry on a disabled tier rebuilt it as a hard
+  // deny — an escalation needing no action keypress at all.
+  const action = rule.action.mitigate.action;
+  const exempt = new Set<string>();
+  for (const g of rule.conditionGroup)
+    for (const c of g.conditions)
+      if (c.type === 'path' && c.neg && typeof c.value === 'string')
+        exempt.add(c.value);
+  return {
+    action:
+      isRecoverableRule(rule.name) || action === 'challenge'
+        ? 'challenge'
+        : 'deny',
+    exemptPaths: [...exempt],
+  };
 }
 
 /** Rule with `value` added. Rejects a malformed one rather than shipping a condition that matches nothing, and de-duplicates so staging the same digest twice is a no-op. */
@@ -180,6 +222,7 @@ export function withValue(
       description: rule.description,
       spec,
       values,
+      ...listShapeOf(rule),
     }),
     values,
   };
@@ -199,6 +242,7 @@ export function withoutValue(
       description: rule.description,
       spec,
       values,
+      ...listShapeOf(rule),
     }),
     values,
   };
@@ -206,14 +250,19 @@ export function withoutValue(
 
 // Stripped before re-appending: withValue/withoutValue feed a rule's own description back in, so
 // without this the counts compound into "… 1 denied. 2 denied."
-const COUNT_SUFFIX = /\s*(?:\d+ denied\.|REVOKED — nothing is denied\.)$/;
+const COUNT_SUFFIX =
+  /\s*(?:\d+ (?:denied|challenged|listed)\.|REVOKED — nothing is (?:denied|challenged|listed)\.)$/;
 
 /** Count-aware description, so the Vercel dashboard list says what a rule is doing without opening it. A revoked rule must say so loudly: it stays active and matching a placeholder, which otherwise reads as "denying something". Idempotent. */
-export function denyDescription(base: string, count: number): string {
+export function denyDescription(
+  base: string,
+  count: number,
+  verb: ListVerb = 'denied',
+): string {
   const clean = base.replace(COUNT_SUFFIX, '');
   return count === 0
-    ? `${clean} REVOKED — nothing is denied.`
-    : `${clean} ${count} denied.`;
+    ? `${clean} REVOKED — nothing is ${verb}.`
+    : `${clean} ${count} ${verb}.`;
 }
 
 /**
@@ -277,6 +326,49 @@ export function pendingEdits(
  */
 export const POLICY_PATHS = ['/robots.txt', '/llms.txt'];
 
+/**
+ * A list rule that CHALLENGES, for the tier an unattended writer may reach.
+ *
+ * Deliberately a separate builder taking no `action`, rather than an option on denyListRule. The
+ * safety property is that nothing turns this list into a deny, and an option is exactly the kind
+ * of thing a refactor or a merge drops in silence — a test asserting it would then still pass
+ * against its own fixture. With no option there is nothing to drop.
+ */
+export function challengeListRule(
+  opts: Omit<Parameters<typeof denyListRule>[0], 'action'>,
+): Rule {
+  return denyListRule({ ...opts, action: 'challenge' });
+}
+
+/**
+ * The same description with its trailing count clause re-verbed for `action`.
+ *
+ * The verb used to be a fixed string; making it follow the action turned it into a claim, and a
+ * rule cycled in the TUI then applied kept a description asserting the opposite of what it does —
+ * "3 denied." on a rule that only interstitials. A no-op on any description without a count
+ * clause, so rate-limit and allow rules pass through untouched.
+ */
+export function retitledForAction(
+  description: string,
+  action: Rule['action']['mitigate']['action'],
+): string {
+  // `log` gets its own verb rather than being left alone: a rule switched off kept announcing
+  // "3 challenged" in the dashboard, which is a claim to be doing something it is not. "listed" is
+  // the honest word for holding entries and acting on none of them.
+  if (action !== 'deny' && action !== 'challenge' && action !== 'log')
+    return description;
+  const m = description.match(COUNT_SUFFIX);
+  if (!m) return description;
+  const verb: ListVerb =
+    action === 'challenge'
+      ? 'challenged'
+      : action === 'log'
+        ? 'listed'
+        : 'denied';
+  const count = m[0].match(/\d+/);
+  return denyDescription(description, count ? Number(count[0]) : 0, verb);
+}
+
 export function denyListRule(opts: {
   name: string;
   description: string;
@@ -284,6 +376,16 @@ export function denyListRule(opts: {
   values: string[];
   /** Paths exempt from the deny, so the stated policy stays readable. */
   exemptPaths?: readonly string[];
+  /**
+   * What the rule does on a match. `deny` unless a caller asks otherwise.
+   *
+   * `challenge` exists for the tier an unattended process is allowed to write to. A wrong deny
+   * takes a real person offline silently and they cannot tell us; a wrong challenge costs them an
+   * interstitial their browser solves, and is still fatal to a headless client. Same effect on the
+   * target, far smaller cost when the judgement is wrong — which is the only thing that makes an
+   * automated write defensible at all.
+   */
+  action?: ListAction;
 }): Rule {
   if (!opts.spec.valid(opts.spec.placeholder))
     throw new Error(
@@ -292,7 +394,11 @@ export function denyListRule(opts: {
   const values = opts.values.length ? opts.values : [opts.spec.placeholder];
   return {
     name: opts.name,
-    description: denyDescription(opts.description, opts.values.length),
+    description: denyDescription(
+      opts.description,
+      opts.values.length,
+      (opts.action ?? 'deny') === 'challenge' ? 'challenged' : 'denied',
+    ),
     active: true,
     // AND-ed within a group: matches the identity AND is not one of the policy documents. The
     // negation is what makes them readable — see POLICY_PATHS.
@@ -309,6 +415,6 @@ export function denyListRule(opts: {
         ),
       ],
     })),
-    action: { mitigate: { action: 'deny' } },
+    action: { mitigate: { action: opts.action ?? 'deny' } },
   };
 }

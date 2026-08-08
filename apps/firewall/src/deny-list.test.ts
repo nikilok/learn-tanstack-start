@@ -13,6 +13,7 @@ import {
   valuesOf,
   withValue,
   withoutValue,
+  UA_DENY,
 } from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
@@ -431,5 +432,66 @@ describe('enforcedNow', () => {
     expect(enforcedNow([DIGEST], [], [], DIGEST.toUpperCase(), JA4_DENY)).toBe(
       true,
     );
+  });
+});
+
+// A user-agent deny is a SUBSTRING match, so a careless token is the largest single-keystroke
+// outage this tool can produce. The guard is the point of the spec, not a detail of it.
+describe('UA_DENY', () => {
+  test('a distinctive bot token is accepted', () => {
+    for (const t of ['ShapBot', 'SemrushBot', 'AhrefsBot', 'PerplexityBot'])
+      expect(UA_DENY.valid(t)).toBe(true);
+  });
+
+  test.each([
+    ['Mozilla', 'every browser on earth'],
+    ['AppleWebKit', 'every Chromium and WebKit browser'],
+    ['Chrome', 'every Chromium browser'],
+    ['Safari', 'sent by Chrome too'],
+    ['Gecko', 'in the UA of browsers that are not Gecko'],
+    ['compatible', 'the bot-UA convention itself'],
+    ['Linux', 'every Linux user'],
+    ['Mobile', 'every phone'],
+  ])('%s is refused — it would deny %s', (token) => {
+    expect(UA_DENY.valid(token)).toBe(false);
+  });
+
+  test('a token too short to be specific is refused', () => {
+    expect(UA_DENY.valid('Bot')).toBe(false);
+  });
+
+  test('a space is allowed — real user agents are full of them', () => {
+    expect(UA_DENY.valid('Shap Bot')).toBe(true);
+  });
+
+  test('a non-ASCII character is refused', () => {
+    // It will not survive the round trip through the firewall config intact, so a rule built
+    // from it would silently match nothing.
+    expect(UA_DENY.valid('Shapé')).toBe(false);
+  });
+
+  test('the value is stored verbatim — the match is case-sensitive', () => {
+    // Case-folding here would silently stop it matching.
+    expect(UA_DENY.normalize('ShapBot')).toBe('ShapBot');
+  });
+
+  test('its placeholder is valid and matches nothing real', () => {
+    expect(UA_DENY.valid(UA_DENY.placeholder)).toBe(true);
+    expect(UA_DENY.placeholder).not.toMatch(/mozilla/i);
+  });
+
+  test('the built rule matches on substring, not equality', () => {
+    // `eq` on a full UA string breaks on the crawler's next version bump — which is exactly how
+    // the hand-made SemRush rule was written.
+    const rule = denyListRule({
+      name: 'deny-scraper-ua',
+      description: 'x',
+      spec: UA_DENY,
+      values: ['ShapBot'],
+    });
+    const c = rule.conditionGroup[0]?.conditions[0];
+    expect(c?.type).toBe('user_agent');
+    expect(c?.op).toBe('sub');
+    expect(c?.value).toBe('ShapBot');
   });
 });

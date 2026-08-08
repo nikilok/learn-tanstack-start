@@ -1,6 +1,12 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
-import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
+import {
+  ASN_DENY,
+  JA4_DENY,
+  UA_DENY,
+  denyListRule,
+  envMatching,
+} from './deny-list';
 import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
 import { envCeiling } from './util';
 
@@ -161,6 +167,14 @@ function bypassRule(opts: {
 }
 
 // Both REQUIRED (absent throws — see envMatching); values stay in .env.local, never this repo.
+const blockedUaRule = denyListRule({
+  name: 'deny-scraper-ua',
+  description:
+    'Deny crawlers by the name they call themselves (FW_BLOCKED_UA). Substring match on user-agent.',
+  spec: UA_DENY,
+  values: envMatching('FW_BLOCKED_UA', UA_DENY, false),
+});
+
 // Unlike observe-ja4-serverfn these match a digest rather than rate-limiting keyed by one, so
 // isLogOnly() leaves them switchable. That rests on the operator having PROVEN the digest is
 // non-browser: a shared browser fingerprint here denies everyone carrying it, and no code-level
@@ -256,6 +270,7 @@ export const rules: Rule[] = [
   // Position here is documentation only: live priority is INSERTION order (applyRule appends).
   blockedJa4Rule,
   blockedAsnRule,
+  blockedUaRule,
   // Two tiers per path: BURST (60s) sized well above a real session so humans never trip it,
   // SUSTAINED (10m) holding the flat rate. Humans burst then idle; scrapers run level.
   rateLimitRule({

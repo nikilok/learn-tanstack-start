@@ -3,10 +3,12 @@
 import type { Rule } from './rules';
 
 // Narrower than Condition['type']: header/query need a `key` this factory never forwards.
-export type DenyType = 'ja4_digest' | 'geo_as_number';
+export type DenyType = 'ja4_digest' | 'geo_as_number' | 'user_agent';
 
 export type DenySpec = {
   type: DenyType;
+  /** Match operator. Defaults to exact; `sub` is substring, which only user-agent tokens want. */
+  op?: 'eq' | 'sub';
   valid: (v: string) => boolean;
   normalize: (v: string) => string;
   example: string; // describes the shape; never paste-able, or the error becomes a match-nothing template
@@ -14,6 +16,73 @@ export type DenySpec = {
 };
 
 const MAX_ASN = 4_294_967_295;
+
+/**
+ * Substrings that appear in ordinary browser user agents.
+ *
+ * A user-agent deny is a SUBSTRING match, so `Mozilla` would deny every browser on earth in one
+ * env edit — the largest single-keystroke outage available in this tool. A token containing any
+ * of these is refused rather than trusted to be deliberate.
+ */
+const UA_TOKENS_EVERY_BROWSER_SENDS = [
+  'mozilla',
+  'applewebkit',
+  'khtml',
+  'gecko',
+  'chrome',
+  'chromium',
+  'safari',
+  'firefox',
+  'edge',
+  'version',
+  'windows',
+  'macintosh',
+  'linux',
+  'x11',
+  'android',
+  'iphone',
+  'ipad',
+  'mobile',
+  'compatible',
+  'like',
+];
+
+/** Shortest token allowed. Three characters is a substring of far too much. */
+const MIN_UA_TOKEN = 4;
+
+/** Whether a user-agent token is specific enough to deny on. Exported for the test to enumerate. */
+export function uaTokenIsSafe(v: string): boolean {
+  if (v.length < MIN_UA_TOKEN || v.length > 120) return false;
+  // Printable ASCII only: a control character cannot appear in a real header and a non-ASCII one
+  // will not survive the round trip through the firewall config intact.
+  if (!/^[\x20-\x7e]+$/.test(v)) return false;
+  const lower = v.toLowerCase();
+  return !UA_TOKENS_EVERY_BROWSER_SENDS.some((t) => lower.includes(t));
+}
+
+/**
+ * Deny by the name a bot calls itself.
+ *
+ * Narrower than the JA4 lever and usually the right one for a crawler that identifies honestly:
+ * a fingerprint is a client BUILD shared by whoever else compiled the same TLS stack, while the
+ * token is the bot alone. Measured on ShapBot — the JA4 lever caught 10 requests from an
+ * unrelated Linux Chrome, the token caught zero.
+ *
+ * It is trivially spoofable, and that is not the weakness it appears to be: a verified crawler
+ * that changes its UA to evade loses the verification it wants, and lands back in the screen.
+ *
+ * Stored verbatim, never case-folded — the match is case-sensitive, so normalising here would
+ * silently stop it matching.
+ */
+export const UA_DENY: DenySpec = {
+  type: 'user_agent',
+  op: 'sub',
+  valid: uaTokenIsSafe,
+  normalize: (v) => v,
+  example:
+    'a distinctive user-agent token, 4-120 printable characters, not a substring every browser sends',
+  placeholder: '__no-such-agent__',
+};
 
 export const JA4_DENY: DenySpec = {
   type: 'ja4_digest',
@@ -188,7 +257,7 @@ export function denyListRule(opts: {
     description: denyDescription(opts.description, opts.values.length),
     active: true,
     conditionGroup: values.map((value) => ({
-      conditions: [{ type: opts.spec.type, op: 'eq' as const, value }],
+      conditions: [{ type: opts.spec.type, op: opts.spec.op ?? 'eq', value }],
     })),
     action: { mitigate: { action: 'deny' } },
   };

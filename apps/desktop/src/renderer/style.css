@@ -61,6 +61,95 @@ html.screensaver #root {
   -webkit-app-region: no-drag;
 }
 
+/* Stand-in screen — its own full-window view (?role=blocked), covering the site whenever
+   it cannot be reached or is refusing us. Opaque by necessity: it has to hide the page
+   behind it, and every asset it draws is bundled, so it renders with no network at all. */
+.blocked {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 46px 32px 0; /* clears the floating title bar */
+  overflow: hidden;
+  background: #ffffff;
+  color: var(--tb-fg);
+  -webkit-app-region: no-drag; /* the view reuses index.html's drag body */
+  --blocked-soft: #6b7180;
+  --blocked-hover: rgba(31, 36, 48, 0.06);
+}
+.dark .blocked {
+  background: #0a0a0a;
+  --blocked-soft: #8b909e;
+  --blocked-hover: rgba(231, 233, 238, 0.08);
+}
+/* The site's own background wash, faint, so this reads as the same product and not a
+   separate screen. Deliberately below the level where it becomes a thing you notice. */
+.blocked::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      58% 46% at 18% 0%,
+      color-mix(in srgb, var(--tb-mark) 8%, transparent),
+      transparent 68%
+    ),
+    radial-gradient(
+      52% 44% at 86% 100%,
+      color-mix(in srgb, var(--tb-mark-red) 7%, transparent),
+      transparent 68%
+    );
+}
+/* The whole status: one quiet line under the game, never a second thing to read. */
+.blocked-status {
+  position: absolute;
+  right: 32px;
+  bottom: 26px;
+  left: 32px;
+  margin: 0;
+  color: var(--blocked-soft);
+  font-size: 12.5px;
+  text-align: center;
+}
+.blocked-countdown {
+  font-variant-numeric: tabular-nums;
+}
+.blocked-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--blocked-hover);
+  cursor: pointer;
+  transition: text-decoration-color 140ms ease;
+}
+.blocked-retry:hover:not(:disabled) {
+  text-decoration-color: currentcolor;
+}
+.blocked-retry:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.blocked-retry:focus-visible {
+  outline: 2px solid var(--tb-mark-red);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* The runner. Idle until a key lands, so a screen nobody plays with costs nothing. */
+.runner-canvas {
+  display: block;
+  width: 100%;
+  max-width: 1000px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
 /* Keycap tooltip — its own overlay view (?role=tooltip). Chip à la Discord, theme-aware;
    hidden until main positions + shows the view. Caret + bubble are absolutely placed (main
    sends the caret's x within the view) so right-edge buttons still point correctly. */

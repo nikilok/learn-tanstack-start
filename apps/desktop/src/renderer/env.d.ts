@@ -10,6 +10,13 @@ declare global {
     | 'filters';
   // Any button that can raise a tooltip: every shortcut, plus the shortcut-less logo (home).
   type TooltipKind = ShortcutId | 'home';
+  // Why the local stand-in screen is up, and what it counts down to.
+  type BlockReason = 'blocked' | 'offline' | 'unreachable';
+  interface BlockState {
+    reason: BlockReason;
+    retryAt: number;
+    checking: boolean;
+  }
 
   interface TitlebarApi {
     back(): void;
@@ -30,6 +37,8 @@ declare global {
     onTooltip(
       cb: (payload: { kind: TooltipKind; caretX: number } | null) => void,
     ): Unsubscribe;
+    onBlocked(cb: (state: BlockState | null) => void): Unsubscribe;
+    retryBlocked(): void;
     platform: string;
     windowControl(action: 'minimize' | 'maximize' | 'close'): void;
     onMaximized(cb: (max: boolean) => void): Unsubscribe;

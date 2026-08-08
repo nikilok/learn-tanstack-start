@@ -6,10 +6,16 @@ import {
   clipboard,
   ipcMain,
   nativeTheme,
+  net,
+  session,
   shell,
   WebContentsView,
 } from 'electron';
 
+import { isEdgeDenied, simulatedReason } from './block-detect';
+import type { BlockReason } from './block-detect';
+import { createBlockedOverlay } from './blocked-overlay';
+import type { BlockedOverlay } from './blocked-overlay';
 import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
 import { cleanTitle, desktopUserAgent } from './site';
@@ -51,15 +57,47 @@ if (isDev) {
 const TITLEBAR_HEIGHT = 46;
 const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
 
+// What the title-bar pill reads while the stand-in screen is up; the page's own title
+// behind it is either stale or the refusal's, and neither says anything useful.
+const BLOCK_TITLES: Record<BlockReason, string> = {
+  blocked: 'Too many requests',
+  offline: 'Offline',
+  unreachable: 'Cannot reach SponsorSearch',
+};
+
 let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
 let tooltipView: WebContentsView | null = null;
+let blocked: BlockedOverlay | null = null;
+let lastTarget = APP_URL; // the page to come back to once the site answers again
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastFilterCount = 0; // active filters, badged on the title-bar icon
 let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
 let screenSaverOn = false; // the web app's screensaver has the window
+
+/**
+ * Dev affordance: DESKTOP_SIMULATE_RATE_LIMIT / _OFFLINE / _UNREACHABLE put the stand-in
+ * screen up at launch. Offline in particular needs the machine's network genuinely gone to
+ * reproduce, and the dev site is served over loopback, so pulling the network does not even
+ * take it down.
+ *
+ * It seeds the state and nothing else: every check from there is a real one, so the
+ * countdown reconnects and hands the window back exactly as it does in the wild. Faking the
+ * checks too made the screen sit there through a countdown that never did anything.
+ */
+function simulatedBlock(): BlockReason | null {
+  return app.isPackaged ? null : simulatedReason(process.env);
+}
+
+/** The title-bar pill's text: what the stand-in screen is saying, or the page's own title. */
+function currentTitle(): string {
+  const reason = blocked?.reason();
+  return reason
+    ? BLOCK_TITLES[reason]
+    : (siteView?.webContents.getTitle() ?? '');
+}
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -76,7 +114,9 @@ function openExternal(url: string): void {
 
 /** Pushes the site's back/forward availability to the title bar buttons. */
 function pushNavState(): void {
-  const h = siteView?.webContents.navigationHistory;
+  // Greyed out while the stand-in screen is up: the history is still there, but moving
+  // through it only earns another refusal.
+  const h = blocked?.isUp() ? null : siteView?.webContents.navigationHistory;
   titleBarView?.webContents.send('titlebar:navstate', {
     canGoBack: h?.canGoBack() ?? false,
     canGoForward: h?.canGoForward() ?? false,
@@ -88,6 +128,7 @@ function navigate(dir: 'back' | 'forward'): void {
   // Shortcuts reach here via before-input-event, which preventDefaults them — so the page
   // never sees the keystroke and would stay idle while the shell acts on it.
   reportChromeInput(true);
+  if (blocked?.isUp()) return;
   const h = siteView?.webContents.navigationHistory;
   if (!h) return;
   if (dir === 'back' && h.canGoBack()) h.goBack();
@@ -98,6 +139,9 @@ function navigate(dir: 'back' | 'forward'): void {
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
   reportChromeInput(true); // see navigate(): shortcuts never reach the page as keystrokes
+  // Theme and cursor still work behind the stand-in screen (it follows the theme too);
+  // anything that would move the page does not.
+  if (blocked?.isUp() && (cmd === 'home' || cmd === 'filters')) return;
   siteView?.webContents.send('ss:command', cmd);
   // Navigation commands hand focus to the page (type-to-search, form controls).
   if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
@@ -153,11 +197,12 @@ function pushTitle(title: string): void {
   titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
 }
 
-/** Pushes the current theme to both title-bar views — the bar and the tooltip overlay. */
+/** Pushes the current theme to every local view — the bar, the tooltip, the stand-in screen. */
 function broadcastTheme(): void {
   const payload = { dark: lastDark, mode: lastMode };
   titleBarView?.webContents.send('titlebar:theme', payload);
   tooltipView?.webContents.send('titlebar:theme', payload);
+  blocked?.sendTheme(payload);
 }
 
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
@@ -183,6 +228,8 @@ function createWindow(): void {
       titleBarView = null;
       siteView = null;
       tooltipView = null;
+      blocked?.destroy();
+      blocked = null;
       screenSaverOn = false;
     }
   });
@@ -244,14 +291,41 @@ function createWindow(): void {
   win.contentView.addChildView(tip);
   tooltipView = tip;
 
+  // The local stand-in for the site. Built on first need and mounted between the page and
+  // the title bar, so the bar keeps floating over it exactly as it does over the page.
+  blocked = createBlockedOverlay({
+    parent: () => mainWindow,
+    index: 1,
+    probeUrl: APP_URL,
+    userAgent: () => view.webContents.getUserAgent(),
+    onCleared: () => {
+      if (!view.webContents.isDestroyed())
+        void view.webContents.loadURL(lastTarget);
+    },
+    onShow: (reason) => {
+      // The page owns the screensaver, and it would otherwise sit over this.
+      setScreenSaver(false);
+      pushNavState();
+      pushTitle(BLOCK_TITLES[reason]);
+    },
+    onHide: () => {
+      pushNavState();
+      pushTitle(currentTitle());
+    },
+  });
+
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
+    blocked?.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
     tip.setVisible(false); // stale on resize; the next hover re-positions + shows it
   };
   layout();
   win.on('resize', layout);
+
+  const simulated = simulatedBlock();
+  if (simulated) blocked.show(simulated);
 
   const wc = view.webContents;
   wc.setUserAgent(
@@ -269,9 +343,30 @@ function createWindow(): void {
     openExternal(url);
     return { action: 'deny' };
   });
-  wc.on('did-navigate', pushNavState);
-  wc.on('did-navigate-in-page', pushNavState);
-  wc.on('page-title-updated', (_e, title) => pushTitle(title));
+  wc.on('did-navigate', (_e, url) => {
+    lastTarget = url || lastTarget;
+    pushNavState();
+  });
+  wc.on('did-navigate-in-page', (_e, url) => {
+    lastTarget = url || lastTarget;
+    pushNavState();
+  });
+  wc.on('page-title-updated', (_e, title) => {
+    if (!blocked?.isUp()) pushTitle(title);
+  });
+
+  // A refusal happens at the network layer, so nothing in the page can report it. Watching
+  // the responses catches both a refused page and the RPCs a loaded page fires in the
+  // background, which is the case that would otherwise just look like a broken app.
+  wc.session.webRequest.onCompleted(
+    { urls: [`${APP_ORIGIN}/*`] },
+    (details) => {
+      // The session outlives the window, so a request can still land during teardown.
+      if (wc.isDestroyed() || blocked?.isUp() || !isEdgeDenied(details)) return;
+      blocked?.show('blocked');
+      if (blocked?.isUp()) wc.stop(); // the rest in flight is only going to be refused too
+    },
+  );
 
   // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
   registerKeyboardShortcuts([wc, bar.webContents], {
@@ -284,7 +379,10 @@ function createWindow(): void {
   const show = (): void => {
     if (win.isDestroyed()) return; // timer/load may fire after a fast window close
     win.show();
-    wc.focus();
+    // A first load that was refused finishes loading like any other, so without this the
+    // keyboard would land on the covered page instead of the screen in front of it.
+    if (blocked?.isUp()) blocked.focus();
+    else wc.focus();
   };
   // Fallback if the initial load stalls; cleared once the load finishes so it
   // can't fire show() against a destroyed window.
@@ -293,18 +391,18 @@ function createWindow(): void {
     clearTimeout(showTimer);
     show();
   });
-  // Retry a failed load (offline / DNS / prod outage) rather than stranding a blank
-  // window — retry the URL that failed, not home, so the user's page survives the
-  // hiccup; ignore -3 (ABORTED), which fires on normal in-page navigations.
+  // A failed load (offline / DNS / prod outage) puts the local screen up rather than
+  // stranding a blank window; it owns the retry from there and comes back to the URL that
+  // failed, not home. Ignore -3 (ABORTED), which fires on normal in-page navigations.
   wc.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
-    if (isMainFrame && code !== -3) {
-      const target = url || APP_URL;
-      setTimeout(() => {
-        if (!wc.isDestroyed()) void wc.loadURL(target);
-      }, 2000);
-    }
+    if (!isMainFrame || code === -3) return;
+    lastTarget = url || lastTarget;
+    blocked?.show(net.isOnline() ? 'unreachable' : 'offline');
   });
-  win.on('focus', () => wc.focus());
+  win.on('focus', () => {
+    if (blocked?.isUp()) blocked.focus();
+    else wc.focus();
+  });
 
   void wc.loadURL(APP_URL);
 }
@@ -415,10 +513,15 @@ function registerIpc(): void {
     } else if (action === 'close') win.close();
   });
 
-  // A title-bar view (bar or tooltip) loaded -> send it the theme; the bar also gets its full state.
+  // The stand-in screen's "Try now" -> check straight away instead of waiting out the timer.
+  ipcMain.on('blocked:retry', () => blocked?.retry());
+
+  // A local view (bar, tooltip or stand-in screen) loaded -> send it the theme; the bar
+  // also gets its full state, and the stand-in screen why it is up.
   ipcMain.on('titlebar:ready', (event) => {
     event.sender.send('titlebar:theme', { dark: lastDark, mode: lastMode });
-    // The rest is bar-only state; skip it when the tooltip view is the one reporting ready.
+    blocked?.sendStateTo(event.sender);
+    // The rest is bar-only state; skip it when another view is the one reporting ready.
     if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
@@ -428,12 +531,21 @@ function registerIpc(): void {
       'titlebar:maximized',
       mainWindow?.isMaximized() ?? false,
     );
-    pushTitle(siteView?.webContents.getTitle() ?? '');
+    // Not the page's title while the stand-in screen is up: a bar that loads or reloads
+    // then would otherwise replace what the screen is saying with a stale page title.
+    pushTitle(currentTitle());
     pushNavState();
   });
 }
 
 void app.whenReady().then(() => {
+  // The recovery check goes through net.fetch, which the certificate-error hook above does
+  // not cover — without this it could never succeed against the dev origin's own cert.
+  if (isDev) {
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      callback(request.hostname === new URL(APP_URL).hostname ? 0 : -3);
+    });
+  }
   setupMenu(APP_URL);
   registerIpc();
   createWindow();

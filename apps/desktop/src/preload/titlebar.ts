@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('titlebar', {
     ipcRenderer.send('titlebar:tooltip', payload),
   onTooltip: (cb: (payload: { kind: string; caretX: number } | null) => void) =>
     subscribe('tooltip:show', cb),
+  // The local stand-in screen: why it is up and when the next check runs, plus "check now".
+  onBlocked: (cb: (state: unknown) => void) => subscribe('blocked:state', cb),
+  retryBlocked: () => ipcRenderer.send('blocked:retry'),
   // Window chrome: which OS we're on, the custom min/max/close actions, and maximise state.
   platform: process.platform,
   windowControl: (action: string) =>

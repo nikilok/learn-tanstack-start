@@ -7,7 +7,6 @@
 // tick the first time Vercel's classification shifts under us.
 
 import { type Advice } from './ban-advice';
-import { watchHours } from './tuning';
 
 /** Investigations per hour, whatever the screen says. Caps our spend, not our detection. */
 export const SPAWN_CEILING = 3;
@@ -211,8 +210,8 @@ export function provenanceOf(parsed: unknown): string {
 export async function runInvestigation(
   f: Suspicious,
   cwd: string,
-  /** Hours actually screened. Defaults to the env value, which is only right when they agree. */
-  hours: number = watchHours(),
+  /** Hours actually screened. Required: a default silently disagrees with a positional override. */
+  hours: number,
   onStart?: (child: {
     kill: (signal?: number | NodeJS.Signals) => void;
   }) => void,

@@ -828,7 +828,7 @@ async function main() {
       // and cannot be prevented from it, so the honest position is to check rather than trust.
       const envPath = `${process.cwd()}/.env.local`;
       const before = await fingerprintConfig(envPath);
-      const out = await runInvestigation(f, process.cwd());
+      const out = await runInvestigation(f, process.cwd(), hours);
       if (
         investigationChangedConfig(before, await fingerprintConfig(envPath))
       ) {

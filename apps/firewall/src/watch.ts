@@ -389,7 +389,7 @@ export function watchLines(r: WatchReport): Line[] {
 export function worthProfiling(
   rows: Screened[],
   denied: string[],
-  floor = screenFloor(),
+  floor: number,
   cap = MAX_PROFILES,
 ): Screened[] {
   const already = new Set(denied.map((d) => JA4_DENY.normalize(d)));
@@ -445,7 +445,11 @@ export async function findSuspects(
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated } = await screen(creds, window, allowedBots);
   const findings: Finding[] = [];
-  const candidates = worthProfiling(rows, deniedJa4);
+  const candidates = worthProfiling(
+    rows,
+    deniedJa4,
+    screenFloor(window.minutes),
+  );
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
   // on the quiet nights, which is nearly all of them.
   const windowTotal = candidates.length

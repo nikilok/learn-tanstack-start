@@ -1,3 +1,5 @@
+import { volumeFloor } from './ban-advice';
+
 // Screening thresholds, read from .env.local and never written here.
 //
 // A threshold in a public repo is a published budget: read it, stay under it, and nothing ever
@@ -16,9 +18,25 @@ function envInt(name: string, why: string): number {
   throw new Error(`${name} must be a positive integer in .env.local — ${why}`);
 }
 
-/** Requests a fingerprint needs in the window before it is worth profiling. */
-export function screenFloor(): number {
-  return envInt('FW_WATCH_MIN_REQUESTS', 'the volume floor for profiling');
+/**
+ * Requests a fingerprint needs before it is worth profiling, scaled to the window.
+ *
+ * The env value is a RATE PER DAY, not an absolute count. It used to be absolute while the
+ * advisory's own `volumeFloor` scaled, so the two disagreed by the window length: over 6 days the
+ * screen demanded 6x what the advisory needed, and nothing was ever profiled. The disagreement,
+ * not either number, was the defect.
+ *
+ * Never below `volumeFloor` for the same window: profiling an identity the advisory cannot reach
+ * a verdict on spends ~21 queries to produce "not enough traffic to say". Above it is a
+ * legitimate operator choice — profile less, spend less.
+ */
+export function screenFloor(windowMinutes = 1440): number {
+  const perDay = envInt(
+    'FW_WATCH_MIN_REQUESTS',
+    'the profiling floor as a rate PER DAY, scaled to the window',
+  );
+  const scaled = Math.round((perDay * windowMinutes) / 1440);
+  return Math.max(volumeFloor(windowMinutes), scaled);
 }
 
 /** Hours of history a screen reads. */

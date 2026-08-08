@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 
+import { volumeFloor } from './ban-advice';
 import { screenFloor, watchHours, watchIntervalMs } from './tuning';
 
 const VARS = [
@@ -52,4 +53,46 @@ describe.each([
 test('the message says where to set it, without printing a value', () => {
   delete process.env.FW_WATCH_MIN_REQUESTS;
   expect(() => screenFloor()).toThrow('.env.local');
+});
+
+// The screen floor and the advisory's volume floor used to disagree by the window length: the
+// screen was absolute, the advisory scaled. Over 6 days the screen demanded 6x what the advisory
+// needed, so nothing was ever profiled and the tool looked quiet.
+describe('screenFloor scales with the window', () => {
+  const withEnv = <T>(perDay: string, fn: () => T): T => {
+    const prior = process.env.FW_WATCH_MIN_REQUESTS;
+    process.env.FW_WATCH_MIN_REQUESTS = perDay;
+    try {
+      return fn();
+    } finally {
+      if (prior === undefined) delete process.env.FW_WATCH_MIN_REQUESTS;
+      else process.env.FW_WATCH_MIN_REQUESTS = prior;
+    }
+  };
+
+  test('the env value is a rate per day, not an absolute count', () => {
+    withEnv('200', () => {
+      expect(screenFloor(24 * 60)).toBe(200);
+      expect(screenFloor(144 * 60)).toBe(1200);
+    });
+  });
+
+  test('it never drops below what the advisory needs for the same window', () => {
+    // Profiling an identity the advisory cannot reach a verdict on spends ~21 queries to
+    // produce "not enough traffic to say".
+    withEnv('1', () =>
+      expect(screenFloor(144 * 60)).toBe(volumeFloor(144 * 60)),
+    );
+  });
+
+  test('a higher rate is honoured — profiling less is a legitimate choice', () => {
+    withEnv('2000', () => expect(screenFloor(24 * 60)).toBe(2000));
+  });
+
+  test('the two agree at every window when set to the advisory rate', () => {
+    withEnv('200', () => {
+      for (const h of [6, 24, 72, 144])
+        expect(screenFloor(h * 60)).toBe(volumeFloor(h * 60));
+    });
+  });
 });

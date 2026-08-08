@@ -8,9 +8,9 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+- **A launch splash** — opening SponsorSearch now puts the window on screen straight away, showing the wordmark on the app's dark background while the site loads, then fading into the app. The mark arrives greyed out and comes up into full colour, Union Jack and all, before the app takes over. Previously nothing appeared at all until the page had finished loading, so the app felt slower to start than it was. The splash is drawn inside the app, so it shows whatever the connection is doing.
 - **A proper screen when the site can't be reached** — if you lose your connection, or SponsorSearch briefly stops answering because you have been searching hard enough to trip its rate limit, the app no longer drops you on a bare "Forbidden" page. It shows its own screen instead, drawn entirely inside the app so it works with no connection at all: what happened, a countdown to the next check, and a "Try now" button. The app keeps checking in the background and puts you back on the page you were reading the moment it can, with nothing to click.
 - **Something to do while you wait** — that screen comes with a small game. Press Space and the SponsorSearch lens sets off across a skyline you have to jump; your best score is kept between visits. Entirely optional, and it stops the moment your page comes back.
-
 - **Update checks include your app version** — when SponsorSearch checks for or downloads a new release it now sends the version you are running, so we can see which versions update cleanly and which get stuck on an old build. It goes into our server logs along with the request, is deleted with them, and is not tied to any account. Nothing about how updates work has changed.
 
 ## v0.4.0 — 2026-07-28

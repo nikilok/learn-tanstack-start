@@ -19,6 +19,7 @@ import type { BlockedOverlay } from './blocked-overlay';
 import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
 import { cleanTitle, desktopUserAgent } from './site';
+import { createSplash } from './splash';
 import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
   getPendingUpdate,
@@ -314,15 +315,26 @@ function createWindow(): void {
     },
   });
 
+  // Topmost, and up before anything is loaded — see splash.ts for why the web app's own
+  // splash cannot cover this.
+  const { width: w0, height: h0 } = win.getContentBounds();
+  const splash = createSplash(win, { x: 0, y: 0, width: w0, height: h0 });
+
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
     blocked?.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
+    splash.setBounds({ x: 0, y: 0, width, height });
     tip.setVisible(false); // stale on resize; the next hover re-positions + shows it
   };
   layout();
   win.on('resize', layout);
+
+  // The window itself is shown straight away, on its ink background, so launching the app
+  // puts something on screen at once. Waiting for the load meant the first thing anyone
+  // saw was an already-finished page, several hundred milliseconds of nothing later.
+  win.show();
 
   const simulated = simulatedBlock();
   if (simulated) blocked.show(simulated);
@@ -374,23 +386,31 @@ function createWindow(): void {
     command: sendCommand,
   });
 
-  // Hand keyboard focus to the site view (not the title bar) so typing reaches the
-  // page right away — the web app's type-to-search needs the document focused.
-  const show = (): void => {
+  // The handover from the splash to the app: drop the splash and hand keyboard focus to
+  // the site view (not the title bar), so typing reaches the page right away — the web
+  // app's type-to-search needs the document focused.
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  const reveal = (): void => {
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = null;
     if (win.isDestroyed()) return; // timer/load may fire after a fast window close
-    win.show();
+    splash.dismiss();
     // A first load that was refused finishes loading like any other, so without this the
     // keyboard would land on the covered page instead of the screen in front of it.
     if (blocked?.isUp()) blocked.focus();
     else wc.focus();
   };
-  // Fallback if the initial load stalls; cleared once the load finishes so it
-  // can't fire show() against a destroyed window.
-  const showTimer = setTimeout(show, 4000);
-  wc.once('did-finish-load', () => {
-    clearTimeout(showTimer);
-    show();
-  });
+  // A slow load keeps the splash, which is what it is for. A load that never finishes and
+  // never fails must not keep it forever: the splash is above the title bar, so the custom
+  // window controls on Windows and Linux are underneath it until this fires.
+  revealTimer = setTimeout(reveal, 6000);
+  // `dom-ready`, not `did-finish-load`: the latter is the load event, which waits for
+  // every font, tile and analytics beacon the page pulls in. Measured on a page with no
+  // subresources at all, the load event still trailed the response by three seconds — on
+  // the real site it is far behind the point where the app is there and usable, and the
+  // splash sitting through all of it is what made it feel long. Finish stays as a backstop.
+  wc.once('dom-ready', reveal);
+  wc.once('did-finish-load', reveal);
   // A failed load (offline / DNS / prod outage) puts the local screen up rather than
   // stranding a blank window; it owns the retry from there and comes back to the URL that
   // failed, not home. Ignore -3 (ABORTED), which fires on normal in-page navigations.
@@ -398,6 +418,7 @@ function createWindow(): void {
     if (!isMainFrame || code === -3) return;
     lastTarget = url || lastTarget;
     blocked?.show(net.isOnline() ? 'unreachable' : 'offline');
+    reveal(); // the stand-in screen is what needs to be on screen now, not the splash
   });
   win.on('focus', () => {
     if (blocked?.isUp()) blocked.focus();

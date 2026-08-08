@@ -37,6 +37,8 @@ declare global {
     onTooltip(
       cb: (payload: { kind: TooltipKind; caretX: number } | null) => void,
     ): Unsubscribe;
+    onSplashDismiss(cb: () => void): Unsubscribe;
+    splashDone(): void;
     onBlocked(cb: (state: BlockState | null) => void): Unsubscribe;
     retryBlocked(): void;
     platform: string;

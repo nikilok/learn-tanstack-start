@@ -61,6 +61,45 @@ html.screensaver #root {
   -webkit-app-region: no-drag;
 }
 
+/* Launch splash — its own full-window view (?role=splash), up before the site has loaded
+   anything. The ink background matches INITIAL_BG in apps/desktop and `.app-splash` in the
+   web app; the mark is white on it, exactly as on the PWA splash and the app icon. */
+.splash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 1.5rem;
+  background: #120817;
+  -webkit-app-region: no-drag; /* the view reuses index.html's drag body */
+  opacity: 1;
+  /* Paired with FADE_MS in main/splash.ts, which hides the view on the same clock. */
+  transition: opacity 160ms ease;
+}
+.splash--leaving {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash {
+    transition: none;
+  }
+}
+/* The mark's resting state is the site footer's treatment (`grayscale opacity-70` there),
+   and it is also the reveal's first frame — without it the mark would paint in full colour
+   for a frame before SplashScreen.tsx takes the animation over. The colours themselves come
+   from the dark tokens, since index.html carries `class="dark"` and the splash is on the ink
+   background whatever theme the app is in. */
+.splash-mark {
+  width: min(58vw, 440px);
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+.splash-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* Stand-in screen — its own full-window view (?role=blocked), covering the site whenever
    it cannot be reached or is refusing us. Opaque by necessity: it has to hide the page
    behind it, and every asset it draws is bundled, so it renders with no network at all. */

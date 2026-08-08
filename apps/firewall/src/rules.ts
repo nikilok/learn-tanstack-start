@@ -88,6 +88,8 @@ const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
 // line, so a missing var must abort the apply rather than silently ship burst-only.
 const SERVERFN_SUSTAINED_LIMIT = envLimit('FW_SERVERFN_SUSTAINED_LIMIT');
 const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
+const COMPANY_LIMIT = envLimit('FW_COMPANY_LIMIT');
+const COMPANY_SUSTAINED_LIMIT = envLimit('FW_COMPANY_SUSTAINED_LIMIT');
 // Opt-in: no burst tier depends on this one, so a missing var drops just this rule.
 const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
 // Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
@@ -322,6 +324,40 @@ export const rules: Rule[] = [
     actionDuration: '1h',
     // Enforces on insert: log mode would make the widened burst tier a net loosening.
     action: 'deny',
+  }),
+  // The corpus itself. Every other ceiling covers RPCs, search, tiles or downloads — the one
+  // surface a harvester actually wants had none, so a client past the managed challenge met no
+  // friction at all on 127k pages.
+  //
+  // Sized against the crawlers we cannot afford to throttle, not against humans. Measured
+  // 2026-08-08 per IP: Googlebot peaks at 14/60s and 58/600s, bingbot 19 and 39. Deindexing
+  // ourselves to inconvenience a scraper would be the worst trade available here, and the WAF
+  // cannot condition on "verified" — exempting by user-agent would hand every scraper a bypass
+  // for the price of a header.
+  //
+  // Counts HTML page fetches only: RPCs live under /_serverFn and do not match this path, so a
+  // real session browsing client-side barely registers.
+  //
+  // Ships in OBSERVE. A rate limit sized without live confirmation is how an ordinary browsing
+  // pattern took this IP off the whole site for ten minutes yesterday.
+  rateLimitRule({
+    name: 'rl-company-ip',
+    description:
+      'Per-IP BURST ceiling (60s) on company page fetches — the corpus surface. Sized several times above the busiest verified crawler so search engines are never throttled. Phase 1: log.',
+    conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
+    limit: COMPANY_LIMIT,
+    keys: ['ip'],
+    actionDuration: '10m',
+  }),
+  rateLimitRule({
+    name: 'rl-company-ip-sustained',
+    description:
+      'Per-IP SUSTAINED ceiling (10m) on company page fetches. Holds flat-rate enumeration below what a bulk harvest needs, forcing address rotation — which is the only part of a scrape that costs real money. Phase 1: log.',
+    conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
+    limit: COMPANY_SUSTAINED_LIMIT,
+    keys: ['ip'],
+    window: SUSTAINED_WINDOW,
+    actionDuration: '1h',
   }),
   rateLimitRule({
     name: 'rl-ssr-search-ip',

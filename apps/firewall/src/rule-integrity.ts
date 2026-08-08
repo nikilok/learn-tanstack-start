@@ -58,3 +58,35 @@ export function trustedRules(
     })
     .map((r) => r.name);
 }
+
+/**
+ * Denied user-agent tokens that robots.txt does NOT also disallow.
+ *
+ * Two statements of one policy: the firewall enforces it, robots.txt requests it. They live in
+ * different files, one secret and one public, so nothing stops them drifting — and a crawler
+ * denied at the edge but permitted in robots.txt was never asked to stop, which is the version
+ * that reads badly if anyone ever asks why they were blocked.
+ *
+ * Token-based rather than exact: robots.txt names a product token (`ShapBot`), the WAF matches a
+ * substring of the full user agent, and they are the same string by construction here.
+ * Case-insensitive because robots.txt user-agent matching is.
+ */
+export function unstatedInRobots(
+  deniedUa: readonly string[],
+  robotsTxt: string,
+): string[] {
+  const disallowed = new Set<string>();
+  let agent: string | null = null;
+  for (const raw of robotsTxt.split('\n')) {
+    const line = raw.replace(/#.*$/, '').trim();
+    const ua = /^user-agent:\s*(.+)$/i.exec(line);
+    if (ua?.[1]) {
+      agent = ua[1].trim().toLowerCase();
+      continue;
+    }
+    // Only a bare `Disallow: /` counts. A narrower path is not a refusal of the whole site, and
+    // treating it as one would report agreement this function exists to disprove.
+    if (agent && /^disallow:\s*\/\s*$/i.test(line)) disallowed.add(agent);
+  }
+  return deniedUa.filter((t) => t && !disallowed.has(t.trim().toLowerCase()));
+}

@@ -8,6 +8,7 @@ import {
   headerKeysByGroup,
   headerKeysOf,
   trustedRules,
+  unstatedInRobots,
 } from './rule-integrity';
 
 const rule = (name: string, keys: string[]) => ({
@@ -188,5 +189,46 @@ describe('negated conditions', () => {
       ],
     };
     expect([...headerKeysOf(r)]).toEqual(['marker']);
+  });
+});
+
+// The firewall enforces the policy and robots.txt requests it. They are two statements of one
+// thing in two files, one secret and one public, with nothing holding them together.
+describe('unstatedInRobots', () => {
+  const robots = [
+    'User-agent: *',
+    'Allow: /',
+    '',
+    'User-agent: ShapBot',
+    'Disallow: /',
+    '',
+    '# a comment',
+    'User-agent: AhrefsBot',
+    'Disallow: /',
+  ].join('\n');
+
+  test('a denied crawler that robots.txt also refuses is fine', () => {
+    expect(unstatedInRobots(['ShapBot', 'AhrefsBot'], robots)).toEqual([]);
+  });
+
+  test('a denied crawler robots.txt never mentions is reported', () => {
+    expect(unstatedInRobots(['ShapBot', 'Bytespider'], robots)).toEqual([
+      'Bytespider',
+    ]);
+  });
+
+  test('matching is case-insensitive, as robots.txt is', () => {
+    expect(unstatedInRobots(['shapbot'], robots)).toEqual([]);
+  });
+
+  test('a narrower Disallow is not a refusal of the site', () => {
+    // `Disallow: /admin` would otherwise read as "we asked them to stop", which is the exact
+    // false agreement this is meant to catch.
+    const partial = 'User-agent: Bytespider\nDisallow: /admin';
+    expect(unstatedInRobots(['Bytespider'], partial)).toEqual(['Bytespider']);
+  });
+
+  test('an empty robots.txt reports everything, never nothing', () => {
+    expect(unstatedInRobots(['ShapBot'], '')).toEqual(['ShapBot']);
   });
 });

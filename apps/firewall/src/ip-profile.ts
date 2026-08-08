@@ -11,6 +11,7 @@ import {
   shapeOf,
   tellsFor,
   withRpcs,
+  verifiedBotsOf,
 } from './ip-signals';
 import {
   type Ctx,
@@ -82,6 +83,8 @@ export type IpProfile = {
   byCountry: [string, number][];
   byBot: [string, number][]; // botVerified|botName|botCategory, for display
   byBotVerified: [string, number][]; // botVerified alone — the field that overrides other tells
+  /** Verified crawler NAMES with counts. The flag says a crawler is genuine; the name says which. */
+  verifiedBots: [string, number][];
   byWafAction: [string, number][];
   byWafRule: [string, number][];
   byPath: [string, number][];
@@ -402,10 +405,7 @@ export async function fetchIpProfile(
         mixOf(pathRows).rpc,
       ),
       complete: failed.length === 0 && !routesTruncated && rpcsMeasured,
-      verifiedNames: bots
-        .filter(([k]) => k.startsWith('pass'))
-        .map(([k]) => k.split(' | ')[1] ?? 'verified')
-        .filter((n, i, a) => a.indexOf(n) === i),
+      verifiedNames: verifiedBotsOf(bots).map(([n]) => n),
     };
   };
 
@@ -473,6 +473,7 @@ export async function fetchIpProfile(
     byCountry,
     byBot,
     byBotVerified,
+    verifiedBots: verifiedBotsOf(byBot),
     byWafAction,
     byWafRule,
     byPath,

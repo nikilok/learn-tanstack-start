@@ -15,6 +15,7 @@ import {
   shapeOf,
   tellsFor,
   withRpcs,
+  rendersIndicateBrowser,
 } from './ip-signals';
 
 /** Build a zero-filled 10-minute series with `counts` starting at `offset` buckets in. */
@@ -574,5 +575,28 @@ describe('path diversity — floor vs ratio', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+});
+
+// The page-proportionality test, built but NOT wired into the advisory. Enabling it changes what
+// the tool recommends denying, which is the operator's call, not a refactor.
+describe('rendersIndicateBrowser — page proportionality', () => {
+  test('omitting pages keeps the pre-existing behaviour exactly', () => {
+    expect(rendersIndicateBrowser(400, 9400)).toBe(true);
+  });
+
+  test('a real session renders many times per page', () => {
+    // Measured on this site: 694 rendering requests across 21 page fetches.
+    expect(rendersIndicateBrowser(694, 721, 21)).toBe(true);
+  });
+
+  test('fewer renders than pages is not a browser', () => {
+    // The live AI-harvester fingerprint: 360 rendering requests across 2008 page fetches, and
+    // zero map tiles. A browser renders every page it loads; this one rendered 1 in 6.
+    expect(rendersIndicateBrowser(360, 2473, 2008)).toBe(false);
+  });
+
+  test('the share gate still applies first', () => {
+    expect(rendersIndicateBrowser(4, 10, 1)).toBe(false);
   });
 });

@@ -30,3 +30,28 @@ export function watchHours(): number {
 export function watchIntervalMs(): number {
   return envInt('FW_WATCH_INTERVAL_MIN', 'minutes between screens') * 60_000;
 }
+
+/**
+ * Verified crawlers we actually want, lower-cased. Everything else stays a candidate however
+ * Vercel classified it.
+ *
+ * Verification proves a crawler is who it says — not that we want it reading the whole corpus.
+ * Treating every `botVerified: pass` as legitimate hands the same access to commercial SEO and
+ * AI harvesters, which is the outcome this list exists to prevent.
+ *
+ * Required, and it throws when absent rather than defaulting to "allow all": a silent fallback
+ * would restore exactly the behaviour being narrowed, and it would do it invisibly. Callers read
+ * this at their boundary so the failure surfaces as an error, never mid-advisory.
+ */
+export function allowedBots(): string[] {
+  const raw = process.env.FW_ALLOWED_BOTS?.trim();
+  const names = (raw ?? '')
+    .split(',')
+    .map((n) => n.trim().toLowerCase())
+    .filter(Boolean);
+  if (!names.length)
+    throw new Error(
+      'FW_ALLOWED_BOTS must list the verified crawlers to exempt, comma-separated, in .env.local — everything else stays bannable',
+    );
+  return names;
+}

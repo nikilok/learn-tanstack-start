@@ -16,14 +16,31 @@ export function assetsIndicateBrowser(assets: number, total: number): boolean {
   return assets >= MIN_ASSETS && assets / Math.max(1, total) >= MIN_ASSET_SHARE;
 }
 
-/** Whether a client's rendering requests are numerous enough to indicate a real browser. Pooled and share-gated: an unconditional `> 0` on any single axis is not evidence. */
+/**
+ * Whether a client's rendering requests indicate a real browser. Pooled and share-gated: an
+ * unconditional `> 0` on any single axis is not evidence.
+ *
+ * `pages` adds the proportionality test, and it is the one that separates a browser from a
+ * headless enumerator. A browser renders EVERY page it loads — the loader alone fires four RPCs
+ * per company page here — so rendering scales with pages viewed. Fewer rendering requests than
+ * page fetches means most pages produced none at all, which no browser does.
+ *
+ * Deliberately generous. Measured on a real session on this site: ~33 rendering requests per
+ * page. The observed enumerator: 0.18 — it read 2008 pages, drew ZERO map tiles, and executed
+ * just enough JS to clear a share threshold. One-per-page sits 33x below anything real and 5x
+ * above that, so it cannot be tuned into by an ordinary visitor.
+ *
+ * `pages` defaults to 0, which skips the test: a caller with no page count is no worse off than
+ * before it existed, and cannot be made stricter by accident.
+ */
 export function rendersIndicateBrowser(
   renders: number,
   total: number,
+  pages = 0,
 ): boolean {
-  return (
-    renders >= MIN_ASSETS && renders / Math.max(1, total) >= MIN_ASSET_SHARE
-  );
+  if (renders < MIN_ASSETS) return false;
+  if (renders / Math.max(1, total) < MIN_ASSET_SHARE) return false;
+  return pages <= 0 || renders >= pages;
 }
 
 // Networks people rent servers on. Some large CDNs carry real consumer traffic and are
@@ -446,4 +463,22 @@ export function tellsFor(input: SignalInput): Tell[] {
   });
 
   return tells;
+}
+
+/**
+ * Verified crawler names with counts, read from the joined bot key (`verified | name | category`).
+ *
+ * One derivation for both the subject and its reach: the same rule written twice is the shape
+ * that drifts, and here a drift means one gate exempts a crawler the other bans.
+ */
+export function verifiedBotsOf(
+  bots: readonly [string, number][],
+): [string, number][] {
+  const out = new Map<string, number>();
+  for (const [key, count] of bots) {
+    if (!key.startsWith('pass')) continue;
+    const name = (key.split(' | ')[1] ?? '').trim().toLowerCase() || 'verified';
+    out.set(name, (out.get(name) ?? 0) + count);
+  }
+  return [...out];
 }

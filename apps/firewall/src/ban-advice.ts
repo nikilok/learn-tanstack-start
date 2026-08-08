@@ -123,12 +123,60 @@ export type AdviceInput = {
   /** True when byPath hit the group cap, so every count in `mix` is a floor and a zero
    * rendering count is a truncation artefact rather than a measurement. */
   mixPartial?: boolean;
+  /** Verified crawler names on this subject with their counts, from the profile's bot join. */
+  verifiedBots?: [string, number][];
+  /**
+   * Verified crawlers we want, lower-cased (FW_ALLOWED_BOTS). Verification proves identity, not
+   * welcome: an SEO or AI harvester passes it exactly as a search engine does.
+   *
+   * Undefined means the list was not read, and that is NOT "allow none" — it falls back to
+   * exempting every verified bot, the behaviour before this list existed. The safe direction
+   * here is the permissive one: failing to read a config file must never turn Googlebot into a
+   * ban candidate.
+   */
+  allowedBots?: string[];
 };
+
+/**
+ * Verified crawler names on this identity that we actually want, lower-cased.
+ *
+ * An unread allowlist returns every verified name, not none: the fallback has to be the
+ * permissive one, because the failure it guards against is a config read turning Googlebot into
+ * a ban candidate. Names absent from a list that WAS read are deliberately omitted — that is the
+ * narrowing.
+ */
+export function welcomeBots(
+  verified: readonly [string, number][],
+  allowed: readonly string[] | undefined,
+): [string, number][] {
+  const names = verified.filter(([n]) => n);
+  if (!allowed) return [...names];
+  const want = new Set(allowed.map((n) => n.toLowerCase()));
+  return names.filter(([n]) => want.has(n.toLowerCase()));
+}
+
+/** The name-only form, for reach, which carries names without counts. */
+export function welcomeNames(
+  names: readonly string[] | undefined,
+  allowed: readonly string[] | undefined,
+): string[] {
+  if (!names?.length) return [];
+  if (!allowed) return [...names];
+  const want = new Set(allowed.map((n) => n.toLowerCase()));
+  return names.filter((n) => want.has(n.toLowerCase()));
+}
 
 /** Reasons this client is LEGITIMATE — statements about the client itself, which outrank everything. */
 function blockersFor(input: AdviceInput): string[] {
   const out: string[] = [];
-  const verified = input.botVerified.filter(([v]) => v === 'pass');
+  // Names, not the bare `pass` flag. Verification says a crawler is who it claims; it says
+  // nothing about whether we want it reading the corpus, and an SEO or AI harvester passes it
+  // exactly as a search engine does. Only the names on FW_ALLOWED_BOTS earn the exemption.
+  const verified = input.verifiedBots?.length
+    ? welcomeBots(input.verifiedBots, input.allowedBots)
+    : // No names available (an older caller, or the bot join failed) — fall back to the flag, so
+      // a missing name can never strip a real crawler's protection.
+      input.botVerified.filter(([v]) => v === 'pass');
   if (verified.length)
     out.push(
       `verified bot (${verified.map(([v, c]) => `${v}:${c}`).join(', ')}) — denying it is a self-inflicted outage`,
@@ -168,9 +216,15 @@ function blockersFor(input: AdviceInput): string[] {
     );
   // A hard blocker, not merely a lever disqualifier: the agent could egress from the same
   // network too, so an ASN deny would catch it just as surely as a fingerprint deny.
-  if (input.digestReach?.verifiedNames.length)
+  // Same narrowing as above: a fingerprint shared with a crawler we WANT is a shared identity
+  // worth protecting. Shared with a harvester we do not want, it is just the harvester.
+  const sharedWith = welcomeNames(
+    input.digestReach?.verifiedNames,
+    input.allowedBots,
+  );
+  if (sharedWith.length)
     out.push(
-      `the fingerprint also carries verified ${input.digestReach.verifiedNames.join(', ')} — a SHARED identity, not one actor; no lever is safe`,
+      `the fingerprint also carries verified ${sharedWith.join(', ')} — a SHARED identity, not one actor; no lever is safe`,
     );
   // Share-based and POOLED, never absolute. One deliberate /favicon.svg per 10,000 page fetches
   // would otherwise immunise a scraper forever — and so would one /_serverFn ping, one map tile
@@ -228,16 +282,19 @@ function unjudgeableFor(input: AdviceInput): string[] {
 export function qualifyLever(
   reach: Reach | undefined,
   kind: 'fingerprint' | 'network',
+  /** Verified crawlers we want. Undefined means unread — every verified name still disqualifies. */
+  allowed?: readonly string[],
 ): { ok: boolean; note: string } {
   if (!reach)
     return {
       ok: false,
       note: `${kind} reach unknown — cannot clear it for a deny`,
     };
-  if (reach.verifiedNames.length)
+  const shared = welcomeNames(reach.verifiedNames, allowed);
+  if (shared.length)
     return {
       ok: false,
-      note: `${kind} ${reach.label} carries verified ${reach.verifiedNames.join(', ')} — shared, not one actor`,
+      note: `${kind} ${reach.label} carries verified ${shared.join(', ')} — shared, not one actor`,
     };
   // The decisive guard. "No browser has ever rendered from it" is an affirmative claim, and a
   // failed query or a truncated sample produces the same zeros as a genuine absence. Clearing a
@@ -414,7 +471,11 @@ export function adviseBan(input: AdviceInput): Advice {
   }
 
   // Fingerprint first: it survives IP rotation, which is why it beat the per-IP rules.
-  const ja4Ok = qualifyLever(input.digestReach, 'fingerprint');
+  const ja4Ok = qualifyLever(
+    input.digestReach,
+    'fingerprint',
+    input.allowedBots,
+  );
   leverNotes.push(ja4Ok.note);
   if (ja4Ok.ok && digest)
     return {
@@ -428,7 +489,7 @@ export function adviseBan(input: AdviceInput): Advice {
 
   // The network, when the fingerprint is shared. This is the velia.net test: an ASN that has
   // never served a sub-resource has never served a real browser.
-  const asnOk = qualifyLever(input.asnReach, 'network');
+  const asnOk = qualifyLever(input.asnReach, 'network', input.allowedBots);
   leverNotes.push(
     input.alreadyDeniedAsn
       ? 'network is already in FW_BLOCKED_ASN'

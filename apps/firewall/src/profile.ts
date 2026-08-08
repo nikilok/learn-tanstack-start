@@ -13,6 +13,7 @@ import { type Subject, fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
 import { rollingWindow } from './time-window';
+import { allowedBots } from './tuning';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 24;
@@ -61,6 +62,15 @@ export function parseArgs(argv: string[]): Args {
   const [ip, rawHours] = positional;
   if (!ip) return { mode: 'help' };
   return { mode: 'profile', ip, hours: hoursFrom(rawHours) };
+}
+
+/** The allowlist, or undefined when it cannot be read. */
+function readAllowedBots(): string[] | undefined {
+  try {
+    return allowedBots();
+  } catch {
+    return undefined;
+  }
 }
 
 async function main() {
@@ -124,6 +134,10 @@ async function main() {
     ja4: profile.byJa4,
     asns: profile.byAsn,
     botVerified: profile.byBotVerified,
+    verifiedBots: profile.verifiedBots,
+    // Undefined when unreadable, never [] — an empty list would assert "no crawler is welcome"
+    // and turn Googlebot into a candidate on a config read failure.
+    allowedBots: readAllowedBots(),
     wafActions: profile.byWafAction,
     wafRules: profile.byWafRule,
     statuses: profile.byStatus,

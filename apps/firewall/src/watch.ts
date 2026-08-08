@@ -25,7 +25,7 @@ import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
 import { trustedRules } from './rule-integrity';
 import { type Window, rollingWindow } from './time-window';
-import { screenFloor, watchHours } from './tuning';
+import { allowedBots, screenFloor, watchHours } from './tuning';
 import { errMsg } from './util';
 import { logWatch } from './watch-log';
 import { investigable, runInvestigation, verdictFrom } from './watch-mode';
@@ -63,7 +63,7 @@ export type Screened = {
 };
 
 /**
- * Digests Vercel confirmed as a named crawler.
+ * Digests carrying a verified crawler WE WANT — the only ones the behavioural screen skips.
  *
  * `botVerified` is NOT a boolean: the value is `'pass'`, and `botVerified eq 'true'` is accepted
  * by the API while matching nothing — the same trap as `botCategory`. Worse, `ne 'true'` matches
@@ -71,12 +71,31 @@ export type Screened = {
  *
  * Verification is reverse DNS with forward confirmation, so it cannot be faked by renting a VM in
  * the right network: measured 2026-08-06, Google's and Microsoft's own ASNs each carried hundreds
- * of UNVERIFIED requests alongside their verified crawlers.
+ * of UNVERIFIED requests alongside their verified crawlers. But proving a crawler is who it says
+ * is not the same as wanting it: SEO and AI harvesters pass identically to a search engine. Only
+ * the names on FW_ALLOWED_BOTS are excluded from candidacy; the rest stay screenable.
+ *
+ * `allowed` undefined means the list was not read, and every verified crawler is skipped — the
+ * behaviour before the list existed. A config that failed to load must not put Googlebot on the
+ * candidate list.
  */
-export function verifiedDigests(summary: Row[]): Set<string> {
+export function verifiedDigests(
+  summary: Row[],
+  allowed?: readonly string[],
+): Set<string> {
+  const want = allowed && new Set(allowed.map((n) => n.toLowerCase()));
   return new Set(
     summary
       .filter((r) => String(r.botVerified ?? '') === 'pass')
+      .filter(
+        (r) =>
+          !want ||
+          want.has(
+            String(r.botName ?? '')
+              .trim()
+              .toLowerCase(),
+          ),
+      )
       .map((r) => JA4_DENY.normalize(String(r.clientJa4Digest ?? '')))
       .filter(Boolean),
   );
@@ -415,8 +434,10 @@ export async function findSuspects(
   window: Window,
   deniedJa4: string[],
   trustedAllowRules?: string[],
+  /** Verified crawlers we want. Undefined = every verified one is exempt, as before the list. */
+  allowedBots?: string[],
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
-  const { rows, truncated } = await screen(creds, window);
+  const { rows, truncated } = await screen(creds, window, allowedBots);
   const findings: Finding[] = [];
   const candidates = worthProfiling(rows, deniedJa4);
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
@@ -449,6 +470,8 @@ export async function findSuspects(
       failedQueries: p.failedQueries,
       trustedAllowRules,
       mixPartial: p.mixPartial,
+      verifiedBots: p.verifiedBots,
+      allowedBots,
     });
     findings.push({
       ...c,
@@ -466,6 +489,63 @@ export async function findSuspects(
     });
   }
   return { rows, findings, truncated };
+}
+
+/**
+ * One screen with every gate the advisory needs, each read fresh.
+ *
+ * Both entrypoints go through here. They used to assemble these arguments separately and drifted
+ * three times — the TUI lost the first-party blocker, then the truncation flag, then the bot
+ * allowlist — and every time it was the UNATTENDED path that lost the signal. Divergence is the
+ * defect, so the assembly is the thing that had to be shared, not the call.
+ *
+ * Config failures are collected, never thrown: each degrades to the permissive value, and the
+ * CALLER decides what a missing gate means. Returned rather than logged so neither entrypoint
+ * can quietly ignore them — the CLI escalates them to exit 2, the TUI shows them.
+ */
+export async function screenOnce(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+): Promise<{
+  rows: Screened[];
+  findings: Finding[];
+  truncated: boolean;
+  configErrors: string[];
+}> {
+  const configErrors: string[] = [];
+
+  // Not required: an unreadable denylist means nothing is known to be already-denied, which only
+  // ever makes the screen wider.
+  let denied: string[] = [];
+  try {
+    denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  } catch (e) {
+    configErrors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
+  }
+
+  // Read fresh, not cached at startup: a rule edited in the dashboard hours into a watch is the
+  // exact drift rule-integrity exists to notice.
+  let trusted: string[] | undefined;
+  try {
+    const { fetchLive } = await import('./client');
+    const { rules } = await import('./rules');
+    trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
+  } catch (e) {
+    configErrors.push(`live firewall config: ${errMsg(e)}`);
+  }
+
+  // Undefined on failure, which exempts EVERY verified crawler — the pre-allowlist behaviour.
+  // The permissive direction is the safe one here: a config that failed to load must never turn
+  // Googlebot into a ban candidate.
+  let allowed: string[] | undefined;
+  try {
+    allowed = allowedBots();
+  } catch (e) {
+    configErrors.push(`FW_ALLOWED_BOTS: ${errMsg(e)}`);
+  }
+
+  const found = await findSuspects(creds, window, denied, trusted, allowed);
+  return { ...found, configErrors };
 }
 
 const IMPERSONATION = 'browser_impersonation';
@@ -519,6 +599,8 @@ export function impersonators(summary: Row[]): Screened[] {
 export async function screen(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
+  /** Verified crawlers to keep off the candidate list. Undefined = skip every verified one. */
+  allowed?: readonly string[],
 ): Promise<{ rows: Screened[]; truncated: boolean }> {
   const { ctx } = makeCtx(creds, window);
   const [routeResp, verifiedResp] = await Promise.all([
@@ -526,7 +608,10 @@ export async function screen(
       filter: PASSED,
       limit: GROUP_CAP,
     }),
-    metrics(ctx, ['clientJa4Digest', 'botVerified'], {
+    // botName joined in: the exclusion is now by NAME, not by the bare verified flag. Measured
+    // 2026-08-08 — botVerified survives this join intact (pass totals matched the single-dimension
+    // query exactly), unlike the botCategory join it is documented to collapse in.
+    metrics(ctx, ['clientJa4Digest', 'botVerified', 'botName'], {
       filter: PASSED,
       limit: GROUP_CAP,
     }),
@@ -553,7 +638,7 @@ export async function screen(
     rows: mergeScreens(
       impersonators(summary),
       verifiedComplete
-        ? nonRendering(routeRows, verifiedDigests(verifiedRows))
+        ? nonRendering(routeRows, verifiedDigests(verifiedRows, allowed))
         : [],
     ),
     // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
@@ -581,29 +666,11 @@ async function main() {
   const window = rollingWindow(hours, new Date());
   const errors: string[] = [];
 
-  // Not required: an unreadable denylist means nothing is known to be already-denied, which
-  // only ever makes the screen wider.
-  let deniedJa4: string[] = [];
-  try {
-    deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
-  } catch (e) {
-    errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
-  }
-
-  // Read the live config once: the same fetch tells us whether the allow rules still mean
-  // anything and whether the deny rules are enforcing.
-  // Imported lazily: rules.ts reads required ceilings from the environment at import time, so a
-  // top-level import would make this module unloadable anywhere those are absent — tests included.
-  const { fetchLive } = await import('./client');
-  const { rules } = await import('./rules');
-  const live = await fetchLive();
-  const trusted = trustedRules(live.headerKeysByName, rules);
-  const { rows, findings, truncated } = await findSuspects(
+  const { rows, findings, truncated, configErrors } = await screenOnce(
     creds,
     window,
-    deniedJa4,
-    trusted,
   );
+  errors.push(...configErrors);
   await logShadow(process.cwd(), findings);
 
   const report: WatchReport = {

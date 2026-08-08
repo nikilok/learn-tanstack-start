@@ -33,7 +33,6 @@ import {
   ASN_DENY,
   JA4_DENY,
   enforcedNow,
-  envMatching,
   pendingEdits,
   valuesOf,
   withValue,
@@ -71,7 +70,7 @@ import { watchHours, watchIntervalMs } from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
-import { findSuspects, logShadow } from './watch';
+import { logShadow, screenOnce } from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
   caffeinateArgs,
@@ -427,44 +426,33 @@ export function App() {
     const tick = async () => {
       setWatchBusy(true);
       try {
-        // Non-fatal: an unreadable denylist only means nothing is known to be already denied,
-        // which widens the screen rather than narrowing it.
-        let denied: string[] = [];
-        try {
-          denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
-        } catch {
-          denied = [];
-        }
-        // The first-party blocker, which the CLI already passes and this loop did not. Without it
-        // the advisory cannot see that a fingerprint matched a header-gated allow rule, so our own
-        // services lose the one thing that outranks every axis — in the UNATTENDED path, the only
-        // one that spends an investigation and wakes someone up. `undefined`, never `[]`: an
-        // unreadable config means "not known", and an empty list would assert that no rule
-        // qualifies, which is the same wrong answer stated confidently.
-        // Read fresh each tick rather than reusing the `trustedAllow` state: that snapshot is
-        // taken when the TUI starts, and a rule edited in the dashboard hours later is the
-        // exact drift rule-integrity exists to notice.
-        let trusted: string[] | undefined;
-        try {
-          const { fetchLive } = await import('./client');
-          const { rules } = await import('./rules');
-          trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
-        } catch {
-          trusted = undefined;
-        }
-        const { rows, findings } = await findSuspects(
+        // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
+        // which the CLI uses too. Assembling them here is what let this loop drift three times.
+        const { rows, findings, truncated, configErrors } = await screenOnce(
           creds,
           rollingWindow(watchHours(), new Date()),
-          denied,
-          trusted,
         );
         if (stopped) return;
         setWatchAt(clockTime(new Date()));
         await logShadow(root, findings);
         const bans = findings.filter((f) => f.advice.verdict === 'ban');
+        // Truncation is carried, not dropped. A capped screen that surfaced nothing is BLIND, and
+        // rendering that as "0 allowed through" is a quiet night the tool never actually had.
+        const blind = truncated && rows.length === 0;
         setWatchNote(
-          `${rows.length} fingerprint(s) allowed through · ${findings.length} profiled · ${bans.length} would ban`,
+          [
+            `${rows.length} fingerprint(s) allowed through · ${findings.length} profiled · ${bans.length} would ban`,
+            truncated ? '· TRUNCATED, rows may be missing' : '',
+            blind ? '· BLIND, not quiet' : '',
+            configErrors.length
+              ? `· ${configErrors.length} config error(s)`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' '),
         );
+        for (const e of configErrors)
+          void logWatch(root, new Date(), { kind: 'error', error: e });
         // Logged even when it finds nothing: otherwise the log cannot tell "ran and was quiet"
         // apart from "never ran", which is the first thing you want to know of a background loop.
         void logWatch(root, new Date(), {

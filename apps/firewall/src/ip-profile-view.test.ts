@@ -72,6 +72,7 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
     byCountry: [],
     byBot: [],
     byBotVerified: [],
+    verifiedBots: [],
     byWafAction: [],
     byWafRule: [],
     byPath: [['/company/a', 5000]],

@@ -12,6 +12,8 @@ import {
   type AdviceInput,
   type Reach,
   volumeFloor,
+  welcomeBots,
+  welcomeNames,
 } from './ban-advice';
 import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
 import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
@@ -953,5 +955,85 @@ describe('first-party protection', () => {
       trustedAllowRules: [CH_STREAM_REVALIDATE],
     });
     expect(advice.blockers.join(' ')).not.toContain('UNKNOWN');
+  });
+});
+
+// Verification proves a crawler is who it claims. It does not say we want it reading the corpus,
+// and an SEO or AI harvester passes it exactly as a search engine does.
+describe('welcomeBots / welcomeNames — the verified-bot allowlist', () => {
+  const verified: [string, number][] = [
+    ['googlebot', 900],
+    ['semrush', 400],
+  ];
+
+  test('an unread allowlist exempts EVERY verified crawler', () => {
+    // The fail-safe direction. A config that failed to load must never turn Googlebot into a ban
+    // candidate, so undefined means "as before the list existed", not "nothing is welcome".
+    expect(welcomeBots(verified, undefined)).toEqual(verified);
+    expect(welcomeNames(['googlebot', 'semrush'], undefined)).toEqual([
+      'googlebot',
+      'semrush',
+    ]);
+  });
+
+  test('a read allowlist exempts only the names on it', () => {
+    expect(welcomeBots(verified, ['googlebot'])).toEqual([['googlebot', 900]]);
+    expect(welcomeNames(['googlebot', 'semrush'], ['googlebot'])).toEqual([
+      'googlebot',
+    ]);
+  });
+
+  test('matching is case-insensitive on both sides', () => {
+    // Vercel echoes names lower-case today, but the env file is hand-edited.
+    expect(welcomeBots([['GoogleBot', 1]], ['googlebot'])).toHaveLength(1);
+    expect(welcomeBots([['googlebot', 1]], ['GOOGLEBOT'])).toHaveLength(1);
+  });
+
+  test('an empty allowlist is not the same as an unread one', () => {
+    // `[]` is a statement: nothing is welcome. Only `undefined` means "not known".
+    expect(welcomeBots(verified, [])).toEqual([]);
+  });
+});
+
+describe('adviseBan — a non-allowlisted verified crawler is not blocked', () => {
+  // A scraper on every axis that also carries a verified crawler name — the case the allowlist
+  // exists to separate.
+  const verifiedInput = (allowed?: string[]): AdviceInput =>
+    scraper({
+      botVerified: [['pass', 1300]],
+      verifiedBots: [['semrush', 1300]],
+      allowedBots: allowed,
+    });
+
+  test('an allowlisted crawler still blocks', () => {
+    const a = adviseBan(verifiedInput(['semrush']));
+    expect(a.blockers.join(' ')).toContain('verified bot');
+    expect(a.verdict).toBe('leave');
+  });
+
+  test('a non-allowlisted verified crawler loses the blocker', () => {
+    // The whole point: verified is not the same as welcome. It still has to earn a ban on the
+    // axes, but it is no longer exempt from being looked at.
+    const a = adviseBan(verifiedInput(['googlebot']));
+    expect(a.blockers.join(' ')).not.toContain('verified bot');
+  });
+
+  test('with the list unread it blocks, whatever the name', () => {
+    expect(adviseBan(verifiedInput(undefined)).blockers.join(' ')).toContain(
+      'verified bot',
+    );
+  });
+
+  test('falls back to the bare flag when no names were resolved', () => {
+    // An older caller, or a bot join that returned nothing. A missing NAME must never strip a
+    // real crawler's protection, so the flag alone still blocks.
+    const a = adviseBan(
+      scraper({
+        botVerified: [['pass', 1300]],
+        verifiedBots: [],
+        allowedBots: ['googlebot'],
+      }),
+    );
+    expect(a.blockers.join(' ')).toContain('verified bot');
   });
 });

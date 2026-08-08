@@ -20,6 +20,7 @@ import {
   shouldNotify,
   writeInvestigated,
   rememberNotified,
+  shortDigest,
 } from './watch-notify';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
@@ -229,10 +230,15 @@ describe('concludedKey / concludedText', () => {
   });
 
   test('says which way it went, since unclear is not a ban', () => {
-    expect(concludedText([`ban:${DIG}`])).toContain('Claude says to deny');
-    expect(concludedText(['unclear:x'])).toContain('inconclusive');
+    // Asserted on the distinction rather than the phrasing — the wording has already changed
+    // once (it used to be a bare count) and will again.
+    const banned = concludedText([`ban:${DIG}`]);
+    const unclear = concludedText(['unclear:x']);
+    expect(banned).not.toEqual(unclear);
+    expect(banned.toLowerCase()).toContain('deny');
+    expect(unclear).toContain('inconclusive');
     const both = concludedText([`ban:${DIG}`, 'unclear:x']);
-    expect(both).toContain('deny');
+    expect(both.toLowerCase()).toContain('deny');
     expect(both).toContain('inconclusive');
   });
 
@@ -290,5 +296,42 @@ describe('notification memory decays', () => {
     const { writeFile } = await import('node:fs/promises');
     await writeFile(`${DIR}/${NOTIFY_STATE}`, KEY, 'utf8');
     expect(await shouldNotify(DIR, KEY, NOW)).toBe(true);
+  });
+});
+
+// "1 inconclusive" on a phone says something happened and nothing about what — and the only
+// reason this path exists is that nobody is reading stdout.
+describe('concludedText names the identity', () => {
+  const D = 't13d1711h2_5b57614c22b0_5894756fee65';
+
+  test('an inconclusive verdict says WHICH fingerprint', () => {
+    const out = concludedText([`unclear:${D}`]);
+    expect(out).toContain('t13d1711h2');
+    expect(out).toContain('5894756fee65'.slice(-8));
+    expect(out).toContain('firewall-watch.log');
+  });
+
+  test('a ban reads as an instruction, not a count', () => {
+    expect(concludedText([`ban:${D}`])).toContain('DENY');
+  });
+
+  test('both kinds appear, and are not conflated', () => {
+    const out = concludedText([
+      `ban:${D}`,
+      'unclear:t13dother0_aaaaaaaaaaaa_bbbbbbbbbbbb',
+    ]);
+    expect(out).toContain('DENY');
+    expect(out).toContain('inconclusive');
+  });
+
+  test('an empty conclusion still says so rather than sending a blank', () => {
+    expect(concludedText([])).toBe('nothing conclusive');
+  });
+
+  test('the short form stays recognisable and phone-sized', () => {
+    // The JA4_a profile carries the ALPN slot, which is the part an operator actually reads.
+    expect(shortDigest(D).startsWith('t13d1711h2')).toBe(true);
+    expect(shortDigest(D).length).toBeLessThan(22);
+    expect(shortDigest('short')).toBe('short');
   });
 });

@@ -51,14 +51,38 @@ export function concludedKey(concluded: readonly string[]): string {
     : '';
 }
 
-/** One line for a conclusion. Says which way it went: `unclear` is not the same as `ban`. */
+/**
+ * Enough of a digest to recognise on a phone: the JA4_a profile, which carries the ALPN slot and
+ * is the part an operator reads, plus a tail to disambiguate siblings sharing a cipher hash.
+ */
+export function shortDigest(digest: string): string {
+  const d = digest.trim();
+  return d.length <= 22 ? d : `${d.slice(0, 10)}…${d.slice(-8)}`;
+}
+
+/**
+ * One line for a conclusion, naming WHICH identity.
+ *
+ * It used to say only "1 inconclusive", which tells a phone that something happened and nothing
+ * about what — and the whole reason this path exists is that nobody is reading stdout. The
+ * digest is the one field worth carrying: it is shape-checked upstream, it is not
+ * client-authored prose, and without it the message cannot be acted on without opening a laptop.
+ *
+ * `unclear` is not a quieter `ban`. It means the investigation ran and could not decide, which
+ * needs a human exactly as much.
+ */
 export function concludedText(concluded: readonly string[]): string {
-  const bans = concluded.filter((c) => c.startsWith('ban:')).length;
-  const unclear = concluded.length - bans;
+  const named = (prefix: string) =>
+    concluded
+      .filter((c) => c.startsWith(prefix))
+      .map((c) => shortDigest(c.slice(prefix.length)));
+  const bans = named('ban:');
+  const unclear = named('unclear:');
   const parts: string[] = [];
-  if (bans) parts.push(`${bans} fingerprint(s) Claude says to deny`);
-  if (unclear) parts.push(`${unclear} inconclusive`);
-  return parts.join(', ') || 'nothing conclusive';
+  if (bans.length) parts.push(`DENY ${bans.join(', ')}`);
+  if (unclear.length) parts.push(`inconclusive ${unclear.join(', ')}`);
+  if (!parts.length) return 'nothing conclusive';
+  return `${parts.join(' · ')} — see firewall-watch.log`;
 }
 
 /** Recipient for the iMessage — a phone number or Apple ID, kept in .env.local. */

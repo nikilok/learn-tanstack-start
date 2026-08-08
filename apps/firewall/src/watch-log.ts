@@ -5,6 +5,11 @@
 
 import { appendFile } from 'node:fs/promises';
 
+// Appends are chained rather than concurrent. Callers fire these without awaiting, and a
+// multi-line verdict block interleaved into another entry corrupts the one record of what
+// happened while nobody was watching.
+let queue: Promise<unknown> = Promise.resolve();
+
 /** Repo root, gitignored. Read it with `tail -f firewall-watch.log`. */
 export const WATCH_LOG = 'firewall-watch.log';
 
@@ -91,8 +96,10 @@ export async function logWatch(
   at: Date,
   e: WatchEvent,
 ): Promise<void> {
+  const entry = logEntry(at, e);
+  queue = queue.then(() => appendFile(`${dir}/${WATCH_LOG}`, entry, 'utf8'));
   try {
-    await appendFile(`${dir}/${WATCH_LOG}`, logEntry(at, e), 'utf8');
+    await queue;
   } catch {
     // Deliberately swallowed. The on-screen state is the primary channel; this is the record.
   }

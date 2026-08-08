@@ -271,6 +271,10 @@ export function App() {
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
+  // Which identity the verdict above belongs to. Without it the pane renders the PREVIOUS
+  // conclusion under a generic heading while a new investigation runs, and an operator acting
+  // on it acts on the wrong fingerprint.
+  const [watchVerdictOf, setWatchVerdictOf] = useState('');
   // Kept even after the verdict is read: an invocation happened whether or not anyone was
   // looking at this pane when it did.
   const [invokedAt, setInvokedAt] = useState('');
@@ -278,6 +282,8 @@ export function App() {
   const [notifiedAt, setNotifiedAt] = useState('');
   const [keepingAwake, setKeepingAwake] = useState(false);
   const investigatedRef = useRef<Set<string>>(new Set());
+  /** Conclusions that were reached but not delivered. Retried before each screen. */
+  const pendingNotifyRef = useRef<{ key: string; text: string }[]>([]);
   const spawnsRef = useRef<number[]>([]);
   // The investigation child, so disarm and unmount can stop it. A hung one would otherwise
   // outlive the loop and every later screen would queue behind it.
@@ -442,6 +448,26 @@ export function App() {
         everyMin: watchIntervalMs() / 60_000,
       });
 
+    /**
+     * Deliver anything a previous tick concluded but could not send.
+     *
+     * The digest is already in `investigatedRef`, so the conclusion will never be re-derived —
+     * without this, one transient notification failure drops the alert for the whole session,
+     * after the investigation has already been paid for.
+     */
+    const flushPending = async () => {
+      for (const p of [...pendingNotifyRef.current]) {
+        if (stopped) return;
+        const failed = await notify(p.text);
+        if (failed) continue;
+        await rememberNotified(root, p.key);
+        pendingNotifyRef.current = pendingNotifyRef.current.filter(
+          (q) => q.key !== p.key,
+        );
+        setNotifiedAt(clockTime(new Date()));
+      }
+    };
+
     /** One screen, plus an investigation for anything that clears the bar. */
     const tick = async () => {
       // Guarded, not assumed: watchHours() throws when unconfigured, and an unhandled throw in
@@ -453,6 +479,7 @@ export function App() {
         setWatchBusy(false);
         return;
       }
+      await flushPending();
       setWatchBusy(true);
       try {
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
@@ -503,6 +530,9 @@ export function App() {
         setInvokedAt(clockTime(new Date()));
         setInvokedCount((n) => n + 1);
         setWatchNote(`invoked claude on ${next.digest}…`);
+        // Cleared before the new run, not after it: the gap is exactly when the stale one shows.
+        setWatchVerdict('');
+        setWatchVerdictOf(next.digest);
         void logWatch(root, new Date(), {
           kind: 'invoke',
           digest: next.digest,
@@ -512,14 +542,22 @@ export function App() {
         });
         // Repo root, so the spawned agent finds .claude/skills/firewall-operator and the
         // firewall commands resolve. The TUI is already launched from there.
-        const out = await runInvestigation(next, process.cwd(), (child) => {
-          investigationRef.current = child;
+        let child: { kill: () => void } | null = null;
+        const out = await runInvestigation(next, process.cwd(), (c) => {
+          child = c;
+          // A child arriving after disarm has nobody left to stop it.
+          if (stopped) c.kill();
+          else investigationRef.current = c;
         });
-        investigationRef.current = null;
+        // Only if it still points at OUR child. A disarm-and-rearm during the await leaves this
+        // continuation running while the new effect has already stored its own handle, and
+        // clearing unconditionally strands that child with nothing able to kill it.
+        if (investigationRef.current === child) investigationRef.current = null;
         if (stopped) return;
         setWatchVerdict(
           out.ok ? out.verdict : `investigation failed: ${out.error}`,
         );
+        setWatchVerdictOf(next.digest);
         setWatchNote(
           out.ok
             ? `investigated ${next.digest} — read it below`
@@ -548,10 +586,21 @@ export function App() {
           // Shared with the CLI, on purpose: whichever path saw it first, the other stays quiet,
           // and quitting the TUI no longer re-notifies about the same fingerprint.
           if (await shouldNotify(root, key)) {
+            // Checked BEFORE sending, not after. shouldNotify awaits a file read, and a disarm
+            // landing in that window otherwise still fires the message.
+            if (stopped) return;
             const failed = await notify(concludedText(conclusion));
             if (stopped) return;
-            if (failed) setWatchNote(failed);
-            else {
+            if (failed) {
+              // Retained for the next tick. The digest is already in investigatedRef, so without
+              // this the conclusion is never re-derived and one transient failure silently drops
+              // the alert for the whole session — after paying for the investigation.
+              pendingNotifyRef.current = [
+                ...pendingNotifyRef.current.filter((p) => p.key !== key),
+                { key, text: concludedText(conclusion) },
+              ];
+              setWatchNote(`${failed} — will retry`);
+            } else {
               await rememberNotified(root, key);
               setNotifiedAt(clockTime(new Date()));
             }
@@ -573,7 +622,10 @@ export function App() {
       timer = setTimeout(async () => {
         if (stopped) return;
         await tick();
-        if (!stopped) schedule(watchIntervalMs());
+        // Guarded like the tick above: watchIntervalMs() throws when unconfigured, and an
+        // unhandled throw HERE kills the loop one tick after the guard said it was fine.
+        const every = watchTiming() === null ? null : watchIntervalMs();
+        if (!stopped && every !== null) schedule(every);
       }, delay);
     };
     schedule(0); // arming should tell you something now, not in fifteen minutes
@@ -1577,7 +1629,10 @@ export function App() {
             {Boolean(watchVerdict) && (
               <Box flexDirection="column" marginTop={1}>
                 <Text color="cyan" bold>
-                  investigation
+                  investigation{' '}
+                  {watchVerdictOf ? (
+                    <Text dimColor>{watchVerdictOf}</Text>
+                  ) : null}
                 </Text>
                 {/* Clamped. This pane's height is reserved in advance, and an unbounded verdict
                     overflows the frame — which scrolls the terminal and hides the editor cursor,

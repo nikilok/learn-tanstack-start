@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { clockTime, logEntry } from './watch-log';
+import { clockTime, logEntry, WATCH_LOG, logWatch } from './watch-log';
 
 const AT = new Date('2026-08-06T14:32:10.500Z');
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
@@ -158,5 +158,43 @@ describe('shadow entries', () => {
   test('it stays one line, so it cannot be read as several events', () => {
     const out = logEntry(at, { kind: 'shadow', digest: D, refusal: null });
     expect(out.trimEnd().split('\n')).toHaveLength(1);
+  });
+});
+
+// Callers fire logWatch without awaiting it. Two concurrent appends can interleave a multi-line
+// verdict block into another entry, corrupting the one record of what happened unattended.
+describe('concurrent appends do not interleave', () => {
+  test('a burst of overlapping writes lands as whole entries', async () => {
+    const { mkdtemp, rm, readFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'fw-log-'));
+    try {
+      const at = new Date('2026-08-08T09:00:00.000Z');
+      // Verdicts are the multi-line case — the one that can be torn in half.
+      await Promise.all(
+        Array.from({ length: 12 }, (_, i) =>
+          logWatch(dir, at, {
+            kind: 'verdict',
+            digest: `t13dtest0${i}_aaaaaaaaaaaa_bbbbbbbbbbbb`,
+            text: `VERDICT: leave\nline two of ${i}\nline three of ${i}`,
+            provenance: 'test',
+          }),
+        ),
+      );
+      const body = await readFile(`${dir}/${WATCH_LOG}`, 'utf8');
+      // Every entry starts with a timestamp. A torn write leaves body text on a line that should
+      // have been a header, or a header spliced mid-block.
+      const headers = body
+        .split('\n')
+        .filter((l) => /^\d{4}-\d{2}-\d{2}T/.test(l));
+      expect(headers).toHaveLength(12);
+      for (let i = 0; i < 12; i++) {
+        expect(body).toContain(`line two of ${i}`);
+        expect(body).toContain(`line three of ${i}`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

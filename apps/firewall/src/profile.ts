@@ -118,6 +118,11 @@ async function main() {
     // Undefined, never []: "not read" and "none qualify" are different, and the advisory says so.
     profile.errors.push(`live firewall config: ${errMsg(e)}`);
   }
+  // Recorded beside the other config failures, so "the allowlist did not load" is visible
+  // rather than inferred from every verified crawler suddenly being exempt.
+  const allowlist = allowedBotsOrUnknown();
+  if (allowlist.error)
+    profile.errors.push(`FW_ALLOWED_BOTS: ${allowlist.error}`);
   const advice = adviseBan({
     total: profile.total,
     mix: profile.mix,
@@ -128,7 +133,7 @@ async function main() {
     verifiedBots: profile.verifiedBots,
     // Undefined when unreadable, never [] — an empty list would assert "no crawler is welcome"
     // and turn Googlebot into a candidate on a config read failure.
-    allowedBots: allowedBotsOrUnknown(),
+    allowedBots: allowlist.names,
     wafActions: profile.byWafAction,
     wafRules: profile.byWafRule,
     statuses: profile.byStatus,

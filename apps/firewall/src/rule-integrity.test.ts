@@ -259,3 +259,43 @@ describe('unstatedInRobots', () => {
     expect(unstatedInRobots(['Googlebot'], two)).toEqual(['Googlebot']);
   });
 });
+
+describe('unstatedInRobots — RFC 9309 shapes', () => {
+  test('CR-only line endings still parse', () => {
+    // Splitting on \n alone collapses such a file to one line, and every crawler then reads as
+    // unstated: safe direction, but wrong.
+    const cr = 'User-agent: ShapBot\rDisallow: /\r';
+    expect(unstatedInRobots(['ShapBot'], cr)).toEqual([]);
+  });
+
+  test('CRLF still parses', () => {
+    expect(
+      unstatedInRobots(['ShapBot'], 'User-agent: ShapBot\r\nDisallow: /\r\n'),
+    ).toEqual([]);
+  });
+
+  test('whitespace before the colon is allowed', () => {
+    // RFC 9309 permits it, and a robots.txt written that way is not a gap.
+    expect(
+      unstatedInRobots(['ShapBot'], 'User-agent : ShapBot\nDisallow : /'),
+    ).toEqual([]);
+  });
+
+  test('a Sitemap line does not split a group', () => {
+    // Sitemap is a NON-GROUP record. Treating it as a directive started a new group and
+    // orphaned every agent named above it.
+    const withSitemap = [
+      'User-agent: ShapBot',
+      'Sitemap: https://example.com/sitemap.xml',
+      'User-agent: AhrefsBot',
+      'Disallow: /',
+    ].join('\n');
+    expect(unstatedInRobots(['ShapBot', 'AhrefsBot'], withSitemap)).toEqual([]);
+  });
+
+  test('an Allow directive still closes the group', () => {
+    const two = 'User-agent: A\nAllow: /\nUser-agent: B\nDisallow: /';
+    expect(unstatedInRobots(['A'], two)).toEqual(['A']);
+    expect(unstatedInRobots(['B'], two)).toEqual([]);
+  });
+});

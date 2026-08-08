@@ -122,6 +122,20 @@ const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 const LIVE_TAB_EVERY = 2;
 // The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
 // paid for. Everything below the top few is what the quiet band is drawn from.
+/**
+ * The profile, plus a note if the allowlist could not be read.
+ *
+ * Non-mutating: the profile is rendered state. An unreadable allowlist exempts EVERY verified
+ * crawler, which is a large silent change in what this pane recommends — inferring it from
+ * "everything is suddenly legitimate" is not something an operator should have to do.
+ */
+function withAllowlistError(p: IpProfile): IpProfile {
+  const { error } = allowedBotsOrUnknown();
+  return error
+    ? { ...p, errors: [...p.errors, `FW_ALLOWED_BOTS: ${error}`] }
+    : p;
+}
+
 const TOP_IPS_LIMIT = 500;
 const MIN_BUSIEST = 10; // busiest rows always shown
 // Grows past the minimum while the leaders are still competing. Bounded because the picker eats
@@ -801,6 +815,10 @@ export function App() {
     if (parts.length) pendingByRule.set(ruleName, parts.join(' '));
   }
 
+  // Read once. The error is carried into the pane rather than swallowed: an unreadable
+  // allowlist exempts EVERY verified crawler, which is a large silent change in what this pane
+  // will recommend, and inferring it from "everything is suddenly legitimate" is not reasonable.
+  const allowlist = allowedBotsOrUnknown();
   const ipAdvice = ipTabs.active?.data
     ? adviseBan({
         total: ipTabs.active.data.total,
@@ -812,7 +830,7 @@ export function App() {
         // Both, or this pane exempts every verified crawler while the watch and the CLI do
         // not — the fourth time these two paths have disagreed about a gate.
         verifiedBots: ipTabs.active.data.verifiedBots,
-        allowedBots: allowedBotsOrUnknown(),
+        allowedBots: allowlist.names,
         wafActions: ipTabs.active.data.byWafAction,
         wafRules: ipTabs.active.data.byWafRule,
         statuses: ipTabs.active.data.byStatus,
@@ -1933,7 +1951,11 @@ function PaneBody({
       <Lines
         lines={
           kind === 'ip'
-            ? profileLines((ipTab as IpTab).data as IpProfile, width, advice)
+            ? profileLines(
+                withAllowlistError((ipTab as IpTab).data as IpProfile),
+                width,
+                advice,
+              )
             : sitemapLines(sitemap.data as SitemapReport, sitemapCursor)
         }
         width={width}

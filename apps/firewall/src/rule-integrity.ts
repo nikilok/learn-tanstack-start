@@ -80,9 +80,12 @@ export function unstatedInRobots(
   // single agent kept only the last, so every earlier name in a group read as unstated.
   let pending: string[] = [];
   let sawDirective = false;
-  for (const raw of robotsTxt.split('\n')) {
+  // Every line ending, not just LF. A CR-only file collapses to one line, and the parser then
+  // reports every crawler as unstated — safe direction, but wrong.
+  for (const raw of robotsTxt.split(/\r\n|\r|\n/)) {
     const line = raw.replace(/#.*$/, '').trim();
-    const ua = /^user-agent:\s*(.+)$/i.exec(line);
+    // RFC 9309 allows whitespace before the colon.
+    const ua = /^user-agent\s*:\s*(.+)$/i.exec(line);
     if (ua?.[1]) {
       // A User-agent AFTER a directive opens a new group rather than joining the last one.
       if (sawDirective) {
@@ -92,10 +95,13 @@ export function unstatedInRobots(
       pending.push(ua[1].trim().toLowerCase());
       continue;
     }
-    if (line) sawDirective = true;
+    // Only GROUP-member records close a group. `Sitemap` and unknown fields are non-group
+    // records (RFC 9309): treating one as a directive split a group in two and orphaned every
+    // agent named above it.
+    if (/^(allow|disallow|crawl-delay)\s*:/i.test(line)) sawDirective = true;
     // Only a bare `Disallow: /` counts. A narrower path is not a refusal of the whole site, and
     // treating it as one would report agreement this function exists to disprove.
-    if (/^disallow:\s*\/\s*$/i.test(line))
+    if (/^disallow\s*:\s*\/\s*$/i.test(line))
       for (const a of pending) disallowed.add(a);
   }
   return deniedUa.filter((t) => t && !disallowed.has(t.trim().toLowerCase()));

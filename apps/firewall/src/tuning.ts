@@ -96,10 +96,16 @@ export function watchTiming(): string | null {
  * "exempt every verified crawler", the safe direction. Shared so the try/catch is written once:
  * three call sites had their own, and the interactive one simply forgot to pass the result.
  */
-export function allowedBotsOrUnknown(): string[] | undefined {
+export function allowedBotsOrUnknown(): {
+  names?: string[];
+  error?: string;
+} {
   try {
-    return allowedBots();
-  } catch {
-    return undefined;
+    return { names: allowedBots() };
+  } catch (e) {
+    // Returned, never swallowed. An unreadable allowlist exempts EVERY verified crawler, which
+    // is the safe direction but a large silent change in what the tool will recommend — and a
+    // failure that degrades to a value with no signal is this codebase's oldest defect class.
+    return { error: e instanceof Error ? e.message : String(e) };
   }
 }

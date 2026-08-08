@@ -9,6 +9,7 @@
 // is offered — nothing legitimate may be riding it.
 
 import {
+  UNNAMED_VERIFIED,
   alpnOf,
   dutyCycleOf,
   renderingRequests,
@@ -123,6 +124,7 @@ export type AdviceInput = {
   /** True when byPath hit the group cap, so every count in `mix` is a floor and a zero
    * rendering count is a truncation artefact rather than a measurement. */
   mixPartial?: boolean;
+  rpcsPartial?: boolean;
   /** Verified crawler names on this subject with their counts, from the profile's bot join. */
   verifiedBots?: [string, number][];
   /**
@@ -152,7 +154,12 @@ export function welcomeBots(
   const names = verified.filter(([n]) => n);
   if (!allowed) return [...names];
   const want = new Set(allowed.map((n) => n.toLowerCase()));
-  return names.filter(([n]) => want.has(n.toLowerCase()));
+  // UNNAMED_VERIFIED is a placeholder for "verified, name not reported" — never a name an
+  // operator lists, so matching it against the allowlist always removed it and stripped the
+  // protection it was added to preserve.
+  return names.filter(
+    ([n]) => n === UNNAMED_VERIFIED || want.has(n.toLowerCase()),
+  );
 }
 
 /** The name-only form, for reach, which carries names without counts. */
@@ -163,7 +170,9 @@ export function welcomeNames(
   if (!names?.length) return [];
   if (!allowed) return [...names];
   const want = new Set(allowed.map((n) => n.toLowerCase()));
-  return names.filter((n) => want.has(n.toLowerCase()));
+  return names.filter(
+    (n) => n === UNNAMED_VERIFIED || want.has(n.toLowerCase()),
+  );
 }
 
 /** Reasons this client is LEGITIMATE — statements about the client itself, which outrank everything. */
@@ -231,7 +240,14 @@ function blockersFor(input: AdviceInput): string[] {
   // or one forged POST to /_vercel/insights, which the three separate `> 0` tests all allowed.
   // Pooling also means a light-but-real session still clears the floor on the sum.
   const renders = renderingRequests(input.mix);
-  if (rendersIndicateBrowser(renders, input.total, input.mix.page)) {
+  // `mix.page` is only a usable denominator while RPC attribution is trustworthy. Unattributed
+  // /_serverFn requests stay in `page`, so a short fn list shrinks `renders` and grows `pages` by
+  // the SAME residual — a double-sided error that turns a real SPA session into a headless
+  // enumerator. Passing 0 skips the proportionality test and keeps the pooled share test, which
+  // is the fail-safe direction: the blocker still fires, it just stops being strictened by a
+  // number we cannot stand behind.
+  const pages = input.rpcsPartial ? 0 : input.mix.page;
+  if (rendersIndicateBrowser(renders, input.total, pages)) {
     const share = ((renders / Math.max(1, input.total)) * 100).toFixed(1);
     out.push(
       `${renders} rendering requests (${share}%: ${input.mix.asset} sub-resources, ${input.mix.rpc} server-fn RPCs, ${input.mix.tile} map tiles, ${input.mix.beacon} analytics beacons) — it is running the app, which is what a real session looks like here`,

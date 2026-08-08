@@ -212,6 +212,10 @@ const blockedJa4Rule = denyListRule({
   description: 'Deny scraper TLS fingerprints (FW_BLOCKED_JA4).',
   spec: JA4_DENY,
   values: envMatching('FW_BLOCKED_JA4', JA4_DENY, !dryRun),
+  // Every lever, not just the name one. `applyRule` INSERTS a new rule, so allow-policy-docs
+  // appends behind the already-live denies and cannot pre-empt them — relying on array order
+  // here would have left the levers that most need a readable refusal without one.
+  exemptPaths: POLICY_PATHS,
 });
 
 const blockedAsnRule = denyListRule({
@@ -220,6 +224,7 @@ const blockedAsnRule = denyListRule({
     'Deny hosting ASNs that only ever serve scrapers (FW_BLOCKED_ASN).',
   spec: ASN_DENY,
   values: envMatching('FW_BLOCKED_ASN', ASN_DENY, !dryRun),
+  exemptPaths: POLICY_PATHS,
 });
 
 // Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a

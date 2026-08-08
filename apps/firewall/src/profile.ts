@@ -156,6 +156,7 @@ async function main() {
     windowMinutes: profile.windowHours * 60,
     failedQueries: profile.failedQueries,
     trustedAllowRules: trusted,
+    rpcsPartial: profile.rpcsPartial,
     mixPartial: profile.mixPartial,
   });
   console.log(

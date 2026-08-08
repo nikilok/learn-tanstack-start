@@ -78,6 +78,8 @@ import { errMsg } from './util';
 import { logShadow, screenOnce } from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
+  fingerprintConfig,
+  investigationChangedConfig,
   caffeinateArgs,
   canKeepAwake,
   recentSpawns,
@@ -86,6 +88,8 @@ import {
   verdictFrom,
 } from './watch-mode';
 import {
+  readInvestigated,
+  writeInvestigated,
   concludedKey,
   concludedText,
   notify,
@@ -520,12 +524,41 @@ export function App() {
 
         const now = Date.now();
         spawnsRef.current = recentSpawns(spawnsRef.current, now);
+        // BEFORE the early return below. A truncated-blind screen, or a config error such as
+        // the live-firewall read failing every tick, produces no candidate at all — so the
+        // return meant those alarms never reached the phone. That is the same either/or split
+        // the CLI's --notify was fixed to stop making, and it survived on the path where nobody
+        // is reading the screen.
+        const alarms = [
+          truncated && rows.length === 0
+            ? 'screen was BLIND: truncated with nothing surfaced'
+            : '',
+          ...configErrors,
+        ].filter(Boolean);
+        if (alarms.length) {
+          const key = `alarm:${alarms.join('|')}`;
+          if (!stopped && (await shouldNotify(root, key))) {
+            const failed = await notify(alarms.join(' · '));
+            if (failed) setWatchNote(failed);
+            else {
+              await rememberNotified(root, key);
+              setNotifiedAt(clockTime(new Date()));
+            }
+          }
+        }
+
         const next = findings.find((f) =>
           shouldInvestigate(f, investigatedRef.current, spawnsRef.current, now),
         );
         if (!next || stopped) return;
 
+        // Persisted, not just in-process. investigatedRef alone meant a TUI restart re-bought an
+        // investigation whose verdict the SHARED notify state then suppressed as already sent —
+        // paying for an answer nobody would be told. The file is the same one the CLI uses.
         investigatedRef.current.add(next.digest.toLowerCase());
+        const persisted = await readInvestigated(root, Date.now());
+        persisted.set(next.digest.toLowerCase(), Date.now());
+        await writeInvestigated(root, persisted);
         spawnsRef.current = [...spawnsRef.current, now];
         setInvokedAt(clockTime(new Date()));
         setInvokedCount((n) => n + 1);
@@ -542,17 +575,38 @@ export function App() {
         });
         // Repo root, so the spawned agent finds .claude/skills/firewall-operator and the
         // firewall commands resolve. The TUI is already launched from there.
+        // The same check the CLI wraps around this call. --disallowed-tools cannot stop a ban:
+        // adding one is an append plus an apply, and Bash has to stay available for the
+        // protocol's read-only queries. Unchecked here, a spawned agent that wrote one went
+        // unnoticed on the unattended path specifically.
+        const envPath = `${root}/.env.local`;
+        const beforeCfg = await fingerprintConfig(envPath);
         let child: { kill: () => void } | null = null;
-        const out = await runInvestigation(next, process.cwd(), (c) => {
-          child = c;
-          // A child arriving after disarm has nobody left to stop it.
-          if (stopped) c.kill();
-          else investigationRef.current = c;
-        });
+        const out = await runInvestigation(
+          next,
+          process.cwd(),
+          watchHours(),
+          (c) => {
+            child = c;
+            // A child arriving after disarm has nobody left to stop it.
+            if (stopped) c.kill();
+            else investigationRef.current = c;
+          },
+        );
         // Only if it still points at OUR child. A disarm-and-rearm during the await leaves this
         // continuation running while the new effect has already stored its own handle, and
         // clearing unconditionally strands that child with nothing able to kill it.
         if (investigationRef.current === child) investigationRef.current = null;
+        if (
+          investigationChangedConfig(
+            beforeCfg,
+            await fingerprintConfig(envPath),
+          )
+        ) {
+          const alarm = `.env.local CHANGED during the investigation of ${next.digest} — the run was told not to apply anything.`;
+          setWatchNote(alarm);
+          void logWatch(root, new Date(), { kind: 'error', error: alarm });
+        }
         if (stopped) return;
         setWatchVerdict(
           out.ok ? out.verdict : `investigation failed: ${out.error}`,
@@ -906,6 +960,7 @@ export function App() {
         // never as a clean client.
         failedQueries: ipTabs.active.data.failedQueries,
         trustedAllowRules: trustedAllow,
+        rpcsPartial: ipTabs.active.data.rpcsPartial,
         mixPartial: ipTabs.active.data.mixPartial,
       })
     : undefined;

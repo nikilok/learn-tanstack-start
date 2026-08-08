@@ -79,6 +79,7 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
     byReferrer: [],
     mix: mixOf([['/company/a', 5000]]),
     mixPartial: false,
+    rpcsPartial: false,
     shape: shapeOf([], 10),
     buckets: [],
     tells: [],

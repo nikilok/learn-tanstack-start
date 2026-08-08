@@ -50,6 +50,26 @@ const UA_TOKENS_EVERY_BROWSER_SENDS = [
 /** Shortest token allowed. Three characters is a substring of far too much. */
 const MIN_UA_TOKEN = 4;
 
+/**
+ * Real user agents, verbatim, to test a candidate token AGAINST.
+ *
+ * The word list above catches a token that CONTAINS a browser word. It cannot catch the opposite
+ * and more dangerous case: a token that IS a fragment of every browser's UA. `Edg/` passes the
+ * word test (the list says `edge`, Chromium Edge sends `Edg/`), as do `/5.0` and `rv:1` — each
+ * four printable characters, each a substring of a real browser's UA, each denying every visitor
+ * once `op: 'sub'` matches it.
+ *
+ * Testing containment in BOTH directions is the only form of this check that holds.
+ */
+const REAL_BROWSER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36',
+];
+
 /** Whether a user-agent token is specific enough to deny on. Exported for the test to enumerate. */
 export function uaTokenIsSafe(v: string): boolean {
   if (v.length < MIN_UA_TOKEN || v.length > 120) return false;
@@ -57,7 +77,10 @@ export function uaTokenIsSafe(v: string): boolean {
   // will not survive the round trip through the firewall config intact.
   if (!/^[\x20-\x7e]+$/.test(v)) return false;
   const lower = v.toLowerCase();
-  return !UA_TOKENS_EVERY_BROWSER_SENDS.some((t) => lower.includes(t));
+  if (UA_TOKENS_EVERY_BROWSER_SENDS.some((t) => lower.includes(t)))
+    return false;
+  // The other direction. A token no browser word appears INSIDE can still be a fragment OF one.
+  return !REAL_BROWSER_AGENTS.some((ua) => ua.includes(v));
 }
 
 /**

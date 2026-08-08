@@ -97,9 +97,17 @@ export async function logWatch(
   e: WatchEvent,
 ): Promise<void> {
   const entry = logEntry(at, e);
-  queue = queue.then(() => appendFile(`${dir}/${WATCH_LOG}`, entry, 'utf8'));
+  // `.catch` on the CHAIN, not just on the await: `.then(onFulfilled)` over a rejected promise
+  // propagates the rejection, so one failed append left `queue` permanently rejected and every
+  // later call re-awaited a dead chain. Measured: five calls with one transient failure produced
+  // one successful append, not four — and logWatch swallows the error, so an unattended run lost
+  // its whole record with no signal.
+  const mine = queue.then(() =>
+    appendFile(`${dir}/${WATCH_LOG}`, entry, 'utf8'),
+  );
+  queue = mine.catch(() => undefined);
   try {
-    await queue;
+    await mine;
   } catch {
     // Deliberately swallowed. The on-screen state is the primary channel; this is the record.
   }

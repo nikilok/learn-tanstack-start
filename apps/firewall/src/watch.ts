@@ -113,8 +113,8 @@ export function verifiedDigests(
  * This is the screen that does not depend on Vercel having classified the traffic — the category
  * is empty for most real users, so anything that evades classification lands in a bucket the
  * category screen cannot see. Rendering share is the discriminator because it is bimodal on live
- * traffic rather than a threshold anyone had to tune: browser sessions render 43-78% of their
- * requests, everything else renders under 2%.
+ * traffic rather than a threshold anyone had to tune: the two populations separate by more than
+ * an order of magnitude, with nothing in between.
  *
  * A crawler is excluded because not rendering IS the job, not a tell. Applied to a live window,
  * that exclusion took eight candidates down to one.
@@ -491,6 +491,7 @@ export async function findSuspects(
       windowMinutes: p.windowHours * 60,
       failedQueries: p.failedQueries,
       trustedAllowRules,
+      rpcsPartial: p.rpcsPartial,
       mixPartial: p.mixPartial,
       verifiedBots: p.verifiedBots,
       allowedBots,
@@ -730,6 +731,8 @@ export async function screen(
     filter: PASSED,
     limit: GROUP_CAP,
   });
+  const uaRows = uaResp?.summary ?? [];
+  const uaCapped = uaRows.length >= GROUP_CAP;
   const summary = resp.summary ?? [];
   const routeRows = routeResp.summary ?? [];
   const verifiedRows = verifiedResp.summary ?? [];
@@ -752,8 +755,16 @@ export async function screen(
     truncated:
       summary.length >= GROUP_CAP ||
       routeRows.length >= GROUP_CAP ||
+      uaCapped ||
       !verifiedComplete,
-    handled: deniedByUa(uaResp?.summary ?? [], deniedUa),
+    // Folded in like the verified response's. This is the highest-cardinality query in the
+    // screen — every distinct user-agent times every digest — and truncation keeps high-count
+    // rows while shedding the tail, so on a shared digest the denied crawler's single busy UA
+    // survives while hundreds of real browsers behind that TLS build are dropped. `deniedByUa`
+    // would then compute a majority from a truncated denominator and call it handled.
+    handled: uaCapped
+      ? new Set<string>()
+      : deniedByUa(uaResp?.summary ?? [], deniedUa),
   };
 }
 
@@ -788,7 +799,7 @@ async function main() {
     findings,
     // Cheap and unrelated to the screen: a deny rule that stopped denying reads as handled
     // while the traffic it lists is served normally.
-    enforcement: await enforcementIssues(),
+    enforcement: await enforcementOrError(errors),
     errors,
   };
   console.log(
@@ -809,6 +820,9 @@ async function main() {
     // fingerprint is still there next hour. Without this it buys the same answer every time.
     const seen = await readInvestigated(process.cwd(), now);
     for (const f of investigable(report.findings, seen)) {
+      // Marked BEFORE the spawn so a crash mid-run cannot re-buy the same answer, and removed
+      // again below if the run bought nothing: a failed investigation that consumed the 7-day
+      // memory left the digest unexamined for a week having produced no verdict at all.
       seen.set(f.digest.toLowerCase(), now);
       // Taken either side of the spawn. The investigation is instructed not to apply anything
       // and cannot be prevented from it, so the honest position is to check rather than trust.
@@ -826,6 +840,7 @@ async function main() {
         });
       }
       const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+      if (!out.ok) seen.delete(f.digest.toLowerCase());
       await logWatch(
         process.cwd(),
         new Date(),
@@ -878,17 +893,34 @@ async function main() {
 }
 
 /** Deferred so the observability-only path does not pay for the firewall config read. */
+/**
+ * Enforcement issues, or the read failure recorded as an error.
+ *
+ * Unguarded, this sat inside the report literal: `rules.ts` evaluates required env at import, so
+ * one missing ceiling threw, rejected `main()`, and discarded a screen that had already completed
+ * — taking the notification with it, on the path where nobody reads stdout.
+ */
+async function enforcementOrError(errors: string[]): Promise<string[]> {
+  try {
+    return await enforcementIssues();
+  } catch (e) {
+    errors.push(`enforcement check failed: ${errMsg(e)}`);
+    return [];
+  }
+}
+
 async function enforcementIssues(): Promise<string[]> {
   const { fetchLive } = await import('./client');
   const live = await fetchLive();
   // null, never 0, when the list cannot be parsed — see notEnforcing.
+  const ENV_FOR: Record<string, string> = {
+    'deny-scraper-ja4': 'FW_BLOCKED_JA4',
+    'deny-scraper-asn': 'FW_BLOCKED_ASN',
+    'deny-scraper-ua': 'FW_BLOCKED_UA',
+  };
   const count = (name: string, spec: typeof JA4_DENY): number | null => {
     try {
-      return envMatching(
-        name === 'deny-scraper-ja4' ? 'FW_BLOCKED_JA4' : 'FW_BLOCKED_ASN',
-        spec,
-        false,
-      ).length;
+      return envMatching(ENV_FOR[name] ?? '', spec, false).length;
     } catch {
       return null;
     }
@@ -898,6 +930,10 @@ async function enforcementIssues(): Promise<string[]> {
       [
         ['deny-scraper-ja4', JA4_DENY],
         ['deny-scraper-asn', ASN_DENY],
+        // The name lever too. Without it a token could sit in FW_BLOCKED_UA un-applied, or be
+        // cycled to `log` in the TUI, while `deniedByUa` treated the crawler as handled and
+        // dropped it from candidacy — a crawler nothing was stopping and nothing was reporting.
+        ['deny-scraper-ua', UA_DENY],
       ] as const
     ).map(([name, spec]) => ({
       name,

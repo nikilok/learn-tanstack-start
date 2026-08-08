@@ -808,8 +808,8 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('a real browser share of assets still blocks', () => {
-    // The original guard, with a fixture that is actually a browser. Measured on this site, a
-    // real session renders ~33 requests per page; anything at or above one per page keeps the
+    // The original guard, with a fixture that is actually a browser. A real session on this
+    // site renders many times over the bar, so anything at or above it keeps the
     // blocker, so an ordinary visitor cannot be tuned into a candidate.
     const a = adviseBan(
       scraper({
@@ -824,7 +824,7 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('rendering that does not scale with pages is not a browser', () => {
-    // Supersedes the earlier rule that any 0.5% rendering share blocks. 400 renders across 9000
+    // Supersedes the earlier rule that a bare rendering share blocks. Renders far short of
     // pages means 8600 pages rendered nothing, which no browser does — it is a headless client
     // executing just enough JS to clear a share threshold.
     const a = adviseBan(
@@ -871,8 +871,8 @@ describe('adviseBan — review regressions', () => {
 
   test('a page-dominant client with a token RPC share does not block', () => {
     // The live case, 2026-08-08: a fingerprint carrying oai-searchbot/claudebot/gptbot read the
-    // sitemap, fetched 2008 company pages, drew ZERO map tiles, and made 332 RPCs — 0.18 per
-    // page against a real session's ~33. The advisory called it "running the app" while its own
+    // sitemap, walked the company pages, drew ZERO map tiles, and made just enough RPCs to
+    // sit far under a real session. The advisory called it "running the app" while its own
     // SPA signal said "fetching HTML directly". Both now agree.
     const a = adviseBan(
       scraper({
@@ -899,6 +899,29 @@ describe('adviseBan — review regressions', () => {
     const a = adviseBan(scraper({ mixPartial: true }));
     expect(a.verdict).toBe('watch');
     expect(a.leverNotes.join(' ')).toContain('floors');
+  });
+
+  // A short fn list moves the SAME residual out of `renders` and into `page`, so the
+  // proportionality test is wrong on both sides at once. A real session must survive it.
+  test('does not let a partial server-fn list unmask a real session', () => {
+    const session = {
+      total: 300,
+      mix: mixOf([
+        ['/company/a', 200],
+        ['/_serverFn/x', 40],
+        ['/assets/app.js', 55],
+        ['/tiles/1', 3],
+        ['/_vercel/insights/view', 2],
+      ]),
+    };
+    // Attribution trusted: 100 rendering requests against 200 pages fails proportionality, so the
+    // browser blocker does not fire.
+    const strict = adviseBan(scraper({ ...session, rpcsPartial: false }));
+    expect(strict.blockers.join(' ')).not.toContain('running the app');
+    // Attribution known incomplete: the same numbers keep the blocker instead of convicting on a
+    // residual we cannot stand behind.
+    const safe = adviseBan(scraper({ ...session, rpcsPartial: true }));
+    expect(safe.blockers.join(' ')).toContain('running the app');
   });
 
   test('a failed query does not override a real legitimacy blocker', () => {

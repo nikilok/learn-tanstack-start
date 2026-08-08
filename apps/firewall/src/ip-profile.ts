@@ -94,6 +94,8 @@ export type IpProfile = {
    * counts are the ones that matter: a dropped /assets or /_serverFn tail reads as an affirmative
    * zero, which is the absence-of-evidence error the reach `complete` flag exists to prevent. */
   mixPartial: boolean;
+  /** The server-fn list may be short, so the RPC count is a floor and `mix.page` a ceiling. */
+  rpcsPartial: boolean;
   shape: Shape;
   buckets: { t: string; c: number }[]; // zero-filled series behind `shape`
   tells: Tell[];
@@ -150,7 +152,7 @@ async function serverFnPaths(
   ctx: Ctx,
   errors: string[],
   failedQueries: string[],
-): Promise<string[]> {
+): Promise<{ paths: string[]; partial: boolean }> {
   const rows = await group(
     ctx,
     errors,
@@ -160,12 +162,18 @@ async function serverFnPaths(
     undefined, // no event override
     failedQueries,
   );
-  return (
-    rows
+  return {
+    paths: rows
       .map(([p]) => p)
       // Interpolated into the filter DSL, which has no escape syntax, so anything exotic is dropped.
-      .filter((p) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p))
-  );
+      .filter((p) => p.startsWith('/_serverFn/') && /^[\w./-]+$/.test(p)),
+    // This groups EVERY requestPath on the site and picks the fn paths out client-side — the DSL
+    // has no prefix operator, so it cannot ask the question narrowly. With ~127k company URLs
+    // competing for 500 slots, a cap hit means fn paths may be MISSING from the list, not merely
+    // that there were many. An empty list is already caught below; a short one was not, and it
+    // undercounts a real session's RPCs, which is the direction that reads as a raw-HTML fetcher.
+    partial: rows.length >= GROUP_CAP,
+  };
 }
 
 /** Profile one IP over the last `hours`. Fans out one grouped query per dimension plus a bucket series, then scores the result with the pure tells. */
@@ -200,7 +208,11 @@ export async function fetchIpProfile(
   // whatever range is on screen, and a 20-minute live window can miss hashes. A short list
   // undercounts a subject's RPCs, which is the direction that makes a real SPA session read as
   // a raw-HTML fetcher.
-  const fnPaths = await serverFnPaths(reachCtx, errors, failedQueries);
+  const { paths: fnPaths, partial: rpcsPartial } = await serverFnPaths(
+    reachCtx,
+    errors,
+    failedQueries,
+  );
   // Without a list the RPC axis cannot be measured for ANY subject, and a zero there is read as
   // "runs no app code". reachOf already refuses to clear a lever on that (rpcsMeasured); the
   // subject mix has to say so too, or a failed discovery passes as a measured absence.
@@ -480,6 +492,7 @@ export async function fetchIpProfile(
     byReferrer,
     mix,
     mixPartial,
+    rpcsPartial,
     shape,
     buckets,
     digestReach,

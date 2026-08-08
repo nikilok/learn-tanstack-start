@@ -211,12 +211,14 @@ export function provenanceOf(parsed: unknown): string {
 export async function runInvestigation(
   f: Suspicious,
   cwd: string,
+  /** Hours actually screened. Defaults to the env value, which is only right when they agree. */
+  hours: number = watchHours(),
   onStart?: (child: {
     kill: (signal?: number | NodeJS.Signals) => void;
   }) => void,
 ): Promise<Investigation> {
   try {
-    const proc = Bun.spawn(['claude', ...investigationArgs(f, watchHours())], {
+    const proc = Bun.spawn(['claude', ...investigationArgs(f, hours)], {
       cwd,
       stdout: 'pipe',
       // NOT piped. A pipe nobody reads fills its buffer and blocks the child forever, which for

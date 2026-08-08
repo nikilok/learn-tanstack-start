@@ -587,7 +587,7 @@ describe('rendersIndicateBrowser — page proportionality', () => {
   });
 
   test('a real session renders many times per page', () => {
-    // Measured on this site: 694 rendering requests across 21 page fetches.
+    // Shaped after a real session on this site.
     expect(rendersIndicateBrowser(694, 721, 21)).toBe(true);
   });
 
@@ -599,7 +599,7 @@ describe('rendersIndicateBrowser — page proportionality', () => {
 
   test('the share gate still applies', () => {
     // 4 renders fails MIN_ASSETS and never reaches the share check, so the old fixture named a
-    // gate it did not exercise. Five clears the count; 5/2000 is 0.25%, under the share floor.
+    // gate it did not exercise: the count clears, the share does not.
     expect(rendersIndicateBrowser(5, 2000, 1)).toBe(false);
   });
 });

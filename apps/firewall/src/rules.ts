@@ -1,6 +1,14 @@
 // The custom WAF rule set (config-as-code) plus its domain types. Pure config — no Vercel/Ink deps.
 
-import { ASN_DENY, denyListRule, envMatching, JA4_DENY } from './deny-list';
+import {
+  ASN_DENY,
+  JA4_DENY,
+  POLICY_PATHS,
+  UA_DENY,
+  denyListRule,
+  envMatching,
+} from './deny-list';
+import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
 import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
@@ -53,6 +61,18 @@ function envLimit(name: string): number {
   );
 }
 
+/**
+ * A REQUIRED value kept in .env.local, never the repo. Absent throws rather than returning empty:
+ * a rule built without it is the PREVIOUS, weaker rule, and applying that would loosen the
+ * firewall while looking like a successful apply.
+ */
+function envRequired(name: string, why: string): string {
+  const v = process.env[name]?.trim();
+  if (v) return v;
+  if (dryRun) return ''; // dry-run lists rule names only
+  throw new Error(`${name} must be set in .env.local — ${why}`);
+}
+
 /** An OPTIONAL ceiling (FW_*_LIMIT), null when unset so the caller drops just that rule instead of failing the whole apply. */
 function optionalLimit(name: string): number | null {
   const v = envCeiling(name);
@@ -68,10 +88,17 @@ const JA4_LIMIT = envLimit('FW_JA4_LIMIT');
 // line, so a missing var must abort the apply rather than silently ship burst-only.
 const SERVERFN_SUSTAINED_LIMIT = envLimit('FW_SERVERFN_SUSTAINED_LIMIT');
 const SEARCH_SUSTAINED_LIMIT = envLimit('FW_SEARCH_SUSTAINED_LIMIT');
+const COMPANY_LIMIT = envLimit('FW_COMPANY_LIMIT');
+const COMPANY_SUSTAINED_LIMIT = envLimit('FW_COMPANY_SUSTAINED_LIMIT');
 // Opt-in: no burst tier depends on this one, so a missing var drops just this rule.
 const DOWNLOADS_LIMIT = optionalLimit('FW_DOWNLOADS_LIMIT');
 // Vercel Pro caps a rate-limit counting window at 10 minutes (1h is Enterprise).
 const SUSTAINED_WINDOW = 600;
+// The header name itself is the value here, so it stays in .env.local like every ceiling above.
+const CH_STREAM_MARKER = envRequired(
+  'REVALIDATE_MARKER_HEADER',
+  'the allow rule requires it and would otherwise be rebuilt without that condition',
+);
 
 /** Build a per-key fixed-window rate-limit rule (60s unless `window` overrides), observe-mode unless `action` overrides it. */
 function rateLimitRule(opts: {
@@ -116,7 +143,13 @@ function bypassRule(opts: {
   description: string;
   path: string;
   headerKey: string;
+  /** Further header names the caller must also send. Empty entries are a bug, not a no-op. */
+  alsoHeaderKeys?: string[];
 }): Rule {
+  const also = opts.alsoHeaderKeys ?? [];
+  // An empty entry would drop silently and rebuild the looser rule, so it fails the apply.
+  if (also.some((k) => !k) && !dryRun)
+    throw new Error(`${opts.name}: an additional header key resolved to empty`);
   return {
     name: opts.name,
     description: opts.description,
@@ -126,6 +159,9 @@ function bypassRule(opts: {
         conditions: [
           { type: 'path', op: 'eq', value: opts.path },
           { type: 'header', op: 'ex', key: opts.headerKey },
+          ...also
+            .filter(Boolean)
+            .map((key): Condition => ({ type: 'header', op: 'ex', key })),
         ],
       },
     ],
@@ -134,6 +170,39 @@ function bypassRule(opts: {
 }
 
 // Both REQUIRED (absent throws — see envMatching); values stay in .env.local, never this repo.
+/**
+ * The stated policy, readable by ANYTHING — verified or not, denied or not.
+ *
+ * Exempting these paths from our own deny rules was only half of it: a client that cannot pass
+ * the managed bot challenge still could not read them, so a JA4-denied scraper had no way to
+ * learn why. A refusal nobody can read is not a refusal, it is just a wall.
+ *
+ * Two static files, a couple of KB, edge-cached, containing nothing that is not already public
+ * by design. The upside is that voluntary compliance becomes possible at all, and compliance is
+ * cheaper than enforcement for both sides.
+ */
+const policyDocsRule: Rule = {
+  name: 'allow-policy-docs',
+  description:
+    'Allow /robots.txt and /llms.txt for every client, including denied ones. A crawler that cannot read the refusal cannot comply with it.',
+  active: true,
+  // One group per path: groups are OR-ed, conditions within a group are AND-ed.
+  conditionGroup: POLICY_PATHS.map((path) => ({
+    conditions: [{ type: 'path' as const, op: 'eq' as const, value: path }],
+  })),
+  action: { mitigate: { action: 'bypass' } },
+};
+
+const blockedUaRule = denyListRule({
+  name: 'deny-scraper-ua',
+  description:
+    'Deny crawlers by the name they call themselves (FW_BLOCKED_UA). Substring match on user-agent.',
+  spec: UA_DENY,
+  values: envMatching('FW_BLOCKED_UA', UA_DENY, false),
+  // A crawler denied on every path can never read the robots.txt that names it.
+  exemptPaths: POLICY_PATHS,
+});
+
 // Unlike observe-ja4-serverfn these match a digest rather than rate-limiting keyed by one, so
 // isLogOnly() leaves them switchable. That rests on the operator having PROVEN the digest is
 // non-browser: a shared browser fingerprint here denies everyone carrying it, and no code-level
@@ -143,6 +212,10 @@ const blockedJa4Rule = denyListRule({
   description: 'Deny scraper TLS fingerprints (FW_BLOCKED_JA4).',
   spec: JA4_DENY,
   values: envMatching('FW_BLOCKED_JA4', JA4_DENY, !dryRun),
+  // Every lever, not just the name one. `applyRule` INSERTS a new rule, so allow-policy-docs
+  // appends behind the already-live denies and cannot pre-empt them — relying on array order
+  // here would have left the levers that most need a readable refusal without one.
+  exemptPaths: POLICY_PATHS,
 });
 
 const blockedAsnRule = denyListRule({
@@ -151,6 +224,7 @@ const blockedAsnRule = denyListRule({
     'Deny hosting ASNs that only ever serve scrapers (FW_BLOCKED_ASN).',
   spec: ASN_DENY,
   values: envMatching('FW_BLOCKED_ASN', ASN_DENY, !dryRun),
+  exemptPaths: POLICY_PATHS,
 });
 
 // Opt-in: empty (rule omitted) until FW_DOWNLOADS_LIMIT is provisioned, so a
@@ -212,22 +286,27 @@ const downloadsRules: Rule[] =
 export const rules: Rule[] = [
   // ALLOW (first — allow rules take precedence): trusted server-to-server callers.
   bypassRule({
-    name: 'allow-ch-stream-revalidate',
+    name: CH_STREAM_REVALIDATE,
     description:
       'Bypass bot protection for ch-stream → POST /api/revalidate (trusted server-to-server cache invalidation; endpoint auths via x-revalidate-secret). Skips the managed Bot Protection challenge that blocks non-browser callers.',
     path: '/api/revalidate',
     headerKey: 'x-revalidate-secret',
+    alsoHeaderKeys: [CH_STREAM_MARKER],
   }),
   bypassRule({
-    name: 'allow-desktop-release-record',
+    name: DESKTOP_RELEASE_RECORD,
     description:
       'Bypass bot protection for the desktop release workflow → POST /api/releases (CI records a release; endpoint auths via x-desktop-release-secret). Skips the managed challenge that 429s non-browser callers.',
     path: '/api/releases',
     headerKey: 'x-desktop-release-secret',
   }),
   // Position here is documentation only: live priority is INSERTION order (applyRule appends).
+  // BEFORE the denies: bypass is terminal and live priority is insertion order, so a policy
+  // document has to be matched before anything gets a chance to refuse it.
+  policyDocsRule,
   blockedJa4Rule,
   blockedAsnRule,
+  blockedUaRule,
   // Two tiers per path: BURST (60s) sized well above a real session so humans never trip it,
   // SUSTAINED (10m) holding the flat rate. Humans burst then idle; scrapers run level.
   rateLimitRule({
@@ -250,6 +329,40 @@ export const rules: Rule[] = [
     actionDuration: '1h',
     // Enforces on insert: log mode would make the widened burst tier a net loosening.
     action: 'deny',
+  }),
+  // The corpus itself. Every other ceiling covers RPCs, search, tiles or downloads — the one
+  // surface a harvester actually wants had none, so a client past the managed challenge met no
+  // friction at all on 127k pages.
+  //
+  // Sized against the crawlers we cannot afford to throttle, not against humans. Measured
+  // 2026-08-08 per IP: Googlebot peaks at 14/60s and 58/600s, bingbot 19 and 39. Deindexing
+  // ourselves to inconvenience a scraper would be the worst trade available here, and the WAF
+  // cannot condition on "verified" — exempting by user-agent would hand every scraper a bypass
+  // for the price of a header.
+  //
+  // Counts HTML page fetches only: RPCs live under /_serverFn and do not match this path, so a
+  // real session browsing client-side barely registers.
+  //
+  // Ships in OBSERVE. A rate limit sized without live confirmation is how an ordinary browsing
+  // pattern took this IP off the whole site for ten minutes yesterday.
+  rateLimitRule({
+    name: 'rl-company-ip',
+    description:
+      'Per-IP BURST ceiling (60s) on company page fetches — the corpus surface. Sized several times above the busiest verified crawler so search engines are never throttled. Phase 1: log.',
+    conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
+    limit: COMPANY_LIMIT,
+    keys: ['ip'],
+    actionDuration: '10m',
+  }),
+  rateLimitRule({
+    name: 'rl-company-ip-sustained',
+    description:
+      'Per-IP SUSTAINED ceiling (10m) on company page fetches. Holds flat-rate enumeration below what a bulk harvest needs, forcing address rotation — which is the only part of a scrape that costs real money. Phase 1: log.',
+    conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
+    limit: COMPANY_SUSTAINED_LIMIT,
+    keys: ['ip'],
+    window: SUSTAINED_WINDOW,
+    actionDuration: '1h',
   }),
   rateLimitRule({
     name: 'rl-ssr-search-ip',

@@ -16,14 +16,30 @@ export function assetsIndicateBrowser(assets: number, total: number): boolean {
   return assets >= MIN_ASSETS && assets / Math.max(1, total) >= MIN_ASSET_SHARE;
 }
 
-/** Whether a client's rendering requests are numerous enough to indicate a real browser. Pooled and share-gated: an unconditional `> 0` on any single axis is not evidence. */
+/**
+ * Whether a client's rendering requests indicate a real browser. Pooled and share-gated: an
+ * unconditional `> 0` on any single axis is not evidence.
+ *
+ * `pages` adds the proportionality test, and it is the one that separates a browser from a
+ * headless enumerator. A browser renders EVERY page it loads — the loader alone fires four RPCs
+ * per company page here — so rendering scales with pages viewed. Fewer rendering requests than
+ * page fetches means most pages produced none at all, which no browser does.
+ *
+ * Deliberately generous — far below any real session, and well above the enumerator it was
+ * calibrated on, so an ordinary visitor cannot fall into it. The calibration is recorded with
+ * the operator notes, not here.
+ *
+ * `pages` defaults to 0, which skips the test: a caller with no page count is no worse off than
+ * before it existed, and cannot be made stricter by accident.
+ */
 export function rendersIndicateBrowser(
   renders: number,
   total: number,
+  pages = 0,
 ): boolean {
-  return (
-    renders >= MIN_ASSETS && renders / Math.max(1, total) >= MIN_ASSET_SHARE
-  );
+  if (renders < MIN_ASSETS) return false;
+  if (renders / Math.max(1, total) < MIN_ASSET_SHARE) return false;
+  return pages <= 0 || renders >= pages;
 }
 
 // Networks people rent servers on. Some large CDNs carry real consumer traffic and are
@@ -270,6 +286,10 @@ export type SignalInput = {
   asns: [string, number][];
   countries: [string, number][];
   botVerified: [string, number][];
+  /** Verified crawler names with counts, so the tell can be narrowed like the blocker is. */
+  verifiedBots?: [string, number][];
+  /** Verified crawlers we want. Undefined = every verified one still counts, as before the list. */
+  allowedBots?: readonly string[];
   windowMinutes: number;
 };
 
@@ -278,6 +298,22 @@ export type SignalInput = {
  * every threshold here has a legitimate client somewhere on the wrong side of it, so the operator
  * makes the call. Verified bots are checked first because they invert several of the others.
  */
+/**
+ * The verified-crawler rows that still count as a legitimacy signal.
+ *
+ * Falls back to the bare `pass` flag when no names were resolved, so a missing NAME can never
+ * strip a real crawler's tell — the same fallback `blockersFor` uses.
+ */
+function welcomeVerified(input: SignalInput): [string, number][] {
+  const named = input.verifiedBots ?? [];
+  if (!named.length) return input.botVerified.filter(([v]) => v === 'pass');
+  if (!input.allowedBots) return named;
+  const want = new Set(input.allowedBots.map((n) => n.toLowerCase()));
+  return named.filter(
+    ([n]) => n === UNNAMED_VERIFIED || want.has(n.toLowerCase()),
+  );
+}
+
 export function tellsFor(input: SignalInput): Tell[] {
   const { mix, shape, total } = input;
   const tells: Tell[] = [];
@@ -286,7 +322,10 @@ export function tellsFor(input: SignalInput): Tell[] {
   // Only 'pass' is a verification. A 'fail' row is a client that CLAIMED to be a known crawler
   // and failed Vercel's reverse check — presenting that as "verified" told the operator, in the
   // tool's own words, to discount the strongest tells against a confirmed impersonator.
-  const verified = input.botVerified.filter(([v]) => v === 'pass');
+  // Narrowed like blockersFor. Unnarrowed, this printed "a verified crawler inverts the
+  // sub-resource and ALPN tells; do not deny on those alone" directly above a DENY RECOMMENDED
+  // whose reasons were exactly those tells — the contradiction the comment below forbids.
+  const verified = welcomeVerified(input);
   const failedCheck = input.botVerified.filter(
     ([v]) => v && v.startsWith('fail'),
   );
@@ -307,7 +346,9 @@ export function tellsFor(input: SignalInput): Tell[] {
   // contradict each other on one screen — they did, and the pane that said 'raw-HTML fetcher'
   // sat directly above a green DO NOT DENY.
   const subResource = renderingRequests(mix);
-  const browsery = rendersIndicateBrowser(subResource, total);
+  // mix.page included, or this tell says 'browsers pull these' about the same identity the
+  // advisory is refusing as a raw-HTML fetcher — the contradiction the comment above forbids.
+  const browsery = rendersIndicateBrowser(subResource, total, mix.page);
   tells.push({
     points: browsery ? 'human' : 'bot',
     label: 'sub-resources',
@@ -446,4 +487,36 @@ export function tellsFor(input: SignalInput): Tell[] {
   });
 
   return tells;
+}
+
+/**
+ * Verified crawler names with counts, read from the joined bot key (`verified | name | category`).
+ *
+ * One derivation for both the subject and its reach: the same rule written twice is the shape
+ * that drifts, and here a drift means one gate exempts a crawler the other bans.
+ */
+/**
+ * Name used when Vercel verified a crawler but reported no name.
+ *
+ * Exempt unconditionally, never matched against FW_ALLOWED_BOTS: it is a placeholder no operator
+ * would ever list, so filtering it removed the protection it exists to preserve. The verification
+ * is the fact that matters — a blank name field is a gap in the API's reporting, not evidence
+ * about the client.
+ */
+export const UNNAMED_VERIFIED = 'verified';
+
+export function verifiedBotsOf(
+  bots: readonly [string, number][],
+): [string, number][] {
+  const out = new Map<string, number>();
+  for (const [key, count] of bots) {
+    // Exact, not a prefix. `startsWith('pass')` also accepts a hypothetical `passive`, and the
+    // failure direction is the bad one: a non-verified group forwarded as a verified crawler
+    // earns the exemption and suppresses the advisory.
+    const [status, rawName] = key.split(' | ', 2);
+    if (status?.trim() !== 'pass') continue;
+    const name = rawName?.trim().toLowerCase() || UNNAMED_VERIFIED;
+    out.set(name, (out.get(name) ?? 0) + count);
+  }
+  return [...out];
 }

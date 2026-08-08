@@ -27,12 +27,31 @@ export function isLogOnly(rule: Rule): boolean {
 }
 
 /**
+ * A bypass whose conditions name nothing but paths, so cycling it to `deny` would refuse those
+ * paths for EVERYONE rather than for a caller who failed a credential check.
+ *
+ * The other bypasses are safe to cycle because they also require a bespoke secret header: turned
+ * into a deny they refuse only callers holding our credential, which is recoverable and visible.
+ * `allow-policy-docs` has no such condition — one LEFT press would 403 /robots.txt for the whole
+ * internet, Google would read that as disallow-all, and `seedItems` prefers the live action so it
+ * would survive every later apply. Nothing else in the tool inspects it: `enforcementIssues`
+ * looks only at the deny rules.
+ */
+export function isBypassOnly(rule: Rule): boolean {
+  if (rule.action.mitigate.action !== 'bypass') return false;
+  return rule.conditionGroup.every((g) =>
+    g.conditions.every((c) => c.type === 'path'),
+  );
+}
+
+/**
  * Switchable actions valid for a rule. JA4-keyed rate-limit rules are locked to log; `bypass` is
  * offered only to rules authored as one, since cycling a deny past `deny` would invert it into an
  * exemption — and seedItems prefers the live action, so that would survive every later apply.
  */
 export function actionOptions(rule: Rule): ActionChoice[] {
   if (isLogOnly(rule)) return ['log'];
+  if (isBypassOnly(rule)) return ['bypass'];
   return rule.action.mitigate.action === 'bypass'
     ? ['log', 'challenge', 'deny', 'bypass']
     : ['log', 'challenge', 'deny'];

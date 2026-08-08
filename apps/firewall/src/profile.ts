@@ -13,6 +13,7 @@ import { type Subject, fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
 import { rollingWindow } from './time-window';
+import { allowedBotsOrUnknown } from './tuning';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 24;
@@ -105,6 +106,23 @@ async function main() {
     // and "the denylist could not be read" are different facts.
     profile.errors.push(`FW_BLOCKED_JA4: ${errMsg(e)}`);
   }
+  // One extra call on top of the profile's ~21. It replaces the caveat this command used to
+  // print: a rule hit means nothing unless the live rule still demands what it should.
+  let trusted: string[] | undefined;
+  try {
+    const { fetchLive } = await import('./client');
+    const { trustedRules } = await import('./rule-integrity');
+    const { rules } = await import('./rules');
+    trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
+  } catch (e) {
+    // Undefined, never []: "not read" and "none qualify" are different, and the advisory says so.
+    profile.errors.push(`live firewall config: ${errMsg(e)}`);
+  }
+  // Recorded beside the other config failures, so "the allowlist did not load" is visible
+  // rather than inferred from every verified crawler suddenly being exempt.
+  const allowlist = allowedBotsOrUnknown();
+  if (allowlist.error)
+    profile.errors.push(`FW_ALLOWED_BOTS: ${allowlist.error}`);
   const advice = adviseBan({
     total: profile.total,
     mix: profile.mix,
@@ -112,6 +130,10 @@ async function main() {
     ja4: profile.byJa4,
     asns: profile.byAsn,
     botVerified: profile.byBotVerified,
+    verifiedBots: profile.verifiedBots,
+    // Undefined when unreadable, never [] — an empty list would assert "no crawler is welcome"
+    // and turn Googlebot into a candidate on a config read failure.
+    allowedBots: allowlist.names,
     wafActions: profile.byWafAction,
     wafRules: profile.byWafRule,
     statuses: profile.byStatus,
@@ -133,6 +155,8 @@ async function main() {
     alreadyDeniedAsn: false,
     windowMinutes: profile.windowHours * 60,
     failedQueries: profile.failedQueries,
+    trustedAllowRules: trusted,
+    rpcsPartial: profile.rpcsPartial,
     mixPartial: profile.mixPartial,
   });
   console.log(

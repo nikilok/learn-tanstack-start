@@ -15,6 +15,8 @@ import {
   shapeOf,
   tellsFor,
   withRpcs,
+  rendersIndicateBrowser,
+  verifiedBotsOf,
 } from './ip-signals';
 
 /** Build a zero-filled 10-minute series with `counts` starting at `offset` buckets in. */
@@ -574,5 +576,64 @@ describe('path diversity — floor vs ratio', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+});
+
+// The page-proportionality test, built but NOT wired into the advisory. Enabling it changes what
+// the tool recommends denying, which is the operator's call, not a refactor.
+describe('rendersIndicateBrowser — page proportionality', () => {
+  test('omitting pages keeps the pre-existing behaviour exactly', () => {
+    expect(rendersIndicateBrowser(400, 9400)).toBe(true);
+  });
+
+  test('a real session renders many times per page', () => {
+    // Shaped after a real session on this site.
+    expect(rendersIndicateBrowser(694, 721, 21)).toBe(true);
+  });
+
+  test('fewer renders than pages is not a browser', () => {
+    // The live AI-harvester fingerprint: 360 rendering requests across 2008 page fetches, and
+    // zero map tiles. A browser renders every page it loads; this one rendered 1 in 6.
+    expect(rendersIndicateBrowser(360, 2473, 2008)).toBe(false);
+  });
+
+  test('the share gate still applies', () => {
+    // 4 renders fails MIN_ASSETS and never reaches the share check, so the old fixture named a
+    // gate it did not exercise: the count clears, the share does not.
+    expect(rendersIndicateBrowser(5, 2000, 1)).toBe(false);
+  });
+});
+
+describe('verifiedBotsOf', () => {
+  test('reads the name out of the joined key', () => {
+    expect(
+      verifiedBotsOf([['pass | googlebot | search_engine_crawler', 900]]),
+    ).toEqual([['googlebot', 900]]);
+  });
+
+  test('a status merely STARTING with pass is not a verification', () => {
+    // `startsWith('pass')` also accepted a hypothetical `passive`, and the failure direction is
+    // the bad one: a non-verified group forwarded as a verified crawler earns the allowlist
+    // exemption and suppresses the advisory that would have flagged it.
+    expect(verifiedBotsOf([['passive | somebot | x', 900]])).toEqual([]);
+    expect(verifiedBotsOf([['passed_check | somebot | x', 900]])).toEqual([]);
+  });
+
+  test('a failed reverse check is not a verification', () => {
+    expect(verifiedBotsOf([['fail_dns | googlebot | x', 900]])).toEqual([]);
+  });
+
+  test('counts for one name are pooled across rows', () => {
+    expect(
+      verifiedBotsOf([
+        ['pass | googlebot | a', 100],
+        ['pass | googlebot | b', 50],
+      ]),
+    ).toEqual([['googlebot', 150]]);
+  });
+
+  test('a verified row with no name is still a verification', () => {
+    // Dropping it would strip a real crawler's protection because a field was blank.
+    expect(verifiedBotsOf([['pass |  | x', 7]])).toEqual([['verified', 7]]);
   });
 });

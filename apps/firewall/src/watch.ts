@@ -1,56 +1,308 @@
 // Entrypoint for `bun run firewall:watch` — what is getting through that should not be.
 // READ-ONLY. It never stages a deny and never applies; it prints a case and a human decides.
 //
-// It does NOT try to find scrapers from first principles. Measured 2026-08-05, Vercel's managed
-// bot protection already challenges ~93% of `automated_browser` and all of `uncategorized_bot`
-// and `client_anomaly`. The gap is `browser_impersonation`, where a large share is still
-// allowed through — and that is the category a driven-browser scraper lands in. So the screen
-// asks Vercel for its own classification and looks only at what it classified and then let
-// past. Adjudicating those is the part Vercel cannot do: deciding a fingerprint is safe to DENY
-// rather than merely challenge needs to know what a real session on this site looks like.
+// It does NOT try to find scrapers from first principles. Vercel's managed bot protection
+// already handles most of what it classifies, so the screen asks for that classification and
+// looks only at what was classified as impersonating a browser and then reached the app anyway.
+// A challenge is a test, not a wall: whatever passes it arrives clean, and something capable of
+// passing is more interesting than something that never faced one.
+//
+// Adjudicating those is the part Vercel cannot do. Deciding a fingerprint is safe to DENY rather
+// than merely challenge needs to know what a real session on this site looks like.
 
-import { type Advice, adviseBan } from './ban-advice';
+import { type BanCandidate, autoBanRefusal } from './auto-ban';
+import {
+  type Advice,
+  type Reach,
+  adviseBan,
+  browserEvidence,
+} from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
-import { ASN_DENY, JA4_DENY, envMatching } from './deny-list';
+import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
 import { fetchIpProfile } from './ip-profile';
+import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
-import { makeCtx, metrics, top } from './observability';
+import { type Row, countOf, makeCtx, metrics } from './observability';
+import { trustedRules } from './rule-integrity';
 import { type Window, rollingWindow } from './time-window';
+import { allowedBots, screenFloor, watchHours } from './tuning';
 import { errMsg } from './util';
+import { logWatch } from './watch-log';
+import {
+  investigable,
+  runInvestigation,
+  verdictFrom,
+  fingerprintConfig,
+  investigationChangedConfig,
+} from './watch-mode';
+import {
+  actionableKey,
+  concludedKey,
+  concludedText,
+  notify,
+  notifyText,
+  readInvestigated,
+  writeInvestigated,
+  rememberNotified,
+  shouldNotify,
+} from './watch-notify';
 
-const DEFAULT_HOURS = 24;
 const MAX_HOURS = 24 * 6; // the free observability window
-// Below this a digest cannot clear the advisory's own volume floor anyway, so profiling it
-// (~21 queries) buys nothing but API budget.
-const SCREEN_FLOOR = 100;
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
 // not that the site is under attack from fifty actors at once.
 const MAX_PROFILES = 6;
 
 const USAGE = `Usage:
-  bun run firewall:watch [hours]     default ${DEFAULT_HOURS}h, max ${MAX_HOURS}h
+  bun run firewall:watch [hours] [--investigate] [--notify]
+                                     max ${MAX_HOURS}h
 
-Read-only. Exits 1 when something wants a human, 0 when quiet.`;
+Read-only. Exits 0 quiet, 1 found something, 2 could not run properly.`;
 
-export type Screened = { digest: string; allowed: number };
+/** Above this share of rendering requests, a browser has run the app from the fingerprint. */
+const MAX_RENDER_SHARE = 0.05;
+
+export type Screened = {
+  digest: string;
+  allowed: number;
+  /** Which screen surfaced it, and why. Carried so a candidate can say what made it one. */
+  why: string[];
+};
+
+/**
+ * Digests carrying a verified crawler WE WANT — the only ones the behavioural screen skips.
+ *
+ * `botVerified` is NOT a boolean: the value is `'pass'`, and `botVerified eq 'true'` is accepted
+ * by the API while matching nothing — the same trap as `botCategory`. Worse, `ne 'true'` matches
+ * everything including the verified. So it is selected here, never filtered.
+ *
+ * Verification is reverse DNS with forward confirmation, so it cannot be faked by renting a VM in
+ * the right network: measured 2026-08-06, Google's and Microsoft's own ASNs each carried hundreds
+ * of UNVERIFIED requests alongside their verified crawlers. But proving a crawler is who it says
+ * is not the same as wanting it: SEO and AI harvesters pass identically to a search engine. Only
+ * the names on FW_ALLOWED_BOTS are excluded from candidacy; the rest stay screenable.
+ *
+ * `allowed` undefined means the list was not read, and every verified crawler is skipped — the
+ * behaviour before the list existed. A config that failed to load must not put Googlebot on the
+ * candidate list.
+ */
+export function verifiedDigests(
+  summary: Row[],
+  allowed?: readonly string[],
+): Set<string> {
+  const want = allowed && new Set(allowed.map((n) => n.toLowerCase()));
+  return new Set(
+    summary
+      .filter((r) => String(r.botVerified ?? '') === 'pass')
+      .filter(
+        (r) =>
+          !want ||
+          want.has(
+            String(r.botName ?? '')
+              .trim()
+              .toLowerCase(),
+          ),
+      )
+      .map((r) => JA4_DENY.normalize(String(r.clientJa4Digest ?? '')))
+      .filter(Boolean),
+  );
+}
+
+/**
+ * Fingerprints doing volume without rendering anything, excluding confirmed crawlers.
+ *
+ * This is the screen that does not depend on Vercel having classified the traffic — the category
+ * is empty for most real users, so anything that evades classification lands in a bucket the
+ * category screen cannot see. Rendering share is the discriminator because it is bimodal on live
+ * traffic rather than a threshold anyone had to tune: the two populations separate by more than
+ * an order of magnitude, with nothing in between.
+ *
+ * A crawler is excluded because not rendering IS the job, not a tell. Applied to a live window,
+ * that exclusion took eight candidates down to one.
+ */
+export function nonRendering(
+  routeRows: Row[],
+  verified: ReadonlySet<string>,
+  maxShare = MAX_RENDER_SHARE,
+): Screened[] {
+  // Keyed on the normalised digest. The API echoes digests in either case, and two casings of one
+  // fingerprint would otherwise be totalled separately — splitting its traffic, splitting its
+  // rendering share, and turning one browser session into two apparent harvesters.
+  const byDigest = new Map<string, [string, number][]>();
+  for (const r of routeRows) {
+    const raw = String(r.clientJa4Digest ?? '');
+    if (!raw || raw === '(none)' || raw === '?') continue;
+    const d = JA4_DENY.normalize(raw);
+    const paths = byDigest.get(d) ?? [];
+    paths.push([String(r.route ?? ''), countOf(r)]);
+    byDigest.set(d, paths);
+  }
+  // Normalised here rather than trusted from the caller. `verifiedDigests` already does it, but
+  // this exclusion is the only thing keeping legitimate crawlers out of the candidate list, and a
+  // set built any other way would silently fail to match — surfacing Googlebot as a suspect.
+  const crawlers = new Set([...verified].map((d) => JA4_DENY.normalize(d)));
+  const out: Screened[] = [];
+  for (const [digest, paths] of byDigest) {
+    if (crawlers.has(digest)) continue;
+    const total = paths.reduce((n, [, c]) => n + c, 0);
+    if (total <= 0) continue;
+    const share = renderingRequests(mixOf(paths)) / total;
+    if (share > maxShare) continue;
+    out.push({
+      digest,
+      allowed: total,
+      why: [`${(share * 100).toFixed(1)}% rendering, not a verified crawler`],
+    });
+  }
+  return out.sort((a, b) => b.allowed - a.allowed);
+}
+
+/**
+ * One candidate list from several screens. Deduped by digest with the reasons merged, so a
+ * fingerprint both screens found is profiled once and says so.
+ */
+export function mergeScreens(...lists: Screened[][]): Screened[] {
+  const by = new Map<string, Screened>();
+  for (const s of lists.flat()) {
+    const key = s.digest.toLowerCase();
+    const prior = by.get(key);
+    if (!prior) by.set(key, { ...s, why: [...s.why] });
+    else {
+      // The screens count different things — impersonation requests versus all of them — so the
+      // larger is the honest figure for "how much traffic is this".
+      prior.allowed = Math.max(prior.allowed, s.allowed);
+      for (const w of s.why) if (!prior.why.includes(w)) prior.why.push(w);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.allowed - a.allowed);
+}
 
 /** One adjudicated candidate: what the screen saw, and what the advisory made of it. */
-export type Finding = Screened & { total: number; advice: Advice };
+export type Finding = Screened & {
+  total: number;
+  advice: Advice;
+  /**
+   * What autonomous applying WOULD have done, had it been wired: the refusal reason, or `null`
+   * for a candidate it would have denied. Nothing acts on this — it exists so the gate's answers
+   * accumulate in the log before anything is allowed to act on them, because the screen has never
+   * produced a live `ban` and a rate nobody has measured is not a rate.
+   */
+  autoBanRefusal: string | null;
+};
+
+/**
+ * Record what autonomous applying WOULD have decided. Applies nothing — `auto-ban.ts` is unwired,
+ * deliberately, and this is how the evidence for wiring it gets collected.
+ *
+ * Only `ban` verdicts are recorded. For anything softer the gate's answer is "verdict is X, not
+ * ban", which measures the advisory rather than the gate and would bury the real answers.
+ */
+export async function logShadow(
+  dir: string,
+  findings: readonly Finding[],
+): Promise<void> {
+  for (const f of findings)
+    if (f.advice.verdict === 'ban')
+      await logWatch(dir, new Date(), {
+        kind: 'shadow',
+        digest: f.digest,
+        refusal: f.autoBanRefusal,
+      });
+}
+
+/**
+ * The blast-radius candidate for a finding, shaped so an unmeasured metric arrives as `NaN`.
+ *
+ * Reach that is absent or INCOMPLETE yields NaN rather than its numbers. A truncated path sample
+ * reports zero rendering, and zero rendering is the single strongest reason `autoBanRefusal` has
+ * to permit a deny — so absence must not arrive as the measurement that clears the gate. NaN is
+ * refused by name; a zero would be believed.
+ */
+export function banCandidate(input: {
+  digest: string;
+  advice: { verdict: string; blockers: string[] };
+  reach: Reach | undefined;
+  total: number;
+  windowTotal: number;
+}): BanCandidate {
+  const measured = input.reach?.complete ? input.reach : undefined;
+  return {
+    digest: input.digest,
+    verdict: input.advice.verdict,
+    blockers: input.advice.blockers,
+    renderingRequests: measured ? browserEvidence(measured) : Number.NaN,
+    ips: measured ? measured.ips : Number.NaN,
+    total: input.total,
+    windowTotal: input.windowTotal,
+  };
+}
+
+/**
+ * All traffic in the window — the denominator a candidate's share is measured against.
+ *
+ * Grouped by `wafAction` because it is the lowest-cardinality dimension available, so this one
+ * cannot be silently truncated by the group cap the way a path or IP grouping can. A failed query
+ * returns NaN, never 0: zero is a denominator that makes every candidate's share unmeasurable in
+ * a direction that reads as small, and NaN is what the gate refuses on.
+ */
+export async function windowTotalOf(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+  deps: ScreenDeps = LIVE_DEPS,
+): Promise<number> {
+  try {
+    const { ctx } = makeCtx(creds, window);
+    const rows = (await deps.metrics(ctx, ['wafAction'], { limit: GROUP_CAP }))
+      .summary;
+    if (!rows?.length) return Number.NaN;
+    return rows.reduce((a, r) => a + countOf(r), 0);
+  } catch {
+    return Number.NaN;
+  }
+}
 
 export type WatchReport = {
   window: Window;
-  /** Requests Vercel classified browser_impersonation and then allowed. */
+  /** Requests Vercel classified browser_impersonation that still reached the app. */
   screened: number;
   fingerprints: number;
   candidates: number;
+  /** The screened response hit the group cap, so rows we wanted may have been dropped. */
+  truncated: boolean;
   findings: Finding[];
   enforcement: string[];
   errors: string[];
 };
 
-/** True when a human should look. Kept separate from rendering so the exit code and the text cannot disagree. */
+/** 0 quiet, 1 ran and found something, 2 could not run properly. */
+export const EXIT_QUIET = 0;
+export const EXIT_FOUND = 1;
+export const EXIT_BROKEN = 2;
+
+/**
+ * What to exit with.
+ *
+ * "Found something" and "could not look" are opposite outcomes, so they cannot share a code: a
+ * caller unable to tell them apart either ignores real findings or alarms on healthy runs. Note
+ * that 1 is a NORMAL outcome here — this command succeeding at its job is not an error.
+ */
+export function exitCodeFor(r: WatchReport): number {
+  // A screen truncated down to nothing observed nothing, so it cannot claim quiet either.
+  if (r.errors.length > 0 || (r.truncated && r.fingerprints === 0))
+    return EXIT_BROKEN;
+  if (
+    r.enforcement.length > 0 ||
+    r.findings.some((f) => f.advice.verdict === 'ban')
+  )
+    return EXIT_FOUND;
+  return EXIT_QUIET;
+}
+
+/** True when a human should look. Separate from the exit code so the two cannot disagree. */
 export function isActionable(r: WatchReport): boolean {
   return (
+    // Truncated AND empty cannot be told apart from genuinely quiet, so it escalates. Truncated
+    // with findings does not: we saw something, and saying so every run is how a watch gets muted.
+    (r.truncated && r.fingerprints === 0) ||
     // Errors count. Exit 0 tells a loop to go back to sleep, so a watch that could not read its
     // own inputs must not report quiet — unknown escalates, it does not pass.
     r.errors.length > 0 ||
@@ -71,14 +323,23 @@ export function watchLines(r: WatchReport): Line[] {
     ),
   ];
   for (const e of r.errors) L.push(line(seg(`  ${e}`, 'warn')));
+  if (r.truncated)
+    L.push(
+      line(
+        seg(
+          `  the screen hit the ${GROUP_CAP}-group cap — impersonation rows may have been dropped`,
+          'warn',
+        ),
+      ),
+    );
   L.push(
     blank(),
     line(
-      `${r.screened} request(s) classified browser_impersonation and ALLOWED, across ${r.fingerprints} fingerprint(s)`,
+      `${r.screened} request(s) classified browser_impersonation reached the app, across ${r.fingerprints} fingerprint(s)`,
     ),
     line(
       seg(
-        `  ${r.candidates} above the ${SCREEN_FLOOR}-request floor and not already denied`,
+        `  ${r.candidates} above the volume floor and not already denied`,
         r.candidates ? 'warn' : 'good',
       ),
     ),
@@ -127,20 +388,19 @@ export function watchLines(r: WatchReport): Line[] {
  * not already denied, and capped so a classification change cannot trigger a query storm.
  */
 export function worthProfiling(
-  rows: [string, number][],
+  rows: Screened[],
   denied: string[],
-  floor = SCREEN_FLOOR,
+  floor: number,
   cap = MAX_PROFILES,
 ): Screened[] {
   const already = new Set(denied.map((d) => JA4_DENY.normalize(d)));
   return rows
-    .filter(([digest, allowed]) => {
+    .filter(({ digest, allowed }) => {
       if (!digest || digest === '(none)') return false;
       if (allowed < floor) return false;
       return !already.has(JA4_DENY.normalize(digest));
     })
-    .slice(0, cap)
-    .map(([digest, allowed]) => ({ digest, allowed }));
+    .slice(0, cap);
 }
 
 /**
@@ -172,22 +432,340 @@ export function notEnforcing(
   });
 }
 
-/** The digests Vercel classified as impersonating a browser and then allowed through. */
-async function screen(
+/**
+ * Screen the window and adjudicate whatever clears the floor. Shared by the CLI and the TUI's
+ * watch mode so there is one definition of what counts as suspicious, not two that drift.
+ */
+export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
-): Promise<[string, number][]> {
-  const { ctx } = makeCtx(creds, window);
-  return top(
-    await metrics(ctx, ['clientJa4Digest'], {
-      // Vercel's own classification, so the screen inherits its bot detection rather than
-      // re-deriving one. `allow` is the point: challenged traffic is already being handled.
-      filter: "botCategory eq 'browser_impersonation' and wafAction eq 'allow'",
-      limit: 500,
-    }),
-    'clientJa4Digest',
-    50,
+  deniedJa4: string[],
+  trustedAllowRules?: string[],
+  /** Verified crawlers we want. Undefined = every verified one is exempt, as before the list. */
+  allowedBots?: string[],
+  /** User-agent tokens already denied at the WAF. */
+  deniedUa: readonly string[] = [],
+  deps: ScreenDeps = LIVE_DEPS,
+): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
+  const { rows, truncated, handled } = await screen(
+    creds,
+    window,
+    allowedBots,
+    deniedUa,
+    deps,
   );
+  const findings: Finding[] = [];
+  // Both levers. An identity denied by either is handled, and profiling it again spends ~21
+  // queries — and, unattended, a paid investigation — to rediscover a ban already in place.
+  const candidates = worthProfiling(
+    rows,
+    [...deniedJa4, ...handled],
+    screenFloor(window.minutes),
+  );
+  // Fetched once, and only when there is something to size — an extra query per run buys nothing
+  // on the quiet nights, which is nearly all of them.
+  const windowTotal = candidates.length
+    ? await windowTotalOf(creds, window, deps)
+    : Number.NaN;
+  for (const c of candidates) {
+    const p = await deps.fetchIpProfile(
+      creds,
+      { kind: 'ja4', value: c.digest },
+      window,
+    );
+    const advice = adviseBan({
+      total: p.total,
+      mix: p.mix,
+      shape: p.shape,
+      ja4: p.byJa4,
+      asns: p.byAsn,
+      botVerified: p.byBotVerified,
+      wafActions: p.byWafAction,
+      wafRules: p.byWafRule,
+      statuses: p.byStatus,
+      digestReach: p.digestReach,
+      asnReach: p.asnReach,
+      alreadyDeniedJa4: false, // filtered out by worthProfiling
+      stagedJa4: false,
+      alreadyDeniedAsn: false,
+      windowMinutes: p.windowHours * 60,
+      failedQueries: p.failedQueries,
+      trustedAllowRules,
+      rpcsPartial: p.rpcsPartial,
+      mixPartial: p.mixPartial,
+      verifiedBots: p.verifiedBots,
+      allowedBots,
+    });
+    findings.push({
+      ...c,
+      total: p.total,
+      advice,
+      autoBanRefusal: autoBanRefusal(
+        banCandidate({
+          digest: c.digest,
+          advice,
+          reach: p.digestReach,
+          total: p.total,
+          windowTotal,
+        }),
+      ),
+    });
+  }
+  return { rows, findings, truncated };
+}
+
+/**
+ * One screen with every gate the advisory needs, each read fresh.
+ *
+ * Both entrypoints go through here. They used to assemble these arguments separately and drifted
+ * three times — the TUI lost the first-party blocker, then the truncation flag, then the bot
+ * allowlist — and every time it was the UNATTENDED path that lost the signal. Divergence is the
+ * defect, so the assembly is the thing that had to be shared, not the call.
+ *
+ * Config failures are collected, never thrown: each degrades to the permissive value, and the
+ * CALLER decides what a missing gate means. Returned rather than logged so neither entrypoint
+ * can quietly ignore them — the CLI escalates them to exit 2, the TUI shows them.
+ */
+export async function screenOnce(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+  deps: ScreenDeps = LIVE_DEPS,
+): Promise<{
+  rows: Screened[];
+  findings: Finding[];
+  truncated: boolean;
+  configErrors: string[];
+}> {
+  const configErrors: string[] = [];
+
+  // Not required: an unreadable denylist means nothing is known to be already-denied, which only
+  // ever makes the screen wider.
+  let denied: string[] = [];
+  try {
+    denied = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
+  } catch (e) {
+    configErrors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
+  }
+
+  // Read fresh, not cached at startup: a rule edited in the dashboard hours into a watch is the
+  // exact drift rule-integrity exists to notice.
+  let trusted: string[] | undefined;
+  try {
+    const { fetchLive } = await import('./client');
+    const { rules } = await import('./rules');
+    trusted = trustedRules((await fetchLive()).headerKeysByName, rules);
+  } catch (e) {
+    configErrors.push(`live firewall config: ${errMsg(e)}`);
+  }
+
+  // Undefined on failure, which exempts EVERY verified crawler — the pre-allowlist behaviour.
+  // The permissive direction is the safe one here: a config that failed to load must never turn
+  // Googlebot into a ban candidate.
+  let allowed: string[] | undefined;
+  try {
+    allowed = allowedBots();
+  } catch (e) {
+    configErrors.push(`FW_ALLOWED_BOTS: ${errMsg(e)}`);
+  }
+
+  // Read like the JA4 list: unreadable means "none known", which only widens the screen.
+  let deniedUa: string[] = [];
+  try {
+    deniedUa = envMatching('FW_BLOCKED_UA', UA_DENY, false);
+  } catch (e) {
+    configErrors.push(`FW_BLOCKED_UA unreadable: ${errMsg(e)}`);
+  }
+  const found = await findSuspects(
+    creds,
+    window,
+    denied,
+    trusted,
+    allowed,
+    deniedUa,
+    deps,
+  );
+  return { ...found, configErrors };
+}
+
+/** Share of an identity's traffic a denied name must own before the identity counts as handled. */
+const HANDLED_SHARE = 0.5;
+
+/**
+ * Fingerprints already denied by NAME, so the screen stops re-nominating them.
+ *
+ * The screen filters on what PASSED, and a window that mostly predates a ban is still full of
+ * the traffic that passed before it. So a UA-denied crawler keeps arriving as a candidate for a
+ * whole window: profiled at ~21 queries, and with --investigate, a paid agent spent to conclude
+ * it should be denied. It already is.
+ *
+ * Dominance, not presence. A digest is a client BUILD and can carry several callers; dropping it
+ * because 1% of its traffic is a denied bot would blind the screen to the other 99%. Only when
+ * the denied name owns the majority is the identity genuinely handled.
+ */
+export function deniedByUa(
+  uaRows: Row[],
+  tokens: readonly string[],
+  share = HANDLED_SHARE,
+): Set<string> {
+  const out = new Set<string>();
+  if (!tokens.length) return out;
+  const total = new Map<string, number>();
+  const denied = new Map<string, number>();
+  for (const r of uaRows) {
+    const digest = JA4_DENY.normalize(String(r.clientJa4Digest ?? ''));
+    if (!digest) continue;
+    const n = countOf(r);
+    total.set(digest, (total.get(digest) ?? 0) + n);
+    const ua = String(r.clientUserAgent ?? '');
+    if (tokens.some((t) => t && ua.includes(t)))
+      denied.set(digest, (denied.get(digest) ?? 0) + n);
+  }
+  for (const [digest, n] of denied) {
+    const all = total.get(digest) ?? 0;
+    if (all > 0 && n / all > share) out.add(digest);
+  }
+  return out;
+}
+
+/**
+ * The two calls that reach the network, injectable so the ASSEMBLY can be tested.
+ *
+ * The decision modules beneath this file carry 238 tests between them; `screen`, `findSuspects`
+ * and `screenOnce` carried none, because driving them needed production. Every defect found in
+ * this package today lived in that gap — four gates present on one path and missing on the
+ * other, a truncation flag dropped, a guard applied to the tick but not the reschedule.
+ */
+export type ScreenDeps = {
+  metrics: typeof metrics;
+  fetchIpProfile: typeof fetchIpProfile;
+};
+
+const LIVE_DEPS: ScreenDeps = { metrics, fetchIpProfile };
+
+const IMPERSONATION = 'browser_impersonation';
+/** The observability group cap. A response at this size may have dropped rows we wanted. */
+const GROUP_CAP = 500;
+// What reached the app, expressed as what did NOT stop it — a request arrives as log, allow or
+// bypass depending on configuration, and naming one of them misses the rest.
+const PASSED = "wafAction ne 'deny' and wafAction ne 'challenge'";
+
+/**
+ * Pick the impersonation rows out of a two-dimension summary, busiest first.
+ *
+ * Separate from the query because `botCategory` cannot be filtered on — see `screen` — so the
+ * selection happens here, and a selection that silently matches nothing is the failure this whole
+ * tool exists to notice.
+ */
+export function impersonators(summary: Row[]): Screened[] {
+  // Deliberately uncapped. `worthProfiling` bounds the expensive work, but it does so AFTER
+  // dropping what is already denied — so a cap here would run first, and with the busiest
+  // fingerprints denied, which is exactly what a working denylist produces, everything still
+  // eligible sits below the cut and is never looked at. The result is bounded by the group cap
+  // regardless.
+  return (
+    summary
+      .filter((r) => String(r.botCategory ?? '') === IMPERSONATION)
+      .map((r) => ({
+        // Lower-cased here, where the value enters, because `fetchIpProfile` validates the
+        // lower-cased digest but filters on the raw one. An upper-cased digest would pass
+        // validation and then match nothing — an empty profile that reads as a quiet identity
+        // rather than as a query that never looked.
+        digest: String(r.clientJa4Digest ?? '').toLowerCase(),
+        allowed: countOf(r),
+        why: ['Vercel classified it as impersonating a browser'],
+      }))
+      // A row with no digest is dropped, not renamed. Substituting a placeholder would clear the
+      // volume floor and be profiled as if it were a fingerprint — ~21 queries spent on an
+      // identity that does not exist, counted in the report as a candidate.
+      .filter(({ digest }) => digest && digest !== '(none)' && digest !== '?')
+      .sort((a, b) => b.allowed - a.allowed)
+  );
+}
+
+/**
+ * The digests Vercel classified as impersonating a browser and then allowed through.
+ *
+ * `botCategory` is a groupBy dimension, NOT a filter field: `botCategory eq '…'` returns zero
+ * rows with no error, which is indistinguishable from a quiet window and is why this screen
+ * reported nothing from the day it shipped. Only `wafAction` is filtered — that one works — and
+ * the category is selected from the result.
+ */
+export async function screen(
+  creds: { projectId: string; teamId: string; token: string },
+  window: Window,
+  /** Verified crawlers to keep off the candidate list. Undefined = skip every verified one. */
+  allowed?: readonly string[],
+  /** Denied user-agent tokens, so an identity already banned by name is not re-nominated. */
+  deniedUa: readonly string[] = [],
+  deps: ScreenDeps = LIVE_DEPS,
+): Promise<{ rows: Screened[]; truncated: boolean; handled: Set<string> }> {
+  const { metrics } = deps;
+  const { ctx } = makeCtx(creds, window);
+  const [routeResp, verifiedResp] = await Promise.all([
+    metrics(ctx, ['clientJa4Digest', 'route'], {
+      filter: PASSED,
+      limit: GROUP_CAP,
+    }),
+    // botName joined in: the exclusion is now by NAME, not by the bare verified flag. Measured
+    // 2026-08-08 — botVerified survives this join intact (pass totals matched the single-dimension
+    // query exactly), unlike the botCategory join it is documented to collapse in.
+    metrics(ctx, ['clientJa4Digest', 'botVerified', 'botName'], {
+      filter: PASSED,
+      limit: GROUP_CAP,
+    }),
+  ]);
+  // Only when there is a name list to check against — otherwise it is a query that can only
+  // answer "nothing is handled".
+  const uaResp = deniedUa.length
+    ? await metrics(ctx, ['clientJa4Digest', 'clientUserAgent'], {
+        filter: PASSED,
+        limit: GROUP_CAP,
+      })
+    : undefined;
+  const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
+    // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
+    // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
+    // rules matched, and a filter naming only one of those silently misses the rest — an
+    // observe-only ruleset serves everything as `log`, where `wafAction eq 'allow'` would have
+    // seen a fraction of a percent of the traffic and called the window quiet.
+    filter: PASSED,
+    limit: GROUP_CAP,
+  });
+  const uaRows = uaResp?.summary ?? [];
+  const uaCapped = uaRows.length >= GROUP_CAP;
+  const summary = resp.summary ?? [];
+  const routeRows = routeResp.summary ?? [];
+  const verifiedRows = verifiedResp.summary ?? [];
+  // A capped verification response can omit a confirmed crawler, and the behavioural screen would
+  // then surface it as a candidate purely because we failed to learn it was legitimate. Better to
+  // run only the category screen and say the window was truncated than to invent a suspect.
+  const verifiedComplete = verifiedRows.length < GROUP_CAP;
+  return {
+    // Both screens, merged. The category screen carries Vercel's own judgement; the behavioural
+    // one sees what Vercel never classified, which is where anything that evaded it will sit.
+    rows: mergeScreens(
+      impersonators(summary),
+      verifiedComplete
+        ? nonRendering(routeRows, verifiedDigests(verifiedRows, allowed))
+        : [],
+    ),
+    // Because `botCategory` cannot be filtered, busy non-impersonation groups compete for the
+    // same 500 slots — so a capped response can have dropped the very rows this screen exists to
+    // find, and would then report a quiet window.
+    truncated:
+      summary.length >= GROUP_CAP ||
+      routeRows.length >= GROUP_CAP ||
+      uaCapped ||
+      !verifiedComplete,
+    // Folded in like the verified response's. This is the highest-cardinality query in the
+    // screen — every distinct user-agent times every digest — and truncation keeps high-count
+    // rows while shedding the tail, so on a shared digest the denied crawler's single busy UA
+    // survives while hundreds of real browsers behind that TLS build are dropped. `deniedByUa`
+    // would then compute a majority from a truncated denominator and call it handled.
+    handled: uaCapped
+      ? new Set<string>()
+      : deniedByUa(uaResp?.summary ?? [], deniedUa),
+  };
 }
 
 async function main() {
@@ -197,7 +775,7 @@ async function main() {
     return;
   }
   const raw = argv.find((a) => !a.startsWith('--'));
-  const hours = raw === undefined ? DEFAULT_HOURS : Number(raw);
+  const hours = raw === undefined ? watchHours() : Number(raw);
   if (!Number.isInteger(hours) || hours < 1 || hours > MAX_HOURS)
     throw new Error(`hours must be an integer from 1 to ${MAX_HOURS}`);
 
@@ -205,58 +783,23 @@ async function main() {
   const window = rollingWindow(hours, new Date());
   const errors: string[] = [];
 
-  // Not required: an unreadable denylist means nothing is known to be already-denied, which
-  // only ever makes the screen wider.
-  let deniedJa4: string[] = [];
-  try {
-    deniedJa4 = envMatching('FW_BLOCKED_JA4', JA4_DENY, false);
-  } catch (e) {
-    errors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
-  }
-
-  const rows = await screen(creds, window);
-  const candidates = worthProfiling(rows, deniedJa4);
-  const findings: Finding[] = [];
-  for (const c of candidates) {
-    const p = await fetchIpProfile(
-      creds,
-      { kind: 'ja4', value: c.digest },
-      window,
-    );
-    findings.push({
-      ...c,
-      total: p.total,
-      advice: adviseBan({
-        total: p.total,
-        mix: p.mix,
-        shape: p.shape,
-        ja4: p.byJa4,
-        asns: p.byAsn,
-        botVerified: p.byBotVerified,
-        wafActions: p.byWafAction,
-        wafRules: p.byWafRule,
-        statuses: p.byStatus,
-        digestReach: p.digestReach,
-        asnReach: p.asnReach,
-        alreadyDeniedJa4: false, // filtered out by worthProfiling
-        stagedJa4: false,
-        alreadyDeniedAsn: false,
-        windowMinutes: p.windowHours * 60,
-        failedQueries: p.failedQueries,
-        mixPartial: p.mixPartial,
-      }),
-    });
-  }
+  const { rows, findings, truncated, configErrors } = await screenOnce(
+    creds,
+    window,
+  );
+  errors.push(...configErrors);
+  await logShadow(process.cwd(), findings);
 
   const report: WatchReport = {
     window,
-    screened: rows.reduce((n, [, c]) => n + c, 0),
+    screened: rows.reduce((n, r) => n + r.allowed, 0),
     fingerprints: rows.length,
-    candidates: candidates.length,
+    candidates: findings.length,
+    truncated,
     findings,
     // Cheap and unrelated to the screen: a deny rule that stopped denying reads as handled
     // while the traffic it lists is served normally.
-    enforcement: await enforcementIssues(),
+    enforcement: await enforcementOrError(errors),
     errors,
   };
   console.log(
@@ -264,21 +807,120 @@ async function main() {
       colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
     }),
   );
-  process.exitCode = isActionable(report) ? 1 : 0;
+
+  // --notify is for the unattended path: nobody is reading stdout, so the only way a finding
+  // reaches a human is if it goes and finds them. Only on a CHANGE, or an hourly repeat of the
+  // same finding trains you to dismiss it.
+  // --investigate spends money, so it is opt-in and heavily gated. The advisory's `ban` is the
+  // bar to START one; what gets a human out of bed is what the investigation CONCLUDES.
+  const concluded: string[] = [];
+  if (argv.includes('--investigate')) {
+    const now = Date.now();
+    // Persisted across runs, because an hourly job has no memory of its own and the same
+    // fingerprint is still there next hour. Without this it buys the same answer every time.
+    const seen = await readInvestigated(process.cwd(), now);
+    for (const f of investigable(report.findings, seen)) {
+      // Marked BEFORE the spawn so a crash mid-run cannot re-buy the same answer, and removed
+      // again below if the run bought nothing: a failed investigation that consumed the 7-day
+      // memory left the digest unexamined for a week having produced no verdict at all.
+      seen.set(f.digest.toLowerCase(), now);
+      // Taken either side of the spawn. The investigation is instructed not to apply anything
+      // and cannot be prevented from it, so the honest position is to check rather than trust.
+      const envPath = `${process.cwd()}/.env.local`;
+      const before = await fingerprintConfig(envPath);
+      const out = await runInvestigation(f, process.cwd(), hours);
+      if (
+        investigationChangedConfig(before, await fingerprintConfig(envPath))
+      ) {
+        const alarm = `.env.local CHANGED during the investigation of ${f.digest} — the run was told not to apply anything. Check FW_BLOCKED_JA4 and the live WAF.`;
+        report.errors.push(alarm);
+        await logWatch(process.cwd(), new Date(), {
+          kind: 'error',
+          error: alarm,
+        });
+      }
+      const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+      if (!out.ok) seen.delete(f.digest.toLowerCase());
+      await logWatch(
+        process.cwd(),
+        new Date(),
+        out.ok
+          ? {
+              kind: 'verdict',
+              digest: f.digest,
+              text: out.verdict,
+              provenance: out.provenance,
+            }
+          : { kind: 'failed', digest: f.digest, error: out.error },
+      );
+      // `unclear` reaches a human too: an investigation that ran and cannot be read is a result
+      // nobody has seen, which is not the same as one that came back clean.
+      if (verdict !== 'leave')
+        concluded.push(`${verdict}:${f.digest.toLowerCase()}`);
+      console.log(`  investigated ${f.digest} -> ${verdict}`);
+    }
+    // Written even if a notification later fails: the money is already spent either way.
+    await writeInvestigated(process.cwd(), seen);
+  }
+
+  // What is worth a message: the investigation's conclusion AND anything else actionable.
+  //
+  // These used to be either/or, on the reasoning that asking for --investigate means you want
+  // Claude's answer rather than the screen's. But the screen also carries alarms an
+  // investigation says nothing about — a deny rule that stopped enforcing, a query that failed,
+  // a truncated window where the tool was blind — and choosing the conclusion silently dropped
+  // every one of them, on precisely the flag combination an unattended cron runs.
+  if (argv.includes('--notify')) {
+    const key = [concludedKey(concluded), actionableKey(report)]
+      .filter(Boolean)
+      .join('|');
+    if (await shouldNotify(process.cwd(), key)) {
+      const failed = await notify(
+        [
+          concluded.length ? concludedText(concluded) : '',
+          isActionable(report) ? notifyText(report) : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      );
+      // Only remember it as delivered if it was. Otherwise the next run would treat the same
+      // finding as already reported and stay quiet about something nobody has seen.
+      if (failed) console.error(`  ${failed}`);
+      else await rememberNotified(process.cwd(), key);
+    }
+  }
+  process.exitCode = exitCodeFor(report);
 }
 
 /** Deferred so the observability-only path does not pay for the firewall config read. */
+/**
+ * Enforcement issues, or the read failure recorded as an error.
+ *
+ * Unguarded, this sat inside the report literal: `rules.ts` evaluates required env at import, so
+ * one missing ceiling threw, rejected `main()`, and discarded a screen that had already completed
+ * — taking the notification with it, on the path where nobody reads stdout.
+ */
+async function enforcementOrError(errors: string[]): Promise<string[]> {
+  try {
+    return await enforcementIssues();
+  } catch (e) {
+    errors.push(`enforcement check failed: ${errMsg(e)}`);
+    return [];
+  }
+}
+
 async function enforcementIssues(): Promise<string[]> {
   const { fetchLive } = await import('./client');
   const live = await fetchLive();
   // null, never 0, when the list cannot be parsed — see notEnforcing.
+  const ENV_FOR: Record<string, string> = {
+    'deny-scraper-ja4': 'FW_BLOCKED_JA4',
+    'deny-scraper-asn': 'FW_BLOCKED_ASN',
+    'deny-scraper-ua': 'FW_BLOCKED_UA',
+  };
   const count = (name: string, spec: typeof JA4_DENY): number | null => {
     try {
-      return envMatching(
-        name === 'deny-scraper-ja4' ? 'FW_BLOCKED_JA4' : 'FW_BLOCKED_ASN',
-        spec,
-        false,
-      ).length;
+      return envMatching(ENV_FOR[name] ?? '', spec, false).length;
     } catch {
       return null;
     }
@@ -288,6 +930,10 @@ async function enforcementIssues(): Promise<string[]> {
       [
         ['deny-scraper-ja4', JA4_DENY],
         ['deny-scraper-asn', ASN_DENY],
+        // The name lever too. Without it a token could sit in FW_BLOCKED_UA un-applied, or be
+        // cycled to `log` in the TUI, while `deniedByUa` treated the crawler as handled and
+        // dropped it from candidacy — a crawler nothing was stopping and nothing was reporting.
+        ['deny-scraper-ua', UA_DENY],
       ] as const
     ).map(([name, spec]) => ({
       name,
@@ -301,5 +947,7 @@ async function enforcementIssues(): Promise<string[]> {
 if (import.meta.main)
   main().catch((error) => {
     console.error('firewall:watch failed:', errMsg(error));
-    process.exit(1);
+    // Not 1. Failing to start is a failure to LOOK, and 1 is reserved for having looked and found
+    // something — the whole distinction these codes exist for.
+    process.exit(EXIT_BROKEN);
   });

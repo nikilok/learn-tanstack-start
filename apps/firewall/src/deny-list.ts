@@ -1,12 +1,14 @@
 // Env-driven identity denylists. Never put a value in an error or log line: --apply output is public.
 
-import type { Rule } from './rules';
+import type { Condition, Rule } from './rules';
 
 // Narrower than Condition['type']: header/query need a `key` this factory never forwards.
-export type DenyType = 'ja4_digest' | 'geo_as_number';
+export type DenyType = 'ja4_digest' | 'geo_as_number' | 'user_agent';
 
 export type DenySpec = {
   type: DenyType;
+  /** Match operator. Defaults to exact; `sub` is substring, which only user-agent tokens want. */
+  op?: 'eq' | 'sub';
   valid: (v: string) => boolean;
   normalize: (v: string) => string;
   example: string; // describes the shape; never paste-able, or the error becomes a match-nothing template
@@ -14,6 +16,96 @@ export type DenySpec = {
 };
 
 const MAX_ASN = 4_294_967_295;
+
+/**
+ * Substrings that appear in ordinary browser user agents.
+ *
+ * A user-agent deny is a SUBSTRING match, so `Mozilla` would deny every browser on earth in one
+ * env edit — the largest single-keystroke outage available in this tool. A token containing any
+ * of these is refused rather than trusted to be deliberate.
+ */
+const UA_TOKENS_EVERY_BROWSER_SENDS = [
+  'mozilla',
+  'applewebkit',
+  'khtml',
+  'gecko',
+  'chrome',
+  'chromium',
+  'safari',
+  'firefox',
+  'edge',
+  'version',
+  'windows',
+  'macintosh',
+  'linux',
+  'x11',
+  'android',
+  'iphone',
+  'ipad',
+  'mobile',
+  'compatible',
+  'like',
+];
+
+/** Shortest token allowed. Three characters is a substring of far too much. */
+const MIN_UA_TOKEN = 4;
+
+/**
+ * Real user agents, verbatim, to test a candidate token AGAINST.
+ *
+ * The word list above catches a token that CONTAINS a browser word. It cannot catch the opposite
+ * and more dangerous case: a token that IS a fragment of every browser's UA. `Edg/` passes the
+ * word test (the list says `edge`, Chromium Edge sends `Edg/`), as do `/5.0` and `rv:1` — each
+ * four printable characters, each a substring of a real browser's UA, each denying every visitor
+ * once `op: 'sub'` matches it.
+ *
+ * Testing containment in BOTH directions is the only form of this check that holds.
+ */
+const REAL_BROWSER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36 Edg/148.0.0.0',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36',
+];
+
+/** Whether a user-agent token is specific enough to deny on. Exported for the test to enumerate. */
+export function uaTokenIsSafe(v: string): boolean {
+  if (v.length < MIN_UA_TOKEN || v.length > 120) return false;
+  // Printable ASCII only: a control character cannot appear in a real header and a non-ASCII one
+  // will not survive the round trip through the firewall config intact.
+  if (!/^[\x20-\x7e]+$/.test(v)) return false;
+  const lower = v.toLowerCase();
+  if (UA_TOKENS_EVERY_BROWSER_SENDS.some((t) => lower.includes(t)))
+    return false;
+  // The other direction. A token no browser word appears INSIDE can still be a fragment OF one.
+  return !REAL_BROWSER_AGENTS.some((ua) => ua.includes(v));
+}
+
+/**
+ * Deny by the name a bot calls itself.
+ *
+ * Narrower than the JA4 lever and usually the right one for a crawler that identifies honestly:
+ * a fingerprint is a client BUILD shared by whoever else compiled the same TLS stack, while the
+ * token is the bot alone. Measured on ShapBot — the JA4 lever caught 10 requests from an
+ * unrelated Linux Chrome, the token caught zero.
+ *
+ * It is trivially spoofable, and that is not the weakness it appears to be: a verified crawler
+ * that changes its UA to evade loses the verification it wants, and lands back in the screen.
+ *
+ * Stored verbatim, never case-folded — the match is case-sensitive, so normalising here would
+ * silently stop it matching.
+ */
+export const UA_DENY: DenySpec = {
+  type: 'user_agent',
+  op: 'sub',
+  valid: uaTokenIsSafe,
+  normalize: (v) => v,
+  example:
+    'a distinctive user-agent token, 4-120 printable characters, not a substring every browser sends',
+  placeholder: '__no-such-agent__',
+};
 
 export const JA4_DENY: DenySpec = {
   type: 'ja4_digest',
@@ -172,11 +264,26 @@ export function pendingEdits(
  * `active: false` (seedItems prefers the live flag) and never an omitted rule (applyRule is
  * upsert-only, so it would keep denying, unrevokable).
  */
+/**
+ * Paths a denied client may still read: the documents that TELL it why it is denied.
+ *
+ * Without this the refusal is unreachable. A crawler denied on every path can never fetch the
+ * robots.txt naming it, so it cannot comply, cannot stop, and retries forever — and "we asked
+ * them not to" is not true in any sense that matters. Voluntary compliance is cheaper than
+ * enforcement for both sides, and it costs two small static files to make it possible.
+ *
+ * Deliberately NOT the sitemap. That is the corpus index, and handing it to a denied harvester
+ * would be publishing the thing the denial exists to protect.
+ */
+export const POLICY_PATHS = ['/robots.txt', '/llms.txt'];
+
 export function denyListRule(opts: {
   name: string;
   description: string;
   spec: DenySpec;
   values: string[];
+  /** Paths exempt from the deny, so the stated policy stays readable. */
+  exemptPaths?: readonly string[];
 }): Rule {
   if (!opts.spec.valid(opts.spec.placeholder))
     throw new Error(
@@ -187,8 +294,20 @@ export function denyListRule(opts: {
     name: opts.name,
     description: denyDescription(opts.description, opts.values.length),
     active: true,
+    // AND-ed within a group: matches the identity AND is not one of the policy documents. The
+    // negation is what makes them readable — see POLICY_PATHS.
     conditionGroup: values.map((value) => ({
-      conditions: [{ type: opts.spec.type, op: 'eq' as const, value }],
+      conditions: [
+        { type: opts.spec.type, op: opts.spec.op ?? 'eq', value },
+        ...(opts.exemptPaths ?? []).map(
+          (path): Condition => ({
+            type: 'path',
+            op: 'eq',
+            value: path,
+            neg: true,
+          }),
+        ),
+      ],
     })),
     action: { mitigate: { action: 'deny' } },
   };

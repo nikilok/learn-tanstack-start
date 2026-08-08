@@ -9,7 +9,8 @@
     "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "sitemap": "bun --env-file=../../.env.local src/sitemap.ts",
     "watch": "bun --env-file=../../.env.local src/watch.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "verify": "bun --env-file=../../.env.local src/verify.ts"
   },
   "dependencies": {
     "@vercel/sdk": "^1.21.5",

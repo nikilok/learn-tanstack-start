@@ -54,7 +54,8 @@ import { moveCursor, resolveIpEntry } from './ip-entry';
 import { type IpProfile, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
-import { dryRun } from './rules';
+import { trustedRules } from './rule-integrity';
+import { dryRun, rules } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import {
@@ -65,9 +66,36 @@ import {
   rollingMinutes,
   rollingWindow,
 } from './time-window';
+import {
+  watchHours,
+  watchIntervalMs,
+  watchTiming,
+  allowedBotsOrUnknown,
+} from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
+import { logShadow, screenOnce } from './watch';
+import { WATCH_LOG, clockTime, logWatch } from './watch-log';
+import {
+  fingerprintConfig,
+  investigationChangedConfig,
+  caffeinateArgs,
+  canKeepAwake,
+  recentSpawns,
+  runInvestigation,
+  shouldInvestigate,
+  verdictFrom,
+} from './watch-mode';
+import {
+  readInvestigated,
+  writeInvestigated,
+  concludedKey,
+  concludedText,
+  notify,
+  rememberNotified,
+  shouldNotify,
+} from './watch-notify';
 
 type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
 const PANE_KEY: Record<string, PaneKind> = {
@@ -98,6 +126,20 @@ const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 const LIVE_TAB_EVERY = 2;
 // The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
 // paid for. Everything below the top few is what the quiet band is drawn from.
+/**
+ * The profile, plus a note if the allowlist could not be read.
+ *
+ * Non-mutating: the profile is rendered state. An unreadable allowlist exempts EVERY verified
+ * crawler, which is a large silent change in what this pane recommends — inferring it from
+ * "everything is suddenly legitimate" is not something an operator should have to do.
+ */
+function withAllowlistError(p: IpProfile): IpProfile {
+  const { error } = allowedBotsOrUnknown();
+  return error
+    ? { ...p, errors: [...p.errors, `FW_ALLOWED_BOTS: ${error}`] }
+    : p;
+}
+
 const TOP_IPS_LIMIT = 500;
 const MIN_BUSIEST = 10; // busiest rows always shown
 // Grows past the minimum while the leaders are still competing. Bounded because the picker eats
@@ -108,6 +150,7 @@ const QUIET_ROWS = 10; // quiet-band rows shown beside them
 // sustain ~60/min. It stays fixed while the list above it grows, or one keypress rate-limits the
 // tool against itself.
 const OPEN_ALL_MAX = 8;
+const VERDICT_LINES = 12; // rendered inline; the rest stays in the log
 const PANE_SHARE = 0.7; // the pane holds the data; the rules list is names and a tag
 // Enough for the deny rule names in full plus a pending marker. At 34 the two deny rules both
 // truncated to "deny-sc…", which is worse than useless when one of them has a staged change.
@@ -140,6 +183,11 @@ export function App() {
   const [cursor, setCursor] = useState(0);
   const [menuCursor, setMenuCursor] = useState(0);
   const [idByName, setIdByName] = useState<Map<string, string>>(new Map());
+  // Undefined until the live config loads, and undefined is meaningful: the advisory treats
+  // "not read" differently from "no rule qualifies".
+  const [trustedAllow, setTrustedAllow] = useState<string[] | undefined>(
+    undefined,
+  );
   const [error, setError] = useState('');
   // Last apply's outcome; cleared by the next edit so it can't describe stale state.
   const [applied, setApplied] = useState<{
@@ -219,6 +267,37 @@ export function App() {
   const [reportMaxScroll, setReportMaxScroll] = useState(0);
   const reportRef = useRef<DOMElement | null>(null);
 
+  // Watch mode. Runs off the app's own timer whatever pane is open, since the point is to be
+  // left running. State lives in refs where the loop reads it: the effect is armed once and its
+  // closure would otherwise keep whatever the values were at arming.
+  const [watchOn, setWatchOn] = useState(false);
+  const [watchNote, setWatchNote] = useState('');
+  const [watchAt, setWatchAt] = useState('');
+  const [watchBusy, setWatchBusy] = useState(false);
+  const [watchVerdict, setWatchVerdict] = useState('');
+  // Which identity the verdict above belongs to. Without it the pane renders the PREVIOUS
+  // conclusion under a generic heading while a new investigation runs, and an operator acting
+  // on it acts on the wrong fingerprint.
+  const [watchVerdictOf, setWatchVerdictOf] = useState('');
+  // Kept even after the verdict is read: an invocation happened whether or not anyone was
+  // looking at this pane when it did.
+  const [invokedAt, setInvokedAt] = useState('');
+  const [invokedCount, setInvokedCount] = useState(0);
+  const [notifiedAt, setNotifiedAt] = useState('');
+  const [keepingAwake, setKeepingAwake] = useState(false);
+  const investigatedRef = useRef<Set<string>>(new Set());
+  /** Conclusions that were reached but not delivered. Retried before each screen. */
+  const pendingNotifyRef = useRef<{ key: string; text: string }[]>([]);
+  const spawnsRef = useRef<number[]>([]);
+  // The investigation child, so disarm and unmount can stop it. A hung one would otherwise
+  // outlive the loop and every later screen would queue behind it.
+  const investigationRef = useRef<{ kill: () => void } | null>(null);
+
+  // Enough to carry a verdict and its first reasons; the log has the rest verbatim.
+  const verdictLines = watchVerdict ? watchVerdict.trimEnd().split('\n') : [];
+  const verdictHead = verdictLines.slice(0, VERDICT_LINES).join('\n');
+  const verdictClipped = Math.max(0, verdictLines.length - VERDICT_LINES);
+
   const isLive = ipWindow.label === 'live';
   const [blink, setBlink] = useState(true);
   const paneLoading =
@@ -239,6 +318,7 @@ export function App() {
     fetchLive()
       .then((live) => {
         setIdByName(live.idByName);
+        setTrustedAllow(trustedRules(live.headerKeysByName, rules));
         setItems(seedItems(live));
         setPhase('select');
       })
@@ -341,6 +421,281 @@ export function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, pane]);
+
+  // Watch mode's loop. Deliberately not gated on `pane`, unlike the live refresh above: this is
+  // meant to be armed and left alone while you work in another pane.
+  useEffect(() => {
+    if (!watchOn) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const root = process.cwd();
+    // A loop that wakes every fifteen minutes is precisely what idle sleep suspends, so arming
+    // the watch has to hold the machine up. Failing to start it is not fatal: a watch that runs
+    // and may be suspended still beats no watch, and the status line says which one you have.
+    let awake: ReturnType<typeof Bun.spawn> | null = null;
+    if (canKeepAwake(process.platform)) {
+      try {
+        awake = Bun.spawn(['caffeinate', ...caffeinateArgs(process.pid)], {
+          stdout: 'ignore',
+          stderr: 'ignore',
+        });
+      } catch {
+        awake = null;
+      }
+    }
+    setKeepingAwake(Boolean(awake));
+    if (watchTiming() !== null)
+      void logWatch(root, new Date(), {
+        kind: 'armed',
+        hours: watchHours(),
+        everyMin: watchIntervalMs() / 60_000,
+      });
+
+    /**
+     * Deliver anything a previous tick concluded but could not send.
+     *
+     * The digest is already in `investigatedRef`, so the conclusion will never be re-derived —
+     * without this, one transient notification failure drops the alert for the whole session,
+     * after the investigation has already been paid for.
+     */
+    const flushPending = async () => {
+      for (const p of [...pendingNotifyRef.current]) {
+        if (stopped) return;
+        const failed = await notify(p.text);
+        if (failed) continue;
+        await rememberNotified(root, p.key);
+        pendingNotifyRef.current = pendingNotifyRef.current.filter(
+          (q) => q.key !== p.key,
+        );
+        setNotifiedAt(clockTime(new Date()));
+      }
+    };
+
+    /** One screen, plus an investigation for anything that clears the bar. */
+    const tick = async () => {
+      // Guarded, not assumed: watchHours() throws when unconfigured, and an unhandled throw in
+      // here kills the loop silently rather than saying why.
+      if (watchTiming() === null) {
+        setWatchNote(
+          'FW_WATCH_HOURS / FW_WATCH_INTERVAL_MIN are not set — nothing screened',
+        );
+        setWatchBusy(false);
+        return;
+      }
+      await flushPending();
+      setWatchBusy(true);
+      try {
+        // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
+        // which the CLI uses too. Assembling them here is what let this loop drift three times.
+        const { rows, findings, truncated, configErrors } = await screenOnce(
+          creds,
+          rollingWindow(watchHours(), new Date()),
+        );
+        if (stopped) return;
+        setWatchAt(clockTime(new Date()));
+        await logShadow(root, findings);
+        const bans = findings.filter((f) => f.advice.verdict === 'ban');
+        // Truncation is carried, not dropped. A capped screen that surfaced nothing is BLIND, and
+        // rendering that as "0 allowed through" is a quiet night the tool never actually had.
+        const blind = truncated && rows.length === 0;
+        setWatchNote(
+          [
+            `${rows.length} fingerprint(s) allowed through · ${findings.length} profiled · ${bans.length} would ban`,
+            truncated ? '· TRUNCATED, rows may be missing' : '',
+            blind ? '· BLIND, not quiet' : '',
+            configErrors.length
+              ? `· ${configErrors.length} config error(s)`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(' '),
+        );
+        for (const e of configErrors)
+          void logWatch(root, new Date(), { kind: 'error', error: e });
+        // Logged even when it finds nothing: otherwise the log cannot tell "ran and was quiet"
+        // apart from "never ran", which is the first thing you want to know of a background loop.
+        void logWatch(root, new Date(), {
+          kind: 'screen',
+          fingerprints: rows.length,
+          profiled: findings.length,
+          bans: bans.length,
+        });
+
+        const now = Date.now();
+        spawnsRef.current = recentSpawns(spawnsRef.current, now);
+        // BEFORE the early return below. A truncated-blind screen, or a config error such as
+        // the live-firewall read failing every tick, produces no candidate at all — so the
+        // return meant those alarms never reached the phone. That is the same either/or split
+        // the CLI's --notify was fixed to stop making, and it survived on the path where nobody
+        // is reading the screen.
+        const alarms = [
+          truncated && rows.length === 0
+            ? 'screen was BLIND: truncated with nothing surfaced'
+            : '',
+          ...configErrors,
+        ].filter(Boolean);
+        if (alarms.length) {
+          const key = `alarm:${alarms.join('|')}`;
+          if (!stopped && (await shouldNotify(root, key))) {
+            const failed = await notify(alarms.join(' · '));
+            if (failed) setWatchNote(failed);
+            else {
+              await rememberNotified(root, key);
+              setNotifiedAt(clockTime(new Date()));
+            }
+          }
+        }
+
+        const next = findings.find((f) =>
+          shouldInvestigate(f, investigatedRef.current, spawnsRef.current, now),
+        );
+        if (!next || stopped) return;
+
+        // Persisted, not just in-process. investigatedRef alone meant a TUI restart re-bought an
+        // investigation whose verdict the SHARED notify state then suppressed as already sent —
+        // paying for an answer nobody would be told. The file is the same one the CLI uses.
+        investigatedRef.current.add(next.digest.toLowerCase());
+        const persisted = await readInvestigated(root, Date.now());
+        persisted.set(next.digest.toLowerCase(), Date.now());
+        await writeInvestigated(root, persisted);
+        spawnsRef.current = [...spawnsRef.current, now];
+        setInvokedAt(clockTime(new Date()));
+        setInvokedCount((n) => n + 1);
+        setWatchNote(`invoked claude on ${next.digest}…`);
+        // Cleared before the new run, not after it: the gap is exactly when the stale one shows.
+        setWatchVerdict('');
+        setWatchVerdictOf(next.digest);
+        void logWatch(root, new Date(), {
+          kind: 'invoke',
+          digest: next.digest,
+          allowed: next.allowed,
+          total: next.total,
+          reasons: next.advice.reasons,
+        });
+        // Repo root, so the spawned agent finds .claude/skills/firewall-operator and the
+        // firewall commands resolve. The TUI is already launched from there.
+        // The same check the CLI wraps around this call. --disallowed-tools cannot stop a ban:
+        // adding one is an append plus an apply, and Bash has to stay available for the
+        // protocol's read-only queries. Unchecked here, a spawned agent that wrote one went
+        // unnoticed on the unattended path specifically.
+        const envPath = `${root}/.env.local`;
+        const beforeCfg = await fingerprintConfig(envPath);
+        let child: { kill: () => void } | null = null;
+        const out = await runInvestigation(
+          next,
+          process.cwd(),
+          watchHours(),
+          (c) => {
+            child = c;
+            // A child arriving after disarm has nobody left to stop it.
+            if (stopped) c.kill();
+            else investigationRef.current = c;
+          },
+        );
+        // Only if it still points at OUR child. A disarm-and-rearm during the await leaves this
+        // continuation running while the new effect has already stored its own handle, and
+        // clearing unconditionally strands that child with nothing able to kill it.
+        if (investigationRef.current === child) investigationRef.current = null;
+        if (
+          investigationChangedConfig(
+            beforeCfg,
+            await fingerprintConfig(envPath),
+          )
+        ) {
+          const alarm = `.env.local CHANGED during the investigation of ${next.digest} — the run was told not to apply anything.`;
+          setWatchNote(alarm);
+          void logWatch(root, new Date(), { kind: 'error', error: alarm });
+        }
+        if (stopped) return;
+        setWatchVerdict(
+          out.ok ? out.verdict : `investigation failed: ${out.error}`,
+        );
+        setWatchVerdictOf(next.digest);
+        setWatchNote(
+          out.ok
+            ? `investigated ${next.digest} — read it below`
+            : `investigation failed for ${next.digest}`,
+        );
+        void logWatch(
+          root,
+          new Date(),
+          out.ok
+            ? {
+                kind: 'verdict',
+                digest: next.digest,
+                text: out.verdict,
+                provenance: out.provenance,
+              }
+            : { kind: 'failed', digest: next.digest, error: out.error },
+        );
+
+        // The pane above only helps while someone is looking at it. This is the path that reaches
+        // you when nobody is, so it fires on what the investigation CONCLUDED, not on the screen's
+        // suspicion. `unclear` counts: an answer nobody can read is not an answer of "fine".
+        const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+        if (verdict !== 'leave') {
+          const conclusion = [`${verdict}:${next.digest.toLowerCase()}`];
+          const key = concludedKey(conclusion);
+          // Shared with the CLI, on purpose: whichever path saw it first, the other stays quiet,
+          // and quitting the TUI no longer re-notifies about the same fingerprint.
+          if (await shouldNotify(root, key)) {
+            // Checked BEFORE sending, not after. shouldNotify awaits a file read, and a disarm
+            // landing in that window otherwise still fires the message.
+            if (stopped) return;
+            const failed = await notify(concludedText(conclusion));
+            if (stopped) return;
+            if (failed) {
+              // Retained for the next tick. The digest is already in investigatedRef, so without
+              // this the conclusion is never re-derived and one transient failure silently drops
+              // the alert for the whole session — after paying for the investigation.
+              pendingNotifyRef.current = [
+                ...pendingNotifyRef.current.filter((p) => p.key !== key),
+                { key, text: concludedText(conclusion) },
+              ];
+              setWatchNote(`${failed} — will retry`);
+            } else {
+              await rememberNotified(root, key);
+              setNotifiedAt(clockTime(new Date()));
+            }
+          }
+        }
+      } catch (e) {
+        // A failed screen must not read as a quiet one. The whole point of the mode is that
+        // silence means "nothing found", so silence has to be earned.
+        if (!stopped) setWatchNote(`watch failed: ${errMsg(e)}`);
+        void logWatch(root, new Date(), { kind: 'error', error: errMsg(e) });
+      } finally {
+        if (!stopped) setWatchBusy(false);
+      }
+    };
+
+    // setTimeout, not setInterval: a tick that outruns the period must not queue another behind
+    // it — a screen plus an investigation can take minutes.
+    const schedule = (delay: number) => {
+      timer = setTimeout(async () => {
+        if (stopped) return;
+        await tick();
+        // Guarded like the tick above: watchIntervalMs() throws when unconfigured, and an
+        // unhandled throw HERE kills the loop one tick after the guard said it was fine.
+        const every = watchTiming() === null ? null : watchIntervalMs();
+        if (!stopped && every !== null) schedule(every);
+      }, delay);
+    };
+    schedule(0); // arming should tell you something now, not in fifteen minutes
+    // Runs on disarm AND on unmount, so quitting the app releases the machine too. The `-w` in
+    // caffeinateArgs is the backstop for the ways a process ends without reaching this at all.
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      awake?.kill();
+      investigationRef.current?.kill();
+      investigationRef.current = null;
+      setKeepingAwake(false);
+      void logWatch(root, new Date(), { kind: 'disarmed' });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchOn]);
 
   /** Sequentially upsert each rule with its chosen active + action, updating per-row status; refreshes ids first so a dashboard edit since load can't target a stale id; sets a non-zero exit code on any failure. */
   const applyAll = async (snapshot: Item[]) => {
@@ -566,6 +921,10 @@ export function App() {
     if (parts.length) pendingByRule.set(ruleName, parts.join(' '));
   }
 
+  // Read once. The error is carried into the pane rather than swallowed: an unreadable
+  // allowlist exempts EVERY verified crawler, which is a large silent change in what this pane
+  // will recommend, and inferring it from "everything is suddenly legitimate" is not reasonable.
+  const allowlist = allowedBotsOrUnknown();
   const ipAdvice = ipTabs.active?.data
     ? adviseBan({
         total: ipTabs.active.data.total,
@@ -574,6 +933,10 @@ export function App() {
         ja4: ipTabs.active.data.byJa4,
         asns: ipTabs.active.data.byAsn,
         botVerified: ipTabs.active.data.byBotVerified,
+        // Both, or this pane exempts every verified crawler while the watch and the CLI do
+        // not — the fourth time these two paths have disagreed about a gate.
+        verifiedBots: ipTabs.active.data.verifiedBots,
+        allowedBots: allowlist.names,
         wafActions: ipTabs.active.data.byWafAction,
         wafRules: ipTabs.active.data.byWafRule,
         statuses: ipTabs.active.data.byStatus,
@@ -596,6 +959,8 @@ export function App() {
         // Absent evidence is not evidence of absence: a query that failed must read as unjudged,
         // never as a clean client.
         failedQueries: ipTabs.active.data.failedQueries,
+        trustedAllowRules: trustedAllow,
+        rpcsPartial: ipTabs.active.data.rpcsPartial,
         mixPartial: ipTabs.active.data.mixPartial,
       })
     : undefined;
@@ -1008,6 +1373,7 @@ export function App() {
       // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'R') refreshPane();
+      else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
       else if (input === 'w' || input === 'W') openWindowPick();
       else if (input === 'b' && pane === 'ip' && ipAdvice?.lever) {
         // Only an OFFERED lever is stageable. A blocked client, or one whose every handle is
@@ -1097,6 +1463,9 @@ export function App() {
       // Lazy: fetch once, cached after, so re-opening a pane is instant.
       else if (PANE_KEY[input])
         openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
+      // Bound here as well as in the pane branch: watch mode is meant to be armed and left, so
+      // it has to be reachable from the view the tool opens on.
+      else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
       else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
       else if (input === 'a') {
         if (applying.current) return;
@@ -1230,7 +1599,10 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist
+              ip · f ja4 · s sitemap · d denylist ·{' '}
+              <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
+                v watch{watchOn ? ' (on)' : ''}
+              </Text>
               {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
               {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
               {items.length} on)
@@ -1269,6 +1641,67 @@ export function App() {
         )}
         {phase === 'applying' && (
           <Text color="yellow">applying… · q stops after the current rule</Text>
+        )}
+        {watchOn && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text>
+              <Text color={watchBusy ? 'yellow' : 'green'} bold>
+                ◉ watch{' '}
+              </Text>
+              <Text dimColor>
+                {watchTiming() ??
+                  'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN'}
+                {watchAt ? ` · last ${watchAt}` : ' · starting…'}
+                {keepingAwake ? ' · holding the mac awake' : ''}
+              </Text>
+            </Text>
+            {Boolean(watchNote) && (
+              <Text dimColor wrap="truncate-end">
+                {'  '}
+                {watchNote}
+              </Text>
+            )}
+            {/* Stays up once it has happened. The loop runs while you are in another pane, so an
+                invocation you were not watching still has to be visible afterwards. */}
+            {invokedCount > 0 && (
+              <Text>
+                <Text color="magenta" bold>
+                  {'  '}⇢ claude invoked{' '}
+                </Text>
+                <Text dimColor>
+                  {invokedCount}× this session · last {invokedAt}
+                  {notifiedAt ? ` · notified ${notifiedAt}` : ''} · {WATCH_LOG}
+                </Text>
+              </Text>
+            )}
+            {invokedCount === 0 && Boolean(watchAt) && (
+              <Text dimColor>
+                {'  '}logging to {WATCH_LOG}
+              </Text>
+            )}
+            {/* Not truncated: a verdict is the one thing here worth reading in full, and a
+                clipped one is worse than none — it reads as complete. */}
+            {Boolean(watchVerdict) && (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color="cyan" bold>
+                  investigation{' '}
+                  {watchVerdictOf ? (
+                    <Text dimColor>{watchVerdictOf}</Text>
+                  ) : null}
+                </Text>
+                {/* Clamped. This pane's height is reserved in advance, and an unbounded verdict
+                    overflows the frame — which scrolls the terminal and hides the editor cursor,
+                    the same defect reportH and the pane height already exist to prevent. */}
+                <Text>{verdictHead}</Text>
+                {verdictClipped > 0 && (
+                  <Text dimColor>
+                    {'  '}… {verdictClipped} more line(s) — full text in{' '}
+                    {WATCH_LOG}
+                  </Text>
+                )}
+              </Box>
+            )}
+          </Box>
         )}
       </Box>
       {showPane && (
@@ -1369,7 +1802,8 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh ·
-                  i new ip · f ja4 · w timeline
+                  i new ip · f ja4 · w timeline · v watch
+                  {watchOn ? ' (on)' : ''}
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
@@ -1627,7 +2061,11 @@ function PaneBody({
       <Lines
         lines={
           kind === 'ip'
-            ? profileLines((ipTab as IpTab).data as IpProfile, width, advice)
+            ? profileLines(
+                withAllowlistError((ipTab as IpTab).data as IpProfile),
+                width,
+                advice,
+              )
             : sitemapLines(sitemap.data as SitemapReport, sitemapCursor)
         }
         width={width}

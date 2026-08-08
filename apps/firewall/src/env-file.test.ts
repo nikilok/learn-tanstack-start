@@ -31,12 +31,14 @@ describe('upsertEnvLine', () => {
   });
 
   test('leaves comments and unrelated keys untouched', () => {
+    // Placeholders, never the configured values — this file is public and those are not.
+    // 64512 is the first RFC 6996 private-use AS number, so it can never name a real network.
     const src =
-      '# firewall\nFW_SERVERFN_LIMIT=300\n\n# denies\nFW_BLOCKED_ASN=29066\n';
+      '# firewall\nFW_SERVERFN_LIMIT=999\n\n# denies\nFW_BLOCKED_ASN=64512\n';
     const out = upsertEnvLine(src, 'FW_BLOCKED_JA4', 'abc');
     expect(out).toContain('# firewall');
-    expect(out).toContain('FW_SERVERFN_LIMIT=300');
-    expect(out).toContain('FW_BLOCKED_ASN=29066');
+    expect(out).toContain('FW_SERVERFN_LIMIT=999');
+    expect(out).toContain('FW_BLOCKED_ASN=64512');
     expect(out).toContain('FW_BLOCKED_JA4=abc');
   });
 

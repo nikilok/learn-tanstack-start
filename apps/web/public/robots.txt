@@ -4,7 +4,30 @@ User-agent: *
 Content-Signal: search=yes, ai-input=yes, ai-train=no
 Allow: /
 
-# Block SEO/backlink-analysis crawlers (Semrush family, Ryte, et al.) — https://www.semrush.com/bot/
+# The Disallow list below mirrors the crawlers denied at the edge. Stated here as well as
+# enforced there, because a crawler that honours robots.txt should never have to be blocked:
+# this is the request, the firewall is what happens when the request is ignored.
+#
+# Search engines and assistants that answer a user's question are deliberately absent — they are
+# welcome. What is refused is bulk harvesting that returns nothing: SEO backlink indexes, model
+# training corpora, and platform data agents.
+
+# --- AI training corpora. Consistent with ai-train=no above. ---
+User-agent: GPTBot
+Disallow: /
+
+# --- AI crawlers that do not identify an operator in their user agent ---
+# ShapBot is operated by Parallel (parallel.ai); opt-out is support@parallel.ai, no public form.
+User-agent: ShapBot
+Disallow: /
+
+# --- SEO / backlink-analysis crawlers ---
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SERankingBacklinksBot
+Disallow: /
+
 User-agent: SemrushBot
 Disallow: /
 
@@ -33,6 +56,16 @@ User-agent: SplitSignalBot
 Disallow: /
 
 User-agent: RyteBot
+Disallow: /
+
+# --- Platform data agents ---
+User-agent: Bytespider
+Disallow: /
+
+User-agent: meta-externalagent
+Disallow: /
+
+User-agent: Amazonbot
 Disallow: /
 
 Sitemap: https://sponsorsearch.co.uk/sitemap.xml

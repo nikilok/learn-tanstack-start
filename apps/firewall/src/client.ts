@@ -10,6 +10,7 @@ import {
   withAction,
 } from './actions';
 import { resolveVercelCredentials } from './credentials';
+import { headerKeysByGroup } from './rule-integrity';
 import { type ActionChoice, type Rule, dryRun, rules } from './rules';
 import { errMsg } from './util';
 
@@ -23,6 +24,8 @@ export type LiveConfig = {
   idByName: Map<string, string>;
   activeByName: Map<string, boolean>;
   actionByName: Map<string, ActionChoice>;
+  /** Header keys each live rule requires, PER condition group — groups are OR'd, so the weakest one governs. */
+  headerKeysByName: Map<string, Set<string>[]>;
 };
 export type Item = {
   rule: Rule;
@@ -45,14 +48,16 @@ export async function fetchLive(): Promise<LiveConfig> {
   const idByName = new Map<string, string>();
   const activeByName = new Map<string, boolean>();
   const actionByName = new Map<string, ActionChoice>();
+  const headerKeysByName = new Map<string, Set<string>[]>();
   for (const r of config.rules ?? []) {
     idByName.set(r.name, r.id);
     activeByName.set(r.name, r.active);
+    headerKeysByName.set(r.name, headerKeysByGroup(r));
     const m = r.action.mitigate;
     const c = m ? asChoice(effectiveAction(m)) : undefined;
     if (c) actionByName.set(r.name, c);
   }
-  return { idByName, activeByName, actionByName };
+  return { idByName, activeByName, actionByName, headerKeysByName };
 }
 
 /** Seed each code rule's desired active + action, preferring the LIVE config so a run never silently downgrades operator-tuned enforcement; the action is clamped to the rule's valid options (so drift like a bypass on a rate-limit rule can't be re-applied as an invalid value). New rules fall back to code defaults. */

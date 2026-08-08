@@ -13,6 +13,8 @@ import {
   valuesOf,
   withValue,
   withoutValue,
+  UA_DENY,
+  POLICY_PATHS,
 } from './deny-list';
 
 const VAR = 'FW_TEST_DENYLIST';
@@ -352,17 +354,17 @@ describe('pendingEdits', () => {
   const OTHER = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
 
   test('a removed ASN does not mark the JA4 rule', () => {
-    const e = pendingEdits([DIGEST], [], ['29066'], JA4_DENY);
+    const e = pendingEdits([DIGEST], [], ['64512'], JA4_DENY);
     expect(e.dropped).toBe(0);
     expect(e.added).toBe(0);
   });
 
   test('a removed digest does not mark the ASN rule', () => {
-    expect(pendingEdits(['29066'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
+    expect(pendingEdits(['64512'], [], [DIGEST], ASN_DENY).dropped).toBe(0);
   });
 
   test('each rule still counts its own removal', () => {
-    expect(pendingEdits([], [], ['29066'], ASN_DENY).dropped).toBe(1);
+    expect(pendingEdits([], [], ['64512'], ASN_DENY).dropped).toBe(1);
     expect(pendingEdits([], [], [DIGEST], JA4_DENY).dropped).toBe(1);
   });
 
@@ -387,13 +389,13 @@ describe('pendingEdits', () => {
   });
 
   test('both kinds staged and removed at once stay on their own rules', () => {
-    const staged = [DIGEST, '29066'];
+    const staged = [DIGEST, '64512'];
     const removed = [OTHER, '64500'];
     expect(pendingEdits([DIGEST], staged, removed, JA4_DENY)).toEqual({
       added: 1,
       dropped: 1,
     });
-    expect(pendingEdits(['29066'], staged, removed, ASN_DENY)).toEqual({
+    expect(pendingEdits(['64512'], staged, removed, ASN_DENY)).toEqual({
       added: 1,
       dropped: 1,
     });
@@ -431,5 +433,104 @@ describe('enforcedNow', () => {
     expect(enforcedNow([DIGEST], [], [], DIGEST.toUpperCase(), JA4_DENY)).toBe(
       true,
     );
+  });
+});
+
+// A user-agent deny is a SUBSTRING match, so a careless token is the largest single-keystroke
+// outage this tool can produce. The guard is the point of the spec, not a detail of it.
+describe('UA_DENY', () => {
+  test('a distinctive bot token is accepted', () => {
+    for (const t of ['ShapBot', 'SemrushBot', 'AhrefsBot', 'PerplexityBot'])
+      expect(UA_DENY.valid(t)).toBe(true);
+  });
+
+  test.each([
+    ['Mozilla', 'every browser on earth'],
+    ['AppleWebKit', 'every Chromium and WebKit browser'],
+    ['Chrome', 'every Chromium browser'],
+    ['Safari', 'sent by Chrome too'],
+    ['Gecko', 'in the UA of browsers that are not Gecko'],
+    ['compatible', 'the bot-UA convention itself'],
+    ['Linux', 'every Linux user'],
+    ['Mobile', 'every phone'],
+  ])('%s is refused — it would deny %s', (token) => {
+    expect(UA_DENY.valid(token)).toBe(false);
+  });
+
+  test('a token too short to be specific is refused', () => {
+    expect(UA_DENY.valid('Bot')).toBe(false);
+  });
+
+  test('a space is allowed — real user agents are full of them', () => {
+    expect(UA_DENY.valid('Shap Bot')).toBe(true);
+  });
+
+  test('a non-ASCII character is refused', () => {
+    // It will not survive the round trip through the firewall config intact, so a rule built
+    // from it would silently match nothing.
+    expect(UA_DENY.valid('Shapé')).toBe(false);
+  });
+
+  test('the value is stored verbatim — the match is case-sensitive', () => {
+    // Case-folding here would silently stop it matching.
+    expect(UA_DENY.normalize('ShapBot')).toBe('ShapBot');
+  });
+
+  test('its placeholder is valid and matches nothing real', () => {
+    expect(UA_DENY.valid(UA_DENY.placeholder)).toBe(true);
+    expect(UA_DENY.placeholder).not.toMatch(/mozilla/i);
+  });
+
+  test('the built rule matches on substring, not equality', () => {
+    // `eq` on a full UA string breaks on the crawler's next version bump — which is exactly how
+    // the hand-made SemRush rule was written.
+    const rule = denyListRule({
+      name: 'deny-scraper-ua',
+      description: 'x',
+      spec: UA_DENY,
+      values: ['ShapBot'],
+    });
+    const c = rule.conditionGroup[0]?.conditions[0];
+    expect(c?.type).toBe('user_agent');
+    expect(c?.op).toBe('sub');
+    expect(c?.value).toBe('ShapBot');
+  });
+});
+
+// A crawler denied on every path can never fetch the robots.txt naming it. It cannot comply,
+// cannot stop, and retries forever — and "we asked them not to" stops being true.
+describe('policy paths stay readable through a deny', () => {
+  const rule = (exempt?: readonly string[]) =>
+    denyListRule({
+      name: 'deny-scraper-ua',
+      description: 'x',
+      spec: UA_DENY,
+      values: ['ShapBot'],
+      exemptPaths: exempt,
+    });
+
+  test('the deny is conditioned on NOT being a policy document', () => {
+    const conds = rule(POLICY_PATHS).conditionGroup[0]?.conditions ?? [];
+    const paths = conds.filter((c) => c.type === 'path');
+    expect(paths).toHaveLength(POLICY_PATHS.length);
+    // Negated, so the rule reads "matches the identity AND is not robots.txt". A non-negated
+    // condition here would mean "deny ONLY robots.txt", which is the exact inversion.
+    for (const c of paths) expect(c.neg).toBe(true);
+    expect(paths.map((c) => c.value).sort()).toEqual([...POLICY_PATHS].sort());
+  });
+
+  test('the identity condition survives alongside them', () => {
+    const conds = rule(POLICY_PATHS).conditionGroup[0]?.conditions ?? [];
+    expect(conds.find((c) => c.type === 'user_agent')?.value).toBe('ShapBot');
+  });
+
+  test('omitting them changes nothing — the JA4 and ASN rules are untouched', () => {
+    expect(rule().conditionGroup[0]?.conditions).toHaveLength(1);
+  });
+
+  test('the sitemap is NOT exempt', () => {
+    // It is the corpus index. Handing it to a denied harvester would publish the thing the
+    // denial exists to protect.
+    expect(POLICY_PATHS).not.toContain('/sitemap.xml');
   });
 });

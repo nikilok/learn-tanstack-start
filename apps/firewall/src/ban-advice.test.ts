@@ -6,12 +6,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  HEADER_GATED_RULES,
+  WAF_RULE_QUERY,
+  adviseBan,
   type AdviceInput,
   type Reach,
-  adviseBan,
   volumeFloor,
+  welcomeBots,
+  welcomeNames,
 } from './ban-advice';
 import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
+import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
 
 function series(counts: number[], offset: number, length: number) {
   const base = Date.parse('2026-08-03T00:00:00.000Z');
@@ -278,6 +283,7 @@ describe('adviseBan — first-party callers', () => {
     botVerified: [],
     wafActions: [['bypass', 1158]],
     wafRules: [['allow-ch-stream-revalidate', 1158]],
+    trustedAllowRules: [CH_STREAM_REVALIDATE],
     statuses: [['202', 1158]],
     digestReach: {
       label: 't13dpolah1_777777777777_888888888888',
@@ -302,10 +308,13 @@ describe('adviseBan — first-party callers', () => {
     expect(a.verdict).toBe('leave');
   });
 
-  test('the matched allow rule is named, and treated as an authentication fact', () => {
+  test('the matched allow rule is named, and the claim is about the RULE', () => {
+    // Deliberately not "it presented our credential" and no longer "it does nothing else".
+    // Nothing here sees what was sent; what it knows is which rule matched, and that only means
+    // something because the rule itself is one an outsider cannot satisfy.
     const b = adviseBan(chStream()).blockers.join(' ');
     expect(b).toContain('allow-ch-stream-revalidate');
-    expect(b).toContain('our own secret header');
+    expect(b).toContain('only our own callers can satisfy');
   });
 
   test('an API-only client is blocked for having nothing to enumerate', () => {
@@ -774,9 +783,14 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('ban');
   });
 
-  test('a secret-header allow rule still certifies first-party', () => {
+  test('a secret-header allow rule certifies first-party when the rule is trusted', () => {
+    // Was a share test: 400 hits of 9060 certified, then later had to dominate. Both were
+    // reconstructions of trust from traffic, needed only while anyone could match the rule.
     const a = adviseBan(
-      scraper({ wafRules: [['allow-ch-stream-revalidate', 400]] }),
+      scraper({
+        wafRules: [['allow-ch-stream-revalidate', 3]],
+        trustedAllowRules: ['allow-ch-stream-revalidate'],
+      }),
     );
     expect(a.blockers.join(' ')).toContain('first-party');
   });
@@ -794,6 +808,25 @@ describe('adviseBan — review regressions', () => {
   });
 
   test('a real browser share of assets still blocks', () => {
+    // The original guard, with a fixture that is actually a browser. A real session on this
+    // site renders many times over the bar, so anything at or above it keeps the
+    // blocker, so an ordinary visitor cannot be tuned into a candidate.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([
+          ['/company/a', 400],
+          ['/assets/x.js', 9000],
+        ]),
+      }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.blockers.join(' ')).toContain('sub-resource');
+  });
+
+  test('rendering that does not scale with pages is not a browser', () => {
+    // Supersedes the earlier rule that a bare rendering share blocks. Renders far short of
+    // pages means 8600 pages rendered nothing, which no browser does — it is a headless client
+    // executing just enough JS to clear a share threshold.
     const a = adviseBan(
       scraper({
         mix: mixOf([
@@ -802,8 +835,7 @@ describe('adviseBan — review regressions', () => {
         ]),
       }),
     );
-    expect(a.verdict).toBe('leave');
-    expect(a.blockers.join(' ')).toContain('sub-resource');
+    expect(a.verdict).toBe('ban');
   });
 
   // Regression: the asset axis was share-gated but tiles, RPCs and beacons were gated at `> 0`,
@@ -824,7 +856,24 @@ describe('adviseBan — review regressions', () => {
     expect(a.verdict).toBe('ban');
   });
 
-  test('a real share of RPCs still blocks — the SPA signal is unchanged', () => {
+  test('an RPC-dominant client still blocks — the SPA direction is unchanged', () => {
+    // A real user makes MANY RPCs and FEW page loads. That invariant is untouched.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([
+          ['/company/a', 400],
+          ['/_serverFn/x', 9000],
+        ]),
+      }),
+    );
+    expect(a.verdict).toBe('leave');
+  });
+
+  test('a page-dominant client with a token RPC share does not block', () => {
+    // The live case, 2026-08-08: a fingerprint carrying oai-searchbot/claudebot/gptbot read the
+    // sitemap, walked the company pages, drew ZERO map tiles, and made just enough RPCs to
+    // sit far under a real session. The advisory called it "running the app" while its own
+    // SPA signal said "fetching HTML directly". Both now agree.
     const a = adviseBan(
       scraper({
         mix: mixOf([
@@ -833,7 +882,7 @@ describe('adviseBan — review regressions', () => {
         ]),
       }),
     );
-    expect(a.verdict).toBe('leave');
+    expect(a.verdict).toBe('ban');
   });
 
   // Regression: qualifyLever refused on incomplete reach but blockersFor read a failed query as
@@ -852,6 +901,29 @@ describe('adviseBan — review regressions', () => {
     expect(a.leverNotes.join(' ')).toContain('floors');
   });
 
+  // A short fn list moves the SAME residual out of `renders` and into `page`, so the
+  // proportionality test is wrong on both sides at once. A real session must survive it.
+  test('does not let a partial server-fn list unmask a real session', () => {
+    const session = {
+      total: 300,
+      mix: mixOf([
+        ['/company/a', 200],
+        ['/_serverFn/x', 40],
+        ['/assets/app.js', 55],
+        ['/tiles/1', 3],
+        ['/_vercel/insights/view', 2],
+      ]),
+    };
+    // Attribution trusted: 100 rendering requests against 200 pages fails proportionality, so the
+    // browser blocker does not fire.
+    const strict = adviseBan(scraper({ ...session, rpcsPartial: false }));
+    expect(strict.blockers.join(' ')).not.toContain('running the app');
+    // Attribution known incomplete: the same numbers keep the blocker instead of convicting on a
+    // residual we cannot stand behind.
+    const safe = adviseBan(scraper({ ...session, rpcsPartial: true }));
+    expect(safe.blockers.join(' ')).toContain('running the app');
+  });
+
   test('a failed query does not override a real legitimacy blocker', () => {
     // Legitimacy outranks "cannot tell": a verified bot stays DO NOT DENY either way.
     const a = adviseBan(
@@ -861,5 +933,165 @@ describe('adviseBan — review regressions', () => {
       }),
     );
     expect(a.verdict).toBe('leave');
+  });
+});
+
+// These two guards protect our own services from our own tooling. ch-stream renders nothing,
+// verifies as nothing and does steady volume — indistinguishable from a harvester on every axis
+// except the credential it presents. So the ways that credential check can silently stop working
+// are worth pinning individually.
+describe('first-party protection', () => {
+  test('the names are shared with the rule definitions, not copied', () => {
+    expect(HEADER_GATED_RULES).toContain(CH_STREAM_REVALIDATE);
+    expect(HEADER_GATED_RULES).toContain(DESKTOP_RELEASE_RECORD);
+  });
+
+  test('a failed WAF-rule lookup blocks, rather than reading as no credential', () => {
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [],
+      failedQueries: [WAF_RULE_QUERY],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
+    });
+    expect(advice.blockers.join(' ')).toContain('UNKNOWN');
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('a hit on a TRUSTED rule certifies a first-party caller', () => {
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 3]],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
+    });
+    expect(advice.blockers.join(' ')).toContain('first-party caller');
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('a few hits are enough when the rule is trusted', () => {
+    // No share threshold any more. A rule only our own callers can satisfy is proof on one hit;
+    // reconstructing that from traffic shape was scaffolding for a rule anyone could match.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 1]],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
+    });
+    expect(advice.blockers.join(' ')).toContain('first-party caller');
+  });
+
+  test('a hit on an UNTRUSTED rule certifies nothing, and says why', () => {
+    // The rule lost a condition — applied from an older checkout, or edited in the dashboard.
+    // It still matches and still looks identical, so the advisory has to say it means nothing.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 9060]],
+      trustedAllowRules: [],
+    });
+    expect(advice.blockers.join(' ')).not.toContain('first-party caller');
+    expect(advice.blockers.join(' ')).toContain(
+      'no longer requires everything',
+    );
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('an unread live config is UNKNOWN, not untrusted and not trusted', () => {
+    // undefined must not collapse into []. One means "we looked and it is weakened", the other
+    // means "we never looked" — and only the first is a statement about the rule.
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [[CH_STREAM_REVALIDATE, 9060]],
+      trustedAllowRules: undefined,
+    });
+    expect(advice.blockers.join(' ')).toContain('UNKNOWN');
+    expect(advice.verdict).not.toBe('ban');
+  });
+
+  test('an unrelated failed query does not fabricate the blocker', () => {
+    const advice = adviseBan({
+      ...scraper(),
+      wafRules: [],
+      failedQueries: ['country'],
+      trustedAllowRules: [CH_STREAM_REVALIDATE],
+    });
+    expect(advice.blockers.join(' ')).not.toContain('UNKNOWN');
+  });
+});
+
+// Verification proves a crawler is who it claims. It does not say we want it reading the corpus,
+// and an SEO or AI harvester passes it exactly as a search engine does.
+describe('welcomeBots / welcomeNames — the verified-bot allowlist', () => {
+  const verified: [string, number][] = [
+    ['googlebot', 900],
+    ['semrush', 400],
+  ];
+
+  test('an unread allowlist exempts EVERY verified crawler', () => {
+    // The fail-safe direction. A config that failed to load must never turn Googlebot into a ban
+    // candidate, so undefined means "as before the list existed", not "nothing is welcome".
+    expect(welcomeBots(verified, undefined)).toEqual(verified);
+    expect(welcomeNames(['googlebot', 'semrush'], undefined)).toEqual([
+      'googlebot',
+      'semrush',
+    ]);
+  });
+
+  test('a read allowlist exempts only the names on it', () => {
+    expect(welcomeBots(verified, ['googlebot'])).toEqual([['googlebot', 900]]);
+    expect(welcomeNames(['googlebot', 'semrush'], ['googlebot'])).toEqual([
+      'googlebot',
+    ]);
+  });
+
+  test('matching is case-insensitive on both sides', () => {
+    // Vercel echoes names lower-case today, but the env file is hand-edited.
+    expect(welcomeBots([['GoogleBot', 1]], ['googlebot'])).toHaveLength(1);
+    expect(welcomeBots([['googlebot', 1]], ['GOOGLEBOT'])).toHaveLength(1);
+  });
+
+  test('an empty allowlist is not the same as an unread one', () => {
+    // `[]` is a statement: nothing is welcome. Only `undefined` means "not known".
+    expect(welcomeBots(verified, [])).toEqual([]);
+  });
+});
+
+describe('adviseBan — a non-allowlisted verified crawler is not blocked', () => {
+  // A scraper on every axis that also carries a verified crawler name — the case the allowlist
+  // exists to separate.
+  const verifiedInput = (allowed?: string[]): AdviceInput =>
+    scraper({
+      botVerified: [['pass', 1300]],
+      verifiedBots: [['semrush', 1300]],
+      allowedBots: allowed,
+    });
+
+  test('an allowlisted crawler still blocks', () => {
+    const a = adviseBan(verifiedInput(['semrush']));
+    expect(a.blockers.join(' ')).toContain('verified bot');
+    expect(a.verdict).toBe('leave');
+  });
+
+  test('a non-allowlisted verified crawler loses the blocker', () => {
+    // The whole point: verified is not the same as welcome. It still has to earn a ban on the
+    // axes, but it is no longer exempt from being looked at.
+    const a = adviseBan(verifiedInput(['googlebot']));
+    expect(a.blockers.join(' ')).not.toContain('verified bot');
+  });
+
+  test('with the list unread it blocks, whatever the name', () => {
+    expect(adviseBan(verifiedInput(undefined)).blockers.join(' ')).toContain(
+      'verified bot',
+    );
+  });
+
+  test('falls back to the bare flag when no names were resolved', () => {
+    // An older caller, or a bot join that returned nothing. A missing NAME must never strip a
+    // real crawler's protection, so the flag alone still blocks.
+    const a = adviseBan(
+      scraper({
+        botVerified: [['pass', 1300]],
+        verifiedBots: [],
+        allowedBots: ['googlebot'],
+      }),
+    );
+    expect(a.blockers.join(' ')).toContain('verified bot');
   });
 });

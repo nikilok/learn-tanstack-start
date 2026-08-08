@@ -76,17 +76,27 @@ export function unstatedInRobots(
   robotsTxt: string,
 ): string[] {
   const disallowed = new Set<string>();
-  let agent: string | null = null;
+  // Consecutive User-agent lines are ONE group and share the directives beneath them. Tracking a
+  // single agent kept only the last, so every earlier name in a group read as unstated.
+  let pending: string[] = [];
+  let sawDirective = false;
   for (const raw of robotsTxt.split('\n')) {
     const line = raw.replace(/#.*$/, '').trim();
     const ua = /^user-agent:\s*(.+)$/i.exec(line);
     if (ua?.[1]) {
-      agent = ua[1].trim().toLowerCase();
+      // A User-agent AFTER a directive opens a new group rather than joining the last one.
+      if (sawDirective) {
+        pending = [];
+        sawDirective = false;
+      }
+      pending.push(ua[1].trim().toLowerCase());
       continue;
     }
+    if (line) sawDirective = true;
     // Only a bare `Disallow: /` counts. A narrower path is not a refusal of the whole site, and
     // treating it as one would report agreement this function exists to disprove.
-    if (agent && /^disallow:\s*\/\s*$/i.test(line)) disallowed.add(agent);
+    if (/^disallow:\s*\/\s*$/i.test(line))
+      for (const a of pending) disallowed.add(a);
   }
   return deniedUa.filter((t) => t && !disallowed.has(t.trim().toLowerCase()));
 }

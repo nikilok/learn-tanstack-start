@@ -324,7 +324,9 @@ export function tellsFor(input: SignalInput): Tell[] {
   // contradict each other on one screen — they did, and the pane that said 'raw-HTML fetcher'
   // sat directly above a green DO NOT DENY.
   const subResource = renderingRequests(mix);
-  const browsery = rendersIndicateBrowser(subResource, total);
+  // mix.page included, or this tell says 'browsers pull these' about the same identity the
+  // advisory is refusing as a raw-HTML fetcher — the contradiction the comment above forbids.
+  const browsery = rendersIndicateBrowser(subResource, total, mix.page);
   tells.push({
     points: browsery ? 'human' : 'bot',
     label: 'sub-resources',
@@ -476,8 +478,12 @@ export function verifiedBotsOf(
 ): [string, number][] {
   const out = new Map<string, number>();
   for (const [key, count] of bots) {
-    if (!key.startsWith('pass')) continue;
-    const name = (key.split(' | ')[1] ?? '').trim().toLowerCase() || 'verified';
+    // Exact, not a prefix. `startsWith('pass')` also accepts a hypothetical `passive`, and the
+    // failure direction is the bad one: a non-verified group forwarded as a verified crawler
+    // earns the exemption and suppresses the advisory.
+    const [status, rawName] = key.split(' | ', 2);
+    if (status?.trim() !== 'pass') continue;
+    const name = rawName?.trim().toLowerCase() || 'verified';
     out.set(name, (out.get(name) ?? 0) + count);
   }
   return [...out];

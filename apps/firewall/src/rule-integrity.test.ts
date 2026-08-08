@@ -231,4 +231,31 @@ describe('unstatedInRobots', () => {
   test('an empty robots.txt reports everything, never nothing', () => {
     expect(unstatedInRobots(['ShapBot'], '')).toEqual(['ShapBot']);
   });
+  test('consecutive User-agent lines share the directives beneath them', () => {
+    // robots.txt groups several agents under one Disallow. Tracking a single agent kept only the
+    // last, so every earlier name in a group read as unstated.
+    const grouped = [
+      'User-agent: ShapBot',
+      'User-agent: AhrefsBot',
+      'User-agent: Bytespider',
+      'Disallow: /',
+    ].join('\n');
+    expect(
+      unstatedInRobots(['ShapBot', 'AhrefsBot', 'Bytespider'], grouped),
+    ).toEqual([]);
+  });
+
+  test('a User-agent after a directive opens a NEW group', () => {
+    // Otherwise the second agent inherits the first group's Disallow and reads as refused when
+    // robots.txt says the opposite.
+    const two = [
+      'User-agent: ShapBot',
+      'Disallow: /',
+      '',
+      'User-agent: Googlebot',
+      'Allow: /',
+    ].join('\n');
+    expect(unstatedInRobots(['ShapBot'], two)).toEqual([]);
+    expect(unstatedInRobots(['Googlebot'], two)).toEqual(['Googlebot']);
+  });
 });

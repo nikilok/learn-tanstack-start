@@ -88,3 +88,18 @@ export function watchTiming(): string | null {
     return null;
   }
 }
+
+/**
+ * The allowlist, or undefined when it cannot be read.
+ *
+ * Every caller wants this shape — `undefined` means "not known", which the advisory treats as
+ * "exempt every verified crawler", the safe direction. Shared so the try/catch is written once:
+ * three call sites had their own, and the interactive one simply forgot to pass the result.
+ */
+export function allowedBotsOrUnknown(): string[] | undefined {
+  try {
+    return allowedBots();
+  } catch {
+    return undefined;
+  }
+}

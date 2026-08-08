@@ -66,7 +66,12 @@ import {
   rollingMinutes,
   rollingWindow,
 } from './time-window';
-import { watchHours, watchIntervalMs, watchTiming } from './tuning';
+import {
+  watchHours,
+  watchIntervalMs,
+  watchTiming,
+  allowedBotsOrUnknown,
+} from './tuning';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
@@ -804,6 +809,10 @@ export function App() {
         ja4: ipTabs.active.data.byJa4,
         asns: ipTabs.active.data.byAsn,
         botVerified: ipTabs.active.data.byBotVerified,
+        // Both, or this pane exempts every verified crawler while the watch and the CLI do
+        // not — the fourth time these two paths have disagreed about a gate.
+        verifiedBots: ipTabs.active.data.verifiedBots,
+        allowedBots: allowedBotsOrUnknown(),
         wafActions: ipTabs.active.data.byWafAction,
         wafRules: ipTabs.active.data.byWafRule,
         statuses: ipTabs.active.data.byStatus,

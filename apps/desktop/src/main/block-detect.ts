@@ -15,6 +15,7 @@ export interface ResponseFacts {
 }
 
 const MITIGATED = 'x-vercel-mitigated';
+const CONTENT_TYPE = 'content-type';
 
 /** Reads a header case-insensitively from webRequest's array-valued map. */
 function header(
@@ -43,19 +44,31 @@ export function isEdgeDenied(facts: ResponseFacts): boolean {
 }
 
 /**
- * True when the document itself came back as a server error.
+ * True when the document itself came back as a server error page.
  *
  * The app never answers a page request with a 5xx, so one means something in front of it
  * did: a proxy with nothing behind it, or the platform's own error page. Unlike a refused
  * connection this LOADS — status, body, dom-ready and all — so nothing else in the shell
  * notices, and the window is handed over to someone else's error page with no way off it.
  *
- * Documents only. A single failing RPC is the page's own problem to report and is no
- * grounds for covering the whole window. This matches what the recovery probe already
- * decides about a 5xx, so the two cannot disagree about what counts as reachable.
+ * Two narrowings, each ruling out a case that is not "the site is down":
+ *
+ * - Documents only. A single failing RPC is the page's own problem to report, and a map
+ *   tile that 502s is not grounds for covering the whole window.
+ * - It has to carry a page. The app's own file routes answer a bad deploy with a bodiless
+ *   500 and no content type at all, and an installer link that lands on one is a failed
+ *   download over a working app — covering that would take the app away over it. Every
+ *   real error page carries text/html: the platform's, and the dev proxy's (measured).
+ *
+ * A 5xx counting as unreachable matches what the recovery probe already decides about one,
+ * so the way in and the way back cannot disagree about what counts as reachable.
  */
 export function isServerError(facts: ResponseFacts): boolean {
-  return facts.resourceType === 'mainFrame' && facts.statusCode >= 500;
+  if (facts.resourceType !== 'mainFrame' || facts.statusCode < 500)
+    return false;
+  return header(facts.responseHeaders, CONTENT_TYPE)
+    .toLowerCase()
+    .startsWith('text/html');
 }
 
 /**

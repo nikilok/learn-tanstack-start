@@ -15,22 +15,57 @@ const facts = (over: Partial<Parameters<typeof isEdgeDenied>[0]> = {}) => ({
 });
 
 describe('isServerError', () => {
-  test('a 5xx document is one, which is the case nothing else catches', () => {
-    // The real one this pins: portless up with the dev server behind it gone answers 502.
-    // That is a complete, successful load — no failure event anywhere — so without this
-    // the window is handed a proxy error page and the stand-in screen never appears.
+  /** A 5xx error page: a document with a body, which is what every real one is. */
+  const errorPage = (statusCode: number, contentType = 'text/html') =>
+    facts({
+      statusCode,
+      resourceType: 'mainFrame',
+      responseHeaders: { 'content-type': [contentType] },
+    });
+
+  test('a 5xx error page is one, which is the case nothing else catches', () => {
+    // The real one this pins: portless up with the dev server behind it gone answers 502
+    // text/html (measured), and production has the same shape in the platform's own error
+    // pages. Either is a complete, successful load — no failure event anywhere — so
+    // without this the window is handed someone else's error page with no way off it.
     for (const statusCode of [500, 502, 503, 504]) {
-      expect(
-        isServerError(facts({ statusCode, resourceType: 'mainFrame' })),
-      ).toBe(true);
+      expect(isServerError(errorPage(statusCode))).toBe(true);
     }
+  });
+
+  test('the content type is matched past its charset, and case-insensitively', () => {
+    expect(isServerError(errorPage(502, 'text/html; charset=utf-8'))).toBe(
+      true,
+    );
+    expect(isServerError(errorPage(502, 'Text/HTML'))).toBe(true);
+    expect(
+      isServerError(
+        facts({
+          statusCode: 502,
+          resourceType: 'mainFrame',
+          responseHeaders: { 'Content-Type': ['text/html'] },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  test('a bodiless 5xx is not a site that is down', () => {
+    // The real one this pins: the app's own file routes answer a missing env var with
+    // `new Response(null, { status: 500 })` — no content type at all. An installer link
+    // landing on one is a failed download, and covering the window would take a working
+    // app away over it.
+    expect(
+      isServerError(facts({ statusCode: 500, resourceType: 'mainFrame' })),
+    ).toBe(false);
+    expect(isServerError(errorPage(500, 'application/json'))).toBe(false);
+    expect(isServerError(errorPage(502, 'application/octet-stream'))).toBe(
+      false,
+    );
   });
 
   test('a served page is not', () => {
     for (const statusCode of [200, 204, 301, 404, 403, 499]) {
-      expect(
-        isServerError(facts({ statusCode, resourceType: 'mainFrame' })),
-      ).toBe(false);
+      expect(isServerError(errorPage(statusCode))).toBe(false);
     }
   });
 
@@ -38,9 +73,15 @@ describe('isServerError', () => {
     // One RPC returning 500 is for the app to report; covering the whole window over it
     // would take a working page away from someone over a single failed request.
     for (const resourceType of ['xhr', 'script', 'image', 'stylesheet']) {
-      expect(isServerError(facts({ statusCode: 503, resourceType }))).toBe(
-        false,
-      );
+      expect(
+        isServerError(
+          facts({
+            statusCode: 503,
+            resourceType,
+            responseHeaders: { 'content-type': ['text/html'] },
+          }),
+        ),
+      ).toBe(false);
     }
   });
 });

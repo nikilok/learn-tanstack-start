@@ -23,6 +23,7 @@ import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
+import { bypassPaths, reachabilityFindings } from './reachability';
 import { trustedRules } from './rule-integrity';
 import { isRecoverableRule } from './rule-names';
 import { type Window, rollingWindow } from './time-window';
@@ -271,6 +272,8 @@ export type WatchReport = {
   truncated: boolean;
   findings: Finding[];
   enforcement: string[];
+  /** Exempted paths that answered only mitigations — an allow rule that stopped allowing. */
+  reachability: string[];
   errors: string[];
 };
 
@@ -292,6 +295,7 @@ export function exitCodeFor(r: WatchReport): number {
     return EXIT_BROKEN;
   if (
     r.enforcement.length > 0 ||
+    r.reachability.length > 0 ||
     r.findings.some((f) => f.advice.verdict === 'ban')
   )
     return EXIT_FOUND;
@@ -308,6 +312,7 @@ export function isActionable(r: WatchReport): boolean {
     // own inputs must not report quiet — unknown escalates, it does not pass.
     r.errors.length > 0 ||
     r.enforcement.length > 0 ||
+    r.reachability.length > 0 ||
     r.findings.some((f) => f.advice.verdict === 'ban')
   );
 }
@@ -374,6 +379,10 @@ export function watchLines(r: WatchReport): Line[] {
       L.push(line(seg('  blocker  ', 'good'), seg(x, 'dim')));
     for (const x of f.advice.leverNotes.slice(0, 2))
       L.push(line(seg('  note     ', 'warn'), seg(x, 'dim')));
+  }
+  if (r.reachability.length) {
+    L.push(blank(), line(seg('REACHABILITY', 'bold')));
+    for (const e of r.reachability) L.push(line(seg(`  ${e}`, 'bad')));
   }
   if (r.enforcement.length) {
     L.push(blank(), line(seg('ENFORCEMENT', 'bold')));
@@ -818,6 +827,9 @@ async function main() {
     // Cheap and unrelated to the screen: a deny rule that stopped denying reads as handled
     // while the traffic it lists is served normally.
     enforcement: await enforcementOrError(errors),
+    // The other direction of the same question. A bypassed path exists because its caller
+    // cannot answer a challenge, so one arriving there fails with nobody to see it.
+    reachability: await reachabilityOrError(creds, window, errors),
     errors,
   };
   console.log(
@@ -918,6 +930,48 @@ async function main() {
  * one missing ceiling threw, rejected `main()`, and discarded a screen that had already completed
  * — taking the notification with it, on the path where nobody reads stdout.
  */
+/**
+ * Exempted paths answering only mitigations, or the read failure recorded as an error.
+ *
+ * Its own try/catch for the same reason as the enforcement check beside it: a failed query must
+ * not reject `main()` and discard a screen that already completed.
+ */
+async function reachabilityOrError(
+  creds: Parameters<typeof makeCtx>[0],
+  window: Window,
+  errors: string[],
+): Promise<string[]> {
+  try {
+    const { rules } = await import('./rules');
+    const { ctx } = makeCtx(creds, window);
+    // The agent dimension costs nothing here and is what separates a path nobody can reach
+    // from a path one client cannot — the second is invisible to a served/mitigated ratio.
+    const resp = await metrics(
+      ctx,
+      ['requestPath', 'clientUserAgent', 'wafAction'],
+      { limit: GROUP_CAP },
+    );
+    const rows = (resp.summary ?? resp.data ?? []).map((r: Row) => ({
+      path: String(r['requestPath'] ?? ''),
+      agent: String(r['clientUserAgent'] ?? ''),
+      action: String(r['wafAction'] ?? ''),
+      count: countOf(r),
+    }));
+    const { findings, error } = reachabilityFindings(
+      rows,
+      bypassPaths(rules),
+      // requestPath x agent x action is a wide grouping; at the cap the rows we need may
+      // be the ones dropped, and a verdict from that is a guess wearing an alarm's clothes.
+      { truncated: rows.length >= GROUP_CAP },
+    );
+    if (error) errors.push(error);
+    return findings;
+  } catch (e) {
+    errors.push(`reachability check failed: ${errMsg(e)}`);
+    return [];
+  }
+}
+
 async function enforcementOrError(errors: string[]): Promise<string[]> {
   try {
     return await enforcementIssues();

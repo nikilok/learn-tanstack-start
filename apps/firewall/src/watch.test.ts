@@ -357,6 +357,7 @@ describe('watchLines', () => {
       },
     ],
     enforcement: [],
+    reachability: [],
     errors: [],
     ...over,
   });
@@ -469,6 +470,7 @@ describe('isActionable', () => {
     truncated: false,
     findings: [],
     enforcement: [],
+    reachability: [],
     errors: [],
   };
   const withVerdict = (v: Advice['verdict']): WatchReport => ({
@@ -495,6 +497,9 @@ describe('isActionable', () => {
 
   test('an enforcement failure is actionable with no findings', () => {
     expect(isActionable({ ...base, enforcement: ['x'] })).toBe(true);
+    // An allow rule that stopped allowing is as actionable as a deny that stopped denying:
+    // the caller it exists for cannot get through and cannot say so.
+    expect(isActionable({ ...base, reachability: ['x'] })).toBe(true);
   });
 
   test('an empty report is quiet', () => {
@@ -527,6 +532,7 @@ describe('exitCodeFor', () => {
     truncated: false,
     findings: [],
     enforcement: [],
+    reachability: [],
     errors: [],
   };
   const withVerdictAt = (v: Advice['verdict']) => ({
@@ -550,6 +556,7 @@ describe('exitCodeFor', () => {
   test('finding something is 1, which is the command working', () => {
     expect(exitCodeFor(withVerdictAt('ban'))).toBe(EXIT_FOUND);
     expect(exitCodeFor({ ...base, enforcement: ['x'] })).toBe(EXIT_FOUND);
+    expect(exitCodeFor({ ...base, reachability: ['x'] })).toBe(EXIT_FOUND);
   });
 
   test('failing to run is 2, NOT 1', () => {

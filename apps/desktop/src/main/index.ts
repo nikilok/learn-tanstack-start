@@ -230,6 +230,17 @@ function createWindow(): void {
   const openDark = splashDark();
   const openBg = openDark ? INITIAL_BG.dark : INITIAL_BG.light;
   lastDark = openDark; // until the page reports its own
+
+  // Started before anything else in the window, so its renderer process is not queued
+  // behind the site view's and the chrome's — that queue was the whole delay before the
+  // splash could paint. It is mounted further down, after the views it has to cover.
+  let showWindow = (): void => {};
+  const splash = createSplash(
+    { x: 0, y: 0, width: 1280, height: 860 },
+    openDark,
+    () => showWindow(),
+  );
+
   const win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -336,14 +347,9 @@ function createWindow(): void {
     },
   });
 
-  // Topmost, and up before anything is loaded — see splash.ts for why the web app's own
-  // splash cannot cover this.
-  const { width: w0, height: h0 } = win.getContentBounds();
-  const splash = createSplash(
-    win,
-    { x: 0, y: 0, width: w0, height: h0 },
-    openDark,
-  );
+  // Mounted last so it covers the page and the chrome both — see splash.ts for why the web
+  // app's own splash cannot serve this.
+  splash.mount(win);
 
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
@@ -356,10 +362,18 @@ function createWindow(): void {
   layout();
   win.on('resize', layout);
 
-  // The window itself is shown straight away, on its ink background, so launching the app
-  // puts something on screen at once. Waiting for the load meant the first thing anyone
-  // saw was an already-finished page, several hundred milliseconds of nothing later.
-  win.show();
+  // Shown once the splash has something to paint, so the window arrives with the brand on
+  // it rather than as a bare rectangle that fills in a beat later. Spawning the first
+  // renderer process is most of that wait (~900ms measured, and unavoidable — it is what
+  // Chromium costs to start), so the backstop sits well clear of it: its only job is to
+  // make sure a splash that never loads cannot keep the window off screen entirely.
+  let shown = false;
+  showWindow = (): void => {
+    if (shown || win.isDestroyed()) return;
+    shown = true;
+    win.show();
+  };
+  setTimeout(showWindow, 2000).unref?.();
 
   const simulated = simulatedBlock();
   if (simulated) blocked.show(simulated);

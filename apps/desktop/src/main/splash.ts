@@ -11,6 +11,8 @@ import type { BaseWindow, IpcMainEvent, Rectangle } from 'electron';
 const FAILSAFE_MS = 2000;
 
 export interface Splash {
+  /** Puts it in the window, on top of everything already there. */
+  mount(parent: BaseWindow): void;
   setBounds(bounds: Rectangle): void;
   /** Completes the reveal, fades out, and releases the view. Safe to call more than once. */
   dismiss(): void;
@@ -27,12 +29,19 @@ export interface Splash {
  *
  * The renderer owns the timing of its own animation and reports when it has finished, so
  * those durations live in one place (SplashScreen.tsx) instead of being mirrored here.
+ *
+ * Built and started BEFORE the window's other views, and mounted afterwards. Spinning up a
+ * renderer process is most of the wait before anything can paint — measured at ~890ms just
+ * to fetch a local file — and going last meant queueing behind three other views for it.
+ * `onReady` fires once its document is up, which is the cue to show the window: the chrome
+ * and the splash then arrive together instead of a bare rectangle sitting there first.
  */
 export function createSplash(
-  parent: BaseWindow,
   bounds: Rectangle,
   dark: boolean,
+  onReady: () => void,
 ): Splash {
+  let parent: BaseWindow | null = null;
   // On the URL rather than over IPC: the renderer needs it for its very first paint, and
   // a message could not arrive before one.
   const theme = dark ? 'dark' : 'light';
@@ -58,8 +67,7 @@ export function createSplash(
       query: { role: 'splash', theme },
     });
   }
-  // Topmost: a launch splash covers the chrome as well as the page.
-  parent.contentView.addChildView(view);
+  view.webContents.once('dom-ready', onReady);
 
   let dismissed = false;
   let gone = false;
@@ -69,7 +77,7 @@ export function createSplash(
     if (gone) return;
     gone = true;
     ipcMain.removeListener('splash:done', onDone);
-    if (parent.isDestroyed()) return;
+    if (!parent || parent.isDestroyed()) return;
     parent.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
@@ -80,6 +88,12 @@ export function createSplash(
   ipcMain.on('splash:done', onDone);
 
   return {
+    mount(win) {
+      if (gone || win.isDestroyed()) return;
+      parent = win;
+      // Added last, so a launch splash covers the chrome as well as the page.
+      win.contentView.addChildView(view);
+    },
     setBounds(next) {
       if (!gone) view.setBounds(next);
     },

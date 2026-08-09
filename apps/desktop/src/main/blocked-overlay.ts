@@ -93,6 +93,8 @@ export function createBlockedOverlay(
   // True between "the probe got through" and "the page behind is painted". A refusal
   // landing in that window cancels it: the way back failed, so this screen is staying.
   let handingBack = false;
+  // Bumped on every state swap, so an in-flight check knows its answer went stale.
+  let generation = 0;
 
   /** Releases anything holding off until this screen was on screen. */
   function flushWaiting(): void {
@@ -179,10 +181,12 @@ export function createBlockedOverlay(
 
   async function runProbe(manual = false): Promise<void> {
     if (!state) return;
+    const asked = generation;
     state = { ...state, checking: true };
     push();
     const reason = await probe();
-    if (!state) return; // hidden while the request was in flight
+    // Hidden, or replaced by something that knows better, while this was in flight.
+    if (!state || asked !== generation) return;
     if (!reason) {
       // Hand back, but keep covering the window until the page has painted. The countdown
       // and the game carry on over the reload rather than blinking out to nothing.
@@ -216,6 +220,7 @@ export function createBlockedOverlay(
     timer = null;
     handingBack = false;
     if (!state) return;
+    generation += 1;
     state = null;
     push();
     // Clearing the state empties the screen's React tree, so whatever it had on it is
@@ -237,6 +242,7 @@ export function createBlockedOverlay(
       // for as long as the site kept clearing and then failing to load — the same trap
       // runProbe already avoids when the reason flaps.
       const resuming = state?.reason === reason;
+      generation += 1;
       handingBack = false;
       const v = ensureView();
       if (!v) return;

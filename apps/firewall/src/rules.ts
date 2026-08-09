@@ -199,6 +199,34 @@ const policyDocsRule: Rule = {
   action: { mitigate: { action: 'bypass' } },
 };
 
+/**
+ * The desktop app's own update channel, which cannot answer a challenge.
+ *
+ * electron-updater is not a browser. It fetches the channel file, and a 429 carrying a
+ * checkpoint page is just a failed check that it reports to nobody — the app stays on the
+ * version it already had and says nothing. Measured over 7 days: 57 update checks, 57
+ * challenged by managed Bot Protection, 0 served, across both the mac and win channels.
+ *
+ * Path-scoped, never user-agent-scoped: a UA is a string the caller picks, so keying on it
+ * would hand the same bypass to anyone who typed it. This prefix serves only the channel
+ * files and the installers they point at, which are public downloads by design.
+ *
+ * Ordered after the denies, which is the right way round rather than a compromise: bypass is
+ * terminal, so a denied fingerprint has to be refused before reaching this. Getting a real
+ * updater past the bot challenge is the problem being solved; free installer downloads for a
+ * known scraper is not.
+ */
+const desktopUpdaterRule: Rule = {
+  name: 'allow-desktop-updater',
+  description:
+    'Allow the desktop updater feed (/downloads/latest/) past managed Bot Protection. electron-updater cannot solve a challenge, so a 429 here silently freezes every installed app on its current version.',
+  active: true,
+  conditionGroup: [
+    { conditions: [{ type: 'path', op: 'pre', value: '/downloads/latest/' }] },
+  ],
+  action: { mitigate: { action: 'bypass' } },
+};
+
 const blockedUaRule = denyListRule({
   name: 'deny-scraper-ua',
   description:
@@ -337,6 +365,10 @@ export const rules: Rule[] = [
   blockedJa4Rule,
   blockedAsnRule,
   blockedUaRule,
+  // AFTER the denies, and not just documentation: on a config rebuilt from empty this
+  // array IS the live order, and a terminal bypass ahead of them would handed a refused
+  // client the installers. Live today only because applyRule appended it.
+  desktopUpdaterRule,
   // AFTER the denies, and this one is not just documentation. Live priority is insertion order,
   // so a digest on BOTH lists is denied rather than challenged — the human's explicit call beats
   // the machine's cautious one, which is the right way round. enforcementIssues reports the

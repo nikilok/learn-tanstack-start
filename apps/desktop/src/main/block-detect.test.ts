@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isEdgeDenied,
+  isServerError,
   probeDelayMs,
   probeStillDenied,
   simulatedReason,
@@ -11,6 +12,37 @@ const facts = (over: Partial<Parameters<typeof isEdgeDenied>[0]> = {}) => ({
   statusCode: 200,
   resourceType: 'xhr',
   ...over,
+});
+
+describe('isServerError', () => {
+  test('a 5xx document is one, which is the case nothing else catches', () => {
+    // The real one this pins: portless up with the dev server behind it gone answers 502.
+    // That is a complete, successful load — no failure event anywhere — so without this
+    // the window is handed a proxy error page and the stand-in screen never appears.
+    for (const statusCode of [500, 502, 503, 504]) {
+      expect(
+        isServerError(facts({ statusCode, resourceType: 'mainFrame' })),
+      ).toBe(true);
+    }
+  });
+
+  test('a served page is not', () => {
+    for (const statusCode of [200, 204, 301, 404, 403, 499]) {
+      expect(
+        isServerError(facts({ statusCode, resourceType: 'mainFrame' })),
+      ).toBe(false);
+    }
+  });
+
+  test('a failing subresource is the page‘s problem, not the window‘s', () => {
+    // One RPC returning 500 is for the app to report; covering the whole window over it
+    // would take a working page away from someone over a single failed request.
+    for (const resourceType of ['xhr', 'script', 'image', 'stylesheet']) {
+      expect(isServerError(facts({ statusCode: 503, resourceType }))).toBe(
+        false,
+      );
+    }
+  });
 });
 
 describe('isEdgeDenied', () => {

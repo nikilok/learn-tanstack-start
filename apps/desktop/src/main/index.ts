@@ -12,7 +12,7 @@ import {
   WebContentsView,
 } from 'electron';
 
-import { isEdgeDenied, simulatedReason } from './block-detect';
+import { isEdgeDenied, isServerError, simulatedReason } from './block-detect';
 import type { BlockReason } from './block-detect';
 import { createBlockedOverlay } from './blocked-overlay';
 import type { BlockedOverlay } from './blocked-overlay';
@@ -518,15 +518,23 @@ function createWindow(): void {
     else finishReveal();
   };
 
-  // A refusal happens at the network layer, so nothing in the page can report it. Watching
-  // the responses catches both a refused page and the RPCs a loaded page fires in the
-  // background, which is the case that would otherwise just look like a broken app.
+  // Neither of these is something the page can report. A refusal happens at the network
+  // layer; a 5xx document is a complete, successful load of somebody else's error page, so
+  // there is no failure event anywhere in the shell to hang off. Watching the responses
+  // catches both, on the document and on the RPCs a loaded page fires in the background —
+  // the case that would otherwise just look like a broken app.
   wc.session.webRequest.onCompleted(
     { urls: [`${APP_ORIGIN}/*`] },
     (details) => {
       // The session outlives the window, so a request can still land during teardown.
-      if (wc.isDestroyed() || blocked?.isUp() || !isEdgeDenied(details)) return;
-      blocked?.show('blocked');
+      if (wc.isDestroyed() || blocked?.isUp()) return;
+      const reason = isEdgeDenied(details)
+        ? 'blocked'
+        : isServerError(details)
+          ? 'unreachable'
+          : null;
+      if (!reason) return;
+      blocked?.show(reason);
       if (!blocked?.isUp()) return;
       wc.stop(); // the rest in flight is only going to be refused too
       // stop() aborts the document mid-load, so dom-ready and did-finish-load may never

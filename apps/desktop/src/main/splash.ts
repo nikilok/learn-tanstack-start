@@ -10,6 +10,15 @@ import type { BaseWindow, IpcMainEvent, Rectangle } from 'electron';
  */
 const FAILSAFE_MS = 2000;
 
+/**
+ * How long the splash stays up once it is actually on screen, however quickly the app turns
+ * out to be ready. Measured from the moment the window is shown for it, not from launch:
+ * everything before that is a hidden window, and counting it would be counting time nobody
+ * saw. The renderer's own finish and fade (~420ms) run after this, so a launch with nothing
+ * to wait for still spends about a second on the brand rather than blinking past it.
+ */
+const MIN_VISIBLE_MS = 800;
+
 export interface Splash {
   /** Puts it in the window, on top of everything already there. */
   mount(parent: BaseWindow): void;
@@ -72,30 +81,42 @@ export function createSplash(
   }
   let dismissed = false;
   let gone = false;
-  let ready = false;
-  let dismissWhenReady = false;
   let announced = false;
-
-  view.webContents.once('dom-ready', () => {
-    ready = true;
-    // A dismissal that arrived first was held rather than sent into a document with no
-    // listener yet — a failed first load can beat the renderer to it by a wide margin.
-    if (dismissWhenReady) sendDismiss();
-  });
+  /** When this splash actually became visible, which is when the window was shown for it. */
+  let shownAt: number | null = null;
 
   /**
    * The window is shown on the splash's first PAINTED frame, not on `dom-ready`. dom-ready
    * only means the document parsed: the renderer still has to mount and lay out, and
    * showing the window on it opened an empty rectangle that sat there for as long as that
    * took — which is the blank window a launch with no network used to start with.
+   *
+   * It also means the renderer has subscribed, since it reports this after wiring its
+   * dismiss listener — so nothing sent from here can land in a document with nobody home.
    */
   function onPainted(event: IpcMainEvent): void {
     if (event.sender !== view.webContents || announced) return;
     announced = true;
+    shownAt = Date.now();
     ipcMain.removeListener('splash:painted', onPainted);
     onReady();
+    // Asked to go before it was even up: start its minimum now that the clock has one.
+    if (dismissed) startLeaving();
   }
   ipcMain.on('splash:painted', onPainted);
+
+  /**
+   * Tells the renderer to go, once this splash has had its minimum time on screen. An app
+   * that is ready immediately — the local dev server, a warm cache — used to dismiss it on
+   * the same frame it appeared, which read as no splash at all. A launch that takes any
+   * real time is long past the floor and is not delayed by it.
+   */
+  function startLeaving(): void {
+    if (gone || shownAt === null) return; // not visible yet; onPainted comes back to this
+    const left = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt));
+    const t = setTimeout(sendDismiss, left);
+    t.unref?.();
+  }
 
   /** Tells the renderer to finish its reveal and fade; it reports back when it has. */
   function sendDismiss(): void {
@@ -137,9 +158,11 @@ export function createSplash(
       // the second caller must be a no-op rather than a teardown of a released view.
       if (dismissed) return;
       dismissed = true;
-      if (ready) sendDismiss();
-      else dismissWhenReady = true;
-      const t = setTimeout(teardown, FAILSAFE_MS);
+      startLeaving();
+      // Armed here rather than after the minimum, so a renderer that never came up — and
+      // so never reports painted, never leaves, and never reports done — cannot leave this
+      // view sitting over the app for good.
+      const t = setTimeout(teardown, MIN_VISIBLE_MS + FAILSAFE_MS);
       t.unref?.(); // never hold the process open on the way out
     },
     destroy: teardown,

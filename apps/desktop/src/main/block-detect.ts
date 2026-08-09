@@ -43,6 +43,22 @@ export function isEdgeDenied(facts: ResponseFacts): boolean {
 }
 
 /**
+ * True when the document itself came back as a server error.
+ *
+ * The app never answers a page request with a 5xx, so one means something in front of it
+ * did: a proxy with nothing behind it, or the platform's own error page. Unlike a refused
+ * connection this LOADS — status, body, dom-ready and all — so nothing else in the shell
+ * notices, and the window is handed over to someone else's error page with no way off it.
+ *
+ * Documents only. A single failing RPC is the page's own problem to report and is no
+ * grounds for covering the whole window. This matches what the recovery probe already
+ * decides about a 5xx, so the two cannot disagree about what counts as reachable.
+ */
+export function isServerError(facts: ResponseFacts): boolean {
+  return facts.resourceType === 'mainFrame' && facts.statusCode >= 500;
+}
+
+/**
  * True when a probe's own response shows we are still being refused.
  *
  * A challenge arrives as its own status rather than a 403 (measured against production),

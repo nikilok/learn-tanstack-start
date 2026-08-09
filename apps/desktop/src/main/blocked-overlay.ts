@@ -93,6 +93,8 @@ export function createBlockedOverlay(
   // True between "the probe got through" and "the page behind is painted". A refusal
   // landing in that window cancels it: the way back failed, so this screen is staying.
   let handingBack = false;
+  // One recovery reload per view, so a renderer that dies on the way up cannot spin.
+  let reloadedAfterCrash = false;
   // Bumped on every state swap, so an in-flight check knows its answer went stale.
   let generation = 0;
 
@@ -142,6 +144,11 @@ export function createBlockedOverlay(
     v.webContents.on('render-process-gone', () => {
       frameLive = false;
       painted = false;
+      // This screen owns the way back, so a dead one strands the window with no site, no
+      // stand-in and no retry. Bring it up again — `dom-ready` re-arms and state re-pushes.
+      if (reloadedAfterCrash || v.webContents.isDestroyed()) return;
+      reloadedAfterCrash = true;
+      v.webContents.reload();
     });
     parent.contentView.addChildView(v, opts.index);
     view = v;
@@ -323,6 +330,7 @@ export function createBlockedOverlay(
       painted = false;
       frameLive = false;
       handingBack = false;
+      reloadedAfterCrash = false;
       // Anything still holding for a paint is released rather than stranded: on a window
       // closed mid-launch the splash's teardown is exactly what would be waiting.
       flushWaiting();

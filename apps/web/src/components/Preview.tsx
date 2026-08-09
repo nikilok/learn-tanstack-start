@@ -284,20 +284,20 @@ export default function Preview({
                   className="h-full w-full border-0"
                 />
               ) : null}
-              {/* Launch splash — replica of the shell/PWA splash (.app-splash
-                  in styles.css + INITIAL_BG in apps/desktop main: #120817 +
-                  white wordmark at min(80vw, 420px) → 420px at this window
-                  width); keep them in lockstep. Fades out over the loaded app. */}
+              {/* Launch splash — replica of the shell's, on the site's own ground: the
+                  --bg-page-edge token INITIAL_BG mirrors in apps/desktop/src/main/index.ts,
+                  so it follows the theme the way the shell does. The mark takes Logo's own
+                  defaults for the same reason — pinning it white was fine over the old
+                  fixed dark ground and became invisible the moment the ground could be
+                  near-white (1.1:1 against #f4f4f8). This window advertises the app, so the
+                  two have to stay in lockstep; the colour has already drifted once. Fades
+                  out over the loaded app. */}
               <div
-                className={`absolute inset-0 flex items-center justify-center bg-[#120817] transition-opacity duration-500 ${
+                className={`absolute inset-0 flex items-center justify-center bg-(--bg-page-edge) transition-opacity duration-500 ${
                   appVisible ? 'opacity-0' : 'opacity-100'
                 }`}
               >
-                <Logo
-                  className="w-105"
-                  navyColor="#ffffff"
-                  redColor="#ffffff"
-                />
+                <Logo className="w-105" />
               </div>
               <PreviewTitleBar
                 platform={platform}

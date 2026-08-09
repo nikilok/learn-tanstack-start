@@ -13,7 +13,13 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "passThroughEnv": ["DESKTOP_APP_URL", "DESKTOP_SIMULATE_UPDATE"]
+      "passThroughEnv": [
+        "DESKTOP_APP_URL",
+        "DESKTOP_SIMULATE_UPDATE",
+        "DESKTOP_SIMULATE_RATE_LIMIT",
+        "DESKTOP_SIMULATE_OFFLINE",
+        "DESKTOP_SIMULATE_UNREACHABLE"
+      ]
     },
     "lint": {
       "dependsOn": ["^build"]

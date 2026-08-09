@@ -6,13 +6,29 @@ import {
   clipboard,
   ipcMain,
   nativeTheme,
+  net,
+  session,
   shell,
   WebContentsView,
 } from 'electron';
 
+import {
+  isEdgeDenied,
+  isMissingApp,
+  isServerError,
+  provesAppServed,
+  simulatedReason,
+} from './block-detect';
+import type { BlockReason } from './block-detect';
+import { createBlockedOverlay } from './blocked-overlay';
+import type { BlockedOverlay } from './blocked-overlay';
 import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
 import { cleanTitle, desktopUserAgent } from './site';
+import { createSplash } from './splash';
+import { parseThemeMode, splashIsDark } from './theme-mode';
+import type { ThemeMode } from './theme-mode';
+import { readSavedThemeMode, saveThemeMode } from './theme-store';
 import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
   getPendingUpdate,
@@ -49,17 +65,88 @@ if (isDev) {
 // top content clears it via its own padding, and styles.css pins the desktop search
 // pill at this same offset (html[data-desktop] .site-header) — keep the two in sync.
 const TITLEBAR_HEIGHT = 46;
-const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
+// The site's own page colours (--bg-page-edge), so the window, the splash drawn over it and
+// the app that follows are one continuous surface — the splash paints a moment after the
+// window appears, and any difference here would read as a flash between the two. Which one
+// is chosen comes from the theme the shell remembered; see splashDark().
+const INITIAL_BG = { dark: '#0a0a0a', light: '#f4f4f8' };
+
+/**
+ * How long the launch splash will wait for the stand-in screen to paint before handing over
+ * anyway. Generous on purpose: this screen's renderer shares a process — and therefore a
+ * main thread — with the splash, the title bar and the tooltip, and measured cold it needs
+ * ~2.5s from creation to having its state and a frame up. A backstop that fires at the same
+ * moment the real signal lands is a race, and losing it means handing over to a screen that
+ * is not there yet. It exists only so a renderer that never comes up cannot hold a splash
+ * over a dead window for good.
+ */
+const BLOCKED_PAINT_MS = 5000;
+
+/**
+ * And how long the stand-in screen keeps covering the window on the way back, waiting for
+ * the returning page to paint. Matches the launch backstop: it is the same page load.
+ */
+const SITE_RETURN_MS = 6000;
+
+/**
+ * How long a first load may sit there saying nothing before the shell stops waiting on it
+ * and puts the stand-in screen up instead. Chosen to sit above a genuinely slow cold load
+ * and below Chromium's own patience with a dead host (~10.4s to ERR_FAILED on a hostname
+ * that accepts nothing, measured) — waiting for that is four seconds of nothing to look at.
+ * Overshooting only costs a longer splash, which is the thing a splash is for.
+ */
+const SLOW_LOAD_MS = 8000;
+
+// What the title-bar pill reads while the stand-in screen is up; the page's own title
+// behind it is either stale or the refusal's, and neither says anything useful.
+const BLOCK_TITLES: Record<BlockReason, string> = {
+  blocked: 'Too many requests',
+  offline: 'Offline',
+  unreachable: 'Cannot reach SponsorSearch',
+};
 
 let mainWindow: BaseWindow | null = null;
 let titleBarView: WebContentsView | null = null;
 let siteView: WebContentsView | null = null;
 let tooltipView: WebContentsView | null = null;
+let blocked: BlockedOverlay | null = null;
+let lastTarget = APP_URL; // the page to come back to once the site answers again
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastFilterCount = 0; // active filters, badged on the title-bar icon
-let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
+let lastMode: ThemeMode = 'auto'; // theme mode, for the title bar icon and next launch
 let screenSaverOn = false; // the web app's screensaver has the window
+
+/**
+ * Which theme the window and its splash open on, before the page exists to report one.
+ * The remembered choice decides it, and `auto` (or a first-ever launch) defers to the OS
+ * the same way the web app's own default does.
+ */
+function splashDark(): boolean {
+  return splashIsDark(readSavedThemeMode(), nativeTheme.shouldUseDarkColors);
+}
+
+/**
+ * Dev affordance: DESKTOP_SIMULATE_RATE_LIMIT / _OFFLINE / _UNREACHABLE put the stand-in
+ * screen up at launch. Offline in particular needs the machine's network genuinely gone to
+ * reproduce, and the dev site is served over loopback, so pulling the network does not even
+ * take it down.
+ *
+ * It seeds the state and nothing else: every check from there is a real one, so the
+ * countdown reconnects and hands the window back exactly as it does in the wild. Faking the
+ * checks too made the screen sit there through a countdown that never did anything.
+ */
+function simulatedBlock(): BlockReason | null {
+  return app.isPackaged ? null : simulatedReason(process.env);
+}
+
+/** The title-bar pill's text: what the stand-in screen is saying, or the page's own title. */
+function currentTitle(): string {
+  const reason = blocked?.reason();
+  return reason
+    ? BLOCK_TITLES[reason]
+    : (siteView?.webContents.getTitle() ?? '');
+}
 
 /** True when a #rrggbb colour is dark enough to want light foreground text. */
 function isDarkColor(hex: string): boolean {
@@ -76,7 +163,9 @@ function openExternal(url: string): void {
 
 /** Pushes the site's back/forward availability to the title bar buttons. */
 function pushNavState(): void {
-  const h = siteView?.webContents.navigationHistory;
+  // Greyed out while the stand-in screen is up: the history is still there, but moving
+  // through it only earns another refusal.
+  const h = blocked?.isUp() ? null : siteView?.webContents.navigationHistory;
   titleBarView?.webContents.send('titlebar:navstate', {
     canGoBack: h?.canGoBack() ?? false,
     canGoForward: h?.canGoForward() ?? false,
@@ -88,6 +177,7 @@ function navigate(dir: 'back' | 'forward'): void {
   // Shortcuts reach here via before-input-event, which preventDefaults them — so the page
   // never sees the keystroke and would stay idle while the shell acts on it.
   reportChromeInput(true);
+  if (blocked?.isUp()) return;
   const h = siteView?.webContents.navigationHistory;
   if (!h) return;
   if (dir === 'back' && h.canGoBack()) h.goBack();
@@ -98,6 +188,10 @@ function navigate(dir: 'back' | 'forward'): void {
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
   reportChromeInput(true); // see navigate(): shortcuts never reach the page as keystrokes
+  // Anything that would move the page is dropped while the stand-in screen is up. The rest
+  // is forwarded, but only the page can act on it — on a cold-start block there is no app
+  // document behind the screen, so those buttons genuinely do nothing until it clears.
+  if (blocked?.isUp() && (cmd === 'home' || cmd === 'filters')) return;
   siteView?.webContents.send('ss:command', cmd);
   // Navigation commands hand focus to the page (type-to-search, form controls).
   if (cmd === 'home' || cmd === 'filters') siteView?.webContents.focus();
@@ -153,16 +247,36 @@ function pushTitle(title: string): void {
   titleBarView?.webContents.send('titlebar:title', cleanTitle(title));
 }
 
-/** Pushes the current theme to both title-bar views — the bar and the tooltip overlay. */
+/** Pushes the current theme to every local view — the bar, the tooltip, the stand-in screen. */
 function broadcastTheme(): void {
   const payload = { dark: lastDark, mode: lastMode };
   titleBarView?.webContents.send('titlebar:theme', payload);
   tooltipView?.webContents.send('titlebar:theme', payload);
+  blocked?.sendTheme(payload);
 }
 
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
+  // Resolved once per window: the splash, the window and the site view all open on it, and
+  // reading it twice could straddle an OS appearance change mid-launch.
+  const openDark = splashDark();
+  const openBg = openDark ? INITIAL_BG.dark : INITIAL_BG.light;
+  lastDark = openDark; // until the page reports its own
+  // And the mode alongside it, or the title bar's control opens on `auto` whatever the
+  // user last chose — for the whole session on a launch where the page never loads.
+  lastMode = readSavedThemeMode() ?? 'auto';
+
+  // Started before anything else in the window, so its renderer process is not queued
+  // behind the site view's and the chrome's — that queue was the whole delay before the
+  // splash could paint. It is mounted further down, after the views it has to cover.
+  let showWindow = (): void => {};
+  const splash = createSplash(
+    { x: 0, y: 0, width: 1280, height: 860 },
+    openDark,
+    () => showWindow(),
+  );
+
   const win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -170,7 +284,7 @@ function createWindow(): void {
     minWidth: 600,
     minHeight: 480,
     show: false,
-    backgroundColor: INITIAL_BG,
+    backgroundColor: openBg,
     // macOS keeps the native traffic lights (inset into the logo pill); Windows/Linux are
     // frameless and draw their own min/max/close in the title bar (see WindowControls).
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
@@ -183,6 +297,11 @@ function createWindow(): void {
       titleBarView = null;
       siteView = null;
       tooltipView = null;
+      blocked?.destroy();
+      blocked = null;
+      // A window closed mid-launch would otherwise leave the splash's ipcMain listener and
+      // its renderer behind — one of each per open/close cycle.
+      splash.destroy();
       screenSaverOn = false;
     }
   });
@@ -203,7 +322,7 @@ function createWindow(): void {
       sandbox: true,
     },
   });
-  view.setBackgroundColor(INITIAL_BG);
+  view.setBackgroundColor(openBg);
   siteView = view;
 
   // Title bar (custom chrome): a transparent overlay. Its page body and view background
@@ -244,14 +363,118 @@ function createWindow(): void {
   win.contentView.addChildView(tip);
   tooltipView = tip;
 
+  /** Drops the hand-back currently in flight, if there is one. See onCleared below. */
+  let cancelHandBack: (() => void) | null = null;
+
+  // The local stand-in for the site. Built on first need and mounted between the page and
+  // the title bar, so the bar keeps floating over it exactly as it does over the page.
+  blocked = createBlockedOverlay({
+    parent: () => mainWindow,
+    index: 1,
+    probeUrl: APP_URL,
+    userAgent: () => view.webContents.getUserAgent(),
+    onCleared: (sitePainted) => {
+      // Whatever was in flight is stale the moment a new hand-back begins. Without this,
+      // a refusal that clears the flag mid-cycle lets the next successful check start a
+      // second cycle while the first still holds a dom-ready listener and a backstop —
+      // and the older one, firing against the newer one's flag, hides the screen over a
+      // reload that has not painted.
+      cancelHandBack?.();
+      if (view.webContents.isDestroyed()) {
+        sitePainted();
+        return;
+      }
+      // The mirror of the launch gate: the stand-in screen keeps covering the window until
+      // the page it is handing back to has painted, so recovery does not flash a blank
+      // window for the length of the reload.
+      let settled = false;
+      const settle = (): void => {
+        if (settled) return;
+        settled = true;
+        cancelHandBack = null;
+        clearTimeout(backstop);
+        view.webContents.removeListener('dom-ready', settle);
+        sitePainted();
+        // The screen held focus the whole time it was up; without handing it back, the
+        // page returns with every keybinding dead until the user clicks it. Via
+        // focusForeground, because a refusal may have cancelled the hand-back while this
+        // was pending — focusing the page unconditionally then left the stand-in screen on
+        // screen with a dead keyboard and no way to reach its retry.
+        focusForeground();
+      };
+      // A load that neither finishes nor fails must not leave the screen covering a live
+      // page forever — but nor may it uncover one that has painted nothing, which is the
+      // same rule the launch path follows. So the backstop puts the screen back up rather
+      // than handing over: `show` cancels the hand-back and re-arms the schedule, and the
+      // `settle` that follows then finds nothing to hand back and does nothing.
+      const backstop = setTimeout(() => {
+        blocked?.show('unreachable');
+        settle();
+      }, SITE_RETURN_MS);
+      backstop.unref?.();
+      // Drops this cycle without handing anything back, for the one above to call.
+      cancelHandBack = () => {
+        settled = true;
+        cancelHandBack = null;
+        clearTimeout(backstop);
+        view.webContents.removeListener('dom-ready', settle);
+      };
+      view.webContents.once('dom-ready', settle);
+      void view.webContents.loadURL(lastTarget);
+    },
+    onShow: (reason) => {
+      // The page owns the screensaver, and it would otherwise sit over this.
+      setScreenSaver(false);
+      pushNavState();
+      pushTitle(BLOCK_TITLES[reason]);
+    },
+    onHide: () => {
+      pushNavState();
+      pushTitle(currentTitle());
+    },
+    background: () => (lastDark ? INITIAL_BG.dark : INITIAL_BG.light),
+    // Shortcuts are bound per webContents, so a view that can hold focus has to be bound
+    // too — otherwise every one of them dies while this screen is the focused view.
+    onCreated: (v) =>
+      registerKeyboardShortcuts([v.webContents], {
+        navigate,
+        command: sendCommand,
+      }),
+  });
+
+  // Mounted last so it covers the page and the chrome both — see splash.ts for why the web
+  // app's own splash cannot serve this.
+  splash.mount(win);
+
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
     view.setBounds({ x: 0, y: 0, width, height });
+    blocked?.setBounds({ x: 0, y: 0, width, height });
     bar.setBounds({ x: 0, y: 0, width, height: TITLEBAR_HEIGHT });
+    splash.setBounds({ x: 0, y: 0, width, height });
     tip.setVisible(false); // stale on resize; the next hover re-positions + shows it
   };
   layout();
   win.on('resize', layout);
+
+  // Shown once the splash has actually painted, so the window arrives with the brand on it
+  // rather than as a bare rectangle that fills in a beat later. Spawning the first renderer
+  // process is most of that wait (~900ms measured, and unavoidable — it is what Chromium
+  // costs to start), and mounting is more on top, so the backstop sits well clear of both:
+  // its only job is to make sure a splash that never paints cannot keep the window off
+  // screen entirely. Better a late window than a blank one — nothing is lost by waiting,
+  // since there is nothing behind it to look at yet, and in dev the renderer comes off a
+  // Vite server rather than disk and does not mount until ~3s.
+  let shown = false;
+  showWindow = (): void => {
+    if (shown || win.isDestroyed()) return;
+    shown = true;
+    win.show();
+  };
+  setTimeout(showWindow, 4000).unref?.();
+
+  const simulated = simulatedBlock();
+  if (simulated) blocked.show(simulated);
 
   const wc = view.webContents;
   wc.setUserAgent(
@@ -269,9 +492,109 @@ function createWindow(): void {
     openExternal(url);
     return { action: 'deny' };
   });
-  wc.on('did-navigate', pushNavState);
-  wc.on('did-navigate-in-page', pushNavState);
-  wc.on('page-title-updated', (_e, title) => pushTitle(title));
+  wc.on('did-navigate', (_e, url) => {
+    lastTarget = url || lastTarget;
+    pushNavState();
+  });
+  // isMainFrame matters here and not on `did-navigate`: this event also fires for
+  // subframes, and the app iframes itself on /download — a route change inside that demo
+  // would otherwise become the page the shell returns to after a block.
+  wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+    if (!isMainFrame) return;
+    lastTarget = url || lastTarget;
+    pushNavState();
+  });
+  wc.on('page-title-updated', (_e, title) => {
+    if (!blocked?.isUp()) pushTitle(title);
+  });
+
+  // The handover from the splash to whatever is going to be on screen. Declared here
+  // because the refusal watcher below also has to be able to call it.
+  let revealTimer: ReturnType<typeof setTimeout> | null = null;
+  let revealed = false;
+  // Per window: once the app has served one document here, a later 404 is its own page.
+  let appHasServed = false;
+
+  /**
+   * Keyboard focus goes to the view in front — the site (not the title bar), so typing
+   * reaches the page right away, since the web app's type-to-search needs the document
+   * focused; or the stand-in screen when that is what is covering it, or the keyboard
+   * would land on the page underneath.
+   */
+  const focusForeground = (): void => {
+    if (win.isDestroyed()) return;
+    if (blocked?.isUp()) blocked.focus();
+    else wc.focus();
+  };
+
+  const finishReveal = (): void => {
+    if (revealed) return;
+    revealed = true;
+    if (revealTimer) clearTimeout(revealTimer);
+    revealTimer = null;
+    if (win.isDestroyed()) return; // timer/load may fire after a fast window close
+    // Only once the splash is actually up. Opening the window before it has painted shows
+    // the site bare, which the splash then covers and uncovers a beat later — a flash of
+    // the app on any start quick enough to reach here first. A splash that never paints is
+    // what the backstop above is for.
+    if (splash.hasPainted()) showWindow();
+    splash.dismiss();
+    focusForeground();
+  };
+
+  /**
+   * The splash is the gate: it comes down only once there is something painted behind it.
+   * That is either the site, or — when the site is refused, offline or simply not there —
+   * the stand-in screen, whose renderer takes a moment to boot and then renders nothing
+   * until its state arrives. Dropping the splash the instant that screen was *asked* for
+   * left the window empty for both of those waits, which is the gap this closes. The
+   * reason does not matter: rate limit, outage or no network all hand over the same way.
+   */
+  const reveal = (): void => {
+    if (revealed) {
+      focusForeground(); // a later refusal still has to move the keyboard
+      return;
+    }
+    if (win.isDestroyed()) return;
+    if (blocked?.isUp()) blocked.whenPainted(finishReveal, BLOCKED_PAINT_MS);
+    else finishReveal();
+  };
+
+  // Neither of these is something the page can report. A refusal happens at the network
+  // layer; a 5xx document is a complete, successful load of somebody else's error page, so
+  // there is no failure event anywhere in the shell to hang off. Watching the responses
+  // catches both, on the document and on the RPCs a loaded page fires in the background —
+  // the case that would otherwise just look like a broken app.
+  wc.session.webRequest.onCompleted(
+    { urls: [`${APP_ORIGIN}/*`] },
+    (details) => {
+      // The session outlives the window, so a request can still land during teardown.
+      // `isUp()` stays true right through the hand-back — the state is only cleared once
+      // the returning page has painted — so guarding on it alone made this blind to a
+      // refusal on the recovery navigation itself, which is the most likely place to hit
+      // one. `show()` is what decides whether a repeat is worth acting on.
+      if (wc.isDestroyed()) return;
+      // Proof that the app itself can serve a document. Until it has, a 404 is the proxy
+      // or the platform saying it has never heard of us rather than the app saying a page
+      // is gone — see isMissingApp.
+      if (provesAppServed(details)) appHasServed = true;
+      if (blocked?.isUp() && !blocked.handingBack()) return;
+      const reason = isEdgeDenied(details)
+        ? 'blocked'
+        : isServerError(details) || isMissingApp(details, appHasServed)
+          ? 'unreachable'
+          : null;
+      if (!reason) return;
+      blocked?.show(reason);
+      if (!blocked?.isUp()) return;
+      wc.stop(); // the rest in flight is only going to be refused too
+      // stop() aborts the document mid-load, so dom-ready and did-finish-load may never
+      // arrive and the resulting did-fail-load is an ABORTED the handler skips. On a
+      // launch that is refused outright this is the only reveal that ever runs, and it
+      // hands over to the stand-in screen the moment that screen has painted.
+      reveal();
+    },
+  );
 
   // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
   registerKeyboardShortcuts([wc, bar.webContents], {
@@ -279,32 +602,41 @@ function createWindow(): void {
     command: sendCommand,
   });
 
-  // Hand keyboard focus to the site view (not the title bar) so typing reaches the
-  // page right away — the web app's type-to-search needs the document focused.
-  const show = (): void => {
-    if (win.isDestroyed()) return; // timer/load may fire after a fast window close
-    win.show();
-    wc.focus();
-  };
-  // Fallback if the initial load stalls; cleared once the load finishes so it
-  // can't fire show() against a destroyed window.
-  const showTimer = setTimeout(show, 4000);
-  wc.once('did-finish-load', () => {
-    clearTimeout(showTimer);
-    show();
-  });
-  // Retry a failed load (offline / DNS / prod outage) rather than stranding a blank
-  // window — retry the URL that failed, not home, so the user's page survives the
-  // hiccup; ignore -3 (ABORTED), which fires on normal in-page navigations.
+  // A slow load keeps the splash, which is what it is for. A load that never finishes and
+  // never fails must not keep it forever, though: the splash is above the title bar, so
+  // the custom window controls on Windows and Linux are underneath it until this fires.
+  //
+  // What it must NOT do is lift onto a page that has produced nothing. Chromium is slow to
+  // give up on a host that accepts nothing — web.local with the dev server down takes
+  // ~10.4s to report ERR_FAILED, measured — so this used to uncover an empty site view
+  // seconds before the failure arrived, which is exactly the black screen between the
+  // splash and the game. If it fires with nothing behind it, the stand-in screen goes up
+  // first and the splash hands over to that; its probe owns the recovery, and a site that
+  // turns out to be fine is picked up on the next check.
+  revealTimer = setTimeout(() => {
+    if (!revealed && !blocked?.isUp()) blocked?.show('unreachable');
+    reveal();
+  }, SLOW_LOAD_MS);
+  // `dom-ready`, not `did-finish-load`: the latter is the load event, which waits for
+  // every font, tile and analytics beacon the page pulls in. Measured on a page with no
+  // subresources at all, the load event still trailed the response by three seconds — on
+  // the real site it is far behind the point where the app is there and usable, and the
+  // splash sitting through all of it is what made it feel long. Finish stays as a backstop.
+  wc.once('dom-ready', reveal);
+  wc.once('did-finish-load', reveal);
+  // A failed load (offline / DNS / prod outage) puts the local screen up rather than
+  // stranding a blank window; it owns the retry from there and comes back to the URL that
+  // failed, not home. Ignore -3 (ABORTED), which fires on normal in-page navigations.
   wc.on('did-fail-load', (_e, code, _desc, url, isMainFrame) => {
-    if (isMainFrame && code !== -3) {
-      const target = url || APP_URL;
-      setTimeout(() => {
-        if (!wc.isDestroyed()) void wc.loadURL(target);
-      }, 2000);
-    }
+    if (!isMainFrame || code === -3) return;
+    lastTarget = url || lastTarget;
+    blocked?.show(net.isOnline() ? 'unreachable' : 'offline');
+    reveal(); // the stand-in screen is what needs to be on screen now, not the splash
   });
-  win.on('focus', () => wc.focus());
+  win.on('focus', () => {
+    if (blocked?.isUp()) blocked.focus();
+    else wc.focus();
+  });
 
   void wc.loadURL(APP_URL);
 }
@@ -318,6 +650,14 @@ function registerIpc(): void {
       _event,
       payload: { themeSource?: string; color?: string; mode?: string },
     ) => {
+      // Behind the stand-in screen the site view may be holding an error page rather than
+      // the app. What that corrupts is the reported COLOUR — no theme-color meta and no
+      // dark class, so the preload reads white, and taking it would repaint the window and
+      // the chrome in light theme for a dark-theme user. The mode is read from
+      // same-origin storage and survives such a page intact, so it is still honoured:
+      // dropping it wholesale meant a theme change made on a live page behind a
+      // mid-session block was silently lost.
+      const blindToColour = blocked?.isUp() === true;
       const themeSource = payload?.themeSource;
       if (
         themeSource === 'light' ||
@@ -326,9 +666,17 @@ function registerIpc(): void {
       ) {
         nativeTheme.themeSource = themeSource; // traffic-light + text contrast
       }
-      if (payload?.mode) lastMode = payload.mode;
+      const mode = parseThemeMode(payload?.mode);
+      if (mode) {
+        lastMode = mode;
+        saveThemeMode(mode); // so the next launch's splash opens on the same ground
+      }
       const color = payload?.color;
-      if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
+      if (
+        !blindToColour &&
+        typeof color === 'string' &&
+        /^#[0-9a-fA-F]{6}$/.test(color)
+      ) {
         lastDark = isDarkColor(color);
         mainWindow?.setBackgroundColor(color);
         siteView?.setBackgroundColor(color); // load placeholder; the title bar stays transparent
@@ -350,10 +698,14 @@ function registerIpc(): void {
     lastFilterCount = Math.max(0, Math.trunc(Number(count) || 0));
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
   });
-  // The web app reports its screensaver taking over the window (and handing it back).
-  ipcMain.on('ss:screensaver', (_event, on: boolean) =>
-    setScreenSaver(Boolean(on)),
-  );
+  // The web app reports its screensaver taking over the window (and handing it back). It
+  // may not take it while the stand-in screen is up: the covered page keeps its own idle
+  // timer running and sees none of the input landing on that screen, so it would eventually
+  // fade the title bar and hide the window buttons over a screensaver nobody can see.
+  ipcMain.on('ss:screensaver', (_event, on: boolean) => {
+    if (on && blocked?.isUp()) return;
+    setScreenSaver(Boolean(on));
+  });
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {
@@ -415,10 +767,17 @@ function registerIpc(): void {
     } else if (action === 'close') win.close();
   });
 
-  // A title-bar view (bar or tooltip) loaded -> send it the theme; the bar also gets its full state.
+  // The stand-in screen's "Try now" -> check straight away instead of waiting out the timer.
+  ipcMain.on('blocked:retry', () => blocked?.retry());
+  // The stand-in screen reporting a frame on the glass — what the launch splash waits for.
+  ipcMain.on('blocked:painted', (event) => blocked?.markPainted(event.sender));
+
+  // A local view (bar, tooltip or stand-in screen) loaded -> send it the theme; the bar
+  // also gets its full state, and the stand-in screen why it is up.
   ipcMain.on('titlebar:ready', (event) => {
     event.sender.send('titlebar:theme', { dark: lastDark, mode: lastMode });
-    // The rest is bar-only state; skip it when the tooltip view is the one reporting ready.
+    blocked?.sendStateTo(event.sender);
+    // The rest is bar-only state; skip it when another view is the one reporting ready.
     if (event.sender !== titleBarView?.webContents) return;
     titleBarView?.webContents.send('titlebar:cursor', lastCursorOn);
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
@@ -428,12 +787,21 @@ function registerIpc(): void {
       'titlebar:maximized',
       mainWindow?.isMaximized() ?? false,
     );
-    pushTitle(siteView?.webContents.getTitle() ?? '');
+    // Not the page's title while the stand-in screen is up: a bar that loads or reloads
+    // then would otherwise replace what the screen is saying with a stale page title.
+    pushTitle(currentTitle());
     pushNavState();
   });
 }
 
 void app.whenReady().then(() => {
+  // The recovery check goes through net.fetch, which the certificate-error hook above does
+  // not cover — without this it could never succeed against the dev origin's own cert.
+  if (isDev) {
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      callback(request.hostname === new URL(APP_URL).hostname ? 0 : -3);
+    });
+  }
   setupMenu(APP_URL);
   registerIpc();
   createWindow();

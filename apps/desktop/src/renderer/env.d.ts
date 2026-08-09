@@ -1,3 +1,7 @@
+import type {
+  BlockReason as SharedBlockReason,
+  BlockState as SharedBlockState,
+} from '../shared/blocked';
 import type { ShortcutId } from '../shared/shortcuts';
 
 declare global {
@@ -10,6 +14,10 @@ declare global {
     | 'filters';
   // Any button that can raise a tooltip: every shortcut, plus the shortcut-less logo (home).
   type TooltipKind = ShortcutId | 'home';
+  // Aliases of the shared contract, so the global names stay available to components
+  // without being a second declaration that could drift from main's.
+  type BlockReason = SharedBlockReason;
+  type BlockState = SharedBlockState;
 
   interface TitlebarApi {
     back(): void;
@@ -30,6 +38,12 @@ declare global {
     onTooltip(
       cb: (payload: { kind: TooltipKind; caretX: number } | null) => void,
     ): Unsubscribe;
+    splashPainted(): void;
+    onSplashDismiss(cb: () => void): Unsubscribe;
+    splashDone(): void;
+    onBlocked(cb: (state: BlockState | null) => void): Unsubscribe;
+    retryBlocked(): void;
+    blockedPainted(): void;
     platform: string;
     windowControl(action: 'minimize' | 'maximize' | 'close'): void;
     onMaximized(cb: (max: boolean) => void): Unsubscribe;

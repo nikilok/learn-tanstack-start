@@ -8,6 +8,8 @@ here under the version's header — only edit `Unreleased` by hand. Full flow:
 
 ## Unreleased
 
+## v0.5.0 — 2026-08-09
+
 - **A launch splash** — opening SponsorSearch now puts the window on screen straight away, on the same ground the app itself uses, in the theme you last chose, with the angled grid and its rainbow streaks running behind the wordmark exactly as they do on the site. The mark arrives greyed out and comes up into full colour, Union Jack and all, finishing just as the app is ready to take over. Previously nothing appeared at all until the page had finished loading, so the app felt slower to start than it was. It is all drawn inside the app, so it shows whatever the connection is doing.
 - **A proper screen when the site can't be reached** — if you lose your connection, or SponsorSearch briefly stops answering, the app no longer drops you on a bare error page. It shows its own screen instead, drawn entirely inside the app so it works with no connection at all: what happened, a countdown to the next check, and a "Try now" button. The app keeps checking in the background and puts you back on the page you were reading the moment it can, with nothing to click.
 - **Something to do while you wait** — that screen comes with a small game. Press Space and the SponsorSearch lens sets off across a skyline you have to jump; your best score is kept between visits. Entirely optional, and it stops the moment your page comes back.

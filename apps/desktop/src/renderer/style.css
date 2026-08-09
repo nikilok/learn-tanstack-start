@@ -70,7 +70,7 @@ html.screensaver #root {
    inlined here because this view has none of the web app's CSS — keep them in step with
    that file. Light is the default and `.dark` overrides it, exactly as the web app orders
    them; main stamps the class from the theme it remembered (see theme-store.ts). */
-.splash {
+.site-ground {
   --sp-bg: #f4f4f8; /* --bg-page-edge */
   --sp-glow-a: rgba(0, 114, 245, 0.18);
   --sp-glow-b: rgba(121, 40, 202, 0.12);
@@ -81,7 +81,7 @@ html.screensaver #root {
   --sp-grid-opacity: 0.7;
   --sp-streaks-opacity: 0.4; /* light needs more punch: colour on near-white */
 }
-.dark .splash {
+.dark .site-ground {
   --sp-bg: #0a0a0a;
   --sp-glow-a: rgba(0, 114, 245, 0.15);
   --sp-glow-b: rgba(121, 40, 202, 0.12);
@@ -91,6 +91,19 @@ html.screensaver #root {
   --sp-grid-line: rgba(255, 255, 255, 0.08);
   --sp-grid-opacity: 1;
   --sp-streaks-opacity: 0.5;
+}
+
+/* Both full-window screens stand on this gradient, so neither is ever a bare white or
+   black panel. The grid and dot layers are NOT part of it: they belong to the splash,
+   where there is nothing else in the frame. Behind the game they would compete with its
+   own sky and horizon. */
+.site-ground {
+  background-color: var(--sp-bg);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, var(--sp-glow-a), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, var(--sp-glow-b), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 80%, var(--sp-glow-c), transparent),
+    radial-gradient(ellipse 110% 55% at 50% 100%, var(--sp-wash), transparent);
 }
 
 .splash {
@@ -104,15 +117,9 @@ html.screensaver #root {
   opacity: 1;
   /* Paired with FADE_MS in main/splash.ts, which hides the view on the same clock. */
   transition: opacity 160ms ease;
-  background-color: var(--sp-bg);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, var(--sp-glow-a), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 50%, var(--sp-glow-b), transparent),
-    radial-gradient(ellipse 50% 50% at 0% 80%, var(--sp-glow-c), transparent),
-    radial-gradient(ellipse 110% 55% at 50% 100%, var(--sp-wash), transparent);
 }
 
-/* The page's drifting dot field (body::before). */
+/* The page's drifting dot field (body::before) — splash only. */
 .splash::before {
   content: '';
   position: absolute;
@@ -133,8 +140,8 @@ html.screensaver #root {
     150px 80px;
 }
 
-/* The page's grid (body::after): same 60px cell, same 26deg tilt, same radial mask, so it
-   sits under the mark exactly as it sits under the app. */
+/* The page's grid (body::after) — splash only: same 60px cell, same 26deg tilt, same
+   radial mask, so it sits under the mark exactly as it sits under the app. */
 .splash::after {
   content: '';
   position: absolute;
@@ -228,48 +235,37 @@ html.screensaver #root {
 .blocked {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 46px 32px 0; /* clears the floating title bar */
+  /* Block, not centred flex: the canvas fills the whole area so its ground can run to the
+     window's edges and its surface continue to the bottom, the way the footer's does. */
+  display: block;
+  /* Clears the floating title bar. No horizontal padding: the game's ground has to reach
+     both window edges the way the footer's does, or it reads as a slab hanging in space.
+     The status line sets its own left/right insets. */
+  padding: 46px 0 0;
   overflow: hidden;
-  background: #ffffff;
   color: var(--tb-fg);
   -webkit-app-region: no-drag; /* the view reuses index.html's drag body */
   --blocked-soft: #6b7180;
   --blocked-hover: rgba(31, 36, 48, 0.06);
 }
 .dark .blocked {
-  background: #0a0a0a;
   --blocked-soft: #8b909e;
   --blocked-hover: rgba(231, 233, 238, 0.08);
 }
-/* The site's own background wash, faint, so this reads as the same product and not a
-   separate screen. Deliberately below the level where it becomes a thing you notice. */
-.blocked::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      58% 46% at 18% 0%,
-      color-mix(in srgb, var(--tb-mark) 8%, transparent),
-      transparent 68%
-    ),
-    radial-gradient(
-      52% 44% at 86% 100%,
-      color-mix(in srgb, var(--tb-mark-red) 7%, transparent),
-      transparent 68%
-    );
-}
 /* The status under the game. The reason carries it — someone who opened the app and got a
    game needs that answered immediately — with the retry timing kept quiet underneath. */
+/* Centred in the ground band, the way the site footer's own content sits under its
+   skyline. The band's height comes from the canvas (--game-ground, set in resize) so the
+   horizon and this cannot drift apart. */
 .blocked-status {
   position: absolute;
   right: 32px;
-  bottom: 30px;
+  bottom: 0;
   left: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: var(--game-ground, 190px);
   text-align: center;
 }
 .blocked-reason {
@@ -312,11 +308,29 @@ html.screensaver #root {
   border-radius: 3px;
 }
 
-/* The runner. Idle until a key lands, so a screen nobody plays with costs nothing. */
+/* The footer's sumi-e brush sweep, painted across the top of the game's sky. It is an SVG
+   layer rather than more canvas drawing because the smoke burst is an feTurbulence
+   displacement, which canvas 2D has no answer to. Light mode only — InkSky renders nothing
+   in dark, exactly as the footer's sky carries no ink there. */
+.ink-sky {
+  position: absolute;
+  top: 46px; /* under the floating title bar, with the rest of the sky */
+  right: 0;
+  left: 0;
+  z-index: 0;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+/* The runner. Idle until a key lands, so a screen nobody plays with costs nothing.
+   Positioned so it sits above the ink layer rather than under it. */
 .runner-canvas {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
-  max-width: 1000px;
+  height: 100%;
   cursor: pointer;
   touch-action: manipulation;
 }

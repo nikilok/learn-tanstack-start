@@ -1,8 +1,13 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    /* Bundler mode, matching apps/web: every file under src/ is bundled by
+       electron-vite (main and preload to CJS, the renderer to ESM), so Node's own
+       module classification never applies to this source — and under Node16 it
+       wrongly refused the workspace packages the renderer imports. */
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "noEmit": true,

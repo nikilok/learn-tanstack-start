@@ -1,23 +1,23 @@
 /**
- * The little endless runner on the stand-in screen: a search lens hopping the skyline
- * while the app waits to be let back in. Pure state in, pure state out — no canvas, no
- * timers, no randomness of its own — so the physics and the collisions are unit-testable
+ * The little endless runner on the stand-in screen: a search lens hopping the London
+ * skyline while the app waits to be let back in. Pure state in, pure state out — no canvas,
+ * no timers, no randomness of its own — so the physics and the collisions are unit-testable
  * and RunnerCanvas.tsx is left with nothing but drawing.
  */
+import { LANDMARKS } from '@ss/skyline';
+import type { LandmarkId } from '@ss/skyline';
 
-/** What sits on top of a building: 0 flat, 1 a mast, 2 a stepped setback with a tank. */
-export type Roof = 0 | 1 | 2;
-
-/** What the runner has to clear. A bus is drawn differently but behaves the same. */
-export type ObstacleKind = 'building' | 'bus';
+/**
+ * What the runner has to clear: one of the footer skyline's landmarks, or a bus.
+ * The landmarks are drawn from the shared geometry, so the obstacles here are literally
+ * the ones standing in the site's footer.
+ */
+export type ObstacleKind = LandmarkId | 'bus';
 
 export interface Obstacle {
   x: number; // left edge, in world px from the canvas's left
   w: number;
   h: number;
-  /** Window rows, so a building keeps the same lit pattern as it scrolls. */
-  lights: number;
-  roof: Roof;
   kind: ObstacleKind;
 }
 
@@ -28,39 +28,104 @@ export interface RunnerState {
   y: number; // lens height above the ground line
   vy: number;
   obstacles: Obstacle[];
-  nextSpawn: number; // dist at which the next building enters
+  nextSpawn: number; // dist at which the next landmark enters
   started: boolean;
   over: boolean;
 }
 
-export const PLAYER_X = 74; // fixed distance from the left edge
-export const PLAYER_R = 15;
+/**
+ * The whole game is drawn at this multiple of its original size. It went up when the
+ * obstacles became landmarks: Big Ben is a slender tower, and at the old scale it was nine
+ * pixels wide — a stick, with no clock on it. Every length below is in scaled px, so the
+ * feel is unchanged and only the size on screen moved.
+ */
+const SCALE = 2.4;
 
-const GRAVITY = 2400;
-const JUMP_V = 780;
+export const PLAYER_X = 178; // fixed distance from the left edge
+// Deliberately short of a full scale-up: the lens reads as something running past the
+// landmarks rather than as another one of them.
+export const PLAYER_R = 26;
+
+const GRAVITY = 2400 * SCALE;
+const JUMP_V = 780 * SCALE;
 /** How high the feet reach at the top of a jump. Nothing spawned may come near it. */
 export const JUMP_APEX = (JUMP_V * JUMP_V) / (2 * GRAVITY);
-const FAST_FALL = 2800; // extra pull while the down key is held
-const SPEED_START = 300;
-const SPEED_MAX = 760;
-const SPEED_RAMP = 16; // px/s gained per second
-const SCORE_PER_PX = 1 / 18;
-const HIT_INSET = 4; // forgiveness, so a near miss reads as a miss
+const FAST_FALL = 2800 * SCALE; // extra pull while the down key is held
+/** Points per px travelled. Divided by the scale, so a run scores as it always did. */
+export const SCORE_PER_PX = 1 / (18 * SCALE);
+const HIT_INSET = 4 * SCALE; // forgiveness, so a near miss reads as a miss
 
-// Low and wide, or tall and narrow. Nothing here is unclearable; the run gets hard
-// through pace and spacing instead, which is the part a player can actually read.
+/*
+ * Difficulty is a curve over distance, not a dice roll.
+ *
+ * Everything below is expressed in score rather than pixels, because score is the only
+ * measure of progress the player can see: the run should get harder at moments they can
+ * point at. It ramps on three axes at once — pace, spacing and what is out there — so a
+ * first run is a gentle jog and a long one is genuinely fast.
+ */
+
+/** Score at which the run is at full difficulty; spacing and unlocks ramp across this. */
+const FULL_TILT = 950;
+/**
+ * Pace is the one axis that stops early. It tops out at a speed a person can still read
+ * and then holds there for the rest of the run, however long it goes: past this point a
+ * run gets harder through what turns up and how close together, never through a ground
+ * that keeps accelerating out from under you.
+ */
+export const SPEED_TOPS_AT = 600;
+/*
+ * Pace, in screen px/s, chosen by how long a landmark is in view rather than by how hard
+ * the run should be. This screen is what someone stares at while they wait to be let back
+ * in, so it is meant to be watchable: a landmark takes ~2.8s to cross at the start and
+ * ~1.4s at the cap, which leaves over a second of reaction time even at full pace.
+ * They are absolute rather than scaled — the drawing got bigger, the pace deliberately
+ * did not follow it.
+ */
+const SPEED_START = 460;
+const SPEED_MAX = 950;
+/** Seconds between obstacles: a long look at the start, a steady rhythm at full tilt. */
+const GAP_EASY = 2.2;
+const GAP_HARD = 1.2; // a jump is ~0.65s in the air, so this leaves room to breathe
+const GAP_JITTER = 0.28; // ± on the gap, so the rhythm is not metronomic
+
+/** 0 at the start of a run, 1 once it is at full difficulty. */
+function progressAt(dist: number): number {
+  return Math.min(1, (dist * SCORE_PER_PX) / FULL_TILT);
+}
+
+/** How fast the ground moves. Ramps to the cap, then flat for the rest of the run. */
+export function speedAt(dist: number): number {
+  const ramp = Math.min(1, (dist * SCORE_PER_PX) / SPEED_TOPS_AT);
+  return SPEED_START + (SPEED_MAX - SPEED_START) * ramp;
+}
+
+/**
+ * The skyline, dealt out as obstacles. Each is drawn at its own proportions — `w` is
+ * derived from the landmark's real bounding box, so nothing is stretched — and `from` is
+ * the score it starts appearing at, which is what turns the run into a tour: the Gherkin
+ * on the first jump, Tower Bridge only once you have earned it.
+ */
+function shape(kind: LandmarkId, h: number, from: number) {
+  const l = LANDMARKS[kind];
+  return { kind, h, from, w: Math.round((l.w * h) / l.h) };
+}
+
 const SHAPES: readonly {
   w: number;
   h: number;
-  roof: Roof;
   kind: ObstacleKind;
+  from: number;
 }[] = [
-  { w: 18, h: 34, roof: 0, kind: 'building' },
-  { w: 26, h: 52, roof: 1, kind: 'building' },
-  // The bus: long and low against the towers, at roughly a Routemaster's proportions.
-  { w: 46, h: 25, roof: 0, kind: 'bus' },
-  { w: 40, h: 30, roof: 2, kind: 'building' },
-  { w: 22, h: 66, roof: 1, kind: 'building' },
+  shape('gherkin', 112, 0),
+  shape('eye', 132, 140),
+  shape('stPauls', 150, 300),
+  // The bus: long and low against the landmarks, at roughly a Routemaster's proportions.
+  // The widest thing out there for most of a run, so it waits until the rhythm is there.
+  { w: 110, h: 60, kind: 'bus', from: 460 },
+  shape('bigBen', 178, 620),
+  shape('shard', 198, 800),
+  // Both towers and the whole span: the one that needs a jump timed off its leading edge.
+  shape('towerBridge', 118, 950),
 ];
 
 /** A fresh run, idle until the first jump. */
@@ -72,7 +137,8 @@ export function createRunner(width: number): RunnerState {
     y: 0,
     vy: 0,
     obstacles: [],
-    nextSpawn: 260,
+    // A clear run-up before the first obstacle, so the opening is never a scramble.
+    nextSpawn: 520 * SCALE,
     started: false,
     over: false,
   };
@@ -91,7 +157,7 @@ export function jump(s: RunnerState): RunnerState {
   return { ...s, vy: JUMP_V };
 }
 
-/** True when the lens overlaps a building. */
+/** True when the lens overlaps an obstacle. */
 function hits(y: number, o: Obstacle): boolean {
   const left = PLAYER_X - PLAYER_R + HIT_INSET;
   const right = PLAYER_X + PLAYER_R - HIT_INSET;
@@ -99,17 +165,14 @@ function hits(y: number, o: Obstacle): boolean {
   return y + HIT_INSET < o.h;
 }
 
-/** Picks the next building, entering just off the right edge. */
-function spawn(width: number, rnd: () => number): Obstacle {
-  const shape = SHAPES[Math.floor(rnd() * SHAPES.length)] as (typeof SHAPES)[0];
-  return {
-    x: width + 20,
-    w: shape.w,
-    h: shape.h,
-    lights: Math.max(1, Math.floor((shape.h - 8) / 12)),
-    roof: shape.roof,
-    kind: shape.kind,
-  };
+/** Picks the next obstacle from what the run has unlocked, entering just off the right edge. */
+function spawn(width: number, dist: number, rnd: () => number): Obstacle {
+  const score = dist * SCORE_PER_PX;
+  const unlocked = SHAPES.filter((s) => score >= s.from);
+  const shape = unlocked[
+    Math.floor(rnd() * unlocked.length)
+  ] as (typeof SHAPES)[0];
+  return { x: width + 40, w: shape.w, h: shape.h, kind: shape.kind };
 }
 
 /**
@@ -124,7 +187,7 @@ export function stepRunner(
 ): RunnerState {
   if (!s.started || s.over) return s;
   const dt = Math.min(Math.max(dtSeconds, 0), 0.05);
-  const speed = Math.min(s.speed + SPEED_RAMP * dt, SPEED_MAX);
+  const speed = speedAt(s.dist);
   const dist = s.dist + speed * dt;
 
   const g = GRAVITY + (fastFall && s.y > 0 ? FAST_FALL : 0);
@@ -138,13 +201,17 @@ export function stepRunner(
   const moved = speed * dt;
   const obstacles = s.obstacles
     .map((o) => ({ ...o, x: o.x - moved }))
-    .filter((o) => o.x + o.w > -20);
+    .filter((o) => o.x + o.w > -50);
 
   let nextSpawn = s.nextSpawn;
   if (dist >= nextSpawn) {
-    obstacles.push(spawn(s.width, rnd));
-    // Room to land and set up again, scaled to the pace so it stays fair as it speeds up.
-    nextSpawn = dist + speed * (0.62 + rnd() * 0.6);
+    obstacles.push(spawn(s.width, dist, rnd));
+    // The gap is in SECONDS of travel, not pixels: as the ground speeds up, the same pixel
+    // gap would give less and less time to react. Tightening the seconds on top of that is
+    // what actually turns the screw, and it stays above a jump's air time throughout.
+    const progress = progressAt(dist);
+    const gap = GAP_EASY + (GAP_HARD - GAP_EASY) * progress;
+    nextSpawn = dist + speed * (gap + (rnd() - 0.5) * 2 * GAP_JITTER);
   }
 
   return {

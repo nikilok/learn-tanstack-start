@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import { LANDMARKS, LANDMARK_ORDER } from '@ss/skyline';
+
 import {
   createRunner,
   JUMP_APEX,
@@ -7,6 +9,9 @@ import {
   PLAYER_R,
   PLAYER_X,
   runnerScore,
+  SCORE_PER_PX,
+  SPEED_TOPS_AT,
+  speedAt,
   stepRunner,
 } from './runner.ts';
 import type { RunnerState } from './runner.ts';
@@ -27,22 +32,37 @@ function clearRun(): RunnerState {
   return { ...jump(createRunner(600)), nextSpawn: 1e9 };
 }
 
-/** A run with a single building parked right where the lens is. */
+/** Distance that puts a run at the given score, for driving the difficulty curve. */
+function scoreToDist(score: number): number {
+  return score / SCORE_PER_PX;
+}
+/** The score at which every obstacle has been unlocked and the pace has topped out. */
+const FULL_TILT = 950;
+
+/** Every obstacle the run can spawn at that score, by sweeping the shape picker's rnd. */
+function spawnsAt(score: number): RunnerState['obstacles'] {
+  const dist = scoreToDist(score);
+  const out: RunnerState['obstacles'] = [];
+  for (let i = 0; i < 24; i++) {
+    const pick = i / 24;
+    const s = stepRunner(
+      { ...createRunner(600), started: true, dist, nextSpawn: dist },
+      FRAME,
+      false,
+      () => pick,
+    );
+    out.push(...s.obstacles);
+  }
+  return out;
+}
+
+/** A run with a single landmark parked right where the lens is. */
 function wall(y = 0): RunnerState {
   return {
     ...createRunner(600),
     started: true,
     y,
-    obstacles: [
-      {
-        x: PLAYER_X - PLAYER_R,
-        w: 30,
-        h: 50,
-        lights: 3,
-        roof: 0,
-        kind: 'building',
-      },
-    ],
+    obstacles: [{ x: PLAYER_X - PLAYER_R, w: 60, h: 120, kind: 'gherkin' }],
   };
 }
 
@@ -91,6 +111,56 @@ describe('pace', () => {
     expect(run(later, 100_000).speed).toBe(run(later, 200_000).speed);
   });
 
+  test('the ground starts slow and only reaches full pace deep into a run', () => {
+    // The complaint this pins: a run that is at full speed from the first jump.
+    const start = speedAt(0);
+    const capped = speedAt(1e9);
+    expect(speedAt(scoreToDist(100))).toBeLessThan(
+      start + (capped - start) * 0.25,
+    );
+    // Close rather than exact: score↔distance is a float round-trip, so the milestone
+    // lands a rounding error short of the clamp.
+    expect(speedAt(scoreToDist(SPEED_TOPS_AT))).toBeCloseTo(capped, 6);
+    // Monotonic the whole way, so it never dips back and reads as a stumble.
+    let previous = 0;
+    for (let score = 0; score <= 1100; score += 50) {
+      const now = speedAt(scoreToDist(score));
+      expect(now).toBeGreaterThanOrEqual(previous);
+      previous = now;
+    }
+  });
+
+  test('even at full pace there is over a second to react', () => {
+    // This screen is what someone watches while they wait, so the run has to stay
+    // watchable rather than turn into a reflex test. Measured the way the player
+    // experiences it: from an obstacle entering on the right to reaching the lens.
+    const width = 1280;
+    const s = stepRunner(
+      { ...createRunner(width), started: true, nextSpawn: 0 },
+      FRAME,
+      false,
+      NEVER,
+    );
+    const entering = s.obstacles[0]!.x;
+    const travel = entering - PLAYER_X;
+    expect(travel / speedAt(scoreToDist(SPEED_TOPS_AT))).toBeGreaterThan(1);
+    // And a whole lot longer than that on the first one you ever see.
+    expect(travel / speedAt(0)).toBeGreaterThan(2);
+  });
+
+  test('the pace plateaus and never creeps up again', () => {
+    // The complaint this pins: a run that just keeps getting faster until it is
+    // unplayable. Past the milestone the ground holds one speed for good — a long run
+    // gets harder through spacing and what spawns, not through acceleration.
+    const topped = speedAt(scoreToDist(SPEED_TOPS_AT));
+    for (const score of [SPEED_TOPS_AT, 1_000, 5_000, 50_000, 1e6]) {
+      expect(speedAt(scoreToDist(score))).toBeCloseTo(topped, 6);
+    }
+    // And the difficulty curve keeps moving after the pace has stopped, or the rest of
+    // the run would be flat in every dimension at once.
+    expect(FULL_TILT).toBeGreaterThan(SPEED_TOPS_AT);
+  });
+
   test('score follows distance', () => {
     const s = run(clearRun(), 300);
     expect(runnerScore(s)).toBeGreaterThan(0);
@@ -106,30 +176,22 @@ describe('pace', () => {
   });
 });
 
-describe('buildings', () => {
+describe('landmarks', () => {
   test('they scroll in from the right and are dropped past the left edge', () => {
     let s = { ...createRunner(600), started: true, nextSpawn: 0 };
     s = stepRunner(s, FRAME, false, NEVER);
     expect(s.obstacles).toHaveLength(1);
     expect(s.obstacles[0]!.x).toBeGreaterThan(500);
-    const scrolled = run(s, 600);
-    expect(scrolled.obstacles.every((o) => o.x + o.w > -20)).toBe(true);
+    const scrolled = run(s, 900);
+    expect(scrolled.obstacles.every((o) => o.x + o.w > -50)).toBe(true);
   });
 
-  test('nothing that spawns is too tall to jump', () => {
+  test('nothing that spawns is too tall to jump, at any point in a run', () => {
     // The rule a new obstacle can silently break: add one taller than the jump reaches and
     // the run becomes unwinnable at that spawn, with nothing failing anywhere else.
     const heights = new Set<number>();
-    for (let i = 0; i < 60; i++) {
-      // A different rnd each pass, so every shape in the table gets picked eventually.
-      const pick = (i % 12) / 12;
-      const s = stepRunner(
-        { ...createRunner(600), started: true, nextSpawn: 0 },
-        FRAME,
-        false,
-        () => pick,
-      );
-      for (const o of s.obstacles) heights.add(o.h);
+    for (const score of [0, 150, 300, 500, 900, 1200]) {
+      for (const o of spawnsAt(score)) heights.add(o.h);
     }
     expect(heights.size).toBeGreaterThan(1);
     for (const h of heights) {
@@ -138,62 +200,104 @@ describe('buildings', () => {
     }
   });
 
-  test('the bus is in the mix, and is the long low one', () => {
-    const buses: number[] = [];
-    const towers: number[] = [];
-    for (let i = 0; i < 60; i++) {
-      const pick = (i % 12) / 12;
-      const s = stepRunner(
-        { ...createRunner(600), started: true, nextSpawn: 0 },
-        FRAME,
-        false,
-        () => pick,
-      );
-      for (const o of s.obstacles) {
-        if (o.kind === 'bus') buses.push(o.w / o.h);
-        else towers.push(o.w / o.h);
-      }
+  test('every landmark keeps its own proportions', () => {
+    // A landmark stretched to fit a box stops being that landmark — Big Ben widened to a
+    // building's footprint reads as a slab with a clock on it. The engine derives `w` from
+    // the shared bounding box, so this pins that it never drifts from the artwork.
+    for (const o of spawnsAt(1200)) {
+      if (o.kind === 'bus') continue;
+      const l = LANDMARKS[o.kind];
+      expect(o.w).toBe(Math.round((l.w * o.h) / l.h));
     }
-    expect(buses.length).toBeGreaterThan(0);
-    // Wider than it is tall, and wider-to-taller than any building it shares the road with.
-    expect(Math.min(...buses)).toBeGreaterThan(1.4);
-    expect(Math.min(...buses)).toBeGreaterThan(Math.max(...towers));
   });
 
-  test('spacing scales with the pace, so a faster run is not unfair', () => {
-    const slow = stepRunner(
-      { ...createRunner(600), started: true, nextSpawn: 0, speed: 300 },
-      FRAME,
-      false,
-      NEVER,
+  test('the opening is one easy obstacle, not the whole set', () => {
+    // The complaint this pins: everything showing up at once on the first jump.
+    const opening = spawnsAt(0);
+    expect(opening.length).toBeGreaterThan(0);
+    expect(new Set(opening.map((o) => o.kind)).size).toBe(1);
+    // Comfortably under the jump, so the first one is never a near thing.
+    expect(Math.max(...opening.map((o) => o.h))).toBeLessThan(JUMP_APEX * 0.4);
+  });
+
+  test('harder shapes unlock as the score climbs', () => {
+    const variety = [0, 150, 300, 500, 900, 1200].map(
+      (score) => new Set(spawnsAt(score).map((o) => o.kind)).size,
     );
-    const fast = stepRunner(
-      { ...createRunner(600), started: true, nextSpawn: 0, speed: 700 },
-      FRAME,
-      false,
-      NEVER,
+    // Never fewer choices than before, and more by the end than at the start.
+    expect(variety).toEqual([...variety].sort((a, b) => a - b));
+    expect(variety.at(-1)).toBeGreaterThan(variety[0] as number);
+    // Every landmark in the footer eventually turns up in the run.
+    const late = new Set(spawnsAt(1200).map((o) => o.kind));
+    for (const id of LANDMARK_ORDER) expect(late.has(id)).toBe(true);
+  });
+
+  test('the bus waits for its milestone, and is the long low one', () => {
+    const isBus = (o: { kind: string }) => o.kind === 'bus';
+    expect(spawnsAt(0).some(isBus)).toBe(false);
+    expect(spawnsAt(300).some(isBus)).toBe(false);
+    const late = spawnsAt(900);
+    const buses = late.filter(isBus);
+    expect(buses.length).toBeGreaterThan(0);
+    // Wider than it is tall, and wider-to-taller than any landmark it shares the road with.
+    const ratio = (o: { w: number; h: number }) => o.w / o.h;
+    expect(Math.min(...buses.map(ratio))).toBeGreaterThan(1.4);
+    expect(Math.min(...buses.map(ratio))).toBeGreaterThan(
+      Math.max(...late.filter((o) => !isBus(o)).map(ratio)),
     );
-    expect(fast.nextSpawn - fast.dist).toBeGreaterThan(
-      slow.nextSpawn - slow.dist,
-    );
+  });
+
+  test('the gap between obstacles tightens as the run goes on', () => {
+    // Measured in seconds of travel, which is the reaction time the player actually has.
+    const gapSeconds = (score: number) => {
+      const dist = scoreToDist(score);
+      const before = {
+        ...createRunner(600),
+        started: true,
+        dist,
+        nextSpawn: dist,
+      };
+      const after = stepRunner(before, FRAME, false, () => 0.5);
+      return (after.nextSpawn - after.dist) / speedAt(dist);
+    };
+    const early = gapSeconds(0);
+    const late = gapSeconds(FULL_TILT);
+    expect(early).toBeGreaterThan(late * 1.5);
+    // Still longer than a jump hangs in the air, or it stops being clearable at all.
+    expect(late).toBeGreaterThan(0.7);
+  });
+
+  test('a faster run still spaces obstacles further apart on screen', () => {
+    // Reaction time shrinks with progress (the test above), but the pixel spacing must not
+    // — bunching them up on screen at speed would make a late run unreadable as well as
+    // fast. Driven by distance, since the pace is derived from it.
+    const pixelGap = (score: number) => {
+      const dist = scoreToDist(score);
+      const after = stepRunner(
+        { ...createRunner(600), started: true, dist, nextSpawn: dist },
+        FRAME,
+        false,
+        () => 0.5,
+      );
+      return after.nextSpawn - after.dist;
+    };
+    expect(pixelGap(FULL_TILT)).toBeGreaterThan(pixelGap(0));
   });
 });
 
 describe('collisions', () => {
-  test('running into a building ends the run', () => {
+  test('running into a landmark ends the run', () => {
     expect(stepRunner(wall(), FRAME, false, NEVER).over).toBe(true);
   });
 
   test('clearing it overhead does not', () => {
-    expect(stepRunner(wall(80), FRAME, false, NEVER).over).toBe(false);
+    expect(stepRunner(wall(200), FRAME, false, NEVER).over).toBe(false);
   });
 
-  test('a building the lens has not reached is not a hit', () => {
+  test('a landmark the lens has not reached is not a hit', () => {
     const ahead = {
       ...wall(),
-      obstacles: [
-        { x: 300, w: 30, h: 50, lights: 3, roof: 0, kind: 'building' },
-      ],
+      obstacles: [{ x: 600, w: 60, h: 120, kind: 'gherkin' as const }],
     };
     expect(stepRunner(ahead, FRAME, false, NEVER).over).toBe(false);
   });

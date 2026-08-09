@@ -17,17 +17,19 @@ export interface Star {
   bright: boolean;
 }
 
-export interface Puff {
-  dx: number; // offsets from the cloud's anchor, in units of its own radius
-  dy: number;
-  r: number;
-}
+/**
+ * The two cloud outlines the site's own footer skyline draws — a puffy three-bump and a
+ * wide four-bump — so the game's day sky is the same weather as the footer's. Canvas takes
+ * SVG path data directly through Path2D.
+ */
+export { CLOUD_PUFFY, CLOUD_WIDE } from '@ss/skyline';
 
 export interface Cloud {
   x: number; // 0..1 across the sky
   y: number; // 0..1 down the sky's band
-  scale: number; // px radius of the cloud's main body
-  puffs: Puff[];
+  scale: number; // multiplier on the path's own ~120-unit width
+  /** Which of the two outlines to draw. */
+  wide: boolean;
 }
 
 /**
@@ -49,25 +51,15 @@ export function makeStars(count: number, rnd: () => number): Star[] {
   return stars;
 }
 
-/** A handful of clouds, each a cluster of overlapping puffs around its own anchor. */
+/** A handful of clouds, alternating the two outlines and spread across the sky. */
 export function makeClouds(count: number, rnd: () => number): Cloud[] {
   const clouds: Cloud[] = [];
   for (let i = 0; i < count; i++) {
-    const puffs: Puff[] = [];
-    const n = 3 + Math.floor(rnd() * 3);
-    for (let j = 0; j < n; j++) {
-      puffs.push({
-        // Spread along the body and kept low, so a cloud reads as wider than it is tall.
-        dx: (j / Math.max(1, n - 1) - 0.5) * 2.2,
-        dy: -rnd() * 0.45,
-        r: 0.55 + rnd() * 0.5,
-      });
-    }
     clouds.push({
       x: Math.min(0.999, (i + rnd() * 0.8) / count),
       y: rnd() ** 1.5,
-      scale: 12 + rnd() * 12,
-      puffs,
+      scale: 0.34 + rnd() * 0.26,
+      wide: i % 2 === 1,
     });
   }
   return clouds;

@@ -31,6 +31,7 @@
     "@flags-sdk/vercel": "1.3.0",
     "@mcp-b/global": "^2.3.2",
     "@ss/db": "workspace:*",
+    "@ss/skyline": "workspace:*",
     "@tailwindcss/vite": "4.3.0",
     "@tanstack/react-devtools": "0.10.5",
     "@tanstack/react-query": "^5.100.11",

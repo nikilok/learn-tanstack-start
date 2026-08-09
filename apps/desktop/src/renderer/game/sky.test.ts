@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { makeClouds, makeStars } from './sky.ts';
+import { CLOUD_PUFFY, CLOUD_WIDE, makeClouds, makeStars } from './sky.ts';
 
 /** Deterministic stand-in for Math.random, cycling through a fixed spread. */
 function seeded(): () => number {
@@ -41,13 +41,16 @@ describe('makeStars', () => {
 });
 
 describe('makeClouds', () => {
-  test('each cloud is a cluster of puffs, wider than it is tall', () => {
-    for (const cloud of makeClouds(6, seeded())) {
-      expect(cloud.puffs.length).toBeGreaterThanOrEqual(3);
-      expect(cloud.scale).toBeGreaterThan(0);
-      const spread = Math.max(...cloud.puffs.map((p) => Math.abs(p.dx)));
-      const rise = Math.max(...cloud.puffs.map((p) => Math.abs(p.dy)));
-      expect(spread).toBeGreaterThan(rise);
+  test('both of the footer skyline outlines get used', () => {
+    const clouds = makeClouds(6, seeded());
+    expect(clouds.some((c) => c.wide)).toBe(true);
+    expect(clouds.some((c) => !c.wide)).toBe(true);
+  });
+
+  test('scales stay in a range that keeps them clouds, not smudges or walls', () => {
+    for (const cloud of makeClouds(8, seeded())) {
+      expect(cloud.scale).toBeGreaterThan(0.2);
+      expect(cloud.scale).toBeLessThan(1);
     }
   });
 
@@ -60,5 +63,15 @@ describe('makeClouds', () => {
       expect(cloud.y).toBeLessThanOrEqual(1);
     }
     expect(Math.max(...clouds.map((c) => c.x))).toBeGreaterThan(0.7);
+  });
+});
+
+describe('cloud outlines', () => {
+  test('both are closed paths, so a fill and a stroke both behave', () => {
+    // A path left open would fill with a straight edge across the bottom.
+    for (const path of [CLOUD_PUFFY, CLOUD_WIDE]) {
+      expect(path.startsWith('M')).toBe(true);
+      expect(path.trimEnd().endsWith('z')).toBe(true);
+    }
   });
 });

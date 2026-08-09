@@ -1,5 +1,9 @@
+import { buildStar, CELESTIAL, MOON_PATH, SUN_R, SUN_RAYS } from '@ss/skyline';
 import { useCallback, useEffect, useRef } from 'react';
 
+import { InkSky } from './InkSky';
+import { drawLandmark, landmarkPaint } from './landmark-draw';
+import type { LandmarkPaint } from './landmark-draw';
 import {
   createRunner,
   jump,
@@ -9,13 +13,24 @@ import {
   stepRunner,
 } from './runner';
 import type { Obstacle, RunnerState } from './runner';
-import { makeClouds, makeStars } from './sky';
+import { CLOUD_PUFFY, CLOUD_WIDE, makeClouds, makeStars } from './sky';
 import type { Cloud, Star } from './sky';
 import { closeSound, playCrash, playJump } from './sound';
 
-const HEIGHT = 210; // CSS px; the ground sits a little above the bottom edge
-const GROUND_Y = HEIGHT - 54;
-const SKY_BAND = GROUND_Y - 26; // how far down the sky's scenery may reach
+/**
+ * The canvas fills the screen, so the ground can run to the window's edges the way the
+ * site footer's does — a horizon with the surface simply continuing below it, rather than
+ * a band with a hard edge partway down. The status line then sits ON that surface, exactly
+ * as the footer's own content sits under its skyline.
+ *
+ * These three are geometry rather than constants because of it, recomputed on resize.
+ * There is one canvas on the screen, so module scope is where they belong.
+ */
+let HEIGHT = 210;
+let GROUND_Y = 156;
+let SKY_BAND = 130; // how far down the sky's scenery may reach
+/** How much surface sits below the horizon. The rest of the canvas is sky. */
+const ROAD_DEPTH = 190;
 const BEST_KEY = 'ss-runner-best';
 
 /** Reads the saved best. Storage can be unavailable on a file:// document, and a high score is never worth a blank screen. */
@@ -37,18 +52,18 @@ function writeBest(score: number): void {
 }
 
 interface Palette {
-  wall: string; // the face of a building
-  wallTop: string; // its lit top edge, which is what gives it any solidity
-  window: string; // an unlit window
-  windowLit: string;
-  beacon: string; // the mast light
-  line: string; // the ground
+  // The ground, borrowed from the site footer the city stands on: a hairline over a
+  // translucent surface (--footer-line / --footer-bg). The footer draws no road markings
+  // and neither does this — the landmarks going past are what carry the speed.
+  groundLine: string;
+  groundFill: string;
   dim: string; // the high score and the prompt, neither of which is the point
   score: string; // the run you are on, which is
   sky: string; // the stars
-  cloud: string;
+  cloud: string; // the cloud body
+  cloudLine: string; // and its outline, which is what makes it read as drawn
   orb: string; // the moon, or the sun
-  orbGlow: string;
+  orbGlow: string | null; // null by day, where a halo over the ink only goes muddy
   navy: string;
   red: string;
 }
@@ -56,43 +71,57 @@ interface Palette {
 function palette(dark: boolean): Palette {
   return dark
     ? {
-        wall: 'rgba(231,233,238,0.13)',
-        wallTop: 'rgba(231,233,238,0.32)',
-        window: 'rgba(231,233,238,0.07)',
-        windowLit: 'rgba(255,206,138,0.75)',
-        beacon: 'rgba(248,113,113,0.9)',
-        line: 'rgba(231,233,238,0.34)',
+        groundLine: '#3a3a3a', // --footer-line
+        groundFill: 'rgba(10,10,10,0.5)', // --footer-bg
         dim: 'rgba(231,233,238,0.3)',
         score: 'rgba(231,233,238,0.72)',
         sky: 'rgba(255,255,255,0.9)',
-        cloud: 'rgba(226,232,255,0.10)',
+        cloud: 'rgba(226,232,255,0.10)', // dark mode draws no clouds
+        cloudLine: 'rgba(226,232,255,0.16)',
         orb: 'rgba(233,236,255,0.85)',
         orbGlow: 'rgba(180,200,255,0.10)',
         navy: '#e0e7ff',
         red: '#f87171',
       }
     : {
-        wall: 'rgba(31,36,48,0.14)',
-        wallTop: 'rgba(31,36,48,0.3)',
-        window: 'rgba(31,36,48,0.1)',
-        windowLit: 'rgba(31,36,48,0.34)',
-        beacon: 'rgba(200,16,46,0.6)',
-        line: 'rgba(31,36,48,0.3)',
-        dim: 'rgba(31,36,48,0.32)',
-        score: 'rgba(31,36,48,0.75)',
+        groundLine: '#d6d6d6', // --footer-line
+        groundFill: 'rgba(255,255,255,0.5)', // --footer-bg
+        // Darker than the dark theme's equivalents: in light mode the score sits over the
+        // ink sweep, and at the weight the night sky wants it disappears into the wash.
+        dim: 'rgba(31,36,48,0.5)',
+        score: 'rgba(31,36,48,0.88)',
         sky: 'rgba(255,255,255,0.95)',
-        // Blue-grey, not white: a white cloud on the near-white day sky is invisible.
-        cloud: 'rgba(88,124,190,0.2)',
-        orb: 'rgba(255,214,140,0.85)',
-        orbGlow: 'rgba(255,196,120,0.16)',
+        // White with an inked outline, exactly as the footer skyline draws them: on a
+        // near-white sky it is the line that makes the cloud, not the fill. The weight is
+        // the footer's own faint ink, not a hard black line.
+        cloud: '#ffffff',
+        cloudLine: 'rgba(122,122,122,0.9)',
+        // Opaque, unlike the moon: the ink sweep passes behind it, and a translucent sun
+        // would show the brushwork straight through its face.
+        orb: '#ffd98f',
+        // No halo by day. Warm light over the blue wash goes muddy, and the footer's sun
+        // is a flat disc with rays — the rays are what make it read as shining.
+        orbGlow: null,
         navy: '#001c55',
         red: '#c8102e',
       };
 }
 
+// Built once from the site's own outlines; Path2D takes SVG path data as-is.
+const CLOUD_PUFFY_PATH = new Path2D(CLOUD_PUFFY);
+const CLOUD_WIDE_PATH = new Path2D(CLOUD_WIDE);
+// The skyline's four-pointed sparkle at unit size, scaled per star rather than rebuilt.
+const SPARKLE_PATH = new Path2D(buildStar(0, 0, 1));
+// The sun's rays and the crescent moon, in the skyline's own coordinates. Both are drawn
+// about CELESTIAL, so the canvas moves that point to wherever the orb sits.
+const SUN_RAY_PATH = new Path2D(SUN_RAYS.join(' '));
+const MOON_DISC_PATH = new Path2D(MOON_PATH);
+
 const HIP_Y = PLAYER_R * 0.6; // hips, below the lens's centre
-const LEG_LEN = 13;
+const LEG_LEN = PLAYER_R * 0.87;
 const STRIDE = 1; // radians either side of straight down, at the top of the swing
+/** Everything drawn on the lens is a fraction of its radius, so it scales as one piece. */
+const LINE = PLAYER_R * 0.22;
 // Centre of the lens to the ground when standing. The physics tracks the feet, so the
 // body is drawn this far above them and the whole character clears an obstacle together.
 const FOOT_DROP = HIP_Y + LEG_LEN;
@@ -116,13 +145,14 @@ function drawLeg(
   const footX = hipX + Math.sin(angle) * LEG_LEN;
   const footY = hipY + Math.cos(angle) * LEG_LEN;
   c.strokeStyle = p.navy;
-  c.lineWidth = 3.4;
+  c.lineWidth = LINE;
   c.lineCap = 'round';
   c.lineJoin = 'round';
   c.beginPath();
   c.moveTo(hipX, hipY);
   c.lineTo(footX, footY);
-  c.lineTo(footX + 4.5, footY); // a little foot, pointing the way it is going
+  // a little foot, pointing the way it is going
+  c.lineTo(footX + PLAYER_R * 0.3, footY);
   c.stroke();
 }
 
@@ -180,23 +210,24 @@ function drawEyes(
   // Above the flag's red bar, not across it: sitting on the bar, white eyes on red read as
   // part of the pattern rather than as a face.
   const y = -PLAYER_R * 0.34;
-  const r = airborne ? 3.4 : 3;
+  const r = PLAYER_R * (airborne ? 0.227 : 0.2);
+  const cross = PLAYER_R * 0.147;
   for (const x of [-PLAYER_R * 0.3, PLAYER_R * 0.34]) {
     if (over) {
       c.strokeStyle = '#12203f';
-      c.lineWidth = 1.6;
+      c.lineWidth = LINE * 0.47;
       c.lineCap = 'round';
       c.beginPath();
-      c.moveTo(x - 2.2, y - 2.2);
-      c.lineTo(x + 2.2, y + 2.2);
-      c.moveTo(x + 2.2, y - 2.2);
-      c.lineTo(x - 2.2, y + 2.2);
+      c.moveTo(x - cross, y - cross);
+      c.lineTo(x + cross, y + cross);
+      c.moveTo(x + cross, y - cross);
+      c.lineTo(x - cross, y + cross);
       c.stroke();
       continue;
     }
     if (blinking) {
       c.strokeStyle = '#12203f';
-      c.lineWidth = 1.6;
+      c.lineWidth = LINE * 0.47;
       c.lineCap = 'round';
       c.beginPath();
       c.moveTo(x - r * 0.8, y);
@@ -210,7 +241,7 @@ function drawEyes(
     c.fill();
     // A hairline rim, so a white eye still has an edge where it lands on the flag's white.
     c.strokeStyle = 'rgba(18,32,63,0.45)';
-    c.lineWidth = 0.7;
+    c.lineWidth = LINE * 0.2;
     c.stroke();
     c.fillStyle = '#12203f';
     c.beginPath();
@@ -250,7 +281,9 @@ function drawLens(
   const swing = pose.running && !pose.airborne ? Math.sin(pose.phase) : 0;
   // A stride's worth of bob, at twice the leg rate: two steps per cycle, one dip each.
   const bob =
-    pose.airborne || !pose.running ? 0 : Math.abs(Math.cos(pose.phase)) * 1.5;
+    pose.airborne || !pose.running
+      ? 0
+      : Math.abs(Math.cos(pose.phase)) * PLAYER_R * 0.1;
 
   c.save();
   c.translate(cx, cy - bob);
@@ -269,7 +302,7 @@ function drawLens(
   const handX = Math.cos(arm) * reach;
   const handY = Math.sin(arm) * reach;
   c.strokeStyle = p.navy;
-  c.lineWidth = 4;
+  c.lineWidth = LINE * 1.18;
   c.lineCap = 'round';
   c.beginPath();
   c.moveTo(Math.cos(arm) * PLAYER_R * 0.7, Math.sin(arm) * PLAYER_R * 0.7);
@@ -277,7 +310,7 @@ function drawLens(
   c.stroke();
   c.fillStyle = p.navy;
   c.beginPath();
-  c.arc(handX, handY, 3.4, 0, Math.PI * 2);
+  c.arc(handX, handY, PLAYER_R * 0.227, 0, Math.PI * 2);
   c.fill();
 
   c.beginPath();
@@ -297,49 +330,53 @@ const BUS_BAND = '#f3ece1';
 const BUS_GLASS = '#cfe0f5';
 const BUS_TYRE = '#15161c';
 
-/** The double-decker: two rows of glass, a cream band between the decks, and wheels on the road. */
+/**
+ * The double-decker: two rows of glass, a cream band between the decks, and wheels on the
+ * road. Every measurement is a multiple of `u`, the bus's own height over the 25 units it
+ * was drawn at, so it holds together at whatever size the run asks for.
+ */
 function drawBus(c: CanvasRenderingContext2D, o: Obstacle): void {
+  const u = o.h / 25;
   const top = GROUND_Y - o.h;
-  const wheelR = 3.2;
+  const wheelR = 3.2 * u;
   const bodyH = o.h - wheelR; // the body rides above the axles
-  const r = 3;
 
   c.fillStyle = BUS_BODY;
   c.beginPath();
-  c.roundRect(o.x, top, o.w, bodyH, r);
+  c.roundRect(o.x, top, o.w, bodyH, 3 * u);
   c.fill();
 
   // Cream band on the deck line, which is what makes it read as a double-decker rather
   // than a red box.
   const deck = top + bodyH * 0.5;
   c.fillStyle = BUS_BAND;
-  c.fillRect(o.x, deck - 1.2, o.w, 2.4);
+  c.fillRect(o.x, deck - 1.2 * u, o.w, 2.4 * u);
 
   // Upper deck: a run of windows, with the front one wrapped round the nose.
   c.fillStyle = BUS_GLASS;
-  const upperY = top + 3.5;
-  const upperH = bodyH * 0.5 - 6;
-  c.fillRect(o.x + 2.5, upperY, 7, upperH); // windscreen
-  for (let x = o.x + 12; x < o.x + o.w - 4; x += 8) {
-    c.fillRect(x, upperY, 5.5, upperH);
+  const upperY = top + 3.5 * u;
+  const upperH = bodyH * 0.5 - 6 * u;
+  c.fillRect(o.x + 2.5 * u, upperY, 7 * u, upperH); // windscreen
+  for (let x = o.x + 12 * u; x < o.x + o.w - 4 * u; x += 8 * u) {
+    c.fillRect(x, upperY, 5.5 * u, upperH);
   }
 
   // Lower deck: windscreen, then windows, then the open platform at the back.
-  const lowerY = deck + 2.4;
-  const lowerH = bodyH * 0.5 - 6;
-  c.fillRect(o.x + 2.5, lowerY, 8, lowerH);
-  for (let x = o.x + 13; x < o.x + o.w - 8; x += 8) {
-    c.fillRect(x, lowerY, 5.5, lowerH);
+  const lowerY = deck + 2.4 * u;
+  const lowerH = bodyH * 0.5 - 6 * u;
+  c.fillRect(o.x + 2.5 * u, lowerY, 8 * u, lowerH);
+  for (let x = o.x + 13 * u; x < o.x + o.w - 8 * u; x += 8 * u) {
+    c.fillRect(x, lowerY, 5.5 * u, lowerH);
   }
   c.fillStyle = BUS_SHADE;
-  c.fillRect(o.x + o.w - 6.5, lowerY, 4.5, lowerH); // the rear platform, in shadow
+  c.fillRect(o.x + o.w - 6.5 * u, lowerY, 4.5 * u, lowerH); // rear platform, in shadow
 
   // Destination blind over the windscreen, and a headlight below it.
   c.fillStyle = BUS_BAND;
-  c.fillRect(o.x + 2.5, top + 1.2, 9, 2);
+  c.fillRect(o.x + 2.5 * u, top + 1.2 * u, 9 * u, 2 * u);
   c.fillStyle = '#ffe9b0';
   c.beginPath();
-  c.arc(o.x + 3, GROUND_Y - wheelR - 2.5, 1.3, 0, Math.PI * 2);
+  c.arc(o.x + 3 * u, GROUND_Y - wheelR - 2.5 * u, 1.3 * u, 0, Math.PI * 2);
   c.fill();
 
   // Resting on the road rather than sunk through it: the ground line is drawn at
@@ -347,59 +384,8 @@ function drawBus(c: CanvasRenderingContext2D, o: Obstacle): void {
   c.fillStyle = BUS_TYRE;
   for (const wx of [o.x + o.w * 0.22, o.x + o.w * 0.78]) {
     c.beginPath();
-    c.arc(wx, GROUND_Y - wheelR - 0.8, wheelR, 0, Math.PI * 2);
+    c.arc(wx, GROUND_Y - wheelR - 0.8 * u, wheelR, 0, Math.PI * 2);
     c.fill();
-  }
-}
-
-/** One building: a silhouette with a lit top edge, a window grid, and something on the roof. */
-function drawBuilding(
-  c: CanvasRenderingContext2D,
-  o: Obstacle,
-  p: Palette,
-): void {
-  const top = GROUND_Y - o.h;
-  c.fillStyle = p.wall;
-  c.fillRect(o.x, top, o.w, o.h);
-  c.fillStyle = p.wallTop;
-  c.fillRect(o.x, top, o.w, 1.5); // the parapet catching the light
-
-  if (o.roof === 1) {
-    // A mast with a beacon on it.
-    const mx = Math.round(o.x + o.w / 2);
-    c.strokeStyle = p.wallTop;
-    c.lineWidth = 1.5;
-    c.beginPath();
-    c.moveTo(mx, top);
-    c.lineTo(mx, top - 9);
-    c.stroke();
-    c.fillStyle = p.beacon;
-    c.beginPath();
-    c.arc(mx, top - 10.5, 1.6, 0, Math.PI * 2);
-    c.fill();
-  } else if (o.roof === 2) {
-    // A stepped setback with a water tank on it.
-    const bw = Math.max(8, o.w * 0.45);
-    const bx = o.x + (o.w - bw) / 2;
-    c.fillStyle = p.wall;
-    c.fillRect(bx, top - 7, bw, 7);
-    c.fillStyle = p.wallTop;
-    c.fillRect(bx, top - 7, bw, 1.5);
-    c.fillRect(bx + bw * 0.3, top - 11, bw * 0.4, 4);
-  }
-
-  // Windows. The lit pattern is derived from the building's own dimensions, so it holds
-  // steady as it scrolls instead of flickering a new arrangement every frame.
-  const cols = Math.max(1, Math.floor((o.w - 5) / 8));
-  const rows = o.lights;
-  for (let row = 0; row < rows; row++) {
-    const y = top + 6 + row * 10;
-    if (y > GROUND_Y - 6) break;
-    for (let col = 0; col < cols; col++) {
-      const lit = (row * 31 + col * 17 + o.w * 7 + o.h) % 5 < 2;
-      c.fillStyle = lit ? p.windowLit : p.window;
-      c.fillRect(o.x + 4 + col * 8, y, 3.5, 4.5);
-    }
   }
 }
 
@@ -413,29 +399,26 @@ function drawStars(
   now: number,
 ): void {
   const drift = dist * 0.05;
+  c.fillStyle = p.sky;
   for (const s of stars) {
     const x = (((s.x * width - drift) % width) + width) % width;
     const y = 8 + s.y * SKY_BAND;
     // Each star breathes on its own clock; the amplitude is small enough to read as air.
     const twinkle = 0.55 + 0.45 * Math.sin(now / 900 + s.phase);
     c.globalAlpha = twinkle * (s.bright ? 1 : 0.7);
-    c.fillStyle = p.sky;
+    if (s.bright) {
+      // The footer's four-pointed sparkle, which is what separates the bright few from
+      // the dots. Same shape the skyline blinks into its own night sky.
+      c.save();
+      c.translate(x, y);
+      c.scale(s.r * 3.4, s.r * 3.4);
+      c.fill(SPARKLE_PATH);
+      c.restore();
+      continue;
+    }
     c.beginPath();
     c.arc(x, y, s.r, 0, Math.PI * 2);
     c.fill();
-    if (s.bright) {
-      // A short cross of light, which is what separates the bright few from the dots.
-      c.strokeStyle = p.sky;
-      c.lineWidth = 0.6;
-      c.globalAlpha = twinkle * 0.5;
-      const arm = s.r * 3;
-      c.beginPath();
-      c.moveTo(x - arm, y);
-      c.lineTo(x + arm, y);
-      c.moveTo(x, y - arm);
-      c.lineTo(x, y + arm);
-      c.stroke();
-    }
   }
   c.globalAlpha = 1;
 }
@@ -450,56 +433,70 @@ function drawClouds(
 ): void {
   const drift = dist * 0.08;
   c.fillStyle = p.cloud;
+  c.strokeStyle = p.cloudLine;
+  c.lineJoin = 'round';
   for (const cloud of clouds) {
     const x = (((cloud.x * width - drift) % width) + width) % width;
-    const y = 14 + cloud.y * (SKY_BAND * 0.7);
-    // Every puff into one path and one fill: filling them separately builds the alpha up
-    // where they overlap, and a translucent cloud comes out with seams across it.
-    c.beginPath();
-    for (const puff of cloud.puffs) {
-      const px = x + puff.dx * cloud.scale;
-      const py = y + puff.dy * cloud.scale;
-      c.moveTo(px + puff.r * cloud.scale * 0.6, py);
-      c.arc(px, py, puff.r * cloud.scale * 0.6, 0, Math.PI * 2);
-    }
-    c.fill();
+    const y = 14 + cloud.y * (SKY_BAND * 0.6);
+    c.save();
+    c.translate(x, y);
+    c.scale(cloud.scale, cloud.scale);
+    // Undo the scale on the stroke, the way the skyline does, so every cloud is outlined
+    // at the same weight however big it is.
+    c.lineWidth = 2 / cloud.scale;
+    const path = cloud.wide ? CLOUD_WIDE_PATH : CLOUD_PUFFY_PATH;
+    c.fill(path);
+    c.stroke(path);
+    c.restore();
   }
 }
 
-/** The moon or the sun, whichever the theme calls for, parked in the upper right. */
+/**
+ * The moon or the sun, whichever the theme calls for, parked in the upper right — the
+ * footer's own rayed sun and crescent moon, which are drawn about CELESTIAL in skyline
+ * units and so get moved and scaled into place here.
+ */
 function drawOrb(
   c: CanvasRenderingContext2D,
   p: Palette,
   width: number,
   dark: boolean,
 ): void {
-  const cx = width - 110;
+  const cx = width - 150;
   // Sat low enough that its glow clears the score along the top edge, which it used to
   // wash straight through.
-  const cy = 64;
-  const r = 15;
-  // A gradient, not a flat disc: a translucent circle at a fixed alpha has a hard edge and
-  // reads as a grey plate behind the moon rather than as light coming off it.
-  const glow = c.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 2.8);
-  glow.addColorStop(0, p.orbGlow);
-  glow.addColorStop(1, 'rgba(0,0,0,0)');
-  c.fillStyle = glow;
-  c.beginPath();
-  c.arc(cx, cy, r * 2.8, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = p.orb;
-  if (!dark) {
+  const cy = 96;
+  const r = 26;
+  if (p.orbGlow) {
+    // A gradient, not a flat disc: a translucent circle at a fixed alpha has a hard edge
+    // and reads as a grey plate behind the moon rather than as light coming off it.
+    const glow = c.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 3.2);
+    glow.addColorStop(0, p.orbGlow);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = glow;
     c.beginPath();
-    c.arc(cx, cy, r, 0, Math.PI * 2);
+    c.arc(cx, cy, r * 3.2, 0, Math.PI * 2);
     c.fill();
-    return;
   }
-  // A crescent: the disc, with a second arc swung back across it to bite the lit side out.
-  c.beginPath();
-  c.arc(cx, cy, r, Math.PI * 0.42, Math.PI * 1.58);
-  c.arc(cx + r * 0.52, cy, r * 0.92, Math.PI * 1.42, Math.PI * 0.58, true);
-  c.closePath();
-  c.fill();
+
+  const s = r / SUN_R;
+  c.save();
+  c.translate(cx, cy);
+  c.scale(s, s);
+  c.translate(-CELESTIAL.cx, -CELESTIAL.cy);
+  c.fillStyle = p.orb;
+  if (dark) {
+    c.fill(MOON_DISC_PATH);
+  } else {
+    c.beginPath();
+    c.arc(CELESTIAL.cx, CELESTIAL.cy, SUN_R, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = p.orb;
+    c.lineWidth = 2 / s; // the skyline's own stroke weight, held at screen size
+    c.lineCap = 'round';
+    c.stroke(SUN_RAY_PATH);
+  }
+  c.restore();
 }
 
 export interface RunnerCanvasProps {
@@ -575,10 +572,20 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     let last = performance.now();
     let cssWidth = 0;
     const p = palette(dark);
+    const landmarks: LandmarkPaint = landmarkPaint(dark);
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
       cssWidth = Math.max(320, Math.round(canvas.clientWidth));
+      HEIGHT = Math.max(260, Math.round(canvas.clientHeight));
+      GROUND_Y = Math.max(140, HEIGHT - ROAD_DEPTH);
+      SKY_BAND = GROUND_Y - 26;
+      // Published so the status line can sit centred in the ground band without a second
+      // copy of this number in the stylesheet.
+      document.documentElement.style.setProperty(
+        '--game-ground',
+        `${HEIGHT - GROUND_Y}px`,
+      );
       canvas.width = Math.round(cssWidth * dpr);
       canvas.height = Math.round(HEIGHT * dpr);
       c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -595,20 +602,22 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       if (dark) drawStars(c, p, skyRef.current.stars, cssWidth, s.dist, now);
       else drawClouds(c, p, skyRef.current.clouds, cssWidth, s.dist);
 
-      // Ground: dashes that scroll, which is what actually sells the speed.
-      c.strokeStyle = p.line;
-      c.lineWidth = 2;
-      c.setLineDash([12, 10]);
-      c.lineDashOffset = -(s.dist % 22);
+      // The ground, styled as the site footer is: its border-top as a hairline running the
+      // full width, with its translucent panel continuing below to the bottom of the
+      // screen. The footer has no road markings and neither does this — the landmarks
+      // going past are what carry the speed.
+      c.fillStyle = p.groundFill;
+      c.fillRect(0, GROUND_Y + 1, cssWidth, HEIGHT - GROUND_Y - 1);
+      c.strokeStyle = p.groundLine;
+      c.lineWidth = 1;
       c.beginPath();
-      c.moveTo(0, GROUND_Y + 1);
-      c.lineTo(cssWidth, GROUND_Y + 1);
+      c.moveTo(0, GROUND_Y + 0.5);
+      c.lineTo(cssWidth, GROUND_Y + 0.5);
       c.stroke();
-      c.setLineDash([]);
 
       for (const o of s.obstacles) {
         if (o.kind === 'bus') drawBus(c, o);
-        else drawBuilding(c, o, p);
+        else drawLandmark(c, o.kind, o.x, GROUND_Y, o.h, landmarks);
       }
       drawLens(c, PLAYER_X, GROUND_Y - s.y - FOOT_DROP, p, {
         phase: s.dist / 16, // a stride per ~100px, so the legs keep up as it speeds up
@@ -619,27 +628,35 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
         blinking: !s.over && now % 4200 < 120,
       });
 
+      // Inset from the corner rather than tucked into it — flush against the edges it read
+      // as clipped. The gap between the two is wide enough for five digits plus air.
       const score = runnerScore(s);
-      c.font = '500 12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      c.font = '500 15px ui-monospace, SFMono-Regular, Menlo, monospace';
       c.textAlign = 'right';
       c.fillStyle = p.dim;
       const best = Math.max(bestRef.current, score);
-      c.fillText(`HI ${String(best).padStart(5, '0')}`, cssWidth - 74, 13);
-      c.fillStyle = p.score;
-      c.fillText(String(score).padStart(5, '0'), cssWidth - 4, 13);
+      c.fillText(`HI ${String(best).padStart(5, '0')}`, cssWidth - 122, 34);
+      // The live score in the brand red, so the number that is moving is the one that
+      // catches the eye; the best stays in the same ink as the rest of the furniture.
+      c.fillStyle = p.red;
+      c.fillText(String(score).padStart(5, '0'), cssWidth - 28, 34);
 
       // The prompt lives on the canvas rather than beside it, so the screen stays one
-      // picture and one line of status underneath.
+      // picture and one line of status underneath. Dead centre of the window: the sky is
+      // empty there in both themes — clear of the ink sweep above and the ground below —
+      // and it is the one thing on this screen the player has to act on.
       if (!s.started || s.over) {
         c.font =
-          '400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          '500 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
         c.textAlign = 'center';
+        c.textBaseline = 'middle';
         c.fillStyle = p.dim;
         c.fillText(
           s.over ? 'Press Space to play again' : 'Press Space to play',
           cssWidth / 2,
-          GROUND_Y - 58,
+          HEIGHT / 2,
         );
+        c.textBaseline = 'alphabetic';
       }
     };
 
@@ -672,11 +689,11 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
   useEffect(() => closeSound, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="runner-canvas"
-      style={{ height: HEIGHT }}
-      onPointerDown={press}
-    />
+    <>
+      {/* Behind the canvas, which is drawn on a transparent ground so the ink shows
+          through it — the sky is painted, the city and the runner are not. */}
+      <InkSky dark={dark} />
+      <canvas ref={canvasRef} className="runner-canvas" onPointerDown={press} />
+    </>
   );
 }

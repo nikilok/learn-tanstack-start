@@ -23,7 +23,12 @@ import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
-import { bypassPaths, rollUp, unreachable } from './reachability';
+import {
+  blockedFirstParty,
+  bypassPaths,
+  rollUp,
+  unreachable,
+} from './reachability';
 import { trustedRules } from './rule-integrity';
 import { isRecoverableRule } from './rule-names';
 import { type Window, rollingWindow } from './time-window';
@@ -944,15 +949,24 @@ async function reachabilityOrError(
   try {
     const { rules } = await import('./rules');
     const { ctx } = makeCtx(creds, window);
-    const resp = await metrics(ctx, ['requestPath', 'wafAction'], {
-      limit: GROUP_CAP,
-    });
+    // The agent dimension costs nothing here and is what separates a path nobody can reach
+    // from a path one client cannot — the second is invisible to a served/mitigated ratio.
+    const resp = await metrics(
+      ctx,
+      ['requestPath', 'clientUserAgent', 'wafAction'],
+      { limit: GROUP_CAP },
+    );
     const rows = (resp.summary ?? resp.data ?? []).map((r: Row) => ({
       path: String(r['requestPath'] ?? ''),
+      agent: String(r['clientUserAgent'] ?? ''),
       action: String(r['wafAction'] ?? ''),
       count: countOf(r),
     }));
-    return unreachable(rollUp(rows, bypassPaths(rules)));
+    const paths = bypassPaths(rules);
+    return [
+      ...unreachable(rollUp(rows, paths)),
+      ...blockedFirstParty(rows, paths),
+    ];
   } catch (e) {
     errors.push(`reachability check failed: ${errMsg(e)}`);
     return [];

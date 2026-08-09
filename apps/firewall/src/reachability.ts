@@ -19,6 +19,19 @@ const SERVED = new Set(['allow', 'bypass', 'log']);
 
 export type PathRow = { path: string; action: string; count: number };
 export type Reach = { prefix: string; served: number; mitigated: number };
+export type ClientRow = PathRow & { agent: string };
+
+/**
+ * User-agent tokens belonging to clients we ship.
+ *
+ * `electron-builder` is electron-updater's own, and `SponsorSearchDesktop` is appended by the
+ * app (see apps/desktop/src/main/site.ts). Substring, because the app's carries a version.
+ *
+ * A user-agent is a string the caller picks, which is why nothing is AUTHORISED on this list.
+ * It is only read to decide whether to raise an alarm, so the worst a spoofer achieves is a
+ * false one — the reverse trade to using it as a bypass condition, where they would gain entry.
+ */
+export const FIRST_PARTY_AGENTS = ['electron-builder', 'SponsorSearchDesktop'];
 
 /**
  * The paths our own bypass rules exempt.
@@ -70,4 +83,42 @@ export function unreachable(
       (r) =>
         `${r.prefix} — ${r.mitigated} requests, none served. A bypassed path answering only mitigations means its caller cannot get through, and it cannot tell you so.`,
     );
+}
+
+/**
+ * Requests from a client we ship that were mitigated on a path we exempt.
+ *
+ * The gap this closes: `unreachable` above is binary, and any traffic getting through silences
+ * it. That is right for a public path — a refused scraper on /robots.txt is the system working
+ * — and wrong here, where a rule denying one fingerprint, network or country stops those users
+ * updating while everyone else keeps the served count above zero.
+ *
+ * No path can distinguish the two, so this asks about the CLIENT instead: our own updater
+ * cannot answer a challenge, so any mitigation of it is a user who silently stopped receiving
+ * releases, whatever else on that path succeeded.
+ */
+export function blockedFirstParty(
+  rows: readonly ClientRow[],
+  prefixes: readonly string[],
+  opts: { agents?: readonly string[]; min?: number } = {},
+): string[] {
+  const agents = opts.agents ?? FIRST_PARTY_AGENTS;
+  const min = Math.max(1, opts.min ?? 1);
+  const hit = new Map<string, number>();
+  for (const r of rows) {
+    if (SERVED.has(r.action)) continue;
+    const prefix = prefixes.find((p) => r.path.startsWith(p));
+    if (!prefix) continue;
+    const agent = agents.find((a) => r.agent.includes(a));
+    if (!agent) continue;
+    const key = `${prefix}\u0000${agent}\u0000${r.action}`;
+    hit.set(key, (hit.get(key) ?? 0) + r.count);
+  }
+  return [...hit]
+    .filter(([, n]) => n >= min)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => {
+      const [prefix, agent, action] = key.split('\u0000');
+      return `${prefix} — ${n} request(s) from ${agent} were ${action}d. A client we ship cannot answer one, so those users stop updating and nothing tells them.`;
+    });
 }

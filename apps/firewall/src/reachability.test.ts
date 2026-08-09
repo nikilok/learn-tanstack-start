@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   MIN_REQUESTS,
   type PathRow,
+  blockedFirstParty,
   bypassPaths,
   rollUp,
   unreachable,
@@ -125,5 +126,92 @@ describe('unreachable', () => {
     expect(unreachable([{ prefix: '/p', served: 0, mitigated: 0 }], 0)).toEqual(
       [],
     );
+  });
+});
+
+describe('blockedFirstParty', () => {
+  const P = ['/downloads/latest/'];
+  const row = (
+    agent: string,
+    action: string,
+    count: number,
+    path = '/downloads/latest/latest.yml',
+  ) => ({ path, agent, action, count });
+
+  test('the case unreachable cannot see: served traffic beside a blocked client', () => {
+    // The real shape, measured live: 27 served on the prefix and 4 updater requests
+    // challenged. unreachable() reads that as quiet, because something got through.
+    const rows = [
+      row('electron-builder', 'bypass', 27),
+      row('electron-builder', 'challenge', 4),
+    ];
+    expect(unreachable(rollUp(rows, P))).toEqual([]);
+    const out = blockedFirstParty(rows, P);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('electron-builder');
+    expect(out[0]).toContain('4');
+  });
+
+  test('the app itself counts, version and all', () => {
+    // Its UA carries a version, so the match has to be a substring.
+    const out = blockedFirstParty(
+      [row('Mozilla/5.0 ... SponsorSearchDesktop/0.5.0', 'deny', 3)],
+      P,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('SponsorSearchDesktop');
+  });
+
+  test('a third-party client being refused is not our problem', () => {
+    expect(blockedFirstParty([row('SomeScraper/1.0', 'deny', 500)], P)).toEqual(
+      [],
+    );
+  });
+
+  test('served first-party traffic raises nothing', () => {
+    expect(
+      blockedFirstParty(
+        [row('electron-builder', 'bypass', 40), row('x', 'allow', 9)],
+        P,
+      ),
+    ).toEqual([]);
+  });
+
+  test('only on paths we exempt', () => {
+    // Our own app being challenged on the site itself is the challenge tier working.
+    expect(
+      blockedFirstParty(
+        [row('SponsorSearchDesktop/0.5.0', 'challenge', 20, '/company/abc')],
+        P,
+      ),
+    ).toEqual([]);
+  });
+
+  test('counts are summed per client and action, not per path', () => {
+    const out = blockedFirstParty(
+      [
+        row(
+          'electron-builder',
+          'challenge',
+          21,
+          '/downloads/latest/latest.yml',
+        ),
+        row(
+          'electron-builder',
+          'challenge',
+          36,
+          '/downloads/latest/latest-mac.yml',
+        ),
+      ],
+      P,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('57');
+  });
+
+  test('a floor is available for spoof noise, and holds at one', () => {
+    const rows = [row('electron-builder', 'deny', 2)];
+    expect(blockedFirstParty(rows, P, { min: 5 })).toEqual([]);
+    expect(blockedFirstParty(rows, P, { min: 0 })).toHaveLength(1);
   });
 });

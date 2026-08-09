@@ -211,10 +211,10 @@ const policyDocsRule: Rule = {
  * would hand the same bypass to anyone who typed it. This prefix serves only the channel
  * files and the installers they point at, which are public downloads by design.
  *
- * Appended after the denies, which is the right way round rather than a compromise: bypass
- * is terminal and live priority is insertion order, so a denied fingerprint is still refused
- * before it reaches this. Getting past the bot challenge is the problem being solved here;
- * free installer downloads for a known scraper is not.
+ * Ordered after the denies, which is the right way round rather than a compromise: bypass is
+ * terminal, so a denied fingerprint has to be refused before reaching this. Getting a real
+ * updater past the bot challenge is the problem being solved; free installer downloads for a
+ * known scraper is not.
  */
 const desktopUpdaterRule: Rule = {
   name: 'allow-desktop-updater',
@@ -362,10 +362,13 @@ export const rules: Rule[] = [
   // BEFORE the denies: bypass is terminal and live priority is insertion order, so a policy
   // document has to be matched before anything gets a chance to refuse it.
   policyDocsRule,
-  desktopUpdaterRule,
   blockedJa4Rule,
   blockedAsnRule,
   blockedUaRule,
+  // AFTER the denies, and not just documentation: on a config rebuilt from empty this
+  // array IS the live order, and a terminal bypass ahead of them would handed a refused
+  // client the installers. Live today only because applyRule appended it.
+  desktopUpdaterRule,
   // AFTER the denies, and this one is not just documentation. Live priority is insertion order,
   // so a digest on BOTH lists is denied rather than challenged — the human's explicit call beats
   // the machine's cautious one, which is the right way round. enforcementIssues reports the

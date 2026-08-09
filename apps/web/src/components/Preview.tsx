@@ -284,24 +284,20 @@ export default function Preview({
                   className="h-full w-full border-0"
                 />
               ) : null}
-              {/* Launch splash — replica of the shell's, which opens on the site's own dark
-                  ground — the same --bg-page-edge token INITIAL_BG mirrors in
-                  apps/desktop/src/main/index.ts, so this follows the theme the way the
-                  shell does rather than being pinned to its dark value — with the white
-                  wordmark over it. This window advertises the
-                  app, so the two have to stay in lockstep; the colour drifted once already
-                  when the shell moved off #120817 and only the comment was updated. Fades
+              {/* Launch splash — replica of the shell's, on the site's own ground: the
+                  --bg-page-edge token INITIAL_BG mirrors in apps/desktop/src/main/index.ts,
+                  so it follows the theme the way the shell does. The mark takes Logo's own
+                  defaults for the same reason — pinning it white was fine over the old
+                  fixed dark ground and became invisible the moment the ground could be
+                  near-white (1.1:1 against #f4f4f8). This window advertises the app, so the
+                  two have to stay in lockstep; the colour has already drifted once. Fades
                   out over the loaded app. */}
               <div
                 className={`absolute inset-0 flex items-center justify-center bg-(--bg-page-edge) transition-opacity duration-500 ${
                   appVisible ? 'opacity-0' : 'opacity-100'
                 }`}
               >
-                <Logo
-                  className="w-105"
-                  navyColor="#ffffff"
-                  redColor="#ffffff"
-                />
+                <Logo className="w-105" />
               </div>
               <PreviewTitleBar
                 platform={platform}

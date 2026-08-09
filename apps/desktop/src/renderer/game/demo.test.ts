@@ -77,11 +77,15 @@ describe('demoShouldJump', () => {
     // of its stint without crashing, having been shown the bus and everything before it.
     let s: RunnerState = createRunner(1280);
     let frames = 0;
+    // 32-bit throughout: a plain multiply here reaches ~2.3e18, past the point doubles
+    // hold every integer, so the low bits round away and feed more zeros back in each
+    // round until the stream collapses. This test would still pass against a near-constant
+    // source while covering none of the shape and gap variety it is here for.
     const rnd = (() => {
       let seed = 12345;
       return () => {
-        seed = (seed * 1103515245 + 12345) % 2147483648;
-        return seed / 2147483648;
+        seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+        return seed / 4294967296;
       };
     })();
     const score = () => Math.floor(s.dist * SCORE_PER_PX);

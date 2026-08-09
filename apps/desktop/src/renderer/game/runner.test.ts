@@ -190,13 +190,27 @@ describe('pace', () => {
 });
 
 describe('landmarks', () => {
-  test('they scroll in from the right and are dropped past the left edge', () => {
+  test('they scroll in from the right', () => {
     let s = { ...createRunner(600), started: true, nextSpawn: 0 };
     s = stepRunner(s, FRAME, false, NEVER);
     expect(s.obstacles).toHaveLength(1);
     expect(s.obstacles[0]!.x).toBeGreaterThan(500);
-    const scrolled = run(s, 900);
-    expect(scrolled.obstacles.every((o) => o.x + o.w > -50)).toBe(true);
+  });
+
+  test('and are dropped once they are past the left edge', () => {
+    // Starts behind the player and spawns nothing more, so the one obstacle can be watched
+    // all the way off. The earlier version ran head-on into its own obstacle at frame 58
+    // and then asserted the drop filter's own predicate against a frozen state whose
+    // obstacle sat at x=191 — it could not fail, and never saw a drop.
+    const s: RunnerState = {
+      ...createRunner(600),
+      started: true,
+      nextSpawn: Number.POSITIVE_INFINITY,
+      obstacles: [{ x: 100, w: 23, h: 112, kind: 'gherkin' }],
+    };
+    const scrolled = run(s, 300);
+    expect(scrolled.over).toBe(false); // nothing was hit, so it really did scroll
+    expect(scrolled.obstacles).toHaveLength(0);
   });
 
   test('nothing that spawns is too tall to jump, at any point in a run', () => {

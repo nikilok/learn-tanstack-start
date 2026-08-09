@@ -299,7 +299,9 @@ html.screensaver #root {
   font: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--blocked-hover);
+  /* Visible at rest. The hover token sits at 6-8% alpha, which reads as plain text on the
+     one control this screen has, so it could not be found without a pointer sweep. */
+  text-decoration-color: color-mix(in srgb, currentcolor 45%, transparent);
   cursor: pointer;
   pointer-events: auto; /* the one thing in the band that is not click-through */
   transition: text-decoration-color 140ms ease;

@@ -199,6 +199,34 @@ const policyDocsRule: Rule = {
   action: { mitigate: { action: 'bypass' } },
 };
 
+/**
+ * The desktop app's own update channel, which cannot answer a challenge.
+ *
+ * electron-updater is not a browser. It fetches the channel file, and a 429 carrying a
+ * checkpoint page is just a failed check that it reports to nobody — the app stays on the
+ * version it already had and says nothing. Measured over 7 days: 57 update checks, 57
+ * challenged by managed Bot Protection, 0 served, across both the mac and win channels.
+ *
+ * Path-scoped, never user-agent-scoped: a UA is a string the caller picks, so keying on it
+ * would hand the same bypass to anyone who typed it. This prefix serves only the channel
+ * files and the installers they point at, which are public downloads by design.
+ *
+ * Appended after the denies, which is the right way round rather than a compromise: bypass
+ * is terminal and live priority is insertion order, so a denied fingerprint is still refused
+ * before it reaches this. Getting past the bot challenge is the problem being solved here;
+ * free installer downloads for a known scraper is not.
+ */
+const desktopUpdaterRule: Rule = {
+  name: 'allow-desktop-updater',
+  description:
+    'Allow the desktop updater feed (/downloads/latest/) past managed Bot Protection. electron-updater cannot solve a challenge, so a 429 here silently freezes every installed app on its current version.',
+  active: true,
+  conditionGroup: [
+    { conditions: [{ type: 'path', op: 'pre', value: '/downloads/latest/' }] },
+  ],
+  action: { mitigate: { action: 'bypass' } },
+};
+
 const blockedUaRule = denyListRule({
   name: 'deny-scraper-ua',
   description:
@@ -334,6 +362,7 @@ export const rules: Rule[] = [
   // BEFORE the denies: bypass is terminal and live priority is insertion order, so a policy
   // document has to be matched before anything gets a chance to refuse it.
   policyDocsRule,
+  desktopUpdaterRule,
   blockedJa4Rule,
   blockedAsnRule,
   blockedUaRule,

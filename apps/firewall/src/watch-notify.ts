@@ -31,6 +31,7 @@ export function actionableKey(r: WatchReport): string {
       .map((f) => `ban:${f.digest.toLowerCase()}`)
       .sort(),
     ...r.enforcement.map((e) => `enforce:${e}`).sort(),
+    ...r.reachability.map((e) => `reach:${e}`).sort(),
     ...r.errors.map((e) => `error:${e}`).sort(),
     ...(r.truncated && r.fingerprints === 0 ? ['truncated:blind'] : []),
   ].join('|');

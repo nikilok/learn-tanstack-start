@@ -32,6 +32,7 @@ const base: WatchReport = {
   truncated: false,
   findings: [],
   enforcement: [],
+  reachability: [],
   errors: [],
 };
 const ban = (digest: string) => ({
@@ -79,6 +80,12 @@ describe('actionableKey', () => {
 
   test('a broken rule and a failed run are each their own news', () => {
     expect(actionableKey({ ...base, enforcement: ['x'] })).not.toBe('');
+    expect(actionableKey({ ...base, reachability: ['x'] })).not.toBe('');
+    // Distinct keys, or a reachability alarm would be silenced by an enforcement one
+    // already reported with the same text.
+    expect(actionableKey({ ...base, reachability: ['x'] })).not.toBe(
+      actionableKey({ ...base, enforcement: ['x'] }),
+    );
     expect(actionableKey({ ...base, errors: ['y'] })).not.toBe('');
     expect(actionableKey({ ...base, truncated: true })).not.toBe('');
   });

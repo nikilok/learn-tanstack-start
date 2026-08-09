@@ -50,6 +50,12 @@ export interface BlockedOverlay {
   /** Check again now, on the user's say-so. */
   retry(): void;
   isUp(): boolean;
+  /**
+   * True between a check getting through and the returning page painting. The screen is
+   * still up and still `isUp()` throughout, so anything that treats "up" as "nothing more
+   * to detect" has to ask this too — a refusal on the recovery navigation lands here.
+   */
+  handingBack(): boolean;
   /** The screen's renderer reporting it has a frame up; no-op for any other view. */
   markPainted(wc: WebContents): void;
   /**
@@ -166,10 +172,11 @@ export function createBlockedOverlay(
       if (probeStillDenied(res.status, res.headers.get('x-vercel-mitigated'))) {
         return 'blocked';
       }
-      // A 5xx answers the connection but not the request. Handing the window back now
-      // would swap this screen — countdown, retry and all — for a bare platform error
-      // page with no way off it, so keep waiting instead.
-      return res.status >= 500 ? 'unreachable' : null;
+      // A 5xx answers the connection but not the request, and a 404 on the app's own entry
+      // point means whatever is answering is not the app. Handing the window back to either
+      // would swap this screen — countdown, retry and all — for a bare error page with no
+      // way off it, so keep waiting instead.
+      return res.status >= 500 || res.status === 404 ? 'unreachable' : null;
     } catch {
       return net.isOnline() ? 'unreachable' : 'offline'; // no answer, or none in time
     }
@@ -193,9 +200,12 @@ export function createBlockedOverlay(
       return;
     }
     if (reason !== state.reason) {
-      // It changed under us (a refusal became an outage, or the other way round): say so,
-      // and start that reason's schedule from the top rather than inheriting a long wait.
-      attempt = 0;
+      // It changed under us: say so. A refusal and an outage are different kinds of wait,
+      // so crossing between them starts the new schedule from the top rather than
+      // inheriting a long one. Drifting between the two outage flavours does NOT — a flaky
+      // connection alternating between them would otherwise reset the backoff on every
+      // check and hammer the probe at its first step for as long as the flapping lasted.
+      if (reason === 'blocked' || state.reason === 'blocked') attempt = 0;
       state = { ...state, reason };
       opts.onShow(reason);
     } else if (!manual) {
@@ -213,6 +223,9 @@ export function createBlockedOverlay(
     if (!state) return;
     state = null;
     push();
+    // Clearing the state empties the screen's React tree, so whatever it had on it is
+    // gone. Anything waiting on the next showing has to wait for a real frame again.
+    painted = false;
     view?.setVisible(false);
     opts.onHide();
   }
@@ -243,6 +256,7 @@ export function createBlockedOverlay(
       void runProbe(true);
     },
     isUp: () => state !== null,
+    handingBack: () => handingBack,
     markPainted(wc) {
       if (wc !== view?.webContents || painted) return;
       painted = true;
@@ -285,6 +299,14 @@ export function createBlockedOverlay(
       if (timer) clearTimeout(timer);
       timer = null;
       state = null;
+      // Dropping the reference alone left the renderer resident for the life of the app —
+      // one leaked process per window that ever saw this screen.
+      if (view) {
+        const parent = opts.parent();
+        if (parent && !parent.isDestroyed())
+          parent.contentView.removeChildView(view);
+        if (!view.webContents.isDestroyed()) view.webContents.close();
+      }
       view = null;
       painted = false;
       frameLive = false;

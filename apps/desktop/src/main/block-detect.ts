@@ -30,11 +30,10 @@ function header(
 }
 
 /**
- * True when the edge refused this response outright.
+ * True when this response was refused rather than served.
  *
- * A challenge is deliberately NOT a refusal: it is solvable by a real browser and this
- * view is one, so covering it would hide the only way back. A 403 on a document counts
- * even without the header, since the app itself never answers a page request that way.
+ * A challenge is deliberately not a refusal: it is solvable by a real browser and this view
+ * is one, so covering it would hide the only way back.
  */
 export function isEdgeDenied(facts: ResponseFacts): boolean {
   if (facts.statusCode !== 403) return false;
@@ -72,10 +71,28 @@ export function isServerError(facts: ResponseFacts): boolean {
 }
 
 /**
- * True when a probe's own response shows we are still being refused.
+ * True when a document came back as "there is nothing here" from something that is not the
+ * app.
  *
- * A challenge arrives as its own status rather than a 403 (measured against production),
- * so it reads as clear here on purpose: the page is a browser and can answer one, which
+ * A 404 is normally a real page — a company slug that no longer exists renders the app's
+ * own not-found, with working navigation — so this cannot key on the status alone. What
+ * separates the two is whether the app has proved it can serve a document at all: the dev
+ * proxy with nothing behind it answers 404 to everything, including the very first load,
+ * and no failure event fires because a 404 with a body is a successful load. `served` is
+ * that proof, and the caller carries it.
+ */
+export function isMissingApp(facts: ResponseFacts, served: boolean): boolean {
+  if (served || facts.resourceType !== 'mainFrame' || facts.statusCode !== 404)
+    return false;
+  return header(facts.responseHeaders, CONTENT_TYPE)
+    .toLowerCase()
+    .startsWith('text/html');
+}
+
+/**
+ * True when a check's own response shows we are still being refused.
+ *
+ * A challenge reads as clear on purpose: the page is a browser and can answer one, which
  * this check cannot.
  */
 export function probeStillDenied(
@@ -85,8 +102,8 @@ export function probeStillDenied(
   return status === 403 && (mitigated ?? '').toLowerCase() !== 'challenge';
 }
 
-// Refusals clear on their own clock, so checking often buys nothing; a dropped connection
-// can come back any second, so those start fast. Both hold at their last step.
+// A dropped connection can come back any second; the other states cannot. Every schedule
+// holds at its last step rather than growing without bound.
 const SCHEDULES: Record<BlockReason, readonly number[]> = {
   blocked: [20_000, 30_000, 45_000, 60_000],
   offline: [2_000, 4_000, 8_000, 15_000, 30_000],

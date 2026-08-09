@@ -39,12 +39,15 @@ export function readSavedThemeMode(): ThemeMode | null {
  */
 export function saveThemeMode(mode: ThemeMode): void {
   if (mode === lastSaved) return;
-  lastSaved = mode;
   try {
     writeFileSync(
       join(app.getPath('userData'), FILE),
       JSON.stringify({ themeMode: mode }),
     );
+    // Only once it is actually on disk. Advancing the memo first meant one failed write
+    // — a full disk, a permissions blip — suppressed every later attempt at the same
+    // value for the rest of the session, and the choice silently never persisted.
+    lastSaved = mode;
   } catch {
     /* not worth surfacing */
   }

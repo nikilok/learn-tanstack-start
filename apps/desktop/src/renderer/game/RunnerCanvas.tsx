@@ -1,6 +1,12 @@
 import { buildStar, CELESTIAL, MOON_PATH, SUN_R, SUN_RAYS } from '@ss/skyline';
 import { useCallback, useEffect, useRef } from 'react';
 
+import {
+  DEMO_AFTER_MS,
+  DEMO_FADE_MS,
+  demoShouldJump,
+  demoStintOver,
+} from './demo';
 import { InkSky } from './InkSky';
 import { drawLandmark, landmarkPaint } from './landmark-draw';
 import type { LandmarkPaint } from './landmark-draw';
@@ -616,6 +622,16 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
   const stateRef = useRef<RunnerState>(createRunner(600));
   const fastFallRef = useRef(false);
   const bestRef = useRef(readBest());
+  // The lens plays itself after a stretch of quiet, and hands straight back on any press.
+  const demoRef = useRef(false);
+  const lastInputRef = useRef(0);
+  const demoRestartRef = useRef(0);
+  // The changeover between demo runs: 'out' while the last one dissolves, 'in' while the
+  // next one arrives. A player's run never fades.
+  const fadeRef = useRef<{ phase: 'none' | 'out' | 'in'; at: number }>({
+    phase: 'none',
+    at: 0,
+  });
   // Generated once and kept in normalised space, so a resize re-uses the same sky.
   const skyRef = useRef({
     stars: makeStars(48, Math.random),
@@ -627,7 +643,19 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
   // second press. The whole game lives in a ref: nothing here needs a re-render, and the
   // frame loop owns the draw.
   const press = useCallback(() => {
+    lastInputRef.current = performance.now();
     const s = stateRef.current;
+    // Taking over from the demo starts a clean run rather than inheriting whatever the
+    // demo had got itself into — nobody wants to be handed a lens mid-air in front of
+    // Tower Bridge, or a score they did not earn.
+    if (demoRef.current) {
+      demoRef.current = false;
+      demoRestartRef.current = 0;
+      fadeRef.current = { phase: 'none', at: 0 };
+      stateRef.current = jump(createRunner(s.width));
+      playJump();
+      return;
+    }
     const next = jump(s.over ? createRunner(s.width) : s);
     stateRef.current = next;
     // `jump` hands back the same object when it declines — mid-air, say — so this is the
@@ -648,6 +676,8 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       ) {
         return;
       }
+      // Any key counts as someone being here, not just the ones the game acts on.
+      lastInputRef.current = performance.now();
       if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
         e.preventDefault();
         press();
@@ -659,11 +689,21 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       if (e.code === 'ArrowDown' || e.code === 'KeyS')
         fastFallRef.current = false;
     };
+    // Down held, then released somewhere else — another view, another app — never sends a
+    // keyup here, and the fast fall stayed on for good: roughly half the apex, so nothing
+    // tall could be cleared again and every run ended on the first tower.
+    const release = () => {
+      fastFallRef.current = false;
+    };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', release);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', release);
+      document.removeEventListener('visibilitychange', release);
     };
   }, [active, press]);
 
@@ -675,6 +715,7 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
 
     let frame = 0;
     let last = performance.now();
+    let lastOpacity = 1;
     let cssWidth = 0;
     const p = palette(dark);
     const landmarks: LandmarkPaint = landmarkPaint(dark);
@@ -700,7 +741,7 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
 
-    const draw = (s: RunnerState, now: number) => {
+    const draw = (s: RunnerState, now: number, demo: boolean) => {
       c.clearRect(0, 0, cssWidth, HEIGHT);
 
       drawOrb(c, p, cssWidth, dark);
@@ -743,7 +784,9 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       c.font = '500 15px ui-monospace, SFMono-Regular, Menlo, monospace';
       c.textAlign = 'right';
       c.fillStyle = p.dim;
-      const best = Math.max(bestRef.current, score);
+      // The best never absorbs a demo run, so it is not maxed against the live score here
+      // either — the number on the right is the demo's, and it is not competing.
+      const best = demo ? bestRef.current : Math.max(bestRef.current, score);
       c.fillText(`HI ${String(best).padStart(5, '0')}`, cssWidth - 122, 34);
       // The live score in the brand red, so the number that is moving is the one that
       // catches the eye; the best stays in the same ink as the rest of the furniture.
@@ -754,14 +797,17 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       // picture and one line of status underneath. Dead centre of the window: the sky is
       // empty there in both themes — clear of the ink sweep above and the ground below —
       // and it is the one thing on this screen the player has to act on.
-      if (!s.started || s.over) {
+      // Shown through the demo too, and that is the point of it: someone watching the lens
+      // play itself has to be told the game is theirs for the taking. Never "again" while
+      // the demo is on — the run that just ended was not theirs.
+      if (!s.started || s.over || demo) {
         c.font =
           '500 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
         c.textAlign = 'center';
         c.textBaseline = 'middle';
         c.fillStyle = p.dim;
         c.fillText(
-          s.over ? 'Press Space to play again' : 'Press Space to play',
+          s.over && !demo ? 'Press Space to play again' : 'Press Space to play',
           cssWidth / 2,
           HEIGHT / 2,
         );
@@ -772,18 +818,80 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     const loop = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
+      if (!lastInputRef.current) lastInputRef.current = now;
       const before = stateRef.current;
-      const next = stepRunner(before, dt, fastFallRef.current, Math.random);
-      stateRef.current = next;
+      let next = stepRunner(before, dt, fastFallRef.current, Math.random);
+
       if (next.over && !before.over) {
-        playCrash();
-        const score = runnerScore(next);
-        if (score > bestRef.current) {
-          bestRef.current = score;
-          writeBest(score);
+        // A demo crash is silent and scores nothing: it is a screen playing to an empty
+        // room, and its runs are not the player's to be measured against.
+        if (!demoRef.current) {
+          playCrash();
+          const crashed = runnerScore(next);
+          if (crashed > bestRef.current) {
+            bestRef.current = crashed;
+            writeBest(crashed);
+          }
         }
       }
-      draw(next, now);
+
+      // Nobody has touched it in a while and it is not mid-run: let it play itself, so the
+      // screen someone is waiting in front of is doing something.
+      if (
+        !demoRef.current &&
+        (!next.started || next.over) &&
+        now - lastInputRef.current > DEMO_AFTER_MS
+      ) {
+        demoRef.current = true;
+        demoRestartRef.current = 0;
+        next = jump(createRunner(next.width));
+      }
+      if (demoRef.current) {
+        const fade = fadeRef.current;
+        if (fade.phase === 'out' && now - fade.at >= DEMO_FADE_MS) {
+          // Gone. Swap in the next run behind the blank and bring it back up.
+          next = jump(createRunner(next.width));
+          fadeRef.current = { phase: 'in', at: now };
+        } else if (fade.phase === 'in' && now - fade.at >= DEMO_FADE_MS) {
+          fadeRef.current = { phase: 'none', at: 0 };
+        } else if (fade.phase === 'none') {
+          if (next.over) {
+            // It got something wrong. A beat to show what happened, then round again.
+            if (!demoRestartRef.current) demoRestartRef.current = now + 1400;
+            else if (now >= demoRestartRef.current) {
+              demoRestartRef.current = 0;
+              next = jump(createRunner(next.width));
+            }
+          } else if (demoStintOver(next)) {
+            // Its stint is up. Bowing out on a fade rather than on a crash: the demo is
+            // not meant to look like it lost, only like it finished.
+            fadeRef.current = { phase: 'out', at: now };
+          } else if (demoShouldJump(next)) {
+            next = jump(next);
+          }
+        } else if (demoShouldJump(next)) {
+          // Still playing properly through the fade in, so it is already up to speed by
+          // the time anyone can see it.
+          next = jump(next);
+        }
+      }
+
+      stateRef.current = next;
+
+      // Applied to the canvas rather than to every draw call: the sky, the ground, the
+      // sweat and the stars all set their own alpha, and an outer globalAlpha would be
+      // clobbered by each of them in turn.
+      const fade = fadeRef.current;
+      const t =
+        fade.phase === 'none' ? 1 : Math.min(1, (now - fade.at) / DEMO_FADE_MS);
+      const opacity =
+        fade.phase === 'out' ? 1 - t : fade.phase === 'in' ? t : 1;
+      if (Math.abs(opacity - lastOpacity) > 0.01 || opacity === 1) {
+        lastOpacity = opacity;
+        canvas.style.opacity = opacity === 1 ? '' : String(opacity);
+      }
+
+      draw(next, now, demoRef.current);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
@@ -791,6 +899,10 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      // A changeover caught mid-fade would otherwise leave the canvas dimmed for whatever
+      // comes back — the theme flips through this effect, and the screen can be re-shown.
+      canvas.style.opacity = '';
+      fadeRef.current = { phase: 'none', at: 0 };
     };
   }, [active, dark]);
 

@@ -16,14 +16,21 @@ const BREATH = '13s';
  * is an feTurbulence displacement, which canvas 2D has no answer to at any sensible cost.
  */
 export function InkSky({ dark }: { dark: boolean }) {
-  // Reduced motion gets the sweep with no filter at all — the still footer sky.
+  // Still — no filter at all, just the footer's own sky — when motion is not wanted, and
+  // when nobody is looking. This screen can be up for many minutes in a window behind
+  // something else, and the displacement map is a full-width raster every frame; there is
+  // nothing to gain from running it for an audience of no one.
   const [still, setStill] = useState(false);
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const sync = () => setStill(query.matches);
+    const sync = () => setStill(query.matches || document.hidden);
     sync();
     query.addEventListener('change', sync);
-    return () => query.removeEventListener('change', sync);
+    document.addEventListener('visibilitychange', sync);
+    return () => {
+      query.removeEventListener('change', sync);
+      document.removeEventListener('visibilitychange', sync);
+    };
   }, []);
 
   // Dark mode has no ink at all, exactly as the footer's sky doesn't.

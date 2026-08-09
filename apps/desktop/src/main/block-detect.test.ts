@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isEdgeDenied,
+  isMissingApp,
   isServerError,
   probeDelayMs,
   probeStillDenied,
@@ -86,8 +87,51 @@ describe('isServerError', () => {
   });
 });
 
+describe('isMissingApp', () => {
+  const page = (statusCode: number, contentType = 'text/html') =>
+    facts({
+      statusCode,
+      resourceType: 'mainFrame',
+      responseHeaders: { 'content-type': [contentType] },
+    });
+
+  test('a 404 before the app has served anything is not the app', () => {
+    // The real one this pins: the dev proxy with nothing behind it answers 404 to every
+    // request including the first, and a 404 with a body is a successful load — no failure
+    // event fires anywhere, so without this the window is handed the proxy's own page.
+    expect(isMissingApp(page(404), false)).toBe(true);
+  });
+
+  test('once the app has served a document, a 404 is its own page', () => {
+    // A company slug that no longer exists renders the app's not-found, with working
+    // navigation. Covering that would take a usable page away — and, because the check
+    // would clear against a healthy root and then reload straight back into the same 404,
+    // it would flip between the two forever.
+    expect(isMissingApp(page(404), true)).toBe(false);
+  });
+
+  test('only documents, and only ones carrying a page', () => {
+    expect(
+      isMissingApp(facts({ statusCode: 404, resourceType: 'xhr' }), false),
+    ).toBe(false);
+    expect(isMissingApp(page(404, 'application/json'), false)).toBe(false);
+    expect(
+      isMissingApp(
+        facts({ statusCode: 404, resourceType: 'mainFrame' }),
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  test("anything that is not a 404 is somebody else's problem", () => {
+    for (const statusCode of [200, 301, 403, 500, 502]) {
+      expect(isMissingApp(page(statusCode), false)).toBe(false);
+    }
+  });
+});
+
 describe('isEdgeDenied', () => {
-  test('a refused RPC is a refusal, on any resource type', () => {
+  test('a refused sub-resource counts, not just a document', () => {
     expect(
       isEdgeDenied(
         facts({
@@ -98,7 +142,7 @@ describe('isEdgeDenied', () => {
     ).toBe(true);
   });
 
-  test('the header is read case-insensitively', () => {
+  test('the marker header is read case-insensitively', () => {
     expect(
       isEdgeDenied(
         facts({
@@ -122,14 +166,14 @@ describe('isEdgeDenied', () => {
     ).toBe(false);
   });
 
-  test('a document 403 counts without the header', () => {
+  test('a refused document counts without the marker', () => {
     expect(
       isEdgeDenied(facts({ statusCode: 403, resourceType: 'mainFrame' })),
     ).toBe(true);
   });
 
-  test('an unmarked 403 on a sub-resource does not count', () => {
-    // The tile proxy passes an upstream 403 straight through, and that is not our edge.
+  test('an unmarked sub-resource refusal does not count', () => {
+    // The tile proxy passes an upstream refusal straight through, and that is not ours.
     expect(
       isEdgeDenied(facts({ statusCode: 403, resourceType: 'image' })),
     ).toBe(false);
@@ -143,8 +187,7 @@ describe('isEdgeDenied', () => {
     }
   });
 
-  test('a challenge on its own status is left alone', () => {
-    // Measured against production: a challenge comes back 429, not 403.
+  test('a challenge is left alone whatever status it arrives on', () => {
     expect(
       isEdgeDenied(
         facts({
@@ -158,7 +201,7 @@ describe('isEdgeDenied', () => {
 });
 
 describe('probeStillDenied', () => {
-  test('403 means still refused', () => {
+  test('a refusal reads as still refused', () => {
     expect(probeStillDenied(403, 'deny')).toBe(true);
     expect(probeStillDenied(403, null)).toBe(true);
   });
@@ -168,8 +211,8 @@ describe('probeStillDenied', () => {
     expect(probeStillDenied(403, 'challenge')).toBe(false);
   });
 
-  test('anything that is not a 403 is clear, errors included', () => {
-    // A 500 means the request reached the app, which is all this is asking.
+  test('anything else is clear, errors included', () => {
+    // An error means the request reached something, which is all this is asking.
     expect(probeStillDenied(200, null)).toBe(false);
     expect(probeStillDenied(500, null)).toBe(false);
   });
@@ -217,7 +260,7 @@ describe('simulatedReason', () => {
 });
 
 describe('probeDelayMs', () => {
-  test('a dropped connection is checked far sooner than a refusal', () => {
+  test('a dropped connection is checked sooner than the other states', () => {
     expect(probeDelayMs('offline', 0)).toBeLessThan(probeDelayMs('blocked', 0));
   });
 

@@ -12,7 +12,12 @@ import {
   WebContentsView,
 } from 'electron';
 
-import { isEdgeDenied, isServerError, simulatedReason } from './block-detect';
+import {
+  isEdgeDenied,
+  isMissingApp,
+  isServerError,
+  simulatedReason,
+} from './block-detect';
 import type { BlockReason } from './block-detect';
 import { createBlockedOverlay } from './blocked-overlay';
 import type { BlockedOverlay } from './blocked-overlay';
@@ -257,6 +262,9 @@ function createWindow(): void {
   const openDark = splashDark();
   const openBg = openDark ? INITIAL_BG.dark : INITIAL_BG.light;
   lastDark = openDark; // until the page reports its own
+  // And the mode alongside it, or the title bar's control opens on `auto` whatever the
+  // user last chose — for the whole session on a launch where the page never loads.
+  lastMode = readSavedThemeMode() ?? 'auto';
 
   // Started before anything else in the window, so its renderer process is not queued
   // behind the site view's and the chrome's — that queue was the whole delay before the
@@ -377,12 +385,21 @@ function createWindow(): void {
         view.webContents.removeListener('dom-ready', settle);
         sitePainted();
         // The screen held focus the whole time it was up; without handing it back, the
-        // page returns with every keybinding dead until the user clicks it.
-        if (!view.webContents.isDestroyed()) view.webContents.focus();
+        // page returns with every keybinding dead until the user clicks it. Via
+        // focusForeground, because a refusal may have cancelled the hand-back while this
+        // was pending — focusing the page unconditionally then left the stand-in screen on
+        // screen with a dead keyboard and no way to reach its retry.
+        focusForeground();
       };
-      // Whatever the outcome — a load that fails puts the screen straight back up, and one
-      // that neither loads nor fails must not leave it covering a live page forever.
-      const backstop = setTimeout(settle, SITE_RETURN_MS);
+      // A load that neither finishes nor fails must not leave the screen covering a live
+      // page forever — but nor may it uncover one that has painted nothing, which is the
+      // same rule the launch path follows. So the backstop puts the screen back up rather
+      // than handing over: `show` cancels the hand-back and re-arms the schedule, and the
+      // `settle` that follows then finds nothing to hand back and does nothing.
+      const backstop = setTimeout(() => {
+        blocked?.show('unreachable');
+        settle();
+      }, SITE_RETURN_MS);
       backstop.unref?.();
       view.webContents.once('dom-ready', settle);
       void view.webContents.loadURL(lastTarget);
@@ -477,6 +494,8 @@ function createWindow(): void {
   // because the refusal watcher below also has to be able to call it.
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
   let revealed = false;
+  // Per window: once the app has served one document here, a later 404 is its own page.
+  let appHasServed = false;
 
   /**
    * Keyboard focus goes to the view in front — the site (not the title bar), so typing
@@ -496,6 +515,10 @@ function createWindow(): void {
     if (revealTimer) clearTimeout(revealTimer);
     revealTimer = null;
     if (win.isDestroyed()) return; // timer/load may fire after a fast window close
+    // Whatever is going to be on screen is ready, so the window may as well be up: without
+    // this its only other triggers are the splash's own mount report and the backstop, and
+    // a splash that never reports would keep a perfectly loaded app hidden until then.
+    showWindow();
     splash.dismiss();
     focusForeground();
   };
@@ -527,10 +550,21 @@ function createWindow(): void {
     { urls: [`${APP_ORIGIN}/*`] },
     (details) => {
       // The session outlives the window, so a request can still land during teardown.
-      if (wc.isDestroyed() || blocked?.isUp()) return;
+      // `isUp()` stays true right through the hand-back — the state is only cleared once
+      // the returning page has painted — so guarding on it alone made this blind to a
+      // refusal on the recovery navigation itself, which is the most likely place to hit
+      // one. `show()` is what decides whether a repeat is worth acting on.
+      if (wc.isDestroyed()) return;
+      // Proof that the app itself can serve a document. Until it has, a 404 is the proxy
+      // or the platform saying it has never heard of us rather than the app saying a page
+      // is gone — see isMissingApp.
+      if (details.resourceType === 'mainFrame' && details.statusCode < 400) {
+        appHasServed = true;
+      }
+      if (blocked?.isUp() && !blocked.handingBack()) return;
       const reason = isEdgeDenied(details)
         ? 'blocked'
-        : isServerError(details)
+        : isServerError(details) || isMissingApp(details, appHasServed)
           ? 'unreachable'
           : null;
       if (!reason) return;
@@ -599,11 +633,14 @@ function registerIpc(): void {
       _event,
       payload: { themeSource?: string; color?: string; mode?: string },
     ) => {
-      // While the stand-in screen is up, whatever document the site view holds is not the
-      // app — a refused navigation commits the edge's own 403 page, which has no theme
-      // colour and no dark class, so the preload reports white. Taking that would repaint
-      // the screen, the window and the chrome in light theme for a dark-theme user.
-      if (blocked?.isUp()) return;
+      // Behind the stand-in screen the site view may be holding an error page rather than
+      // the app. What that corrupts is the reported COLOUR — no theme-color meta and no
+      // dark class, so the preload reads white, and taking it would repaint the window and
+      // the chrome in light theme for a dark-theme user. The mode is read from
+      // same-origin storage and survives such a page intact, so it is still honoured:
+      // dropping it wholesale meant a theme change made on a live page behind a
+      // mid-session block was silently lost.
+      const blindToColour = blocked?.isUp() === true;
       const themeSource = payload?.themeSource;
       if (
         themeSource === 'light' ||
@@ -618,7 +655,11 @@ function registerIpc(): void {
         saveThemeMode(mode); // so the next launch's splash opens on the same ground
       }
       const color = payload?.color;
-      if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
+      if (
+        !blindToColour &&
+        typeof color === 'string' &&
+        /^#[0-9a-fA-F]{6}$/.test(color)
+      ) {
         lastDark = isDarkColor(color);
         mainWindow?.setBackgroundColor(color);
         siteView?.setBackgroundColor(color); // load placeholder; the title bar stays transparent

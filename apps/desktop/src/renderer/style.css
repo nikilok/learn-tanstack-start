@@ -256,12 +256,19 @@ html.screensaver #root {
    game needs that answered immediately — with the retry timing kept quiet underneath. */
 /* Centred in the ground band, the way the site footer's own content sits under its
    skyline. The band's height comes from the canvas (--game-ground, set in resize) so the
-   horizon and this cannot drift apart. */
+   horizon and this cannot drift apart.
+
+   Above the canvas and transparent to the pointer: the canvas is a positioned sibling with
+   a z-index, so it paints over this band and was swallowing every click meant for the retry
+   button. Only the button itself takes pointer events back, so the rest of the band still
+   reaches the game underneath. */
 .blocked-status {
   position: absolute;
   right: 32px;
   bottom: 0;
   left: 32px;
+  z-index: 2;
+  pointer-events: none;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -293,6 +300,7 @@ html.screensaver #root {
   text-underline-offset: 3px;
   text-decoration-color: var(--blocked-hover);
   cursor: pointer;
+  pointer-events: auto; /* the one thing in the band that is not click-through */
   transition: text-decoration-color 140ms ease;
 }
 .blocked-retry:hover:not(:disabled) {

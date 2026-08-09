@@ -39,8 +39,6 @@ function clearRun(): RunnerState {
 function scoreToDist(score: number): number {
   return score / SCORE_PER_PX;
 }
-/** The score at which every obstacle has been unlocked and the pace has topped out. */
-
 /** Every obstacle the run can spawn at that score, by sweeping the shape picker's rnd. */
 function spawnsAt(score: number): RunnerState['obstacles'] {
   const dist = scoreToDist(score);

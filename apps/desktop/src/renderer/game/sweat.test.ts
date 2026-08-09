@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
+import { PLAYER_R } from './runner.ts';
 import { sweatCount, sweatDrops } from './sweat.ts';
 
-const R = 26; // the lens's radius, as the canvas draws it
+const R = PLAYER_R; // the radius the canvas actually passes to sweatDrops
 
 describe('sweatCount', () => {
   test('a fresh run is not sweating', () => {

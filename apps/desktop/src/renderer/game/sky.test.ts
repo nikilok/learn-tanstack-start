@@ -2,11 +2,21 @@ import { describe, expect, test } from 'bun:test';
 
 import { CLOUD_PUFFY, CLOUD_WIDE, makeClouds, makeStars } from './sky.ts';
 
-/** Deterministic stand-in for Math.random, cycling through a fixed spread. */
+/**
+ * Deterministic stand-in for Math.random.
+ *
+ * A short cycling list aliases with the generators under test: a star takes exactly five
+ * values, so a ten-value loop gave every star one of two identities and the variety
+ * assertions below passed against a source that had stopped varying. 32-bit throughout,
+ * because a plain multiply here runs past the point doubles hold every integer and the
+ * stream decays toward a constant.
+ */
 function seeded(): () => number {
-  const values = [0.05, 0.61, 0.27, 0.94, 0.42, 0.78, 0.13, 0.86, 0.35, 0.7];
-  let i = 0;
-  return () => values[i++ % values.length] as number;
+  let seed = 987654321;
+  return () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed / 4294967296;
+  };
 }
 
 describe('makeStars', () => {

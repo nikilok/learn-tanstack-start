@@ -45,7 +45,7 @@ export function InkSky({ dark }: { dark: boolean }) {
    * arrives late. Measured: the displacement sat at exactly 0 for as long as it was
    * sampled, so the sweep was mounted, filtered, and completely still.
    */
-  const runningRef = useRef<SVGAnimationElement[]>([]);
+  const runningRef = useRef<(SVGAnimationElement | null)[]>([]);
   useEffect(() => {
     if (dark || still) return;
     // A frame later, not in the effect itself. The layer has only just been inserted at
@@ -58,8 +58,10 @@ export function InkSky({ dark }: { dark: boolean }) {
     });
     return () => cancelAnimationFrame(id);
   }, [dark, still]);
+  // Null on detach too: dark mode unmounts the whole sweep, and keeping the entries would
+  // hold every removed <animate> alive for as long as the run stays at night.
   const collect = (el: SVGElement | null, i: number) => {
-    if (el) runningRef.current[i] = el as SVGAnimationElement;
+    runningRef.current[i] = el as SVGAnimationElement | null;
   };
 
   // Dark mode has no ink at all, exactly as the footer's sky doesn't.

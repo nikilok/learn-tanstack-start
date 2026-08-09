@@ -26,6 +26,11 @@ const VIEWS = {
   blocked: BlockedScreen,
 } as const;
 if (root) {
-  const View = VIEWS[role as keyof typeof VIEWS] ?? TitleBar;
+  // Own keys only: a bare lookup reaches inherited ones, so `?role=constructor` resolves
+  // to Object and render() throws instead of falling back to the bar.
+  const View =
+    role && Object.hasOwn(VIEWS, role)
+      ? VIEWS[role as keyof typeof VIEWS]
+      : TitleBar;
   createRoot(root).render(<View />);
 }

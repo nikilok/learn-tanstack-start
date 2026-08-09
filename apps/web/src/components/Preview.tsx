@@ -285,13 +285,15 @@ export default function Preview({
                 />
               ) : null}
               {/* Launch splash — replica of the shell's, which opens on the site's own dark
-                  ground (INITIAL_BG.dark in apps/desktop/src/main/index.ts, --bg-page-edge
-                  in styles.css) with the white wordmark over it. This window advertises the
+                  ground — the same --bg-page-edge token INITIAL_BG mirrors in
+                  apps/desktop/src/main/index.ts, so this follows the theme the way the
+                  shell does rather than being pinned to its dark value — with the white
+                  wordmark over it. This window advertises the
                   app, so the two have to stay in lockstep; the colour drifted once already
                   when the shell moved off #120817 and only the comment was updated. Fades
                   out over the loaded app. */}
               <div
-                className={`absolute inset-0 flex items-center justify-center bg-[#0a0a0a] transition-opacity duration-500 ${
+                className={`absolute inset-0 flex items-center justify-center bg-(--bg-page-edge) transition-opacity duration-500 ${
                   appVisible ? 'opacity-0' : 'opacity-100'
                 }`}
               >

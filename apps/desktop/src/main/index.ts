@@ -362,6 +362,9 @@ function createWindow(): void {
   win.contentView.addChildView(tip);
   tooltipView = tip;
 
+  /** Drops the hand-back currently in flight, if there is one. See onCleared below. */
+  let cancelHandBack: (() => void) | null = null;
+
   // The local stand-in for the site. Built on first need and mounted between the page and
   // the title bar, so the bar keeps floating over it exactly as it does over the page.
   blocked = createBlockedOverlay({
@@ -370,6 +373,12 @@ function createWindow(): void {
     probeUrl: APP_URL,
     userAgent: () => view.webContents.getUserAgent(),
     onCleared: (sitePainted) => {
+      // Whatever was in flight is stale the moment a new hand-back begins. Without this,
+      // a refusal that clears the flag mid-cycle lets the next successful check start a
+      // second cycle while the first still holds a dom-ready listener and a backstop —
+      // and the older one, firing against the newer one's flag, hides the screen over a
+      // reload that has not painted.
+      cancelHandBack?.();
       if (view.webContents.isDestroyed()) {
         sitePainted();
         return;
@@ -381,6 +390,7 @@ function createWindow(): void {
       const settle = (): void => {
         if (settled) return;
         settled = true;
+        cancelHandBack = null;
         clearTimeout(backstop);
         view.webContents.removeListener('dom-ready', settle);
         sitePainted();
@@ -401,6 +411,13 @@ function createWindow(): void {
         settle();
       }, SITE_RETURN_MS);
       backstop.unref?.();
+      // Drops this cycle without handing anything back, for the one above to call.
+      cancelHandBack = () => {
+        settled = true;
+        cancelHandBack = null;
+        clearTimeout(backstop);
+        view.webContents.removeListener('dom-ready', settle);
+      };
       view.webContents.once('dom-ready', settle);
       void view.webContents.loadURL(lastTarget);
     },

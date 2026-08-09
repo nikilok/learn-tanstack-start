@@ -3,15 +3,10 @@ import { join } from 'node:path';
 import { net, WebContentsView } from 'electron';
 import type { BaseWindow, Rectangle, WebContents } from 'electron';
 
+import type { BlockReason, BlockState } from '../shared/blocked';
 import { probeDelayMs, probeStillDenied } from './block-detect';
-import type { BlockReason } from './block-detect';
 
-/** What the screen renders: why it is up, when the next check runs, whether one is in flight. */
-export interface BlockState {
-  reason: BlockReason;
-  retryAt: number; // epoch ms
-  checking: boolean;
-}
+export type { BlockState } from '../shared/blocked';
 
 export interface BlockedOverlayOptions {
   /** The window to mount into; null once it has been closed. */

@@ -4,8 +4,8 @@
  * they're unit-testable; blocked-overlay.ts applies the result to the view.
  */
 
-/** Why the local screen is up. */
-export type BlockReason = 'blocked' | 'offline' | 'unreachable';
+export type { BlockReason } from '../shared/blocked';
+import type { BlockReason } from '../shared/blocked';
 
 /** The parts of a webRequest response the refusal check reads. */
 export interface ResponseFacts {

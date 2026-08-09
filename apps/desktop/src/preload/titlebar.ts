@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 
+import type { BlockState } from '../shared/blocked';
+
 // Subscribes to a channel and returns an unsubscribe fn (so React effects clean up).
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T) => cb(payload);
@@ -37,7 +39,8 @@ contextBridge.exposeInMainWorld('titlebar', {
   onSplashDismiss: (cb: () => void) => subscribe('splash:dismiss', () => cb()),
   splashDone: () => ipcRenderer.send('splash:done'),
   // The local stand-in screen: why it is up and when the next check runs, plus "check now".
-  onBlocked: (cb: (state: unknown) => void) => subscribe('blocked:state', cb),
+  onBlocked: (cb: (state: BlockState | null) => void) =>
+    subscribe('blocked:state', cb),
   retryBlocked: () => ipcRenderer.send('blocked:retry'),
   // Reported once the stand-in screen has a frame on the glass, so the launch splash knows
   // there is something behind it to hand over to.

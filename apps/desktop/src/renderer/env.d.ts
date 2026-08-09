@@ -1,3 +1,7 @@
+import type {
+  BlockReason as SharedBlockReason,
+  BlockState as SharedBlockState,
+} from '../shared/blocked';
 import type { ShortcutId } from '../shared/shortcuts';
 
 declare global {
@@ -10,13 +14,10 @@ declare global {
     | 'filters';
   // Any button that can raise a tooltip: every shortcut, plus the shortcut-less logo (home).
   type TooltipKind = ShortcutId | 'home';
-  // Why the local stand-in screen is up, and what it counts down to.
-  type BlockReason = 'blocked' | 'offline' | 'unreachable';
-  interface BlockState {
-    reason: BlockReason;
-    retryAt: number;
-    checking: boolean;
-  }
+  // Aliases of the shared contract, so the global names stay available to components
+  // without being a second declaration that could drift from main's.
+  type BlockReason = SharedBlockReason;
+  type BlockState = SharedBlockState;
 
   interface TitlebarApi {
     back(): void;

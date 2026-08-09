@@ -65,7 +65,7 @@ const HIT_INSET = 4 * SCALE; // forgiveness, so a near miss reads as a miss
  */
 
 /** Score at which the run is at full difficulty; spacing and unlocks ramp across this. */
-const FULL_TILT = 950;
+export const FULL_TILT = 950;
 /** Score at which the opening ramp reaches the pace the run then settles into. */
 export const SPEED_TOPS_AT = 600;
 /**

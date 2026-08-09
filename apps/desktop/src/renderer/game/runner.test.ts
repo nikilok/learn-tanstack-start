@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { LANDMARKS, LANDMARK_ORDER } from '@ss/skyline';
 
 import {
+  FULL_TILT,
   createRunner,
   JUMP_APEX,
   jump,
@@ -39,7 +40,6 @@ function scoreToDist(score: number): number {
   return score / SCORE_PER_PX;
 }
 /** The score at which every obstacle has been unlocked and the pace has topped out. */
-const FULL_TILT = 950;
 
 /** Every obstacle the run can spawn at that score, by sweeping the shape picker's rnd. */
 function spawnsAt(score: number): RunnerState['obstacles'] {

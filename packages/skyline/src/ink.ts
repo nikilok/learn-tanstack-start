@@ -5,7 +5,7 @@
  * app — generate the identical sky.
  */
 import { edgeAngleAt, edgeYAt } from './stations.ts';
-import { mulberry32, ri, r } from './units.ts';
+import { mulberry32, ri, r, VIEW_W } from './units.ts';
 
 /** Thin tapered sliver from (x, y) along `angle` — a bristle mark or comb gap. */
 function sliver(
@@ -47,7 +47,7 @@ function splot(rand: () => number, cx: number, cy: number, rBase: number) {
 
 /** Seeded 1-D value noise over x, smoothstep-blended between lattice points. */
 function makeNoise(rand: () => number, wavelength: number, amplitude: number) {
-  const n = Math.ceil(1460 / wavelength) + 2;
+  const n = Math.ceil(VIEW_W / wavelength) + 2;
   const lattice = Array.from({ length: n }, () => rand() - 0.5);
   return (x: number) => {
     const t = Math.max(0, x / wavelength);

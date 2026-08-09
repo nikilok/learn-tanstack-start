@@ -133,9 +133,15 @@ export function createBlockedOverlay(
     // Nothing may be sent to this view until it has a document: show() creates it and
     // pushes state in the same turn, and `send` on a view whose render frame does not
     // exist yet neither throws nor arrives — it logs and drops.
-    v.webContents.once('dom-ready', () => {
+    v.webContents.on('dom-ready', () => {
       frameLive = true;
       push();
+    });
+    // A gone render process leaves the webContents alive, so the guard in `push` still
+    // reads it as usable and every later send is dropped without a word.
+    v.webContents.on('render-process-gone', () => {
+      frameLive = false;
+      painted = false;
     });
     parent.contentView.addChildView(v, opts.index);
     view = v;

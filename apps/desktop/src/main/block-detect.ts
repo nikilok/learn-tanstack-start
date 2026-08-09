@@ -71,17 +71,6 @@ export function isServerError(facts: ResponseFacts): boolean {
 }
 
 /**
- * True when a document came back as "there is nothing here" from something that is not the
- * app.
- *
- * A 404 is normally a real page — a company slug that no longer exists renders the app's
- * own not-found, with working navigation — so this cannot key on the status alone. What
- * separates the two is whether the app has proved it can serve a document at all: the dev
- * proxy with nothing behind it answers 404 to everything, including the very first load,
- * and no failure event fires because a 404 with a body is a successful load. `served` is
- * that proof, and the caller carries it.
- */
-/**
  * True when a response proves the app itself handed back a document.
  *
  * A redirect names somewhere else to look, so it proves nothing. A 304 counts: the
@@ -93,6 +82,17 @@ export function provesAppServed(facts: ResponseFacts): boolean {
   return (code >= 200 && code < 300) || code === 304;
 }
 
+/**
+ * True when a document came back as "there is nothing here" from something that is not the
+ * app.
+ *
+ * A 404 is normally a real page — a company slug that no longer exists renders the app's
+ * own not-found, with working navigation — so this cannot key on the status alone. What
+ * separates the two is whether the app has proved it can serve a document at all: the dev
+ * proxy with nothing behind it answers 404 to everything, including the very first load,
+ * and no failure event fires because a 404 with a body is a successful load. `served` is
+ * that proof, and the caller carries it.
+ */
 export function isMissingApp(facts: ResponseFacts, served: boolean): boolean {
   if (served || facts.resourceType !== 'mainFrame' || facts.statusCode !== 404)
     return false;

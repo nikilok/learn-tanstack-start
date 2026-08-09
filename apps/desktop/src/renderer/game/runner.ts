@@ -66,23 +66,26 @@ const HIT_INSET = 4 * SCALE; // forgiveness, so a near miss reads as a miss
 
 /** Score at which the run is at full difficulty; spacing and unlocks ramp across this. */
 const FULL_TILT = 950;
-/**
- * Pace is the one axis that stops early. It tops out at a speed a person can still read
- * and then holds there for the rest of the run, however long it goes: past this point a
- * run gets harder through what turns up and how close together, never through a ground
- * that keeps accelerating out from under you.
- */
+/** Score at which the opening ramp reaches the pace the run then settles into. */
 export const SPEED_TOPS_AT = 600;
+/**
+ * Score at which the run starts pressing again, and the score that second climb tops out
+ * at. Between the two milestones above it holds one pace: long enough to settle into a
+ * rhythm and believe that is the run, which is what makes it register when it picks up.
+ */
+export const CHALLENGE_FROM = 800;
+export const CHALLENGE_FULL = 1600;
 /*
  * Pace, in screen px/s, chosen by how long a landmark is in view rather than by how hard
  * the run should be. This screen is what someone stares at while they wait to be let back
- * in, so it is meant to be watchable: a landmark takes ~2.8s to cross at the start and
- * ~1.4s at the cap, which leaves over a second of reaction time even at full pace.
- * They are absolute rather than scaled — the drawing got bigger, the pace deliberately
- * did not follow it.
+ * in, so it is meant to be watchable: a landmark takes ~2.8s to cross at the start, ~1.4s
+ * at cruise, and ~1.0s once it is pressing — still over a second of reaction time from an
+ * obstacle entering to reaching the lens. They are absolute rather than scaled: the drawing
+ * got bigger, the pace deliberately did not follow it.
  */
 const SPEED_START = 460;
-const SPEED_MAX = 950;
+const SPEED_CRUISE = 950;
+const SPEED_MAX = 1250;
 /** Seconds between obstacles: a long look at the start, a steady rhythm at full tilt. */
 const GAP_EASY = 2.2;
 const GAP_HARD = 1.2; // a jump is ~0.65s in the air, so this leaves room to breathe
@@ -93,10 +96,26 @@ function progressAt(dist: number): number {
   return Math.min(1, (dist * SCORE_PER_PX) / FULL_TILT);
 }
 
-/** How fast the ground moves. Ramps to the cap, then flat for the rest of the run. */
+/**
+ * How fast the ground moves, in three acts: a ramp up to a cruising pace, a stretch held
+ * there, then a second climb to a hard ceiling it never passes.
+ *
+ * The plateau is the point of it. A run that accelerates without pause never has a pace you
+ * learn, and one that tops out for good stops asking anything of you; holding still long
+ * enough to feel settled is what makes the second climb read as the run getting harder
+ * rather than as the same run continuing.
+ */
 export function speedAt(dist: number): number {
-  const ramp = Math.min(1, (dist * SCORE_PER_PX) / SPEED_TOPS_AT);
-  return SPEED_START + (SPEED_MAX - SPEED_START) * ramp;
+  const score = dist * SCORE_PER_PX;
+  if (score <= SPEED_TOPS_AT) {
+    return SPEED_START + (SPEED_CRUISE - SPEED_START) * (score / SPEED_TOPS_AT);
+  }
+  if (score <= CHALLENGE_FROM) return SPEED_CRUISE;
+  const climb = Math.min(
+    1,
+    (score - CHALLENGE_FROM) / (CHALLENGE_FULL - CHALLENGE_FROM),
+  );
+  return SPEED_CRUISE + (SPEED_MAX - SPEED_CRUISE) * climb;
 }
 
 /**

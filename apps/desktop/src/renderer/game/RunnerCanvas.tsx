@@ -1,11 +1,13 @@
 import { buildStar, CELESTIAL, MOON_PATH, SUN_R, SUN_RAYS } from '@ss/skyline';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { skyAt } from './daylight';
 import {
   DEMO_AFTER_MS,
   DEMO_FADE_MS,
   demoShouldJump,
   demoStintOver,
+  demoStintTarget,
 } from './demo';
 import { InkSky } from './InkSky';
 import { drawLandmark, landmarkPaint } from './landmark-draw';
@@ -613,11 +615,21 @@ function drawOrb(
 export interface RunnerCanvasProps {
   /** False while the screen is hidden, so nothing animates behind a closed overlay. */
   active: boolean;
+  /** The theme the screen opened in. A run turns the sky over from here as it goes. */
   dark: boolean;
+  /** The sky the run has reached, so the rest of the screen can follow it. */
+  onSky?: (dark: boolean) => void;
 }
 
 /** The endless runner itself: input, the frame loop, and drawing. All of the rules live in runner.ts. */
-export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
+export function RunnerCanvas({ active, dark, onSky }: RunnerCanvasProps) {
+  // The sky the run is in, which is not always the one the app is in — it turns over at
+  // milestones. State rather than a ref, because the ink layer is a React child of it.
+  const [night, setNight] = useState(dark);
+  // Read through a ref so the frame loop never re-subscribes on a new callback identity.
+  const onSkyRef = useRef(onSky);
+  onSkyRef.current = onSky;
+  useEffect(() => setNight(dark), [dark]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<RunnerState>(createRunner(600));
   const fastFallRef = useRef(false);
@@ -626,6 +638,8 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
   const demoRef = useRef(false);
   const lastInputRef = useRef(0);
   const demoRestartRef = useRef(0);
+  // Each stint bows out at its own score, so the changeovers do not read as a metronome.
+  const demoTargetRef = useRef(demoStintTarget(Math.random));
   // The changeover between demo runs: 'out' while the last one dissolves, 'in' while the
   // next one arrives. A player's run never fades.
   const fadeRef = useRef<{ phase: 'none' | 'out' | 'in'; at: number }>({
@@ -652,6 +666,7 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       demoRef.current = false;
       demoRestartRef.current = 0;
       fadeRef.current = { phase: 'none', at: 0 };
+      demoTargetRef.current = demoStintTarget(Math.random);
       stateRef.current = jump(createRunner(s.width));
       playJump();
       return;
@@ -717,8 +732,11 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     let last = performance.now();
     let lastOpacity = 1;
     let cssWidth = 0;
-    const p = palette(dark);
-    const landmarks: LandmarkPaint = landmarkPaint(dark);
+    // Rebuilt only when the sky turns over, which is a handful of times in a long run —
+    // not per frame, where it would allocate two of these sixty times a second.
+    let sky = dark;
+    let p = palette(sky);
+    let landmarks: LandmarkPaint = landmarkPaint(sky);
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -741,11 +759,19 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
 
-    const draw = (s: RunnerState, now: number, demo: boolean) => {
+    // `night` rather than the `dark` prop: the run turns the sky over as it goes, and the
+    // moon and the star field have to turn with it — a crescent hanging in a daylight sky
+    // is what the prop gave.
+    const draw = (
+      s: RunnerState,
+      now: number,
+      demo: boolean,
+      night: boolean,
+    ) => {
       c.clearRect(0, 0, cssWidth, HEIGHT);
 
-      drawOrb(c, p, cssWidth, dark);
-      if (dark) drawStars(c, p, skyRef.current.stars, cssWidth, s.dist, now);
+      drawOrb(c, p, cssWidth, night);
+      if (night) drawStars(c, p, skyRef.current.stars, cssWidth, s.dist, now);
       else drawClouds(c, p, skyRef.current.clouds, cssWidth, s.dist);
 
       // The ground, styled as the site footer is: its border-top as a hairline running the
@@ -844,12 +870,14 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
       ) {
         demoRef.current = true;
         demoRestartRef.current = 0;
+        demoTargetRef.current = demoStintTarget(Math.random);
         next = jump(createRunner(next.width));
       }
       if (demoRef.current) {
         const fade = fadeRef.current;
         if (fade.phase === 'out' && now - fade.at >= DEMO_FADE_MS) {
           // Gone. Swap in the next run behind the blank and bring it back up.
+          demoTargetRef.current = demoStintTarget(Math.random);
           next = jump(createRunner(next.width));
           fadeRef.current = { phase: 'in', at: now };
         } else if (fade.phase === 'in' && now - fade.at >= DEMO_FADE_MS) {
@@ -860,9 +888,10 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
             if (!demoRestartRef.current) demoRestartRef.current = now + 1400;
             else if (now >= demoRestartRef.current) {
               demoRestartRef.current = 0;
+              demoTargetRef.current = demoStintTarget(Math.random);
               next = jump(createRunner(next.width));
             }
-          } else if (demoStintOver(next)) {
+          } else if (demoStintOver(next, demoTargetRef.current)) {
             // Its stint is up. Bowing out on a fade rather than on a crash: the demo is
             // not meant to look like it lost, only like it finished.
             fadeRef.current = { phase: 'out', at: now };
@@ -878,12 +907,24 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
 
       stateRef.current = next;
 
+      // Day into night and back, as a straight cut. Dipping the frame through black to
+      // cross between them read as the game glitching rather than as the sun going down.
+      const wantDark = skyAt(next, dark);
+      if (wantDark !== sky) {
+        sky = wantDark;
+        p = palette(sky);
+        landmarks = landmarkPaint(sky);
+        setNight(sky);
+        onSkyRef.current?.(sky);
+      }
+
       // Applied to the canvas rather than to every draw call: the sky, the ground, the
       // sweat and the stars all set their own alpha, and an outer globalAlpha would be
       // clobbered by each of them in turn.
       const fade = fadeRef.current;
       const t =
         fade.phase === 'none' ? 1 : Math.min(1, (now - fade.at) / DEMO_FADE_MS);
+      // The demo's changeover is the only thing that ever fades the frame.
       const opacity =
         fade.phase === 'out' ? 1 - t : fade.phase === 'in' ? t : 1;
       if (Math.abs(opacity - lastOpacity) > 0.01 || opacity === 1) {
@@ -891,7 +932,7 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
         canvas.style.opacity = opacity === 1 ? '' : String(opacity);
       }
 
-      draw(next, now, demoRef.current);
+      draw(next, now, demoRef.current, sky);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
@@ -913,7 +954,7 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
     <>
       {/* Behind the canvas, which is drawn on a transparent ground so the ink shows
           through it — the sky is painted, the city and the runner are not. */}
-      <InkSky dark={dark} />
+      <InkSky dark={night} />
       <canvas ref={canvasRef} className="runner-canvas" onPointerDown={press} />
     </>
   );

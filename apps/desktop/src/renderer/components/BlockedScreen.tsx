@@ -88,7 +88,18 @@ export function BlockedScreen() {
 
   return (
     <div className="blocked site-ground">
-      <RunnerCanvas active dark={dark} />
+      {/* The run turns the sky over as it goes, and the page behind the canvas goes with
+          it — the status line and the ground gradient are the app's tokens, so leaving
+          them on the old theme would strand a light footer under a night sky. Nothing has
+          to undo it: the shell re-stamps the class from its own theme on the next report,
+          and this whole view goes away when the site comes back. */}
+      <RunnerCanvas
+        active
+        dark={dark}
+        onSky={(night) =>
+          document.documentElement.classList.toggle('dark', night)
+        }
+      />
       <div className="blocked-status">
         {/* The reason leads and is meant to be read at a glance: someone landing on a game
             instead of their app needs to know why before anything else. */}

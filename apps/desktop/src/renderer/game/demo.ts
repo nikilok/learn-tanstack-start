@@ -20,21 +20,30 @@ import type { RunnerState } from './runner.ts';
 export const DEMO_AFTER_MS = 12_000;
 
 /**
- * How far the demo takes a run before bowing out and starting again.
+ * How far the demo takes a run before bowing out and starting again. A range rather than a
+ * number: every stint ending at the same score is a loop you can set your watch by, and the
+ * whole point of it is to look like someone playing.
  *
  * Not a technical limit — it plays indefinitely if left to. It is that a machine reeling off
  * scores nobody is going to match is discouraging to walk up to, and the number in the
- * corner is meant to be worth beating. Far enough to show the Gherkin and the Eye; short of
- * the towers, and short of anything intimidating.
+ * corner is meant to be worth beating. The low end shows the Gherkin and the Eye; the high
+ * end reaches Big Ben and the first of the pressing pace, without ever looking untouchable.
  */
-export const DEMO_MAX_SCORE = 300;
+export const DEMO_MIN_SCORE = 300;
+export const DEMO_MAX_SCORE = 1000;
+
+/** The score this particular stint will bow out at. */
+export function demoStintTarget(rnd: () => number): number {
+  const span = DEMO_MAX_SCORE - DEMO_MIN_SCORE;
+  return Math.round(DEMO_MIN_SCORE + Math.min(0.999999, rnd()) * span);
+}
 
 /** Each half of the demo's changeover: out to nothing, then back in on a fresh run. */
 export const DEMO_FADE_MS = 500;
 
-/** True once the demo's run has gone as far as it is meant to and should bow out. */
-export function demoStintOver(s: RunnerState): boolean {
-  return s.dist * SCORE_PER_PX >= DEMO_MAX_SCORE;
+/** True once this stint has gone as far as it was going to and should bow out. */
+export function demoStintOver(s: RunnerState, target: number): boolean {
+  return s.dist * SCORE_PER_PX >= target;
 }
 
 /**

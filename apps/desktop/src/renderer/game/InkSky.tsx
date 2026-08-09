@@ -1,11 +1,14 @@
 import { INK_COLOR, INK_STROKES, VIEW_W } from '@ss/skyline';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /** How far down the skyline's viewBox the ink sweep reaches. Cropping to it keeps the
  * brushwork at the top of the sky instead of scaling the whole 600-unit box down. */
 const INK_BAND = 300;
-/** One full breath of the sweep. Long and slow, because it runs the whole time. */
-const BREATH = '13s';
+/**
+ * One full breath of the sweep. Slow, because it runs the whole time it is up — but not so
+ * slow that a glance never catches it moving, which is what 13s was.
+ */
+const BREATH = '7s';
 
 /**
  * The sumi-e brush sweep from the site's footer, painted across the game's sky in light
@@ -33,6 +36,32 @@ export function InkSky({ dark }: { dark: boolean }) {
     };
   }, []);
 
+  /**
+   * Started by hand rather than by `begin="0s"`.
+   *
+   * This layer is only in the document while the run is in daylight, so on a run that
+   * starts at night it is inserted long after the document's own timeline began — and a
+   * SMIL animation whose start time is already in the past does not play when its element
+   * arrives late. Measured: the displacement sat at exactly 0 for as long as it was
+   * sampled, so the sweep was mounted, filtered, and completely still.
+   */
+  const runningRef = useRef<SVGAnimationElement[]>([]);
+  useEffect(() => {
+    if (dark || still) return;
+    // A frame later, not in the effect itself. The layer has only just been inserted at
+    // this point and its SVG timeline has not started — measured at getCurrentTime() ≈ 0 —
+    // and a begin issued against a clock that is not running yet is dropped on the floor.
+    // Calling it once the timeline is live is the difference between a sweep that breathes
+    // and one that sits at exactly zero displacement for as long as you care to watch.
+    const id = requestAnimationFrame(() => {
+      for (const a of runningRef.current) a?.beginElement();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [dark, still]);
+  const collect = (el: SVGElement | null, i: number) => {
+    if (el) runningRef.current[i] = el as SVGAnimationElement;
+  };
+
   // Dark mode has no ink at all, exactly as the footer's sky doesn't.
   if (dark) return null;
 
@@ -57,7 +86,9 @@ export function InkSky({ dark }: { dark: boolean }) {
           result="n"
         >
           <animate
+            ref={(el) => collect(el, 0)}
             attributeName="baseFrequency"
+            begin="indefinite"
             dur={BREATH}
             repeatCount="indefinite"
             values="0.011 0.019;0.016 0.027;0.011 0.019"
@@ -71,7 +102,9 @@ export function InkSky({ dark }: { dark: boolean }) {
             velocity is what keeps the drift from reading as a rewind. */}
         <feOffset in="n" dx={0} dy={0} result="np">
           <animate
+            ref={(el) => collect(el, 1)}
             attributeName="dx"
+            begin="indefinite"
             dur={BREATH}
             repeatCount="indefinite"
             values="0;30;0"
@@ -90,7 +123,9 @@ export function InkSky({ dark }: { dark: boolean }) {
           yChannelSelector="G"
         >
           <animate
+            ref={(el) => collect(el, 2)}
             attributeName="scale"
+            begin="indefinite"
             dur={BREATH}
             repeatCount="indefinite"
             values="0;46;0"

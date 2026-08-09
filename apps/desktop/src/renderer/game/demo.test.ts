@@ -4,8 +4,10 @@ import {
   DEMO_AFTER_MS,
   DEMO_FADE_MS,
   DEMO_MAX_SCORE,
+  DEMO_MIN_SCORE,
   demoShouldJump,
   demoStintOver,
+  demoStintTarget,
 } from './demo.ts';
 import {
   createRunner,
@@ -83,7 +85,7 @@ describe('demoShouldJump', () => {
       };
     })();
     const score = () => Math.floor(s.dist * SCORE_PER_PX);
-    while (frames < 60 * 180 && !s.over && score() < DEMO_MAX_SCORE) {
+    while (frames < 60 * 300 && !s.over && score() < DEMO_MAX_SCORE) {
       if (!s.started || demoShouldJump(s)) s = jump(s);
       s = stepRunner(s, FRAME, false, rnd);
       frames++;
@@ -101,28 +103,48 @@ describe('demoShouldJump', () => {
     };
     expect(demoShouldJump(spent)).toBe(true);
   });
-
-  test('the stint stays short enough not to be discouraging', () => {
-    // The point of the cap: a number in the corner nobody is going to match puts people
-    // off, and this one is meant to be worth beating.
-    expect(DEMO_MAX_SCORE).toBeLessThanOrEqual(400);
-  });
 });
 
 describe('demoStintOver', () => {
-  test('it is the score that ends the stint, nothing else', () => {
+  test("it is the score against this stint's own target, nothing else", () => {
     const at = (score: number) => ({
       ...createRunner(1280),
       dist: score / SCORE_PER_PX,
     });
-    expect(demoStintOver(at(0))).toBe(false);
-    expect(demoStintOver(at(DEMO_MAX_SCORE - 1))).toBe(false);
-    expect(demoStintOver(at(DEMO_MAX_SCORE))).toBe(true);
-    expect(demoStintOver(at(DEMO_MAX_SCORE * 3))).toBe(true);
+    // Either side of the target rather than exactly on it: score and distance are a float
+    // round-trip, so the boundary itself lands a rounding error out.
+    expect(demoStintOver(at(0), 500)).toBe(false);
+    expect(demoStintOver(at(499), 500)).toBe(false);
+    expect(demoStintOver(at(501), 500)).toBe(true);
+    expect(demoStintOver(at(1500), 500)).toBe(true);
   });
 
   test('the changeover is quick enough not to read as a stall', () => {
     expect(DEMO_FADE_MS).toBeLessThanOrEqual(800);
+  });
+});
+
+describe('demoStintTarget', () => {
+  test('every stint lands inside the range', () => {
+    for (const r of [0, 0.001, 0.25, 0.5, 0.75, 0.999, 1]) {
+      const target = demoStintTarget(() => r);
+      expect(target).toBeGreaterThanOrEqual(DEMO_MIN_SCORE);
+      expect(target).toBeLessThanOrEqual(DEMO_MAX_SCORE);
+    }
+  });
+
+  test('it actually varies, or it is just a fixed cap with extra steps', () => {
+    // The point of the range: stints that all end on the same score read as a loop.
+    const seen = new Set(
+      [0.05, 0.3, 0.55, 0.8, 0.95].map((r) => demoStintTarget(() => r)),
+    );
+    expect(seen.size).toBe(5);
+  });
+
+  test('the range stays short enough not to be discouraging', () => {
+    expect(DEMO_MIN_SCORE).toBeGreaterThanOrEqual(200);
+    expect(DEMO_MAX_SCORE).toBeLessThanOrEqual(1200);
+    expect(DEMO_MAX_SCORE).toBeGreaterThan(DEMO_MIN_SCORE);
   });
 });
 

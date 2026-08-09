@@ -9,6 +9,8 @@ import {
   PLAYER_R,
   PLAYER_X,
   runnerScore,
+  CHALLENGE_FROM,
+  CHALLENGE_FULL,
   SCORE_PER_PX,
   SPEED_TOPS_AT,
   speedAt,
@@ -111,19 +113,20 @@ describe('pace', () => {
     expect(run(later, 100_000).speed).toBe(run(later, 200_000).speed);
   });
 
-  test('the ground starts slow and only reaches full pace deep into a run', () => {
+  test('the ground starts slow and only reaches cruise deep into a run', () => {
     // The complaint this pins: a run that is at full speed from the first jump.
     const start = speedAt(0);
-    const capped = speedAt(1e9);
+    const cruise = speedAt(scoreToDist(SPEED_TOPS_AT));
     expect(speedAt(scoreToDist(100))).toBeLessThan(
-      start + (capped - start) * 0.25,
+      start + (cruise - start) * 0.3,
     );
-    // Close rather than exact: score↔distance is a float round-trip, so the milestone
-    // lands a rounding error short of the clamp.
-    expect(speedAt(scoreToDist(SPEED_TOPS_AT))).toBeCloseTo(capped, 6);
-    // Monotonic the whole way, so it never dips back and reads as a stumble.
+    expect(cruise).toBeGreaterThan(start);
+  });
+
+  test('it never dips back, at any point', () => {
+    // A dip reads as a stumble, and the curve now has two joins where one could hide.
     let previous = 0;
-    for (let score = 0; score <= 1100; score += 50) {
+    for (let score = 0; score <= 2500; score += 25) {
       const now = speedAt(scoreToDist(score));
       expect(now).toBeGreaterThanOrEqual(previous);
       previous = now;
@@ -148,17 +151,29 @@ describe('pace', () => {
     expect(travel / speedAt(0)).toBeGreaterThan(2);
   });
 
-  test('the pace plateaus and never creeps up again', () => {
-    // The complaint this pins: a run that just keeps getting faster until it is
-    // unplayable. Past the milestone the ground holds one speed for good — a long run
-    // gets harder through spacing and what spawns, not through acceleration.
-    const topped = speedAt(scoreToDist(SPEED_TOPS_AT));
-    for (const score of [SPEED_TOPS_AT, 1_000, 5_000, 50_000, 1e6]) {
-      expect(speedAt(scoreToDist(score))).toBeCloseTo(topped, 6);
+  test('it holds one pace before it starts pressing again', () => {
+    // The stretch that makes the second climb register: without it the run only ever gets
+    // faster, and there is never a pace you learn well enough to notice it change.
+    const cruise = speedAt(scoreToDist(SPEED_TOPS_AT));
+    for (const score of [SPEED_TOPS_AT, 700, CHALLENGE_FROM]) {
+      expect(speedAt(scoreToDist(score))).toBeCloseTo(cruise, 6);
     }
-    // And the difficulty curve keeps moving after the pace has stopped, or the rest of
-    // the run would be flat in every dimension at once.
+    expect(speedAt(scoreToDist(CHALLENGE_FROM + 200))).toBeGreaterThan(cruise);
+    expect(CHALLENGE_FROM).toBeGreaterThan(SPEED_TOPS_AT);
+    // And the difficulty curve keeps moving through that stretch, or the middle of the
+    // run would be flat in every dimension at once.
     expect(FULL_TILT).toBeGreaterThan(SPEED_TOPS_AT);
+  });
+
+  test('the second climb tops out and then holds for good', () => {
+    // The complaint this pins from the other side: a run that keeps accelerating until it
+    // is unplayable. It presses harder past the milestone, but only up to a ceiling.
+    const ceiling = speedAt(scoreToDist(CHALLENGE_FULL));
+    for (const score of [CHALLENGE_FULL, 5_000, 50_000, 1e6]) {
+      expect(speedAt(scoreToDist(score))).toBeCloseTo(ceiling, 6);
+    }
+    // Even flat out, an obstacle is on screen long enough to answer.
+    expect((1280 + 40 - PLAYER_X) / ceiling).toBeGreaterThan(0.85);
   });
 
   test('score follows distance', () => {

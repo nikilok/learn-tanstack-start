@@ -105,11 +105,21 @@ export function BlockedScreen() {
             instead of their app needs to know why before anything else. */}
         <p className="blocked-reason">{REASON[state.reason]}</p>
         <p className="blocked-meta">
-          <span className="blocked-countdown" aria-live="polite">
+          <span className="blocked-countdown">
             {state.checking
               ? 'Checking now.'
               : `Checking again in ${clock(left)}.`}
           </span>{' '}
+          {/* The announcement lives here rather than on the countdown itself, which ticks
+              every half second and would read the whole line out again on each one. This
+              region is empty until a check starts, so it speaks once when one does.
+              Present from the first render on purpose: a live region created at the same
+              moment as its content is not reliably observed, so switching aria-live on
+              and off around the countdown would have traded a stream of noise for an
+              announcement that may never arrive. */}
+          <span className="sr-only" aria-live="polite">
+            {state.checking ? 'Checking now.' : ''}
+          </span>
           {/* aria-disabled, not disabled: a disabled element cannot hold focus, so
               pressing this with the keyboard dropped focus to <body> — where the game's
               own key handler takes over, and the next Space started a run instead of

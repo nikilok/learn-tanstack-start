@@ -81,6 +81,18 @@ export function isServerError(facts: ResponseFacts): boolean {
  * and no failure event fires because a 404 with a body is a successful load. `served` is
  * that proof, and the caller carries it.
  */
+/**
+ * True when a response proves the app itself handed back a document.
+ *
+ * A redirect names somewhere else to look, so it proves nothing. A 304 counts: the
+ * document was served from cache after the app validated it.
+ */
+export function provesAppServed(facts: ResponseFacts): boolean {
+  if (facts.resourceType !== 'mainFrame') return false;
+  const code = facts.statusCode;
+  return (code >= 200 && code < 300) || code === 304;
+}
+
 export function isMissingApp(facts: ResponseFacts, served: boolean): boolean {
   if (served || facts.resourceType !== 'mainFrame' || facts.statusCode !== 404)
     return false;

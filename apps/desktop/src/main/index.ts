@@ -16,6 +16,7 @@ import {
   isEdgeDenied,
   isMissingApp,
   isServerError,
+  provesAppServed,
   simulatedReason,
 } from './block-detect';
 import type { BlockReason } from './block-detect';
@@ -575,9 +576,7 @@ function createWindow(): void {
       // Proof that the app itself can serve a document. Until it has, a 404 is the proxy
       // or the platform saying it has never heard of us rather than the app saying a page
       // is gone — see isMissingApp.
-      if (details.resourceType === 'mainFrame' && details.statusCode < 400) {
-        appHasServed = true;
-      }
+      if (provesAppServed(details)) appHasServed = true;
       if (blocked?.isUp() && !blocked.handingBack()) return;
       const reason = isEdgeDenied(details)
         ? 'blocked'

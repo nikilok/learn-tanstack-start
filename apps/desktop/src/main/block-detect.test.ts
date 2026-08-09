@@ -6,6 +6,7 @@ import {
   isServerError,
   probeDelayMs,
   probeStillDenied,
+  provesAppServed,
   simulatedReason,
 } from './block-detect.ts';
 
@@ -70,7 +71,7 @@ describe('isServerError', () => {
     }
   });
 
-  test('a failing subresource is the page‘s problem, not the window‘s', () => {
+  test("a failing subresource is the page's problem, not the window's", () => {
     // One RPC returning 500 is for the app to report; covering the whole window over it
     // would take a working page away from someone over a single failed request.
     for (const resourceType of ['xhr', 'script', 'image', 'stylesheet']) {
@@ -280,5 +281,55 @@ describe('probeDelayMs', () => {
     const first = probeDelayMs('blocked', 0);
     expect(probeDelayMs('blocked', -3)).toBe(first);
     expect(probeDelayMs('blocked', Number.NaN)).toBe(first);
+  });
+});
+
+describe('provesAppServed', () => {
+  const main = (statusCode: number) =>
+    facts({ statusCode, resourceType: 'mainFrame' });
+
+  test('a document the app answered with counts', () => {
+    expect(provesAppServed(main(200))).toBe(true);
+    expect(provesAppServed(main(204))).toBe(true);
+  });
+
+  test('a cached document the app revalidated counts', () => {
+    expect(provesAppServed(main(304))).toBe(true);
+  });
+
+  test('a redirect only names somewhere else to look', () => {
+    for (const code of [301, 302, 307, 308]) {
+      expect(provesAppServed(main(code))).toBe(false);
+    }
+  });
+
+  test('a refusal or a failure is not proof', () => {
+    for (const code of [403, 404, 429, 500, 503]) {
+      expect(provesAppServed(main(code))).toBe(false);
+    }
+  });
+
+  test('only the main frame can prove it', () => {
+    expect(
+      provesAppServed(facts({ statusCode: 200, resourceType: 'script' })),
+    ).toBe(false);
+    expect(
+      provesAppServed(facts({ statusCode: 200, resourceType: 'xhr' })),
+    ).toBe(false);
+  });
+
+  test('a redirect ahead of a 404 leaves the cold start still detectable', () => {
+    const served = provesAppServed(main(302));
+    expect(served).toBe(false);
+    expect(
+      isMissingApp(
+        facts({
+          statusCode: 404,
+          resourceType: 'mainFrame',
+          responseHeaders: { 'content-type': ['text/html; charset=utf-8'] },
+        }),
+        served,
+      ),
+    ).toBe(true);
   });
 });

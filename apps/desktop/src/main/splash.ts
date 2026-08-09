@@ -20,6 +20,8 @@ const FAILSAFE_MS = 2000;
 const MIN_VISIBLE_MS = 800;
 
 export interface Splash {
+  /** True once the splash has reported a painted frame; the window is shown on that. */
+  hasPainted(): boolean;
   /** Puts it in the window, on top of everything already there. */
   mount(parent: BaseWindow): void;
   setBounds(bounds: Rectangle): void;
@@ -150,6 +152,7 @@ export function createSplash(
       // Added last, so a launch splash covers the chrome as well as the page.
       win.contentView.addChildView(view);
     },
+    hasPainted: () => announced,
     setBounds(next) {
       if (!gone) view.setBounds(next);
     },

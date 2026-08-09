@@ -533,10 +533,11 @@ function createWindow(): void {
     if (revealTimer) clearTimeout(revealTimer);
     revealTimer = null;
     if (win.isDestroyed()) return; // timer/load may fire after a fast window close
-    // Whatever is going to be on screen is ready, so the window may as well be up: without
-    // this its only other triggers are the splash's own mount report and the backstop, and
-    // a splash that never reports would keep a perfectly loaded app hidden until then.
-    showWindow();
+    // Only once the splash is actually up. Opening the window before it has painted shows
+    // the site bare, which the splash then covers and uncovers a beat later — a flash of
+    // the app on any start quick enough to reach here first. A splash that never paints is
+    // what the backstop above is for.
+    if (splash.hasPainted()) showWindow();
     splash.dismiss();
     focusForeground();
   };

@@ -188,9 +188,10 @@ function hits(y: number, o: Obstacle): boolean {
 function spawn(width: number, dist: number, rnd: () => number): Obstacle {
   const score = dist * SCORE_PER_PX;
   const unlocked = SHAPES.filter((s) => score >= s.from);
-  const shape = unlocked[
-    Math.floor(rnd() * unlocked.length)
-  ] as (typeof SHAPES)[0];
+  // Clamped because `rnd` is injected: a source that can return exactly 1 indexes one
+  // past the end, and the cast below would let that reach a property read as undefined.
+  const pick = Math.floor(Math.min(0.999999, rnd()) * unlocked.length);
+  const shape = unlocked[pick] as (typeof SHAPES)[0];
   return { x: width + 40, w: shape.w, h: shape.h, kind: shape.kind };
 }
 

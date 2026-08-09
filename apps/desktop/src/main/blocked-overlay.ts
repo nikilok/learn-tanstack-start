@@ -237,13 +237,18 @@ export function createBlockedOverlay(
       // A hand-back in flight is the exception: the reload it was waiting on has just
       // failed, so the schedule has to be armed again or the countdown sits frozen.
       if (state?.reason === reason && !handingBack) return;
+      // Coming back from a hand-back that failed is the same wait resuming, so it keeps
+      // its place in the schedule. Starting over would pin the checks to their first step
+      // for as long as the site kept clearing and then failing to load — the same trap
+      // runProbe already avoids when the reason flaps.
+      const resuming = state?.reason === reason;
       handingBack = false;
       const v = ensureView();
       if (!v) return;
       v.setBounds(bounds);
       v.setVisible(true);
       v.webContents.focus();
-      attempt = 0;
+      if (!resuming) attempt = 0;
       state = { reason, retryAt: Date.now(), checking: false };
       opts.onShow(reason);
       scheduleProbe();

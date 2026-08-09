@@ -115,7 +115,8 @@ html.screensaver #root {
   overflow: hidden;
   -webkit-app-region: no-drag; /* the view reuses index.html's drag body */
   opacity: 1;
-  /* Paired with FADE_MS in main/splash.ts, which hides the view on the same clock. */
+  /* Paired with FADE_MS in components/SplashScreen.tsx, which reports back on the same
+     clock so main can release the view once this has finished running. */
   transition: opacity 160ms ease;
 }
 
@@ -303,10 +304,10 @@ html.screensaver #root {
   pointer-events: auto; /* the one thing in the band that is not click-through */
   transition: text-decoration-color 140ms ease;
 }
-.blocked-retry:hover:not(:disabled) {
+.blocked-retry:hover:not([aria-disabled='true']) {
   text-decoration-color: currentcolor;
 }
-.blocked-retry:disabled {
+.blocked-retry[aria-disabled='true'] {
   opacity: 0.5;
   cursor: default;
 }

@@ -105,16 +105,24 @@ export function BlockedScreen() {
             instead of their app needs to know why before anything else. */}
         <p className="blocked-reason">{REASON[state.reason]}</p>
         <p className="blocked-meta">
-          <span className="blocked-countdown">
+          <span className="blocked-countdown" aria-live="polite">
             {state.checking
               ? 'Checking now.'
               : `Checking again in ${clock(left)}.`}
           </span>{' '}
+          {/* aria-disabled, not disabled: a disabled element cannot hold focus, so
+              pressing this with the keyboard dropped focus to <body> — where the game's
+              own key handler takes over, and the next Space started a run instead of
+              re-pressing the button. Staying focusable also keeps it matching the
+              `closest('button')` guard that keeps the game out of the way. */}
           <button
             type="button"
             className="blocked-retry no-drag"
-            onClick={() => window.titlebar.retryBlocked()}
-            disabled={state.checking}
+            onClick={() => {
+              if (state.checking) return;
+              window.titlebar.retryBlocked();
+            }}
+            aria-disabled={state.checking}
           >
             Try now
           </button>

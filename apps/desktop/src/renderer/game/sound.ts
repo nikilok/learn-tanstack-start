@@ -18,7 +18,9 @@ function context(): AudioContext | null {
   try {
     ctx ??= new AudioContext();
     // Suspended is the normal state before a gesture, and after the OS sleeps the device.
-    if (ctx.state === 'suspended') void ctx.resume();
+    // Caught, not just voided: it rejects on a closed context or a device that has gone
+    // away, and an unhandled rejection over a sound effect is not worth surfacing.
+    if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
     return ctx;
   } catch {
     failed = true; // no audio device, or blocked outright: never try again

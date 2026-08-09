@@ -944,6 +944,8 @@ export function RunnerCanvas({ active, dark, onSky }: RunnerCanvasProps) {
       // comes back — the theme flips through this effect, and the screen can be re-shown.
       canvas.style.opacity = '';
       fadeRef.current = { phase: 'none', at: 0 };
+      // Set by resize; nothing else owns it, so it goes when the canvas that measured it does.
+      document.documentElement.style.removeProperty('--game-ground');
     };
   }, [active, dark]);
 

@@ -64,17 +64,137 @@ html.screensaver #root {
 /* Launch splash — its own full-window view (?role=splash), up before the site has loaded
    anything. The ink background matches INITIAL_BG in apps/desktop and `.app-splash` in the
    web app; the mark is white on it, exactly as on the PWA splash and the app icon. */
+/* The backdrop is the site's own, so the splash and the app it hands over to are the same
+   surface: the base colour, the four glow ellipses, the dot field and the tilted grid that
+   `body` and its pseudo-elements paint in apps/web/src/styles.css. Those token values are
+   inlined here because this view has none of the web app's CSS — keep them in step with
+   that file. Light is the default and `.dark` overrides it, exactly as the web app orders
+   them; main stamps the class from the theme it remembered (see theme-store.ts). */
+.splash {
+  --sp-bg: #f4f4f8; /* --bg-page-edge */
+  --sp-glow-a: rgba(0, 114, 245, 0.18);
+  --sp-glow-b: rgba(121, 40, 202, 0.12);
+  --sp-glow-c: rgba(0, 112, 243, 0.1);
+  --sp-wash: rgba(0, 114, 245, 0.14);
+  --sp-dot: rgba(0, 0, 0, 0.12);
+  --sp-grid-line: rgba(62, 147, 244, 0.369);
+  --sp-grid-opacity: 0.7;
+  --sp-streaks-opacity: 0.4; /* light needs more punch: colour on near-white */
+}
+.dark .splash {
+  --sp-bg: #0a0a0a;
+  --sp-glow-a: rgba(0, 114, 245, 0.15);
+  --sp-glow-b: rgba(121, 40, 202, 0.12);
+  --sp-glow-c: rgba(0, 112, 243, 0.08);
+  --sp-wash: rgba(99, 102, 241, 0.11);
+  --sp-dot: rgba(255, 255, 255, 0.06);
+  --sp-grid-line: rgba(255, 255, 255, 0.08);
+  --sp-grid-opacity: 1;
+  --sp-streaks-opacity: 0.5;
+}
+
 .splash {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
   padding: 0 1.5rem;
-  background: #120817;
+  overflow: hidden;
   -webkit-app-region: no-drag; /* the view reuses index.html's drag body */
   opacity: 1;
   /* Paired with FADE_MS in main/splash.ts, which hides the view on the same clock. */
   transition: opacity 160ms ease;
+  background-color: var(--sp-bg);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, var(--sp-glow-a), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 50%, var(--sp-glow-b), transparent),
+    radial-gradient(ellipse 50% 50% at 0% 80%, var(--sp-glow-c), transparent),
+    radial-gradient(ellipse 110% 55% at 50% 100%, var(--sp-wash), transparent);
+}
+
+/* The page's drifting dot field (body::before). */
+.splash::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, var(--sp-dot), transparent),
+    radial-gradient(1px 1px at 40% 70%, var(--sp-dot), transparent),
+    radial-gradient(1px 1px at 60% 20%, var(--sp-dot), transparent),
+    radial-gradient(1px 1px at 80% 50%, var(--sp-dot), transparent);
+  background-size: 200px 200px;
+  background-position:
+    0 0,
+    50px 100px,
+    100px 30px,
+    150px 80px;
+}
+
+/* The page's grid (body::after): same 60px cell, same 26deg tilt, same radial mask, so it
+   sits under the mark exactly as it sits under the app. */
+.splash::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--sp-grid-opacity);
+  transform: rotate(26deg) scale(1.02);
+  background-image:
+    linear-gradient(var(--sp-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--sp-grid-line) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(
+    ellipse 70% 50% at 50% 30%,
+    black,
+    transparent 70%
+  );
+}
+
+/* The home page's rainbow streaks (HeroText.module.css `.streaks`): a spectrum painted
+   only onto those same grid lines, by masking with the same pattern — so a few of the real
+   lines light up in colour. Fades in on arrival the way the hero's does. */
+.splash-streaks {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  transform: rotate(26deg) scale(1.02);
+  background: linear-gradient(
+    90deg,
+    #4f7cff 0%,
+    #9a5cff 26%,
+    #ff6fae 50%,
+    #ffb347 74%,
+    #5fd0a0 100%
+  );
+  mask-image:
+    radial-gradient(ellipse 70% 50% at 50% 30%, #000, transparent 70%),
+    linear-gradient(#000 1.5px, transparent 1.5px),
+    linear-gradient(90deg, #000 1.5px, transparent 1.5px);
+  mask-size:
+    100% 100%,
+    60px 60px,
+    60px 60px;
+  mask-composite: intersect, add, add;
+  opacity: var(--sp-streaks-opacity);
+  animation: splash-streaks-in 1s ease-out both;
+}
+
+/* `to` is implied as the element's set opacity, matching the hero's own fade. */
+@keyframes splash-streaks-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-streaks {
+    animation: none;
+  }
 }
 .splash--leaving {
   opacity: 0;
@@ -90,7 +210,9 @@ html.screensaver #root {
    from the dark tokens, since index.html carries `class="dark"` and the splash is on the ink
    background whatever theme the app is in. */
 .splash-mark {
-  width: min(58vw, 440px);
+  position: relative;
+  z-index: 2; /* above the grid, the streaks and the dots */
+  width: min(42vw, 320px);
   filter: grayscale(1);
   opacity: 0.7;
 }

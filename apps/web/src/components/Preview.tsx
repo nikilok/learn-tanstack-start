@@ -284,10 +284,13 @@ export default function Preview({
                   className="h-full w-full border-0"
                 />
               ) : null}
-              {/* Launch splash — replica of the shell/PWA splash (.app-splash
-                  in styles.css + INITIAL_BG in apps/desktop main: #120817 +
-                  white wordmark at min(80vw, 420px) → 420px at this window
-                  width); keep them in lockstep. Fades out over the loaded app. */}
+              {/* Launch splash — replica of the PWA splash (.app-splash in
+                  styles.css: #120817 + white wordmark at min(80vw, 420px) →
+                  420px at this window width); keep those two in lockstep. The
+                  desktop shell's own splash has since moved to the site's dark
+                  ground with the page grid over it (apps/desktop splash.ts +
+                  SplashScreen.tsx), so this no longer mirrors it. Fades out
+                  over the loaded app. */}
               <div
                 className={`absolute inset-0 flex items-center justify-center bg-[#120817] transition-opacity duration-500 ${
                   appVisible ? 'opacity-0' : 'opacity-100'

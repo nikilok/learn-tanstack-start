@@ -28,7 +28,14 @@ export interface Splash {
  * The renderer owns the timing of its own animation and reports when it has finished, so
  * those durations live in one place (SplashScreen.tsx) instead of being mirrored here.
  */
-export function createSplash(parent: BaseWindow, bounds: Rectangle): Splash {
+export function createSplash(
+  parent: BaseWindow,
+  bounds: Rectangle,
+  dark: boolean,
+): Splash {
+  // On the URL rather than over IPC: the renderer needs it for its very first paint, and
+  // a message could not arrive before one.
+  const theme = dark ? 'dark' : 'light';
   const view = new WebContentsView({
     webPreferences: {
       preload: join(__dirname, '../preload/titlebar.js'),
@@ -44,11 +51,11 @@ export function createSplash(parent: BaseWindow, bounds: Rectangle): Splash {
   view.setBounds(bounds);
   if (process.env['ELECTRON_RENDERER_URL']) {
     void view.webContents.loadURL(
-      `${process.env['ELECTRON_RENDERER_URL']}?role=splash`,
+      `${process.env['ELECTRON_RENDERER_URL']}?role=splash&theme=${theme}`,
     );
   } else {
     void view.webContents.loadFile(join(__dirname, '../renderer/index.html'), {
-      query: { role: 'splash' },
+      query: { role: 'splash', theme },
     });
   }
   // Topmost: a launch splash covers the chrome as well as the page.

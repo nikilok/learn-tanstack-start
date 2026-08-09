@@ -20,6 +20,9 @@ import { registerKeyboardShortcuts } from './keyboard-shortcuts';
 import { setupMenu } from './menu';
 import { cleanTitle, desktopUserAgent } from './site';
 import { createSplash } from './splash';
+import { parseThemeMode, splashIsDark } from './theme-mode';
+import type { ThemeMode } from './theme-mode';
+import { readSavedThemeMode, saveThemeMode } from './theme-store';
 import { createTooltipView, positionTooltip } from './tooltip-overlay';
 import {
   getPendingUpdate,
@@ -56,7 +59,11 @@ if (isDev) {
 // top content clears it via its own padding, and styles.css pins the desktop search
 // pill at this same offset (html[data-desktop] .site-header) — keep the two in sync.
 const TITLEBAR_HEIGHT = 46;
-const INITIAL_BG = '#120817'; // PWA splash navy, until the page reports its theme colour
+// The site's own page colours (--bg-page-edge), so the window, the splash drawn over it and
+// the app that follows are one continuous surface — the splash paints a moment after the
+// window appears, and any difference here would read as a flash between the two. Which one
+// is chosen comes from the theme the shell remembered; see splashDark().
+const INITIAL_BG = { dark: '#0a0a0a', light: '#f4f4f8' };
 
 // What the title-bar pill reads while the stand-in screen is up; the page's own title
 // behind it is either stale or the refusal's, and neither says anything useful.
@@ -75,8 +82,17 @@ let lastTarget = APP_URL; // the page to come back to once the site answers agai
 let lastDark = true;
 let lastCursorOn = true; // custom-cursor on/off, mirrored to the title bar
 let lastFilterCount = 0; // active filters, badged on the title-bar icon
-let lastMode = 'auto'; // theme mode (light/dark/auto), for the title bar icon
+let lastMode: ThemeMode = 'auto'; // theme mode, for the title bar icon and next launch
 let screenSaverOn = false; // the web app's screensaver has the window
+
+/**
+ * Which theme the window and its splash open on, before the page exists to report one.
+ * The remembered choice decides it, and `auto` (or a first-ever launch) defers to the OS
+ * the same way the web app's own default does.
+ */
+function splashDark(): boolean {
+  return splashIsDark(readSavedThemeMode(), nativeTheme.shouldUseDarkColors);
+}
 
 /**
  * Dev affordance: DESKTOP_SIMULATE_RATE_LIMIT / _OFFLINE / _UNREACHABLE put the stand-in
@@ -209,6 +225,11 @@ function broadcastTheme(): void {
 /** Creates the window: a custom title-bar view above a WebContentsView of the hosted site. */
 function createWindow(): void {
   const isMac = process.platform === 'darwin';
+  // Resolved once per window: the splash, the window and the site view all open on it, and
+  // reading it twice could straddle an OS appearance change mid-launch.
+  const openDark = splashDark();
+  const openBg = openDark ? INITIAL_BG.dark : INITIAL_BG.light;
+  lastDark = openDark; // until the page reports its own
   const win = new BaseWindow({
     width: 1280,
     height: 860,
@@ -216,7 +237,7 @@ function createWindow(): void {
     minWidth: 600,
     minHeight: 480,
     show: false,
-    backgroundColor: INITIAL_BG,
+    backgroundColor: openBg,
     // macOS keeps the native traffic lights (inset into the logo pill); Windows/Linux are
     // frameless and draw their own min/max/close in the title bar (see WindowControls).
     titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
@@ -251,7 +272,7 @@ function createWindow(): void {
       sandbox: true,
     },
   });
-  view.setBackgroundColor(INITIAL_BG);
+  view.setBackgroundColor(openBg);
   siteView = view;
 
   // Title bar (custom chrome): a transparent overlay. Its page body and view background
@@ -318,7 +339,11 @@ function createWindow(): void {
   // Topmost, and up before anything is loaded — see splash.ts for why the web app's own
   // splash cannot cover this.
   const { width: w0, height: h0 } = win.getContentBounds();
-  const splash = createSplash(win, { x: 0, y: 0, width: w0, height: h0 });
+  const splash = createSplash(
+    win,
+    { x: 0, y: 0, width: w0, height: h0 },
+    openDark,
+  );
 
   const layout = (): void => {
     const { width, height } = win.getContentBounds();
@@ -445,7 +470,11 @@ function registerIpc(): void {
       ) {
         nativeTheme.themeSource = themeSource; // traffic-light + text contrast
       }
-      if (payload?.mode) lastMode = payload.mode;
+      const mode = parseThemeMode(payload?.mode);
+      if (mode) {
+        lastMode = mode;
+        saveThemeMode(mode); // so the next launch's splash opens on the same ground
+      }
       const color = payload?.color;
       if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
         lastDark = isDarkColor(color);

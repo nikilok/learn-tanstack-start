@@ -37,7 +37,9 @@ export function SplashScreen() {
   useEffect(() => {
     const mark = markRef.current;
     if (!mark) return;
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduced = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches;
     // Reduced motion gets the destination, not the journey.
     const reveal = reduced
       ? null
@@ -72,6 +74,7 @@ export function SplashScreen() {
 
   return (
     <div className={`splash${leaving ? ' splash--leaving' : ''}`}>
+      <div className="splash-streaks" aria-hidden="true" />
       <div className="splash-mark" ref={markRef}>
         <Logo className="splash-logo" />
       </div>

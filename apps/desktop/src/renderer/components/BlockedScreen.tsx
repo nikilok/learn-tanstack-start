@@ -4,7 +4,10 @@ import { RunnerCanvas } from '../game/RunnerCanvas';
 
 // One line, so keep each of these to a clause. The countdown is appended to it.
 const REASON: Record<BlockReason, string> = {
-  blocked: 'Too many requests, usually clear within 10 minutes.',
+  // No duration here on purpose: how long a refusal lasts is not something a public repo
+  // should write down, and the countdown below already tells the user when the next check
+  // runs. The screen clears itself either way.
+  blocked: 'Too many requests. Your page comes back on its own.',
   offline: 'You are offline.',
   unreachable: 'SponsorSearch is not answering.',
 };
@@ -57,22 +60,26 @@ export function BlockedScreen() {
   return (
     <div className="blocked">
       <RunnerCanvas active dark={dark} />
-      <p className="blocked-status">
-        <span>{REASON[state.reason]}</span>{' '}
-        <span className="blocked-countdown">
-          {state.checking
-            ? 'Checking now.'
-            : `Checking again in ${clock(left)}.`}
-        </span>{' '}
-        <button
-          type="button"
-          className="blocked-retry no-drag"
-          onClick={() => window.titlebar.retryBlocked()}
-          disabled={state.checking}
-        >
-          Try now
-        </button>
-      </p>
+      <div className="blocked-status">
+        {/* The reason leads and is meant to be read at a glance: someone landing on a game
+            instead of their app needs to know why before anything else. */}
+        <p className="blocked-reason">{REASON[state.reason]}</p>
+        <p className="blocked-meta">
+          <span className="blocked-countdown">
+            {state.checking
+              ? 'Checking now.'
+              : `Checking again in ${clock(left)}.`}
+          </span>{' '}
+          <button
+            type="button"
+            className="blocked-retry no-drag"
+            onClick={() => window.titlebar.retryBlocked()}
+            disabled={state.checking}
+          >
+            Try now
+          </button>
+        </p>
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   createRunner,
+  JUMP_APEX,
   jump,
   PLAYER_R,
   PLAYER_X,
@@ -32,7 +33,16 @@ function wall(y = 0): RunnerState {
     ...createRunner(600),
     started: true,
     y,
-    obstacles: [{ x: PLAYER_X - PLAYER_R, w: 30, h: 50, lights: 3 }],
+    obstacles: [
+      {
+        x: PLAYER_X - PLAYER_R,
+        w: 30,
+        h: 50,
+        lights: 3,
+        roof: 0,
+        kind: 'building',
+      },
+    ],
   };
 }
 
@@ -106,6 +116,50 @@ describe('buildings', () => {
     expect(scrolled.obstacles.every((o) => o.x + o.w > -20)).toBe(true);
   });
 
+  test('nothing that spawns is too tall to jump', () => {
+    // The rule a new obstacle can silently break: add one taller than the jump reaches and
+    // the run becomes unwinnable at that spawn, with nothing failing anywhere else.
+    const heights = new Set<number>();
+    for (let i = 0; i < 60; i++) {
+      // A different rnd each pass, so every shape in the table gets picked eventually.
+      const pick = (i % 12) / 12;
+      const s = stepRunner(
+        { ...createRunner(600), started: true, nextSpawn: 0 },
+        FRAME,
+        false,
+        () => pick,
+      );
+      for (const o of s.obstacles) heights.add(o.h);
+    }
+    expect(heights.size).toBeGreaterThan(1);
+    for (const h of heights) {
+      // Cleared with real room to spare, not by a pixel.
+      expect(h).toBeLessThan(JUMP_APEX * 0.7);
+    }
+  });
+
+  test('the bus is in the mix, and is the long low one', () => {
+    const buses: number[] = [];
+    const towers: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const pick = (i % 12) / 12;
+      const s = stepRunner(
+        { ...createRunner(600), started: true, nextSpawn: 0 },
+        FRAME,
+        false,
+        () => pick,
+      );
+      for (const o of s.obstacles) {
+        if (o.kind === 'bus') buses.push(o.w / o.h);
+        else towers.push(o.w / o.h);
+      }
+    }
+    expect(buses.length).toBeGreaterThan(0);
+    // Wider than it is tall, and wider-to-taller than any building it shares the road with.
+    expect(Math.min(...buses)).toBeGreaterThan(1.4);
+    expect(Math.min(...buses)).toBeGreaterThan(Math.max(...towers));
+  });
+
   test('spacing scales with the pace, so a faster run is not unfair', () => {
     const slow = stepRunner(
       { ...createRunner(600), started: true, nextSpawn: 0, speed: 300 },
@@ -137,7 +191,9 @@ describe('collisions', () => {
   test('a building the lens has not reached is not a hit', () => {
     const ahead = {
       ...wall(),
-      obstacles: [{ x: 300, w: 30, h: 50, lights: 3 }],
+      obstacles: [
+        { x: 300, w: 30, h: 50, lights: 3, roof: 0, kind: 'building' },
+      ],
     };
     expect(stepRunner(ahead, FRAME, false, NEVER).over).toBe(false);
   });

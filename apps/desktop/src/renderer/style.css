@@ -263,16 +263,26 @@ html.screensaver #root {
       transparent 68%
     );
 }
-/* The whole status: one quiet line under the game, never a second thing to read. */
+/* The status under the game. The reason carries it — someone who opened the app and got a
+   game needs that answered immediately — with the retry timing kept quiet underneath. */
 .blocked-status {
   position: absolute;
   right: 32px;
-  bottom: 26px;
+  bottom: 30px;
   left: 32px;
+  text-align: center;
+}
+.blocked-reason {
   margin: 0;
+  color: var(--tb-fg);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.blocked-meta {
+  margin: 7px 0 0;
   color: var(--blocked-soft);
   font-size: 12.5px;
-  text-align: center;
 }
 .blocked-countdown {
   font-variant-numeric: tabular-nums;

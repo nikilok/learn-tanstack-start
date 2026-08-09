@@ -5,12 +5,20 @@
  * and RunnerCanvas.tsx is left with nothing but drawing.
  */
 
+/** What sits on top of a building: 0 flat, 1 a mast, 2 a stepped setback with a tank. */
+export type Roof = 0 | 1 | 2;
+
+/** What the runner has to clear. A bus is drawn differently but behaves the same. */
+export type ObstacleKind = 'building' | 'bus';
+
 export interface Obstacle {
   x: number; // left edge, in world px from the canvas's left
   w: number;
   h: number;
   /** Window rows, so a building keeps the same lit pattern as it scrolls. */
   lights: number;
+  roof: Roof;
+  kind: ObstacleKind;
 }
 
 export interface RunnerState {
@@ -30,6 +38,8 @@ export const PLAYER_R = 15;
 
 const GRAVITY = 2400;
 const JUMP_V = 780;
+/** How high the feet reach at the top of a jump. Nothing spawned may come near it. */
+export const JUMP_APEX = (JUMP_V * JUMP_V) / (2 * GRAVITY);
 const FAST_FALL = 2800; // extra pull while the down key is held
 const SPEED_START = 300;
 const SPEED_MAX = 760;
@@ -39,11 +49,18 @@ const HIT_INSET = 4; // forgiveness, so a near miss reads as a miss
 
 // Low and wide, or tall and narrow. Nothing here is unclearable; the run gets hard
 // through pace and spacing instead, which is the part a player can actually read.
-const SHAPES: readonly { w: number; h: number }[] = [
-  { w: 18, h: 34 },
-  { w: 26, h: 52 },
-  { w: 40, h: 30 },
-  { w: 22, h: 66 },
+const SHAPES: readonly {
+  w: number;
+  h: number;
+  roof: Roof;
+  kind: ObstacleKind;
+}[] = [
+  { w: 18, h: 34, roof: 0, kind: 'building' },
+  { w: 26, h: 52, roof: 1, kind: 'building' },
+  // The bus: long and low against the towers, at roughly a Routemaster's proportions.
+  { w: 46, h: 25, roof: 0, kind: 'bus' },
+  { w: 40, h: 30, roof: 2, kind: 'building' },
+  { w: 22, h: 66, roof: 1, kind: 'building' },
 ];
 
 /** A fresh run, idle until the first jump. */
@@ -90,6 +107,8 @@ function spawn(width: number, rnd: () => number): Obstacle {
     w: shape.w,
     h: shape.h,
     lights: Math.max(1, Math.floor((shape.h - 8) / 12)),
+    roof: shape.roof,
+    kind: shape.kind,
   };
 }
 

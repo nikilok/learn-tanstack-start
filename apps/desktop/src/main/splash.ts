@@ -16,6 +16,8 @@ export interface Splash {
   setBounds(bounds: Rectangle): void;
   /** Completes the reveal, fades out, and releases the view. Safe to call more than once. */
   dismiss(): void;
+  /** Drops it immediately, listener and all — for a window closed before it ever finished. */
+  destroy(): void;
 }
 
 /**
@@ -67,18 +69,35 @@ export function createSplash(
       query: { role: 'splash', theme },
     });
   }
-  view.webContents.once('dom-ready', onReady);
-
   let dismissed = false;
   let gone = false;
+  let ready = false;
+  let dismissWhenReady = false;
+
+  view.webContents.once('dom-ready', () => {
+    ready = true;
+    // A dismissal that arrived first was held rather than sent into a document with no
+    // listener yet — a failed first load can beat the renderer to it by a wide margin.
+    if (dismissWhenReady) sendDismiss();
+    onReady();
+  });
+
+  /** Tells the renderer to finish its reveal and fade; it reports back when it has. */
+  function sendDismiss(): void {
+    if (!view.webContents.isDestroyed()) {
+      view.webContents.send('splash:dismiss');
+    }
+  }
 
   /** Takes the view down. Reached from the renderer's report and from the failsafe. */
   function teardown(): void {
     if (gone) return;
     gone = true;
     ipcMain.removeListener('splash:done', onDone);
-    if (!parent || parent.isDestroyed()) return;
-    parent.contentView.removeChildView(view);
+    // The renderer is released whether or not the window is still there. Returning early
+    // on a destroyed parent would leave the process resident for the life of the app.
+    if (parent && !parent.isDestroyed())
+      parent.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
   }
 
@@ -102,11 +121,11 @@ export function createSplash(
       // the second caller must be a no-op rather than a teardown of a released view.
       if (dismissed) return;
       dismissed = true;
-      if (!view.webContents.isDestroyed()) {
-        view.webContents.send('splash:dismiss');
-      }
+      if (ready) sendDismiss();
+      else dismissWhenReady = true;
       const t = setTimeout(teardown, FAILSAFE_MS);
       t.unref?.(); // never hold the process open on the way out
     },
+    destroy: teardown,
   };
 }

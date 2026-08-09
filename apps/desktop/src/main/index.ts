@@ -156,8 +156,9 @@ function navigate(dir: 'back' | 'forward'): void {
 /** Forwards a title-bar command to the web app (its DesktopBridge handles share / cursor / theme / home). */
 function sendCommand(cmd: string): void {
   reportChromeInput(true); // see navigate(): shortcuts never reach the page as keystrokes
-  // Theme and cursor still work behind the stand-in screen (it follows the theme too);
-  // anything that would move the page does not.
+  // Anything that would move the page is dropped while the stand-in screen is up. The rest
+  // is forwarded, but only the page can act on it — on a cold-start block there is no app
+  // document behind the screen, so those buttons genuinely do nothing until it clears.
   if (blocked?.isUp() && (cmd === 'home' || cmd === 'filters')) return;
   siteView?.webContents.send('ss:command', cmd);
   // Navigation commands hand focus to the page (type-to-search, form controls).
@@ -263,6 +264,9 @@ function createWindow(): void {
       tooltipView = null;
       blocked?.destroy();
       blocked = null;
+      // A window closed mid-launch would otherwise leave the splash's ipcMain listener and
+      // its renderer behind — one of each per open/close cycle.
+      splash.destroy();
       screenSaverOn = false;
     }
   });
@@ -332,8 +336,11 @@ function createWindow(): void {
     probeUrl: APP_URL,
     userAgent: () => view.webContents.getUserAgent(),
     onCleared: () => {
-      if (!view.webContents.isDestroyed())
-        void view.webContents.loadURL(lastTarget);
+      if (view.webContents.isDestroyed()) return;
+      void view.webContents.loadURL(lastTarget);
+      // The screen held focus the whole time it was up; without handing it back, the page
+      // returns with every keybinding dead until the user clicks it.
+      view.webContents.focus();
     },
     onShow: (reason) => {
       // The page owns the screensaver, and it would otherwise sit over this.
@@ -345,6 +352,14 @@ function createWindow(): void {
       pushNavState();
       pushTitle(currentTitle());
     },
+    background: () => (lastDark ? INITIAL_BG.dark : INITIAL_BG.light),
+    // Shortcuts are bound per webContents, so a view that can hold focus has to be bound
+    // too — otherwise every one of them dies while this screen is the focused view.
+    onCreated: (v) =>
+      registerKeyboardShortcuts([v.webContents], {
+        navigate,
+        command: sendCommand,
+      }),
   });
 
   // Mounted last so it covers the page and the chrome both — see splash.ts for why the web
@@ -398,7 +413,11 @@ function createWindow(): void {
     lastTarget = url || lastTarget;
     pushNavState();
   });
-  wc.on('did-navigate-in-page', (_e, url) => {
+  // isMainFrame matters here and not on `did-navigate`: this event also fires for
+  // subframes, and the app iframes itself on /download — a route change inside that demo
+  // would otherwise become the page the shell returns to after a block.
+  wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+    if (!isMainFrame) return;
     lastTarget = url || lastTarget;
     pushNavState();
   });
@@ -406,28 +425,10 @@ function createWindow(): void {
     if (!blocked?.isUp()) pushTitle(title);
   });
 
-  // A refusal happens at the network layer, so nothing in the page can report it. Watching
-  // the responses catches both a refused page and the RPCs a loaded page fires in the
-  // background, which is the case that would otherwise just look like a broken app.
-  wc.session.webRequest.onCompleted(
-    { urls: [`${APP_ORIGIN}/*`] },
-    (details) => {
-      // The session outlives the window, so a request can still land during teardown.
-      if (wc.isDestroyed() || blocked?.isUp() || !isEdgeDenied(details)) return;
-      blocked?.show('blocked');
-      if (blocked?.isUp()) wc.stop(); // the rest in flight is only going to be refused too
-    },
-  );
-
-  // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
-  registerKeyboardShortcuts([wc, bar.webContents], {
-    navigate,
-    command: sendCommand,
-  });
-
   // The handover from the splash to the app: drop the splash and hand keyboard focus to
   // the site view (not the title bar), so typing reaches the page right away — the web
-  // app's type-to-search needs the document focused.
+  // app's type-to-search needs the document focused. Declared here because the refusal
+  // watcher below also has to be able to call it.
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
   const reveal = (): void => {
     if (revealTimer) clearTimeout(revealTimer);
@@ -439,6 +440,31 @@ function createWindow(): void {
     if (blocked?.isUp()) blocked.focus();
     else wc.focus();
   };
+
+  // A refusal happens at the network layer, so nothing in the page can report it. Watching
+  // the responses catches both a refused page and the RPCs a loaded page fires in the
+  // background, which is the case that would otherwise just look like a broken app.
+  wc.session.webRequest.onCompleted(
+    { urls: [`${APP_ORIGIN}/*`] },
+    (details) => {
+      // The session outlives the window, so a request can still land during teardown.
+      if (wc.isDestroyed() || blocked?.isUp() || !isEdgeDenied(details)) return;
+      blocked?.show('blocked');
+      if (!blocked?.isUp()) return;
+      wc.stop(); // the rest in flight is only going to be refused too
+      // stop() aborts the document mid-load, so dom-ready and did-finish-load may never
+      // arrive and the resulting did-fail-load is an ABORTED the handler skips. The screen
+      // is up and ready, so nothing should be waiting on the splash's backstop.
+      reveal();
+    },
+  );
+
+  // Cmd/Ctrl + [ / ] back / forward, whichever view holds focus (see keyboard-shortcuts.ts).
+  registerKeyboardShortcuts([wc, bar.webContents], {
+    navigate,
+    command: sendCommand,
+  });
+
   // A slow load keeps the splash, which is what it is for. A load that never finishes and
   // never fails must not keep it forever: the splash is above the title bar, so the custom
   // window controls on Windows and Linux are underneath it until this fires.
@@ -476,6 +502,11 @@ function registerIpc(): void {
       _event,
       payload: { themeSource?: string; color?: string; mode?: string },
     ) => {
+      // While the stand-in screen is up, whatever document the site view holds is not the
+      // app — a refused navigation commits the edge's own 403 page, which has no theme
+      // colour and no dark class, so the preload reports white. Taking that would repaint
+      // the screen, the window and the chrome in light theme for a dark-theme user.
+      if (blocked?.isUp()) return;
       const themeSource = payload?.themeSource;
       if (
         themeSource === 'light' ||
@@ -512,10 +543,14 @@ function registerIpc(): void {
     lastFilterCount = Math.max(0, Math.trunc(Number(count) || 0));
     titleBarView?.webContents.send('titlebar:filters', lastFilterCount);
   });
-  // The web app reports its screensaver taking over the window (and handing it back).
-  ipcMain.on('ss:screensaver', (_event, on: boolean) =>
-    setScreenSaver(Boolean(on)),
-  );
+  // The web app reports its screensaver taking over the window (and handing it back). It
+  // may not take it while the stand-in screen is up: the covered page keeps its own idle
+  // timer running and sees none of the input landing on that screen, so it would eventually
+  // fade the title bar and hide the window buttons over a screensaver nobody can see.
+  ipcMain.on('ss:screensaver', (_event, on: boolean) => {
+    if (on && blocked?.isUp()) return;
+    setScreenSaver(Boolean(on));
+  });
   // Share = copy the canonical URL via the main-process clipboard (no user gesture needed).
   ipcMain.on('ss:clipboard', (_event, text: string) => {
     if (typeof text === 'string' && text) {

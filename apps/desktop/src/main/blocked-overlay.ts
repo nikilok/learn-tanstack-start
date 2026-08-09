@@ -26,7 +26,18 @@ export interface BlockedOverlayOptions {
   onCleared: () => void;
   onShow: (reason: BlockReason) => void;
   onHide: () => void;
+  /** The ground the view paints while its renderer boots — see ensureView. */
+  background: () => string;
+  /** The view, the moment it exists, so the shell can wire it up like its siblings. */
+  onCreated: (view: WebContentsView) => void;
 }
+
+/**
+ * A probe that never settles would strand the screen: `checking` disables the retry button
+ * and the next timer is only armed after the request returns. Half-open connections (a
+ * captive portal that accepts the TCP handshake and answers nothing) do exactly that.
+ */
+const PROBE_TIMEOUT_MS = 8000;
 
 export interface BlockedOverlay {
   show(reason: BlockReason): void;
@@ -73,6 +84,10 @@ export function createBlockedOverlay(
         sandbox: true,
       },
     });
+    // Opaque, in the theme it is about to paint: a WebContentsView defaults to white, and
+    // this one is mounted visible while its renderer boots — long enough for that default
+    // to flash the whole window white before the screen appears.
+    v.setBackgroundColor(opts.background());
     v.setBounds(bounds);
     if (process.env['ELECTRON_RENDERER_URL']) {
       void v.webContents.loadURL(
@@ -85,6 +100,7 @@ export function createBlockedOverlay(
     }
     parent.contentView.addChildView(v, opts.index);
     view = v;
+    opts.onCreated(v);
     return v;
   }
 
@@ -109,16 +125,21 @@ export function createBlockedOverlay(
         method: 'HEAD',
         cache: 'no-store',
         headers: { 'User-Agent': opts.userAgent() },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
-      return probeStillDenied(res.status, res.headers.get('x-vercel-mitigated'))
-        ? 'blocked'
-        : null;
+      if (probeStillDenied(res.status, res.headers.get('x-vercel-mitigated'))) {
+        return 'blocked';
+      }
+      // A 5xx answers the connection but not the request. Handing the window back now
+      // would swap this screen — countdown, retry and all — for a bare platform error
+      // page with no way off it, so keep waiting instead.
+      return res.status >= 500 ? 'unreachable' : null;
     } catch {
-      return net.isOnline() ? 'unreachable' : 'offline'; // no answer at all
+      return net.isOnline() ? 'unreachable' : 'offline'; // no answer, or none in time
     }
   }
 
-  async function runProbe(): Promise<void> {
+  async function runProbe(manual = false): Promise<void> {
     if (!state) return;
     state = { ...state, checking: true };
     push();
@@ -129,14 +150,16 @@ export function createBlockedOverlay(
       opts.onCleared();
       return;
     }
-    if (reason === state.reason) {
-      attempt += 1;
-    } else {
+    if (reason !== state.reason) {
       // It changed under us (a refusal became an outage, or the other way round): say so,
       // and start that reason's schedule from the top rather than inheriting a long wait.
       attempt = 0;
       state = { ...state, reason };
       opts.onShow(reason);
+    } else if (!manual) {
+      // Only the automatic checks back off. Counting a hand-pressed one would mean the
+      // button that exists to hurry recovery along lengthens the wait every time it fails.
+      attempt += 1;
     }
     scheduleProbe();
   }
@@ -171,7 +194,7 @@ export function createBlockedOverlay(
       if (!state || state.checking) return;
       if (timer) clearTimeout(timer);
       timer = null;
-      void runProbe();
+      void runProbe(true);
     },
     isUp: () => state !== null,
     reason: () => state?.reason ?? null,

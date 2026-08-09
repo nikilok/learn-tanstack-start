@@ -16,6 +16,7 @@ import type { Obstacle, RunnerState } from './runner';
 import { CLOUD_PUFFY, CLOUD_WIDE, makeClouds, makeStars } from './sky';
 import type { Cloud, Star } from './sky';
 import { closeSound, playCrash, playJump } from './sound';
+import { sweatDrops } from './sweat';
 
 /**
  * The canvas fills the screen, so the ground can run to the window's edges the way the
@@ -64,8 +65,11 @@ interface Palette {
   cloudLine: string; // and its outline, which is what makes it read as drawn
   orb: string; // the moon, or the sun
   orbGlow: string | null; // null by day, where a halo over the ink only goes muddy
-  navy: string;
+  /** The mascot's own ink: its legs, its arm and its hand. Near-white at night, the
+   *  logo's navy by day — named for the part rather than the colour, since it is both. */
+  limb: string;
   red: string;
+  sweat: string; // the beads flicking off it once a run has been going a while
 }
 
 function palette(dark: boolean): Palette {
@@ -80,8 +84,9 @@ function palette(dark: boolean): Palette {
         cloudLine: 'rgba(226,232,255,0.16)',
         orb: 'rgba(233,236,255,0.85)',
         orbGlow: 'rgba(180,200,255,0.10)',
-        navy: '#e0e7ff',
+        limb: '#e0e7ff',
         red: '#f87171',
+        sweat: 'rgba(196,222,255,0.95)',
       }
     : {
         groundLine: '#d6d6d6', // --footer-line
@@ -102,8 +107,9 @@ function palette(dark: boolean): Palette {
         // No halo by day. Warm light over the blue wash goes muddy, and the footer's sun
         // is a flat disc with rays — the rays are what make it read as shining.
         orbGlow: null,
-        navy: '#001c55',
+        limb: '#001c55',
         red: '#c8102e',
+        sweat: 'rgba(86,146,208,0.9)',
       };
 }
 
@@ -134,7 +140,7 @@ const SALTIRE_RED = FLAG_R * 0.14;
 const CROSS_W = FLAG_R * 0.69;
 const CROSS_RED = FLAG_R * 0.41;
 
-/** One leg from its hip, swung to `angle` (0 = straight down), with a foot on the end. */
+/** One leg from its hip, swung to `angle` (0 = straight down), with a shoe on the end. */
 function drawLeg(
   c: CanvasRenderingContext2D,
   p: Palette,
@@ -144,14 +150,22 @@ function drawLeg(
   const hipY = HIP_Y;
   const footX = hipX + Math.sin(angle) * LEG_LEN;
   const footY = hipY + Math.cos(angle) * LEG_LEN;
-  c.strokeStyle = p.navy;
   c.lineWidth = LINE;
   c.lineCap = 'round';
   c.lineJoin = 'round';
+
+  c.strokeStyle = p.limb;
   c.beginPath();
   c.moveTo(hipX, hipY);
   c.lineTo(footX, footY);
-  // a little foot, pointing the way it is going
+  c.stroke();
+
+  // The shoe, in the brand red, pointing the way it is going. Drawn as its own stroke
+  // starting at the ankle rather than as a second segment of the leg's path: the round cap
+  // then lands over the leg's own, so the two read as one joint instead of a seam.
+  c.strokeStyle = p.red;
+  c.beginPath();
+  c.moveTo(footX, footY);
   c.lineTo(footX + PLAYER_R * 0.3, footY);
   c.stroke();
 }
@@ -257,6 +271,90 @@ function drawEyes(
   }
 }
 
+const MOUTH_Y = PLAYER_R * 0.3;
+const MOUTH_INK = '#12203f';
+
+/**
+ * A mouth under the flag's red bar, and the only part of the face that answers to what is
+ * happening: a small closed smile waiting to start, a wide open grin once it is running,
+ * a round one for the effort of a jump, and corners down after it hits something.
+ *
+ * Everything here carries a white halo under the ink, for the same reason the eyes carry a
+ * rim — the flag underneath is navy in some places and white in others, and a mark this
+ * small disappears into one of them wherever it happens to land.
+ */
+function drawMouth(c: CanvasRenderingContext2D, pose: Pose): void {
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
+
+  if (!pose.over && pose.airborne) {
+    // Round and open, for the effort of the jump.
+    const r = PLAYER_R * 0.12;
+    c.beginPath();
+    c.ellipse(0, MOUTH_Y, r * 1.1, r, 0, 0, Math.PI * 2);
+    c.fillStyle = '#ffffff';
+    c.fill();
+    c.strokeStyle = MOUTH_INK;
+    c.lineWidth = LINE * 0.32;
+    c.stroke();
+    return;
+  }
+
+  if (!pose.over && pose.running) {
+    // Game on: an open grin, filled rather than drawn as a line. A stroked smile reads as
+    // polite at this size; the flat top and the weight of the fill are what make it read
+    // as a character enjoying itself.
+    const half = PLAYER_R * 0.23;
+    c.beginPath();
+    c.moveTo(-half, MOUTH_Y);
+    c.quadraticCurveTo(0, MOUTH_Y + PLAYER_R * 0.3, half, MOUTH_Y);
+    c.closePath();
+    c.strokeStyle = '#ffffff';
+    c.lineWidth = LINE * 0.5;
+    c.stroke();
+    c.fillStyle = MOUTH_INK;
+    c.fill();
+    return;
+  }
+
+  // Positive bulges the middle downward — a smile. Negative lifts it, dropping the corners.
+  const half = PLAYER_R * 0.17;
+  const curve = pose.over ? -PLAYER_R * 0.15 : PLAYER_R * 0.2;
+  for (const [width, colour] of [
+    [LINE * 0.78, '#ffffff'],
+    [LINE * 0.34, MOUTH_INK],
+  ] as const) {
+    c.strokeStyle = colour;
+    c.lineWidth = width;
+    c.beginPath();
+    c.moveTo(-half, MOUTH_Y);
+    c.quadraticCurveTo(0, MOUTH_Y + curve, half, MOUTH_Y);
+    c.stroke();
+  }
+}
+
+/**
+ * Beads flicking off the brow. Drawn in the lens's own space, so `sweatDrops` hands back
+ * offsets from its centre and this only has to fade and shrink them along the way.
+ */
+function drawSweat(
+  c: CanvasRenderingContext2D,
+  p: Palette,
+  dist: number,
+  score: number,
+): void {
+  c.fillStyle = p.sweat;
+  for (const d of sweatDrops(dist, score, PLAYER_R)) {
+    // Full for the first stretch of the flight, then out — a bead that fades from the
+    // instant it leaves never reads as having been thrown.
+    c.globalAlpha = Math.min(1, (1 - d.life) * 2.2);
+    c.beginPath();
+    c.arc(d.x, d.y, PLAYER_R * 0.1 * (1 - d.life * 0.5), 0, Math.PI * 2);
+    c.fill();
+  }
+  c.globalAlpha = 1;
+}
+
 interface Pose {
   /** Run cycle, in radians. */
   phase: number;
@@ -264,6 +362,9 @@ interface Pose {
   running: boolean;
   over: boolean;
   blinking: boolean;
+  /** Ground travelled and points scored, which is all the sweat is driven by. */
+  dist: number;
+  score: number;
 }
 
 /**
@@ -301,14 +402,14 @@ function drawLens(
   const reach = PLAYER_R * 1.34;
   const handX = Math.cos(arm) * reach;
   const handY = Math.sin(arm) * reach;
-  c.strokeStyle = p.navy;
+  c.strokeStyle = p.limb;
   c.lineWidth = LINE * 1.18;
   c.lineCap = 'round';
   c.beginPath();
   c.moveTo(Math.cos(arm) * PLAYER_R * 0.7, Math.sin(arm) * PLAYER_R * 0.7);
   c.lineTo(handX, handY);
   c.stroke();
-  c.fillStyle = p.navy;
+  c.fillStyle = p.limb;
   c.beginPath();
   c.arc(handX, handY, PLAYER_R * 0.227, 0, Math.PI * 2);
   c.fill();
@@ -319,6 +420,10 @@ function drawLens(
 
   drawFlag(c, p);
   drawEyes(c, pose.over, pose.airborne, pose.blinking);
+  drawMouth(c, pose);
+  // Last, so the beads sit over the head rather than under its rim. Gone the moment it
+  // stops running: a crashed lens lying on its side is not still working.
+  if (pose.running) drawSweat(c, p, pose.dist, pose.score);
   c.restore();
 }
 
@@ -619,6 +724,9 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
         if (o.kind === 'bus') drawBus(c, o);
         else drawLandmark(c, o.kind, o.x, GROUND_Y, o.h, landmarks);
       }
+      // Read before the lens is drawn, not just for the readout: how hard it looks to be
+      // working is driven by the same number.
+      const score = runnerScore(s);
       drawLens(c, PLAYER_X, GROUND_Y - s.y - FOOT_DROP, p, {
         phase: s.dist / 16, // a stride per ~100px, so the legs keep up as it speeds up
         airborne: s.y > 0,
@@ -626,11 +734,12 @@ export function RunnerCanvas({ active, dark }: RunnerCanvasProps) {
         over: s.over,
         // A blink every few seconds, over in a snap, so it reads as alive and not as a fault.
         blinking: !s.over && now % 4200 < 120,
+        dist: s.dist,
+        score,
       });
 
       // Inset from the corner rather than tucked into it — flush against the edges it read
       // as clipped. The gap between the two is wide enough for five digits plus air.
-      const score = runnerScore(s);
       c.font = '500 15px ui-monospace, SFMono-Regular, Menlo, monospace';
       c.textAlign = 'right';
       c.fillStyle = p.dim;

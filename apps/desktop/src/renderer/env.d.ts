@@ -37,10 +37,12 @@ declare global {
     onTooltip(
       cb: (payload: { kind: TooltipKind; caretX: number } | null) => void,
     ): Unsubscribe;
+    splashPainted(): void;
     onSplashDismiss(cb: () => void): Unsubscribe;
     splashDone(): void;
     onBlocked(cb: (state: BlockState | null) => void): Unsubscribe;
     retryBlocked(): void;
+    blockedPainted(): void;
     platform: string;
     windowControl(action: 'minimize' | 'maximize' | 'close'): void;
     onMaximized(cb: (max: boolean) => void): Unsubscribe;

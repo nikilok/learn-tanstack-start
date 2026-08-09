@@ -55,10 +55,39 @@ export function BlockedScreen() {
     return () => clearInterval(id);
   }, [state]);
 
+  // Tell main the moment there is a frame on the glass. The launch splash is held until
+  // this arrives, so a launch that cannot reach the site goes splash -> game with nothing
+  // blank in between. Two frames deep on purpose: the first only schedules this screen's
+  // paint, and reporting from it hands over to a window that is still empty.
+  //
+  // The timeout is not belt-and-braces: a hidden window runs no frames at all, so on a
+  // launch where this screen comes up before the window has been shown, rAF would never
+  // fire and the splash would sit on its backstop instead of handing over.
+  const up = state !== null;
+  useEffect(() => {
+    if (!up) return;
+    let done = false;
+    const report = () => {
+      if (done) return;
+      done = true;
+      window.titlebar.blockedPainted();
+    };
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(report);
+    });
+    const fallback = setTimeout(report, 200);
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+      clearTimeout(fallback);
+    };
+  }, [up]);
+
   if (!state) return null;
 
   return (
-    <div className="blocked">
+    <div className="blocked site-ground">
       <RunnerCanvas active dark={dark} />
       <div className="blocked-status">
         {/* The reason leads and is meant to be read at a glance: someone landing on a game

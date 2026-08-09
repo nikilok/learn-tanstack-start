@@ -35,8 +35,9 @@ export interface Splash {
  * Built and started BEFORE the window's other views, and mounted afterwards. Spinning up a
  * renderer process is most of the wait before anything can paint — measured at ~890ms just
  * to fetch a local file — and going last meant queueing behind three other views for it.
- * `onReady` fires once its document is up, which is the cue to show the window: the chrome
- * and the splash then arrive together instead of a bare rectangle sitting there first.
+ * `onReady` fires once the renderer reports itself mounted, which is the cue to show the
+ * window: the chrome and the splash then arrive together instead of a bare rectangle
+ * sitting there first.
  */
 export function createSplash(
   bounds: Rectangle,
@@ -73,14 +74,28 @@ export function createSplash(
   let gone = false;
   let ready = false;
   let dismissWhenReady = false;
+  let announced = false;
 
   view.webContents.once('dom-ready', () => {
     ready = true;
     // A dismissal that arrived first was held rather than sent into a document with no
     // listener yet — a failed first load can beat the renderer to it by a wide margin.
     if (dismissWhenReady) sendDismiss();
-    onReady();
   });
+
+  /**
+   * The window is shown on the splash's first PAINTED frame, not on `dom-ready`. dom-ready
+   * only means the document parsed: the renderer still has to mount and lay out, and
+   * showing the window on it opened an empty rectangle that sat there for as long as that
+   * took — which is the blank window a launch with no network used to start with.
+   */
+  function onPainted(event: IpcMainEvent): void {
+    if (event.sender !== view.webContents || announced) return;
+    announced = true;
+    ipcMain.removeListener('splash:painted', onPainted);
+    onReady();
+  }
+  ipcMain.on('splash:painted', onPainted);
 
   /** Tells the renderer to finish its reveal and fade; it reports back when it has. */
   function sendDismiss(): void {
@@ -94,6 +109,7 @@ export function createSplash(
     if (gone) return;
     gone = true;
     ipcMain.removeListener('splash:done', onDone);
+    ipcMain.removeListener('splash:painted', onPainted);
     // The renderer is released whether or not the window is still there. Returning early
     // on a destroyed parent would leave the process resident for the life of the app.
     if (parent && !parent.isDestroyed())

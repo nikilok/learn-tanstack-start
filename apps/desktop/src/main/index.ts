@@ -65,6 +65,32 @@ const TITLEBAR_HEIGHT = 46;
 // is chosen comes from the theme the shell remembered; see splashDark().
 const INITIAL_BG = { dark: '#0a0a0a', light: '#f4f4f8' };
 
+/**
+ * How long the launch splash will wait for the stand-in screen to paint before handing over
+ * anyway. Generous on purpose: this screen's renderer shares a process — and therefore a
+ * main thread — with the splash, the title bar and the tooltip, and measured cold it needs
+ * ~2.5s from creation to having its state and a frame up. A backstop that fires at the same
+ * moment the real signal lands is a race, and losing it means handing over to a screen that
+ * is not there yet. It exists only so a renderer that never comes up cannot hold a splash
+ * over a dead window for good.
+ */
+const BLOCKED_PAINT_MS = 5000;
+
+/**
+ * And how long the stand-in screen keeps covering the window on the way back, waiting for
+ * the returning page to paint. Matches the launch backstop: it is the same page load.
+ */
+const SITE_RETURN_MS = 6000;
+
+/**
+ * How long a first load may sit there saying nothing before the shell stops waiting on it
+ * and puts the stand-in screen up instead. Chosen to sit above a genuinely slow cold load
+ * and below Chromium's own patience with a dead host (~10.4s to ERR_FAILED on a hostname
+ * that accepts nothing, measured) — waiting for that is four seconds of nothing to look at.
+ * Overshooting only costs a longer splash, which is the thing a splash is for.
+ */
+const SLOW_LOAD_MS = 8000;
+
 // What the title-bar pill reads while the stand-in screen is up; the page's own title
 // behind it is either stale or the refusal's, and neither says anything useful.
 const BLOCK_TITLES: Record<BlockReason, string> = {
@@ -335,12 +361,31 @@ function createWindow(): void {
     index: 1,
     probeUrl: APP_URL,
     userAgent: () => view.webContents.getUserAgent(),
-    onCleared: () => {
-      if (view.webContents.isDestroyed()) return;
+    onCleared: (sitePainted) => {
+      if (view.webContents.isDestroyed()) {
+        sitePainted();
+        return;
+      }
+      // The mirror of the launch gate: the stand-in screen keeps covering the window until
+      // the page it is handing back to has painted, so recovery does not flash a blank
+      // window for the length of the reload.
+      let settled = false;
+      const settle = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(backstop);
+        view.webContents.removeListener('dom-ready', settle);
+        sitePainted();
+        // The screen held focus the whole time it was up; without handing it back, the
+        // page returns with every keybinding dead until the user clicks it.
+        if (!view.webContents.isDestroyed()) view.webContents.focus();
+      };
+      // Whatever the outcome — a load that fails puts the screen straight back up, and one
+      // that neither loads nor fails must not leave it covering a live page forever.
+      const backstop = setTimeout(settle, SITE_RETURN_MS);
+      backstop.unref?.();
+      view.webContents.once('dom-ready', settle);
       void view.webContents.loadURL(lastTarget);
-      // The screen held focus the whole time it was up; without handing it back, the page
-      // returns with every keybinding dead until the user clicks it.
-      view.webContents.focus();
     },
     onShow: (reason) => {
       // The page owns the screensaver, and it would otherwise sit over this.
@@ -377,18 +422,21 @@ function createWindow(): void {
   layout();
   win.on('resize', layout);
 
-  // Shown once the splash has something to paint, so the window arrives with the brand on
-  // it rather than as a bare rectangle that fills in a beat later. Spawning the first
-  // renderer process is most of that wait (~900ms measured, and unavoidable — it is what
-  // Chromium costs to start), so the backstop sits well clear of it: its only job is to
-  // make sure a splash that never loads cannot keep the window off screen entirely.
+  // Shown once the splash has actually painted, so the window arrives with the brand on it
+  // rather than as a bare rectangle that fills in a beat later. Spawning the first renderer
+  // process is most of that wait (~900ms measured, and unavoidable — it is what Chromium
+  // costs to start), and mounting is more on top, so the backstop sits well clear of both:
+  // its only job is to make sure a splash that never paints cannot keep the window off
+  // screen entirely. Better a late window than a blank one — nothing is lost by waiting,
+  // since there is nothing behind it to look at yet, and in dev the renderer comes off a
+  // Vite server rather than disk and does not mount until ~3s.
   let shown = false;
   showWindow = (): void => {
     if (shown || win.isDestroyed()) return;
     shown = true;
     win.show();
   };
-  setTimeout(showWindow, 2000).unref?.();
+  setTimeout(showWindow, 4000).unref?.();
 
   const simulated = simulatedBlock();
   if (simulated) blocked.show(simulated);
@@ -425,20 +473,49 @@ function createWindow(): void {
     if (!blocked?.isUp()) pushTitle(title);
   });
 
-  // The handover from the splash to the app: drop the splash and hand keyboard focus to
-  // the site view (not the title bar), so typing reaches the page right away — the web
-  // app's type-to-search needs the document focused. Declared here because the refusal
-  // watcher below also has to be able to call it.
+  // The handover from the splash to whatever is going to be on screen. Declared here
+  // because the refusal watcher below also has to be able to call it.
   let revealTimer: ReturnType<typeof setTimeout> | null = null;
-  const reveal = (): void => {
+  let revealed = false;
+
+  /**
+   * Keyboard focus goes to the view in front — the site (not the title bar), so typing
+   * reaches the page right away, since the web app's type-to-search needs the document
+   * focused; or the stand-in screen when that is what is covering it, or the keyboard
+   * would land on the page underneath.
+   */
+  const focusForeground = (): void => {
+    if (win.isDestroyed()) return;
+    if (blocked?.isUp()) blocked.focus();
+    else wc.focus();
+  };
+
+  const finishReveal = (): void => {
+    if (revealed) return;
+    revealed = true;
     if (revealTimer) clearTimeout(revealTimer);
     revealTimer = null;
     if (win.isDestroyed()) return; // timer/load may fire after a fast window close
     splash.dismiss();
-    // A first load that was refused finishes loading like any other, so without this the
-    // keyboard would land on the covered page instead of the screen in front of it.
-    if (blocked?.isUp()) blocked.focus();
-    else wc.focus();
+    focusForeground();
+  };
+
+  /**
+   * The splash is the gate: it comes down only once there is something painted behind it.
+   * That is either the site, or — when the site is refused, offline or simply not there —
+   * the stand-in screen, whose renderer takes a moment to boot and then renders nothing
+   * until its state arrives. Dropping the splash the instant that screen was *asked* for
+   * left the window empty for both of those waits, which is the gap this closes. The
+   * reason does not matter: rate limit, outage or no network all hand over the same way.
+   */
+  const reveal = (): void => {
+    if (revealed) {
+      focusForeground(); // a later refusal still has to move the keyboard
+      return;
+    }
+    if (win.isDestroyed()) return;
+    if (blocked?.isUp()) blocked.whenPainted(finishReveal, BLOCKED_PAINT_MS);
+    else finishReveal();
   };
 
   // A refusal happens at the network layer, so nothing in the page can report it. Watching
@@ -453,8 +530,9 @@ function createWindow(): void {
       if (!blocked?.isUp()) return;
       wc.stop(); // the rest in flight is only going to be refused too
       // stop() aborts the document mid-load, so dom-ready and did-finish-load may never
-      // arrive and the resulting did-fail-load is an ABORTED the handler skips. The screen
-      // is up and ready, so nothing should be waiting on the splash's backstop.
+      // arrive and the resulting did-fail-load is an ABORTED the handler skips. On a
+      // launch that is refused outright this is the only reveal that ever runs, and it
+      // hands over to the stand-in screen the moment that screen has painted.
       reveal();
     },
   );
@@ -466,9 +544,20 @@ function createWindow(): void {
   });
 
   // A slow load keeps the splash, which is what it is for. A load that never finishes and
-  // never fails must not keep it forever: the splash is above the title bar, so the custom
-  // window controls on Windows and Linux are underneath it until this fires.
-  revealTimer = setTimeout(reveal, 6000);
+  // never fails must not keep it forever, though: the splash is above the title bar, so
+  // the custom window controls on Windows and Linux are underneath it until this fires.
+  //
+  // What it must NOT do is lift onto a page that has produced nothing. Chromium is slow to
+  // give up on a host that accepts nothing — web.local with the dev server down takes
+  // ~10.4s to report ERR_FAILED, measured — so this used to uncover an empty site view
+  // seconds before the failure arrived, which is exactly the black screen between the
+  // splash and the game. If it fires with nothing behind it, the stand-in screen goes up
+  // first and the splash hands over to that; its probe owns the recovery, and a site that
+  // turns out to be fine is picked up on the next check.
+  revealTimer = setTimeout(() => {
+    if (!revealed && !blocked?.isUp()) blocked?.show('unreachable');
+    reveal();
+  }, SLOW_LOAD_MS);
   // `dom-ready`, not `did-finish-load`: the latter is the load event, which waits for
   // every font, tile and analytics beacon the page pulls in. Measured on a page with no
   // subresources at all, the load event still trailed the response by three seconds — on
@@ -614,6 +703,8 @@ function registerIpc(): void {
 
   // The stand-in screen's "Try now" -> check straight away instead of waiting out the timer.
   ipcMain.on('blocked:retry', () => blocked?.retry());
+  // The stand-in screen reporting a frame on the glass — what the launch splash waits for.
+  ipcMain.on('blocked:painted', (event) => blocked?.markPainted(event.sender));
 
   // A local view (bar, tooltip or stand-in screen) loaded -> send it the theme; the bar
   // also gets its full state, and the stand-in screen why it is up.

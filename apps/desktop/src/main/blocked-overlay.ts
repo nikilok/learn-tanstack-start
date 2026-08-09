@@ -22,8 +22,13 @@ export interface BlockedOverlayOptions {
   probeUrl: string;
   /** The site view's user-agent, so the check looks like the app rather than a stray client. */
   userAgent: () => string;
-  /** The way back: called once the edge lets us through again. */
-  onCleared: () => void;
+  /**
+   * The way back: called once the edge lets us through again. This screen stays up, exactly
+   * as it is, until `sitePainted` is invoked — bringing the page back is a page load, and
+   * dropping the cover the moment the probe succeeded left a blank window for the length of
+   * it. Call it whatever the outcome; a load that fails puts the screen back up on its own.
+   */
+  onCleared: (sitePainted: () => void) => void;
   onShow: (reason: BlockReason) => void;
   onHide: () => void;
   /** The ground the view paints while its renderer boots — see ensureView. */
@@ -45,6 +50,14 @@ export interface BlockedOverlay {
   /** Check again now, on the user's say-so. */
   retry(): void;
   isUp(): boolean;
+  /** The screen's renderer reporting it has a frame up; no-op for any other view. */
+  markPainted(wc: WebContents): void;
+  /**
+   * Runs `cb` once this screen is actually on the glass — immediately if it already is,
+   * and after `timeoutMs` regardless, so a renderer that dies on the way up cannot leave
+   * whatever is waiting on it (the launch splash) waiting forever.
+   */
+  whenPainted(cb: () => void, timeoutMs: number): void;
   /** Why the screen is up, or null when it is not. */
   reason(): BlockReason | null;
   /** Hands keyboard focus to the screen, so its controls answer the keyboard. */
@@ -70,6 +83,22 @@ export function createBlockedOverlay(
   let state: BlockState | null = null;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // Sticky for the life of the view: once this screen has painted it keeps its renderer,
+  // so a second showing is up on the frame it is asked for.
+  let painted = false;
+  /** Whether the view has a render frame to send to at all — see push(). */
+  let frameLive = false;
+  let waiting: Array<() => void> = [];
+  // True between "the probe got through" and "the page behind is painted". A refusal
+  // landing in that window cancels it: the way back failed, so this screen is staying.
+  let handingBack = false;
+
+  /** Releases anything holding off until this screen was on screen. */
+  function flushWaiting(): void {
+    const due = waiting;
+    waiting = [];
+    for (const cb of due) cb();
+  }
 
   /** Builds the view on first need — most sessions never see this screen. */
   function ensureView(): WebContentsView | null {
@@ -98,6 +127,13 @@ export function createBlockedOverlay(
         query: { role: 'blocked' },
       });
     }
+    // Nothing may be sent to this view until it has a document: show() creates it and
+    // pushes state in the same turn, and `send` on a view whose render frame does not
+    // exist yet neither throws nor arrives — it logs and drops.
+    v.webContents.once('dom-ready', () => {
+      frameLive = true;
+      push();
+    });
     parent.contentView.addChildView(v, opts.index);
     view = v;
     opts.onCreated(v);
@@ -105,7 +141,7 @@ export function createBlockedOverlay(
   }
 
   function push(): void {
-    if (!view || view.webContents.isDestroyed()) return;
+    if (!view || !frameLive || view.webContents.isDestroyed()) return;
     view.webContents.send('blocked:state', state);
   }
 
@@ -146,8 +182,14 @@ export function createBlockedOverlay(
     const reason = await probe();
     if (!state) return; // hidden while the request was in flight
     if (!reason) {
-      hide();
-      opts.onCleared();
+      // Hand back, but keep covering the window until the page has painted. The countdown
+      // and the game carry on over the reload rather than blinking out to nothing.
+      handingBack = true;
+      opts.onCleared(() => {
+        if (!handingBack) return; // a refusal landed mid-reload; the screen stays
+        handingBack = false;
+        hide();
+      });
       return;
     }
     if (reason !== state.reason) {
@@ -167,6 +209,7 @@ export function createBlockedOverlay(
   function hide(): void {
     if (timer) clearTimeout(timer);
     timer = null;
+    handingBack = false;
     if (!state) return;
     state = null;
     push();
@@ -178,7 +221,10 @@ export function createBlockedOverlay(
     show(reason) {
       // Every refused request re-reports while the screen is up; the first one owns the
       // schedule, or the countdown would restart on each one and never reach a check.
-      if (state?.reason === reason) return;
+      // A hand-back in flight is the exception: the reload it was waiting on has just
+      // failed, so the schedule has to be armed again or the countdown sits frozen.
+      if (state?.reason === reason && !handingBack) return;
+      handingBack = false;
       const v = ensureView();
       if (!v) return;
       v.setBounds(bounds);
@@ -197,6 +243,28 @@ export function createBlockedOverlay(
       void runProbe(true);
     },
     isUp: () => state !== null,
+    markPainted(wc) {
+      if (wc !== view?.webContents || painted) return;
+      painted = true;
+      flushWaiting();
+    },
+    whenPainted(cb, timeoutMs) {
+      if (painted || !view) {
+        // No view means show() never got one up — there is nothing to wait for.
+        cb();
+        return;
+      }
+      let done = false;
+      const once = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        cb();
+      };
+      const t = setTimeout(once, timeoutMs);
+      t.unref?.();
+      waiting.push(once);
+    },
     reason: () => state?.reason ?? null,
     focus() {
       if (view && !view.webContents.isDestroyed()) view.webContents.focus();
@@ -218,6 +286,12 @@ export function createBlockedOverlay(
       timer = null;
       state = null;
       view = null;
+      painted = false;
+      frameLive = false;
+      handingBack = false;
+      // Anything still holding for a paint is released rather than stranded: on a window
+      // closed mid-launch the splash's teardown is exactly what would be waiting.
+      flushWaiting();
     },
   };
 }

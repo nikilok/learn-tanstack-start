@@ -66,6 +66,17 @@ export function SplashScreen() {
       })();
     });
 
+    // Tell main this splash is mounted and laid out. The window is not shown until it
+    // lands: `dom-ready` only means the document parsed, and showing on that opened an
+    // empty rectangle that sat there for as long as this renderer took to mount.
+    //
+    // NOT requestAnimationFrame, however much a real painted frame would be the better
+    // signal — the window is still hidden at this point and a hidden window runs no
+    // frames, so waiting for one here deadlocks against the very show() it is gating. An
+    // effect runs on a task instead, so it fires regardless, and by then the DOM is
+    // committed: the window has something to draw the instant it appears.
+    window.titlebar.splashPainted();
+
     return () => {
       off();
       reveal?.cancel();
@@ -73,7 +84,7 @@ export function SplashScreen() {
   }, []);
 
   return (
-    <div className={`splash${leaving ? ' splash--leaving' : ''}`}>
+    <div className={`splash site-ground${leaving ? ' splash--leaving' : ''}`}>
       <div className="splash-streaks" aria-hidden="true" />
       <div className="splash-mark" ref={markRef}>
         <Logo className="splash-logo" />

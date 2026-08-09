@@ -31,12 +31,17 @@ contextBridge.exposeInMainWorld('titlebar', {
     ipcRenderer.send('titlebar:tooltip', payload),
   onTooltip: (cb: (payload: { kind: string; caretX: number } | null) => void) =>
     subscribe('tooltip:show', cb),
-  // The launch splash: told when to finish, and reporting back once it has.
+  // The launch splash: reporting its first painted frame (what the window waits for),
+  // told when to finish, and reporting back once it has.
+  splashPainted: () => ipcRenderer.send('splash:painted'),
   onSplashDismiss: (cb: () => void) => subscribe('splash:dismiss', () => cb()),
   splashDone: () => ipcRenderer.send('splash:done'),
   // The local stand-in screen: why it is up and when the next check runs, plus "check now".
   onBlocked: (cb: (state: unknown) => void) => subscribe('blocked:state', cb),
   retryBlocked: () => ipcRenderer.send('blocked:retry'),
+  // Reported once the stand-in screen has a frame on the glass, so the launch splash knows
+  // there is something behind it to hand over to.
+  blockedPainted: () => ipcRenderer.send('blocked:painted'),
   // Window chrome: which OS we're on, the custom min/max/close actions, and maximise state.
   platform: process.platform,
   windowControl: (action: string) =>

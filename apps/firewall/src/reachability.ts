@@ -42,10 +42,18 @@ export const FIRST_PARTY_AGENTS = ['electron-builder', 'SponsorSearchDesktop'];
 export function bypassPaths(rules: readonly Rule[]): string[] {
   const out = new Set<string>();
   for (const r of rules) {
-    if (r.action.mitigate?.action !== 'bypass') continue;
-    for (const g of r.conditionGroup)
+    // An inactive rule is not exempting anything, so mitigation there is the operator's
+    // own choice rather than a fault.
+    if (!r.active || r.action.mitigate?.action !== 'bypass') continue;
+    for (const g of r.conditionGroup) {
+      // Groups are OR-ed and conditions within one are AND-ed, so a group carrying any
+      // other predicate is not a path exemption. A header-gated bypass mitigates an
+      // unauthenticated caller BY DESIGN — /api/revalidate answering a scanner with a
+      // challenge is the gate working, and reading it as an outage would alarm on that.
+      if (g.conditions.some((c) => c.type !== 'path')) continue;
       for (const c of g.conditions)
-        if (c.type === 'path' && typeof c.value === 'string') out.add(c.value);
+        if (typeof c.value === 'string') out.add(c.value);
+    }
   }
   return [...out];
 }
@@ -121,4 +129,30 @@ export function blockedFirstParty(
       const [prefix, agent, action] = key.split('\u0000');
       return `${prefix} — ${n} request(s) from ${agent} were ${action}d. A client we ship cannot answer one, so those users stop updating and nothing tells them.`;
     });
+}
+
+/**
+ * Both checks, and the refusal to answer from a sample that may be missing rows.
+ *
+ * A capped response cannot support either verdict: dropped served rows invent an outage,
+ * dropped mitigated rows hide one. Unknown escalates rather than passes, which is the same
+ * call the screen makes about its own cap.
+ */
+export function reachabilityFindings(
+  rows: readonly ClientRow[],
+  prefixes: readonly string[],
+  opts: { truncated: boolean },
+): { findings: string[]; error?: string } {
+  if (opts.truncated)
+    return {
+      findings: [],
+      error:
+        'reachability check inconclusive: the traffic sample hit the group cap, so a path answering nothing could be a dropped row rather than an outage',
+    };
+  return {
+    findings: [
+      ...unreachable(rollUp(rows, prefixes)),
+      ...blockedFirstParty(rows, prefixes),
+    ],
+  };
 }

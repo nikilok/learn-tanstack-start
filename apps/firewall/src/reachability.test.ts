@@ -5,6 +5,7 @@ import {
   type PathRow,
   blockedFirstParty,
   bypassPaths,
+  reachabilityFindings,
   rollUp,
   unreachable,
 } from './reachability.ts';
@@ -213,5 +214,97 @@ describe('blockedFirstParty', () => {
     const rows = [row('electron-builder', 'deny', 2)];
     expect(blockedFirstParty(rows, P, { min: 5 })).toEqual([]);
     expect(blockedFirstParty(rows, P, { min: 0 })).toHaveLength(1);
+  });
+});
+
+describe('bypassPaths — branches that are not path exemptions', () => {
+  const withGroups = (
+    name: string,
+    active: boolean,
+    groups: Rule['conditionGroup'],
+  ): Rule => ({
+    name,
+    description: name,
+    active,
+    conditionGroup: groups,
+    action: { mitigate: { action: 'bypass' } },
+  });
+
+  test('an inactive bypass is not exempting anything', () => {
+    // Mitigation on a rule the operator switched off is their call, not a fault.
+    expect(
+      bypassPaths([
+        withGroups('allow-off', false, [
+          { conditions: [{ type: 'path', op: 'pre', value: '/p/' }] },
+        ]),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('a header-gated bypass is skipped: it mitigates by design', () => {
+    // The real one this pins: /api/revalidate and /api/releases challenge a caller with no
+    // secret, which is the gate working. Monitoring them would alarm on that.
+    expect(
+      bypassPaths([
+        withGroups('allow-gated', true, [
+          {
+            conditions: [
+              { type: 'path', op: 'eq', value: '/api/revalidate' },
+              { type: 'header', op: 'ex', key: 'x-revalidate-secret' },
+            ],
+          },
+        ]),
+      ]),
+    ).toEqual([]);
+  });
+
+  test('a rule mixing both keeps only its path-only branch', () => {
+    expect(
+      bypassPaths([
+        withGroups('allow-mixed', true, [
+          { conditions: [{ type: 'path', op: 'pre', value: '/open/' }] },
+          {
+            conditions: [
+              { type: 'path', op: 'eq', value: '/gated' },
+              { type: 'header', op: 'ex', key: 'x-secret' },
+            ],
+          },
+        ]),
+      ]),
+    ).toEqual(['/open/']);
+  });
+
+  // Deliberately no assertion against the real `rules` array: rules.ts reads required
+  // ceilings from the environment at import, by design, so importing it from a test either
+  // throws or races another file that already has. The shapes it can produce are covered
+  // above; a guard over the live rules belongs in rule-integrity, not here.
+});
+
+describe('reachabilityFindings', () => {
+  const rows = [
+    {
+      path: '/downloads/latest/latest.yml',
+      agent: 'electron-builder',
+      action: 'challenge',
+      count: 57,
+    },
+  ];
+
+  test('a complete sample answers', () => {
+    const r = reachabilityFindings(rows, ['/downloads/latest/'], {
+      truncated: false,
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.findings.length).toBeGreaterThan(0);
+  });
+
+  test('a capped sample refuses to answer, and says so', () => {
+    // Dropped served rows invent an outage; dropped mitigated rows hide one. Neither
+    // verdict is available, so this reports that rather than guessing.
+    const r = reachabilityFindings(rows, ['/downloads/latest/'], {
+      truncated: true,
+    });
+    expect(r.findings).toEqual([]);
+    expect(r.error).toContain('group cap');
   });
 });

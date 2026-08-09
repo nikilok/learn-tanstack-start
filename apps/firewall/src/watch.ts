@@ -23,12 +23,7 @@ import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
-import {
-  blockedFirstParty,
-  bypassPaths,
-  rollUp,
-  unreachable,
-} from './reachability';
+import { bypassPaths, reachabilityFindings } from './reachability';
 import { trustedRules } from './rule-integrity';
 import { isRecoverableRule } from './rule-names';
 import { type Window, rollingWindow } from './time-window';
@@ -962,11 +957,15 @@ async function reachabilityOrError(
       action: String(r['wafAction'] ?? ''),
       count: countOf(r),
     }));
-    const paths = bypassPaths(rules);
-    return [
-      ...unreachable(rollUp(rows, paths)),
-      ...blockedFirstParty(rows, paths),
-    ];
+    const { findings, error } = reachabilityFindings(
+      rows,
+      bypassPaths(rules),
+      // requestPath x agent x action is a wide grouping; at the cap the rows we need may
+      // be the ones dropped, and a verdict from that is a guess wearing an alarm's clothes.
+      { truncated: rows.length >= GROUP_CAP },
+    );
+    if (error) errors.push(error);
+    return findings;
   } catch (e) {
     errors.push(`reachability check failed: ${errMsg(e)}`);
     return [];

@@ -13,6 +13,11 @@
  *   bun apps/web/scripts/profile-company.ts --limit=20 --from-snapshots    # extract sweep
  *   bun apps/web/scripts/profile-company.ts --limit=20                     # local backfill
  *   bun apps/web/scripts/profile-company.ts --limit=50 --from-snapshots --claim=mac-1
+ *   bun profiles:work                       # fleet worker, from any machine
+ *
+ * --work (the root `profiles:work` script) is sugar for the fleet defaults:
+ * --from-snapshots + --claim=<hostname> + --limit=100, each yielding to an
+ * explicit flag.
  *
  * --origin persists NOTHING. --limit counts origins. --dry-run skips every
  * write. Answers stamp question_hash + model, so re-runs skip fresh rows and
@@ -28,6 +33,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { hostname } from 'node:os';
 import { basename } from 'node:path';
 
 import { createClient } from '@ss/db/client';
@@ -93,22 +99,33 @@ const flag = (name: string) =>
 
 const originArg = flag('origin');
 const companyArg = flag('company');
-const limitArg = flag('limit');
 const questionArg = flag('question');
-const claimArg = flag('claim');
 const companiesFileArg = flag('companies-file');
 const noExtract = args.includes('--no-extract');
-const fromSnapshots = args.includes('--from-snapshots');
 const dryRun = args.includes('--dry-run');
 /** Per-page detail and text previews, for a human at a terminal. */
 const verbose = args.includes('--verbose');
 const delayMs = parseStrictInt(flag('delay') ?? '250', 'delay');
 
+/**
+ * --work is the fleet entry point (the root `profiles:work` script): any
+ * trusted machine latches into the shared due list with one command. Pure
+ * sugar over the explicit flags — extract-only, hostname claim identity, a
+ * bounded default chunk — and every default yields to an explicit flag, so
+ * everything downstream sees only effective values and there is no second
+ * code path.
+ */
+const workMode = args.includes('--work');
+const limitArg = flag('limit') ?? (workMode ? '100' : undefined);
+const claimArg =
+  flag('claim') ?? (workMode ? hostname().slice(0, 40) : undefined);
+const fromSnapshots = args.includes('--from-snapshots') || workMode;
+
 // Reject anything unrecognized: a mistyped or removed flag (--shard, --claim
 // without '=') silently degrading to an uncoordinated run is how two workers
 // end up double-extracting a whole sweep.
 const KNOWN_ARGS =
-  /^--(origin|company|limit|question|claim|companies-file|delay)=|^--(no-extract|from-snapshots|dry-run|verbose)$/;
+  /^--(origin|company|limit|question|claim|companies-file|delay)=|^--(no-extract|from-snapshots|dry-run|verbose|work)$/;
 const unknownArgs = args.filter((arg) => !KNOWN_ARGS.test(arg));
 if (unknownArgs.length > 0) {
   const shardHint = unknownArgs.some((arg) => arg.startsWith('--shard'))
@@ -117,6 +134,17 @@ if (unknownArgs.length > 0) {
   console.error(
     `  unrecognized argument(s): ${unknownArgs.join(' ')}${shardHint}`,
   );
+  process.exit(1);
+}
+
+if (workMode && (originArg || companyArg || companiesFileArg)) {
+  console.error(
+    '  --work drains the shared due list; drop --origin/--company/--companies-file',
+  );
+  process.exit(1);
+}
+if (workMode && noExtract) {
+  console.error('  --work is extract-only; the crawl sweep runs from CI alone');
   process.exit(1);
 }
 

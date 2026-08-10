@@ -702,6 +702,8 @@ if (noExtract) {
           console.error(
             `  aborting: ${failureStreak} consecutive extraction failures (engine wedged?)`,
           );
+          // The summary still prints, but the run must read as failed in CI.
+          process.exitCode = 1;
           return false;
         }
         return true;

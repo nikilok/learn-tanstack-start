@@ -28,4 +28,4 @@ export {
   ensureModel,
   type GemmaModelConfig,
 } from './model';
-export { DEFAULT_MODEL_SHA256, DEFAULT_MODEL_URL } from './model-pin';
+export { DEFAULT_MODEL_SHA256, DEFAULT_MODEL_URL, MODEL_REVISION } from './model-pin';

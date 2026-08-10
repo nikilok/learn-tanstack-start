@@ -41,21 +41,32 @@ function scanObject(text: string, start: number): string | null {
 }
 
 /**
- * Extracts the first parseable JSON object from a model response, tolerating
- * code fences, surrounding prose, and multiple candidate objects.
+ * The first parseable JSON object anywhere in a model response, tolerating
+ * code fences, surrounding prose, and multiple candidate objects. Null when
+ * none parses. scanObject only ever yields '{...}', so a non-null return is
+ * always an object.
  */
-export function parseAgentAction(text: string, label = 'Model'): AgentAction {
+export function parseFirstJsonObject(text: string): unknown {
   for (let i = text.indexOf('{'); i !== -1; i = text.indexOf('{', i + 1)) {
     const raw = scanObject(text, i);
     if (raw) {
       try {
-        return JSON.parse(raw) as AgentAction;
+        return JSON.parse(raw);
       } catch {
         // Balanced but not JSON (e.g. prose braces) — try the next candidate.
       }
     }
   }
-  throw new Error(`${label} did not return valid JSON: ${text}`);
+  return null;
+}
+
+/** Extracts the agent-action object from a model response, or throws. */
+export function parseAgentAction(text: string, label = 'Model'): AgentAction {
+  const parsed = parseFirstJsonObject(text);
+  if (parsed === null) {
+    throw new Error(`${label} did not return valid JSON: ${text}`);
+  }
+  return parsed as AgentAction;
 }
 
 /** Formats scraped links for the prompt; filtered + compact for Gemma's 8k context. */

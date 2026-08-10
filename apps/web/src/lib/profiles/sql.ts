@@ -5,13 +5,37 @@
  */
 
 import type { createClient } from '@ss/db/client';
-import { companyPageSnapshots, companyWebsites } from '@ss/db/schema';
+import {
+  companyPageSnapshots,
+  companyWebsites,
+  profileQuestions,
+} from '@ss/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 
 import { publishableWebsiteGate } from '../websites/publishable';
 import { type CrawlPage, snapshotOrigin } from './crawl';
+import type { ProfileQuestion, QuestionKind } from './extract';
 
 type Db = ReturnType<typeof createClient>;
+
+/** Active questions in ask-assembly order — the live contract every run
+ *  re-reads from the table rather than assuming. */
+export function makeSelectActiveQuestions(db: Db) {
+  return async (): Promise<ProfileQuestion[]> => {
+    const rows = await db
+      .select({
+        slug: profileQuestions.slug,
+        prompt: profileQuestions.prompt,
+        kind: profileQuestions.kind,
+        intent: profileQuestions.intent,
+        sort: profileQuestions.sort,
+      })
+      .from(profileQuestions)
+      .where(eq(profileQuestions.active, true))
+      .orderBy(profileQuestions.sort);
+    return rows.map((row) => ({ ...row, kind: row.kind as QuestionKind }));
+  };
+}
 
 export type CrawlTarget = {
   /** The stored website URL, the crawl base. */

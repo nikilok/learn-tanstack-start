@@ -31,6 +31,10 @@ import { parseStrictInt } from './script-utils';
 
 const DEBUG = process.env.GEMMA_DEBUG === '1';
 
+/** Engine context budget when GEMMA_MAX_TOKENS is unset. Exported so callers
+ *  sizing prompts against the window share the number instead of re-guessing. */
+export const DEFAULT_GEMMA_MAX_TOKENS = 8192;
+
 /** Reads an env var, treating unset/empty/whitespace values as undefined. */
 function envStr(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -44,7 +48,7 @@ function readEnvConfig(): GemmaClientConfig {
   // error; createGemmaClient owns the positivity check at the API boundary.
   const maxNumTokens = rawMaxTokens
     ? parseStrictInt(rawMaxTokens, 'GEMMA_MAX_TOKENS')
-    : 8192;
+    : DEFAULT_GEMMA_MAX_TOKENS;
   return {
     model: {
       path: envStr('GEMMA_MODEL_PATH') ?? defaultModelPath(),

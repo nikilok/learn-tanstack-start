@@ -110,7 +110,9 @@ for (const entry of byOrigin.values()) {
 // The steady state once the corpus is crawled: nothing left to sample is a
 // clean report, not a TypeError out of the allocation loop.
 if (byOrigin.size === 0) {
-  console.error('  no eligible origins to sample; every candidate already has snapshots');
+  console.error(
+    '  no eligible origins to sample; every candidate already has snapshots',
+  );
   process.exit(1);
 }
 

@@ -117,6 +117,18 @@ export function assertAskFits(
   return budget;
 }
 
+/**
+ * The canonical string question_hash is computed over — everything that
+ * shapes the ask. Deliberately wider than the plan's "prompt text": kind
+ * picks the answer shape and intent aims the model, so editing either must
+ * mark rows stale exactly as a prompt edit does. sort and slug are excluded —
+ * reordering questions or renaming identity is not a reason to re-extract a
+ * population. Callers store sha256 of this string.
+ */
+export function askHashInput(question: ProfileQuestion): string {
+  return `${question.kind}\n${question.prompt}\n${question.intent}`;
+}
+
 export type ParsedAnswers =
   | { ok: true; answers: PageAnswers }
   | { ok: false; error: string };

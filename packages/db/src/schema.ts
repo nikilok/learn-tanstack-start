@@ -523,7 +523,9 @@ export const companyPageSnapshots = pgTable(
 // Extracted answers, one row per (company, question). INTERNAL ONLY: nothing
 // renders these and no RPC selects from this table. question_hash pins the
 // prompt text that produced the row, so a prompt edit strands old-hash rows as
-// stale and the nightly job re-extracts them from stored snapshots.
+// stale and the nightly job re-extracts them from stored snapshots. Rows of a
+// company that stops passing the render gate are archived to
+// company_answers_archive, then deleted — never silently destroyed.
 // Deliberately NOT foreign-keyed to companies_house_profiles, matching
 // company_websites (and the 63-byte FK-name trap migration 0034 had to undo);
 // the profile_questions FK is short and stays.
@@ -565,6 +567,40 @@ export const companyAnswers = pgTable(
     index('idx_company_answers_staleness').on(
       table.questionSlug,
       table.extractedAt,
+    ),
+  ],
+);
+
+// Cold append-only history of company_answers, written at identity-severance
+// moments (the mark-never-destroy pattern of companies_house_profile_trails).
+// `id` carries the archived row's original id, so the archive insert is
+// idempotent and a crash between archive and delete loses nothing. reason:
+// 'website_demoted' today; 'reattributed'/'superseded' are future policy
+// dials, not schema changes. source_urls preserve which domain the knowledge
+// came from. Nothing reads this table yet.
+export const companyAnswersArchive = pgTable(
+  'company_answers_archive',
+  {
+    id: integer('id').primaryKey(),
+    companyNumber: varchar('company_number', { length: 20 }).notNull(),
+    questionSlug: varchar('question_slug', { length: 64 }).notNull(),
+    questionHash: varchar('question_hash', { length: 64 }).notNull(),
+    questionText: text('question_text').notNull(),
+    answer: text('answer'),
+    items: jsonb('items').$type<string[]>(),
+    sourceUrls: jsonb('source_urls').$type<string[]>().notNull(),
+    identityEvidence: varchar('identity_evidence', { length: 24 }).notNull(),
+    model: varchar('model', { length: 64 }).notNull(),
+    status: varchar('status', { length: 16 }).notNull(),
+    extractedAt: timestamp('extracted_at').notNull(),
+    archivedAt: timestamp('archived_at').defaultNow().notNull(),
+    reason: varchar('reason', { length: 24 }).notNull(),
+  },
+  (table) => [
+    // The story query: a company's knowledge history in time order.
+    index('idx_answers_archive_company').on(
+      table.companyNumber,
+      table.archivedAt,
     ),
   ],
 );

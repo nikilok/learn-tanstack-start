@@ -36,10 +36,13 @@ export function makeClaimOrigins(db: Db) {
     candidates: string[],
     target: number,
   ): Promise<string[]> => {
+    // Dedupe first: a repeated origin inside one upsert is a Postgres 21000
+    // ("cannot affect row a second time") and aborts the whole statement.
+    const pool = [...new Set(candidates)];
     const won: string[] = [];
     let cursor = 0;
-    while (cursor < candidates.length && won.length < target) {
-      const chunk = candidates.slice(cursor, cursor + (target - won.length));
+    while (cursor < pool.length && won.length < target) {
+      const chunk = pool.slice(cursor, cursor + (target - won.length));
       cursor += chunk.length;
       const rows = await db
         .insert(profileWorkClaims)

@@ -99,6 +99,25 @@ describe('mergeAnswers', () => {
     ]);
   });
 
+  test('a page that only repeats known items is not a source', () => {
+    const merged = mergeAnswers(QUESTIONS, [
+      page('/about-us', {
+        what_does: null,
+        offerings: ['Home care', 'Respite care'],
+      }),
+      page('/services', {
+        what_does: null,
+        offerings: ['home  care', 'RESPITE CARE'],
+      }),
+    ]);
+    expect(merged.offerings).toEqual({
+      kind: 'list',
+      status: 'ok',
+      items: ['Home care', 'Respite care'],
+      sourceUrls: ['https://example.co.uk/about-us'],
+    });
+  });
+
   test('the union caps rather than bloating an answer row', () => {
     const merged = mergeAnswers(QUESTIONS, [
       page('', {

@@ -86,13 +86,16 @@ export function mergeAnswers(
     for (const candidate of ordered) {
       const value = candidate.answers[question.slug];
       if (!Array.isArray(value) || value.length === 0) continue;
-      sourceUrls.push(candidate.url);
+      const before = items.length;
       for (const item of value) {
         const key = normaliseItem(item);
         if (!key || seen.has(key)) continue;
         seen.add(key);
         if (items.length < MAX_LIST_ITEMS) items.push(item);
       }
+      // Provenance is contribution: a page whose items all dedupe away or
+      // fall past the cap is not a source of this answer.
+      if (items.length > before) sourceUrls.push(candidate.url);
     }
     merged[question.slug] =
       items.length > 0

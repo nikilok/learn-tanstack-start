@@ -26,13 +26,31 @@ function stubClaimDb(decide: (origins: string[]) => string[]) {
   return { db, statements };
 }
 
-/** Stub for the release/renew chains, returning a fixed row set. */
+/** Stub for the release/renew chains: records each where predicate so the
+ *  claimed_by guard's presence is asserted, not assumed. */
 function stubRowsDb(result: { origin: string }[]) {
+  const wheres: unknown[] = [];
   const rows = () => Promise.resolve(result);
-  return {
-    delete: () => ({ where: () => ({ returning: rows }) }),
-    update: () => ({ set: () => ({ where: () => ({ returning: rows }) }) }),
+  const capture = (where: unknown) => {
+    wheres.push(where);
+    return { returning: rows };
+  };
+  const db = {
+    delete: () => ({ where: capture }),
+    update: () => ({ set: () => ({ where: capture }) }),
   } as unknown as Db;
+  return { db, wheres };
+}
+
+/** Column names referenced anywhere in a drizzle condition tree. */
+function columnNames(node: unknown, out: string[] = []): string[] {
+  if (!node || typeof node !== 'object') return out;
+  const record = node as Record<string, unknown>;
+  if (typeof record.name === 'string' && record.table) out.push(record.name);
+  if (Array.isArray(record.queryChunks)) {
+    for (const chunk of record.queryChunks) columnNames(chunk, out);
+  }
+  return out;
 }
 
 describe('makeClaimOrigins', () => {
@@ -78,6 +96,13 @@ describe('makeClaimOrigins', () => {
     expect(statements).toEqual([['a', 'm', 'z']]);
     expect(won).toEqual(['a', 'm', 'z']);
   });
+
+  test('a repeated origin claims once, never a same-row conflict', async () => {
+    const { db, statements } = stubClaimDb((origins) => origins);
+    const won = await makeClaimOrigins(db)('w', ['a', 'b', 'a', 'a'], 4);
+    expect(statements).toEqual([['a', 'b']]);
+    expect(won).toEqual(['a', 'b']);
+  });
 });
 
 describe('makeReleaseClaims', () => {
@@ -86,8 +111,17 @@ describe('makeReleaseClaims', () => {
   });
 
   test('returns the count of rows actually deleted', async () => {
-    const db = stubRowsDb([{ origin: 'a' }, { origin: 'b' }]);
+    const { db } = stubRowsDb([{ origin: 'a' }, { origin: 'b' }]);
     expect(await makeReleaseClaims(db)('w', ['a', 'b', 'c'])).toBe(2);
+  });
+
+  test('the delete is guarded by origin AND claimed_by', async () => {
+    // Without the claimed_by arm a stale worker's release deletes an origin
+    // another worker now holds; this pins the guard into the predicate.
+    const { db, wheres } = stubRowsDb([]);
+    await makeReleaseClaims(db)('w', ['a']);
+    expect(columnNames(wheres[0])).toContain('origin');
+    expect(columnNames(wheres[0])).toContain('claimed_by');
   });
 });
 
@@ -97,7 +131,14 @@ describe('makeRenewClaims', () => {
   });
 
   test('returns the count of rows actually renewed', async () => {
-    const db = stubRowsDb([{ origin: 'a' }]);
+    const { db } = stubRowsDb([{ origin: 'a' }]);
     expect(await makeRenewClaims(db)('w', ['a', 'b'])).toBe(1);
+  });
+
+  test('the renewal is guarded by origin AND claimed_by', async () => {
+    const { db, wheres } = stubRowsDb([]);
+    await makeRenewClaims(db)('w', ['a']);
+    expect(columnNames(wheres[0])).toContain('origin');
+    expect(columnNames(wheres[0])).toContain('claimed_by');
   });
 });

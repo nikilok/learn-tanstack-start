@@ -168,6 +168,9 @@ export function makeSelectDueCompanies(db: Db) {
     model: string,
     companyNumbers?: string[],
   ): Promise<DueCompany[]> => {
+    // No active questions means nothing can be due — and an empty VALUES
+    // list is a Postgres syntax error, not an empty set.
+    if (hashes.length === 0) return [];
     const pairs = sql.join(
       hashes.map((entry) => sql`(${entry.slug}, ${entry.hash})`),
       sql`, `,
@@ -389,7 +392,7 @@ export function makeUpsertAnswers(db: Db) {
 export function makeInvalidateOrphanedAnswers(db: Db) {
   return async (): Promise<number> => {
     const result = await db.execute(sql`
-      WITH orphaned AS (
+      WITH orphaned AS MATERIALIZED (
         SELECT a.* FROM company_answers a
         WHERE NOT EXISTS (
           SELECT 1 FROM company_websites

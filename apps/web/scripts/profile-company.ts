@@ -678,9 +678,11 @@ if (noExtract) {
 
     /** Extract + write one origin group. False = abort the run (engine wedged). */
     const processGroup = async (group: OriginGroup): Promise<boolean> => {
-      const pages = await pagesForExtraction(group);
       let outcome: ExtractionOutcome;
       try {
+        // Page loading sits under the same tolerance as the asks: a transient
+        // DB or crawl error on one origin must not end the sweep.
+        const pages = await pagesForExtraction(group);
         outcome = await extractOutcome(
           await ensureGemma(),
           pages,

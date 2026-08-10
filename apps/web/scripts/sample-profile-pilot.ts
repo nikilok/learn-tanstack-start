@@ -58,6 +58,7 @@ const rand = makeRand(seed);
 function era(dateOfCreation: string | null): string {
   if (!dateOfCreation) return 'unknown';
   const year = Number(dateOfCreation.slice(0, 4));
+  if (!Number.isFinite(year)) return 'unknown';
   if (year < 2010) return 'pre2010';
   if (year < 2020) return '2010s';
   return '2020s';
@@ -104,6 +105,13 @@ for (const entry of byOrigin.values()) {
   const cell = cells.get(entry.stratum) ?? [];
   cell.push(entry);
   cells.set(entry.stratum, cell);
+}
+
+// The steady state once the corpus is crawled: nothing left to sample is a
+// clean report, not a TypeError out of the allocation loop.
+if (byOrigin.size === 0) {
+  console.error('  no eligible origins to sample; every candidate already has snapshots');
+  process.exit(1);
 }
 
 // Proportional allocation with a floor of 1 per non-empty cell, trimmed to

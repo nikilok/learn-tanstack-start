@@ -100,9 +100,11 @@ export function publishableWebsiteGate(): SQL {
  * tiers, or a null URL. It never renders anything — the render gate is the
  * only publish decision.
  */
+export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
+
 export function answersRetentionGate(): SQL {
   return and(
-    inArray(companyWebsites.status, ['verified', 'unreachable']),
+    inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]),
     isNotNull(companyWebsites.checkedAt),
     inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
     isNotNull(companyWebsites.url),

@@ -156,11 +156,17 @@ export const PROFILE_RETRY_DAYS = 7;
  * a permanent exclusion (see PROFILE_RETRY_DAYS). Ordered never-answered first
  * (min extracted_at NULLS FIRST), no LIMIT: the caller groups by origin,
  * filters, and caps.
+ *
+ * `companyNumbers` narrows the same predicate to a claimed batch — the
+ * post-claim dueness recheck MUST be this exact rule (a claim run's list is a
+ * startup snapshot; a peer may complete origins after it), so the filter is a
+ * parameter here rather than a second query that could drift.
  */
 export function makeSelectDueCompanies(db: Db) {
   return async (
     hashes: { slug: string; hash: string }[],
     model: string,
+    companyNumbers?: string[],
   ): Promise<DueCompany[]> => {
     const pairs = sql.join(
       hashes.map((entry) => sql`(${entry.slug}, ${entry.hash})`),
@@ -176,6 +182,9 @@ export function makeSelectDueCompanies(db: Db) {
       .where(
         and(
           publishableWebsiteGate(),
+          ...(companyNumbers
+            ? [inArray(companyWebsites.companyNumber, companyNumbers)]
+            : []),
           sql`EXISTS (
             SELECT 1 FROM (VALUES ${pairs}) AS q(slug, hash)
             WHERE NOT EXISTS (

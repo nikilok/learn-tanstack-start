@@ -21,7 +21,8 @@
  * profile_work_claims: each origin is won by exactly one worker, released on
  * completion, and --limit becomes that worker's win target. Claims are taken
  * for real even under --dry-run (coordination must be observable); answers
- * and snapshots stay unwritten.
+ * and snapshots stay unwritten — which means a dry-run rehearsal DISPLACES
+ * live workers for its window. Never overlap one with a scheduled sweep.
  *
  * Env: POSTGRES_URL, GEMMA_* (model runtime).
  */
@@ -41,6 +42,7 @@ import {
 import {
   makeClaimOrigins,
   makeReleaseClaims,
+  makeRenewClaims,
 } from '../src/lib/profiles/claims.ts';
 import { truncateToTokenBudget } from '../src/lib/profiles/clean.ts';
 import type { CrawlDeps, CrawlResult } from '../src/lib/profiles/crawl.ts';
@@ -102,6 +104,22 @@ const dryRun = args.includes('--dry-run');
 const verbose = args.includes('--verbose');
 const delayMs = parseStrictInt(flag('delay') ?? '250', 'delay');
 
+// Reject anything unrecognized: a mistyped or removed flag (--shard, --claim
+// without '=') silently degrading to an uncoordinated run is how two workers
+// end up double-extracting a whole sweep.
+const KNOWN_ARGS =
+  /^--(origin|company|limit|question|claim|companies-file|delay)=|^--(no-extract|from-snapshots|dry-run|verbose)$/;
+const unknownArgs = args.filter((arg) => !KNOWN_ARGS.test(arg));
+if (unknownArgs.length > 0) {
+  const shardHint = unknownArgs.some((arg) => arg.startsWith('--shard'))
+    ? ' (--shard was removed; concurrent workers coordinate via --claim)'
+    : '';
+  console.error(
+    `  unrecognized argument(s): ${unknownArgs.join(' ')}${shardHint}`,
+  );
+  process.exit(1);
+}
+
 const modes = [originArg, companyArg, limitArg, companiesFileArg].filter(
   Boolean,
 ).length;
@@ -143,9 +161,9 @@ if (questionArg && !originArg) {
  * simply claims more. Null when unset (single-worker run, plain --limit cap).
  */
 const claimWorker = ((): string | null => {
-  if (!claimArg) return null;
-  if (!/^\S{1,64}$/.test(claimArg)) {
-    console.error('  --claim needs a worker id: 1-64 chars, no whitespace');
+  if (claimArg === undefined) return null;
+  if (!/^\S{1,40}$/.test(claimArg)) {
+    console.error('  --claim needs a worker id: 1-40 chars, no whitespace');
     process.exit(1);
   }
   if (!limitArg || noExtract) {
@@ -154,8 +172,25 @@ const claimWorker = ((): string | null => {
     );
     process.exit(1);
   }
+  if (parseStrictInt(limitArg, 'limit') === 0) {
+    console.error('  --claim needs a positive --limit win target');
+    process.exit(1);
+  }
   return claimArg;
 })();
+
+/**
+ * Per-process claim identity: the operator id salted with pid + start time.
+ * Two incarnations sharing --claim=id (a retry racing its hung predecessor)
+ * must never pass each other's claimed_by guard, so claims, renewals and
+ * releases all key on the instance. The deliberate cost: a restarted worker
+ * cannot instantly reclaim its predecessor's orphans — they wait out the
+ * lease, bounded at one CLAIM_BATCH — chosen over same-id reclamation, which
+ * would let two live same-id processes delete each other's active claims.
+ */
+const claimInstance = claimWorker
+  ? `${claimWorker}.${process.pid.toString(36)}.${Date.now().toString(36)}`
+  : null;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -481,8 +516,9 @@ async function pagesForExtraction(group: OriginGroup): Promise<AskablePage[]> {
  *  would burn the whole window writing nothing. */
 const SYSTEMIC_FAILURE_STREAK = 5;
 
-/** Origins claimed per round in a --claim run: small enough that a batch
- *  always completes well inside CLAIM_LEASE_MINUTES, even at CI decode speed. */
+/** Origins claimed per round in a --claim run. Batch size trades claim-table
+ *  round-trips against how long a lost peer's origins wait; the lease is kept
+ *  alive by per-origin renewal, not by batch duration. */
 const CLAIM_BATCH = 8;
 
 if (noExtract) {
@@ -601,11 +637,15 @@ if (noExtract) {
     : DEFAULT_GEMMA_MAX_TOKENS;
   const budget = assertAskFits(questions, contextTokens);
   console.log(
-    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens  model: ${MODEL_STAMP}${claimWorker ? `  claim: ${claimWorker} (target ${dueLimit})` : ''}`,
+    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens  model: ${MODEL_STAMP}${claimInstance ? `  claim: ${claimInstance} (target ${dueLimit})` : ''}`,
   );
 
   if (groups.length > 0) {
-    const gemma = await createPlaywrightGemmaClient();
+    // Booted on first real work, not on selection: a claim worker that wins
+    // nothing (a faster peer drained the tail) must not pay the engine boot.
+    let gemma: GemmaClient | undefined;
+    const ensureGemma = async (): Promise<GemmaClient> =>
+      (gemma ??= await createPlaywrightGemmaClient());
     let failureStreak = 0;
 
     /** Extract + write one origin group. False = abort the run (engine wedged). */
@@ -613,7 +653,12 @@ if (noExtract) {
       const pages = await pagesForExtraction(group);
       let outcome: ExtractionOutcome;
       try {
-        outcome = await extractOutcome(gemma, pages, questions, budget);
+        outcome = await extractOutcome(
+          await ensureGemma(),
+          pages,
+          questions,
+          budget,
+        );
         failureStreak = 0;
       } catch (err) {
         // A wedged generation must not crash the sweep. Leave the origin
@@ -652,47 +697,147 @@ if (noExtract) {
     };
 
     try {
-      if (claimWorker) {
-        // Just-in-time claiming: small batches keep every claim comfortably
-        // inside its lease even at CI speed, and origins other workers hold
-        // are skipped rather than waited on.
+      if (claimInstance) {
+        const instance = claimInstance;
         const claimOrigins = makeClaimOrigins(db);
         const releaseClaims = makeReleaseClaims(db);
-        const byOrigin = new Map(groups.map((group) => [group.origin, group]));
-        const pending = groups.map((group) => group.origin);
-        let cursor = 0;
+        const renewClaims = makeRenewClaims(db);
+        const selectDue = makeSelectDueCompanies(db);
+
+        /** A coordination write must never kill a GPU run: log, count, move
+         *  on — a lost release simply ages out via the lease. */
+        const tryCoord = async (
+          label: string,
+          write: () => Promise<unknown>,
+        ): Promise<boolean> => {
+          try {
+            await write();
+            return true;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.log(`  claim ${label} failed, continuing — ${message}`);
+            totals.claimErrors = (totals.claimErrors ?? 0) + 1;
+            return false;
+          }
+        };
+
         let processed = 0;
         let aborted = false;
-        while (!aborted && processed < dueLimit && cursor < pending.length) {
-          const want = Math.min(CLAIM_BATCH, dueLimit - processed);
-          const slice = pending.slice(cursor, cursor + want);
-          cursor += slice.length;
-          const won = await claimOrigins(claimWorker, slice, want);
-          totals.claimsSkipped =
-            (totals.claimsSkipped ?? 0) + slice.length - won.length;
-          if (won.length === 0) continue;
-          totals.claimsWon = (totals.claimsWon ?? 0) + won.length;
-          const unfinished = new Set(won);
-          try {
-            for (const origin of won) {
-              const ok = await processGroup(
-                byOrigin.get(origin) as OriginGroup,
+
+        /**
+         * Walk a candidate list once, claiming and processing until the win
+         * target is met. Returns the groups offered but not won, so the
+         * caller can retry them once — a peer may complete them (the recheck
+         * drops those) or hand claims back from an aborted batch after this
+         * worker's cursor has already passed them.
+         */
+        const drain = async (list: OriginGroup[]): Promise<OriginGroup[]> => {
+          const leftover: OriginGroup[] = [];
+          let cursor = 0;
+          while (!aborted && processed < dueLimit && cursor < list.length) {
+            const want = Math.min(CLAIM_BATCH, dueLimit - processed);
+            const slice = list.slice(cursor, cursor + want);
+            cursor += slice.length;
+            let won: string[];
+            try {
+              won = await claimOrigins(
+                instance,
+                slice.map((group) => group.origin),
+                want,
               );
-              unfinished.delete(origin);
-              await releaseClaims(claimWorker, [origin]);
-              processed++;
-              if (!ok) {
-                aborted = true;
-                break;
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              console.log(`  claim round failed, continuing — ${message}`);
+              totals.claimErrors = (totals.claimErrors ?? 0) + 1;
+              leftover.push(...slice);
+              continue;
+            }
+            const wonSet = new Set(won);
+            leftover.push(...slice.filter((g) => !wonSet.has(g.origin)));
+            totals.claimsSkipped =
+              (totals.claimsSkipped ?? 0) + slice.length - won.length;
+            if (won.length === 0) continue;
+
+            // The ledger, not the claim table, decides dueness: this run's
+            // list is a startup snapshot, and a peer completing an origin
+            // deletes its claim — indistinguishable from never-claimed. So
+            // re-run the SAME due predicate over just the won batch and hand
+            // back whatever a peer already finished.
+            let wonGroups = slice.filter((g) => wonSet.has(g.origin));
+            try {
+              const stillDue = new Set(
+                (
+                  await selectDue(
+                    hashPairs,
+                    MODEL_STAMP,
+                    wonGroups.flatMap((g) =>
+                      g.companies.map((c) => c.companyNumber),
+                    ),
+                  )
+                ).map((c) => c.companyNumber),
+              );
+              const done = wonGroups.filter(
+                (g) => !g.companies.some((c) => stillDue.has(c.companyNumber)),
+              );
+              if (done.length > 0) {
+                totals.claimsCompletedElsewhere =
+                  (totals.claimsCompletedElsewhere ?? 0) + done.length;
+                await tryCoord('release', () =>
+                  releaseClaims(
+                    instance,
+                    done.map((g) => g.origin),
+                  ),
+                );
+                wonGroups = wonGroups.filter((g) =>
+                  g.companies.some((c) => stillDue.has(c.companyNumber)),
+                );
+              }
+            } catch {
+              // The recheck is an optimization; on failure proceed with the
+              // full batch — duplicate work is tolerated, lost work is not.
+            }
+            if (wonGroups.length === 0) continue;
+            totals.claimsWon = (totals.claimsWon ?? 0) + wonGroups.length;
+
+            const unfinished = new Set(wonGroups.map((g) => g.origin));
+            try {
+              for (const group of wonGroups) {
+                // Renewal keeps the batch tail inside the lease however slow
+                // the preceding origins run.
+                await tryCoord('renew', () =>
+                  renewClaims(instance, [...unfinished]),
+                );
+                const ok = await processGroup(group);
+                if (
+                  await tryCoord('release', () =>
+                    releaseClaims(instance, [group.origin]),
+                  )
+                ) {
+                  unfinished.delete(group.origin);
+                }
+                processed++;
+                if (!ok) {
+                  aborted = true;
+                  break;
+                }
+              }
+            } finally {
+              // An aborted batch must not shadow its unprocessed origins for
+              // a whole lease; hand them straight back (also retries any
+              // per-origin release that failed above).
+              if (unfinished.size > 0) {
+                await tryCoord('release', () =>
+                  releaseClaims(instance, [...unfinished]),
+                );
               }
             }
-          } finally {
-            // An aborted batch must not shadow its unprocessed origins for a
-            // whole lease; hand them straight back.
-            if (unfinished.size > 0) {
-              await releaseClaims(claimWorker, [...unfinished]);
-            }
           }
+          return leftover;
+        };
+
+        const contested = await drain(groups);
+        if (!aborted && processed < dueLimit && contested.length > 0) {
+          await drain(contested);
         }
       } else {
         for (const group of groups) {
@@ -700,7 +845,7 @@ if (noExtract) {
         }
       }
     } finally {
-      await gemma.stop();
+      if (gemma) await gemma.stop();
     }
   }
 }

@@ -43,7 +43,11 @@ export function makeClaimOrigins(db: Db) {
       cursor += chunk.length;
       const rows = await db
         .insert(profileWorkClaims)
-        .values(chunk.map((origin) => ({ origin, claimedBy: workerId })))
+        // Sorted VALUES = canonical row-lock order, so two overlapping claim
+        // statements can never deadlock however their callers ordered input.
+        .values(
+          [...chunk].sort().map((origin) => ({ origin, claimedBy: workerId })),
+        )
         .onConflictDoUpdate({
           target: profileWorkClaims.origin,
           set: {
@@ -60,10 +64,37 @@ export function makeClaimOrigins(db: Db) {
 }
 
 /**
+ * Re-stamp claimed_at on claims this worker still holds, so a long batch's
+ * tail never ages past the lease while earlier origins process. Guarded by
+ * claimed_by like release: renewing a row another worker now holds is a
+ * silent no-op, and the caller finding fewer rows renewed than asked is the
+ * signal that a claim was lost.
+ */
+export function makeRenewClaims(db: Db) {
+  return async (workerId: string, origins: string[]): Promise<number> => {
+    if (origins.length === 0) return 0;
+    const rows = await db
+      .update(profileWorkClaims)
+      .set({ claimedAt: sql`now()` })
+      .where(
+        and(
+          inArray(profileWorkClaims.origin, origins),
+          eq(profileWorkClaims.claimedBy, workerId),
+        ),
+      )
+      .returning({ origin: profileWorkClaims.origin });
+    return rows.length;
+  };
+}
+
+/**
  * Release claims this worker holds, by deleting them. The claimed_by guard
  * makes a stale worker's release a no-op: if its lease expired and another
  * worker re-claimed the origin, the row now belongs to that worker and must
- * survive.
+ * survive. The guard is only as strong as id uniqueness, so callers must pass
+ * a PER-PROCESS instance id, never a shared machine name — two incarnations
+ * under one id would pass each other's guard (the harness salts its --claim
+ * value with pid + start time for exactly this reason).
  */
 export function makeReleaseClaims(db: Db) {
   return async (workerId: string, origins: string[]): Promise<number> => {

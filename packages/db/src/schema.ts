@@ -604,3 +604,19 @@ export const companyAnswersArchive = pgTable(
     ),
   ],
 );
+
+/**
+ * Work distribution for profile extraction: one row = one origin currently
+ * claimed by one worker. Claiming is a single INSERT .. ON CONFLICT (origin)
+ * DO UPDATE .. WHERE lease-expired .. RETURNING, so two workers can never
+ * hold the same origin; completion deletes the row. A crashed worker's claim
+ * simply expires and the origin becomes claimable again — the answers ledger
+ * backstops correctness, since extraction writes are idempotent upserts.
+ * Crawling is never claimed; this table governs extraction (Gemma) work only,
+ * and the future volunteer API wraps the same claim/release factories.
+ */
+export const profileWorkClaims = pgTable('profile_work_claims', {
+  origin: text('origin').primaryKey(),
+  claimedBy: varchar('claimed_by', { length: 64 }).notNull(),
+  claimedAt: timestamp('claimed_at').defaultNow().notNull(),
+});

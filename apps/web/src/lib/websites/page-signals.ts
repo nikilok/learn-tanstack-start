@@ -191,6 +191,9 @@ const CHALLENGE_HEAD_CHARS = 600;
  * challenge; an article opens with its own content and buries the phrase.
  */
 export function looksChallenged(visibleText: string): boolean {
-  const head = visibleText.replace(/\s+/g, ' ').trim().slice(0, CHALLENGE_HEAD_CHARS);
+  const head = visibleText
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, CHALLENGE_HEAD_CHARS);
   return CHALLENGE_PHRASES.test(head);
 }

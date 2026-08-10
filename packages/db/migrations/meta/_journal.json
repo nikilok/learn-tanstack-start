@@ -316,6 +316,13 @@
       "when": 1786385543291,
       "tag": "0044_answer_status_width",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786395762148,
+      "tag": "0045_profile_work_claims",
+      "breakpoints": true
     }
   ]
 }

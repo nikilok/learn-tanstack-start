@@ -20,10 +20,7 @@ const QUESTIONS: ProfileQuestion[] = [
   },
 ];
 
-function page(
-  path: string,
-  answers: PageCandidate['answers'],
-): PageCandidate {
+function page(path: string, answers: PageCandidate['answers']): PageCandidate {
   return { path, url: `https://example.co.uk${path || '/'}`, answers };
 }
 

@@ -85,7 +85,9 @@ ${pageText}`;
 
 /** Token cost of the composed ask before any page text enters it. */
 export function askOverheadTokens(questions: ProfileQuestion[]): number {
-  return estimateTokens(buildAskPrompt(questions, 'x'.repeat(URL_DISPLAY_MAX), ''));
+  return estimateTokens(
+    buildAskPrompt(questions, 'x'.repeat(URL_DISPLAY_MAX), ''),
+  );
 }
 
 /** Per-page text budget for a given context window; can be non-positive. */

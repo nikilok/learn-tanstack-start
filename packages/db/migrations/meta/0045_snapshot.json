@@ -1,6 +1,6 @@
 {
-  "id": "01c2ab8c-465f-4417-ab21-2383c085e9b2",
-  "prevId": "545869fa-520a-43ab-9ddc-14de1d8d05cc",
+  "id": "97c8105f-e494-480e-99c8-0eca1bb2b56a",
+  "prevId": "01c2ab8c-465f-4417-ab21-2383c085e9b2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1924,6 +1924,38 @@
         },
         "created_at": {
           "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.profile_work_claims": {
+      "name": "profile_work_claims",
+      "schema": "",
+      "columns": {
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "claimed_by": {
+          "name": "claimed_by",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claimed_at": {
+          "name": "claimed_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": true,

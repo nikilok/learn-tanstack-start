@@ -66,9 +66,9 @@ describe('buildAskPrompt', () => {
         longUrl,
         truncateToTokenBudget(text, budget),
       );
-      expect(estimateTokens(prompt) + OUTPUT_HEADROOM_TOKENS).toBeLessThanOrEqual(
-        contextTokens,
-      );
+      expect(
+        estimateTokens(prompt) + OUTPUT_HEADROOM_TOKENS,
+      ).toBeLessThanOrEqual(contextTokens);
     }
   });
 
@@ -129,7 +129,8 @@ describe('parsePageAnswers', () => {
   });
 
   test('prose braces before the real object do not derail parsing', () => {
-    const raw = 'The set {a, b} is not JSON. {"what_does": null, "offerings": ["Care"]}';
+    const raw =
+      'The set {a, b} is not JSON. {"what_does": null, "offerings": ["Care"]}';
     const parsed = parsePageAnswers(raw, QUESTIONS);
     expect(parsed.ok).toBe(true);
   });

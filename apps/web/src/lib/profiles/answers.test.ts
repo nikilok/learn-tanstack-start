@@ -125,9 +125,9 @@ describe('answerRows', () => {
         'insufficient_content',
       ]);
       expect(rows.every((row) => row.sourceUrls.length === 0)).toBe(true);
-      expect(rows.every((row) => row.answer === null && row.items === null)).toBe(
-        true,
-      );
+      expect(
+        rows.every((row) => row.answer === null && row.items === null),
+      ).toBe(true);
     }
   });
 

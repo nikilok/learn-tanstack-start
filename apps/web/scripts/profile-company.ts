@@ -12,10 +12,16 @@
  *   bun apps/web/scripts/profile-company.ts --limit=20 --no-extract        # crawl sweep
  *   bun apps/web/scripts/profile-company.ts --limit=20 --from-snapshots    # extract sweep
  *   bun apps/web/scripts/profile-company.ts --limit=20                     # local backfill
+ *   bun apps/web/scripts/profile-company.ts --limit=50 --from-snapshots --claim=mac-1
  *
  * --origin persists NOTHING. --limit counts origins. --dry-run skips every
  * write. Answers stamp question_hash + model, so re-runs skip fresh rows and
  * a prompt edit or pin bump re-extracts rolling from stored snapshots.
+ * --claim=<worker-id> lets concurrent workers share one due list through
+ * profile_work_claims: each origin is won by exactly one worker, released on
+ * completion, and --limit becomes that worker's win target. Claims are taken
+ * for real even under --dry-run (coordination must be observable); answers
+ * and snapshots stay unwritten.
  *
  * Env: POSTGRES_URL, GEMMA_* (model runtime).
  */
@@ -25,12 +31,17 @@ import { basename } from 'node:path';
 
 import { createClient } from '@ss/db/client';
 import { MODEL_REVISION } from '@ss/gemma';
+import type { GemmaClient } from '@ss/gemma';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
   answerRows,
   type ExtractionOutcome,
 } from '../src/lib/profiles/answers.ts';
+import {
+  makeClaimOrigins,
+  makeReleaseClaims,
+} from '../src/lib/profiles/claims.ts';
 import { truncateToTokenBudget } from '../src/lib/profiles/clean.ts';
 import type { CrawlDeps, CrawlResult } from '../src/lib/profiles/crawl.ts';
 import { crawlOrigin, snapshotOrigin } from '../src/lib/profiles/crawl.ts';
@@ -61,7 +72,6 @@ import {
   looksChallenged,
   looksParked,
 } from '../src/lib/websites/page-signals.ts';
-import type { GemmaClient } from '@ss/gemma';
 import {
   createPlaywrightGemmaClient,
   DEFAULT_GEMMA_MAX_TOKENS,
@@ -83,7 +93,7 @@ const originArg = flag('origin');
 const companyArg = flag('company');
 const limitArg = flag('limit');
 const questionArg = flag('question');
-const shardArg = flag('shard');
+const claimArg = flag('claim');
 const companiesFileArg = flag('companies-file');
 const noExtract = args.includes('--no-extract');
 const fromSnapshots = args.includes('--from-snapshots');
@@ -127,39 +137,25 @@ if (questionArg && !originArg) {
 }
 
 /**
- * Deterministic work partition for concurrent extraction workers: an origin
- * belongs to bucket hash(origin) % N, permanently, on every machine —
- * disjoint inputs by arithmetic, so no claims table and no coordination.
- * Progress within a shard is the staleness predicate itself: done work stops
- * being due. Null when unset (the whole population).
+ * Worker identity for claim-coordinated extraction: concurrent workers (CI,
+ * local Mac, any GPU box) share one due list, and profile_work_claims hands
+ * each origin to exactly one of them. No pre-partitioning — a fast worker
+ * simply claims more. Null when unset (single-worker run, plain --limit cap).
  */
-const shard = ((): { bucket: number; of: number } | null => {
-  if (!shardArg) return null;
-  const match = /^(\d+)\/(\d+)$/.exec(shardArg);
-  const bucket = match ? Number(match[1]) : Number.NaN;
-  const of = match ? Number(match[2]) : Number.NaN;
-  if (!match || of < 2 || bucket >= of) {
-    console.error('  --shard must be K/N with 0 <= K < N and N >= 2');
+const claimWorker = ((): string | null => {
+  if (!claimArg) return null;
+  if (!/^\S{1,64}$/.test(claimArg)) {
+    console.error('  --claim needs a worker id: 1-64 chars, no whitespace');
     process.exit(1);
   }
   if (!limitArg || noExtract) {
     console.error(
-      '  --shard partitions extraction batches; it needs --limit without --no-extract',
+      '  --claim coordinates extraction batches; it needs --limit without --no-extract',
     );
     process.exit(1);
   }
-  return { bucket, of };
+  return claimArg;
 })();
-
-/** FNV-1a over the origin: stable across runs and machines. */
-function shardBucket(origin: string, of: number): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < origin.length; i++) {
-    hash ^= origin.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash % of;
-}
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,7 +215,9 @@ function printPages(result: CrawlResult): void {
       `  ${page.path || '(home)'}  [${page.source}]  ${page.status}${detail}  ${size}`,
     );
     if (verbose && page.contentText) {
-      console.log(`    ${page.contentText.slice(0, 240).replace(/\n/g, ' | ')}`);
+      console.log(
+        `    ${page.contentText.slice(0, 240).replace(/\n/g, ' | ')}`,
+      );
     }
   }
   console.log(
@@ -232,8 +230,10 @@ type Totals = Record<string, number>;
 /** Fold one crawl into the aggregate counters the default output reports. */
 function tally(totals: Totals, result: CrawlResult): void {
   for (const page of result.pages) {
-    totals[`status:${page.status}`] = (totals[`status:${page.status}`] ?? 0) + 1;
-    totals[`source:${page.source}`] = (totals[`source:${page.source}`] ?? 0) + 1;
+    totals[`status:${page.status}`] =
+      (totals[`status:${page.status}`] ?? 0) + 1;
+    totals[`source:${page.source}`] =
+      (totals[`source:${page.source}`] ?? 0) + 1;
   }
   totals.pages = (totals.pages ?? 0) + result.pages.length;
   totals.sitemapFetches = (totals.sitemapFetches ?? 0) + result.sitemapFetches;
@@ -481,6 +481,10 @@ async function pagesForExtraction(group: OriginGroup): Promise<AskablePage[]> {
  *  would burn the whole window writing nothing. */
 const SYSTEMIC_FAILURE_STREAK = 5;
 
+/** Origins claimed per round in a --claim run: small enough that a batch
+ *  always completes well inside CLAIM_LEASE_MINUTES, even at CI decode speed. */
+const CLAIM_BATCH = 8;
+
 if (noExtract) {
   // Crawl sweep: snapshots only. Origin groups (not per-url) so franchise
   // subtrees on one domain crawl together and reconcile once — per-url
@@ -492,7 +496,13 @@ if (noExtract) {
       console.error(`  no publishable website for company ${companyArg}`);
       process.exit(1);
     }
-    groups = [{ origin: snapshotOrigin(website.url), urls: [website.url], companies: [] }];
+    groups = [
+      {
+        origin: snapshotOrigin(website.url),
+        urls: [website.url],
+        companies: [],
+      },
+    ];
   } else if (companiesFileArg) {
     const resolved = await makeResolveCompanyWebsites(db)(
       await readCompaniesFile(companiesFileArg),
@@ -517,7 +527,10 @@ if (noExtract) {
   // Extraction modes: one extraction per origin serves every company on it.
   const questions = await loadQuestions();
   const hashes = new Map(
-    questions.map((question) => [question.slug, sha256(askHashInput(question))]),
+    questions.map((question) => [
+      question.slug,
+      sha256(askHashInput(question)),
+    ]),
   );
   const hashPairs = questions.map((question) => ({
     slug: question.slug,
@@ -558,16 +571,6 @@ if (noExtract) {
   } else {
     const due = await makeSelectDueCompanies(db)(hashPairs, MODEL_STAMP);
     groups = groupByOrigin(due);
-    if (shard) {
-      // The origin is the unit of work, so it is also the unit of sharding —
-      // companies sharing a domain always travel to the same worker.
-      groups = groups.filter(
-        (group) => shardBucket(group.origin, shard.of) === shard.bucket,
-      );
-      console.log(
-        `  shard ${shard.bucket}/${shard.of}: ${groups.length} due origins in this bucket`,
-      );
-    }
   }
 
   // Shared across every extraction mode: --from-snapshots serves ONLY origins
@@ -579,13 +582,18 @@ if (noExtract) {
     groups = groups.filter((group) => crawled.has(group.origin));
     const dropped = before - groups.length;
     if (dropped) {
-      console.log(`  ${dropped} origins not yet crawled; run the crawl sweep first`);
+      console.log(
+        `  ${dropped} origins not yet crawled; run the crawl sweep first`,
+      );
     }
   }
 
   // The due path caps to --limit origins; explicit modes take the whole list.
-  if (!companyArg && !companiesFileArg) {
-    groups = groups.slice(0, parseStrictInt(limitArg ?? '0', 'limit'));
+  // A claim run keeps the full list: --limit becomes the number of origins to
+  // WIN, and the claim loop walks as far as it must to win them.
+  const dueLimit = parseStrictInt(limitArg ?? '0', 'limit');
+  if (!companyArg && !companiesFileArg && !claimWorker) {
+    groups = groups.slice(0, dueLimit);
   }
 
   const contextTokens = process.env.GEMMA_MAX_TOKENS
@@ -593,50 +601,103 @@ if (noExtract) {
     : DEFAULT_GEMMA_MAX_TOKENS;
   const budget = assertAskFits(questions, contextTokens);
   console.log(
-    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens  model: ${MODEL_STAMP}`,
+    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens  model: ${MODEL_STAMP}${claimWorker ? `  claim: ${claimWorker} (target ${dueLimit})` : ''}`,
   );
 
   if (groups.length > 0) {
     const gemma = await createPlaywrightGemmaClient();
     let failureStreak = 0;
+
+    /** Extract + write one origin group. False = abort the run (engine wedged). */
+    const processGroup = async (group: OriginGroup): Promise<boolean> => {
+      const pages = await pagesForExtraction(group);
+      let outcome: ExtractionOutcome;
+      try {
+        outcome = await extractOutcome(gemma, pages, questions, budget);
+        failureStreak = 0;
+      } catch (err) {
+        // A wedged generation must not crash the sweep. Leave the origin
+        // unwritten — immediately retryable, an infra blip rather than a
+        // model verdict — and escalate if it keeps happening.
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(
+          `  ${group.origin}: extraction failed, left due — ${message}`,
+        );
+        failureStreak++;
+        totals.extractionFailures = (totals.extractionFailures ?? 0) + 1;
+        if (failureStreak >= SYSTEMIC_FAILURE_STREAK) {
+          console.error(
+            `  aborting: ${failureStreak} consecutive extraction failures (engine wedged?)`,
+          );
+          return false;
+        }
+        return true;
+      }
+      for (const company of group.companies) {
+        const rows = answerRows(company.companyNumber, questions, outcome, {
+          hashes,
+          model: MODEL_STAMP,
+          identityEvidence: company.evidence,
+        });
+        if (!dryRun) await upsertAnswers(rows);
+        for (const row of rows) {
+          const key = `answer:${row.questionSlug}:${row.status}`;
+          totals[key] = (totals[key] ?? 0) + 1;
+          totals.answers = (totals.answers ?? 0) + 1;
+        }
+        totals.companies = (totals.companies ?? 0) + 1;
+      }
+      totals.origins = (totals.origins ?? 0) + 1;
+      return true;
+    };
+
     try {
-      for (const group of groups) {
-        const pages = await pagesForExtraction(group);
-        let outcome: ExtractionOutcome;
-        try {
-          outcome = await extractOutcome(gemma, pages, questions, budget);
-          failureStreak = 0;
-        } catch (err) {
-          // A wedged generation must not crash the sweep. Leave the origin
-          // unwritten — immediately retryable, an infra blip rather than a
-          // model verdict — and escalate if it keeps happening.
-          const message = err instanceof Error ? err.message : String(err);
-          console.log(`  ${group.origin}: extraction failed, left due — ${message}`);
-          failureStreak++;
-          totals.extractionFailures = (totals.extractionFailures ?? 0) + 1;
-          if (failureStreak >= SYSTEMIC_FAILURE_STREAK) {
-            console.error(
-              `  aborting: ${failureStreak} consecutive extraction failures (engine wedged?)`,
-            );
-            break;
+      if (claimWorker) {
+        // Just-in-time claiming: small batches keep every claim comfortably
+        // inside its lease even at CI speed, and origins other workers hold
+        // are skipped rather than waited on.
+        const claimOrigins = makeClaimOrigins(db);
+        const releaseClaims = makeReleaseClaims(db);
+        const byOrigin = new Map(groups.map((group) => [group.origin, group]));
+        const pending = groups.map((group) => group.origin);
+        let cursor = 0;
+        let processed = 0;
+        let aborted = false;
+        while (!aborted && processed < dueLimit && cursor < pending.length) {
+          const want = Math.min(CLAIM_BATCH, dueLimit - processed);
+          const slice = pending.slice(cursor, cursor + want);
+          cursor += slice.length;
+          const won = await claimOrigins(claimWorker, slice, want);
+          totals.claimsSkipped =
+            (totals.claimsSkipped ?? 0) + slice.length - won.length;
+          if (won.length === 0) continue;
+          totals.claimsWon = (totals.claimsWon ?? 0) + won.length;
+          const unfinished = new Set(won);
+          try {
+            for (const origin of won) {
+              const ok = await processGroup(
+                byOrigin.get(origin) as OriginGroup,
+              );
+              unfinished.delete(origin);
+              await releaseClaims(claimWorker, [origin]);
+              processed++;
+              if (!ok) {
+                aborted = true;
+                break;
+              }
+            }
+          } finally {
+            // An aborted batch must not shadow its unprocessed origins for a
+            // whole lease; hand them straight back.
+            if (unfinished.size > 0) {
+              await releaseClaims(claimWorker, [...unfinished]);
+            }
           }
-          continue;
         }
-        for (const company of group.companies) {
-          const rows = answerRows(company.companyNumber, questions, outcome, {
-            hashes,
-            model: MODEL_STAMP,
-            identityEvidence: company.evidence,
-          });
-          if (!dryRun) await upsertAnswers(rows);
-          for (const row of rows) {
-            const key = `answer:${row.questionSlug}:${row.status}`;
-            totals[key] = (totals[key] ?? 0) + 1;
-            totals.answers = (totals.answers ?? 0) + 1;
-          }
-          totals.companies = (totals.companies ?? 0) + 1;
+      } else {
+        for (const group of groups) {
+          if (!(await processGroup(group))) break;
         }
-        totals.origins = (totals.origins ?? 0) + 1;
       }
     } finally {
       await gemma.stop();

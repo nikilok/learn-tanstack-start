@@ -170,7 +170,9 @@ describe('looksChallenged', () => {
 
   test('does NOT flag an ordinary short page', () => {
     expect(
-      looksChallenged('Contact us on 01234 567890 or visit us in Leigh on Sea.'),
+      looksChallenged(
+        'Contact us on 01234 567890 or visit us in Leigh on Sea.',
+      ),
     ).toBe(false);
   });
 });

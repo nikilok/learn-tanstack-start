@@ -288,6 +288,13 @@
       "when": 1785326925401,
       "tag": "0040_real_smasher",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786360405698,
+      "tag": "0041_company_profiles",
+      "breakpoints": true
     }
   ]
 }

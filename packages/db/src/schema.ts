@@ -555,7 +555,7 @@ export const companyAnswers = pgTable(
     // Model identifier from the @ss/gemma model pin at extraction time.
     model: varchar('model', { length: 64 }).notNull(),
     // 'ok' | 'insufficient_content' | 'error'.
-    status: varchar('status', { length: 16 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull(),
     extractedAt: timestamp('extracted_at').defaultNow().notNull(),
   },
   (table) => [
@@ -591,7 +591,7 @@ export const companyAnswersArchive = pgTable(
     sourceUrls: jsonb('source_urls').$type<string[]>().notNull(),
     identityEvidence: varchar('identity_evidence', { length: 24 }).notNull(),
     model: varchar('model', { length: 64 }).notNull(),
-    status: varchar('status', { length: 16 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull(),
     extractedAt: timestamp('extracted_at').notNull(),
     archivedAt: timestamp('archived_at').defaultNow().notNull(),
     reason: varchar('reason', { length: 24 }).notNull(),

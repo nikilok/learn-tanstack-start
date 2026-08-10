@@ -43,8 +43,10 @@ import {
 } from '../src/lib/profiles/extract.ts';
 import { mergeAnswers, type PageCandidate } from '../src/lib/profiles/merge.ts';
 import {
+  type DueCompany,
   makeInvalidateOrphanedAnswers,
   makeResolveCompanyWebsite,
+  makeResolveCompanyWebsites,
   makeSelectActiveQuestions,
   makeSelectCrawlTargets,
   makeSelectDueCompanies,
@@ -80,6 +82,7 @@ const companyArg = flag('company');
 const limitArg = flag('limit');
 const questionArg = flag('question');
 const shardArg = flag('shard');
+const companiesFileArg = flag('companies-file');
 const noExtract = args.includes('--no-extract');
 const fromSnapshots = args.includes('--from-snapshots');
 const dryRun = args.includes('--dry-run');
@@ -87,10 +90,28 @@ const dryRun = args.includes('--dry-run');
 const verbose = args.includes('--verbose');
 const delayMs = parseStrictInt(flag('delay') ?? '250', 'delay');
 
-const modes = [originArg, companyArg, limitArg].filter(Boolean).length;
+const modes = [originArg, companyArg, limitArg, companiesFileArg].filter(
+  Boolean,
+).length;
 if (modes !== 1) {
-  console.error('  pass exactly one of --origin= | --company= | --limit=');
+  console.error(
+    '  pass exactly one of --origin= | --company= | --limit= | --companies-file=',
+  );
   process.exit(1);
+}
+
+/** Company numbers from an explicit list file: one per line, # comments. */
+async function readCompaniesFile(path: string): Promise<string[]> {
+  const body = await Bun.file(path).text();
+  const numbers = body
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*$/, '').trim())
+    .filter(Boolean);
+  if (numbers.length === 0) {
+    console.error(`  ${path} holds no company numbers`);
+    process.exit(1);
+  }
+  return numbers;
 }
 if (noExtract && fromSnapshots) {
   console.error('  --no-extract and --from-snapshots contradict each other');
@@ -390,20 +411,45 @@ async function crawlGroup(
 const totals: Totals = {};
 const startedAt = Date.now();
 
+/** Group an explicit or due company list by its unit of work, the origin. */
+function groupByOrigin(companies: DueCompany[]): OriginGroup[] {
+  const byOrigin = new Map<string, OriginGroup>();
+  for (const company of companies) {
+    const origin = snapshotOrigin(company.url);
+    const group = byOrigin.get(origin) ?? { origin, urls: [], companies: [] };
+    if (!group.urls.includes(company.url)) group.urls.push(company.url);
+    group.companies.push({
+      companyNumber: company.companyNumber,
+      evidence: company.evidence,
+    });
+    byOrigin.set(origin, group);
+  }
+  return [...byOrigin.values()];
+}
+
 if (noExtract) {
   // Crawl sweep: snapshots only, selection ordered never-crawled first.
-  const targets = companyArg
-    ? await (async () => {
-        const website = await makeResolveCompanyWebsite(db)(companyArg);
-        if (!website) {
-          console.error(`  no publishable website for company ${companyArg}`);
-          process.exit(1);
-        }
-        return [{ url: website.url, companies: 1 }];
-      })()
-    : await makeSelectCrawlTargets(db)(
-        parseStrictInt(limitArg ?? '0', 'limit'),
-      );
+  let targets: { url: string; companies: number }[];
+  if (companyArg) {
+    const website = await makeResolveCompanyWebsite(db)(companyArg);
+    if (!website) {
+      console.error(`  no publishable website for company ${companyArg}`);
+      process.exit(1);
+    }
+    targets = [{ url: website.url, companies: 1 }];
+  } else if (companiesFileArg) {
+    const resolved = await makeResolveCompanyWebsites(db)(
+      await readCompaniesFile(companiesFileArg),
+    );
+    targets = groupByOrigin(resolved).map((group) => ({
+      url: group.urls[0],
+      companies: group.companies.length,
+    }));
+  } else {
+    targets = await makeSelectCrawlTargets(db)(
+      parseStrictInt(limitArg ?? '0', 'limit'),
+    );
+  }
   console.log(`  targets: ${targets.length}  delay: ${delayMs}ms`);
   for (const target of targets) {
     await crawlGroup(
@@ -450,21 +496,24 @@ if (noExtract) {
         ],
       },
     ];
+  } else if (companiesFileArg) {
+    // The pilot path: an explicit (stratified) company list through the
+    // exact pipeline, no due-ordering, no cap.
+    const numbers = await readCompaniesFile(companiesFileArg);
+    const resolved = await makeResolveCompanyWebsites(db)(numbers);
+    if (resolved.length < numbers.length) {
+      console.log(
+        `  ${numbers.length - resolved.length} of ${numbers.length} listed companies have no publishable website; skipped`,
+      );
+    }
+    groups = groupByOrigin(resolved);
+    if (fromSnapshots) {
+      const crawled = await makeSelectSnapshotOrigins(db)();
+      groups = groups.filter((group) => crawled.has(group.origin));
+    }
   } else {
     const due = await makeSelectDueCompanies(db)(hashPairs, MODEL_STAMP);
-    const byOrigin = new Map<string, OriginGroup>();
-    for (const company of due) {
-      const origin = snapshotOrigin(company.url);
-      const group =
-        byOrigin.get(origin) ?? { origin, urls: [], companies: [] };
-      if (!group.urls.includes(company.url)) group.urls.push(company.url);
-      group.companies.push({
-        companyNumber: company.companyNumber,
-        evidence: company.evidence,
-      });
-      byOrigin.set(origin, group);
-    }
-    groups = [...byOrigin.values()];
+    groups = groupByOrigin(due);
     if (shard) {
       // The origin is the unit of work, so it is also the unit of sharding —
       // companies sharing a domain always travel to the same worker.

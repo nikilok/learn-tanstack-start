@@ -11,7 +11,7 @@ import {
   companyWebsites,
   profileQuestions,
 } from '@ss/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { publishableWebsiteGate } from '../websites/publishable';
 import type { AnswerRow } from './answers';
@@ -151,6 +151,38 @@ export function makeSelectDueCompanies(db: Db) {
       .orderBy(
         sql`(SELECT min(a.extracted_at) FROM company_answers a WHERE a.company_number = "company_websites"."company_number") ASC NULLS FIRST`,
         companyWebsites.companyNumber,
+      );
+    return rows.flatMap((row) =>
+      row.url
+        ? [
+            {
+              companyNumber: row.companyNumber,
+              url: row.url,
+              evidence: row.evidence,
+            },
+          ]
+        : [],
+    );
+  };
+}
+
+/** Publishable websites for an explicit company list — the pilot's entry
+ *  point, so a stratified sample runs through the exact pipeline path. */
+export function makeResolveCompanyWebsites(db: Db) {
+  return async (companyNumbers: string[]): Promise<DueCompany[]> => {
+    if (companyNumbers.length === 0) return [];
+    const rows = await db
+      .select({
+        companyNumber: companyWebsites.companyNumber,
+        url: companyWebsites.url,
+        evidence: companyWebsites.evidence,
+      })
+      .from(companyWebsites)
+      .where(
+        and(
+          publishableWebsiteGate(),
+          inArray(companyWebsites.companyNumber, companyNumbers),
+        ),
       );
     return rows.flatMap((row) =>
       row.url

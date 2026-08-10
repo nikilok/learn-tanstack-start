@@ -41,22 +41,33 @@ function scanObject(text: string, start: number): string | null {
 }
 
 /**
- * The first parseable JSON object anywhere in a model response, tolerating
- * code fences, surrounding prose, and multiple candidate objects. Null when
- * none parses. scanObject only ever yields '{...}', so a non-null return is
- * always an object.
+ * Every parseable JSON object anywhere in a model response, in document order,
+ * tolerating code fences, surrounding prose, and multiple candidate objects.
+ * Callers that need the RIGHT object (not merely the first parseable one) walk
+ * these and validate each against their schema — an earlier prose example must
+ * not shadow the real payload. scanObject only yields '{...}', so every yield
+ * is an object.
  */
-export function parseFirstJsonObject(text: string): unknown {
+export function* scanJsonObjects(text: string): Generator<unknown> {
   for (let i = text.indexOf('{'); i !== -1; i = text.indexOf('{', i + 1)) {
     const raw = scanObject(text, i);
     if (raw) {
       try {
-        return JSON.parse(raw);
+        yield JSON.parse(raw);
       } catch {
         // Balanced but not JSON (e.g. prose braces) — try the next candidate.
       }
     }
   }
+}
+
+/**
+ * The first parseable JSON object anywhere in a model response. Null when none
+ * parses. Correct only where ANY object is the payload (parseAgentAction);
+ * schema-validated callers use scanJsonObjects instead.
+ */
+export function parseFirstJsonObject(text: string): unknown {
+  for (const parsed of scanJsonObjects(text)) return parsed;
   return null;
 }
 

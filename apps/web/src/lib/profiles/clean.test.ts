@@ -38,6 +38,37 @@ describe('cleanPageText', () => {
     expect(cleanPageText(html)).toContain('Real content about our services.');
   });
 
+  test('a commented-out chrome tag does not pair with a later real close', () => {
+    // The named production bug: a <form> open inside an HTML comment paired
+    // with a real </form> later, deleting the prose between — and the orphaned
+    // <!-- then swallowed the rest via visibleText's |$ fallback.
+    const html = `<!-- <form class="legacy-signup"> disabled until relaunch -->
+      <main><p>We provide domiciliary care across Sussex.</p></main>
+      <form><input></form>
+      <p>Call us on 01234 567890.</p>`;
+    const text = cleanPageText(html);
+    expect(text).toContain('We provide domiciliary care across Sussex.');
+    expect(text).toContain('Call us on 01234 567890.');
+  });
+
+  test('a script string holding a chrome open tag does not swallow content', () => {
+    const html = `<script>document.write('<header>x')</script>
+      <main><p>Genuine services content here.</p></main>
+      <header>Site chrome</header>`;
+    expect(cleanPageText(html)).toContain('Genuine services content here.');
+  });
+
+  test('a page full of unclosed chrome tags cleans promptly (no EOF scan)', () => {
+    // Pathological: hundreds of unclosed <nav> opens in a large body would,
+    // unbounded, each lazy-scan to end-of-string. The bounded quantifier keeps
+    // it linear. Guard on wall-clock so a regression fails loudly.
+    const html = `${'<nav>'.repeat(400)}${'lorem ipsum dolor sit amet '.repeat(40_000)}<p>tail content</p>`;
+    const started = Date.now();
+    const text = cleanPageText(html);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(text).toContain('tail content');
+  });
+
   test('inherits entity decoding and inline-tag fusion', () => {
     expect(cleanPageText('<p>Care &amp; <b>Support</b> Ltd</p>')).toBe(
       'Care & Support Ltd',

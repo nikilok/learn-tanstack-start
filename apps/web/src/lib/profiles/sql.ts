@@ -11,9 +11,12 @@ import {
   companyWebsites,
   profileQuestions,
 } from '@ss/db/schema';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 
-import { publishableWebsiteGate } from '../websites/publishable';
+import {
+  answersRetentionGate,
+  publishableWebsiteGate,
+} from '../websites/publishable';
 import type { AnswerRow } from './answers';
 import { type CrawlPage, snapshotOrigin } from './crawl';
 import type { ProfileQuestion, QuestionKind } from './extract';
@@ -47,10 +50,20 @@ export type CrawlTarget = {
 };
 
 /**
- * Publishable crawl bases, never-crawled origins first. The whole target set
- * is small (thousands), so ordering happens in TypeScript against
- * snapshotOrigin — the same origin rule the crawler stamps rows with — rather
- * than re-deriving the origin in SQL.
+ * Days a crawled origin is left alone before it is a re-crawl candidate. Once
+ * the backfill drains, snapshots must still refresh — but not every night. An
+ * origin crawled inside this window is skipped; past it, oldest re-crawls
+ * first. Pilot-tunable (the plan sets the true cadence after backfill).
+ */
+export const RECRAWL_AFTER_DAYS = 30;
+
+/**
+ * Publishable crawl bases in rotation order: never-crawled first, then oldest
+ * snapshot first, skipping origins crawled within RECRAWL_AFTER_DAYS. Without
+ * the recency key the sweep re-crawls the same alphabetical head every night
+ * and the tail never refreshes. The whole target set is small (thousands), so
+ * ordering happens in TypeScript against snapshotOrigin — the same origin rule
+ * the crawler stamps rows with — rather than re-deriving the origin in SQL.
  */
 export function makeSelectCrawlTargets(db: Db) {
   return async (limit: number): Promise<CrawlTarget[]> => {
@@ -62,22 +75,35 @@ export function makeSelectCrawlTargets(db: Db) {
       .from(companyWebsites)
       .where(publishableWebsiteGate())
       .groupBy(companyWebsites.url);
-    const crawled = new Set(
+    // Newest fetch per origin: the rotation key and the recency floor.
+    const lastCrawled = new Map(
       (
         await db
-          .selectDistinct({ origin: companyPageSnapshots.origin })
+          .select({
+            origin: companyPageSnapshots.origin,
+            fetchedAt: sql<string>`max(${companyPageSnapshots.fetchedAt})`,
+          })
           .from(companyPageSnapshots)
-      ).map((row) => row.origin),
+          .groupBy(companyPageSnapshots.origin)
+      ).map((row) => [row.origin, new Date(row.fetchedAt).getTime()]),
     );
+    const floor = Date.now() - RECRAWL_AFTER_DAYS * 86_400_000;
     return rows
-      .flatMap((row) => (row.url ? [{ url: row.url, companies: row.companies }] : []))
+      .flatMap((row) => {
+        if (!row.url) return [];
+        const crawledAt = lastCrawled.get(snapshotOrigin(row.url));
+        // Skip freshly-crawled origins; never-crawled (undefined) always pass.
+        if (crawledAt !== undefined && crawledAt > floor) return [];
+        return [{ url: row.url, companies: row.companies, crawledAt }];
+      })
       .sort(
         (a, b) =>
-          Number(crawled.has(snapshotOrigin(a.url))) -
-            Number(crawled.has(snapshotOrigin(b.url))) ||
+          // never-crawled (undefined → -Infinity) first, then oldest first.
+          (a.crawledAt ?? -Infinity) - (b.crawledAt ?? -Infinity) ||
           a.url.localeCompare(b.url),
       )
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(({ url, companies }) => ({ url, companies }));
   };
 }
 
@@ -110,12 +136,26 @@ export type DueCompany = {
 };
 
 /**
- * Companies due for extraction. Missing, hash-stale and model-stale collapse
- * into one predicate: due means some active question has no row that matches
- * both its current ask hash and the current model — which is exactly what
- * makes a prompt edit or a model-pin bump self-invalidating. Ordered
- * never-answered first (min extracted_at NULLS FIRST), no LIMIT: the caller
- * groups by origin, filters, and caps.
+ * Days before a non-ok answer (`error` or `insufficient_content`) is retried.
+ *
+ * An `ok` answer is terminal for its (hash, model): re-extraction changes
+ * nothing until the prompt or model does. A non-ok answer is NOT terminal —
+ * a model schema-failure is transient, and an `insufficient_content` written
+ * while a site was temporarily unreadable should be re-tried once the crawl
+ * sweep stores good snapshots. Without this window a single flaky night would
+ * exclude a company from extraction forever. Pilot-tunable.
+ */
+export const PROFILE_RETRY_DAYS = 7;
+
+/**
+ * Companies due for extraction. Missing, hash-stale, model-stale and
+ * stale-non-ok collapse into one predicate: due means some active question has
+ * no `ok` row matching its current ask hash and the current model, and no
+ * recent non-ok attempt against them either. That makes a prompt edit or a
+ * model-pin bump self-invalidating AND keeps a transient failure from becoming
+ * a permanent exclusion (see PROFILE_RETRY_DAYS). Ordered never-answered first
+ * (min extracted_at NULLS FIRST), no LIMIT: the caller groups by origin,
+ * filters, and caps.
  */
 export function makeSelectDueCompanies(db: Db) {
   return async (
@@ -144,6 +184,10 @@ export function makeSelectDueCompanies(db: Db) {
                 AND a.question_slug = q.slug
                 AND a.question_hash = q.hash
                 AND a.model = ${model}
+                AND (
+                  a.status = 'ok'
+                  OR a.extracted_at > now() - make_interval(days => ${PROFILE_RETRY_DAYS})
+                )
             )
           )`,
         ),
@@ -215,7 +259,38 @@ export type SnapshotPage = {
   contentHash: string | null;
 };
 
-/** An origin's readable corpus — the --from-snapshots page source. */
+/**
+ * Prune an origin's snapshots down to the pages a crawl just kept, so the
+ * corpus stays bounded to the current frontier plus hand-gathered rows. The
+ * 8-page-per-crawl cap does not bound the extract sweep on its own: paths that
+ * drop out of later frontiers (a site redesign, a changed nav or sitemap)
+ * would otherwise persist as `ok` rows forever, growing per-origin Gemma cost
+ * and grounding fresh answers in text the site no longer serves. `manual` rows
+ * are never pruned (they outrank the crawler). The caller must only reconcile
+ * a crawl that READ the site: a blocked or erroring crawl still returns
+ * failure-row paths, so a non-empty kept-set alone does not prove the frontier
+ * was real — the empty-set no-op here is a last-resort belt, not that guard.
+ * Returns the count removed.
+ */
+export function makeReconcileOrigin(db: Db) {
+  return async (origin: string, keptPaths: string[]): Promise<number> => {
+    if (keptPaths.length === 0) return 0;
+    const deleted = await db
+      .delete(companyPageSnapshots)
+      .where(
+        and(
+          eq(companyPageSnapshots.origin, origin),
+          ne(companyPageSnapshots.fetchMethod, 'manual'),
+          notInArray(companyPageSnapshots.path, keptPaths),
+        ),
+      )
+      .returning({ id: companyPageSnapshots.id });
+    return deleted.length;
+  };
+}
+
+/** An origin's readable corpus — the --from-snapshots page source. Bounded by
+ *  makeReconcileOrigin to the current frontier plus manual rows. */
 export function makeSelectOkSnapshots(db: Db) {
   return async (origin: string): Promise<SnapshotPage[]> => {
     const rows = await db
@@ -239,7 +314,17 @@ export function makeSelectOkSnapshots(db: Db) {
   };
 }
 
-/** Batch-upsert one origin's answer rows on (company_number, question_slug). */
+/**
+ * Batch-upsert one origin's answer rows on (company_number, question_slug).
+ *
+ * A non-ok result never overwrites an existing `ok` answer: a transient
+ * unreadable crawl (WAF, timeout, a manual-snapshot origin the fetch tier
+ * can't read) would otherwise regress good answers to insufficient_content.
+ * The stale-but-real ok row keeps its old (hash, model), so the due predicate
+ * still sees the question as unsatisfied and retries — a later good extraction
+ * overwrites it. A fresh `ok` always wins, so genuine staleness re-extraction
+ * proceeds normally.
+ */
 export function makeUpsertAnswers(db: Db) {
   return async (rows: AnswerRow[]): Promise<void> => {
     if (rows.length === 0) return;
@@ -272,50 +357,69 @@ export function makeUpsertAnswers(db: Db) {
           status: sql`excluded.status`,
           extractedAt: sql`now()`,
         },
+        setWhere: sql`excluded.status = 'ok' OR ${companyAnswers.status} <> 'ok'`,
       });
   };
 }
 
 /**
  * Answer rows do not survive their website row's demotion — but they are
- * never silently destroyed either: archive first, then delete, the same
- * trails-first ordering ch-stream uses. A crash between the statements
- * duplicates nothing (the archive carries the original row id as its PK,
- * ON CONFLICT DO NOTHING) and loses nothing. Snapshots stay — the origin
- * corpus remains valid fact about the website itself.
+ * never silently destroyed either: archive, then delete, in ONE statement so
+ * a row can never be deleted without an archive copy.
+ *
+ * A single data-modifying CTE gives that atomicity on the transactionless HTTP
+ * driver: all three arms share one snapshot, the DELETE targets exactly the
+ * `orphaned` set the INSERT read (not a re-evaluation of the predicate, which
+ * a concurrent write could shift between two statements), and the archive
+ * INSERT is idempotent (`ON CONFLICT (id) DO NOTHING`) so a crash-and-retry
+ * duplicates nothing. Orphaning uses answersRetentionGate — wider than the
+ * render gate — so a company's corpus is not churned over a single sweep's
+ * transient `unreachable`. Snapshots stay; the origin corpus remains valid
+ * fact about the website itself.
  */
 export function makeInvalidateOrphanedAnswers(db: Db) {
   return async (): Promise<number> => {
-    // One declaration of "orphaned", shared by both statements; renders
-    // against the unaliased tables (publishable.ts requires it).
-    const orphaned = sql`NOT EXISTS (
-      SELECT 1 FROM company_websites
-      WHERE ${publishableWebsiteGate()}
-        AND "company_websites"."company_number" = ${companyAnswers.companyNumber}
-    )`;
-    await db.execute(sql`
-      INSERT INTO company_answers_archive
-        (id, company_number, question_slug, question_hash, question_text,
-         answer, items, source_urls, identity_evidence, model, status,
-         extracted_at, reason)
-      SELECT id, company_number, question_slug, question_hash, question_text,
-             answer, items, source_urls, identity_evidence, model, status,
-             extracted_at, 'website_demoted'
-      FROM company_answers
-      WHERE ${orphaned}
-      ON CONFLICT (id) DO NOTHING
+    const result = await db.execute(sql`
+      WITH orphaned AS (
+        SELECT a.* FROM company_answers a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM company_websites
+          WHERE ${answersRetentionGate()}
+            AND "company_websites"."company_number" = a.company_number
+        )
+      ),
+      archived AS (
+        INSERT INTO company_answers_archive
+          (id, company_number, question_slug, question_hash, question_text,
+           answer, items, source_urls, identity_evidence, model, status,
+           extracted_at, reason)
+        SELECT id, company_number, question_slug, question_hash, question_text,
+               answer, items, source_urls, identity_evidence, model, status,
+               extracted_at, 'website_demoted'
+        FROM orphaned
+        ON CONFLICT (id) DO NOTHING
+      )
+      DELETE FROM company_answers
+      WHERE id IN (SELECT id FROM orphaned)
+      RETURNING id
     `);
-    const deleted = await db
-      .delete(companyAnswers)
-      .where(orphaned)
-      .returning({ id: companyAnswers.id });
-    return deleted.length;
+    return result.rows.length;
   };
 }
 
-/** Upsert one crawled page as its origin's snapshot for that path. A
- *  hand-gathered row outranks the crawler, so the update skips 'manual' rows
- *  — without this, one nightly pass replaces a person's work with an error. */
+/**
+ * Upsert one crawled page as its origin's snapshot for that path.
+ *
+ * The update is guarded two ways. A hand-gathered `manual` row outranks the
+ * crawler and is never touched. And a NON-ok result never overwrites an
+ * existing `ok` row — the corpus is the asset extraction re-reads on every
+ * prompt/model change, and a re-crawl that transiently WAF-challenges or times
+ * out on a page we already read must not null its stored text (the site may
+ * now block refetch, destroying the corpus permanently). A fresh `ok` result
+ * always wins (new content); a failure only writes where there was no good
+ * content to lose. An origin we can already read is not an escalation
+ * candidate anyway, so dropping the failure signal there costs nothing.
+ */
 export function makeUpsertSnapshot(db: Db) {
   return async (origin: string, page: CrawlPage): Promise<void> => {
     await db
@@ -343,7 +447,8 @@ export function makeUpsertSnapshot(db: Db) {
           fetchMethod: 'fetch',
           fetchedAt: sql`now()`,
         },
-        setWhere: sql`${companyPageSnapshots.fetchMethod} <> 'manual'`,
+        setWhere: sql`${companyPageSnapshots.fetchMethod} <> 'manual'
+          AND (excluded.status = 'ok' OR ${companyPageSnapshots.status} <> 'ok')`,
       });
   };
 }

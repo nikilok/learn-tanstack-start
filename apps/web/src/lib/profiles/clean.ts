@@ -18,20 +18,43 @@ import { visibleText } from '../websites/extract';
 export const CHARS_PER_TOKEN = 4;
 
 /**
- * Structural chrome that is navigation, not content. No `|$` fallback on the
- * close tag, deliberately: an unclosed <header> must not swallow the rest of
- * the document the way a truncated <script> is allowed to in visibleText —
- * an unmatched open is simply left for visibleText's tag strip, keeping the
- * content. Nested same-tag markup truncates at the first close; leftovers are
- * tag-stripped downstream.
+ * Comments and script/style bodies, removed BEFORE the boilerplate pass. This
+ * ordering is load-bearing: a boilerplate open tag hidden inside a comment
+ * (`<!-- <form> …`) or a script string would otherwise pair with a later real
+ * close tag, and BOILERPLATE would delete every genuine line between them —
+ * the exact commented-out-open-tag bug visibleText's own docstring records.
+ * The `|$` fallbacks mirror visibleText (which re-runs these harmlessly after
+ * us): a truncated comment/script at the 2MB cap collapses rather than
+ * surviving as a phantom open.
  */
-const BOILERPLATE =
-  /<(nav|footer|header|aside|form|select|noscript|iframe|svg|dialog|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+const COMMENTS = /<!--[\s\S]*?(?:-->|$)/g;
+const SCRIPT_STYLE = /<(script|style)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi;
+
+/**
+ * Structural chrome that is navigation, not content. No `|$` fallback on the
+ * close tag, deliberately: a genuinely unclosed <header> must not swallow the
+ * rest of the document the way a truncated <script> is allowed to — an
+ * unmatched open is left for visibleText's tag strip, keeping the content.
+ *
+ * The `{0,BOILERPLATE_MAX}?` bound stops an unclosed open tag from scanning to
+ * end-of-string: without it every unmatched <nav>/<header> triggers an
+ * O(length) lazy walk to EOF, and a page full of them is O(opens × length).
+ * A real chrome block never approaches this ceiling.
+ */
+const BOILERPLATE_MAX = 200_000;
+const BOILERPLATE = new RegExp(
+  `<(nav|footer|header|aside|form|select|noscript|iframe|svg|dialog|template)\\b[^>]*>[\\s\\S]{0,${BOILERPLATE_MAX}}?</\\1\\s*>`,
+  'gi',
+);
 
 /** Cleaned readable text for one fetched page. */
 export function cleanPageText(html: string): string {
-  const text = visibleText(html.replace(BOILERPLATE, '\n'));
-  return text
+  // Order matters: kill comments and scripts, THEN chrome, THEN visibleText.
+  const stripped = html
+    .replace(COMMENTS, '\n')
+    .replace(SCRIPT_STYLE, '\n')
+    .replace(BOILERPLATE, '\n');
+  return visibleText(stripped)
     .split('\n')
     .map((line) => line.replace(/\s+/g, ' ').trim())
     .filter(Boolean)

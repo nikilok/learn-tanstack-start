@@ -56,8 +56,14 @@ const SKIPPED_EXTENSIONS =
 /** Bounds the work a pathological page full of anchors can cost. */
 const MAX_EXTRACTED_LINKS = 500;
 
-const ANCHOR =
-  /<a\b[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi;
+/** Cap on the anchor label the `([\s\S]{0,N}?)` capture will walk. Without a
+ *  bound, a single unclosed `<a>` lazy-scans to end-of-string; a nav link's
+ *  text never approaches this, so bounding it removes the O(length) tail. */
+const ANCHOR_TEXT_MAX = 5_000;
+const ANCHOR = new RegExp(
+  `<a\\b[^>]*?href\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))[^>]*>([\\s\\S]{0,${ANCHOR_TEXT_MAX}}?)</a>`,
+  'gi',
+);
 
 /** Hosts compare www-insensitively, matching isSameSite's reading of a site. */
 function siteHost(hostname: string): string {

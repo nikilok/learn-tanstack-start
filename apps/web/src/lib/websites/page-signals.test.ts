@@ -149,10 +149,22 @@ describe('looksChallenged', () => {
     ).toBe(true);
   });
 
+  test('catches a VERBOSE interstitial that clears the old length gate', () => {
+    // A multilingual WAF wall repeats its boilerplate past 1,500 chars — the
+    // position check catches it because the challenge still leads the page.
+    const verbose = `Just a moment... Verifying you are human. ${'This process is automatic. Your browser will redirect once verification is complete. Please enable JavaScript and cookies. Veuillez patienter. '.repeat(20)}`;
+    expect(verbose.length).toBeGreaterThan(1500);
+    expect(looksChallenged(verbose)).toBe(true);
+  });
+
   test('does NOT reject a real page that discusses bot protection', () => {
-    // A security vendor legitimately says the phrase in prose; the length
-    // gate is what separates an interstitial from an article about one.
-    const article = `We provide managed DDoS protection by monitoring traffic at the edge. ${'Our platform inspects requests, rate-limits abusive clients and keeps genuine users flowing to your site without friction. '.repeat(14)}`;
+    // A security vendor legitimately says the phrase in its body; position is
+    // the discriminator — the article opens with its own content, so the
+    // phrase sits past the interstitial head window.
+    const intro =
+      'Acme Networks helps growing companies stay online during traffic spikes and outages. Our engineers have decades of combined experience across finance, healthcare, and public services. We build resilient edge infrastructure tuned to each customer, with round-the-clock monitoring and a support team that answers in minutes, not days. Clients trust us to keep their storefronts fast and available through their busiest trading periods. ';
+    const article = `${intro.repeat(2)}We provide managed DDoS protection by monitoring traffic at the edge. ${'Our platform inspects requests, rate-limits abusive clients and keeps genuine users flowing without friction. '.repeat(10)}`;
+    expect(article.indexOf('DDoS protection by')).toBeGreaterThan(600);
     expect(looksChallenged(article)).toBe(false);
   });
 

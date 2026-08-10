@@ -12,7 +12,7 @@
  * answer.
  */
 
-import { parseFirstJsonObject } from '../../../scripts/lib/agent-action';
+import { scanJsonObjects } from '../../../scripts/lib/agent-action';
 import { estimateTokens } from './clean';
 
 export type QuestionKind = 'prose' | 'list';
@@ -133,18 +133,14 @@ export type ParsedAnswers =
   | { ok: true; answers: PageAnswers }
   | { ok: false; error: string };
 
-/**
- * Schema-validate one model response against the question set. Strict: every
- * declared key present with its declared shape, or the whole response is a
- * failure — the caller retries once and then records status='error'.
- */
-export function parsePageAnswers(
-  raw: string,
+/** Validate one candidate object against the question schema. Strict: every
+ *  declared key present with its declared shape, or a failure. */
+function validateAnswers(
+  parsed: unknown,
   questions: ProfileQuestion[],
 ): ParsedAnswers {
-  const parsed = parseFirstJsonObject(raw);
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, error: 'no JSON object in response' };
+    return { ok: false, error: 'not a JSON object' };
   }
   const record = parsed as Record<string, unknown>;
   const answers: PageAnswers = {};
@@ -179,4 +175,24 @@ export function parsePageAnswers(
     answers[question.slug] = items;
   }
   return { ok: true, answers };
+}
+
+/**
+ * Schema-validate a model response against the question set. Walks every
+ * parseable object and returns the FIRST that validates — a leading prose
+ * example (`for instance {"note": 1}`) must not shadow the real answer object
+ * and turn a valid response into a failure. The caller retries once and then
+ * records status='error'.
+ */
+export function parsePageAnswers(
+  raw: string,
+  questions: ProfileQuestion[],
+): ParsedAnswers {
+  let lastError = 'no JSON object in response';
+  for (const candidate of scanJsonObjects(raw)) {
+    const result = validateAnswers(candidate, questions);
+    if (result.ok) return result;
+    lastError = result.error;
+  }
+  return { ok: false, error: lastError };
 }

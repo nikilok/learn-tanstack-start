@@ -133,4 +133,16 @@ describe('parsePageAnswers', () => {
     const parsed = parsePageAnswers(raw, QUESTIONS);
     expect(parsed.ok).toBe(true);
   });
+
+  test('an earlier valid-but-wrong object does not shadow the real answer', () => {
+    // The model prefaces its reply with a small JSON example. First-parseable
+    // would return {"note": ...}, fail the schema, and wrongly report failure.
+    const raw =
+      'For instance {"note": "reply with keys"}, here it is:\n' +
+      '{"what_does": "Provides home care.", "offerings": ["Home care"]}';
+    expect(parsePageAnswers(raw, QUESTIONS)).toEqual({
+      ok: true,
+      answers: { what_does: 'Provides home care.', offerings: ['Home care'] },
+    });
+  });
 });

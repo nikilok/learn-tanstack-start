@@ -21,6 +21,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
 
 import { createClient } from '@ss/db/client';
 import { MODEL_REVISION } from '@ss/gemma';
@@ -45,6 +46,7 @@ import { mergeAnswers, type PageCandidate } from '../src/lib/profiles/merge.ts';
 import {
   type DueCompany,
   makeInvalidateOrphanedAnswers,
+  makeReconcileOrigin,
   makeResolveCompanyWebsite,
   makeResolveCompanyWebsites,
   makeSelectActiveQuestions,
@@ -164,8 +166,22 @@ const sleep = (ms: number): Promise<void> =>
 const sha256 = (text: string): string =>
   createHash('sha256').update(text).digest('hex');
 
-/** The model identity stamped onto every answer row this run writes. */
-const MODEL_STAMP = `gemma-4-E2B-it@${MODEL_REVISION}`;
+/**
+ * The model identity stamped onto every answer row — the ACTUAL weights, not
+ * the pin. createPlaywrightGemmaClient resolves the model from GEMMA_MODEL_PATH
+ * / GEMMA_MODEL_URL when either is set, so a run under an override extracts
+ * with different weights than `MODEL_REVISION` names. Stamping the pin there
+ * would record false provenance: the (question_hash, model) staleness key
+ * would treat override-produced answers as fresh output of the pinned model,
+ * and a later real pin bump would fail to mark exactly those rows stale. The
+ * override marker keeps them distinct so they re-extract when the true pin runs.
+ */
+const modelPathOverride = process.env.GEMMA_MODEL_PATH?.trim();
+const modelUrlOverride = process.env.GEMMA_MODEL_URL?.trim();
+const MODEL_STAMP =
+  modelPathOverride || modelUrlOverride
+    ? `gemma-override:${(modelPathOverride ? basename(modelPathOverride) : 'url').slice(0, 48)}`
+    : `gemma-4-E2B-it@${MODEL_REVISION}`;
 
 let dbHandle: ReturnType<typeof createClient> | undefined;
 const getDb = () => {
@@ -371,6 +387,8 @@ if (originArg) {
 const db = getDb();
 const upsertSnapshot = makeUpsertSnapshot(db);
 const upsertAnswers = makeUpsertAnswers(db);
+const reconcileOrigin = makeReconcileOrigin(db);
+const selectOkSnapshots = makeSelectOkSnapshots(db);
 
 console.log(
   `Profile ${noExtract ? 'crawl' : fromSnapshots ? 'extract' : 'pipeline'} — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
@@ -383,35 +401,11 @@ type OriginGroup = {
   companies: { companyNumber: string; evidence: string }[];
 };
 
-/** Crawl one group's url(s), persist snapshots, return the askable pages. */
-async function crawlGroup(
-  group: OriginGroup,
-  totals: Totals,
-): Promise<AskablePage[]> {
-  const pages: AskablePage[] = [];
-  for (const url of group.urls) {
-    const result = await crawlOrigin(url, { delayMs }, deps);
-    tally(totals, result);
-    if (verbose) {
-      console.log(`${url} (${group.companies.length} companies)`);
-      printPages(result);
-    }
-    if (!dryRun) {
-      for (const page of result.pages) {
-        await upsertSnapshot(result.origin, page);
-        totals.snapshotsWritten = (totals.snapshotsWritten ?? 0) + 1;
-      }
-    }
-    pages.push(...askablePages(result));
-    await sleep(delayMs);
-  }
-  return pages;
-}
-
 const totals: Totals = {};
 const startedAt = Date.now();
 
-/** Group an explicit or due company list by its unit of work, the origin. */
+/** Group a company list by its unit of work, the origin — franchise subtrees
+ *  on one domain travel together so a single crawl + reconcile covers them. */
 function groupByOrigin(companies: DueCompany[]): OriginGroup[] {
   const byOrigin = new Map<string, OriginGroup>();
   for (const company of companies) {
@@ -427,43 +421,100 @@ function groupByOrigin(companies: DueCompany[]): OriginGroup[] {
   return [...byOrigin.values()];
 }
 
+/**
+ * Crawl every url of a group, persist snapshots (the upsert guards preserve ok
+ * text and manual rows), and reconcile the origin down to the pages this crawl
+ * kept — only when the crawl actually read the site. Persist-only; extraction
+ * reads the corpus back from the store. The returned in-memory pages are used
+ * only by --dry-run, which persists nothing to read back.
+ */
+async function crawlGroup(group: OriginGroup): Promise<AskablePage[]> {
+  const inMemory: AskablePage[] = [];
+  const keptPaths: string[] = [];
+  let everyUrlReadable = true;
+  for (const url of group.urls) {
+    const result = await crawlOrigin(url, { delayMs }, deps);
+    tally(totals, result);
+    if (verbose) {
+      console.log(`${url} (${group.companies.length} companies)`);
+      printPages(result);
+    }
+    if (!dryRun) {
+      for (const page of result.pages) {
+        await upsertSnapshot(result.origin, page);
+        keptPaths.push(page.path);
+        totals.snapshotsWritten = (totals.snapshotsWritten ?? 0) + 1;
+      }
+    }
+    const readable = askablePages(result);
+    if (readable.length === 0) everyUrlReadable = false;
+    inMemory.push(...readable);
+    await sleep(delayMs);
+  }
+  // Prune only when every url of the group read pages: a blocked or erroring
+  // crawl still returns failure-row paths, so a non-empty kept-set does NOT
+  // prove the frontier was real — reconciling to it would delete the stored
+  // corpus the upsert guard just preserved.
+  if (!dryRun && everyUrlReadable) {
+    const pruned = await reconcileOrigin(group.origin, keptPaths);
+    if (pruned) totals.snapshotsPruned = (totals.snapshotsPruned ?? 0) + pruned;
+  }
+  return inMemory;
+}
+
+/**
+ * The pages one origin's extraction reads. --from-snapshots and the persisting
+ * combined mode both extract from the STORED corpus, so manual rows and any ok
+ * text preserved across a failed re-crawl are included and a transient
+ * unreadable crawl can't feed extraction an empty page set that regresses good
+ * answers. --dry-run has nothing persisted to read back, so it uses the
+ * in-memory crawl.
+ */
+async function pagesForExtraction(group: OriginGroup): Promise<AskablePage[]> {
+  if (fromSnapshots) return selectOkSnapshots(group.origin);
+  const inMemory = await crawlGroup(group);
+  return dryRun ? inMemory : selectOkSnapshots(group.origin);
+}
+
+/** Consecutive origins whose extraction throws before the run aborts: a wedged
+ *  engine (WebGPU device lost, page crash) fails every ask, so churning on
+ *  would burn the whole window writing nothing. */
+const SYSTEMIC_FAILURE_STREAK = 5;
+
 if (noExtract) {
-  // Crawl sweep: snapshots only, selection ordered never-crawled first.
-  let targets: { url: string; companies: number }[];
+  // Crawl sweep: snapshots only. Origin groups (not per-url) so franchise
+  // subtrees on one domain crawl together and reconcile once — per-url
+  // reconciliation would delete each other's pages.
+  let groups: OriginGroup[];
   if (companyArg) {
     const website = await makeResolveCompanyWebsite(db)(companyArg);
     if (!website) {
       console.error(`  no publishable website for company ${companyArg}`);
       process.exit(1);
     }
-    targets = [{ url: website.url, companies: 1 }];
+    groups = [{ origin: snapshotOrigin(website.url), urls: [website.url], companies: [] }];
   } else if (companiesFileArg) {
     const resolved = await makeResolveCompanyWebsites(db)(
       await readCompaniesFile(companiesFileArg),
     );
-    targets = groupByOrigin(resolved).map((group) => ({
-      url: group.urls[0],
-      companies: group.companies.length,
-    }));
+    groups = groupByOrigin(resolved);
   } else {
-    targets = await makeSelectCrawlTargets(db)(
+    const targets = await makeSelectCrawlTargets(db)(
       parseStrictInt(limitArg ?? '0', 'limit'),
     );
+    const byOrigin = new Map<string, OriginGroup>();
+    for (const target of targets) {
+      const origin = snapshotOrigin(target.url);
+      const group = byOrigin.get(origin) ?? { origin, urls: [], companies: [] };
+      if (!group.urls.includes(target.url)) group.urls.push(target.url);
+      byOrigin.set(origin, group);
+    }
+    groups = [...byOrigin.values()];
   }
-  console.log(`  targets: ${targets.length}  delay: ${delayMs}ms`);
-  for (const target of targets) {
-    await crawlGroup(
-      {
-        origin: snapshotOrigin(target.url),
-        urls: [target.url],
-        companies: [],
-      },
-      totals,
-    );
-  }
+  console.log(`  origins: ${groups.length}  delay: ${delayMs}ms`);
+  for (const group of groups) await crawlGroup(group);
 } else {
-  // Extraction modes: group due companies by origin, one extraction serves
-  // every company on the domain.
+  // Extraction modes: one extraction per origin serves every company on it.
   const questions = await loadQuestions();
   const hashes = new Map(
     questions.map((question) => [question.slug, sha256(askHashInput(question))]),
@@ -476,7 +527,7 @@ if (noExtract) {
   if (!dryRun) {
     const invalidated = await makeInvalidateOrphanedAnswers(db)();
     if (invalidated > 0) {
-      console.log(`  invalidated ${invalidated} answers of unpublishable companies`);
+      console.log(`  invalidated ${invalidated} answers of demoted companies`);
     }
   }
 
@@ -491,14 +542,11 @@ if (noExtract) {
       {
         origin: snapshotOrigin(website.url),
         urls: [website.url],
-        companies: [
-          { companyNumber: companyArg, evidence: website.evidence },
-        ],
+        companies: [{ companyNumber: companyArg, evidence: website.evidence }],
       },
     ];
   } else if (companiesFileArg) {
-    // The pilot path: an explicit (stratified) company list through the
-    // exact pipeline, no due-ordering, no cap.
+    // The pilot path: an explicit (stratified) company list, no cap.
     const numbers = await readCompaniesFile(companiesFileArg);
     const resolved = await makeResolveCompanyWebsites(db)(numbers);
     if (resolved.length < numbers.length) {
@@ -507,10 +555,6 @@ if (noExtract) {
       );
     }
     groups = groupByOrigin(resolved);
-    if (fromSnapshots) {
-      const crawled = await makeSelectSnapshotOrigins(db)();
-      groups = groups.filter((group) => crawled.has(group.origin));
-    }
   } else {
     const due = await makeSelectDueCompanies(db)(hashPairs, MODEL_STAMP);
     groups = groupByOrigin(due);
@@ -524,11 +568,23 @@ if (noExtract) {
         `  shard ${shard.bucket}/${shard.of}: ${groups.length} due origins in this bucket`,
       );
     }
-    if (fromSnapshots) {
-      // The extract sweep serves only what the crawl sweep has stored.
-      const crawled = await makeSelectSnapshotOrigins(db)();
-      groups = groups.filter((group) => crawled.has(group.origin));
+  }
+
+  // Shared across every extraction mode: --from-snapshots serves ONLY origins
+  // the crawl sweep has stored, so a never-crawled origin is never written as
+  // insufficient_content — it's simply not fetched yet.
+  if (fromSnapshots) {
+    const crawled = await makeSelectSnapshotOrigins(db)();
+    const before = groups.length;
+    groups = groups.filter((group) => crawled.has(group.origin));
+    const dropped = before - groups.length;
+    if (dropped) {
+      console.log(`  ${dropped} origins not yet crawled; run the crawl sweep first`);
     }
+  }
+
+  // The due path caps to --limit origins; explicit modes take the whole list.
+  if (!companyArg && !companiesFileArg) {
     groups = groups.slice(0, parseStrictInt(limitArg ?? '0', 'limit'));
   }
 
@@ -537,18 +593,35 @@ if (noExtract) {
     : DEFAULT_GEMMA_MAX_TOKENS;
   const budget = assertAskFits(questions, contextTokens);
   console.log(
-    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens`,
+    `  origins: ${groups.length}  questions: ${questions.length}  page budget: ${budget} tokens  model: ${MODEL_STAMP}`,
   );
 
   if (groups.length > 0) {
-    const selectOkSnapshots = makeSelectOkSnapshots(db);
     const gemma = await createPlaywrightGemmaClient();
+    let failureStreak = 0;
     try {
       for (const group of groups) {
-        const pages = fromSnapshots
-          ? await selectOkSnapshots(group.origin)
-          : await crawlGroup(group, totals);
-        const outcome = await extractOutcome(gemma, pages, questions, budget);
+        const pages = await pagesForExtraction(group);
+        let outcome: ExtractionOutcome;
+        try {
+          outcome = await extractOutcome(gemma, pages, questions, budget);
+          failureStreak = 0;
+        } catch (err) {
+          // A wedged generation must not crash the sweep. Leave the origin
+          // unwritten — immediately retryable, an infra blip rather than a
+          // model verdict — and escalate if it keeps happening.
+          const message = err instanceof Error ? err.message : String(err);
+          console.log(`  ${group.origin}: extraction failed, left due — ${message}`);
+          failureStreak++;
+          totals.extractionFailures = (totals.extractionFailures ?? 0) + 1;
+          if (failureStreak >= SYSTEMIC_FAILURE_STREAK) {
+            console.error(
+              `  aborting: ${failureStreak} consecutive extraction failures (engine wedged?)`,
+            );
+            break;
+          }
+          continue;
+        }
         for (const company of group.companies) {
           const rows = answerRows(company.companyNumber, questions, outcome, {
             hashes,

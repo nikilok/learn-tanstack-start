@@ -500,8 +500,15 @@ export const companyPageSnapshots = pgTable(
     url: text('url').notNull(),
     // 'ok' | 'empty' | 'blocked' | 'error' | 'not_html'.
     status: varchar('status', { length: 16 }).notNull(),
-    // web-fetch failure taxonomy value when status != 'ok'.
+    // Failure detail when the page was not read: web-fetch taxonomy value,
+    // 'http_<code>', or 'challenge_page' (a WAF interstitial behind a 200).
     failure: varchar('failure', { length: 24 }),
+    // 'fetch' | 'playwright' | 'manual' — which tier produced this attempt.
+    // The escalation ladder's position marker; automated upserts never
+    // overwrite a 'manual' row.
+    fetchMethod: varchar('fetch_method', { length: 16 })
+      .notNull()
+      .default('fetch'),
     contentText: text('content_text'),
     contentHash: varchar('content_hash', { length: 64 }),
     bytes: integer('bytes'),

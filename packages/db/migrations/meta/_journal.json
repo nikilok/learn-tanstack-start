@@ -295,6 +295,13 @@
       "when": 1786360405698,
       "tag": "0041_company_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786379487901,
+      "tag": "0042_snapshot_fetch_method",
+      "breakpoints": true
     }
   ]
 }

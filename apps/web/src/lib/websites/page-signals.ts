@@ -171,3 +171,19 @@ export function looksParked(visibleText: string): boolean {
 export function pageTooThin(visibleText: string): boolean {
   return visibleText.replace(/\s+/g, ' ').trim().length < PARKED_MAX_TEXT;
 }
+
+/** Phrases a WAF or bot-management interstitial shows a client it is
+ *  challenging. Vendor-spanning by wording, not by brand name alone. */
+const CHALLENGE_PHRASES =
+  /(just a moment|checking your browser|verify(ing)? (that )?you are (a )?human|enable javascript and cookies|security check(point)?|attention required.{0,40}cloudflare|ddos protection by|browser verification|are you a robot|access to this page has been denied)/i;
+
+/**
+ * A 200 response that is a bot challenge rather than the page. The phrase
+ * alone is not the test, same as looksParked: a security vendor's real site
+ * legitimately says "DDoS protection" in prose, so the length gate is what
+ * separates an interstitial from an article about one.
+ */
+export function looksChallenged(visibleText: string): boolean {
+  const flat = visibleText.replace(/\s+/g, ' ').trim();
+  return flat.length < PARKED_MAX_TEXT && CHALLENGE_PHRASES.test(flat);
+}

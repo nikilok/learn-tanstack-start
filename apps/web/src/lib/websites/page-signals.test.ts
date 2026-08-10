@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isAggregatorHost, looksParked } from './page-signals';
+import { isAggregatorHost, looksChallenged, looksParked } from './page-signals';
 
 describe('isAggregatorHost', () => {
   test('rejects a directory listing', () => {
@@ -134,5 +134,31 @@ describe('assertions use the host callers actually see, post-redirect', () => {
     expect(isAggregatorHost('suite.endole.co.uk')).toBe(true);
     expect(isAggregatorHost('reports.endole.co.uk')).toBe(true);
     expect(isAggregatorHost('data.opencorporates.com')).toBe(true);
+  });
+});
+
+describe('looksChallenged', () => {
+  test('catches a WAF interstitial behind a 200', () => {
+    expect(
+      looksChallenged(
+        'www.example.co.uk Verifying you are human. This may take a few seconds. Just a moment... Enable JavaScript and cookies to continue.',
+      ),
+    ).toBe(true);
+    expect(
+      looksChallenged('Checking your browser before accessing example.co.uk.'),
+    ).toBe(true);
+  });
+
+  test('does NOT reject a real page that discusses bot protection', () => {
+    // A security vendor legitimately says the phrase in prose; the length
+    // gate is what separates an interstitial from an article about one.
+    const article = `We provide managed DDoS protection by monitoring traffic at the edge. ${'Our platform inspects requests, rate-limits abusive clients and keeps genuine users flowing to your site without friction. '.repeat(14)}`;
+    expect(looksChallenged(article)).toBe(false);
+  });
+
+  test('does NOT flag an ordinary short page', () => {
+    expect(
+      looksChallenged('Contact us on 01234 567890 or visit us in Leigh on Sea.'),
+    ).toBe(false);
   });
 });

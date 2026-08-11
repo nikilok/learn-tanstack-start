@@ -58,8 +58,11 @@ import {
   askHashInput,
   assertAskFits,
   buildAskPrompt,
+  MAX_OVERFLOW_SHRINKS,
   parsePageAnswers,
+  parseTokenOverflow,
   type ProfileQuestion,
+  shrinkBudgetForOverflow,
   SYSTEM_PROMPT,
 } from '../src/lib/profiles/extract.ts';
 import { mergeAnswers, type PageCandidate } from '../src/lib/profiles/merge.ts';
@@ -295,6 +298,10 @@ function printPages(result: CrawlResult): void {
 
 type Totals = Record<string, number>;
 
+// Declared ahead of the ad-hoc --origin driver, which runs at module top
+// level before the persisting-modes section executes.
+const totals: Totals = {};
+
 /** Fold one crawl into the aggregate counters the default output reports. */
 function tally(totals: Totals, result: CrawlResult): void {
   for (const page of result.pages) {
@@ -347,6 +354,45 @@ function dedupeByHash(pages: AskablePage[]): AskablePage[] {
   });
 }
 
+/** One page's ask, shrinking the text budget when the real tokenizer
+ *  overflows the window the estimate said it would fit. */
+async function askFittingWindow(
+  gemma: GemmaClient,
+  questions: ProfileQuestion[],
+  page: AskablePage,
+  budget: number,
+): Promise<{
+  prompt: string;
+  response: Awaited<ReturnType<GemmaClient['ask']>>;
+}> {
+  let pageBudget = budget;
+  for (let shrinks = 0; ; shrinks += 1) {
+    const prompt = buildAskPrompt(
+      questions,
+      page.url,
+      truncateToTokenBudget(page.contentText, pageBudget),
+    );
+    try {
+      return { prompt, response: await gemma.ask(prompt, SYSTEM_PROMPT) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const overflow = parseTokenOverflow(message);
+      if (!overflow || shrinks >= MAX_OVERFLOW_SHRINKS) throw error;
+      const next = shrinkBudgetForOverflow(
+        pageBudget,
+        overflow.actual,
+        overflow.allowed,
+      );
+      if (next <= 0) throw error;
+      totals.askOverflowShrinks = (totals.askOverflowShrinks ?? 0) + 1;
+      console.log(
+        `  ${page.path || '(home)'}: window overflow (${overflow.actual} real tokens), retrying at ${next}-token budget`,
+      );
+      pageBudget = next;
+    }
+  }
+}
+
 /** Map-reduce one origin's pages through Gemma into an extraction outcome. */
 async function extractOutcome(
   gemma: GemmaClient,
@@ -358,12 +404,13 @@ async function extractOutcome(
   if (deduped.length === 0) return { kind: 'no_readable_pages' };
   const candidates: PageCandidate[] = [];
   for (const page of deduped) {
-    const prompt = buildAskPrompt(
+    const { prompt, response: first } = await askFittingWindow(
+      gemma,
       questions,
-      page.url,
-      truncateToTokenBudget(page.contentText, budget),
+      page,
+      budget,
     );
-    let response = await gemma.ask(prompt, SYSTEM_PROMPT);
+    let response = first;
     let parsed = parsePageAnswers(response.text, questions);
     if (!parsed.ok) {
       console.log(`  ${page.path || '(home)'}: retrying (${parsed.error})`);
@@ -468,7 +515,6 @@ type OriginGroup = {
   companies: { companyNumber: string; evidence: string }[];
 };
 
-const totals: Totals = {};
 const startedAt = Date.now();
 
 /** Group a company list by its unit of work, the origin — franchise subtrees

@@ -6,9 +6,12 @@ import {
   buildAskPrompt,
   MIN_PAGE_BUDGET_TOKENS,
   OUTPUT_HEADROOM_TOKENS,
+  OVERFLOW_SHRINK_MARGIN,
   pageTextBudget,
   parsePageAnswers,
+  parseTokenOverflow,
   type ProfileQuestion,
+  shrinkBudgetForOverflow,
   SYSTEM_PROMPT,
 } from './extract';
 
@@ -161,5 +164,50 @@ describe('parsePageAnswers', () => {
       ok: true,
       answers: { what_does: 'Provides home care.', offerings: ['Home care'] },
     });
+  });
+});
+
+describe('token overflow recovery', () => {
+  test('the real CI failure parses, shrinks, and refits', () => {
+    // The production case (run 31504617373): a 31.5k-char homepage whose
+    // text tokenizes at ~2.7 chars/token materialised as 10,838 real tokens
+    // against an 8,192 window. Playwright wraps the engine error, so the
+    // parser must see through the prefix and the remote stack.
+    const message =
+      'evaluate: Error: Input token ids are too long. Exceeding the maximum ' +
+      'number of tokens allowed: 10838 >= 8192\n' +
+      '    at DefaultErrorReporter (http://127.0.0.1:49447/core/wasm/litertlm_wasm_internal.js:8016:9)';
+    expect(parseTokenOverflow(message)).toEqual({
+      actual: 10838,
+      allowed: 8192,
+    });
+    const next = shrinkBudgetForOverflow(7363, 10838, 8192);
+    expect(next).toBe(
+      Math.floor(7363 * (8192 / 10838) * OVERFLOW_SHRINK_MARGIN),
+    );
+    // The rescaled budget must both fit and stay worth asking.
+    expect((next / 7363) * 10838).toBeLessThan(8192);
+    expect(next).toBeGreaterThan(MIN_PAGE_BUDGET_TOKENS);
+  });
+
+  test('overflow parsing rejects lookalikes and nonsense counts', () => {
+    expect(parseTokenOverflow('evaluate: Error: WebGPU device lost')).toBe(
+      null,
+    );
+    expect(parseTokenOverflow('Input token ids are too long, honest')).toBe(
+      null,
+    );
+    expect(
+      parseTokenOverflow(
+        'Input token ids are too long. Exceeding the maximum number of tokens allowed: 0 >= 8192',
+      ),
+    ).toBe(null);
+  });
+
+  test('shrinking always makes strict progress on a positive budget', () => {
+    // A one-token overflow must still shrink, or the retry loops in place.
+    expect(shrinkBudgetForOverflow(1000, 8193, 8192)).toBeLessThan(1000);
+    expect(shrinkBudgetForOverflow(0, 10838, 8192)).toBe(0);
+    expect(shrinkBudgetForOverflow(1000, 0, 8192)).toBe(0);
   });
 });

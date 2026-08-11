@@ -39,7 +39,7 @@ import { basename } from 'node:path';
 
 import { createClient } from '@ss/db/client';
 import { MODEL_REVISION } from '@ss/gemma';
-import type { GemmaClient } from '@ss/gemma';
+import type { GemmaAskResult, GemmaClient } from '@ss/gemma';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
@@ -58,7 +58,11 @@ import {
   askHashInput,
   assertAskFits,
   buildAskPrompt,
+  MAX_OVERFLOW_SHRINKS,
+  MIN_PAGE_BUDGET_TOKENS,
+  overflowRetryBudget,
   parsePageAnswers,
+  parseTokenOverflow,
   type ProfileQuestion,
   SYSTEM_PROMPT,
 } from '../src/lib/profiles/extract.ts';
@@ -295,6 +299,8 @@ function printPages(result: CrawlResult): void {
 
 type Totals = Record<string, number>;
 
+const totals: Totals = {};
+
 /** Fold one crawl into the aggregate counters the default output reports. */
 function tally(totals: Totals, result: CrawlResult): void {
   for (const page of result.pages) {
@@ -347,23 +353,62 @@ function dedupeByHash(pages: AskablePage[]): AskablePage[] {
   });
 }
 
+/** One page's ask, shrinking the text budget when the real tokenizer overflows. */
+async function askFittingWindow(
+  gemma: GemmaClient,
+  questions: ProfileQuestion[],
+  page: AskablePage,
+  budget: number,
+  totals: Totals,
+): Promise<{ prompt: string; response: GemmaAskResult }> {
+  let pageBudget = budget;
+  for (let shrinks = 0; ; shrinks += 1) {
+    // The retry base must be this text, not the full page: a boundary cut
+    // can send far less than the budget implies.
+    const pageText = truncateToTokenBudget(page.contentText, pageBudget);
+    const prompt = buildAskPrompt(questions, page.url, pageText);
+    try {
+      return { prompt, response: await gemma.ask(prompt, SYSTEM_PROMPT) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const overflow = parseTokenOverflow(message);
+      if (!overflow || shrinks >= MAX_OVERFLOW_SHRINKS) throw error;
+      const next = overflowRetryBudget(
+        pageBudget,
+        pageText,
+        overflow.actual,
+        overflow.allowed,
+      );
+      if (next < MIN_PAGE_BUDGET_TOKENS) throw error;
+      totals.askOverflowShrinks = (totals.askOverflowShrinks ?? 0) + 1;
+      console.log(
+        `  ${page.path || '(home)'}: window overflow (${overflow.actual} real tokens), retrying at ${next}-token budget`,
+      );
+      pageBudget = next;
+    }
+  }
+}
+
 /** Map-reduce one origin's pages through Gemma into an extraction outcome. */
 async function extractOutcome(
   gemma: GemmaClient,
   pages: AskablePage[],
   questions: ProfileQuestion[],
   budget: number,
+  totals: Totals,
 ): Promise<ExtractionOutcome> {
   const deduped = dedupeByHash(pages);
   if (deduped.length === 0) return { kind: 'no_readable_pages' };
   const candidates: PageCandidate[] = [];
   for (const page of deduped) {
-    const prompt = buildAskPrompt(
+    const { prompt, response: first } = await askFittingWindow(
+      gemma,
       questions,
-      page.url,
-      truncateToTokenBudget(page.contentText, budget),
+      page,
+      budget,
+      totals,
     );
-    let response = await gemma.ask(prompt, SYSTEM_PROMPT);
+    let response = first;
     let parsed = parsePageAnswers(response.text, questions);
     if (!parsed.ok) {
       console.log(`  ${page.path || '(home)'}: retrying (${parsed.error})`);
@@ -427,8 +472,15 @@ if (originArg) {
       `  extract: ${pages.length} pages × ${questions.length} questions, page budget ${budget} tokens`,
     );
     const gemma = await createPlaywrightGemmaClient();
+    const adHocTotals: Totals = {};
     try {
-      const outcome = await extractOutcome(gemma, pages, questions, budget);
+      const outcome = await extractOutcome(
+        gemma,
+        pages,
+        questions,
+        budget,
+        adHocTotals,
+      );
       console.log(
         JSON.stringify(
           {
@@ -443,6 +495,9 @@ if (originArg) {
           2,
         ),
       );
+      if (adHocTotals.askOverflowShrinks) {
+        console.log(`  overflow shrinks: ${adHocTotals.askOverflowShrinks}`);
+      }
     } finally {
       await gemma.stop();
     }
@@ -468,7 +523,6 @@ type OriginGroup = {
   companies: { companyNumber: string; evidence: string }[];
 };
 
-const totals: Totals = {};
 const startedAt = Date.now();
 
 /** Group a company list by its unit of work, the origin — franchise subtrees
@@ -736,6 +790,7 @@ if (noExtract) {
           pages,
           questions,
           budget,
+          totals,
         );
         for (const company of group.companies) {
           const rows = answerRows(company.companyNumber, questions, outcome, {

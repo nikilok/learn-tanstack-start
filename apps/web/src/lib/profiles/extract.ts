@@ -121,6 +121,58 @@ export function assertAskFits(
   return budget;
 }
 
+/** Slack applied when re-truncating after a real-tokenizer overflow. */
+export const OVERFLOW_SHRINK_MARGIN = 0.9;
+
+/** Shrink retries per page before the overflow is treated as a failure. */
+export const MAX_OVERFLOW_SHRINKS = 2;
+
+/** Read the engine's measured token counts out of a window-overflow error. */
+export function parseTokenOverflow(
+  message: string,
+): { actual: number; allowed: number } | null {
+  const match = /Input token ids are too long[\s\S]*?(\d+)\s*>=\s*(\d+)/.exec(
+    message,
+  );
+  if (!match) return null;
+  const actual = Number(match[1]);
+  const allowed = Number(match[2]);
+  // A pair that is not a genuine overflow would rescale the budget UP.
+  if (
+    !Number.isFinite(actual) ||
+    !Number.isFinite(allowed) ||
+    allowed <= 0 ||
+    actual <= allowed
+  ) {
+    return null;
+  }
+  return { actual, allowed };
+}
+
+/** Rescale an estimated page budget by the engine's measured ratio, with margin. */
+export function shrinkBudgetForOverflow(
+  budget: number,
+  actual: number,
+  allowed: number,
+): number {
+  if (actual <= 0) return 0;
+  return Math.floor(budget * (allowed / actual) * OVERFLOW_SHRINK_MARGIN);
+}
+
+/** Next page budget after an overflow, rescaled from the TEXT ACTUALLY SENT
+ *  (post-truncation) — the measured ratio belongs to that text, and rescaling
+ *  anything larger can leave the next cut at the same boundary, rebuilding
+ *  the identical prompt. */
+export function overflowRetryBudget(
+  pageBudget: number,
+  sentText: string,
+  actual: number,
+  allowed: number,
+): number {
+  const effective = Math.min(pageBudget, estimateTokens(sentText));
+  return shrinkBudgetForOverflow(effective, actual, allowed);
+}
+
 /**
  * The canonical string question_hash is computed over — everything that
  * shapes the ask. Deliberately wider than the plan's "prompt text": kind

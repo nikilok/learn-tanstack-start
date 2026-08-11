@@ -232,6 +232,13 @@ describe('crawlOrigin', () => {
     expect(about?.url).toBe('https://new.example.org/about-us');
   });
 
+  test('bytes count UTF-8, not string units', async () => {
+    const html = `<main><p>${'Für die Familie — häusliche Pflege im Süden, größte Sorgfalt. '.repeat(6)}</p></main>`;
+    const { deps } = fakeCrawl({ [B]: html });
+    const result = await crawlOrigin(B, CONFIG, deps);
+    expect(result.pages[0].bytes).toBeGreaterThan(html.length);
+  });
+
   test('an unparsable base is one error row', async () => {
     const { deps, pageCalls } = fakeCrawl({});
     const result = await crawlOrigin('not a url', CONFIG, deps);

@@ -51,6 +51,15 @@ describe('allocateQuotas', () => {
     expect(allocateQuotas(new Map(), 10).size).toBe(0);
   });
 
+  test('a fractional or negative size fails fast instead of spinning', () => {
+    expect(() => allocateQuotas(new Map([['a', 3]]), 1.5)).toThrow(
+      /non-negative integer/,
+    );
+    expect(() => allocateQuotas(new Map([['a', 3]]), -1)).toThrow(
+      /non-negative integer/,
+    );
+  });
+
   test('an empty stratum never receives the floor', () => {
     const quotas = allocateQuotas(
       new Map([

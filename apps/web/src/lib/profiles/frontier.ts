@@ -150,8 +150,10 @@ const CHILD_DEPRIORITIZED =
 
 /** Preference order among sitemap files: pages first, catalogs last. */
 function childSitemapRank(url: string): number {
-  if (/page/i.test(url)) return 0;
+  // Catalog markers outrank the page hint: /pages/product-sitemap.xml is a
+  // catalog wearing a promising path segment.
   if (CHILD_DEPRIORITIZED.test(url)) return 2;
+  if (/page/i.test(url)) return 0;
   return 1;
 }
 

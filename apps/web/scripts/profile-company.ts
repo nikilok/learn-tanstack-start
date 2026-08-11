@@ -470,6 +470,19 @@ const startedAt = Date.now();
 
 /** Group a company list by its unit of work, the origin — franchise subtrees
  *  on one domain travel together so a single crawl + reconcile covers them. */
+/** Origin for a stored url, failing loudly on a malformed value — a scripted
+ *  single-company call deserves a clean message, not a TypeError. */
+function requireOrigin(url: string, companyNumber: string): string {
+  try {
+    return snapshotOrigin(url);
+  } catch {
+    console.error(
+      `  malformed stored website url for company ${companyNumber}`,
+    );
+    process.exit(1);
+  }
+}
+
 function groupByOrigin(companies: DueCompany[]): OriginGroup[] {
   const byOrigin = new Map<string, OriginGroup>();
   for (const company of companies) {
@@ -571,7 +584,7 @@ if (noExtract) {
     }
     groups = [
       {
-        origin: snapshotOrigin(website.url),
+        origin: requireOrigin(website.url, companyArg),
         urls: [website.url],
         companies: [],
       },
@@ -647,7 +660,7 @@ if (noExtract) {
     }
     groups = [
       {
-        origin: snapshotOrigin(website.url),
+        origin: requireOrigin(website.url, companyArg),
         urls: [website.url],
         companies: [{ companyNumber: companyArg, evidence: website.evidence }],
       },

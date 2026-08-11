@@ -233,6 +233,14 @@ describe('parseSitemapEntries', () => {
 });
 
 describe('chooseChildSitemaps', () => {
+  test('a catalog under a /pages/ segment never rides the page hint', () => {
+    const chosen = chooseChildSitemaps([
+      'https://example.co.uk/pages/product-sitemap.xml',
+      'https://example.co.uk/sitemap-general.xml',
+    ]);
+    expect(chosen[0]).toBe('https://example.co.uk/sitemap-general.xml');
+  });
+
   test('pages beat catalogs regardless of order, capped', () => {
     const chosen = chooseChildSitemaps([
       'https://example.co.uk/post-sitemap.xml',

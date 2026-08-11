@@ -15,6 +15,11 @@ export function allocateQuotas(
   cellSizes: Map<string, number>,
   size: number,
 ): Map<string, number> {
+  // The adjustment loop moves in whole steps; a fractional or negative size
+  // could never be reached and would spin forever.
+  if (!Number.isInteger(size) || size < 0) {
+    throw new Error(`size must be a non-negative integer, got ${size}`);
+  }
   const total = [...cellSizes.values()].reduce((sum, n) => sum + n, 0);
   const quotas = new Map<string, number>();
   if (total === 0) return quotas;

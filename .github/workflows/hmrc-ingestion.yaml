@@ -123,6 +123,8 @@ jobs:
         # Skip the clone on the manual path — only find-csv (a local action) needs the repo.
         if: github.event.inputs.csv-url == ''
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Find HMRC CSV URL
         id: find-csv

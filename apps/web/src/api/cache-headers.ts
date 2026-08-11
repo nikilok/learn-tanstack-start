@@ -19,6 +19,14 @@ export const LONG_EDGE_CACHE =
 export const SHORT_EDGE_CACHE = 's-maxage=300, stale-while-revalidate=60';
 
 /**
+ * Minimal edge TTL for transient-failure responses (upstream refused or
+ * returned nothing usable). Long enough to absorb a same-page refetch
+ * burst, short enough that recovery is never pinned behind a cached
+ * failure.
+ */
+export const TRANSIENT_EDGE_CACHE = 's-maxage=60';
+
+/**
  * Attach a `Cache-Control` header to the current response only when the
  * request is a server-fn RPC invocation (`/_serverFn/…`). Prevents the
  * header from leaking onto the full SSR HTML response when the fn is

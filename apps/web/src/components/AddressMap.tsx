@@ -3,6 +3,7 @@ import { ClientOnly } from '@tanstack/react-router';
 import { lazy, Suspense } from 'react';
 
 import { geocodeQueryOptions } from '../api/geocode';
+import { isRenderingBot } from '../utils/rendering-bot';
 import { MapErrorBoundary } from './MapErrorBoundary';
 
 const LeafletMap = lazy(() => import('./LeafletMap'));
@@ -28,6 +29,24 @@ function GeocodedMap({
   );
 }
 
+/** Client half of AddressMap: crawler renders hold the placeholder frame instead of mounting the map — the page keeps its first-paint structure with none of the geocode, Leaflet or tile spend. The geocode fn refuses crawlers anyway. */
+function CrawlerGatedMap({
+  address,
+  companyName,
+}: {
+  address: string;
+  companyName?: string;
+}) {
+  if (isRenderingBot(navigator.userAgent)) return placeholder;
+  return (
+    <MapErrorBoundary>
+      <Suspense fallback={placeholder}>
+        <GeocodedMap address={address} companyName={companyName} />
+      </Suspense>
+    </MapErrorBoundary>
+  );
+}
+
 /** Client-only map for `address`. Streams in after the rest of the page renders — Leaflet can't SSR and Nominatim is too slow to block on. */
 export function AddressMap({
   address,
@@ -38,11 +57,7 @@ export function AddressMap({
 }) {
   return (
     <ClientOnly fallback={placeholder}>
-      <MapErrorBoundary>
-        <Suspense fallback={placeholder}>
-          <GeocodedMap address={address} companyName={companyName} />
-        </Suspense>
-      </MapErrorBoundary>
+      <CrawlerGatedMap address={address} companyName={companyName} />
     </ClientOnly>
   );
 }

@@ -33,6 +33,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { basename } from 'node:path';
 
@@ -76,6 +77,7 @@ import {
   makeUpsertAnswers,
   makeUpsertSnapshot,
 } from '../src/lib/profiles/sql.ts';
+import { renderRunSummary } from '../src/lib/profiles/summary.ts';
 import {
   looksChallenged,
   looksParked,
@@ -453,9 +455,8 @@ const upsertAnswers = makeUpsertAnswers(db);
 const reconcileOrigin = makeReconcileOrigin(db);
 const selectOkSnapshots = makeSelectOkSnapshots(db);
 
-console.log(
-  `Profile ${noExtract ? 'crawl' : fromSnapshots ? 'extract' : 'pipeline'} — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
-);
+const modeLabel = `Profile ${noExtract ? 'crawl' : fromSnapshots ? 'extract' : 'pipeline'}${dryRun ? ' (DRY RUN)' : ''}`;
+console.log(`${modeLabel} — db ${dbFingerprint(process.env.POSTGRES_URL)}`);
 
 /** Companies of one origin, with everything a write needs. */
 type OriginGroup = {
@@ -936,4 +937,11 @@ if (totals.answers) {
 }
 if (totals.origins) {
   console.log(`  seconds/origin: ${(seconds / totals.origins).toFixed(1)}`);
+}
+// On Actions, the same totals land on the run's summary page.
+if (process.env.GITHUB_STEP_SUMMARY) {
+  appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    renderRunSummary(modeLabel, totals, seconds),
+  );
 }

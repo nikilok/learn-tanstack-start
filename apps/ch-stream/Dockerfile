@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY packages/db/package.json packages/db/package.json
 COPY packages/gemma/package.json packages/gemma/package.json
+COPY packages/skyline/package.json packages/skyline/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/ch-stream/package.json apps/ch-stream/package.json
 COPY apps/desktop/package.json apps/desktop/package.json

@@ -1,7 +1,13 @@
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
+import { getRequestHeader } from '@tanstack/react-start/server';
 
-import { LONG_EDGE_CACHE, setRpcCacheControl } from './cache-headers';
+import { isRenderingBot } from '../utils/rendering-bot';
+import {
+  LONG_EDGE_CACHE,
+  setRpcCacheControl,
+  TRANSIENT_EDGE_CACHE,
+} from './cache-headers';
 
 export interface Geocoded {
   lat: number;
@@ -20,7 +26,11 @@ function buildQuery(address: string): string {
  * Server fn that proxies Nominatim with a compliant User-Agent and the
  * shared long-TTL RPC cache header. Postcodes don't move, so a 30-day
  * Vercel edge cache means each unique postcode hits Nominatim once
- * globally. Returns `null` for misses or upstream errors.
+ * globally. Returns `null` for misses or upstream errors — logged, and
+ * edge-cached only briefly so a transient upstream refusal is retried
+ * rather than pinned. Rendering crawlers get an uncached `null` before
+ * Nominatim is touched: coords are render decoration, and crawl-rate
+ * renders don't fit inside the upstream's request budget.
  */
 const getGeocode = createServerFn()
   .inputValidator((input: unknown) => input as { q: string })
@@ -28,7 +38,12 @@ const getGeocode = createServerFn()
     const raw = q.trim();
     if (!raw || raw.length > 200) return null;
 
+    // Uncacheable by omission: a crawler-served null must never become the cache entry a person then hits.
+    if (isRenderingBot(getRequestHeader('user-agent') ?? '')) return null;
+
     const query = buildQuery(raw);
+
+    setRpcCacheControl(TRANSIENT_EDGE_CACHE);
 
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
@@ -39,17 +54,24 @@ const getGeocode = createServerFn()
       },
     );
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[geocode] upstream ${res.status} for "${query}"`);
+      return null;
+    }
 
     let data: Array<{ lat: string; lon: string }>;
     try {
       data = (await res.json()) as Array<{ lat: string; lon: string }>;
     } catch {
+      console.error(`[geocode] unparseable upstream body for "${query}"`);
       return null;
     }
 
     const hit = data[0];
-    if (!hit) return null;
+    if (!hit) {
+      console.log(`[geocode] no result for "${query}"`);
+      return null;
+    }
 
     const lat = Number.parseFloat(hit.lat);
     const lon = Number.parseFloat(hit.lon);
@@ -60,12 +82,12 @@ const getGeocode = createServerFn()
     return { lat, lon };
   });
 
-/** React Query options for `getGeocode`. Normalises to a UK postcode so addresses sharing a postcode dedupe in both the React Query cache and the Vercel edge cache. `staleTime: Infinity` since postcode coords are immutable. */
+/** React Query options for `getGeocode`. Normalises to a UK postcode so addresses sharing a postcode dedupe in both the React Query cache and the Vercel edge cache. Real coords are immutable and stay fresh forever; a `null` is usually Nominatim under load, so it goes stale immediately and re-resolves on the next mount or window refocus. */
 export const geocodeQueryOptions = (address: string) => {
   const query = buildQuery(address);
   return queryOptions({
     queryKey: ['geocode', query],
     queryFn: () => getGeocode({ data: { q: query } }),
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: (q) => (q.state.data ? Number.POSITIVE_INFINITY : 0),
   });
 };

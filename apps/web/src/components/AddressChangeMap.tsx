@@ -2,6 +2,7 @@ import { useSuspenseQueries } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { geocodeQueryOptions } from '../api/geocode';
+import { isRenderingBot } from '../utils/rendering-bot';
 import { MapErrorBoundary } from './MapErrorBoundary';
 
 const LeafletJourneyMap = lazy(() => import('./LeafletJourneyMap'));
@@ -35,6 +36,8 @@ export function AddressChangeMap({ from, to }: { from: string; to: string }) {
   const [near, setNear] = useState(false);
 
   useEffect(() => {
+    // Crawler renders never go "near": the frame stays a static placeholder.
+    if (isRenderingBot(navigator.userAgent)) return;
     const frame = frameRef.current;
     if (!frame) return;
     const observer = new IntersectionObserver(

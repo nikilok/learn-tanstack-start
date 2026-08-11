@@ -29,7 +29,7 @@ function GeocodedMap({
   );
 }
 
-/** Client half of AddressMap: collapses for rendering crawlers — the geocode fn refuses them anyway, so their render shouldn't spend tiles and Leaflet either. */
+/** Client half of AddressMap: crawler renders hold the placeholder frame instead of mounting the map — the page keeps its first-paint structure with none of the geocode, Leaflet or tile spend. The geocode fn refuses crawlers anyway. */
 function CrawlerGatedMap({
   address,
   companyName,
@@ -37,7 +37,7 @@ function CrawlerGatedMap({
   address: string;
   companyName?: string;
 }) {
-  if (isRenderingBot(navigator.userAgent)) return null;
+  if (isRenderingBot(navigator.userAgent)) return placeholder;
   return (
     <MapErrorBoundary>
       <Suspense fallback={placeholder}>

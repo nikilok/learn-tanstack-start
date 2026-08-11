@@ -2,13 +2,13 @@ import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 
-import { parseGeocodeBody } from '../utils/geocode-body';
 import { isRenderingBot } from '../utils/rendering-bot';
 import {
   LONG_EDGE_CACHE,
   setRpcCacheControl,
   TRANSIENT_EDGE_CACHE,
 } from './cache-headers';
+import { geocodeUpstream } from './geocode-upstream';
 
 export type { Geocoded } from '../utils/geocode-body';
 
@@ -20,18 +20,26 @@ function buildQuery(address: string): string {
   return m ? `${m[1]} ${m[2]}` : address;
 }
 
+/** Log form of a geocode query: postcodes are format-validated public geographic tokens and safe to log; anything else (free-form input on a public endpoint) is redacted. */
+function logLabel(query: string): string {
+  return UK_POSTCODE_RE.test(query) ? `"${query}"` : '[non-postcode address]';
+}
+
 /**
  * Server fn that proxies Nominatim with a compliant User-Agent, a 5s cap,
  * and the shared long-TTL RPC cache header. Postcodes don't move, so a
  * 30-day Vercel edge cache means each unique postcode hits Nominatim once
- * globally. Returns `null` for misses and every upstream failure — logged,
- * and edge-cached only briefly so a transient refusal is retried rather
- * than pinned. Rendering crawlers get an uncached `null` before Nominatim
- * is touched: coords are render decoration, and crawl-rate renders don't
- * fit inside the upstream's request budget.
+ * globally. Returns `null` for malformed input, misses and every upstream
+ * failure — logged, and edge-cached only briefly so a transient refusal is
+ * retried rather than pinned. Rendering crawlers get an uncached `null`
+ * before Nominatim is touched: coords are render decoration, and
+ * crawl-rate renders don't fit inside the upstream's request budget.
  */
 const getGeocode = createServerFn()
-  .inputValidator((input: unknown) => input as { q: string })
+  .inputValidator((input: unknown) => {
+    const q = (input as { q?: unknown } | null | undefined)?.q;
+    return { q: typeof q === 'string' ? q : '' };
+  })
   .handler(async ({ data: { q } }) => {
     const raw = q.trim();
     if (!raw || raw.length > 200) return null;
@@ -43,46 +51,21 @@ const getGeocode = createServerFn()
 
     setRpcCacheControl(TRANSIENT_EDGE_CACHE);
 
-    // One timeout spans fetch AND body read — `await fetch` settles at headers, so timing only the fetch leaves a stalled body unbounded.
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    let body: unknown;
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
-        {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'SponsorSearch/1.0 (+https://sponsorsearch.co.uk)',
-          },
-        },
+    const result = await geocodeUpstream(query);
+    if (!result.ok) {
+      console.error(
+        `[geocode] upstream failed (${result.reason}) for ${logLabel(query)}`,
       );
-      if (!res.ok) {
-        console.error(`[geocode] upstream ${res.status} for "${query}"`);
-        return null;
-      }
-      body = (await res.json()) as unknown;
-    } catch (err) {
-      console.error(`[geocode] upstream fetch or parse failed for "${query}":`, err);
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!Array.isArray(body)) {
-      console.error(`[geocode] invalid upstream body for "${query}"`);
       return null;
     }
-
-    const geo = parseGeocodeBody(body);
-    if (!geo) {
-      console.log(`[geocode] no result for "${query}"`);
+    if (!result.geo) {
+      console.log(`[geocode] no result for ${logLabel(query)}`);
       return null;
     }
 
     setRpcCacheControl(LONG_EDGE_CACHE);
 
-    return geo;
+    return result.geo;
   });
 
 /** React Query options for `getGeocode`. Normalises to a UK postcode so addresses sharing a postcode dedupe in both the React Query cache and the Vercel edge cache. Real coords are immutable and stay fresh forever; a `null` is usually Nominatim under load, so it goes stale immediately and re-resolves on the next mount or window refocus. */

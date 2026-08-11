@@ -19,7 +19,11 @@ export function allocateQuotas(
   const quotas = new Map<string, number>();
   if (total === 0) return quotas;
   for (const [stratum, n] of cellSizes) {
-    quotas.set(stratum, Math.max(1, Math.round((size * n) / total)));
+    // The floor belongs to non-empty cells only, per the contract above.
+    quotas.set(
+      stratum,
+      n === 0 ? 0 : Math.max(1, Math.round((size * n) / total)),
+    );
   }
   let allocated = [...quotas.values()].reduce((sum, n) => sum + n, 0);
   while (allocated !== size) {

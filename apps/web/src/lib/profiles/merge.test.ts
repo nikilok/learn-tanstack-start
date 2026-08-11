@@ -99,6 +99,19 @@ describe('mergeAnswers', () => {
     ]);
   });
 
+  test('punctuation and stray spaces around it share one dedupe key', () => {
+    const merged = mergeAnswers(QUESTIONS, [
+      page('/about-us', { what_does: null, offerings: ['Home care.'] }),
+      page('/services', { what_does: null, offerings: ['home care .'] }),
+    ]);
+    expect(merged.offerings).toEqual({
+      kind: 'list',
+      status: 'ok',
+      items: ['Home care.'],
+      sourceUrls: ['https://example.co.uk/about-us'],
+    });
+  });
+
   test('a page that only repeats known items is not a source', () => {
     const merged = mergeAnswers(QUESTIONS, [
       page('/about-us', {

@@ -50,4 +50,16 @@ describe('allocateQuotas', () => {
   test('empty cells allocate an empty map, not a division by zero', () => {
     expect(allocateQuotas(new Map(), 10).size).toBe(0);
   });
+
+  test('an empty stratum never receives the floor', () => {
+    const quotas = allocateQuotas(
+      new Map([
+        ['full', 10],
+        ['hollow', 0],
+      ]),
+      5,
+    );
+    expect(quotas.get('hollow')).toBe(0);
+    expect(quotas.get('full')).toBe(5);
+  });
 });

@@ -154,6 +154,10 @@ for (const [stratum, cell] of [...cells.entries()].sort()) {
   );
 }
 
+console.log(
+  `  sampled ${sampled.length} of ${size} requested${sampled.length < size ? ' (some strata exhausted)' : ''}`,
+);
+
 const lines = [
   `# profiles pilot sample — seed ${seed}, ${sampled.length} origins, ${sampled.reduce((sum, entry) => sum + entry.companies.length, 0)} companies`,
   ...sampled.flatMap((entry) => entry.companies),

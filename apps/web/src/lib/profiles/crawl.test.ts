@@ -167,8 +167,9 @@ describe('crawlOrigin', () => {
       [B]: PROSE,
       [`${B}/about`]: { fail: 'blocked_by_robots' },
       [`${B}/services`]: { fail: 'not_html' },
-      [`${B}/products`]:
-        '<p>this domain for sale by owner, enquire within today</p>',
+      // Long enough to clear MIN_SNAPSHOT_CHARS, so the parked verdict comes
+      // from looksParked itself and not the thin-text gate before it.
+      [`${B}/products`]: `<p>this domain for sale by owner, enquire within today. ${'The owner has priced this premium domain to sell quickly and invites serious offers from interested parties. '.repeat(3)}</p>`,
     });
     const result = await crawlOrigin(B, CONFIG, deps);
     const byPath = new Map(result.pages.map((page) => [page.path, page]));
@@ -237,6 +238,17 @@ describe('crawlOrigin', () => {
     expect(result.pages).toHaveLength(1);
     expect(result.pages[0].failure).toBe('unparsable');
     expect(pageCalls).toHaveLength(0);
+  });
+
+  test('a path-carrying base never duplicates its own path in the frontier', async () => {
+    // /about-us sits in the fallback tier, so without the basePath filter the
+    // home row and a frontier fetch would collide on one (origin, path).
+    const base = 'https://example.co.uk/about-us';
+    const { deps } = fakeCrawl({ [base]: PROSE });
+    const result = await crawlOrigin(base, CONFIG, deps);
+    const paths = result.pages.map((page) => page.path);
+    expect(new Set(paths).size).toBe(paths.length);
+    expect(paths.filter((path) => path === '/about-us')).toHaveLength(1);
   });
 });
 

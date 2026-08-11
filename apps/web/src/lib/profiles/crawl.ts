@@ -270,7 +270,11 @@ export async function crawlOrigin(
   // real anchor counts as a link even if the sitemap also listed it, matching
   // tier precedence.
   const links = extractLinks(home.html, home.url);
-  const chosen = selectFrontier(links, sitemapPaths);
+  // A path-carrying base is already the home row; the frontier must not fetch
+  // it again as a duplicate (origin, path) snapshot.
+  const chosen = selectFrontier(links, sitemapPaths).filter(
+    (path) => path.toLowerCase() !== basePath.toLowerCase(),
+  );
   const fromLinks = new Set(links.map((link) => link.path.toLowerCase()));
   const fromSitemap = new Set(sitemapPaths.map((path) => path.toLowerCase()));
   const sourceOf = (path: string): PageSource => {

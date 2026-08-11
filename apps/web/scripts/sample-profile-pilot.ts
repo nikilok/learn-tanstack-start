@@ -90,7 +90,12 @@ type OriginEntry = { origin: string; stratum: string; companies: string[] };
 const byOrigin = new Map<string, OriginEntry>();
 for (const row of rows) {
   if (!row.url) continue;
-  const origin = snapshotOrigin(row.url);
+  let origin: string;
+  try {
+    origin = snapshotOrigin(row.url);
+  } catch {
+    continue;
+  }
   if (touched.has(origin)) continue;
   const entry = byOrigin.get(origin) ?? {
     origin,
@@ -129,8 +134,12 @@ for (const [stratum, cell] of cells) {
 let allocated = [...quotas.values()].reduce((sum, n) => sum + n, 0);
 while (allocated !== size) {
   const direction = allocated > size ? -1 : 1;
-  const [stratum] = [...quotas.entries()].sort((a, b) => b[1] - a[1])[0];
-  quotas.set(stratum, (quotas.get(stratum) as number) + direction);
+  // Shaving stops at zero: with more strata than --size the floor of one per
+  // cell must give way — a negative quota would slice(0, -n) and keep MORE.
+  const ranked = [...quotas.entries()].sort((a, b) => b[1] - a[1]);
+  const target = direction === -1 ? ranked.find(([, n]) => n > 0) : ranked[0];
+  if (!target) break;
+  quotas.set(target[0], (quotas.get(target[0]) as number) + direction);
   allocated += direction;
 }
 

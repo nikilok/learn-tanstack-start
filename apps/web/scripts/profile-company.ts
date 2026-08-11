@@ -842,10 +842,21 @@ if (noExtract) {
             try {
               for (const group of wonGroups) {
                 // Renewal keeps the batch tail inside the lease however slow
-                // the preceding origins run.
-                await tryCoord('renew', () =>
-                  renewClaims(instance, [...unfinished]),
-                );
+                // the preceding origins run. Fewer rows renewed than held
+                // means a lease lapsed and a peer may redo that origin —
+                // surfaced in totals rather than left as silent double work.
+                try {
+                  const renewed = await renewClaims(instance, [...unfinished]);
+                  if (renewed < unfinished.size) {
+                    totals.claimsLost =
+                      (totals.claimsLost ?? 0) + (unfinished.size - renewed);
+                  }
+                } catch (err) {
+                  const message =
+                    err instanceof Error ? err.message : String(err);
+                  console.log(`  claim renew failed, continuing — ${message}`);
+                  totals.claimErrors = (totals.claimErrors ?? 0) + 1;
+                }
                 const ok = await processGroup(group);
                 if (
                   await tryCoord('release', () =>

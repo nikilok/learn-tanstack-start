@@ -128,7 +128,12 @@ export function assertAskFits(
  * population. Callers store sha256 of this string.
  */
 export function askHashInput(question: ProfileQuestion): string {
-  return `${question.kind}\n${question.prompt}\n${question.intent}`;
+  // The system prompt shapes every answer, so it is part of each question's
+  // fingerprint. Slug and sort stay excluded on purpose: staleness is
+  // per-question (editing one question re-asks one question, not the whole
+  // corpus), and composition-order effects are accepted noise under that
+  // cost model.
+  return `${SYSTEM_PROMPT}\n${question.kind}\n${question.prompt}\n${question.intent}`;
 }
 
 export type ParsedAnswers =

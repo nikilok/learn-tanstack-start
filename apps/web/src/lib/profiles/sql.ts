@@ -130,13 +130,15 @@ export function makeSelectCrawlTargets(db: Db) {
       .from(companyWebsites)
       .where(publishableWebsiteGate())
       .groupBy(companyWebsites.url);
-    // Newest fetch per origin: the rotation key and the recency floor.
+    // Newest ATTEMPT per origin — the rotation key and the recency floor.
+    // Attempts count even when the ok-preservation guard skipped the write,
+    // so a failing origin waits out the window like any crawled origin.
     const lastCrawled = new Map(
       (
         await db
           .select({
             origin: companyPageSnapshots.origin,
-            fetchedAt: sql<string>`max(${companyPageSnapshots.fetchedAt})`,
+            fetchedAt: sql<string>`max(GREATEST(${companyPageSnapshots.fetchedAt}, COALESCE(${companyPageSnapshots.lastAttemptAt}, ${companyPageSnapshots.fetchedAt})))`,
           })
           .from(companyPageSnapshots)
           .groupBy(companyPageSnapshots.origin)
@@ -494,8 +496,18 @@ export function makeInvalidateOrphanedAnswers(db: Db) {
  * always wins (new content); a failure only writes where there was no good
  * content to lose. An origin we can already read is not an escalation
  * candidate anyway, so dropping the failure signal there costs nothing.
+ *
+ * `last_attempt_at` advances on every upsert INCLUDING a guarded skip (content
+ * columns ratchet per-column), and the crawl rotation keys on the newer of
+ * fetched_at/last_attempt_at — so a permanently-failing origin backs off a
+ * full RECRAWL_AFTER_DAYS window instead of holding a rotation slot nightly.
  */
 export function makeUpsertSnapshot(db: Db) {
+  // excluded wins on non-manual rows when it is ok, or the stored row is not.
+  const wins = sql`(${companyPageSnapshots.fetchMethod} <> 'manual'
+    AND (excluded.status = 'ok' OR ${companyPageSnapshots.status} <> 'ok'))`;
+  const ratchet = (column: AnyColumn, excludedName: string) =>
+    sql`CASE WHEN ${wins} THEN ${sql.raw(`excluded.${excludedName}`)} ELSE ${column} END`;
   return async (origin: string, page: CrawlPage): Promise<void> => {
     await db
       .insert(companyPageSnapshots)
@@ -509,21 +521,30 @@ export function makeUpsertSnapshot(db: Db) {
         contentHash: page.contentHash,
         bytes: page.bytes,
         fetchMethod: 'fetch',
+        lastAttemptAt: sql`now()`,
       })
       .onConflictDoUpdate({
         target: [companyPageSnapshots.origin, companyPageSnapshots.path],
         set: {
-          url: page.url,
-          status: page.status,
-          failure: page.failure,
-          contentText: page.contentText,
-          contentHash: page.contentHash,
-          bytes: page.bytes,
-          fetchMethod: 'fetch',
-          fetchedAt: sql`now()`,
+          url: ratchet(companyPageSnapshots.url, 'url'),
+          status: ratchet(companyPageSnapshots.status, 'status'),
+          failure: ratchet(companyPageSnapshots.failure, 'failure'),
+          contentText: ratchet(
+            companyPageSnapshots.contentText,
+            'content_text',
+          ),
+          contentHash: ratchet(
+            companyPageSnapshots.contentHash,
+            'content_hash',
+          ),
+          bytes: ratchet(companyPageSnapshots.bytes, 'bytes'),
+          fetchMethod: ratchet(
+            companyPageSnapshots.fetchMethod,
+            'fetch_method',
+          ),
+          fetchedAt: sql`CASE WHEN ${wins} THEN now() ELSE ${companyPageSnapshots.fetchedAt} END`,
+          lastAttemptAt: sql`now()`,
         },
-        setWhere: sql`${companyPageSnapshots.fetchMethod} <> 'manual'
-          AND (excluded.status = 'ok' OR ${companyPageSnapshots.status} <> 'ok')`,
       });
   };
 }

@@ -330,6 +330,13 @@
       "when": 1786409376982,
       "tag": "0046_answers_last_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786415658016,
+      "tag": "0047_snapshot_last_attempt",
+      "breakpoints": true
     }
   ]
 }

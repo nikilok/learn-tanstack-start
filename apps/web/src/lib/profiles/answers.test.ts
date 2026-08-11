@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { answerRows, type AnswerStamps } from './answers';
-import { askHashInput, type ProfileQuestion } from './extract';
+import { askHashInput, type ProfileQuestion, SYSTEM_PROMPT } from './extract';
 
 const QUESTIONS: ProfileQuestion[] = [
   {
@@ -37,6 +37,12 @@ describe('askHashInput', () => {
     expect(askHashInput({ ...QUESTIONS[0], intent: 'other' })).not.toBe(base);
     expect(askHashInput({ ...QUESTIONS[0], sort: 9 })).toBe(base);
     expect(askHashInput({ ...QUESTIONS[0], slug: 'renamed' })).toBe(base);
+  });
+
+  test('the system prompt is part of every fingerprint', () => {
+    // An edit to the shared instruction changes what the model was told for
+    // every answer, so it must invalidate every stored hash.
+    expect(askHashInput(QUESTIONS[0])).toContain(SYSTEM_PROMPT);
   });
 });
 

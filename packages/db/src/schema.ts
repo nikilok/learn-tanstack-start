@@ -513,6 +513,11 @@ export const companyPageSnapshots = pgTable(
     contentHash: varchar('content_hash', { length: 64 }),
     bytes: integer('bytes'),
     fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
+    // Advances on EVERY upsert, including one the ok-preservation guard
+    // blocks; fetched_at advances only on a real write. The crawl rotation
+    // keys on the newer of the two, so a permanently-failing origin backs
+    // off a full window instead of holding a slot every night.
+    lastAttemptAt: timestamp('last_attempt_at'),
   },
   // Doubles as the origin lookup index via the leftmost column.
   (table) => [

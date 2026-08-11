@@ -51,9 +51,11 @@ export function makeSelectActiveQuestions(db: Db) {
 }
 
 export type CrawlTarget = {
-  /** The stored website URL, the crawl base. */
-  url: string;
-  /** Companies this URL is publishable for; shared domains crawl once. */
+  /** Canonical origin — the crawl unit and the rotation slot. */
+  origin: string;
+  /** Every publishable URL on the origin; franchise subtrees crawl together. */
+  urls: string[];
+  /** Companies this origin serves across all of its urls. */
   companies: number;
 };
 
@@ -66,12 +68,57 @@ export type CrawlTarget = {
 export const RECRAWL_AFTER_DAYS = 30;
 
 /**
- * Publishable crawl bases in rotation order: never-crawled first, then oldest
- * snapshot first, skipping origins crawled within RECRAWL_AFTER_DAYS. Without
- * the recency key the sweep re-crawls the same alphabetical head every night
- * and the tail never refreshes. The whole target set is small (thousands), so
- * ordering happens in TypeScript against snapshotOrigin — the same origin rule
- * the crawler stamps rows with — rather than re-deriving the origin in SQL.
+ * Pure rotation planner: collapse publishable url rows to ORIGINS, drop
+ * origins crawled after the floor, order never-crawled first then oldest
+ * first, cap at the limit. The origin is the slot unit — two subtree urls on
+ * one domain must never spend two --limit slots, and slicing between them
+ * would crawl half a group and reconcile the origin against half its pages.
+ * A malformed stored url skips its row rather than failing the sweep.
+ */
+export function planCrawlRotation(
+  rows: { url: string | null; companies: number }[],
+  lastCrawled: Map<string, number>,
+  floor: number,
+  limit: number,
+): CrawlTarget[] {
+  const byOrigin = new Map<string, CrawlTarget & { crawledAt?: number }>();
+  for (const row of rows) {
+    if (!row.url) continue;
+    let origin: string;
+    try {
+      origin = snapshotOrigin(row.url);
+    } catch {
+      continue;
+    }
+    const entry = byOrigin.get(origin) ?? {
+      origin,
+      urls: [],
+      companies: 0,
+      crawledAt: lastCrawled.get(origin),
+    };
+    if (!entry.urls.includes(row.url)) entry.urls.push(row.url);
+    entry.companies += row.companies;
+    byOrigin.set(origin, entry);
+  }
+  return [...byOrigin.values()]
+    .filter(
+      (entry) => entry.crawledAt === undefined || entry.crawledAt <= floor,
+    )
+    .sort(
+      (a, b) =>
+        // never-crawled (undefined → -Infinity) first, then oldest first.
+        (a.crawledAt ?? -Infinity) - (b.crawledAt ?? -Infinity) ||
+        a.origin.localeCompare(b.origin),
+    )
+    .slice(0, limit)
+    .map(({ origin, urls, companies }) => ({ origin, urls, companies }));
+}
+
+/**
+ * Publishable crawl origins in rotation order (see planCrawlRotation). The
+ * whole target set is small (thousands), so planning happens in TypeScript
+ * against snapshotOrigin — the same origin rule the crawler stamps rows
+ * with — rather than re-deriving the origin in SQL.
  */
 export function makeSelectCrawlTargets(db: Db) {
   return async (limit: number): Promise<CrawlTarget[]> => {
@@ -96,29 +143,7 @@ export function makeSelectCrawlTargets(db: Db) {
       ).map((row) => [row.origin, new Date(row.fetchedAt).getTime()]),
     );
     const floor = Date.now() - RECRAWL_AFTER_DAYS * 86_400_000;
-    return rows
-      .flatMap((row) => {
-        if (!row.url) return [];
-        // One malformed stored URL must not fail the whole sweep's selection.
-        let origin: string;
-        try {
-          origin = snapshotOrigin(row.url);
-        } catch {
-          return [];
-        }
-        const crawledAt = lastCrawled.get(origin);
-        // Skip freshly-crawled origins; never-crawled (undefined) always pass.
-        if (crawledAt !== undefined && crawledAt > floor) return [];
-        return [{ url: row.url, companies: row.companies, crawledAt }];
-      })
-      .sort(
-        (a, b) =>
-          // never-crawled (undefined → -Infinity) first, then oldest first.
-          (a.crawledAt ?? -Infinity) - (b.crawledAt ?? -Infinity) ||
-          a.url.localeCompare(b.url),
-      )
-      .slice(0, limit)
-      .map(({ url, companies }) => ({ url, companies }));
+    return planCrawlRotation(rows, lastCrawled, floor, limit);
   };
 }
 

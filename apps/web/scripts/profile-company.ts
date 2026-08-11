@@ -581,17 +581,16 @@ if (noExtract) {
     );
     groups = groupByOrigin(resolved);
   } else {
+    // Targets arrive origin-planned: one rotation slot per origin, every
+    // subtree url included, so a group can never be split by the limit.
     const targets = await makeSelectCrawlTargets(db)(
       parseStrictInt(limitArg ?? '0', 'limit'),
     );
-    const byOrigin = new Map<string, OriginGroup>();
-    for (const target of targets) {
-      const origin = snapshotOrigin(target.url);
-      const group = byOrigin.get(origin) ?? { origin, urls: [], companies: [] };
-      if (!group.urls.includes(target.url)) group.urls.push(target.url);
-      byOrigin.set(origin, group);
-    }
-    groups = [...byOrigin.values()];
+    groups = targets.map((target) => ({
+      origin: target.origin,
+      urls: target.urls,
+      companies: [],
+    }));
   }
   console.log(`  origins: ${groups.length}  delay: ${delayMs}ms`);
   for (const group of groups) await crawlGroup(group);

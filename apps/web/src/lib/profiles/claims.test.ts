@@ -8,22 +8,26 @@ type Db = Parameters<typeof makeClaimOrigins>[0];
  *  grants whatever wins `decide` allows, like contested rows would. */
 function stubClaimDb(decide: (origins: string[]) => string[]) {
   const statements: string[][] = [];
+  const conflicts: unknown[] = [];
   const db = {
     insert: () => ({
       values: (rows: { origin: string }[]) => ({
-        onConflictDoUpdate: () => ({
-          returning: () => {
-            const origins = rows.map((row) => row.origin);
-            statements.push(origins);
-            return Promise.resolve(
-              decide(origins).map((origin) => ({ origin })),
-            );
-          },
-        }),
+        onConflictDoUpdate: (config: unknown) => {
+          conflicts.push(config);
+          return {
+            returning: () => {
+              const origins = rows.map((row) => row.origin);
+              statements.push(origins);
+              return Promise.resolve(
+                decide(origins).map((origin) => ({ origin })),
+              );
+            },
+          };
+        },
       }),
     }),
   } as unknown as Db;
-  return { db, statements };
+  return { db, statements, conflicts };
 }
 
 /** Stub for the release/renew chains: records each where predicate so the
@@ -102,6 +106,16 @@ describe('makeClaimOrigins', () => {
     const won = await makeClaimOrigins(db)('w', ['a', 'b', 'a', 'a'], 4);
     expect(statements).toEqual([['a', 'b']]);
     expect(won).toEqual(['a', 'b']);
+  });
+
+  test('the claim upsert takes only rows whose lease has expired', async () => {
+    // Without the setWhere guard the upsert would steal origins other workers
+    // still hold; this pins the lease predicate into the statement.
+    const { db, conflicts } = stubClaimDb((origins) => origins);
+    await makeClaimOrigins(db)('w', ['a'], 1);
+    const guard = (conflicts[0] as { setWhere?: unknown }).setWhere;
+    expect(guard).toBeDefined();
+    expect(columnNames(guard)).toContain('claimed_at');
   });
 });
 

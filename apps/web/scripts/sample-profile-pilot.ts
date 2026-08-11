@@ -21,6 +21,7 @@ import { eq } from 'drizzle-orm';
 
 import { snapshotOrigin } from '../src/lib/profiles/crawl.ts';
 import { makeSelectSnapshotOrigins } from '../src/lib/profiles/sql.ts';
+import { allocateQuotas } from '../src/lib/profiles/stratify.ts';
 import { publishableWebsiteGate } from '../src/lib/websites/publishable.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 
@@ -124,24 +125,13 @@ if (byOrigin.size === 0) {
   process.exit(1);
 }
 
-// Proportional allocation with a floor of 1 per non-empty cell, trimmed to
-// size by shaving the largest cells.
 const total = byOrigin.size;
-const quotas = new Map<string, number>();
-for (const [stratum, cell] of cells) {
-  quotas.set(stratum, Math.max(1, Math.round((size * cell.length) / total)));
-}
-let allocated = [...quotas.values()].reduce((sum, n) => sum + n, 0);
-while (allocated !== size) {
-  const direction = allocated > size ? -1 : 1;
-  // Shaving stops at zero: with more strata than --size the floor of one per
-  // cell must give way — a negative quota would slice(0, -n) and keep MORE.
-  const ranked = [...quotas.entries()].sort((a, b) => b[1] - a[1]);
-  const target = direction === -1 ? ranked.find(([, n]) => n > 0) : ranked[0];
-  if (!target) break;
-  quotas.set(target[0], (quotas.get(target[0]) as number) + direction);
-  allocated += direction;
-}
+const quotas = allocateQuotas(
+  new Map(
+    [...cells.entries()].map(([stratum, cell]) => [stratum, cell.length]),
+  ),
+  size,
+);
 
 /** Seeded Fisher-Yates, so the draw is a pure function of the seed. */
 function shuffle<T>(items: T[]): T[] {

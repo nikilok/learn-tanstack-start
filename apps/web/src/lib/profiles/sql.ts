@@ -142,7 +142,12 @@ export function makeSelectCrawlTargets(db: Db) {
           })
           .from(companyPageSnapshots)
           .groupBy(companyPageSnapshots.origin)
-      ).map((row) => [row.origin, new Date(row.fetchedAt).getTime()]),
+      ).map((row) => [
+        row.origin,
+        // Neon returns a bare 'YYYY-MM-DD HH:MM:SS' string for this UTC
+        // instant; parsed without a designator it would shift with local TZ.
+        new Date(`${row.fetchedAt.replace(' ', 'T')}Z`).getTime(),
+      ]),
     );
     const floor = Date.now() - RECRAWL_AFTER_DAYS * 86_400_000;
     return planCrawlRotation(rows, lastCrawled, floor, limit);

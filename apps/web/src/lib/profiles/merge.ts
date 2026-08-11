@@ -37,11 +37,13 @@ function pagePriority(path: string): number {
 
 /** Dedupe key for list items: case, whitespace and trailing punctuation. */
 function normaliseItem(item: string): string {
+  // Trim BEFORE the punctuation strip: its $ anchor must see the real tail,
+  // or 'care.' and 'care. ' dedupe to different keys.
   return item
     .toLowerCase()
     .replace(/\s+/g, ' ')
-    .replace(/[.,;:!]+$/, '')
-    .trim();
+    .trim()
+    .replace(/[.,;:!]+$/, '');
 }
 
 /**

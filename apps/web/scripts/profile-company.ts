@@ -593,7 +593,29 @@ if (noExtract) {
     }));
   }
   console.log(`  origins: ${groups.length}  delay: ${delayMs}ms`);
-  for (const group of groups) await crawlGroup(group);
+  // The same per-origin tolerance the extraction loop has: one transient DB
+  // or network error must not discard the rest of the night's rotation.
+  let crawlStreak = 0;
+  for (const group of groups) {
+    try {
+      await crawlGroup(group);
+      crawlStreak = 0;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(
+        `  ${group.origin}: crawl failed, left in rotation — ${message}`,
+      );
+      crawlStreak++;
+      totals.crawlFailures = (totals.crawlFailures ?? 0) + 1;
+      if (crawlStreak >= SYSTEMIC_FAILURE_STREAK) {
+        console.error(
+          `  aborting: ${crawlStreak} consecutive crawl failures (network or db down?)`,
+        );
+        process.exitCode = 1;
+        break;
+      }
+    }
+  }
 } else {
   // Extraction modes: one extraction per origin serves every company on it.
   const questions = await loadQuestions();
@@ -685,53 +707,52 @@ if (noExtract) {
 
     /** Extract + write one origin group. False = abort the run (engine wedged). */
     const processGroup = async (group: OriginGroup): Promise<boolean> => {
-      let outcome: ExtractionOutcome;
       try {
-        // Page loading sits under the same tolerance as the asks: a transient
-        // DB or crawl error on one origin must not end the sweep.
+        // Page loading, the asks AND the answer writes all sit under one
+        // per-origin tolerance: a transient DB error on a write is an infra
+        // blip like any other and must not discard the rest of the run. The
+        // streak resets only after the writes land, so a systemic outage on
+        // any stage escalates.
         const pages = await pagesForExtraction(group);
-        outcome = await extractOutcome(
+        const outcome = await extractOutcome(
           await ensureGemma(),
           pages,
           questions,
           budget,
         );
+        for (const company of group.companies) {
+          const rows = answerRows(company.companyNumber, questions, outcome, {
+            hashes,
+            model: MODEL_STAMP,
+            identityEvidence: company.evidence,
+          });
+          if (!dryRun) await upsertAnswers(rows);
+          for (const row of rows) {
+            const key = `answer:${row.questionSlug}:${row.status}`;
+            totals[key] = (totals[key] ?? 0) + 1;
+            totals.answers = (totals.answers ?? 0) + 1;
+          }
+          totals.companies = (totals.companies ?? 0) + 1;
+        }
+        totals.origins = (totals.origins ?? 0) + 1;
         failureStreak = 0;
       } catch (err) {
-        // A wedged generation must not crash the sweep. Leave the origin
-        // unwritten — immediately retryable, an infra blip rather than a
-        // model verdict — and escalate if it keeps happening.
+        // A wedged engine or a flaky night must not crash the sweep. Leave
+        // the origin unfinished — immediately retryable, an infra blip rather
+        // than a verdict — and escalate if it keeps happening.
         const message = err instanceof Error ? err.message : String(err);
-        console.log(
-          `  ${group.origin}: extraction failed, left due — ${message}`,
-        );
+        console.log(`  ${group.origin}: failed, left due — ${message}`);
         failureStreak++;
         totals.extractionFailures = (totals.extractionFailures ?? 0) + 1;
         if (failureStreak >= SYSTEMIC_FAILURE_STREAK) {
           console.error(
-            `  aborting: ${failureStreak} consecutive extraction failures (engine wedged?)`,
+            `  aborting: ${failureStreak} consecutive origin failures (engine wedged? db down?)`,
           );
           // The summary still prints, but the run must read as failed in CI.
           process.exitCode = 1;
           return false;
         }
-        return true;
       }
-      for (const company of group.companies) {
-        const rows = answerRows(company.companyNumber, questions, outcome, {
-          hashes,
-          model: MODEL_STAMP,
-          identityEvidence: company.evidence,
-        });
-        if (!dryRun) await upsertAnswers(rows);
-        for (const row of rows) {
-          const key = `answer:${row.questionSlug}:${row.status}`;
-          totals[key] = (totals[key] ?? 0) + 1;
-          totals.answers = (totals.answers ?? 0) + 1;
-        }
-        totals.companies = (totals.companies ?? 0) + 1;
-      }
-      totals.origins = (totals.origins ?? 0) + 1;
       return true;
     };
 

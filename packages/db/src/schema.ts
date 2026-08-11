@@ -557,6 +557,11 @@ export const companyAnswers = pgTable(
     // 'ok' | 'insufficient_content' | 'error'.
     status: varchar('status', { length: 24 }).notNull(),
     extractedAt: timestamp('extracted_at').defaultNow().notNull(),
+    // Advances on EVERY upsert, including one the ok-preservation guard
+    // blocks; extracted_at advances only on a real write. attempt > extracted
+    // therefore marks a protected stale row, which the due predicate backs
+    // off instead of re-extracting nightly forever.
+    lastAttemptAt: timestamp('last_attempt_at'),
   },
   (table) => [
     uniqueIndex('ux_company_answers_company_question').on(

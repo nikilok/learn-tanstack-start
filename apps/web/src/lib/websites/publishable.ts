@@ -75,13 +75,18 @@ export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
  * must not alias the table.
  */
-export function publishableWebsiteGate(): SQL {
+/** The arms both gates share; only the status arm differs between them. */
+function gateWithStatusArm(statusArm: SQL): SQL {
   return and(
-    eq(companyWebsites.status, 'verified'),
+    statusArm,
     isNotNull(companyWebsites.checkedAt),
     inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
     isNotNull(companyWebsites.url),
   ) as SQL;
+}
+
+export function publishableWebsiteGate(): SQL {
+  return gateWithStatusArm(eq(companyWebsites.status, 'verified') as SQL);
 }
 
 /**
@@ -103,10 +108,7 @@ export function publishableWebsiteGate(): SQL {
 export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
 
 export function answersRetentionGate(): SQL {
-  return and(
-    inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]),
-    isNotNull(companyWebsites.checkedAt),
-    inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
-    isNotNull(companyWebsites.url),
-  ) as SQL;
+  return gateWithStatusArm(
+    inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]) as SQL,
+  );
 }

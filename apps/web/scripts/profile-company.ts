@@ -472,7 +472,15 @@ const startedAt = Date.now();
 function groupByOrigin(companies: DueCompany[]): OriginGroup[] {
   const byOrigin = new Map<string, OriginGroup>();
   for (const company of companies) {
-    const origin = snapshotOrigin(company.url);
+    let origin: string;
+    try {
+      origin = snapshotOrigin(company.url);
+    } catch {
+      console.log(
+        `  skipping malformed website url for ${company.companyNumber}`,
+      );
+      continue;
+    }
     const group = byOrigin.get(origin) ?? { origin, urls: [], companies: [] };
     if (!group.urls.includes(company.url)) group.urls.push(company.url);
     group.companies.push({

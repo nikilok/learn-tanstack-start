@@ -78,7 +78,10 @@ const rows = await db
     companiesHouseProfiles,
     eq(companiesHouseProfiles.companyNumber, companyWebsites.companyNumber),
   )
-  .where(publishableWebsiteGate());
+  .where(publishableWebsiteGate())
+  // Postgres guarantees no row order without one; the seeded shuffle is only
+  // a pure function of the seed if its input order is pinned too.
+  .orderBy(companyWebsites.companyNumber);
 
 const touched = await makeSelectSnapshotOrigins(db)();
 

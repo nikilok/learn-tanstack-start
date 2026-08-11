@@ -115,6 +115,8 @@ function pageFromHtml(
   source: PageSource,
 ): CrawlPage {
   const text = cleanPageText(html);
+  // True UTF-8 bytes; String.length would undercount non-ASCII pages.
+  const bytes = new TextEncoder().encode(html).length;
   // A 200 that is a bot interstitial is a block wearing a success code. It
   // outranks the thin check so the row carries its real diagnosis — these
   // rows ARE the try-differently-later work-list.
@@ -126,7 +128,7 @@ function pageFromHtml(
       failure: 'challenge_page',
       contentText: null,
       contentHash: null,
-      bytes: html.length,
+      bytes,
       source,
     };
   }
@@ -141,7 +143,7 @@ function pageFromHtml(
       failure: null,
       contentText: null,
       contentHash: null,
-      bytes: html.length,
+      bytes,
       source,
     };
   }
@@ -152,7 +154,7 @@ function pageFromHtml(
     failure: null,
     contentText: text,
     contentHash: deps.hash(text),
-    bytes: html.length,
+    bytes,
     source,
   };
 }

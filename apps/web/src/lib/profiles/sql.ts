@@ -11,7 +11,15 @@ import {
   companyWebsites,
   profileQuestions,
 } from '@ss/db/schema';
-import { and, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  type AnyColumn,
+  eq,
+  inArray,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 
 import {
   answersRetentionGate,
@@ -91,7 +99,14 @@ export function makeSelectCrawlTargets(db: Db) {
     return rows
       .flatMap((row) => {
         if (!row.url) return [];
-        const crawledAt = lastCrawled.get(snapshotOrigin(row.url));
+        // One malformed stored URL must not fail the whole sweep's selection.
+        let origin: string;
+        try {
+          origin = snapshotOrigin(row.url);
+        } catch {
+          return [];
+        }
+        const crawledAt = lastCrawled.get(origin);
         // Skip freshly-crawled origins; never-crawled (undefined) always pass.
         if (crawledAt !== undefined && crawledAt > floor) return [];
         return [{ url: row.url, companies: row.companies, crawledAt }];
@@ -194,11 +209,23 @@ export function makeSelectDueCompanies(db: Db) {
               SELECT 1 FROM company_answers a
               WHERE a.company_number = ${companyWebsites.companyNumber}
                 AND a.question_slug = q.slug
-                AND a.question_hash = q.hash
-                AND a.model = ${model}
                 AND (
-                  a.status = 'ok'
-                  OR a.extracted_at > now() - make_interval(days => ${PROFILE_RETRY_DAYS})
+                  (
+                    a.question_hash = q.hash
+                    AND a.model = ${model}
+                    AND (
+                      a.status = 'ok'
+                      OR a.extracted_at > now() - make_interval(days => ${PROFILE_RETRY_DAYS})
+                    )
+                  )
+                  OR (
+                    -- A protected stale-ok row: the site failed to produce a
+                    -- fresh answer (attempt advanced, write did not), so back
+                    -- off for the retry window instead of nightly Gemma cost.
+                    a.status = 'ok'
+                    AND a.last_attempt_at > a.extracted_at
+                    AND a.last_attempt_at > now() - make_interval(days => ${PROFILE_RETRY_DAYS})
+                  )
                 )
             )
           )`,
@@ -332,12 +359,19 @@ export function makeSelectOkSnapshots(db: Db) {
  * A non-ok result never overwrites an existing `ok` answer: a transient
  * unreadable crawl (WAF, timeout, a manual-snapshot origin the fetch tier
  * can't read) would otherwise regress good answers to insufficient_content.
- * The stale-but-real ok row keeps its old (hash, model), so the due predicate
- * still sees the question as unsatisfied and retries — a later good extraction
- * overwrites it. A fresh `ok` always wins, so genuine staleness re-extraction
- * proceeds normally.
+ * The stale-but-real ok row keeps its old (hash, model) — back-stamping it
+ * with the current pair would present old text as current-model output. But
+ * a guarded skip still advances `last_attempt_at` (content columns ratchet
+ * per-column instead of a statement-level setWhere), so the due predicate can
+ * back off a company whose site keeps failing to produce a fresh answer
+ * instead of re-extracting it at Gemma cost every night. A fresh `ok` always
+ * wins, so genuine staleness re-extraction proceeds normally.
  */
 export function makeUpsertAnswers(db: Db) {
+  // excluded wins only when it is ok, or the stored row is not ok.
+  const wins = sql`(excluded.status = 'ok' OR ${companyAnswers.status} <> 'ok')`;
+  const ratchet = (column: AnyColumn, excludedName: string) =>
+    sql`CASE WHEN ${wins} THEN ${sql.raw(`excluded.${excludedName}`)} ELSE ${column} END`;
   return async (rows: AnswerRow[]): Promise<void> => {
     if (rows.length === 0) return;
     await db
@@ -354,22 +388,26 @@ export function makeUpsertAnswers(db: Db) {
           identityEvidence: row.identityEvidence,
           model: row.model,
           status: row.status,
+          lastAttemptAt: sql`now()`,
         })),
       )
       .onConflictDoUpdate({
         target: [companyAnswers.companyNumber, companyAnswers.questionSlug],
         set: {
-          questionHash: sql`excluded.question_hash`,
-          questionText: sql`excluded.question_text`,
-          answer: sql`excluded.answer`,
-          items: sql`excluded.items`,
-          sourceUrls: sql`excluded.source_urls`,
-          identityEvidence: sql`excluded.identity_evidence`,
-          model: sql`excluded.model`,
-          status: sql`excluded.status`,
-          extractedAt: sql`now()`,
+          questionHash: ratchet(companyAnswers.questionHash, 'question_hash'),
+          questionText: ratchet(companyAnswers.questionText, 'question_text'),
+          answer: ratchet(companyAnswers.answer, 'answer'),
+          items: ratchet(companyAnswers.items, 'items'),
+          sourceUrls: ratchet(companyAnswers.sourceUrls, 'source_urls'),
+          identityEvidence: ratchet(
+            companyAnswers.identityEvidence,
+            'identity_evidence',
+          ),
+          model: ratchet(companyAnswers.model, 'model'),
+          status: ratchet(companyAnswers.status, 'status'),
+          extractedAt: sql`CASE WHEN ${wins} THEN now() ELSE ${companyAnswers.extractedAt} END`,
+          lastAttemptAt: sql`now()`,
         },
-        setWhere: sql`excluded.status = 'ok' OR ${companyAnswers.status} <> 'ok'`,
       });
   };
 }

@@ -9,6 +9,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   check:
     name: Lint & Format

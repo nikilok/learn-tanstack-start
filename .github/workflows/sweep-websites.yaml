@@ -32,6 +32,10 @@ concurrency:
   group: sweep-websites
   cancel-in-progress: false
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   sweep:
     runs-on: ubuntu-latest

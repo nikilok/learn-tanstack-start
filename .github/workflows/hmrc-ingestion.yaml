@@ -35,6 +35,10 @@ on:
         type: string
         default: ''
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   # Primary (and, on schedule, only) discovery: local Gemma 4 on a free Apple
   # Silicon runner (paravirtual Metal WebGPU). Pure-test phase: a gemma failure

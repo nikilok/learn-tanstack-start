@@ -33,6 +33,10 @@ concurrency:
   group: import-registry-websites
   cancel-in-progress: false
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   import:
     runs-on: ubuntu-latest

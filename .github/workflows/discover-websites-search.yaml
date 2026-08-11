@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # This job never pushes, so it has no use for a credential that
           # actions/checkout would otherwise leave in the local git config.

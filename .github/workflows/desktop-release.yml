@@ -82,7 +82,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -127,7 +127,7 @@ jobs:
         run: |
           echo "::error::Publishing releases dispatch from main only ('$REF' is not main). To test a build from a branch, tick 'skip_release' (a dry-run — artifacts only, nothing published)."
           exit 1
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # fetch-tags:true is silently ignored when the ref resolves to a SHA (no --tags
           # in the fetch), so manual-mode tag validation + the highest-tag feed guard saw
@@ -243,7 +243,7 @@ jobs:
         run: |
           echo "::error::Dispatch releases from main only — the bump PR squash-merges the dispatched ref into main, so '$REF' would land there wholesale."
           exit 1
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -411,7 +411,7 @@ jobs:
           D="NOTES_${RANDOM}${RANDOM}" # random delim: notes are arbitrary markdown
           { echo "notes<<$D"; printf '%s\n' "$NOTES"; echo "$D"; } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ steps.params.outputs.ref }} # release tag, or the dispatched commit on a dry-run
           persist-credentials: false
@@ -424,7 +424,7 @@ jobs:
       # or this single-file overlay breaks against older tags.
       - name: Fetch current publish script (manual mode)
         if: needs.resolve.outputs.mode == 'manual' && !inputs.skip_release
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.sha }}
           path: .dispatch-head

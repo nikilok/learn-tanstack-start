@@ -38,7 +38,7 @@ jobs:
       PHASE5_DELAY_MS: ${{ vars.PHASE5_DELAY_MS }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Run sweep
         uses: ./.github/actions/run-phase5-sweep

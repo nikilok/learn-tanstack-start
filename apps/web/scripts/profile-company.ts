@@ -363,11 +363,10 @@ async function askFittingWindow(
 ): Promise<{ prompt: string; response: GemmaAskResult }> {
   let pageBudget = budget;
   for (let shrinks = 0; ; shrinks += 1) {
-    const prompt = buildAskPrompt(
-      questions,
-      page.url,
-      truncateToTokenBudget(page.contentText, pageBudget),
-    );
+    // The retry base must be this text, not the full page: a boundary cut
+    // can send far less than the budget implies.
+    const pageText = truncateToTokenBudget(page.contentText, pageBudget);
+    const prompt = buildAskPrompt(questions, page.url, pageText);
     try {
       return { prompt, response: await gemma.ask(prompt, SYSTEM_PROMPT) };
     } catch (error) {
@@ -376,7 +375,7 @@ async function askFittingWindow(
       if (!overflow || shrinks >= MAX_OVERFLOW_SHRINKS) throw error;
       const next = overflowRetryBudget(
         pageBudget,
-        page.contentText,
+        pageText,
         overflow.actual,
         overflow.allowed,
       );
@@ -473,8 +472,15 @@ if (originArg) {
       `  extract: ${pages.length} pages × ${questions.length} questions, page budget ${budget} tokens`,
     );
     const gemma = await createPlaywrightGemmaClient();
+    const adHocTotals: Totals = {};
     try {
-      const outcome = await extractOutcome(gemma, pages, questions, budget, {});
+      const outcome = await extractOutcome(
+        gemma,
+        pages,
+        questions,
+        budget,
+        adHocTotals,
+      );
       console.log(
         JSON.stringify(
           {
@@ -489,6 +495,9 @@ if (originArg) {
           2,
         ),
       );
+      if (adHocTotals.askOverflowShrinks) {
+        console.log(`  overflow shrinks: ${adHocTotals.askOverflowShrinks}`);
+      }
     } finally {
       await gemma.stop();
     }

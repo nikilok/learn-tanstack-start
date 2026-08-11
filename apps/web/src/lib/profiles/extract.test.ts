@@ -202,6 +202,18 @@ describe('token overflow recovery', () => {
     expect(next).toBeGreaterThan(MIN_PAGE_BUDGET_TOKENS);
   });
 
+  test('boundary-cut page: the base is the sent text, not the full page', () => {
+    // Last word boundary far below the char cap: the sent text is much
+    // shorter than the budget implies, and a budget-based rescale can leave
+    // the next cut at the same boundary, resending it verbatim.
+    const full = `${'word '.repeat(3_520)}${'x'.repeat(20_000)}`;
+    const sent = truncateToTokenBudget(full, 7363);
+    expect(sent.length).toBeLessThan(7363 * 4 * 0.7);
+    const next = overflowRetryBudget(7363, sent, 8330, 8192);
+    expect(next).toBeLessThan(estimateTokens(sent));
+    expect(truncateToTokenBudget(full, next)).not.toBe(sent);
+  });
+
   test('overflow parsing rejects lookalikes and non-overflow pairs', () => {
     expect(parseTokenOverflow('evaluate: Error: WebGPU device lost')).toBe(
       null,

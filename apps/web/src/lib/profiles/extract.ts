@@ -159,16 +159,17 @@ export function shrinkBudgetForOverflow(
   return Math.floor(budget * (allowed / actual) * OVERFLOW_SHRINK_MARGIN);
 }
 
-/** Next page budget after an overflow, rescaling what was actually sent —
- *  a page under the char cap must shrink from its own size or the retry
- *  rebuilds the identical prompt. */
+/** Next page budget after an overflow, rescaled from the TEXT ACTUALLY SENT
+ *  (post-truncation) — the measured ratio belongs to that text, and rescaling
+ *  anything larger can leave the next cut at the same boundary, rebuilding
+ *  the identical prompt. */
 export function overflowRetryBudget(
   pageBudget: number,
-  pageText: string,
+  sentText: string,
   actual: number,
   allowed: number,
 ): number {
-  const effective = Math.min(pageBudget, estimateTokens(pageText));
+  const effective = Math.min(pageBudget, estimateTokens(sentText));
   return shrinkBudgetForOverflow(effective, actual, allowed);
 }
 

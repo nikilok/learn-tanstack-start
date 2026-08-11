@@ -3,6 +3,14 @@
  * pure; the harness appends it to $GITHUB_STEP_SUMMARY when present, so a
  * sweep's outcome reads at a glance without opening logs.
  */
+/** Insufficient-content rows across every question counter, THE one rate
+ *  definition — the console summary and the Actions page must never drift. */
+export function insufficientCount(totals: Record<string, number>): number {
+  return Object.entries(totals)
+    .filter(([key]) => key.endsWith(':insufficient_content'))
+    .reduce((sum, [, count]) => sum + count, 0);
+}
+
 export function renderRunSummary(
   title: string,
   totals: Record<string, number>,
@@ -10,9 +18,7 @@ export function renderRunSummary(
 ): string {
   const origins = totals.origins ?? 0;
   const answers = totals.answers ?? 0;
-  const insufficient = Object.entries(totals)
-    .filter(([key]) => key.endsWith(':insufficient_content'))
-    .reduce((sum, [, count]) => sum + count, 0);
+  const insufficient = insufficientCount(totals);
   const headline: string[] = [];
   if (origins > 0) {
     headline.push(

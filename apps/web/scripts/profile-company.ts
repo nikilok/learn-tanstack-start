@@ -77,7 +77,10 @@ import {
   makeUpsertAnswers,
   makeUpsertSnapshot,
 } from '../src/lib/profiles/sql.ts';
-import { renderRunSummary } from '../src/lib/profiles/summary.ts';
+import {
+  insufficientCount,
+  renderRunSummary,
+} from '../src/lib/profiles/summary.ts';
 import {
   looksChallenged,
   looksParked,
@@ -945,11 +948,8 @@ for (const key of Object.keys(totals).sort()) {
   console.log(`  ${key}: ${totals[key]}`);
 }
 if (totals.answers) {
-  const insufficient = Object.entries(totals)
-    .filter(([key]) => key.endsWith(':insufficient_content'))
-    .reduce((sum, [, count]) => sum + count, 0);
   console.log(
-    `  insufficient rate: ${((insufficient / totals.answers) * 100).toFixed(1)}%`,
+    `  insufficient rate: ${((insufficientCount(totals) / totals.answers) * 100).toFixed(1)}%`,
   );
 }
 if (totals.origins) {

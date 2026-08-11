@@ -29,6 +29,19 @@ describe('extractLinks', () => {
     ]);
   });
 
+  test('a long unclosed anchor is dropped, later valid links survive', () => {
+    // Malformed HTML: an <a> that never closes, followed by kilobytes of
+    // body. The bounded label capture must give up on it instead of scanning
+    // to EOF or swallowing the next real link as its own text.
+    const html = `
+      <a href="/broken">Menu without a closing tag
+      ${'body copy that keeps going and going. '.repeat(200)}
+      <a href="/about">About us</a>`;
+    const paths = extractLinks(html, `${BASE}/`).map((link) => link.path);
+    expect(paths).toContain('/about');
+    expect(paths).not.toContain('/broken');
+  });
+
   test('www and apex are one site; other hosts and schemes are not', () => {
     const html = `
       <a href="https://example.co.uk/team">Team</a>

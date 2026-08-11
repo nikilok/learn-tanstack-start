@@ -74,7 +74,9 @@ export function truncateToTokenBudget(
   text: string,
   budgetTokens: number,
 ): string {
-  const maxChars = Math.floor(budgetTokens * CHARS_PER_TOKEN);
+  // Floor the budget first: 0.5 tokens must yield nothing, not two chars
+  // that estimate back to a whole token over budget.
+  const maxChars = Math.floor(budgetTokens) * CHARS_PER_TOKEN;
   if (maxChars <= 0) return '';
   if (text.length <= maxChars) return text;
   const slice = text.slice(0, maxChars);

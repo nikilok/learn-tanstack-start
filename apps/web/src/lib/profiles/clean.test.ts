@@ -58,6 +58,10 @@ describe('cleanPageText', () => {
     expect(cleanPageText(html)).toContain('Genuine services content here.');
   });
 
+  test('a fractional budget yields nothing, never a rounded-up token', () => {
+    expect(truncateToTokenBudget('some text', 0.5)).toBe('');
+  });
+
   test('a page full of unclosed chrome tags cleans promptly (no EOF scan)', () => {
     // Pathological: hundreds of unclosed <nav> opens in a large body would,
     // unbounded, each lazy-scan to end-of-string. The bounded quantifier keeps

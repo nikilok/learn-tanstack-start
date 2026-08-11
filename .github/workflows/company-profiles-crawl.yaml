@@ -1,11 +1,6 @@
 name: Company Profiles Crawl Sweep
 
 on:
-  # TEMPORARY branch-verification trigger — removed before merge. Dispatch
-  # only registers default-branch workflows, so the pre-merge test rides a
-  # push event, which runs this branch's own file.
-  push:
-    branches: [feat/companies-profiles-enrich]
   schedule:
     # 23:07 UTC nightly, after the 21:43 websites sweep so the publishable
     # set is fresh. Timeout keeps this clear of the 02:07 extract sweep.

@@ -32,5 +32,23 @@ describe('parseGeocodeBody', () => {
     expect(parseGeocodeBody([{ lat: 'abc', lon: '-0.1' }])).toBeNull();
     expect(parseGeocodeBody([{ lat: 'Infinity', lon: '0' }])).toBeNull();
     expect(parseGeocodeBody([{ lat: null, lon: null }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: true, lon: false }])).toBeNull();
+  });
+
+  test('returns null for partial numerics and blank strings', () => {
+    expect(parseGeocodeBody([{ lat: '51.5junk', lon: '-0.1' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '', lon: '' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '  ', lon: '0' }])).toBeNull();
+  });
+
+  test('returns null outside latitude/longitude limits, keeps the boundaries', () => {
+    expect(parseGeocodeBody([{ lat: '91', lon: '0' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '-90.5', lon: '0' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '0', lon: '181' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '0', lon: '-180.5' }])).toBeNull();
+    expect(parseGeocodeBody([{ lat: '90', lon: '-180' }])).toEqual({
+      lat: 90,
+      lon: -180,
+    });
   });
 });

@@ -33,12 +33,11 @@ export async function geocodeUpstream(
     if (!res.ok) return { ok: false, reason: `status ${res.status}` };
     body = (await res.json()) as unknown;
   } catch (err) {
+    // Category + error name only — a message can embed the request URL, and with it the query.
     return {
       ok: false,
       reason:
-        err instanceof Error
-          ? `${err.name}: ${err.message.slice(0, 120)}`
-          : 'unknown error',
+        err instanceof Error ? `request error: ${err.name}` : 'unknown error',
     };
   } finally {
     clearTimeout(timeout);

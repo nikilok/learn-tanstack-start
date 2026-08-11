@@ -3,7 +3,10 @@ import { describe, expect, test } from 'bun:test';
 import { geocodeUpstream } from './geocode-upstream';
 
 const json = (body: string, status = 200) =>
-  new Response(body, { status, headers: { 'Content-Type': 'application/json' } });
+  new Response(body, {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 
 describe('geocodeUpstream', () => {
   test('resolves coords from a well-formed body', async () => {
@@ -28,7 +31,7 @@ describe('geocodeUpstream', () => {
       throw new TypeError('fetch failed');
     }) as unknown as typeof fetch;
     const result = await geocodeUpstream('SW1A 1AA', { fetchImpl });
-    expect(result).toEqual({ ok: false, reason: 'TypeError: fetch failed' });
+    expect(result).toEqual({ ok: false, reason: 'request error: TypeError' });
   });
 
   test('a non-OK status fails with the status in the reason', async () => {
@@ -66,7 +69,28 @@ describe('geocodeUpstream', () => {
       fetchImpl,
       timeoutMs: 10,
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toStartWith('AbortError');
+    expect(result).toEqual({ ok: false, reason: 'request error: AbortError' });
+  });
+
+  test('a stalled body read aborts at the same timeout', async () => {
+    // Headers arrive fine; json() never settles until the signal aborts — the timeout must span the body read too.
+    const fetchImpl = ((_url: string, init: { signal: AbortSignal }) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            init.signal.addEventListener('abort', () =>
+              reject(
+                new DOMException('The operation was aborted', 'AbortError'),
+              ),
+            );
+          }),
+      })) as unknown as typeof fetch;
+    const result = await geocodeUpstream('SW1A 1AA', {
+      fetchImpl,
+      timeoutMs: 10,
+    });
+    expect(result).toEqual({ ok: false, reason: 'request error: AbortError' });
   });
 });

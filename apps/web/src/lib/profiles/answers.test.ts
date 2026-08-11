@@ -42,7 +42,23 @@ describe('askHashInput', () => {
   test('the system prompt is part of every fingerprint', () => {
     // An edit to the shared instruction changes what the model was told for
     // every answer, so it must invalidate every stored hash.
-    expect(askHashInput(QUESTIONS[0])).toContain(SYSTEM_PROMPT);
+    expect(askHashInput(QUESTIONS[0])).toContain(JSON.stringify(SYSTEM_PROMPT));
+  });
+
+  test('field boundaries cannot collide across newlines', () => {
+    // Under a bare newline join these two hash identically — text moved
+    // across the prompt/intent boundary is a REAL question change.
+    const a = askHashInput({
+      ...QUESTIONS[0],
+      prompt: 'What?\nExtra',
+      intent: 'identity',
+    });
+    const b = askHashInput({
+      ...QUESTIONS[0],
+      prompt: 'What?',
+      intent: 'Extra\nidentity',
+    });
+    expect(a).not.toBe(b);
   });
 });
 

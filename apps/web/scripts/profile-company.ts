@@ -866,9 +866,13 @@ if (noExtract) {
                   g.companies.some((c) => stillDue.has(c.companyNumber)),
                 );
               }
-            } catch {
+            } catch (err) {
               // The recheck is an optimization; on failure proceed with the
               // full batch — duplicate work is tolerated, lost work is not.
+              // But say so: a silently failing recheck is silent double work.
+              const message = err instanceof Error ? err.message : String(err);
+              console.log(`  claim recheck failed, continuing — ${message}`);
+              totals.claimErrors = (totals.claimErrors ?? 0) + 1;
             }
             if (wonGroups.length === 0) continue;
             totals.claimsWon = (totals.claimsWon ?? 0) + wonGroups.length;

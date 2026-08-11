@@ -83,10 +83,12 @@ PAGE TEXT:
 ${pageText}`;
 }
 
-/** Token cost of the composed ask before any page text enters it. */
+/** Token cost of the composed ask before any page text enters it. The system
+ *  prompt rides in the same request, so it spends the same context window. */
 export function askOverheadTokens(questions: ProfileQuestion[]): number {
-  return estimateTokens(
-    buildAskPrompt(questions, 'x'.repeat(URL_DISPLAY_MAX), ''),
+  return (
+    estimateTokens(SYSTEM_PROMPT) +
+    estimateTokens(buildAskPrompt(questions, 'x'.repeat(URL_DISPLAY_MAX), ''))
   );
 }
 
@@ -132,8 +134,15 @@ export function askHashInput(question: ProfileQuestion): string {
   // fingerprint. Slug and sort stay excluded on purpose: staleness is
   // per-question (editing one question re-asks one question, not the whole
   // corpus), and composition-order effects are accepted noise under that
-  // cost model.
-  return `${SYSTEM_PROMPT}\n${question.kind}\n${question.prompt}\n${question.intent}`;
+  // cost model. JSON framing keeps field boundaries unambiguous — newlines
+  // are legal inside prompts, so a bare join could hash two different
+  // questions identically.
+  return JSON.stringify([
+    SYSTEM_PROMPT,
+    question.kind,
+    question.prompt,
+    question.intent,
+  ]);
 }
 
 export type ParsedAnswers =

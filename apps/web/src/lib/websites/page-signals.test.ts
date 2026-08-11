@@ -175,4 +175,20 @@ describe('looksChallenged', () => {
       ),
     ).toBe(false);
   });
+
+  test('a security firm OPENING with the trade phrase is a real page', () => {
+    // 'security check' is ordinary industry prose; only interstitial
+    // framings (performing a security check / security checkpoint / check in
+    // progress) classify, even inside the head window.
+    const text = `Security check and patrol services for offices, events and construction sites across Kent. ${'Our licensed officers deliver manned guarding, keyholding and alarm response around the clock. '.repeat(8)}`;
+    expect(looksChallenged(text)).toBe(false);
+  });
+
+  test('interstitial framings still classify from the head', () => {
+    expect(
+      looksChallenged(
+        `Performing a security check of your browser before continuing. ${'Please wait while we verify your connection. '.repeat(4)}`,
+      ),
+    ).toBe(true);
+  });
 });

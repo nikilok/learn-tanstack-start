@@ -65,7 +65,9 @@ describe('cleanPageText', () => {
     const html = `${'<nav>'.repeat(400)}${'lorem ipsum dolor sit amet '.repeat(40_000)}<p>tail content</p>`;
     const started = Date.now();
     const text = cleanPageText(html);
-    expect(Date.now() - started).toBeLessThan(2000);
+    // Performance tripwire, deliberately generous: an EOF-scan regression is
+    // tens of seconds, while a loaded CI runner is not.
+    expect(Date.now() - started).toBeLessThan(5000);
     expect(text).toContain('tail content');
   });
 

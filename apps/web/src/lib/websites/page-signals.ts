@@ -175,7 +175,7 @@ export function pageTooThin(visibleText: string): boolean {
 /** Phrases a WAF or bot-management interstitial shows a client it is
  *  challenging. Vendor-spanning by wording, not by brand name alone. */
 const CHALLENGE_PHRASES =
-  /(just a moment|checking your browser|verify(ing)? (that )?you are (a )?human|enable javascript and cookies|security check(point)?|attention required.{0,40}cloudflare|ddos protection by|browser verification|are you a robot|access to this page has been denied)/i;
+  /(just a moment|checking your browser|verify(ing)? (that )?you are (a )?human|enable javascript and cookies|performing a security check|security check in progress|security checkpoint|attention required.{0,40}cloudflare|ddos protection by|browser verification|are you a robot|access to this page has been denied)/i;
 
 /** An interstitial leads with its challenge text; this is the window it must
  *  fall inside. Wide enough for a multilingual WAF wall, short enough that a

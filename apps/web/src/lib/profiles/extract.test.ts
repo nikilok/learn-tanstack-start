@@ -9,6 +9,7 @@ import {
   pageTextBudget,
   parsePageAnswers,
   type ProfileQuestion,
+  SYSTEM_PROMPT,
 } from './extract';
 
 const QUESTIONS: ProfileQuestion[] = [
@@ -66,8 +67,12 @@ describe('buildAskPrompt', () => {
         longUrl,
         truncateToTokenBudget(text, budget),
       );
+      // The real request carries the system prompt too; the budget must
+      // leave room for it or a truncated page can still overflow.
       expect(
-        estimateTokens(prompt) + OUTPUT_HEADROOM_TOKENS,
+        estimateTokens(SYSTEM_PROMPT) +
+          estimateTokens(prompt) +
+          OUTPUT_HEADROOM_TOKENS,
       ).toBeLessThanOrEqual(contextTokens);
     }
   });

@@ -51,6 +51,20 @@ describe('allocateQuotas', () => {
     expect(allocateQuotas(new Map(), 10).size).toBe(0);
   });
 
+  test('a size beyond the population still allocates exactly size', () => {
+    // Quotas may exceed cell sizes by contract; the caller clamps at draw
+    // time (Math.min(quota, cell.length)). Pinned so a top-up rule change
+    // cannot silently alter that division of responsibility.
+    const quotas = allocateQuotas(
+      new Map([
+        ['a', 2],
+        ['b', 1],
+      ]),
+      10,
+    );
+    expect(sum(quotas)).toBe(10);
+  });
+
   test('a fractional or negative size fails fast instead of spinning', () => {
     expect(() => allocateQuotas(new Map([['a', 3]]), 1.5)).toThrow(
       /non-negative integer/,

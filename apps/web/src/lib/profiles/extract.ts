@@ -159,6 +159,14 @@ function validateAnswers(
     return { ok: false, error: 'not a JSON object' };
   }
   const record = parsed as Record<string, unknown>;
+  // The prompt demands EXACTLY the declared keys; an undeclared extra means
+  // the model deviated from instructions, which is grounds for the retry.
+  const declared = new Set(questions.map((question) => question.slug));
+  for (const key of Object.keys(record)) {
+    if (!declared.has(key)) {
+      return { ok: false, error: `undeclared key "${key}"` };
+    }
+  }
   const answers: PageAnswers = {};
   for (const question of questions) {
     if (!(question.slug in record)) {

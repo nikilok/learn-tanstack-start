@@ -133,6 +133,17 @@ describe('parsePageAnswers', () => {
     expect(parsePageAnswers('no json here', QUESTIONS).ok).toBe(false);
   });
 
+  test('an undeclared extra key fails the response', () => {
+    // 'Exactly these keys' is the contract; extra metadata means the model
+    // wandered off the instructions and earns the retry, not acceptance.
+    expect(
+      parsePageAnswers(
+        '{"what_does": "Cares.", "offerings": [], "confidence": 0.9}',
+        QUESTIONS,
+      ).ok,
+    ).toBe(false);
+  });
+
   test('prose braces before the real object do not derail parsing', () => {
     const raw =
       'The set {a, b} is not JSON. {"what_does": null, "offerings": ["Care"]}';

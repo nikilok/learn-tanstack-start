@@ -39,7 +39,7 @@ import { basename } from 'node:path';
 
 import { createClient } from '@ss/db/client';
 import { MODEL_REVISION } from '@ss/gemma';
-import type { GemmaClient } from '@ss/gemma';
+import type { GemmaAskResult, GemmaClient } from '@ss/gemma';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
@@ -59,10 +59,11 @@ import {
   assertAskFits,
   buildAskPrompt,
   MAX_OVERFLOW_SHRINKS,
+  MIN_PAGE_BUDGET_TOKENS,
+  overflowRetryBudget,
   parsePageAnswers,
   parseTokenOverflow,
   type ProfileQuestion,
-  shrinkBudgetForOverflow,
   SYSTEM_PROMPT,
 } from '../src/lib/profiles/extract.ts';
 import { mergeAnswers, type PageCandidate } from '../src/lib/profiles/merge.ts';
@@ -298,8 +299,6 @@ function printPages(result: CrawlResult): void {
 
 type Totals = Record<string, number>;
 
-// Declared ahead of the ad-hoc --origin driver, which runs at module top
-// level before the persisting-modes section executes.
 const totals: Totals = {};
 
 /** Fold one crawl into the aggregate counters the default output reports. */
@@ -354,17 +353,14 @@ function dedupeByHash(pages: AskablePage[]): AskablePage[] {
   });
 }
 
-/** One page's ask, shrinking the text budget when the real tokenizer
- *  overflows the window the estimate said it would fit. */
+/** One page's ask, shrinking the text budget when the real tokenizer overflows. */
 async function askFittingWindow(
   gemma: GemmaClient,
   questions: ProfileQuestion[],
   page: AskablePage,
   budget: number,
-): Promise<{
-  prompt: string;
-  response: Awaited<ReturnType<GemmaClient['ask']>>;
-}> {
+  totals: Totals,
+): Promise<{ prompt: string; response: GemmaAskResult }> {
   let pageBudget = budget;
   for (let shrinks = 0; ; shrinks += 1) {
     const prompt = buildAskPrompt(
@@ -378,12 +374,13 @@ async function askFittingWindow(
       const message = error instanceof Error ? error.message : String(error);
       const overflow = parseTokenOverflow(message);
       if (!overflow || shrinks >= MAX_OVERFLOW_SHRINKS) throw error;
-      const next = shrinkBudgetForOverflow(
+      const next = overflowRetryBudget(
         pageBudget,
+        page.contentText,
         overflow.actual,
         overflow.allowed,
       );
-      if (next <= 0) throw error;
+      if (next < MIN_PAGE_BUDGET_TOKENS) throw error;
       totals.askOverflowShrinks = (totals.askOverflowShrinks ?? 0) + 1;
       console.log(
         `  ${page.path || '(home)'}: window overflow (${overflow.actual} real tokens), retrying at ${next}-token budget`,
@@ -399,6 +396,7 @@ async function extractOutcome(
   pages: AskablePage[],
   questions: ProfileQuestion[],
   budget: number,
+  totals: Totals,
 ): Promise<ExtractionOutcome> {
   const deduped = dedupeByHash(pages);
   if (deduped.length === 0) return { kind: 'no_readable_pages' };
@@ -409,6 +407,7 @@ async function extractOutcome(
       questions,
       page,
       budget,
+      totals,
     );
     let response = first;
     let parsed = parsePageAnswers(response.text, questions);
@@ -475,7 +474,7 @@ if (originArg) {
     );
     const gemma = await createPlaywrightGemmaClient();
     try {
-      const outcome = await extractOutcome(gemma, pages, questions, budget);
+      const outcome = await extractOutcome(gemma, pages, questions, budget, {});
       console.log(
         JSON.stringify(
           {
@@ -782,6 +781,7 @@ if (noExtract) {
           pages,
           questions,
           budget,
+          totals,
         );
         for (const company of group.companies) {
           const rows = answerRows(company.companyNumber, questions, outcome, {

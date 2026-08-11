@@ -2,11 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import { estimateTokens, truncateToTokenBudget } from './clean';
 import {
+  askOverheadTokens,
   assertAskFits,
   buildAskPrompt,
   MIN_PAGE_BUDGET_TOKENS,
   OUTPUT_HEADROOM_TOKENS,
-  OVERFLOW_SHRINK_MARGIN,
+  overflowRetryBudget,
   pageTextBudget,
   parsePageAnswers,
   parseTokenOverflow,
@@ -169,10 +170,7 @@ describe('parsePageAnswers', () => {
 
 describe('token overflow recovery', () => {
   test('the real CI failure parses, shrinks, and refits', () => {
-    // The production case (run 31504617373): a 31.5k-char homepage whose
-    // text tokenizes at ~2.7 chars/token materialised as 10,838 real tokens
-    // against an 8,192 window. Playwright wraps the engine error, so the
-    // parser must see through the prefix and the remote stack.
+    // The real CI failure (run 31504617373), Playwright wrapper included.
     const message =
       'evaluate: Error: Input token ids are too long. Exceeding the maximum ' +
       'number of tokens allowed: 10838 >= 8192\n' +
@@ -181,16 +179,30 @@ describe('token overflow recovery', () => {
       actual: 10838,
       allowed: 8192,
     });
-    const next = shrinkBudgetForOverflow(7363, 10838, 8192);
-    expect(next).toBe(
-      Math.floor(7363 * (8192 / 10838) * OVERFLOW_SHRINK_MARGIN),
+    // 31.5k chars overfills the char cap, so the base stays the budget.
+    const next = overflowRetryBudget(7363, 'x'.repeat(31_502), 10838, 8192);
+    expect(next).toBe(5008); // pinned by the live replay
+    // Refit: retry = overhead + page×ratio, real overhead bounded at 2× its
+    // estimate; scaling the WHOLE count by the ratio would understate it.
+    const ratio = next / 7363;
+    const overheadCeiling = 2 * askOverheadTokens(QUESTIONS);
+    expect(overheadCeiling + (10838 - overheadCeiling) * ratio).toBeLessThan(
+      8192,
     );
-    // The rescaled budget must both fit and stay worth asking.
-    expect((next / 7363) * 10838).toBeLessThan(8192);
     expect(next).toBeGreaterThan(MIN_PAGE_BUDGET_TOKENS);
   });
 
-  test('overflow parsing rejects lookalikes and nonsense counts', () => {
+  test('short dense page: the shrink base is the text actually sent', () => {
+    // 21,600 chars at ~2.7 chars/token fits the char cap yet overflows the
+    // window; rescaling the nominal budget would rebuild the identical prompt.
+    const text = 'x'.repeat(21_600);
+    const next = overflowRetryBudget(7363, text, 8330, 8192);
+    expect(next).toBeLessThan(estimateTokens(text));
+    expect(truncateToTokenBudget(text, next)).not.toBe(text);
+    expect(next).toBeGreaterThan(MIN_PAGE_BUDGET_TOKENS);
+  });
+
+  test('overflow parsing rejects lookalikes and non-overflow pairs', () => {
     expect(parseTokenOverflow('evaluate: Error: WebGPU device lost')).toBe(
       null,
     );
@@ -200,6 +212,12 @@ describe('token overflow recovery', () => {
     expect(
       parseTokenOverflow(
         'Input token ids are too long. Exceeding the maximum number of tokens allowed: 0 >= 8192',
+      ),
+    ).toBe(null);
+    // A pair that is not actual > allowed would rescale the budget UP.
+    expect(
+      parseTokenOverflow(
+        'Input token ids are too long. Exceeding the maximum number of tokens allowed: 8192 >= 10838',
       ),
     ).toBe(null);
   });

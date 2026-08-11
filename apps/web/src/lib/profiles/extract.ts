@@ -127,13 +127,7 @@ export const OVERFLOW_SHRINK_MARGIN = 0.9;
 /** Shrink retries per page before the overflow is treated as a failure. */
 export const MAX_OVERFLOW_SHRINKS = 2;
 
-/**
- * Read the engine's measured token counts out of a window-overflow error.
- * The budget maths runs on estimated tokens; the engine judges the composed
- * ask with its real tokenizer, and dense non-prose text (URLs, menus,
- * numbers) can tokenize far under 4 chars/token. The overflow message
- * carries the real count, which is exactly the correction the retry needs.
- */
+/** Read the engine's measured token counts out of a window-overflow error. */
 export function parseTokenOverflow(
   message: string,
 ): { actual: number; allowed: number } | null {
@@ -143,14 +137,19 @@ export function parseTokenOverflow(
   if (!match) return null;
   const actual = Number(match[1]);
   const allowed = Number(match[2]);
-  if (!Number.isFinite(actual) || !Number.isFinite(allowed) || actual <= 0) {
+  // A pair that is not a genuine overflow would rescale the budget UP.
+  if (
+    !Number.isFinite(actual) ||
+    !Number.isFinite(allowed) ||
+    allowed <= 0 ||
+    actual <= allowed
+  ) {
     return null;
   }
   return { actual, allowed };
 }
 
-/** Rescale an estimated page budget by the engine's measured ratio, with
- *  margin. Non-positive means the page cannot be made to fit. */
+/** Rescale an estimated page budget by the engine's measured ratio, with margin. */
 export function shrinkBudgetForOverflow(
   budget: number,
   actual: number,
@@ -158,6 +157,19 @@ export function shrinkBudgetForOverflow(
 ): number {
   if (actual <= 0) return 0;
   return Math.floor(budget * (allowed / actual) * OVERFLOW_SHRINK_MARGIN);
+}
+
+/** Next page budget after an overflow, rescaling what was actually sent —
+ *  a page under the char cap must shrink from its own size or the retry
+ *  rebuilds the identical prompt. */
+export function overflowRetryBudget(
+  pageBudget: number,
+  pageText: string,
+  actual: number,
+  allowed: number,
+): number {
+  const effective = Math.min(pageBudget, estimateTokens(pageText));
+  return shrinkBudgetForOverflow(effective, actual, allowed);
 }
 
 /**

@@ -28,6 +28,10 @@ concurrency:
   group: phase5-sweep
   cancel-in-progress: false
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   match:
     runs-on: ubuntu-latest
@@ -37,10 +41,16 @@ jobs:
       COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the installed runtime to packageManager; the SHA above pins
+          # only the installer, which otherwise downloads latest Bun.
+          bun-version-file: package.json
 
       - name: Install dependencies
         shell: bash

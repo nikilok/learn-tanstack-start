@@ -288,6 +288,55 @@
       "when": 1785326925401,
       "tag": "0040_real_smasher",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786360405698,
+      "tag": "0041_company_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786379487901,
+      "tag": "0042_snapshot_fetch_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786383198423,
+      "tag": "0043_answers_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786385543291,
+      "tag": "0044_answer_status_width",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786395762148,
+      "tag": "0045_profile_work_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786409376982,
+      "tag": "0046_answers_last_attempt",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786415658016,
+      "tag": "0047_snapshot_last_attempt",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isAggregatorHost, looksParked } from './page-signals';
+import { isAggregatorHost, looksChallenged, looksParked } from './page-signals';
 
 describe('isAggregatorHost', () => {
   test('rejects a directory listing', () => {
@@ -134,5 +134,61 @@ describe('assertions use the host callers actually see, post-redirect', () => {
     expect(isAggregatorHost('suite.endole.co.uk')).toBe(true);
     expect(isAggregatorHost('reports.endole.co.uk')).toBe(true);
     expect(isAggregatorHost('data.opencorporates.com')).toBe(true);
+  });
+});
+
+describe('looksChallenged', () => {
+  test('catches a WAF interstitial behind a 200', () => {
+    expect(
+      looksChallenged(
+        'www.example.co.uk Verifying you are human. This may take a few seconds. Just a moment... Enable JavaScript and cookies to continue.',
+      ),
+    ).toBe(true);
+    expect(
+      looksChallenged('Checking your browser before accessing example.co.uk.'),
+    ).toBe(true);
+  });
+
+  test('catches a VERBOSE interstitial that clears the old length gate', () => {
+    // A multilingual WAF wall repeats its boilerplate past 1,500 chars — the
+    // position check catches it because the challenge still leads the page.
+    const verbose = `Just a moment... Verifying you are human. ${'This process is automatic. Your browser will redirect once verification is complete. Please enable JavaScript and cookies. Veuillez patienter. '.repeat(20)}`;
+    expect(verbose.length).toBeGreaterThan(1500);
+    expect(looksChallenged(verbose)).toBe(true);
+  });
+
+  test('does NOT reject a real page that discusses bot protection', () => {
+    // A security vendor legitimately says the phrase in its body; position is
+    // the discriminator — the article opens with its own content, so the
+    // phrase sits past the interstitial head window.
+    const intro =
+      'Acme Networks helps growing companies stay online during traffic spikes and outages. Our engineers have decades of combined experience across finance, healthcare, and public services. We build resilient edge infrastructure tuned to each customer, with round-the-clock monitoring and a support team that answers in minutes, not days. Clients trust us to keep their storefronts fast and available through their busiest trading periods. ';
+    const article = `${intro.repeat(2)}We provide managed DDoS protection by monitoring traffic at the edge. ${'Our platform inspects requests, rate-limits abusive clients and keeps genuine users flowing without friction. '.repeat(10)}`;
+    expect(article.indexOf('DDoS protection by')).toBeGreaterThan(600);
+    expect(looksChallenged(article)).toBe(false);
+  });
+
+  test('does NOT flag an ordinary short page', () => {
+    expect(
+      looksChallenged(
+        'Contact us on 01234 567890 or visit us in Leigh on Sea.',
+      ),
+    ).toBe(false);
+  });
+
+  test('a security firm OPENING with the trade phrase is a real page', () => {
+    // 'security check' is ordinary industry prose; only interstitial
+    // framings (performing a security check / security checkpoint / check in
+    // progress) classify, even inside the head window.
+    const text = `Security check and patrol services for offices, events and construction sites across Kent. ${'Our licensed officers deliver manned guarding, keyholding and alarm response around the clock. '.repeat(8)}`;
+    expect(looksChallenged(text)).toBe(false);
+  });
+
+  test('interstitial framings still classify from the head', () => {
+    expect(
+      looksChallenged(
+        `Performing a security check of your browser before continuing. ${'Please wait while we verify your connection. '.repeat(4)}`,
+      ),
+    ).toBe(true);
   });
 });

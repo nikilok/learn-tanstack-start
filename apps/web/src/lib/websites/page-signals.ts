@@ -171,3 +171,29 @@ export function looksParked(visibleText: string): boolean {
 export function pageTooThin(visibleText: string): boolean {
   return visibleText.replace(/\s+/g, ' ').trim().length < PARKED_MAX_TEXT;
 }
+
+/** Phrases a WAF or bot-management interstitial shows a client it is
+ *  challenging. Vendor-spanning by wording, not by brand name alone. */
+const CHALLENGE_PHRASES =
+  /(just a moment|checking your browser|verify(ing)? (that )?you are (a )?human|enable javascript and cookies|performing a security check|security check in progress|security checkpoint|attention required.{0,40}cloudflare|ddos protection by|browser verification|are you a robot|access to this page has been denied)/i;
+
+/** An interstitial leads with its challenge text; this is the window it must
+ *  fall inside. Wide enough for a multilingual WAF wall, short enough that a
+ *  real article mentioning "DDoS protection" in its body sits past it. */
+const CHALLENGE_HEAD_CHARS = 600;
+
+/**
+ * A 200 response that is a bot challenge rather than the page. The phrase
+ * alone is not the test, same as looksParked: a security vendor's real site
+ * legitimately says "DDoS protection" in prose. But a total-length gate lets a
+ * verbose (multilingual) interstitial through as ok corpus text, so the
+ * discriminator is POSITION instead — a challenge page opens with its
+ * challenge; an article opens with its own content and buries the phrase.
+ */
+export function looksChallenged(visibleText: string): boolean {
+  const head = visibleText
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, CHALLENGE_HEAD_CHARS);
+  return CHALLENGE_PHRASES.test(head);
+}

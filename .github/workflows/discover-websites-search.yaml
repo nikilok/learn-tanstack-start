@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # This job never pushes, so it has no use for a credential that
           # actions/checkout would otherwise leave in the local git config.
@@ -64,6 +64,10 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the installed runtime to packageManager; the SHA above pins
+          # only the installer, which otherwise downloads latest Bun.
+          bun-version-file: package.json
 
       - name: Install dependencies
         shell: bash

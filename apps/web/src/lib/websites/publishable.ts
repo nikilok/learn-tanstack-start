@@ -75,11 +75,40 @@ export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
  * must not alias the table.
  */
-export function publishableWebsiteGate(): SQL {
+/** The arms both gates share; only the status arm differs between them. */
+function gateWithStatusArm(statusArm: SQL): SQL {
   return and(
-    eq(companyWebsites.status, 'verified'),
+    statusArm,
     isNotNull(companyWebsites.checkedAt),
     inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
     isNotNull(companyWebsites.url),
   ) as SQL;
+}
+
+export function publishableWebsiteGate(): SQL {
+  return gateWithStatusArm(eq(companyWebsites.status, 'verified') as SQL);
+}
+
+/**
+ * States whose company still OWNS its extracted answers — deliberately ONE
+ * notch wider than the render gate.
+ *
+ * The revalidation sweep flips a `verified` row to `unreachable` after a
+ * SINGLE failed fetch (revalidate.ts: "ONE failure path, no exemptions"), and
+ * schema.ts documents that state as transient — "returns to `verified` on the
+ * next pass that answers". The render gate correctly stops showing the link
+ * during that blip. But the profiles corpus must NOT archive-and-delete a
+ * company's whole answer set over one bad night, then re-extract it at Gemma
+ * cost when the status self-heals. So retention tolerates `unreachable` and
+ * fires only on genuine loss: `dead` (written off after two consecutive
+ * failures), `none`/`candidate`, an evidence demotion below the publishable
+ * tiers, or a null URL. It never renders anything — the render gate is the
+ * only publish decision.
+ */
+export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
+
+export function answersRetentionGate(): SQL {
+  return gateWithStatusArm(
+    inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]) as SQL,
+  );
 }

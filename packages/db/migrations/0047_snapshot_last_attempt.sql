@@ -1,0 +1,1 @@
+ALTER TABLE "company_page_snapshots" ADD COLUMN "last_attempt_at" timestamp;

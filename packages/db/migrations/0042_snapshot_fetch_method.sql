@@ -1,0 +1,1 @@
+ALTER TABLE "company_page_snapshots" ADD COLUMN "fetch_method" varchar(16) DEFAULT 'fetch' NOT NULL;

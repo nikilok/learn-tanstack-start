@@ -35,6 +35,10 @@ on:
         type: string
         default: ''
 
+# Least privilege by default; jobs that push declare their own elevation.
+permissions:
+  contents: read
+
 jobs:
   # Primary (and, on schedule, only) discovery: local Gemma 4 on a free Apple
   # Silicon runner (paravirtual Metal WebGPU). Pure-test phase: a gemma failure
@@ -48,12 +52,16 @@ jobs:
       csv-url: ${{ steps.extract-url.outputs.csv-url }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the installed runtime to packageManager; the SHA above pins
+          # only the installer, which otherwise downloads latest Bun.
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -118,7 +126,9 @@ jobs:
       - name: Checkout repository
         # Skip the clone on the manual path — only find-csv (a local action) needs the repo.
         if: github.event.inputs.csv-url == ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Find HMRC CSV URL
         id: find-csv
@@ -169,10 +179,14 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the installed runtime to packageManager; the SHA above pins
+          # only the installer, which otherwise downloads latest Bun.
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

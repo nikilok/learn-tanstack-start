@@ -1,0 +1,82 @@
+name: Company Profiles Extract Sweep
+
+on:
+  schedule:
+    # 02:07 UTC nightly, after the crawl sweep's window closes. Touches no
+    # third-party site: extraction reads the stored corpus only.
+    - cron: '7 2 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Origin win target for this worker (default: PROFILE_EXTRACT_LIMIT var or 80)'
+        type: string
+        default: ''
+
+concurrency:
+  group: company-profiles-extract
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: macos-latest
+    timeout-minutes: 170
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the runtime to the repo's packageManager — an unattended
+          # nightly must not float to whatever Bun shipped yesterday.
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # The host's own download cache, keyed on the model pin like the
+      # hmrc-ingestion cache. Deliberately NOT that workflow's entry: feeding
+      # the model via GEMMA_MODEL_PATH would stamp every answer as an
+      # override instead of the pin, forking provenance between CI and local
+      # workers. Here the host resolves the pin itself and the stamp stays
+      # true; a cache miss just re-downloads once.
+      - name: Restore model cache
+        id: model-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/litert-lm
+          key: litert-lm-cache-${{ hashFiles('packages/gemma/src/model-pin.ts') }}
+
+      - name: Extract sweep
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          LIMIT: ${{ inputs.limit || vars.PROFILE_EXTRACT_LIMIT || '80' }}
+          RUN_ID: ${{ github.run_id }}
+        run: bun apps/web/scripts/profile-company.ts --from-snapshots --limit="$LIMIT" --claim="ci-$RUN_ID"
+
+      # hashFiles() cannot see outside the workspace, so the downloaded-model
+      # check is a shell test.
+      - name: Check model downloaded
+        id: model-present
+        if: always() && steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          if ls "$HOME/.cache/litert-lm/"*.litertlm >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save model cache
+        if: always() && steps.model-present.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/litert-lm
+          key: litert-lm-cache-${{ hashFiles('packages/gemma/src/model-pin.ts') }}

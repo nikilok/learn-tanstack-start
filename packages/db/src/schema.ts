@@ -464,3 +464,169 @@ export const companyWebsites = pgTable(
     index('idx_company_websites_status').on(table.status),
   ],
 );
+
+// Question set for the company-profiles corpus, one row per question. The
+// table is the single source of truth for the extraction prompts: adding a
+// question is an INSERT, retiring one sets active=false — never DELETE, dead
+// slugs keep their answer rows interpretable.
+export const profileQuestions = pgTable('profile_questions', {
+  // 'what_does', 'offerings' — stable, readable identity for answer rows.
+  slug: varchar('slug', { length: 64 }).primaryKey(),
+  // The question as asked of the model.
+  prompt: text('prompt').notNull(),
+  // 'prose' | 'list' — drives the merge strategy.
+  kind: varchar('kind', { length: 16 }).notNull(),
+  // Why the question exists / how downstream should use it; aiming context.
+  intent: text('intent').notNull(),
+  active: boolean('active').notNull().default(true),
+  // Assembly order in the per-page ask.
+  sort: smallint('sort').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Cleaned page text captured by the company-profiles crawler, one row per
+// (origin, path). Origin-keyed so companies sharing a domain crawl once, and
+// persisted so prompt/model/question changes re-extract from here without
+// touching any site again. Stores readable text only; raw HTML is never kept.
+export const companyPageSnapshots = pgTable(
+  'company_page_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    // Canonical origin (scheme + host), the dedupe key.
+    origin: text('origin').notNull(),
+    // '' for the homepage, '/about', ... — the frontier path as requested.
+    path: text('path').notNull(),
+    // Final post-redirect URL actually fetched.
+    url: text('url').notNull(),
+    // 'ok' | 'empty' | 'blocked' | 'error' | 'not_html'.
+    status: varchar('status', { length: 16 }).notNull(),
+    // Failure detail when the page was not read: web-fetch taxonomy value,
+    // 'http_<code>', or 'challenge_page' (a WAF interstitial behind a 200).
+    failure: varchar('failure', { length: 24 }),
+    // 'fetch' | 'playwright' | 'manual' — which tier produced this attempt.
+    // The escalation ladder's position marker; automated upserts never
+    // overwrite a 'manual' row.
+    fetchMethod: varchar('fetch_method', { length: 16 })
+      .notNull()
+      .default('fetch'),
+    contentText: text('content_text'),
+    contentHash: varchar('content_hash', { length: 64 }),
+    bytes: integer('bytes'),
+    fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
+    // Advances on EVERY upsert, including one the ok-preservation guard
+    // blocks; fetched_at advances only on a real write. The crawl rotation
+    // keys on the newer of the two, so a permanently-failing origin backs
+    // off a full window instead of holding a slot every night.
+    lastAttemptAt: timestamp('last_attempt_at'),
+  },
+  // Doubles as the origin lookup index via the leftmost column.
+  (table) => [
+    uniqueIndex('ux_page_snapshots_origin_path').on(table.origin, table.path),
+  ],
+);
+
+// Extracted answers, one row per (company, question). INTERNAL ONLY: nothing
+// renders these and no RPC selects from this table. question_hash pins the
+// prompt text that produced the row, so a prompt edit strands old-hash rows as
+// stale and the nightly job re-extracts them from stored snapshots. Rows of a
+// company that stops passing the render gate are archived to
+// company_answers_archive, then deleted — never silently destroyed.
+// Deliberately NOT foreign-keyed to companies_house_profiles, matching
+// company_websites (and the 63-byte FK-name trap migration 0034 had to undo);
+// the profile_questions FK is short and stays.
+export const companyAnswers = pgTable(
+  'company_answers',
+  {
+    id: serial('id').primaryKey(),
+    companyNumber: varchar('company_number', { length: 20 }).notNull(),
+    questionSlug: varchar('question_slug', { length: 64 })
+      .notNull()
+      .references(() => profileQuestions.slug),
+    // Hash of the prompt text that produced this row — the staleness key.
+    questionHash: varchar('question_hash', { length: 64 }).notNull(),
+    // Verbatim prompt, so rows stay self-describing after edits/retirement.
+    questionText: text('question_text').notNull(),
+    // kind='prose' result.
+    answer: text('answer'),
+    // kind='list' result.
+    items: jsonb('items').$type<string[]>(),
+    // Snapshot URLs that contributed to the answer — provenance.
+    sourceUrls: jsonb('source_urls')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    // Website evidence tier at extraction time (lib/websites/decide.ts ladder).
+    identityEvidence: varchar('identity_evidence', { length: 24 }).notNull(),
+    // Model identifier from the @ss/gemma model pin at extraction time.
+    model: varchar('model', { length: 64 }).notNull(),
+    // 'ok' | 'insufficient_content' | 'error'.
+    status: varchar('status', { length: 24 }).notNull(),
+    extractedAt: timestamp('extracted_at').defaultNow().notNull(),
+    // Advances on EVERY upsert, including one the ok-preservation guard
+    // blocks; extracted_at advances only on a real write. attempt > extracted
+    // therefore marks a protected stale row, which the due predicate backs
+    // off instead of re-extracting nightly forever.
+    lastAttemptAt: timestamp('last_attempt_at'),
+  },
+  (table) => [
+    uniqueIndex('ux_company_answers_company_question').on(
+      table.companyNumber,
+      table.questionSlug,
+    ),
+    // Staleness rotation: missing/oldest-extracted first within a question.
+    index('idx_company_answers_staleness').on(
+      table.questionSlug,
+      table.extractedAt,
+    ),
+  ],
+);
+
+// Cold append-only history of company_answers, written at identity-severance
+// moments (the mark-never-destroy pattern of companies_house_profile_trails).
+// `id` carries the archived row's original id, so the archive insert is
+// idempotent and a crash between archive and delete loses nothing. reason:
+// 'website_demoted' today; 'reattributed'/'superseded' are future policy
+// dials, not schema changes. source_urls preserve which domain the knowledge
+// came from. Nothing reads this table yet.
+export const companyAnswersArchive = pgTable(
+  'company_answers_archive',
+  {
+    id: integer('id').primaryKey(),
+    companyNumber: varchar('company_number', { length: 20 }).notNull(),
+    questionSlug: varchar('question_slug', { length: 64 }).notNull(),
+    questionHash: varchar('question_hash', { length: 64 }).notNull(),
+    questionText: text('question_text').notNull(),
+    answer: text('answer'),
+    items: jsonb('items').$type<string[]>(),
+    sourceUrls: jsonb('source_urls').$type<string[]>().notNull(),
+    identityEvidence: varchar('identity_evidence', { length: 24 }).notNull(),
+    model: varchar('model', { length: 64 }).notNull(),
+    status: varchar('status', { length: 24 }).notNull(),
+    extractedAt: timestamp('extracted_at').notNull(),
+    archivedAt: timestamp('archived_at').defaultNow().notNull(),
+    reason: varchar('reason', { length: 24 }).notNull(),
+  },
+  (table) => [
+    // The story query: a company's knowledge history in time order.
+    index('idx_answers_archive_company').on(
+      table.companyNumber,
+      table.archivedAt,
+    ),
+  ],
+);
+
+/**
+ * Work distribution for profile extraction: one row = one origin currently
+ * claimed by one worker. Claiming is a single INSERT .. ON CONFLICT (origin)
+ * DO UPDATE .. WHERE lease-expired .. RETURNING, so two workers can never
+ * hold the same origin; completion deletes the row. A crashed worker's claim
+ * simply expires and the origin becomes claimable again — the answers ledger
+ * backstops correctness, since extraction writes are idempotent upserts.
+ * Crawling is never claimed; this table governs extraction (Gemma) work only,
+ * and the future volunteer API wraps the same claim/release factories.
+ */
+export const profileWorkClaims = pgTable('profile_work_claims', {
+  origin: text('origin').primaryKey(),
+  claimedBy: varchar('claimed_by', { length: 64 }).notNull(),
+  claimedAt: timestamp('claimed_at').defaultNow().notNull(),
+});

@@ -27,6 +27,7 @@
     "knip": "knip",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint:fix",
+    "profiles:work": "bun apps/web/scripts/profile-company.ts --work",
     "test": "turbo run test",
     "firewall:verify": "bun --env-file=.env.local apps/firewall/src/verify.ts"
   },

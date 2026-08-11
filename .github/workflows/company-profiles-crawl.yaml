@@ -1,0 +1,47 @@
+name: Company Profiles Crawl Sweep
+
+on:
+  schedule:
+    # 23:07 UTC nightly, after the 21:43 websites sweep so the publishable
+    # set is fresh. Timeout keeps this clear of the 02:07 extract sweep.
+    - cron: '7 23 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Origins to crawl this run (default: PROFILE_CRAWL_LIMIT var or 150)'
+        type: string
+        default: ''
+
+concurrency:
+  group: company-profiles-crawl
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Pin the runtime to the repo's packageManager — an unattended
+          # nightly must not float to whatever Bun shipped yesterday.
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      - name: Crawl sweep
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          LIMIT: ${{ inputs.limit || vars.PROFILE_CRAWL_LIMIT || '150' }}
+        run: bun apps/web/scripts/profile-company.ts --no-extract --limit="$LIMIT"

@@ -48,6 +48,7 @@ import {
   rememberNotified,
   shouldNotify,
 } from './watch-notify';
+import { type WatchAddition, recordAdditions } from './watchlist';
 
 const MAX_HOURS = 24 * 6; // the free observability window
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
@@ -209,6 +210,29 @@ export async function logShadow(
         digest: f.digest,
         refusal: f.autoBanRefusal,
       });
+}
+
+/** The first thing that decided the advice — a blocker outranks evidence, evidence outranks a ruled-out lever. */
+export function adviceWhy(a: Advice): string {
+  return a.blockers[0] ?? a.reasons[0] ?? a.leverNotes[0] ?? '';
+}
+
+/** The advice as one log-friendly line: the verdict plus what decided it. */
+export function adviceSummary(a: Advice): string {
+  const why = adviceWhy(a);
+  return why ? `${a.verdict} — ${why}` : a.verdict;
+}
+
+/** What a run contributes to the watch list: every profiled identity, whatever the verdict — "who was that?" is exactly the question the list exists to answer. */
+export function watchlistAdditions(
+  findings: readonly Finding[],
+): WatchAddition[] {
+  return findings.map((f) => ({
+    kind: 'ja4' as const,
+    id: f.digest,
+    source: 'watch' as const,
+    note: `${adviceSummary(f.advice)}${f.why.length ? ` · screen: ${f.why[0]}` : ''}`,
+  }));
 }
 
 /**
@@ -816,6 +840,13 @@ async function main() {
   );
   errors.push(...configErrors);
   await logShadow(process.cwd(), findings);
+  // Whatever was judged goes on the watch list, so "who was that?" outlives this run's stdout.
+  const listed = await recordAdditions(
+    process.cwd(),
+    watchlistAdditions(findings),
+    new Date(),
+  );
+  if (listed.error) errors.push(`watch list: ${listed.error}`);
 
   const report: WatchReport = {
     window,

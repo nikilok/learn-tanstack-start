@@ -28,3 +28,4 @@ apps/web/.precision-samples
 firewall-watch.log
 .firewall-watch-state
 .firewall-watch-investigated
+.firewall-watchlist

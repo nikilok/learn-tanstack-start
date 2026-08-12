@@ -51,7 +51,7 @@ import {
   quietBand,
 } from './identity-list';
 import { moveCursor, resolveIpEntry } from './ip-entry';
-import { type IpProfile, topIps, topJa4 } from './ip-profile';
+import { type IpProfile, type Subject, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { trustedRules } from './rule-integrity';
@@ -75,7 +75,13 @@ import {
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
-import { logShadow, screenOnce } from './watch';
+import {
+  adviceSummary,
+  adviceWhy,
+  logShadow,
+  screenOnce,
+  watchlistAdditions,
+} from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
   fingerprintConfig,
@@ -96,20 +102,31 @@ import {
   rememberNotified,
   shouldNotify,
 } from './watch-notify';
+import {
+  type WatchlistEntry,
+  readWatchlist,
+  recordAdditions,
+  removeEntry,
+  saveWatchlist,
+} from './watchlist';
+import { watchlistLines } from './watchlist-view';
 
-type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
+type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist' | 'watchlist';
 const PANE_KEY: Record<string, PaneKind> = {
   r: 'report',
   i: 'ip',
   f: 'ip', // same pane, fingerprint picker
   s: 'sitemap',
   d: 'denylist',
+  t: 'watchlist',
 };
 const JA4_RULE = 'deny-scraper-ja4';
 const ASN_RULE = 'deny-scraper-asn';
 const DENY_ACTIVITY_HOURS = 144;
 // Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
 const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
+// Where the watch list and the watch log live — the CLI runs from here too, so they share state.
+const ROOT = process.cwd();
 const IP_WINDOW_HOURS = 24;
 // One query per tick. Measured: 10 back-to-back calls to this endpoint all returned 200 at ~1s
 // each, so ~1/s is tolerated. This sits 15x under that, matching the cadence Vercel's own live
@@ -238,6 +255,9 @@ export function App() {
   const [denyActivityNote, setDenyActivityNote] = useState('');
   const [sitemapCursor, setSitemapCursor] = useState(0);
   const [copied, setCopied] = useState('');
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
+  const [watchlistError, setWatchlistError] = useState('');
+  const [watchlistCursor, setWatchlistCursor] = useState(0);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removedDenies, setRemovedDenies] = useState<string[]>([]);
@@ -272,6 +292,8 @@ export function App() {
   // closure would otherwise keep whatever the values were at arming.
   const [watchOn, setWatchOn] = useState(false);
   const [watchNote, setWatchNote] = useState('');
+  // Who the last tick actually profiled, one line each — the note above only counts them.
+  const [watchWho, setWatchWho] = useState<string[]>([]);
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
@@ -495,6 +517,28 @@ export function App() {
         if (stopped) return;
         setWatchAt(clockTime(new Date()));
         await logShadow(root, findings);
+        // Whatever was judged goes on the watch list, so "who was that?" survives the tick.
+        if (findings.length) {
+          const listed = await recordAdditions(
+            root,
+            watchlistAdditions(findings),
+            new Date(),
+          );
+          if (listed.error)
+            void logWatch(root, new Date(), {
+              kind: 'error',
+              error: `watch list: ${listed.error}`,
+            });
+          else if (listed.entries) {
+            setWatchlist(listed.entries);
+            setWatchlistError('');
+          }
+        }
+        setWatchWho(
+          findings.map(
+            (f) => `${f.digest} · ${f.total} req · ${adviceSummary(f.advice)}`,
+          ),
+        );
         const bans = findings.filter((f) => f.advice.verdict === 'ban');
         // Truncation is carried, not dropped. A capped screen that surfaced nothing is BLIND, and
         // rendering that as "0 allowed through" is a quiet night the tool never actually had.
@@ -520,6 +564,13 @@ export function App() {
           fingerprints: rows.length,
           profiled: findings.length,
           bans: bans.length,
+          profiledWho: findings.map((f) => ({
+            digest: f.digest,
+            allowed: f.allowed,
+            total: f.total,
+            verdict: f.advice.verdict,
+            why: adviceWhy(f.advice),
+          })),
         });
 
         const now = Date.now();
@@ -1019,6 +1070,9 @@ export function App() {
   const openPane = (kind: PaneKind, pick: 'ip' | 'ja4' = 'ip') => {
     setPane(kind);
     setReportScroll(0);
+    // The copy note describes an action on the pane being left; carried across, it reads as a
+    // response to whatever key opened this one.
+    setCopied('');
     if (kind === 'ip') {
       setPickKind(pick);
       setIpInput('');
@@ -1032,6 +1086,8 @@ export function App() {
     setFocus('pane');
     if (kind === 'report' && !report.data)
       void report.load(() => fetchReport(creds));
+    // Always re-read: the file is local, and the watch tick or a CLI run may have fed it since.
+    if (kind === 'watchlist') void loadWatchlist();
     if (kind === 'sitemap' && !sitemap.data)
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     if (kind === 'denylist' && !denyActivity.data)
@@ -1208,9 +1264,45 @@ export function App() {
     ipTabs.openMany(subjects, ipWindow);
   };
 
+  /** Load the on-disk watch list into the pane, keeping unreadable distinct from empty. */
+  const loadWatchlist = async () => {
+    const list = await readWatchlist(ROOT);
+    setWatchlist(list.entries);
+    setWatchlistError(list.ok ? '' : (list.error ?? 'unreadable'));
+    setWatchlistCursor((c) =>
+      Math.max(0, Math.min(c, list.entries.length - 1)),
+    );
+  };
+
+  /** Put the open profile's subject on the watch list. */
+  const markWatched = async (subject: Subject) => {
+    const { entries, error } = await recordAdditions(
+      ROOT,
+      [
+        {
+          kind: subject.kind,
+          id: subject.value,
+          source: 'manual',
+          note: 'marked from profile',
+        },
+      ],
+      new Date(),
+    );
+    if (error) {
+      setCopied(`watch list: ${error}`);
+      return;
+    }
+    if (entries) {
+      setWatchlist(entries);
+      setWatchlistError('');
+    }
+    setCopied(`watching ${subject.value} — t to view`);
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
+    else if (pane === 'watchlist') void loadWatchlist();
     else if (pane === 'sitemap')
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     else if (pane === 'ip') ipTabs.refresh();
@@ -1393,6 +1485,13 @@ export function App() {
           onYes: () => stageDeny('ja4', lever.value),
         });
         setFocus('confirm');
+      } else if (pane === 'denylist' && key.return) {
+        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
+        const entry = denyEntries[denyCursor];
+        if (entry)
+          void copyToClipboard(entry.value).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${entry.value}`),
+          );
       } else if (input === 'u' && pane === 'denylist') {
         const entry = denyEntries[denyCursor];
         if (!entry || entry.removed) return;
@@ -1429,17 +1528,53 @@ export function App() {
           setReportScroll(0);
           ipTabs.open({ kind: 'ja4', value: d.ja4 }, ipWindow);
         }
+      } else if (pane === 'watchlist' && key.return) {
+        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
+        const e = watchlist[watchlistCursor];
+        if (e)
+          void copyToClipboard(e.id).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
+          );
+      } else if (input === 'o' && pane === 'watchlist') {
+        const e = watchlist[watchlistCursor];
+        if (e) {
+          setPickKind(e.kind);
+          setPane('ip');
+          setReportScroll(0);
+          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
+        }
+      } else if (input === 'x' && pane === 'watchlist') {
+        // Removal is cheap to undo (mark it again), so no confirm — unlike lifting a deny.
+        const e = watchlist[watchlistCursor];
+        if (e) {
+          const next = removeEntry(watchlist, e.kind, e.id);
+          setWatchlist(next);
+          setWatchlistCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
+          void saveWatchlist(ROOT, next).then((err) => {
+            if (err) setCopied(`watch list: ${err}`);
+          });
+        }
+      } else if (input === 'm' && pane === 'ip' && ipTabs.active) {
+        void markWatched(ipTabs.active.subject);
       } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
       } else if (PANE_KEY[input])
         openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
       else if (key.escape) setFocus('editor');
-      else if (pane === 'denylist' && (key.upArrow || input === 'k'))
+      else if (pane === 'denylist' && (key.upArrow || input === 'k')) {
         setDenyCursor((c) => Math.max(0, c - 1));
-      else if (pane === 'denylist' && (key.downArrow || input === 'j'))
+        setCopied('');
+      } else if (pane === 'denylist' && (key.downArrow || input === 'j')) {
         setDenyCursor((c) => Math.min(denyEntries.length - 1, c + 1));
-      else if (key.upArrow || input === 'k')
+        setCopied('');
+      } else if (pane === 'watchlist' && (key.upArrow || input === 'k')) {
+        setWatchlistCursor((c) => Math.max(0, c - 1));
+        setCopied('');
+      } else if (pane === 'watchlist' && (key.downArrow || input === 'j')) {
+        setWatchlistCursor((c) => Math.min(watchlist.length - 1, c + 1));
+        setCopied('');
+      } else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
       else if (key.downArrow || input === 'j')
         setReportScroll((s) => Math.min(reportMaxScroll, s + 1));
@@ -1599,7 +1734,7 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist ·{' '}
+              ip · f ja4 · s sitemap · d denylist · t watch-list ·{' '}
               <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
                 v watch{watchOn ? ' (on)' : ''}
               </Text>
@@ -1661,6 +1796,13 @@ export function App() {
                 {watchNote}
               </Text>
             )}
+            {/* Name them, or "1 profiled" sends the operator digging through the log. */}
+            {watchWho.map((w) => (
+              <Text key={w} dimColor wrap="truncate-end">
+                {'    '}
+                {w}
+              </Text>
+            ))}
             {/* Stays up once it has happened. The loop runs while you are in another pane, so an
                 invocation you were not watching still has to be visible afterwards. */}
             {invokedCount > 0 && (
@@ -1774,11 +1916,21 @@ export function App() {
                 denyActivityNote={denyActivityNote}
                 denyCursor={denyCursor}
                 denyActivity={denyActivity}
+                watchEntries={watchlist}
+                watchError={watchlistError}
+                watchCursor={watchlistCursor}
               />
             </Box>
           </Box>
           {copied && (
-            <Text color={copied.startsWith('copy failed') ? 'red' : 'green'}>
+            <Text
+              color={
+                copied.startsWith('copy failed') ||
+                copied.startsWith('watch list:')
+                  ? 'red'
+                  : 'green'
+              }
+            >
               {copied}
             </Text>
           )}
@@ -1801,16 +1953,23 @@ export function App() {
               )}
               {focus === 'pane' && (
                 <Text dimColor>
-                  j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh ·
-                  i new ip · f ja4 · w timeline · v watch
+                  j/k{' '}
+                  {pane === 'denylist' || pane === 'watchlist'
+                    ? 'select'
+                    : 'scroll'}{' '}
+                  · R refresh · i new ip · f ja4 · t watch-list · w timeline · v
+                  watch
                   {watchOn ? ' (on)' : ''}
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
                     ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
                     : ''}
-                  {pane === 'denylist' ? ' · u unban' : ''}
+                  {pane === 'denylist' ? ' · enter copy · u unban' : ''}
                   {pane === 'sitemap' ? ' · enter copy · o profile it' : ''}
-                  {pane === 'ip' ? ' · x close tab' : ''} · esc rules
+                  {pane === 'watchlist'
+                    ? ' · enter copy · o profile it · x remove'
+                    : ''}
+                  {pane === 'ip' ? ' · m watch · x close tab' : ''} · esc rules
                 </Text>
               )}
             </Box>
@@ -2008,6 +2167,9 @@ function PaneBody({
   denyActivityNote,
   denyCursor,
   denyActivity,
+  watchEntries,
+  watchError,
+  watchCursor,
 }: {
   kind: PaneKind;
   width: number;
@@ -2021,6 +2183,9 @@ function PaneBody({
   denyActivityNote: string;
   denyCursor: number;
   denyActivity: Pane<Map<string, Activity>>;
+  watchEntries: WatchlistEntry[];
+  watchError: string;
+  watchCursor: number;
 }) {
   if (kind === 'report')
     return (
@@ -2041,6 +2206,17 @@ function PaneBody({
             error: denyActivity.error || denyActivityNote || undefined,
           },
           denyCursor,
+        )}
+        width={width}
+      />
+    );
+  if (kind === 'watchlist')
+    return (
+      <Lines
+        lines={watchlistLines(
+          { entries: watchEntries, error: watchError || undefined },
+          watchCursor,
+          Date.now(),
         )}
         width={width}
       />

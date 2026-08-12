@@ -25,7 +25,14 @@ async function main() {
   }
   if (interactive) {
     const { App } = await import('./app');
-    render(<App />);
+    const { enterTuiScreen, leaveTuiScreen } = await import('./terminal');
+    enterTuiScreen();
+    try {
+      await render(<App />).waitUntilExit();
+    } finally {
+      // Before anything prints: an error surfaced while still on the app buffer vanishes with it.
+      leaveTuiScreen();
+    }
   } else if (apply || dryRun) {
     const { runHeadless } = await import('./client');
     await runHeadless();

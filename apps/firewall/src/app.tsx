@@ -26,6 +26,11 @@ import {
   token,
 } from './client';
 import { copyToClipboard } from './clipboard';
+import {
+  FooterHints,
+  type MaybeHint,
+  hintRows,
+} from './components/footer-hints';
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
@@ -1776,6 +1781,61 @@ export function App() {
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
   const paneFooter = showTabNav || focus === 'pane';
+  // The pane footer's keybinds, built once so the layout can both render them and reserve the
+  // rows they wrap to — otherwise a footer that wraps to a second line grows the frame past the
+  // viewport and scrolls the header off. Falsey entries drop out (conditional keys).
+  const paneHints: MaybeHint[] =
+    focus === 'pane'
+      ? [
+          {
+            key: 'j/k',
+            label:
+              pane === 'denylist' ||
+              pane === 'watchlist' ||
+              pane === 'ignorelist'
+                ? 'select'
+                : 'scroll',
+          },
+          { key: 'R', label: 'refresh' },
+          { key: 'i', label: 'new ip' },
+          { key: 'f', label: 'ja4' },
+          { key: 't', label: 'watch-list' },
+          { key: 'g', label: 'ignore' },
+          { key: 'w', label: 'timeline' },
+          {
+            key: 'v',
+            label: watchOn ? 'watch (on)' : 'watch',
+            active: watchOn,
+          },
+          // Shown exactly when `b` does something: the advisor offered a lever.
+          pane === 'ip' &&
+            ipAdvice?.lever && {
+              key: 'b',
+              label: `deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`,
+            },
+          pane === 'denylist' && { key: 'enter', label: 'copy' },
+          pane === 'denylist' && { key: 'u', label: 'unban' },
+          pane === 'sitemap' && { key: 'enter', label: 'copy' },
+          pane === 'sitemap' && { key: 'o', label: 'profile it' },
+          pane === 'watchlist' && { key: 'enter', label: 'copy' },
+          pane === 'watchlist' && { key: 'o', label: 'profile it' },
+          pane === 'watchlist' && { key: 'z', label: 'ignore' },
+          pane === 'watchlist' && { key: 'x', label: 'remove' },
+          pane === 'ignorelist' && { key: 'enter', label: 'copy' },
+          pane === 'ignorelist' && { key: 'o', label: 'profile it' },
+          pane === 'ignorelist' && { key: 'm', label: 'watch it' },
+          pane === 'ignorelist' && { key: 'x', label: 'remove' },
+          pane === 'ip' && { key: 'm', label: 'watch' },
+          pane === 'ip' && { key: 'z', label: 'ignore' },
+          pane === 'ip' && { key: 'x', label: 'close tab' },
+          { key: 'esc', label: 'rules' },
+        ]
+      : [];
+  // The tab indicator shares the footer's first line, so its width counts toward the wrap.
+  const tabNavWidth = showTabNav
+    ? `◂ ${ipTabs.index + 1}/${ipTabs.tabs.length} ▸ tab/shift-tab · `.length
+    : 0;
+  const footerRows = paneFooter ? hintRows(paneHints, reportW, tabNavWidth) : 0;
   // Measured, not assumed: an IPv4 is 15 chars and a JA4 digest 36, so whether two columns fit
   // depends on what is actually listed. A row that wraps takes the whole Ink list with it, so
   // the quiet band stacks underneath when the width is not there.
@@ -1798,7 +1858,7 @@ export function App() {
     (focus === 'range-input' ? 1 : 0) +
     // header + one row per preset + the custom row + the hint
     (focus === 'window-pick' ? WINDOW_PRESETS.length + 3 : 0) +
-    (paneFooter ? 1 : 0) +
+    footerRows +
     (copied ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -1806,6 +1866,9 @@ export function App() {
         flexDirection="column"
         width={rulesW}
         flexShrink={0}
+        // At least full height so the footer below can be pushed to the bottom; a minimum, not a
+        // fixed height, so a long rule list on a short terminal still grows rather than clipping.
+        minHeight={reportH}
         marginRight={showPane ? PANE_GAP : 0}
       >
         <Box>
@@ -1828,6 +1891,9 @@ export function App() {
             />
           ))}
         </Box>
+        {/* Absorbs the slack between the rule list and the footer, anchoring the footer to the
+            bottom edge instead of floating under the last rule. */}
+        <Box flexGrow={1} />
         {phase === 'select' && (
           <Box flexDirection="column">
             {applied && (
@@ -1836,23 +1902,39 @@ export function App() {
                 editing, or q to quit
               </Text>
             )}
-            <Text dimColor>
-              ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist · t watch-list · g ignore ·{' '}
-              <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
-                v watch{watchOn ? ' (on)' : ''}
-              </Text>
-              {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
-              {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
-              {items.length} on)
+            <Text wrap="wrap">
+              <FooterHints
+                hints={[
+                  { key: '↑/↓', label: 'move' },
+                  { key: '←/→', label: 'action' },
+                  { key: 'enter', label: 'menu' },
+                  { key: 'space', label: 'on/off' },
+                  { key: 'r', label: 'report' },
+                  { key: 'i', label: 'ip' },
+                  { key: 'f', label: 'ja4' },
+                  { key: 's', label: 'sitemap' },
+                  { key: 'd', label: 'denylist' },
+                  { key: 't', label: 'watch-list' },
+                  { key: 'g', label: 'ignore' },
+                  {
+                    key: 'v',
+                    label: watchOn ? 'watch (on)' : 'watch',
+                    active: watchOn,
+                  },
+                  ipTabs.tabs.length
+                    ? { key: 'tab', label: 'cycle ips' }
+                    : false,
+                  { key: 'a', label: 'apply' },
+                  { key: 'q', label: `quit (${onCount}/${items.length} on)` },
+                ]}
+              />
+              {paneLoading ? <Text dimColor> (loading…)</Text> : null}
               {pendingByRule.size ? (
                 <Text color="yellow">
                   {' '}
                   · {pendingByRule.size} rule(s) unapplied
                 </Text>
-              ) : (
-                ''
-              )}
+              ) : null}
             </Text>
           </Box>
         )}
@@ -1875,7 +1957,16 @@ export function App() {
                 locked to log — JA4 is shared by many real users
               </Text>
             )}
-            <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
+            <Text wrap="wrap">
+              <FooterHints
+                hints={[
+                  { key: '↑/↓', label: 'choose' },
+                  { key: 'enter', label: 'set' },
+                  { key: 'esc', label: 'cancel' },
+                  { key: 'q', label: 'quit' },
+                ]}
+              />
+            </Text>
           </Box>
         )}
         {phase === 'applying' && (
@@ -2043,49 +2134,27 @@ export function App() {
             </Text>
           )}
           {paneFooter && (
-            <Box>
-              {showTabNav && (
-                <Text>
-                  <Text color="cyan" bold>
-                    ◂{' '}
-                  </Text>
-                  <Text bold>
-                    {ipTabs.index + 1}/{ipTabs.tabs.length}
-                  </Text>
-                  <Text color="cyan" bold>
-                    {' '}
-                    ▸
-                  </Text>
-                  <Text dimColor> tab/shift-tab · </Text>
-                </Text>
-              )}
-              {focus === 'pane' && (
-                <Text dimColor>
-                  j/k{' '}
-                  {pane === 'denylist' ||
-                  pane === 'watchlist' ||
-                  pane === 'ignorelist'
-                    ? 'select'
-                    : 'scroll'}{' '}
-                  · R refresh · i new ip · f ja4 · t watch-list · g ignore · w
-                  timeline · v watch
-                  {watchOn ? ' (on)' : ''}
-                  {/* Shown exactly when `b` does something: the advisor offered a lever. */}
-                  {pane === 'ip' && ipAdvice?.lever
-                    ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
-                    : ''}
-                  {pane === 'denylist' ? ' · enter copy · u unban' : ''}
-                  {pane === 'sitemap' ? ' · enter copy · o profile it' : ''}
-                  {pane === 'watchlist'
-                    ? ' · enter copy · o profile it · z ignore · x remove'
-                    : ''}
-                  {pane === 'ignorelist'
-                    ? ' · enter copy · o profile it · m watch it · x remove'
-                    : ''}
-                  {pane === 'ip' ? ' · m watch · z ignore · x close tab' : ''} ·
-                  esc rules
-                </Text>
-              )}
+            <Box width={reportW}>
+              {/* One wrapping flow so tab indicator and hints wrap together at the pane width,
+                  and `footerRows` above reserves exactly the lines this produces. */}
+              <Text wrap="wrap">
+                {showTabNav && (
+                  <>
+                    <Text color="cyan" bold>
+                      ◂{' '}
+                    </Text>
+                    <Text bold>
+                      {ipTabs.index + 1}/{ipTabs.tabs.length}
+                    </Text>
+                    <Text color="cyan" bold>
+                      {' '}
+                      ▸
+                    </Text>
+                    <Text dimColor> tab/shift-tab · </Text>
+                  </>
+                )}
+                {focus === 'pane' && <FooterHints hints={paneHints} />}
+              </Text>
             </Box>
           )}
           {focus === 'window-pick' && (
@@ -2124,7 +2193,16 @@ export function App() {
                   type dates{presetIdx < 0 ? '  ·  in force' : ''}
                 </Text>
               </Box>
-              <Text dimColor>{'  '}↑↓ choose · enter apply · esc cancel</Text>
+              <Text wrap="wrap">
+                {'  '}
+                <FooterHints
+                  hints={[
+                    { key: '↑↓', label: 'choose' },
+                    { key: 'enter', label: 'apply' },
+                    { key: 'esc', label: 'cancel' },
+                  ]}
+                />
+              </Text>
             </Box>
           )}
           {focus === 'range-input' && (
@@ -2144,9 +2222,19 @@ export function App() {
               <Text color="cyan">AS number for {ipAdvice?.lever?.value}: </Text>
               <Text>{asnInput}</Text>
               <Text color="cyan">▏</Text>
-              <Text dimColor>
-                {asnError ? `  ${asnError}` : '  enter confirm · esc cancel'}
-              </Text>
+              {asnError ? (
+                <Text dimColor>{`  ${asnError}`}</Text>
+              ) : (
+                <Text>
+                  {'  '}
+                  <FooterHints
+                    hints={[
+                      { key: 'enter', label: 'confirm' },
+                      { key: 'esc', label: 'cancel' },
+                    ]}
+                  />
+                </Text>
+              )}
             </Box>
           )}
           {focus === 'confirm' && confirm && (

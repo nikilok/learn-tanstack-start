@@ -103,15 +103,24 @@ import {
   shouldNotify,
 } from './watch-notify';
 import {
+  IGNORELIST_FILE,
+  WATCHLIST_FILE,
   type WatchlistEntry,
-  readWatchlist,
+  readList,
   recordAdditions,
+  recordExclusive,
   removeEntry,
-  saveWatchlist,
+  saveList,
 } from './watchlist';
-import { watchlistLines } from './watchlist-view';
+import { ignoreListLines, watchlistLines } from './watchlist-view';
 
-type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist' | 'watchlist';
+type PaneKind =
+  | 'report'
+  | 'ip'
+  | 'sitemap'
+  | 'denylist'
+  | 'watchlist'
+  | 'ignorelist';
 const PANE_KEY: Record<string, PaneKind> = {
   r: 'report',
   i: 'ip',
@@ -119,6 +128,7 @@ const PANE_KEY: Record<string, PaneKind> = {
   s: 'sitemap',
   d: 'denylist',
   t: 'watchlist',
+  g: 'ignorelist',
 };
 const JA4_RULE = 'deny-scraper-ja4';
 const ASN_RULE = 'deny-scraper-asn';
@@ -258,6 +268,9 @@ export function App() {
   const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
   const [watchlistError, setWatchlistError] = useState('');
   const [watchlistCursor, setWatchlistCursor] = useState(0);
+  const [ignoreList, setIgnoreList] = useState<WatchlistEntry[]>([]);
+  const [ignoreError, setIgnoreError] = useState('');
+  const [ignoreCursor, setIgnoreCursor] = useState(0);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removedDenies, setRemovedDenies] = useState<string[]>([]);
@@ -521,6 +534,7 @@ export function App() {
         if (findings.length) {
           const listed = await recordAdditions(
             root,
+            WATCHLIST_FILE,
             watchlistAdditions(findings),
             new Date(),
           );
@@ -1088,6 +1102,7 @@ export function App() {
       void report.load(() => fetchReport(creds));
     // Always re-read: the file is local, and the watch tick or a CLI run may have fed it since.
     if (kind === 'watchlist') void loadWatchlist();
+    if (kind === 'ignorelist') void loadIgnoreList();
     if (kind === 'sitemap' && !sitemap.data)
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     if (kind === 'denylist' && !denyActivity.data)
@@ -1266,7 +1281,7 @@ export function App() {
 
   /** Load the on-disk watch list into the pane, keeping unreadable distinct from empty. */
   const loadWatchlist = async () => {
-    const list = await readWatchlist(ROOT);
+    const list = await readList(ROOT, WATCHLIST_FILE);
     setWatchlist(list.entries);
     setWatchlistError(list.ok ? '' : (list.error ?? 'unreadable'));
     setWatchlistCursor((c) =>
@@ -1274,35 +1289,61 @@ export function App() {
     );
   };
 
-  /** Put the open profile's subject on the watch list. */
-  const markWatched = async (subject: Subject) => {
-    const { entries, error } = await recordAdditions(
+  /** Same for the ignore list. */
+  const loadIgnoreList = async () => {
+    const list = await readList(ROOT, IGNORELIST_FILE);
+    setIgnoreList(list.entries);
+    setIgnoreError(list.ok ? '' : (list.error ?? 'unreadable'));
+    setIgnoreCursor((c) => Math.max(0, Math.min(c, list.entries.length - 1)));
+  };
+
+  /** Put an identity on one list and off the other — watched and ignored are exclusive. */
+  const moveIdentity = async (
+    to: 'watch' | 'ignore',
+    subject: Subject,
+    note: string,
+  ) => {
+    const [addFile, dropFile] =
+      to === 'watch'
+        ? [WATCHLIST_FILE, IGNORELIST_FILE]
+        : [IGNORELIST_FILE, WATCHLIST_FILE];
+    const out = await recordExclusive(
       ROOT,
-      [
-        {
-          kind: subject.kind,
-          id: subject.value,
-          source: 'manual',
-          note: 'marked from profile',
-        },
-      ],
+      addFile,
+      dropFile,
+      [{ kind: subject.kind, id: subject.value, source: 'manual', note }],
       new Date(),
     );
-    if (error) {
-      setCopied(`watch list: ${error}`);
+    if (out.error) {
+      setCopied(`${to} list: ${out.error}`);
       return;
     }
-    if (entries) {
-      setWatchlist(entries);
-      setWatchlistError('');
+    const [added, remaining] = [out.added ?? [], out.remaining ?? []];
+    if (to === 'watch') {
+      setWatchlist(added);
+      setIgnoreList(remaining);
+    } else {
+      setIgnoreList(added);
+      setWatchlist(remaining);
     }
-    setCopied(`watching ${subject.value} — t to view`);
+    setWatchlistError('');
+    setIgnoreError('');
+    const watchLen = (to === 'watch' ? added : remaining).length;
+    const ignoreLen = (to === 'ignore' ? added : remaining).length;
+    setWatchlistCursor((c) => Math.max(0, Math.min(c, watchLen - 1)));
+    setIgnoreCursor((c) => Math.max(0, Math.min(c, ignoreLen - 1)));
+    setCopied(
+      to === 'watch'
+        ? `watching ${subject.value} — t to view`
+        : `ignoring ${subject.value} — g to view · watch mode now skips it`,
+    );
   };
 
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
     else if (pane === 'watchlist') void loadWatchlist();
+    else if (pane === 'ignorelist') void loadIgnoreList();
     else if (pane === 'sitemap')
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     else if (pane === 'ip') ipTabs.refresh();
@@ -1550,12 +1591,65 @@ export function App() {
           const next = removeEntry(watchlist, e.kind, e.id);
           setWatchlist(next);
           setWatchlistCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
-          void saveWatchlist(ROOT, next).then((err) => {
+          void saveList(ROOT, WATCHLIST_FILE, next).then((err) => {
             if (err) setCopied(`watch list: ${err}`);
           });
         }
+      } else if (input === 'z' && pane === 'watchlist') {
+        // The successor state: seen, judged, and not worth being told about again.
+        const e = watchlist[watchlistCursor];
+        if (e)
+          void moveIdentity(
+            'ignore',
+            { kind: e.kind, value: e.id },
+            e.note || 'moved from watch list',
+          );
+      } else if (pane === 'ignorelist' && key.return) {
+        const e = ignoreList[ignoreCursor];
+        if (e)
+          void copyToClipboard(e.id).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
+          );
+      } else if (input === 'o' && pane === 'ignorelist') {
+        // Ignored is muted, not invisible — a profile is still one keystroke away.
+        const e = ignoreList[ignoreCursor];
+        if (e) {
+          setPickKind(e.kind);
+          setPane('ip');
+          setReportScroll(0);
+          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
+        }
+      } else if (input === 'x' && pane === 'ignorelist') {
+        // Un-ignoring needs no ceremony: if it is still active, the next tick re-surfaces it.
+        const e = ignoreList[ignoreCursor];
+        if (e) {
+          const next = removeEntry(ignoreList, e.kind, e.id);
+          setIgnoreList(next);
+          setIgnoreCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
+          void saveList(ROOT, IGNORELIST_FILE, next).then((err) => {
+            if (err) setCopied(`ignore list: ${err}`);
+          });
+        }
+      } else if (input === 'm' && pane === 'ignorelist') {
+        const e = ignoreList[ignoreCursor];
+        if (e)
+          void moveIdentity(
+            'watch',
+            { kind: e.kind, value: e.id },
+            e.note || 'moved from ignore list',
+          );
       } else if (input === 'm' && pane === 'ip' && ipTabs.active) {
-        void markWatched(ipTabs.active.subject);
+        void moveIdentity(
+          'watch',
+          ipTabs.active.subject,
+          'marked from profile',
+        );
+      } else if (input === 'z' && pane === 'ip' && ipTabs.active) {
+        void moveIdentity(
+          'ignore',
+          ipTabs.active.subject,
+          'ignored from profile',
+        );
       } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
@@ -1573,6 +1667,12 @@ export function App() {
         setCopied('');
       } else if (pane === 'watchlist' && (key.downArrow || input === 'j')) {
         setWatchlistCursor((c) => Math.min(watchlist.length - 1, c + 1));
+        setCopied('');
+      } else if (pane === 'ignorelist' && (key.upArrow || input === 'k')) {
+        setIgnoreCursor((c) => Math.max(0, c - 1));
+        setCopied('');
+      } else if (pane === 'ignorelist' && (key.downArrow || input === 'j')) {
+        setIgnoreCursor((c) => Math.min(ignoreList.length - 1, c + 1));
         setCopied('');
       } else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
@@ -1734,7 +1834,7 @@ export function App() {
             )}
             <Text dimColor>
               ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist · t watch-list ·{' '}
+              ip · f ja4 · s sitemap · d denylist · t watch-list · g ignore ·{' '}
               <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
                 v watch{watchOn ? ' (on)' : ''}
               </Text>
@@ -1919,6 +2019,9 @@ export function App() {
                 watchEntries={watchlist}
                 watchError={watchlistError}
                 watchCursor={watchlistCursor}
+                ignoreEntries={ignoreList}
+                ignoreError={ignoreError}
+                ignoreCursor={ignoreCursor}
               />
             </Box>
           </Box>
@@ -1926,7 +2029,8 @@ export function App() {
             <Text
               color={
                 copied.startsWith('copy failed') ||
-                copied.startsWith('watch list:')
+                copied.startsWith('watch list:') ||
+                copied.startsWith('ignore list:')
                   ? 'red'
                   : 'green'
               }
@@ -1954,11 +2058,13 @@ export function App() {
               {focus === 'pane' && (
                 <Text dimColor>
                   j/k{' '}
-                  {pane === 'denylist' || pane === 'watchlist'
+                  {pane === 'denylist' ||
+                  pane === 'watchlist' ||
+                  pane === 'ignorelist'
                     ? 'select'
                     : 'scroll'}{' '}
-                  · R refresh · i new ip · f ja4 · t watch-list · w timeline · v
-                  watch
+                  · R refresh · i new ip · f ja4 · t watch-list · g ignore · w
+                  timeline · v watch
                   {watchOn ? ' (on)' : ''}
                   {/* Shown exactly when `b` does something: the advisor offered a lever. */}
                   {pane === 'ip' && ipAdvice?.lever
@@ -1967,9 +2073,13 @@ export function App() {
                   {pane === 'denylist' ? ' · enter copy · u unban' : ''}
                   {pane === 'sitemap' ? ' · enter copy · o profile it' : ''}
                   {pane === 'watchlist'
-                    ? ' · enter copy · o profile it · x remove'
+                    ? ' · enter copy · o profile it · z ignore · x remove'
                     : ''}
-                  {pane === 'ip' ? ' · m watch · x close tab' : ''} · esc rules
+                  {pane === 'ignorelist'
+                    ? ' · enter copy · o profile it · m watch it · x remove'
+                    : ''}
+                  {pane === 'ip' ? ' · m watch · z ignore · x close tab' : ''} ·
+                  esc rules
                 </Text>
               )}
             </Box>
@@ -2170,6 +2280,9 @@ function PaneBody({
   watchEntries,
   watchError,
   watchCursor,
+  ignoreEntries,
+  ignoreError,
+  ignoreCursor,
 }: {
   kind: PaneKind;
   width: number;
@@ -2186,6 +2299,9 @@ function PaneBody({
   watchEntries: WatchlistEntry[];
   watchError: string;
   watchCursor: number;
+  ignoreEntries: WatchlistEntry[];
+  ignoreError: string;
+  ignoreCursor: number;
 }) {
   if (kind === 'report')
     return (
@@ -2216,6 +2332,17 @@ function PaneBody({
         lines={watchlistLines(
           { entries: watchEntries, error: watchError || undefined },
           watchCursor,
+          Date.now(),
+        )}
+        width={width}
+      />
+    );
+  if (kind === 'ignorelist')
+    return (
+      <Lines
+        lines={ignoreListLines(
+          { entries: ignoreEntries, error: ignoreError || undefined },
+          ignoreCursor,
           Date.now(),
         )}
         width={width}

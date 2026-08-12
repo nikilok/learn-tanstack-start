@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { lineText } from './line-model';
 import type { WatchlistEntry } from './watchlist';
-import { watchlistLines } from './watchlist-view';
+import { ignoreListLines, watchlistLines } from './watchlist-view';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
 const NOW = Date.parse('2026-08-12T10:00:00.000Z');
@@ -56,6 +56,32 @@ describe('watchlistLines', () => {
     expect(out).not.toContain('nothing is being watched');
     expect(out).not.toContain(DIG); // withheld: a partial list reads as the whole list
     expect(out).toContain('could not be read');
+    expect(out).toContain('nothing will be saved over it');
+  });
+});
+
+// Same rows, opposite meaning — and the same destructive-empty invariant.
+describe('ignoreListLines', () => {
+  const text = (entries: WatchlistEntry[], cursor = 0, error?: string) =>
+    ignoreListLines({ entries, error }, cursor, NOW).map(lineText).join('\n');
+
+  test('reads as muted, never as allowed or denied', () => {
+    const out = text([entry({ source: 'manual', seen: 1 })]);
+    expect(out).toContain('watch mode skips these');
+    expect(out).toContain('the WAF is untouched');
+    expect(out).toContain(DIG);
+  });
+
+  test('empty is a good state and says how to mute something', () => {
+    const out = text([]);
+    expect(out).toContain('nothing is ignored');
+    expect(out).toContain('z on an open profile');
+  });
+
+  test('unreadable NEVER renders as empty', () => {
+    const out = text([entry()], 0, 'line 1: missing id');
+    expect(out).not.toContain('nothing is ignored');
+    expect(out).not.toContain(DIG);
     expect(out).toContain('nothing will be saved over it');
   });
 });

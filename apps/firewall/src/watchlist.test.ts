@@ -7,17 +7,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  IGNORELIST_FILE,
   WATCHLIST_FILE,
   type WatchlistEntry,
   formatWatchlist,
   parseWatchlist,
-  readWatchlist,
+  readList,
   recordAdditions,
+  recordExclusive,
   removeEntry,
   upsertEntry,
 } from './watchlist';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
+const OTHER = 't13dothr00_111111111111_222222222222';
 const AT = new Date('2026-08-12T10:00:00.000Z');
 const LATER = new Date('2026-08-12T11:00:00.000Z');
 
@@ -45,7 +48,7 @@ afterAll(() => {
 describe('parseWatchlist / formatWatchlist', () => {
   test('round-trips entries, including a note containing pipes', () => {
     const e = entry({ note: 'leave — matched rule (267x) | first-party' });
-    const parsed = parseWatchlist(formatWatchlist([e]));
+    const parsed = parseWatchlist(formatWatchlist([e]), WATCHLIST_FILE);
     expect(parsed.ok).toBe(true);
     expect(parsed.entries).toEqual([
       { ...e, note: 'leave — matched rule (267x)   first-party' },
@@ -53,22 +56,29 @@ describe('parseWatchlist / formatWatchlist', () => {
   });
 
   test('blank lines are skipped, so a hand-edited file stays valid', () => {
-    const parsed = parseWatchlist(`\n${formatWatchlist([entry()])}\n\n`);
+    const parsed = parseWatchlist(
+      `\n${formatWatchlist([entry()])}\n\n`,
+      WATCHLIST_FILE,
+    );
     expect(parsed.ok).toBe(true);
     expect(parsed.entries).toHaveLength(1);
   });
 
-  test('one malformed line refuses the WHOLE file and says which line', () => {
-    // A partial load that later saves is how a hand edit gets silently destroyed.
-    const parsed = parseWatchlist(`${formatWatchlist([entry()])}garbage\n`);
+  test('one malformed line refuses the WHOLE file and names file and line', () => {
+    // A partial load that later saves is how a hand edit gets silently destroyed. The file is
+    // named because there are two of these now, and "line 2" alone sends you to the wrong one.
+    const parsed = parseWatchlist(
+      `${formatWatchlist([entry()])}garbage\n`,
+      IGNORELIST_FILE,
+    );
     expect(parsed.ok).toBe(false);
     expect(parsed.entries).toEqual([]);
-    expect(parsed.error).toContain('line 2');
+    expect(parsed.error).toContain(`${IGNORELIST_FILE} line 2`);
   });
 
   test('a JA4 id is normalised to lower case on the way in', () => {
     const raw = formatWatchlist([entry()]).replace(DIG, DIG.toUpperCase());
-    expect(parseWatchlist(raw).entries[0]?.id).toBe(DIG);
+    expect(parseWatchlist(raw, WATCHLIST_FILE).entries[0]?.id).toBe(DIG);
   });
 });
 
@@ -153,9 +163,12 @@ describe('removeEntry', () => {
   });
 });
 
-describe('readWatchlist / recordAdditions', () => {
+describe('readList / recordAdditions', () => {
   test('a missing file is an empty list, ok', async () => {
-    expect(await readWatchlist(tmp())).toEqual({ entries: [], ok: true });
+    expect(await readList(tmp(), WATCHLIST_FILE)).toEqual({
+      entries: [],
+      ok: true,
+    });
   });
 
   test('recording twice accumulates on disk, deduped', async () => {
@@ -163,11 +176,13 @@ describe('readWatchlist / recordAdditions', () => {
     const add = [
       { kind: 'ja4' as const, id: DIG, source: 'watch' as const, note: 'n1' },
     ];
-    expect((await recordAdditions(dir, add, AT)).error).toBeUndefined();
-    const { entries } = await recordAdditions(dir, add, LATER);
+    expect(
+      (await recordAdditions(dir, WATCHLIST_FILE, add, AT)).error,
+    ).toBeUndefined();
+    const { entries } = await recordAdditions(dir, WATCHLIST_FILE, add, LATER);
     expect(entries).toHaveLength(1);
     expect(entries?.[0]?.seen).toBe(2);
-    expect((await readWatchlist(dir)).entries?.[0]?.seen).toBe(2);
+    expect((await readList(dir, WATCHLIST_FILE)).entries?.[0]?.seen).toBe(2);
   });
 
   test('a corrupt file is reported and NEVER written over', async () => {
@@ -175,6 +190,7 @@ describe('readWatchlist / recordAdditions', () => {
     writeFileSync(join(dir, WATCHLIST_FILE), 'not|a|valid|line\n', 'utf8');
     const out = await recordAdditions(
       dir,
+      WATCHLIST_FILE,
       [{ kind: 'ja4', id: DIG, source: 'watch', note: '' }],
       AT,
     );
@@ -187,7 +203,72 @@ describe('readWatchlist / recordAdditions', () => {
 
   test('nothing to add means nothing is read or written', async () => {
     const dir = tmp();
-    expect(await recordAdditions(dir, [], AT)).toEqual({});
-    expect((await readWatchlist(dir)).entries).toEqual([]);
+    expect(await recordAdditions(dir, WATCHLIST_FILE, [], AT)).toEqual({});
+    expect((await readList(dir, WATCHLIST_FILE)).entries).toEqual([]);
+  });
+
+  test('the two lists are separate files that never bleed into each other', async () => {
+    const dir = tmp();
+    const add = (id: string) => [
+      { kind: 'ja4' as const, id, source: 'manual' as const, note: '' },
+    ];
+    await recordAdditions(dir, WATCHLIST_FILE, add(DIG), AT);
+    await recordAdditions(dir, IGNORELIST_FILE, add(OTHER), AT);
+    expect((await readList(dir, WATCHLIST_FILE)).entries[0]?.id).toBe(DIG);
+    expect((await readList(dir, IGNORELIST_FILE)).entries[0]?.id).toBe(OTHER);
+  });
+});
+
+describe('recordExclusive', () => {
+  const add = [
+    { kind: 'ja4' as const, id: DIG, source: 'manual' as const, note: 'z' },
+  ];
+
+  test('lands on the target list and leaves the other, so no identity holds both meanings', async () => {
+    const dir = tmp();
+    await recordAdditions(dir, WATCHLIST_FILE, add, AT); // starts watched
+    const out = await recordExclusive(
+      dir,
+      IGNORELIST_FILE,
+      WATCHLIST_FILE,
+      add,
+      LATER,
+    );
+    expect(out.error).toBeUndefined();
+    expect(out.added?.map((e) => e.id)).toEqual([DIG]);
+    expect(out.remaining).toEqual([]);
+    expect((await readList(dir, WATCHLIST_FILE)).entries).toEqual([]);
+    expect((await readList(dir, IGNORELIST_FILE)).entries[0]?.id).toBe(DIG);
+  });
+
+  test('adding when the other list never held it does not rewrite the other file', async () => {
+    const dir = tmp();
+    const out = await recordExclusive(
+      dir,
+      IGNORELIST_FILE,
+      WATCHLIST_FILE,
+      add,
+      AT,
+    );
+    expect(out.error).toBeUndefined();
+    // The drop side stayed absent: nothing manufactured an empty file to overwrite later.
+    expect(() => readFileSync(join(dir, WATCHLIST_FILE), 'utf8')).toThrow();
+  });
+
+  test('refuses when EITHER side is unreadable — a half-move leaves both meanings live', async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, WATCHLIST_FILE), 'garbage\n', 'utf8');
+    const out = await recordExclusive(
+      dir,
+      IGNORELIST_FILE,
+      WATCHLIST_FILE,
+      add,
+      AT,
+    );
+    expect(out.error).toContain('nothing recorded');
+    expect(out.added).toBeUndefined();
+    // Neither file was touched: the corrupt one survives, the target was never created.
+    expect(readFileSync(join(dir, WATCHLIST_FILE), 'utf8')).toBe('garbage\n');
+    expect(() => readFileSync(join(dir, IGNORELIST_FILE), 'utf8')).toThrow();
   });
 });

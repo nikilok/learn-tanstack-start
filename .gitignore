@@ -29,3 +29,4 @@ firewall-watch.log
 .firewall-watch-state
 .firewall-watch-investigated
 .firewall-watchlist
+.firewall-ignorelist

@@ -1,7 +1,9 @@
-// The watch list pane: what is being kept an eye on, how long it has been there, and why.
+// The watch list and ignore list panes: same rows, opposite meanings. Watched is what to keep
+// an eye on; ignored is curated noise watch mode must not profile, record, or display. Neither
+// is enforcement — nothing on either list is denied.
 //
-// Nothing here is denied — the list is memory, not enforcement. Its job is to make "who was
-// that fingerprint again?" a keystroke instead of an archaeology session through the log.
+// Their job is to make "who was that fingerprint again?" and "stop telling me about ch-stream"
+// each a keystroke instead of an archaeology session through the log.
 
 import { ageLabel } from './ip-profile-view';
 import { type Line, blank, line, seg } from './line-model';
@@ -33,6 +35,18 @@ function entryLines(e: WatchlistEntry, isCursor: boolean, now: number): Line[] {
   return L;
 }
 
+// An unreadable list renders as unknown, never as empty: "empty" invites re-adding what may
+// already be there, and the next save would overwrite whatever the file still holds.
+function unreadable(error: string): Line[] {
+  return [
+    blank(),
+    line(seg(`  the list could not be read — ${error}`, 'bad')),
+    line(
+      seg('  entries are withheld and nothing will be saved over it', 'bad'),
+    ),
+  ];
+}
+
 /** Full watch list layout. `cursor` indexes `entries`. */
 export function watchlistLines(
   r: WatchlistReport,
@@ -42,18 +56,7 @@ export function watchlistLines(
   const L: Line[] = [
     line(seg('Watch list', 'bold'), seg('  nothing here is denied', 'dim')),
   ];
-  // An unreadable list renders as unknown, never as empty: "empty" invites re-adding what may
-  // already be there, and the next save would overwrite whatever the file still holds.
-  if (r.error) {
-    L.push(
-      blank(),
-      line(seg(`  the list could not be read — ${r.error}`, 'bad')),
-      line(
-        seg('  entries are withheld and nothing will be saved over it', 'bad'),
-      ),
-    );
-    return L;
-  }
+  if (r.error) return [...L, ...unreadable(r.error)];
   if (!r.entries.length) {
     L.push(
       blank(),
@@ -68,6 +71,32 @@ export function watchlistLines(
     return L;
   }
   L.push(line(seg(`${r.entries.length} watched`)), blank());
+  r.entries.forEach((e, i) => L.push(...entryLines(e, i === cursor, now)));
+  return L;
+}
+
+/** Full ignore list layout — what watch mode skips, before it spends a profile on it. */
+export function ignoreListLines(
+  r: WatchlistReport,
+  cursor: number,
+  now: number,
+): Line[] {
+  const L: Line[] = [
+    line(
+      seg('Ignore list', 'bold'),
+      seg('  watch mode skips these · the WAF is untouched', 'dim'),
+    ),
+  ];
+  if (r.error) return [...L, ...unreadable(r.error)];
+  if (!r.entries.length) {
+    L.push(
+      blank(),
+      line(seg('  nothing is ignored', 'good')),
+      line(seg('  z on an open profile or a watch-list entry mutes it', 'dim')),
+    );
+    return L;
+  }
+  L.push(line(seg(`${r.entries.length} ignored`)), blank());
   r.entries.forEach((e, i) => L.push(...entryLines(e, i === cursor, now)));
   return L;
 }

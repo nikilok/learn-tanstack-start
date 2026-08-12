@@ -1,10 +1,12 @@
-// The watch list — identities worth keeping an eye on, without denying anything. Fed
-// automatically by watch mode (every profiled fingerprint) and manually from a profile tab.
+// Operator-curated identity lists, one file format, two opposite meanings. The WATCH list is
+// what to keep an eye on — fed automatically by watch mode (every profiled fingerprint) and
+// manually from a profile tab. The IGNORE list is curated noise — identities watch mode must
+// not profile, record, or display. An identity sits on at most one of them.
 //
-// Tool-side state only: nothing here touches a WAF rule, so it does NOT live in .env.local.
+// Tool-side state only: nothing here touches a WAF rule, so neither lives in .env.local.
 // That file is written by deliberate operator action and fingerprinted around investigations to
 // alarm on unattended writes; a background tick appending to it would either trip that alarm or
-// normalise automation writing the secrets file. This sits with the loop's other state files.
+// normalise automation writing the secrets file. These sit with the loop's other state files.
 
 import { readFile, writeFile } from 'node:fs/promises';
 
@@ -12,6 +14,8 @@ import { errMsg } from './util';
 
 /** Repo root, gitignored. One entry per line: kind|id|addedAt|lastSeen|seen|source|note. */
 export const WATCHLIST_FILE = '.firewall-watchlist';
+/** Same format, same place. Ignoring is muting, not allowing: the WAF is untouched. */
+export const IGNORELIST_FILE = '.firewall-ignorelist';
 
 const KINDS = ['ip', 'ja4'] as const;
 const SOURCES = ['watch', 'manual'] as const;
@@ -60,8 +64,8 @@ function cleanNote(note: string): string {
     .slice(0, NOTE_MAX);
 }
 
-/** Strict: one malformed line refuses the whole file, because a partial load that then saves is how hand edits get destroyed. */
-export function parseWatchlist(raw: string): Watchlist {
+/** Strict: one malformed line refuses the whole file, because a partial load that then saves is how hand edits get destroyed. `file` only names the culprit in errors — there are two now. */
+export function parseWatchlist(raw: string, file: string): Watchlist {
   const entries: WatchlistEntry[] = [];
   for (const [i, text] of raw.split('\n').entries()) {
     const trimmed = text.trim();
@@ -71,7 +75,7 @@ export function parseWatchlist(raw: string): Watchlist {
     const bad = (why: string): Watchlist => ({
       entries: [],
       ok: false,
-      error: `${WATCHLIST_FILE} line ${i + 1}: ${why}`,
+      error: `${file} line ${i + 1}: ${why}`,
     });
     if (!KINDS.includes(kind as WatchlistEntry['kind']))
       return bad(`kind must be ${KINDS.join(' or ')}`);
@@ -155,30 +159,27 @@ export function removeEntry(
   return entries.filter((e) => keyOf(e.kind, e.id) !== key);
 }
 
-/** Load the list. A missing file is an empty list; anything else unreadable is UNKNOWN, ok:false. */
-export async function readWatchlist(dir: string): Promise<Watchlist> {
+/** Load a list. A missing file is an empty list; anything else unreadable is UNKNOWN, ok:false. */
+export async function readList(dir: string, file: string): Promise<Watchlist> {
   let raw: string;
   try {
-    raw = await readFile(`${dir}/${WATCHLIST_FILE}`, 'utf8');
+    raw = await readFile(`${dir}/${file}`, 'utf8');
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT')
       return { entries: [], ok: true };
     return { entries: [], ok: false, error: errMsg(e) };
   }
-  return parseWatchlist(raw);
+  return parseWatchlist(raw, file);
 }
 
-/** Persist the list. Returns an error message rather than throwing — the list is a convenience and must never kill the loop that guards the site. */
-export async function saveWatchlist(
+/** Persist a list. Returns an error message rather than throwing — the lists are a convenience and must never kill the loop that guards the site. */
+export async function saveList(
   dir: string,
+  file: string,
   entries: readonly WatchlistEntry[],
 ): Promise<string | undefined> {
   try {
-    await writeFile(
-      `${dir}/${WATCHLIST_FILE}`,
-      formatWatchlist(entries),
-      'utf8',
-    );
+    await writeFile(`${dir}/${file}`, formatWatchlist(entries), 'utf8');
     return undefined;
   } catch (e) {
     return errMsg(e);
@@ -186,20 +187,59 @@ export async function saveWatchlist(
 }
 
 /**
- * Read–upsert–write in one step, shared by the TUI tick, the CLI run and a manual mark.
+ * Read–upsert–write in one step, shared by the TUI tick and the CLI run.
  * Refuses to write over a file it could not read, and says so.
  */
 export async function recordAdditions(
   dir: string,
+  file: string,
   additions: readonly WatchAddition[],
   at: Date,
 ): Promise<{ entries?: WatchlistEntry[]; error?: string }> {
   if (!additions.length) return {};
-  const list = await readWatchlist(dir);
+  const list = await readList(dir, file);
   if (!list.ok)
     return { error: `${list.error ?? 'unreadable'} — nothing recorded` };
   let entries = list.entries;
   for (const add of additions) entries = upsertEntry(entries, add, at);
-  const error = await saveWatchlist(dir, entries);
+  const error = await saveList(dir, file, entries);
   return error ? { error } : { entries };
+}
+
+/**
+ * Record onto one list and drop the same identities from the other, so watch and ignore stay
+ * exclusive by construction. Refuses when EITHER file is unreadable: dropping is half the move,
+ * and doing only the addition would leave the identity on both lists with both meanings.
+ */
+export async function recordExclusive(
+  dir: string,
+  addFile: string,
+  dropFile: string,
+  additions: readonly WatchAddition[],
+  at: Date,
+): Promise<{
+  added?: WatchlistEntry[];
+  remaining?: WatchlistEntry[];
+  error?: string;
+}> {
+  if (!additions.length) return {};
+  const [target, other] = await Promise.all([
+    readList(dir, addFile),
+    readList(dir, dropFile),
+  ]);
+  if (!target.ok)
+    return { error: `${target.error ?? 'unreadable'} — nothing recorded` };
+  if (!other.ok)
+    return { error: `${other.error ?? 'unreadable'} — nothing recorded` };
+  let added = target.entries;
+  for (const add of additions) added = upsertEntry(added, add, at);
+  let remaining = other.entries;
+  for (const add of additions)
+    remaining = removeEntry(remaining, add.kind, add.id);
+  const error =
+    (await saveList(dir, addFile, added)) ??
+    (remaining.length !== other.entries.length
+      ? await saveList(dir, dropFile, remaining)
+      : undefined);
+  return error ? { error } : { added, remaining };
 }

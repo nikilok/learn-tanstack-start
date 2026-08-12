@@ -76,4 +76,26 @@ describe('enterTuiScreen / leaveTuiScreen', () => {
     leaveTuiScreen(out);
     expect(listenerCounts()).toEqual(before);
   });
+
+  test('re-entry never stacks exit hooks — the live one restores the live stream', () => {
+    // A stale hook from a previous entry would run first at exit, flip `entered` off against
+    // the OLD stream, and leave the active screen unrestored.
+    const first = stream(true);
+    const second = stream(true);
+    const before = process.listeners('exit').length;
+    enterTuiScreen(first.out);
+    expect(process.listeners('exit')).toHaveLength(before + 1);
+    leaveTuiScreen(first.out);
+    expect(process.listeners('exit')).toHaveLength(before);
+    enterTuiScreen(second.out);
+    const hooks = process.listeners('exit');
+    expect(hooks).toHaveLength(before + 1);
+    (hooks[hooks.length - 1] as () => void)();
+    expect(second.writes).toEqual([
+      '\x1b[?1049h\x1b[?1007h\x1b[H',
+      '\x1b[?1007l\x1b[?1049l',
+    ]);
+    expect(first.writes).toHaveLength(2); // untouched by the second lifecycle
+    expect(process.listeners('exit')).toHaveLength(before);
+  });
 });

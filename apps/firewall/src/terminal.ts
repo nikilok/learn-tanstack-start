@@ -14,6 +14,7 @@ type ExitSignal = (typeof SIGNALS)[number];
 
 let entered = false;
 let signalHandlers: Array<[ExitSignal, () => void]> = [];
+let exitHandler: (() => void) | undefined;
 
 /** Switch to the TUI screen. No-op without a TTY, so headless runs never emit control codes. */
 export function enterTuiScreen(
@@ -23,7 +24,8 @@ export function enterTuiScreen(
   if (!out.isTTY || entered) return;
   entered = true;
   // Every way out — q, ctrl-c, a crash — must restore, or the shell is left on the app buffer.
-  process.once('exit', () => leaveTuiScreen(out));
+  exitHandler = () => leaveTuiScreen(out);
+  process.once('exit', exitHandler);
   for (const sig of SIGNALS) {
     // Restore first, then re-deliver, so the process still dies by the signal it was sent.
     const handler = () => {
@@ -41,6 +43,12 @@ export function enterTuiScreen(
 
 /** Back to the shell's own buffer. Safe to call twice; the exit hook makes that the normal case. */
 export function leaveTuiScreen(out: NodeJS.WriteStream = process.stdout): void {
+  // A leave detaches everything enter attached, or a re-entered TUI carries a stale hook
+  // bound to the previous stream that steals the real exit's restore.
+  if (exitHandler) {
+    process.removeListener('exit', exitHandler);
+    exitHandler = undefined;
+  }
   for (const [sig, handler] of signalHandlers)
     process.removeListener(sig, handler);
   signalHandlers = [];

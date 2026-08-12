@@ -1601,7 +1601,11 @@ export function App() {
           setWatchlist(next);
           setWatchlistCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
           void saveList(ROOT, WATCHLIST_FILE, next).then((err) => {
-            if (err) setCopied(`watch list: ${err}`);
+            if (err) {
+              // The file still holds what the pane just dropped — re-read so they agree.
+              setCopied(`watch list: ${err}`);
+              void loadWatchlist();
+            }
           });
         }
       } else if (input === 'z' && pane === 'watchlist') {
@@ -1636,7 +1640,12 @@ export function App() {
           setIgnoreList(next);
           setIgnoreCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
           void saveList(ROOT, IGNORELIST_FILE, next).then((err) => {
-            if (err) setCopied(`ignore list: ${err}`);
+            if (err) {
+              // Worse here than on the watch list: the pane would show it un-ignored while
+              // the screen keeps skipping it. Re-read so the pane tells the truth.
+              setCopied(`ignore list: ${err}`);
+              void loadIgnoreList();
+            }
           });
         }
       } else if (input === 'm' && pane === 'ignorelist') {
@@ -2121,7 +2130,10 @@ export function App() {
             </Box>
           </Box>
           {copied && (
+            // paneChrome reserves exactly one row for this note; a long save error must clip,
+            // not wrap, or the frame outgrows the viewport.
             <Text
+              wrap="truncate-end"
               color={
                 copied.startsWith('copy failed') ||
                 copied.startsWith('watch list:') ||

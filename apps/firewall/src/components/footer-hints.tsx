@@ -47,6 +47,8 @@ export function hintSegments(hints: readonly MaybeHint[]): HintSeg[] {
  * scroll the frame. Mirrors the terminal's word wrap given the non-breaking spaces above: each
  * hint is unbreakable, the ` · ` separators are the only break points (and are dropped at a
  * line start). `prefixWidth` is any leading text sharing the first line, e.g. a tab indicator.
+ * Assumes prefix-plus-one-hint fits `width`; the caller guarantees it — the pane never renders
+ * below MIN_PANE_W (46), several times the widest hint — so Ink's mid-word hard wrap cannot fire.
  */
 export function hintRows(
   hints: readonly MaybeHint[],

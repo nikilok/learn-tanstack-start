@@ -381,6 +381,10 @@ export function App() {
     ipTabs.active?.data,
     ipTabs.index,
     reportH,
+    // The list panes load and grow asynchronously; without these a long list is clamped to the
+    // height it had while still loading and can never be scrolled to.
+    watchlist,
+    ignoreList,
   ]);
 
   // A blinking marker, so a watch screen left on a desk reads as live at a glance rather than

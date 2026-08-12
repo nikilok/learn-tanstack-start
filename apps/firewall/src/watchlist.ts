@@ -7,8 +7,12 @@
 // That file is written by deliberate operator action and fingerprinted around investigations to
 // alarm on unattended writes; a background tick appending to it would either trip that alarm or
 // normalise automation writing the secrets file. These sit with the loop's other state files.
+//
+// Single-writer by assumption. A TUI tick and a CLI run racing the same file can lose one
+// seen-bump to a read-modify-write overlap — tolerated: saves go through a write-then-rename,
+// so a race can drop a count, never leave a file half-written.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 
 import { errMsg } from './util';
 
@@ -178,10 +182,14 @@ export async function saveList(
   file: string,
   entries: readonly WatchlistEntry[],
 ): Promise<string | undefined> {
+  // Write-then-rename: a failure mid-write must never truncate the list it was replacing.
+  const tmp = `${dir}/${file}.tmp-${process.pid}`;
   try {
-    await writeFile(`${dir}/${file}`, formatWatchlist(entries), 'utf8');
+    await writeFile(tmp, formatWatchlist(entries), 'utf8');
+    await rename(tmp, `${dir}/${file}`);
     return undefined;
   } catch (e) {
+    await unlink(tmp).catch(() => undefined);
     return errMsg(e);
   }
 }
@@ -236,10 +244,16 @@ export async function recordExclusive(
   let remaining = other.entries;
   for (const add of additions)
     remaining = removeEntry(remaining, add.kind, add.id);
-  const error =
-    (await saveList(dir, addFile, added)) ??
-    (remaining.length !== other.entries.length
-      ? await saveList(dir, dropFile, remaining)
-      : undefined);
-  return error ? { error } : { added, remaining };
+  // Add first: if the drop then fails, the identity sits on BOTH lists — confusing but nothing
+  // is lost, and ignore keeps gating. Drop-first would risk losing it from both.
+  const addError = await saveList(dir, addFile, added);
+  if (addError) return { error: addError };
+  if (remaining.length !== other.entries.length) {
+    const dropError = await saveList(dir, dropFile, remaining);
+    if (dropError)
+      return {
+        error: `half-moved — written to ${addFile} but ${dropFile} still lists it: ${dropError}`,
+      };
+  }
+  return { added, remaining };
 }

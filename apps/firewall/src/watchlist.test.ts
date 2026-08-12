@@ -2,7 +2,14 @@
 // over, because the save is what turns one bad parse into a lost curation.
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -205,6 +212,46 @@ describe('readList / recordAdditions', () => {
     const dir = tmp();
     expect(await recordAdditions(dir, WATCHLIST_FILE, [], AT)).toEqual({});
     expect((await readList(dir, WATCHLIST_FILE)).entries).toEqual([]);
+  });
+
+  test('a successful save leaves no temp file behind', async () => {
+    const dir = tmp();
+    await recordAdditions(
+      dir,
+      WATCHLIST_FILE,
+      [{ kind: 'ja4', id: DIG, source: 'watch', note: '' }],
+      AT,
+    );
+    expect(readdirSync(dir)).toEqual([WATCHLIST_FILE]);
+  });
+
+  test('a failed save reports and leaves the existing list untouched', async () => {
+    // Root ignores directory permissions, so this scenario cannot be staged there.
+    if (process.getuid?.() === 0) return;
+    const dir = tmp();
+    await recordAdditions(
+      dir,
+      WATCHLIST_FILE,
+      [{ kind: 'ja4', id: DIG, source: 'watch', note: 'original' }],
+      AT,
+    );
+    const before = readFileSync(join(dir, WATCHLIST_FILE), 'utf8');
+    chmodSync(dir, 0o555);
+    try {
+      const out = await recordAdditions(
+        dir,
+        WATCHLIST_FILE,
+        [{ kind: 'ja4', id: OTHER, source: 'watch', note: 'new' }],
+        LATER,
+      );
+      expect(out.error).toBeTruthy();
+      expect(out.entries).toBeUndefined();
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    // The write-then-rename means the original survives the failure byte for byte.
+    expect(readFileSync(join(dir, WATCHLIST_FILE), 'utf8')).toBe(before);
+    expect(readdirSync(dir)).toEqual([WATCHLIST_FILE]);
   });
 
   test('the two lists are separate files that never bleed into each other', async () => {

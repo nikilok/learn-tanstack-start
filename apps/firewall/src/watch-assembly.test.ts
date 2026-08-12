@@ -10,7 +10,10 @@
 // than recording API payloads. Recorded rows go stale as dimensions change and would carry real
 // fingerprints; parameters carry neither.
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { Reach } from './ban-advice';
 import type { IpProfile } from './ip-profile';
@@ -18,9 +21,22 @@ import { mixOf } from './ip-signals';
 import type { Row } from './observability';
 import { rollingWindow } from './time-window';
 import { type ScreenDeps, findSuspects, screen, screenOnce } from './watch';
+import { IGNORELIST_FILE } from './watchlist';
 
 const CREDS = { projectId: 'p', teamId: 't', token: 'x' };
 const WINDOW = rollingWindow(24, new Date('2026-08-08T12:00:00.000Z'));
+
+// screenOnce reads the operator's list files from a directory; tests hand it a fresh one so
+// they can never read the REAL ignore list on this machine — the file-fixture trap again.
+const dirs: string[] = [];
+const tmp = () => {
+  const d = mkdtempSync(join(tmpdir(), 'fw-assembly-'));
+  dirs.push(d);
+  return d;
+};
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
 
 /** One client's traffic, said once, in the terms an operator would use to describe it. */
 type Client = {
@@ -336,6 +352,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
+        [],
         deps([HARVESTER]),
       ),
     );
@@ -359,6 +376,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
+        [],
         deps([chStream]),
       ),
     );
@@ -380,6 +398,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         [],
         undefined,
         ['googlebot'],
+        [],
         [],
         deps([chStream]),
       ),
@@ -406,6 +425,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
+        [],
         deps([crawler]),
       ),
     );
@@ -428,6 +448,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
+        [],
         deps([crawler]),
       ),
     );
@@ -443,6 +464,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         ['SomeBot'],
+        [],
         deps([HARVESTER]),
       ),
     );
@@ -458,9 +480,29 @@ describe('findSuspects — screen to verdict, end to end', () => {
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
+        [],
         deps([HARVESTER]),
       ),
     );
+    expect(findings).toHaveLength(0);
+  });
+
+  test('an IGNORED identity is skipped before the profile spend, but still screened', async () => {
+    const { rows, findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [HARVESTER.digest],
+        deps([HARVESTER]),
+      ),
+    );
+    // Muted, not invisible: the aggregate count stays honest while nothing is profiled,
+    // recorded, or displayed for it.
+    expect(rows.map((r) => r.digest)).toContain(HARVESTER.digest);
     expect(findings).toHaveLength(0);
   });
 });
@@ -499,11 +541,38 @@ describe('screenOnce — the shared entry both paths use', () => {
     // must degrade to the permissive value and hand the failures BACK, because the CLI escalates
     // them to exit 2 and the TUI shows them — and a throw here kills the loop instead.
     const out = await offline(() =>
-      atFloor(() => screenOnce(CREDS, WINDOW, deps([HARVESTER]))),
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([HARVESTER]), tmp())),
     );
     expect(out.configErrors.length).toBeGreaterThan(0);
     // Degraded, not dead: it still screened.
     expect(out.rows.length).toBeGreaterThan(0);
+  });
+
+  test('the ignore list reaches the screen THROUGH screenOnce', async () => {
+    // Same forwarding assertion as the allowlist one: the gate exists in findSuspects, and the
+    // defect class this file exists for is a caller failing to pass it.
+    const dir = tmp();
+    writeFileSync(
+      join(dir, IGNORELIST_FILE),
+      `ja4|${HARVESTER.digest}|2026-08-12T10:00:00.000Z|2026-08-12T10:00:00.000Z|1|manual|first-party\n`,
+      'utf8',
+    );
+    const out = await offline(() =>
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([HARVESTER]), dir)),
+    );
+    expect(out.rows.map((r) => r.digest)).toContain(HARVESTER.digest);
+    expect(out.findings).toHaveLength(0);
+  });
+
+  test('an unreadable ignore list ignores NOTHING, and says so', async () => {
+    // The permissive direction: a config that failed to load must never mute the screen.
+    const dir = tmp();
+    writeFileSync(join(dir, IGNORELIST_FILE), 'garbage\n', 'utf8');
+    const out = await offline(() =>
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([HARVESTER]), dir)),
+    );
+    expect(out.findings.length).toBeGreaterThan(0);
+    expect(out.configErrors.join(' ')).toContain(IGNORELIST_FILE);
   });
 
   test('an unreadable allowlist exempts every verified crawler', async () => {
@@ -518,7 +587,7 @@ describe('screenOnce — the shared entry both paths use', () => {
       category: undefined,
     };
     const out = await offline(() =>
-      atFloor(() => screenOnce(CREDS, WINDOW, deps([crawler]))),
+      atFloor(() => screenOnce(CREDS, WINDOW, deps([crawler]), tmp())),
     );
     expect(out.rows).toHaveLength(0);
     expect(out.configErrors.join(' ')).toContain('FW_ALLOWED_BOTS');

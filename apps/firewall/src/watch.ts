@@ -48,6 +48,13 @@ import {
   rememberNotified,
   shouldNotify,
 } from './watch-notify';
+import {
+  IGNORELIST_FILE,
+  WATCHLIST_FILE,
+  type WatchAddition,
+  readList,
+  recordAdditions,
+} from './watchlist';
 
 const MAX_HOURS = 24 * 6; // the free observability window
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
@@ -209,6 +216,29 @@ export async function logShadow(
         digest: f.digest,
         refusal: f.autoBanRefusal,
       });
+}
+
+/** The first thing that decided the advice — a blocker outranks evidence, evidence outranks a ruled-out lever. */
+export function adviceWhy(a: Advice): string {
+  return a.blockers[0] ?? a.reasons[0] ?? a.leverNotes[0] ?? '';
+}
+
+/** The advice as one log-friendly line: the verdict plus what decided it. */
+export function adviceSummary(a: Advice): string {
+  const why = adviceWhy(a);
+  return why ? `${a.verdict} — ${why}` : a.verdict;
+}
+
+/** What a run contributes to the watch list: every profiled identity, whatever the verdict — "who was that?" is exactly the question the list exists to answer. */
+export function watchlistAdditions(
+  findings: readonly Finding[],
+): WatchAddition[] {
+  return findings.map((f) => ({
+    kind: 'ja4' as const,
+    id: f.digest,
+    source: 'watch' as const,
+    note: `${adviceSummary(f.advice)}${f.why.length ? ` · screen: ${f.why[0]}` : ''}`,
+  }));
 }
 
 /**
@@ -466,6 +496,8 @@ export async function findSuspects(
   allowedBots?: string[],
   /** User-agent tokens already denied at the WAF. */
   deniedUa: readonly string[] = [],
+  /** Operator-curated noise: never profiled, so never recorded, logged, or displayed. */
+  ignoredJa4: readonly string[] = [],
   deps: ScreenDeps = LIVE_DEPS,
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
   const { rows, truncated, handled } = await screen(
@@ -476,11 +508,13 @@ export async function findSuspects(
     deps,
   );
   const findings: Finding[] = [];
-  // Both levers. An identity denied by either is handled, and profiling it again spends ~21
-  // queries — and, unattended, a paid investigation — to rediscover a ban already in place.
+  // Both levers, plus the ignore list. An identity denied by either lever is handled, and
+  // profiling it again spends ~21 queries — and, unattended, a paid investigation — to
+  // rediscover a ban already in place. An IGNORED identity is the operator saying the same
+  // about a first-party or otherwise-known caller: skip it before the spend, not after.
   const candidates = worthProfiling(
     rows,
-    [...deniedJa4, ...handled],
+    [...deniedJa4, ...handled, ...ignoredJa4],
     screenFloor(window.minutes),
   );
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
@@ -551,6 +585,8 @@ export async function screenOnce(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
   deps: ScreenDeps = LIVE_DEPS,
+  /** Where the operator's list files live. Injectable so tests never read the real ones. */
+  dir: string = process.cwd(),
 ): Promise<{
   rows: Screened[];
   findings: Finding[];
@@ -558,6 +594,16 @@ export async function screenOnce(
   configErrors: string[];
 }> {
   const configErrors: string[] = [];
+
+  // Curated noise. Unreadable means NOTHING is ignored — the screen only ever widens, and the
+  // noise coming back is what tells the operator the file needs fixing, alongside the error.
+  let ignored: string[] = [];
+  {
+    const list = await readList(dir, IGNORELIST_FILE);
+    if (list.ok)
+      ignored = list.entries.filter((e) => e.kind === 'ja4').map((e) => e.id);
+    else configErrors.push(list.error ?? `${IGNORELIST_FILE} unreadable`);
+  }
 
   // Not required: an unreadable denylist means nothing is known to be already-denied, which only
   // ever makes the screen wider.
@@ -609,6 +655,7 @@ export async function screenOnce(
     trusted,
     allowed,
     deniedUa,
+    ignored,
     deps,
   );
   return { ...found, configErrors };
@@ -816,6 +863,14 @@ async function main() {
   );
   errors.push(...configErrors);
   await logShadow(process.cwd(), findings);
+  // Whatever was judged goes on the watch list, so "who was that?" outlives this run's stdout.
+  const listed = await recordAdditions(
+    process.cwd(),
+    WATCHLIST_FILE,
+    watchlistAdditions(findings),
+    new Date(),
+  );
+  if (listed.error) errors.push(`watch list: ${listed.error}`);
 
   const report: WatchReport = {
     window,

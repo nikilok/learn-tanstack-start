@@ -26,6 +26,11 @@ import {
   token,
 } from './client';
 import { copyToClipboard } from './clipboard';
+import {
+  FooterHints,
+  type MaybeHint,
+  hintRows,
+} from './components/footer-hints';
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
@@ -51,7 +56,7 @@ import {
   quietBand,
 } from './identity-list';
 import { moveCursor, resolveIpEntry } from './ip-entry';
-import { type IpProfile, topIps, topJa4 } from './ip-profile';
+import { type IpProfile, type Subject, topIps, topJa4 } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { trustedRules } from './rule-integrity';
@@ -75,7 +80,13 @@ import {
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
 import { type Pane, usePane } from './use-pane';
 import { errMsg } from './util';
-import { logShadow, screenOnce } from './watch';
+import {
+  adviceSummary,
+  adviceWhy,
+  logShadow,
+  screenOnce,
+  watchlistAdditions,
+} from './watch';
 import { WATCH_LOG, clockTime, logWatch } from './watch-log';
 import {
   fingerprintConfig,
@@ -96,20 +107,41 @@ import {
   rememberNotified,
   shouldNotify,
 } from './watch-notify';
+import {
+  IGNORELIST_FILE,
+  WATCHLIST_FILE,
+  type WatchlistEntry,
+  readList,
+  recordAdditions,
+  recordExclusive,
+  removeEntry,
+  saveList,
+} from './watchlist';
+import { ignoreListLines, watchlistLines } from './watchlist-view';
 
-type PaneKind = 'report' | 'ip' | 'sitemap' | 'denylist';
+type PaneKind =
+  | 'report'
+  | 'ip'
+  | 'sitemap'
+  | 'denylist'
+  | 'watchlist'
+  | 'ignorelist';
 const PANE_KEY: Record<string, PaneKind> = {
   r: 'report',
   i: 'ip',
   f: 'ip', // same pane, fingerprint picker
   s: 'sitemap',
   d: 'denylist',
+  t: 'watchlist',
+  g: 'ignorelist',
 };
 const JA4_RULE = 'deny-scraper-ja4';
 const ASN_RULE = 'deny-scraper-asn';
 const DENY_ACTIVITY_HOURS = 144;
 // Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
 const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
+// Where the watch list and the watch log live — the CLI runs from here too, so they share state.
+const ROOT = process.cwd();
 const IP_WINDOW_HOURS = 24;
 // One query per tick. Measured: 10 back-to-back calls to this endpoint all returned 200 at ~1s
 // each, so ~1/s is tolerated. This sits 15x under that, matching the cadence Vercel's own live
@@ -238,6 +270,12 @@ export function App() {
   const [denyActivityNote, setDenyActivityNote] = useState('');
   const [sitemapCursor, setSitemapCursor] = useState(0);
   const [copied, setCopied] = useState('');
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
+  const [watchlistError, setWatchlistError] = useState('');
+  const [watchlistCursor, setWatchlistCursor] = useState(0);
+  const [ignoreList, setIgnoreList] = useState<WatchlistEntry[]>([]);
+  const [ignoreError, setIgnoreError] = useState('');
+  const [ignoreCursor, setIgnoreCursor] = useState(0);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removedDenies, setRemovedDenies] = useState<string[]>([]);
@@ -272,6 +310,8 @@ export function App() {
   // closure would otherwise keep whatever the values were at arming.
   const [watchOn, setWatchOn] = useState(false);
   const [watchNote, setWatchNote] = useState('');
+  // Who the last tick actually profiled, one line each — the note above only counts them.
+  const [watchWho, setWatchWho] = useState<string[]>([]);
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
@@ -346,6 +386,10 @@ export function App() {
     ipTabs.active?.data,
     ipTabs.index,
     reportH,
+    // The list panes load and grow asynchronously; without these a long list is clamped to the
+    // height it had while still loading and can never be scrolled to.
+    watchlist,
+    ignoreList,
   ]);
 
   // A blinking marker, so a watch screen left on a desk reads as live at a glance rather than
@@ -495,6 +539,29 @@ export function App() {
         if (stopped) return;
         setWatchAt(clockTime(new Date()));
         await logShadow(root, findings);
+        // Whatever was judged goes on the watch list, so "who was that?" survives the tick.
+        if (findings.length) {
+          const listed = await recordAdditions(
+            root,
+            WATCHLIST_FILE,
+            watchlistAdditions(findings),
+            new Date(),
+          );
+          if (listed.error)
+            void logWatch(root, new Date(), {
+              kind: 'error',
+              error: `watch list: ${listed.error}`,
+            });
+          else if (listed.entries) {
+            setWatchlist(listed.entries);
+            setWatchlistError('');
+          }
+        }
+        setWatchWho(
+          findings.map(
+            (f) => `${f.digest} · ${f.total} req · ${adviceSummary(f.advice)}`,
+          ),
+        );
         const bans = findings.filter((f) => f.advice.verdict === 'ban');
         // Truncation is carried, not dropped. A capped screen that surfaced nothing is BLIND, and
         // rendering that as "0 allowed through" is a quiet night the tool never actually had.
@@ -520,6 +587,13 @@ export function App() {
           fingerprints: rows.length,
           profiled: findings.length,
           bans: bans.length,
+          profiledWho: findings.map((f) => ({
+            digest: f.digest,
+            allowed: f.allowed,
+            total: f.total,
+            verdict: f.advice.verdict,
+            why: adviceWhy(f.advice),
+          })),
         });
 
         const now = Date.now();
@@ -1019,6 +1093,9 @@ export function App() {
   const openPane = (kind: PaneKind, pick: 'ip' | 'ja4' = 'ip') => {
     setPane(kind);
     setReportScroll(0);
+    // The copy note describes an action on the pane being left; carried across, it reads as a
+    // response to whatever key opened this one.
+    setCopied('');
     if (kind === 'ip') {
       setPickKind(pick);
       setIpInput('');
@@ -1032,6 +1109,9 @@ export function App() {
     setFocus('pane');
     if (kind === 'report' && !report.data)
       void report.load(() => fetchReport(creds));
+    // Always re-read: the file is local, and the watch tick or a CLI run may have fed it since.
+    if (kind === 'watchlist') void loadWatchlist();
+    if (kind === 'ignorelist') void loadIgnoreList();
     if (kind === 'sitemap' && !sitemap.data)
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     if (kind === 'denylist' && !denyActivity.data)
@@ -1208,9 +1288,71 @@ export function App() {
     ipTabs.openMany(subjects, ipWindow);
   };
 
+  /** Load the on-disk watch list into the pane, keeping unreadable distinct from empty. */
+  const loadWatchlist = async () => {
+    const list = await readList(ROOT, WATCHLIST_FILE);
+    setWatchlist(list.entries);
+    setWatchlistError(list.ok ? '' : (list.error ?? 'unreadable'));
+    setWatchlistCursor((c) =>
+      Math.max(0, Math.min(c, list.entries.length - 1)),
+    );
+  };
+
+  /** Same for the ignore list. */
+  const loadIgnoreList = async () => {
+    const list = await readList(ROOT, IGNORELIST_FILE);
+    setIgnoreList(list.entries);
+    setIgnoreError(list.ok ? '' : (list.error ?? 'unreadable'));
+    setIgnoreCursor((c) => Math.max(0, Math.min(c, list.entries.length - 1)));
+  };
+
+  /** Put an identity on one list and off the other — watched and ignored are exclusive. */
+  const moveIdentity = async (
+    to: 'watch' | 'ignore',
+    subject: Subject,
+    note: string,
+  ) => {
+    const [addFile, dropFile] =
+      to === 'watch'
+        ? [WATCHLIST_FILE, IGNORELIST_FILE]
+        : [IGNORELIST_FILE, WATCHLIST_FILE];
+    const out = await recordExclusive(
+      ROOT,
+      addFile,
+      dropFile,
+      [{ kind: subject.kind, id: subject.value, source: 'manual', note }],
+      new Date(),
+    );
+    if (out.error) {
+      setCopied(`${to} list: ${out.error}`);
+      return;
+    }
+    const [added, remaining] = [out.added ?? [], out.remaining ?? []];
+    if (to === 'watch') {
+      setWatchlist(added);
+      setIgnoreList(remaining);
+    } else {
+      setIgnoreList(added);
+      setWatchlist(remaining);
+    }
+    setWatchlistError('');
+    setIgnoreError('');
+    const watchLen = (to === 'watch' ? added : remaining).length;
+    const ignoreLen = (to === 'ignore' ? added : remaining).length;
+    setWatchlistCursor((c) => Math.max(0, Math.min(c, watchLen - 1)));
+    setIgnoreCursor((c) => Math.max(0, Math.min(c, ignoreLen - 1)));
+    setCopied(
+      to === 'watch'
+        ? `watching ${subject.value} — t to view`
+        : `ignoring ${subject.value} — g to view · watch mode now skips it`,
+    );
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
+    else if (pane === 'watchlist') void loadWatchlist();
+    else if (pane === 'ignorelist') void loadIgnoreList();
     else if (pane === 'sitemap')
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     else if (pane === 'ip') ipTabs.refresh();
@@ -1393,6 +1535,13 @@ export function App() {
           onYes: () => stageDeny('ja4', lever.value),
         });
         setFocus('confirm');
+      } else if (pane === 'denylist' && key.return) {
+        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
+        const entry = denyEntries[denyCursor];
+        if (entry)
+          void copyToClipboard(entry.value).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${entry.value}`),
+          );
       } else if (input === 'u' && pane === 'denylist') {
         const entry = denyEntries[denyCursor];
         if (!entry || entry.removed) return;
@@ -1429,17 +1578,121 @@ export function App() {
           setReportScroll(0);
           ipTabs.open({ kind: 'ja4', value: d.ja4 }, ipWindow);
         }
+      } else if (pane === 'watchlist' && key.return) {
+        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
+        const e = watchlist[watchlistCursor];
+        if (e)
+          void copyToClipboard(e.id).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
+          );
+      } else if (input === 'o' && pane === 'watchlist') {
+        const e = watchlist[watchlistCursor];
+        if (e) {
+          setPickKind(e.kind);
+          setPane('ip');
+          setReportScroll(0);
+          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
+        }
+      } else if (input === 'x' && pane === 'watchlist') {
+        // Removal is cheap to undo (mark it again), so no confirm — unlike lifting a deny.
+        const e = watchlist[watchlistCursor];
+        if (e) {
+          const next = removeEntry(watchlist, e.kind, e.id);
+          setWatchlist(next);
+          setWatchlistCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
+          void saveList(ROOT, WATCHLIST_FILE, next).then((err) => {
+            if (err) {
+              // The file still holds what the pane just dropped — re-read so they agree.
+              setCopied(`watch list: ${err}`);
+              void loadWatchlist();
+            }
+          });
+        }
+      } else if (input === 'z' && pane === 'watchlist') {
+        // The successor state: seen, judged, and not worth being told about again.
+        const e = watchlist[watchlistCursor];
+        if (e)
+          void moveIdentity(
+            'ignore',
+            { kind: e.kind, value: e.id },
+            e.note || 'moved from watch list',
+          );
+      } else if (pane === 'ignorelist' && key.return) {
+        const e = ignoreList[ignoreCursor];
+        if (e)
+          void copyToClipboard(e.id).then((err) =>
+            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
+          );
+      } else if (input === 'o' && pane === 'ignorelist') {
+        // Ignored is muted, not invisible — a profile is still one keystroke away.
+        const e = ignoreList[ignoreCursor];
+        if (e) {
+          setPickKind(e.kind);
+          setPane('ip');
+          setReportScroll(0);
+          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
+        }
+      } else if (input === 'x' && pane === 'ignorelist') {
+        // Un-ignoring needs no ceremony: if it is still active, the next tick re-surfaces it.
+        const e = ignoreList[ignoreCursor];
+        if (e) {
+          const next = removeEntry(ignoreList, e.kind, e.id);
+          setIgnoreList(next);
+          setIgnoreCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
+          void saveList(ROOT, IGNORELIST_FILE, next).then((err) => {
+            if (err) {
+              // Worse here than on the watch list: the pane would show it un-ignored while
+              // the screen keeps skipping it. Re-read so the pane tells the truth.
+              setCopied(`ignore list: ${err}`);
+              void loadIgnoreList();
+            }
+          });
+        }
+      } else if (input === 'm' && pane === 'ignorelist') {
+        const e = ignoreList[ignoreCursor];
+        if (e)
+          void moveIdentity(
+            'watch',
+            { kind: e.kind, value: e.id },
+            e.note || 'moved from ignore list',
+          );
+      } else if (input === 'm' && pane === 'ip' && ipTabs.active) {
+        void moveIdentity(
+          'watch',
+          ipTabs.active.subject,
+          'marked from profile',
+        );
+      } else if (input === 'z' && pane === 'ip' && ipTabs.active) {
+        void moveIdentity(
+          'ignore',
+          ipTabs.active.subject,
+          'ignored from profile',
+        );
       } else if (input === 'x' && pane === 'ip') {
         ipTabs.close();
         setReportScroll(0);
       } else if (PANE_KEY[input])
         openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
       else if (key.escape) setFocus('editor');
-      else if (pane === 'denylist' && (key.upArrow || input === 'k'))
+      else if (pane === 'denylist' && (key.upArrow || input === 'k')) {
         setDenyCursor((c) => Math.max(0, c - 1));
-      else if (pane === 'denylist' && (key.downArrow || input === 'j'))
+        setCopied('');
+      } else if (pane === 'denylist' && (key.downArrow || input === 'j')) {
         setDenyCursor((c) => Math.min(denyEntries.length - 1, c + 1));
-      else if (key.upArrow || input === 'k')
+        setCopied('');
+      } else if (pane === 'watchlist' && (key.upArrow || input === 'k')) {
+        setWatchlistCursor((c) => Math.max(0, c - 1));
+        setCopied('');
+      } else if (pane === 'watchlist' && (key.downArrow || input === 'j')) {
+        setWatchlistCursor((c) => Math.min(watchlist.length - 1, c + 1));
+        setCopied('');
+      } else if (pane === 'ignorelist' && (key.upArrow || input === 'k')) {
+        setIgnoreCursor((c) => Math.max(0, c - 1));
+        setCopied('');
+      } else if (pane === 'ignorelist' && (key.downArrow || input === 'j')) {
+        setIgnoreCursor((c) => Math.min(ignoreList.length - 1, c + 1));
+        setCopied('');
+      } else if (key.upArrow || input === 'k')
         setReportScroll((s) => Math.max(0, s - 1));
       else if (key.downArrow || input === 'j')
         setReportScroll((s) => Math.min(reportMaxScroll, s + 1));
@@ -1537,6 +1790,61 @@ export function App() {
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
   const paneFooter = showTabNav || focus === 'pane';
+  // The pane footer's keybinds, built once so the layout can both render them and reserve the
+  // rows they wrap to — otherwise a footer that wraps to a second line grows the frame past the
+  // viewport and scrolls the header off. Falsey entries drop out (conditional keys).
+  const paneHints: MaybeHint[] =
+    focus === 'pane'
+      ? [
+          {
+            key: 'j/k',
+            label:
+              pane === 'denylist' ||
+              pane === 'watchlist' ||
+              pane === 'ignorelist'
+                ? 'select'
+                : 'scroll',
+          },
+          { key: 'R', label: 'refresh' },
+          { key: 'i', label: 'new ip' },
+          { key: 'f', label: 'ja4' },
+          { key: 't', label: 'watch-list' },
+          { key: 'g', label: 'ignore' },
+          { key: 'w', label: 'timeline' },
+          {
+            key: 'v',
+            label: watchOn ? 'watch (on)' : 'watch',
+            active: watchOn,
+          },
+          // Shown exactly when `b` does something: the advisor offered a lever.
+          pane === 'ip' &&
+            ipAdvice?.lever && {
+              key: 'b',
+              label: `deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`,
+            },
+          pane === 'denylist' && { key: 'enter', label: 'copy' },
+          pane === 'denylist' && { key: 'u', label: 'unban' },
+          pane === 'sitemap' && { key: 'enter', label: 'copy' },
+          pane === 'sitemap' && { key: 'o', label: 'profile it' },
+          pane === 'watchlist' && { key: 'enter', label: 'copy' },
+          pane === 'watchlist' && { key: 'o', label: 'profile it' },
+          pane === 'watchlist' && { key: 'z', label: 'ignore' },
+          pane === 'watchlist' && { key: 'x', label: 'remove' },
+          pane === 'ignorelist' && { key: 'enter', label: 'copy' },
+          pane === 'ignorelist' && { key: 'o', label: 'profile it' },
+          pane === 'ignorelist' && { key: 'm', label: 'watch it' },
+          pane === 'ignorelist' && { key: 'x', label: 'remove' },
+          pane === 'ip' && { key: 'm', label: 'watch' },
+          pane === 'ip' && { key: 'z', label: 'ignore' },
+          pane === 'ip' && { key: 'x', label: 'close tab' },
+          { key: 'esc', label: 'rules' },
+        ]
+      : [];
+  // The tab indicator shares the footer's first line, so its width counts toward the wrap.
+  const tabNavWidth = showTabNav
+    ? `◂ ${ipTabs.index + 1}/${ipTabs.tabs.length} ▸ tab/shift-tab · `.length
+    : 0;
+  const footerRows = paneFooter ? hintRows(paneHints, reportW, tabNavWidth) : 0;
   // Measured, not assumed: an IPv4 is 15 chars and a JA4 digest 36, so whether two columns fit
   // depends on what is actually listed. A row that wraps takes the whole Ink list with it, so
   // the quiet band stacks underneath when the width is not there.
@@ -1559,7 +1867,7 @@ export function App() {
     (focus === 'range-input' ? 1 : 0) +
     // header + one row per preset + the custom row + the hint
     (focus === 'window-pick' ? WINDOW_PRESETS.length + 3 : 0) +
-    (paneFooter ? 1 : 0) +
+    footerRows +
     (copied ? 1 : 0);
   return (
     <Box flexDirection="row">
@@ -1567,6 +1875,9 @@ export function App() {
         flexDirection="column"
         width={rulesW}
         flexShrink={0}
+        // At least full height so the footer below can be pushed to the bottom; a minimum, not a
+        // fixed height, so a long rule list on a short terminal still grows rather than clipping.
+        minHeight={reportH}
         marginRight={showPane ? PANE_GAP : 0}
       >
         <Box>
@@ -1589,6 +1900,9 @@ export function App() {
             />
           ))}
         </Box>
+        {/* Absorbs the slack between the rule list and the footer, anchoring the footer to the
+            bottom edge instead of floating under the last rule. */}
+        <Box flexGrow={1} />
         {phase === 'select' && (
           <Box flexDirection="column">
             {applied && (
@@ -1597,23 +1911,39 @@ export function App() {
                 editing, or q to quit
               </Text>
             )}
-            <Text dimColor>
-              ↑/↓ move · ←/→ action · enter menu · space on/off · r report · i
-              ip · f ja4 · s sitemap · d denylist ·{' '}
-              <Text color={watchOn ? 'green' : undefined} bold={watchOn}>
-                v watch{watchOn ? ' (on)' : ''}
-              </Text>
-              {ipTabs.tabs.length ? ' · tab cycle ips' : ''}
-              {paneLoading ? ' (loading…)' : ''} · a apply · q quit ({onCount}/
-              {items.length} on)
+            <Text wrap="wrap">
+              <FooterHints
+                hints={[
+                  { key: '↑/↓', label: 'move' },
+                  { key: '←/→', label: 'action' },
+                  { key: 'enter', label: 'menu' },
+                  { key: 'space', label: 'on/off' },
+                  { key: 'r', label: 'report' },
+                  { key: 'i', label: 'ip' },
+                  { key: 'f', label: 'ja4' },
+                  { key: 's', label: 'sitemap' },
+                  { key: 'd', label: 'denylist' },
+                  { key: 't', label: 'watch-list' },
+                  { key: 'g', label: 'ignore' },
+                  {
+                    key: 'v',
+                    label: watchOn ? 'watch (on)' : 'watch',
+                    active: watchOn,
+                  },
+                  ipTabs.tabs.length
+                    ? { key: 'tab', label: 'cycle ips' }
+                    : false,
+                  { key: 'a', label: 'apply' },
+                  { key: 'q', label: `quit (${onCount}/${items.length} on)` },
+                ]}
+              />
+              {paneLoading ? <Text dimColor> (loading…)</Text> : null}
               {pendingByRule.size ? (
                 <Text color="yellow">
                   {' '}
                   · {pendingByRule.size} rule(s) unapplied
                 </Text>
-              ) : (
-                ''
-              )}
+              ) : null}
             </Text>
           </Box>
         )}
@@ -1636,7 +1966,16 @@ export function App() {
                 locked to log — JA4 is shared by many real users
               </Text>
             )}
-            <Text dimColor>↑/↓ choose · enter set · esc cancel · q quit</Text>
+            <Text wrap="wrap">
+              <FooterHints
+                hints={[
+                  { key: '↑/↓', label: 'choose' },
+                  { key: 'enter', label: 'set' },
+                  { key: 'esc', label: 'cancel' },
+                  { key: 'q', label: 'quit' },
+                ]}
+              />
+            </Text>
           </Box>
         )}
         {phase === 'applying' && (
@@ -1661,6 +2000,13 @@ export function App() {
                 {watchNote}
               </Text>
             )}
+            {/* Name them, or "1 profiled" sends the operator digging through the log. */}
+            {watchWho.map((w) => (
+              <Text key={w} dimColor wrap="truncate-end">
+                {'    '}
+                {w}
+              </Text>
+            ))}
             {/* Stays up once it has happened. The loop runs while you are in another pane, so an
                 invocation you were not watching still has to be visible afterwards. */}
             {invokedCount > 0 && (
@@ -1774,45 +2120,53 @@ export function App() {
                 denyActivityNote={denyActivityNote}
                 denyCursor={denyCursor}
                 denyActivity={denyActivity}
+                watchEntries={watchlist}
+                watchError={watchlistError}
+                watchCursor={watchlistCursor}
+                ignoreEntries={ignoreList}
+                ignoreError={ignoreError}
+                ignoreCursor={ignoreCursor}
               />
             </Box>
           </Box>
           {copied && (
-            <Text color={copied.startsWith('copy failed') ? 'red' : 'green'}>
+            // paneChrome reserves exactly one row for this note; a long save error must clip,
+            // not wrap, or the frame outgrows the viewport.
+            <Text
+              wrap="truncate-end"
+              color={
+                copied.startsWith('copy failed') ||
+                copied.startsWith('watch list:') ||
+                copied.startsWith('ignore list:')
+                  ? 'red'
+                  : 'green'
+              }
+            >
               {copied}
             </Text>
           )}
           {paneFooter && (
-            <Box>
-              {showTabNav && (
-                <Text>
-                  <Text color="cyan" bold>
-                    ◂{' '}
-                  </Text>
-                  <Text bold>
-                    {ipTabs.index + 1}/{ipTabs.tabs.length}
-                  </Text>
-                  <Text color="cyan" bold>
-                    {' '}
-                    ▸
-                  </Text>
-                  <Text dimColor> tab/shift-tab · </Text>
-                </Text>
-              )}
-              {focus === 'pane' && (
-                <Text dimColor>
-                  j/k {pane === 'denylist' ? 'select' : 'scroll'} · R refresh ·
-                  i new ip · f ja4 · w timeline · v watch
-                  {watchOn ? ' (on)' : ''}
-                  {/* Shown exactly when `b` does something: the advisor offered a lever. */}
-                  {pane === 'ip' && ipAdvice?.lever
-                    ? ` · b deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`
-                    : ''}
-                  {pane === 'denylist' ? ' · u unban' : ''}
-                  {pane === 'sitemap' ? ' · enter copy · o profile it' : ''}
-                  {pane === 'ip' ? ' · x close tab' : ''} · esc rules
-                </Text>
-              )}
+            <Box width={reportW}>
+              {/* One wrapping flow so tab indicator and hints wrap together at the pane width,
+                  and `footerRows` above reserves exactly the lines this produces. */}
+              <Text wrap="wrap">
+                {showTabNav && (
+                  <>
+                    <Text color="cyan" bold>
+                      ◂{' '}
+                    </Text>
+                    <Text bold>
+                      {ipTabs.index + 1}/{ipTabs.tabs.length}
+                    </Text>
+                    <Text color="cyan" bold>
+                      {' '}
+                      ▸
+                    </Text>
+                    <Text dimColor> tab/shift-tab · </Text>
+                  </>
+                )}
+                {focus === 'pane' && <FooterHints hints={paneHints} />}
+              </Text>
             </Box>
           )}
           {focus === 'window-pick' && (
@@ -1851,7 +2205,16 @@ export function App() {
                   type dates{presetIdx < 0 ? '  ·  in force' : ''}
                 </Text>
               </Box>
-              <Text dimColor>{'  '}↑↓ choose · enter apply · esc cancel</Text>
+              <Text wrap="wrap">
+                {'  '}
+                <FooterHints
+                  hints={[
+                    { key: '↑↓', label: 'choose' },
+                    { key: 'enter', label: 'apply' },
+                    { key: 'esc', label: 'cancel' },
+                  ]}
+                />
+              </Text>
             </Box>
           )}
           {focus === 'range-input' && (
@@ -1871,9 +2234,19 @@ export function App() {
               <Text color="cyan">AS number for {ipAdvice?.lever?.value}: </Text>
               <Text>{asnInput}</Text>
               <Text color="cyan">▏</Text>
-              <Text dimColor>
-                {asnError ? `  ${asnError}` : '  enter confirm · esc cancel'}
-              </Text>
+              {asnError ? (
+                <Text dimColor>{`  ${asnError}`}</Text>
+              ) : (
+                <Text>
+                  {'  '}
+                  <FooterHints
+                    hints={[
+                      { key: 'enter', label: 'confirm' },
+                      { key: 'esc', label: 'cancel' },
+                    ]}
+                  />
+                </Text>
+              )}
             </Box>
           )}
           {focus === 'confirm' && confirm && (
@@ -2008,6 +2381,12 @@ function PaneBody({
   denyActivityNote,
   denyCursor,
   denyActivity,
+  watchEntries,
+  watchError,
+  watchCursor,
+  ignoreEntries,
+  ignoreError,
+  ignoreCursor,
 }: {
   kind: PaneKind;
   width: number;
@@ -2021,6 +2400,12 @@ function PaneBody({
   denyActivityNote: string;
   denyCursor: number;
   denyActivity: Pane<Map<string, Activity>>;
+  watchEntries: WatchlistEntry[];
+  watchError: string;
+  watchCursor: number;
+  ignoreEntries: WatchlistEntry[];
+  ignoreError: string;
+  ignoreCursor: number;
 }) {
   if (kind === 'report')
     return (
@@ -2041,6 +2426,28 @@ function PaneBody({
             error: denyActivity.error || denyActivityNote || undefined,
           },
           denyCursor,
+        )}
+        width={width}
+      />
+    );
+  if (kind === 'watchlist')
+    return (
+      <Lines
+        lines={watchlistLines(
+          { entries: watchEntries, error: watchError || undefined },
+          watchCursor,
+          Date.now(),
+        )}
+        width={width}
+      />
+    );
+  if (kind === 'ignorelist')
+    return (
+      <Lines
+        lines={ignoreListLines(
+          { entries: ignoreEntries, error: ignoreError || undefined },
+          ignoreCursor,
+          Date.now(),
         )}
         width={width}
       />

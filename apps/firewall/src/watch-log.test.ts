@@ -68,6 +68,44 @@ describe('logEntry', () => {
     expect(s).toContain('0 allowed through');
   });
 
+  test('a screen names who it profiled, so "1 profiled" is answerable from the log alone', () => {
+    const s = at({
+      kind: 'screen',
+      fingerprints: 33,
+      profiled: 1,
+      bans: 0,
+      profiledWho: [
+        {
+          digest: DIG,
+          allowed: 268,
+          total: 270,
+          verdict: 'leave',
+          why: 'matched allow-ch-stream-revalidate (267x)',
+        },
+      ],
+    });
+    // Indented like a verdict block, so it cannot be mistaken for a separate event.
+    expect(s).toContain(
+      `\n    ${DIG}  268 allowed of 270 · leave — matched allow-ch-stream-revalidate (267x)\n`,
+    );
+    expect(s.endsWith('\n')).toBe(true);
+    expect(s.endsWith('\n\n')).toBe(false);
+  });
+
+  test('an empty why does not leave a dangling dash', () => {
+    const s = at({
+      kind: 'screen',
+      fingerprints: 1,
+      profiled: 1,
+      bans: 0,
+      profiledWho: [
+        { digest: DIG, allowed: 5, total: 5, verdict: 'leave', why: '' },
+      ],
+    });
+    expect(s).toContain('· leave\n');
+    expect(s).not.toContain('leave —');
+  });
+
   test('an invocation is shouted, with the reasons that caused it', () => {
     const s = at({
       kind: 'invoke',

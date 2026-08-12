@@ -10,11 +10,14 @@ import { lineText } from './line-model';
 import { rollingWindow } from './time-window';
 import {
   type WatchReport,
+  adviceSummary,
+  adviceWhy,
   banCandidate,
   deniedByUa,
   impersonators,
   mergeScreens,
   nonRendering,
+  watchlistAdditions,
   EXIT_BROKEN,
   EXIT_FOUND,
   EXIT_QUIET,
@@ -722,5 +725,56 @@ describe('deniedByUa', () => {
     expect(
       deniedByUa([row(A, 'compatible; shapbot/0.1.0', 900)], ['ShapBot']).size,
     ).toBe(0);
+  });
+});
+
+// One line per profiled identity — the summary that stops "1 profiled" from meaning a rerun.
+describe('adviceWhy / adviceSummary / watchlistAdditions', () => {
+  const advice = (over: Partial<Advice> = {}): Advice => ({
+    verdict: 'leave',
+    reasons: ['zero rendering requests'],
+    blockers: ['matched allow-ch-stream-revalidate (267x)'],
+    leverNotes: ['no safe lever'],
+    ...over,
+  });
+
+  test('a blocker outranks evidence, evidence outranks a ruled-out lever', () => {
+    expect(adviceWhy(advice())).toBe(
+      'matched allow-ch-stream-revalidate (267x)',
+    );
+    expect(adviceWhy(advice({ blockers: [] }))).toBe('zero rendering requests');
+    expect(adviceWhy(advice({ blockers: [], reasons: [] }))).toBe(
+      'no safe lever',
+    );
+  });
+
+  test('the summary is verdict plus what decided it, with no dangling dash', () => {
+    expect(adviceSummary(advice())).toBe(
+      'leave — matched allow-ch-stream-revalidate (267x)',
+    );
+    expect(
+      adviceSummary(advice({ blockers: [], reasons: [], leverNotes: [] })),
+    ).toBe('leave');
+  });
+
+  test('every profiled finding becomes a watch-list addition, whatever the verdict', () => {
+    const adds = watchlistAdditions([
+      {
+        digest: A,
+        allowed: 268,
+        total: 270,
+        why: ['0.0% rendering, not a verified crawler'],
+        advice: advice(),
+        autoBanRefusal: null,
+      },
+    ]);
+    expect(adds).toEqual([
+      {
+        kind: 'ja4',
+        id: A,
+        source: 'watch',
+        note: 'leave — matched allow-ch-stream-revalidate (267x) · screen: 0.0% rendering, not a verified crawler',
+      },
+    ]);
   });
 });

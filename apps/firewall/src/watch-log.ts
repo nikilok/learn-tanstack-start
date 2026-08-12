@@ -16,7 +16,20 @@ export const WATCH_LOG = 'firewall-watch.log';
 export type WatchEvent =
   | { kind: 'armed'; hours: number; everyMin: number }
   | { kind: 'disarmed' }
-  | { kind: 'screen'; fingerprints: number; profiled: number; bans: number }
+  | {
+      kind: 'screen';
+      fingerprints: number;
+      profiled: number;
+      bans: number;
+      /** One line per profiled identity, so the log answers WHO without a rerun. */
+      profiledWho?: {
+        digest: string;
+        allowed: number;
+        total: number;
+        verdict: string;
+        why: string;
+      }[];
+    }
   | {
       kind: 'invoke';
       digest: string;
@@ -65,7 +78,17 @@ export function logEntry(at: Date, e: WatchEvent): string {
     case 'disarmed':
       return `${head('disarmed', '')}\n`;
     case 'screen':
-      return `${head('screen', `${e.fingerprints} allowed through · ${e.profiled} profiled · ${e.bans} would ban`)}\n`;
+      return [
+        head(
+          'screen',
+          `${e.fingerprints} allowed through · ${e.profiled} profiled · ${e.bans} would ban`,
+        ),
+        ...(e.profiledWho ?? []).map(
+          (p) =>
+            `    ${p.digest}  ${p.allowed} allowed of ${p.total} · ${p.verdict}${p.why ? ` — ${p.why}` : ''}`,
+        ),
+        '',
+      ].join('\n');
     case 'invoke':
       return [
         head(

@@ -3,9 +3,9 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import { type IpProfile, type Subject, fetchIpProfile } from './ip-profile';
-import type { Window } from './time-window';
-import { errMsg } from './util';
+import { type IpProfile, type Subject, fetchIpProfile } from '../ip-profile';
+import type { Window } from '../time-window';
+import { errMsg } from '../util';
 
 export type Creds = { projectId: string; teamId: string; token: string };
 

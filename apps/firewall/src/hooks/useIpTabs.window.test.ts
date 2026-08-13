@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { tabWindow } from './use-ip-tabs';
+import { tabWindow } from './useIpTabs';
 
 const w = (n: number, each = 18) => Array.from({ length: n }, () => each);
 

@@ -18,8 +18,8 @@ const REAL_TERMINAL = {
 };
 
 // Matching the ESC byte is the whole job here — assertions read frames as plain text.
-// eslint-disable-next-line no-control-regex
 const ANSI =
+  // eslint-disable-next-line no-control-regex
   /\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B/g;
 
 /** Put the real terminal size back. The preload calls this after every test, so a harness abandoned by a failing assertion cannot leave the next one measuring a patched width. */

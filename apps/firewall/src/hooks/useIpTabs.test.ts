@@ -5,7 +5,7 @@ import {
   newSubjects,
   nextIndex,
   runDisposition,
-} from './use-ip-tabs';
+} from './useIpTabs';
 
 describe('nextIndex', () => {
   test('advances and wraps past the end', () => {

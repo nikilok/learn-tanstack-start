@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import type { Subject } from './ip-profile';
+import type { Subject } from '../ip-profile';
 import {
   IGNORELIST_FILE,
   type ListSide,
@@ -17,7 +17,7 @@ import {
   recordExclusive,
   removeEntry,
   saveList,
-} from './watchlist';
+} from '../watchlist';
 
 export type ListState = {
   entries: WatchlistEntry[];

@@ -9,8 +9,8 @@ import {
   useState,
 } from 'react';
 
-import { JA4_DENY, enforcedNow } from './deny-list';
-import { persistDenies } from './deny-persist';
+import { JA4_DENY, enforcedNow } from '../deny-list';
+import { persistDenies } from '../deny-persist';
 import {
   type DenyKind,
   type LiveDenies,
@@ -22,13 +22,13 @@ import {
   pendingByRule,
   stage,
   unstage,
-} from './deny-staging';
-import { type Activity, fetchDenyActivity } from './denylist-data';
-import type { DenyEntry } from './denylist-view';
-import { persistEnvVar } from './env-file';
-import type { ApplyStatus, Item } from './seed-items';
-import type { Creds } from './use-ip-tabs';
-import { type Pane, usePane } from './use-pane';
+} from '../deny-staging';
+import { type Activity, fetchDenyActivity } from '../denylist-data';
+import type { DenyEntry } from '../denylist-view';
+import { persistEnvVar } from '../env-file';
+import type { ApplyStatus, Item } from '../seed-items';
+import type { Creds } from './useIpTabs';
+import { type Pane, usePane } from './usePane';
 
 // Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
 const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));

@@ -6,8 +6,8 @@ import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { useEffect } from 'react';
 
-import { renderInk } from './ink-harness';
-import { type Pane, usePane } from './use-pane';
+import { renderInk } from '../ink-harness';
+import { type Pane, usePane } from './usePane';
 
 /** Renders a pane's state as one line, and hands the pane back to the test to drive. */
 function Probe({ onReady }: { onReady: (p: Pane<string>) => void }) {

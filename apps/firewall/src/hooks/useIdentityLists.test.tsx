@@ -9,9 +9,9 @@ import { join } from 'node:path';
 import { Text } from 'ink';
 import { useEffect } from 'react';
 
-import { renderInk } from './ink-harness';
-import { type IdentityLists, useIdentityLists } from './use-lists';
-import { IGNORELIST_FILE, WATCHLIST_FILE } from './watchlist';
+import { renderInk } from '../ink-harness';
+import { IGNORELIST_FILE, WATCHLIST_FILE } from '../watchlist';
+import { type IdentityLists, useIdentityLists } from './useIdentityLists';
 
 const DIGEST = 't13d1516h2_8daaf6152771_b0da82dd1658';
 
@@ -85,14 +85,14 @@ describe('useIdentityLists.move', () => {
     writeFileSync(join(root, WATCHLIST_FILE), line('on-disk-watch'));
     writeFileSync(join(root, IGNORELIST_FILE), line('still-on-ignore'));
 
-    const real = await import('./watchlist');
-    mock.module('./watchlist', () => ({
+    const real = await import('../watchlist');
+    mock.module('../watchlist', () => ({
       ...real,
       recordExclusive: async () => ({
         error: `half-moved — written to ${WATCHLIST_FILE} but ${IGNORELIST_FILE} still lists it: EACCES`,
       }),
     }));
-    const fresh = await import('./use-lists');
+    const fresh = await import('./useIdentityLists');
     const { h, get } = await mountLists(root, fresh.useIdentityLists);
 
     const msg = await get().move(

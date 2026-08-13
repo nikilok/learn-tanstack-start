@@ -3,7 +3,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import { errMsg } from './util';
+import { errMsg } from '../util';
 
 /** `skipped` means a concurrent load was already running and this call did nothing. */
 export type LoadResult = 'ok' | 'error' | 'skipped';

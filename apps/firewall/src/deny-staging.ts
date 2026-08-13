@@ -150,7 +150,7 @@ export function unstage(items: Item[], kind: DenyKind, value: string): Item[] {
 // that way at each site, because the comparisons are spread across the pane, the advisory and the
 // pending-edit count, and one of them was always going to be missed.
 /** How a staged or lifted value is held, whatever case it was typed in. */
-export function normalizeStaged(value: string): string {
+function normalizeStaged(value: string): string {
   return value.trim().toLowerCase();
 }
 

@@ -8,12 +8,12 @@ import {
   busiestCount,
   pickable,
   quietBand,
-} from './identity-list';
-import { type Subject, topIps, topJa4 } from './ip-profile';
-import { busiestCap, filterIdentities, type PickKind } from './pick-input';
-import type { Window } from './time-window';
-import type { Creds } from './use-ip-tabs';
-import { type LoadResult, type Pane, usePane } from './use-pane';
+} from '../identity-list';
+import { type Subject, topIps, topJa4 } from '../ip-profile';
+import { busiestCap, filterIdentities, type PickKind } from '../pick-input';
+import type { Window } from '../time-window';
+import type { Creds } from './useIpTabs';
+import { type LoadResult, type Pane, usePane } from './usePane';
 
 // The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
 // paid for. Everything below the top few is what the quiet band is drawn from.
@@ -26,7 +26,7 @@ const QUIET_ROWS = 10; // quiet-band rows shown beside them
 
 export const CAP_BUSIEST = 'busiest';
 export const CAP_QUIET = `quietest over ${QUIET_FLOOR}`;
-export { TOP_IPS_LIMIT, QUIET_ROWS };
+export { TOP_IPS_LIMIT };
 
 export type Pickers = {
   /** Which identity the picker and new tabs address. `i` and `f` set it. */

@@ -236,7 +236,12 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
         : a.verdict === 'staged'
           ? 'STAGED — not live yet; press a to apply, or u in the denylist to drop it'
           : a.verdict === 'watch'
-            ? 'INCONCLUSIVE — no safe lever, do not deny'
+            ? // "Inconclusive" is about the EVIDENCE. If a challenge is live it is a fact about
+              // the WAF, and printing only the first tells an operator nothing is in place while
+              // every request on this fingerprint is being interstitialed.
+              a.challengeLive
+              ? 'INCONCLUSIVE on new evidence — but a CHALLENGE IS LIVE on this fingerprint (FW_CHALLENGE_JA4)'
+              : 'INCONCLUSIVE — no safe lever, do not deny'
             : a.verdict === 'already'
               ? // Which tier is live is not a detail: "denied" and "challenged" lead to different
                 // next actions, and saying DENIED about an interstitial is the more costly way
@@ -260,6 +265,20 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
     );
   L.push(...reachLine('fingerprint', p.digestReach, p.reachHours));
   L.push(...reachLine('network', p.asnReach, p.reachHours));
+  // Deliberately NOT folded into `blockers`, which render green and read as reassurance. A live
+  // mitigation is a warning: it is costing somebody something right now, and the operator has to
+  // weigh that whatever the evidence says.
+  if (a.challengeLive && a.verdict !== 'already')
+    L.push(
+      line(
+        '  ',
+        seg('LIVE      ', 'warn'),
+        seg(
+          'this fingerprint is on FW_CHALLENGE_JA4 — every request to it is being challenged now',
+          'dim',
+        ),
+      ),
+    );
   for (const b of a.blockers)
     L.push(line('  ', seg('blocker  ', 'good'), seg(b, 'dim')));
   for (const n of a.leverNotes)

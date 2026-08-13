@@ -321,3 +321,59 @@ describe('profileLines — the impersonation check', () => {
     expect(text).toContain('is consistent with this fingerprint');
   });
 });
+
+// PR review, 2026-08-13. `challengeLive` is a fact about the WAF, not about the evidence. It used
+// to reach the screen only through `lever.tier` on an `already` verdict, so a challenged digest
+// whose challenge failed to qualify fell to `watch` and rendered INCONCLUSIVE — telling the
+// operator nothing was in place while every request to it was being interstitialed.
+describe('a live challenge is stated whatever the verdict', () => {
+  const watch = (over: Partial<Advice> = {}): Advice => ({
+    verdict: 'watch',
+    reasons: [],
+    axes: ['rendering', 'spread'],
+    blockers: [],
+    leverNotes: [],
+    ...over,
+  });
+  const render = (a: Advice) =>
+    profileLines(profile(), 120, a).map(lineText).join('\n');
+
+  test('CONTROL — an unchallenged watch still reads as plain INCONCLUSIVE', () => {
+    const t = render(watch());
+    expect(t).toContain('INCONCLUSIVE — no safe lever');
+    expect(t).not.toContain('FW_CHALLENGE_JA4');
+  });
+
+  test('a challenged watch says so in the headline', () => {
+    const t = render(watch({ challengeLive: true }));
+    expect(t).toContain('CHALLENGE IS LIVE');
+    expect(t).toContain('FW_CHALLENGE_JA4');
+    expect(t).not.toContain('INCONCLUSIVE — no safe lever');
+  });
+
+  test('and carries a LIVE line, not a green blocker', () => {
+    // Blockers render as reassurance. A running mitigation is a warning: it is costing somebody
+    // something right now.
+    const t = render(watch({ challengeLive: true }));
+    expect(t).toContain('being challenged now');
+  });
+
+  test('every other verdict states it too — leave was the quietest place to lose it', () => {
+    for (const v of ['leave', 'watch', 'ban'] as const)
+      expect(render(watch({ verdict: v, challengeLive: true }))).toContain(
+        'being challenged now',
+      );
+  });
+
+  test('but `already` does not repeat it — its headline says it already', () => {
+    const t = render(
+      watch({
+        verdict: 'already',
+        challengeLive: true,
+        lever: { kind: 'ja4', value: 'x', why: '', tier: 'challenge' },
+      }),
+    );
+    expect(t).toContain('ALREADY CHALLENGED');
+    expect(t).not.toContain('being challenged now');
+  });
+});

@@ -1638,3 +1638,48 @@ describe('unmeasured metrics never clear a lever', () => {
     expect(a.leverNotes.join(' ')).toContain('could not be read');
   });
 });
+
+// The advisory half of the same finding: the fact has to leave adviseBan on every path, or the
+// view has nothing to render.
+describe('challengeLive leaves the advisory whatever the verdict', () => {
+  test('a challenged digest that cannot qualify still reports the live challenge', () => {
+    // Renders in the window, so qualifyChallenge refuses and this falls through to `watch` —
+    // the exact path where the fact used to disappear.
+    const a = adviseBan(
+      scraper({
+        challengedJa4: true,
+        mix: mixOf([
+          ['/company/a', 9000],
+          ['/api/tiles/x', 60],
+        ]),
+        digestReach: {
+          label: 'x',
+          ips: 413,
+          countries: 205,
+          total: 171751,
+          subResources: 900,
+          beacons: 40,
+          tiles: 10,
+          rpcs: 5,
+          complete: true,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.challengeLive).toBe(true);
+  });
+
+  test('CONTROL — an unchallenged one reports false, not undefined', () => {
+    const a = adviseBan(scraper());
+    expect(a.challengeLive).toBe(false);
+  });
+
+  test('it survives a legitimacy blocker too', () => {
+    const a = adviseBan(
+      scraper({ challengedJa4: true, botVerified: [['pass', 500]] }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.challengeLive).toBe(true);
+  });
+});

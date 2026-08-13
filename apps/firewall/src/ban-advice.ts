@@ -122,6 +122,19 @@ export type Advice = {
    * is — including whether to spend a paid investigation on it — has to read this, not the prose.
    */
   axes: string[];
+  /**
+   * True when FW_CHALLENGE_JA4 carries this digest RIGHT NOW, whatever the verdict.
+   *
+   * A statement about live WAF state, not about the evidence, so it survives every verdict. The
+   * `already` path conveyed it through `lever.tier`, which only exists when the challenge tier
+   * qualifies — so a challenged digest whose challenge failed to qualify fell through to `watch`
+   * and rendered as INCONCLUSIVE while the WAF was interstitialing every one of its requests.
+   * An operator reading "no safe lever" concludes nothing is in place and may drop the entry as
+   * inert, or fail to connect a user complaint to a mitigation they do not know is running.
+   *
+   * Output-only and set on every return by `adviseBan`, so no caller can forget it.
+   */
+  challengeLive?: boolean;
   blockers: string[];
   /** Why a lever was ruled out — the useful half when the answer is "nothing safe applies". */
   leverNotes: string[];
@@ -665,6 +678,7 @@ export function adviseBan(input: AdviceInput): Advice {
       verdict: 'leave',
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [...blockers, ...denied],
       leverNotes,
     };
@@ -676,6 +690,7 @@ export function adviseBan(input: AdviceInput): Advice {
       digest,
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: denied,
       leverNotes,
     };
@@ -688,6 +703,7 @@ export function adviseBan(input: AdviceInput): Advice {
       digest,
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [],
       leverNotes,
     };
@@ -698,6 +714,7 @@ export function adviseBan(input: AdviceInput): Advice {
       digest,
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [],
       leverNotes: [...leverNotes, ...unjudgeable],
     };
@@ -707,6 +724,7 @@ export function adviseBan(input: AdviceInput): Advice {
       digest,
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -725,6 +743,7 @@ export function adviseBan(input: AdviceInput): Advice {
       digest,
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -763,6 +782,7 @@ export function adviseBan(input: AdviceInput): Advice {
       lever: { kind: 'ja4', value: digest, why: ja4Ok.note, tier: 'deny' },
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -791,6 +811,7 @@ export function adviseBan(input: AdviceInput): Advice {
       },
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -820,6 +841,7 @@ export function adviseBan(input: AdviceInput): Advice {
       },
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [
         'fingerprint is already in FW_CHALLENGE_JA4 — challenged, not denied',
       ],
@@ -837,6 +859,7 @@ export function adviseBan(input: AdviceInput): Advice {
       },
       reasons,
       axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -847,6 +870,7 @@ export function adviseBan(input: AdviceInput): Advice {
     digest,
     reasons,
     axes: [...axes],
+    challengeLive: input.challengedJa4,
     blockers,
     leverNotes,
   };

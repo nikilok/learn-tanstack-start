@@ -326,7 +326,7 @@ export const INVESTIGATIONS_PER_RUN = 2;
  * conflate a week of past runs with what this one has started.
  */
 export function investigable<
-  T extends { digest: string; advice: Pick<Advice, 'axes'> },
+  T extends { digest: string; advice: Pick<Advice, 'axes' | 'verdict'> },
 >(
   findings: readonly T[],
   seen: ReadonlyMap<string, number>,

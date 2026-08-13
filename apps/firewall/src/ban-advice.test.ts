@@ -1500,7 +1500,53 @@ describe('worthInvestigating', () => {
   });
 
   test('one axis is never enough, however loud', () => {
-    expect(worthInvestigating({ axes: ['rendering'] })).toBe(false);
-    expect(worthInvestigating({ axes: [] })).toBe(false);
+    expect(worthInvestigating({ verdict: 'watch', axes: ['rendering'] })).toBe(
+      false,
+    );
+    expect(worthInvestigating({ verdict: 'watch', axes: [] })).toBe(false);
+  });
+});
+
+// Both found by the PR review on 2026-08-13, after a local CLI pass reported nothing. Each is a
+// TWIN-MISS: a guard added to one function and not to the sibling that needed it just as much.
+describe('review regressions — the twin that got missed', () => {
+  test('a reach too thin for a deny is too thin for a CHALLENGE as well', () => {
+    // The floor went into qualifyLever and not qualifyChallenge, and the path is reachable: the
+    // deny is refused on the floor, then falls straight through to the recoverable tier. The
+    // "recoverable, so a lower bar is fine" argument does not survive the note it prints, which
+    // claims the fingerprint is SHARED — the only reason to prefer a challenge over a deny.
+    const thin = {
+      label: 'x',
+      ips: 2,
+      countries: 1,
+      total: 2,
+      subResources: 0,
+      beacons: 0,
+      tiles: 0,
+      rpcs: 0,
+      complete: true,
+      verifiedNames: [],
+    };
+    const a = adviseBan(scraper({ digestReach: thin, asnReach: thin }));
+    expect(a.verdict).not.toBe('challenge');
+    expect(a.lever).toBeUndefined();
+    expect(a.leverNotes.join(' ')).toContain('too little to call it shared');
+  });
+
+  test('a BLOCKED identity is never worth an agent, however many axes it scores', () => {
+    // Axes are filled on every path, including `leave`. A verified crawler still scores rendering
+    // and spread before blockersFor clears it — so reading axes alone wakes a paid agent on
+    // Googlebot, and does it every tick.
+    const a = adviseBan(scraper({ botVerified: [['pass', 500]] }));
+    expect(a.verdict).toBe('leave');
+    expect(a.axes.length).toBeGreaterThanOrEqual(2);
+    expect(worthInvestigating(a)).toBe(false);
+  });
+
+  test('nor is one already handled or staged', () => {
+    for (const v of ['already', 'staged'] as const)
+      expect(
+        worthInvestigating({ verdict: v, axes: ['rendering', 'spread'] }),
+      ).toBe(false);
   });
 });

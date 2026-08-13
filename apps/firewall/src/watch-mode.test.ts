@@ -328,7 +328,7 @@ describe('investigable', () => {
   // the one thing never investigated, while being the one that cost a human hours.
   const f = (digest: string, axes: string[]) => ({
     digest,
-    advice: { axes },
+    advice: { axes, verdict: 'ban' as const },
   });
   const SHAPED = ['rendering', 'spread'];
 

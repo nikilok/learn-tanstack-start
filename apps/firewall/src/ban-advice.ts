@@ -144,7 +144,16 @@ export type Advice = {
  * Widens what gets INVESTIGATED, never what gets applied. `autoBanRefusal` still compares against
  * `'ban'` exactly, and an investigation is read-only by protocol.
  */
-export function worthInvestigating(advice: Pick<Advice, 'axes'>): boolean {
+export function worthInvestigating(
+  advice: Pick<Advice, 'axes' | 'verdict'>,
+): boolean {
+  // Axes are filled on EVERY path, including the ones where the advisory already concluded — a
+  // verified crawler or a first-party service still scores `rendering` and `spread` before
+  // `blockersFor` returns `leave`. Reading axes alone therefore wakes a paid agent on Googlebot,
+  // which is both a cost and an insult to the blocker that just cleared it. `already` and
+  // `staged` are the same shape: the question has an answer, so there is nothing to adjudicate.
+  if (advice.verdict === 'leave') return false;
+  if (advice.verdict === 'already' || advice.verdict === 'staged') return false;
   return advice.axes.length >= 2;
 }
 
@@ -460,6 +469,19 @@ export function qualifyChallenge(
   // No re-test of mixPartial/failedQueries here: unjudgeableFor returns `watch` for both before
   // any lever is consulted, so a branch for them could never execute. Reachability is checked
   // rather than assumed — two guards have shipped in this file that read perfectly and were dead.
+  // THE SAME FLOOR AS `qualifyLever`, and it belongs here for a reason specific to this tier.
+  // Adding it there and not here was the twin-miss this codebase warns about above all others:
+  // one instance fixed, its sibling left, and the sibling is reachable — a thin reach is refused
+  // for the deny and then falls straight through to the challenge.
+  //
+  // "Recoverable, so a lower bar is fine" does not survive contact with the note below, which
+  // claims the fingerprint is SHARED. That claim is the entire justification for choosing this
+  // tier over a deny, and a reach of a handful of requests cannot support it.
+  if (reach.total < MIN_VOLUME_FLOOR)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label} has only ${reach.total} requests across the whole reach — under ${MIN_VOLUME_FLOOR}, too little to call it shared, which is the only reason to prefer a challenge over a deny`,
+    };
   const renders = renderingRequests(input.mix);
   if (renders > 0)
     return {

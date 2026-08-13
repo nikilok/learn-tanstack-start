@@ -1,8 +1,6 @@
 // The interactive rule-manager TUI: a stateful Ink container wiring the data layer
 // (client.ts, report-data.ts) to the presentational components in ./components.
 
-import { fileURLToPath } from 'node:url';
-
 import {
   type DOMElement,
   Box,
@@ -15,16 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import { type Advice, adviseBan } from './ban-advice';
-import {
-  type ApplyStatus,
-  type Item,
-  applyItem,
-  fetchLive,
-  projectId,
-  seedItems,
-  teamId,
-  token,
-} from './client';
+import { applyItem, fetchLive, projectId, teamId, token } from './client';
 import { copyToClipboard } from './clipboard';
 import {
   FooterHints,
@@ -34,47 +23,36 @@ import {
 import { Lines } from './components/lines';
 import { ReportView } from './components/report-view';
 import { type Phase, Row, summaryLine } from './components/rule-list';
-import {
-  ASN_DENY,
-  JA4_DENY,
-  enforcedNow,
-  pendingEdits,
-  valuesOf,
-  withValue,
-  withoutValue,
-} from './deny-list';
-import { type Activity, fetchDenyActivity } from './denylist-data';
-import { type DenyEntry, denylistLines } from './denylist-view';
-import { persistEnvVar } from './env-file';
-import {
-  QUIET_FLOOR,
-  busiestCount,
-  columnWidth,
-  noAlpn,
-  pickable,
-  pickerLayout,
-  quietBand,
-} from './identity-list';
+import { ASN_DENY } from './deny-list';
+import { promotes } from './deny-staging';
+import { denylistLines } from './denylist-view';
+import { columnWidth, noAlpn, pickerLayout } from './identity-list';
 import { moveCursor, resolveIpEntry } from './ip-entry';
-import { type IpProfile, type Subject, topIps, topJa4 } from './ip-profile';
+import type { IpProfile, Subject } from './ip-profile';
 import {
   fingerprintScopeNote,
   overrideWarning,
   profileLines,
 } from './ip-profile-view';
+import {
+  type Binding,
+  type Press,
+  bindingFor,
+  hintsFor,
+  isUp,
+  press,
+} from './pane-keys';
+import { resolveSubject, subjectsToOpen, typeIdentity } from './pick-input';
 import { type ReportData, fetchReport } from './report-data';
 import { trustedRules } from './rule-integrity';
-// Imported, never re-typed here: the same constant keys `RECOVERABLE_RULES`, and a second
-// hand-written copy of the name would drift out of that guard without anything noticing.
-import { CHALLENGE_SCRAPER_JA4 } from './rule-names';
 import { dryRun, rules } from './rules';
+import { type ApplyStatus, type Item, seedItems } from './seed-items';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
 import {
   LIVE_MINUTES,
   type Window,
   WINDOW_PRESETS,
-  resolveWindow,
   rollingMinutes,
   rollingWindow,
 } from './time-window';
@@ -84,8 +62,20 @@ import {
   watchTiming,
   allowedBotsOrUnknown,
 } from './tuning';
+import {
+  type Denylist,
+  DENY_ACTIVITY_HOURS,
+  useDenylist,
+} from './use-denylist';
 import { type IpTab, tabWindow, useIpTabs } from './use-ip-tabs';
+import { type IdentityLists, useIdentityLists } from './use-lists';
 import { type Pane, usePane } from './use-pane';
+import {
+  CAP_BUSIEST,
+  CAP_QUIET,
+  TOP_IPS_LIMIT,
+  usePickers,
+} from './use-pickers';
 import { errMsg } from './util';
 import {
   adviceSummary,
@@ -115,16 +105,20 @@ import {
   shouldNotify,
 } from './watch-notify';
 import {
-  IGNORELIST_FILE,
+  type ListSide,
   WATCHLIST_FILE,
   type WatchlistEntry,
-  readList,
   recordAdditions,
-  recordExclusive,
-  removeEntry,
-  saveList,
 } from './watchlist';
 import { ignoreListLines, watchlistLines } from './watchlist-view';
+import {
+  isCustomRow,
+  moveWindowCursor,
+  openCursor,
+  rangeSelection,
+  submitsOnPaste,
+  typeRange,
+} from './window-pick';
 
 type PaneKind =
   | 'report'
@@ -142,11 +136,6 @@ const PANE_KEY: Record<string, PaneKind> = {
   t: 'watchlist',
   g: 'ignorelist',
 };
-const JA4_RULE = 'deny-scraper-ja4';
-const ASN_RULE = 'deny-scraper-asn';
-const DENY_ACTIVITY_HOURS = 144;
-// Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
-const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
 // Where the watch list and the watch log live — the CLI runs from here too, so they share state.
 const ROOT = process.cwd();
 const IP_WINDOW_HOURS = 24;
@@ -163,8 +152,6 @@ const LIVE_BACKOFF_MAX_MS = 15 * 60_000;
 // to sustain. Refreshing four background tabs every tick would be ~340/min and would rate-limit
 // the tool against itself.
 const LIVE_TAB_EVERY = 2;
-// The API is asked for 500 groups whatever we pass, so keeping fewer only discards rows already
-// paid for. Everything below the top few is what the quiet band is drawn from.
 /**
  * The profile, plus a note if the allowlist could not be read.
  *
@@ -179,12 +166,6 @@ function withAllowlistError(p: IpProfile): IpProfile {
     : p;
 }
 
-const TOP_IPS_LIMIT = 500;
-const MIN_BUSIEST = 10; // busiest rows always shown
-// Grows past the minimum while the leaders are still competing. Bounded because the picker eats
-// into the pane it sits under, and because every extra row is one more identity to read.
-const MAX_BUSIEST = 20;
-const QUIET_ROWS = 10; // quiet-band rows shown beside them
 // `o` opens each listed subject at ~21 observability queries, against an endpoint measured to
 // sustain ~60/min. It stays fixed while the list above it grows, or one keypress rate-limits the
 // tool against itself.
@@ -204,15 +185,12 @@ const COUNT_W = 7; // right-aligned request count
 const ROW_W = CURSOR_W + COUNT_W + 1; // ... and the space before the identity
 const FLAG_W = 3; // ' ⚑' — budgeted at 2 cells, since the glyph is ambiguous-width
 const OPEN_W = 7; // ' (open)'
-const CAP_BUSIEST = 'busiest';
-const CAP_QUIET = `quietest over ${QUIET_FLOOR}`;
 const ROW_CHROME = {
   row: ROW_W,
   cursor: CURSOR_W,
   flag: FLAG_W,
   open: OPEN_W,
 };
-const IP_CHARS = /^[0-9a-fA-F.:]+$/; // everything an IPv4/IPv6 literal can contain
 
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
 export function App() {
@@ -236,6 +214,13 @@ export function App() {
   const report = usePane<ReportData>();
   const sitemap = usePane<SitemapReport>();
   const ipTabs = useIpTabs({ projectId, teamId, token });
+  // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
+  // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
+  const reportH = Math.max(8, (process.stdout.rows ?? 24) - 1);
+  const pickers = usePickers(reportH);
+  // The live loop is armed once, so it reaches the picker through a ref rather than a closure.
+  const pickersRef = useRef(pickers);
+  pickersRef.current = pickers;
   const [pane, setPane] = useState<PaneKind | null>(null);
   const [focus, setFocus] = useState<
     | 'editor'
@@ -246,12 +231,6 @@ export function App() {
     | 'window-pick'
     | 'confirm'
   >('editor');
-  // Which identity the picker and new tabs address. `i` and `f` set it.
-  const [pickKind, setPickKind] = useState<'ip' | 'ja4'>('ip');
-  const [ipInput, setIpInput] = useState('');
-  const [ipError, setIpError] = useState('');
-  // -1 means "use what I typed"; 0+ indexes the filtered suggestions, like a URL bar.
-  const [ipCursor, setIpCursor] = useState(-1);
   const [asnInput, setAsnInput] = useState('');
   const [asnError, setAsnError] = useState('');
   // The window IP lookups use. Rolling by default; `w` switches it to a typed date range.
@@ -268,37 +247,19 @@ export function App() {
   const windowReturn = useRef<'pane' | 'ip-input'>('pane');
   const [rangeInput, setRangeInput] = useState('');
   const [rangeError, setRangeError] = useState('');
-  const topIpList = usePane<[string, number][]>();
-  const topJa4List = usePane<[string, number][]>();
-  const denyActivity = usePane<Map<string, Activity>>();
-  const [denyCursor, setDenyCursor] = useState(0);
-  // An error that arrived WITH partial data. usePane.error only carries a total failure, so
-  // without this a partial activity map renders as a complete one.
-  const [denyActivityNote, setDenyActivityNote] = useState('');
+  const denylist = useDenylist({
+    items,
+    setItems,
+    onEdit: () => setApplied(null),
+  });
   const [sitemapCursor, setSitemapCursor] = useState(0);
   const [copied, setCopied] = useState('');
-  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
-  const [watchlistError, setWatchlistError] = useState('');
-  const [watchlistCursor, setWatchlistCursor] = useState(0);
-  const [ignoreList, setIgnoreList] = useState<WatchlistEntry[]>([]);
-  const [ignoreError, setIgnoreError] = useState('');
-  const [ignoreCursor, setIgnoreCursor] = useState(0);
-  // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
-  // on screen as a pending change until applied.
-  const [removedDenies, setRemovedDenies] = useState<string[]>([]);
-  const [stagedDenies, setStagedDenies] = useState<string[]>([]);
+  const lists = useIdentityLists(ROOT);
   const [confirm, setConfirm] = useState<{
     prompt: string;
     detail: string;
     onYes: () => void;
   } | null>(null);
-  // Read by the live-refresh interval, which must not capture a stale render's values.
-  const pickKindRef = useRef(pickKind);
-  pickKindRef.current = pickKind;
-  const topIpListRef = useRef(topIpList);
-  topIpListRef.current = topIpList;
-  const topJa4ListRef = useRef(topJa4List);
-  topJa4ListRef.current = topJa4List;
   const failuresRef = useRef(0); // consecutive live-refresh failures, drives the backoff
   const tickRef = useRef(0);
   const activeTabRef = useRef(ipTabs.active);
@@ -356,11 +317,6 @@ export function App() {
           ? Boolean(ipTabs.active?.loading)
           : false;
 
-  // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
-  // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
-  const rows = process.stdout.rows ?? 24;
-  const reportH = Math.max(8, rows - 1);
-
   useEffect(() => {
     fetchLive()
       .then((live) => {
@@ -395,8 +351,8 @@ export function App() {
     reportH,
     // The list panes load and grow asynchronously; without these a long list is clamped to the
     // height it had while still loading and can never be scrolled to.
-    watchlist,
-    ignoreList,
+    lists.watch.entries,
+    lists.ignore.entries,
   ]);
 
   // A blinking marker, so a watch screen left on a desk reads as live at a glance rather than
@@ -429,22 +385,7 @@ export function App() {
         if (stopped) return;
         const w = rollingMinutes(LIVE_MINUTES, new Date(), 'live');
         setIpWindow(w);
-        const cache =
-          pickKindRef.current === 'ip'
-            ? topIpListRef.current
-            : topJa4ListRef.current;
-        cache.reset();
-        // The outcome comes from load itself: it catches every rejection, so a flag set inside
-        // the fetcher cannot see a request the pane dropped as a duplicate, and that reset the
-        // backoff to zero on the exact ticks it was supposed to be lengthening.
-        const outcome = await cache.load(async () => {
-          const { rows, error } =
-            pickKindRef.current === 'ip'
-              ? await topIps(creds, w, TOP_IPS_LIMIT)
-              : await topJa4(creds, w, TOP_IPS_LIMIT);
-          if (error) throw new Error(error);
-          return rows;
-        });
+        const outcome = await pickersRef.current.refreshLive(creds, w);
         if (stopped) return;
         // Only the visible tab, and only every Nth tick — a profile costs ~21 queries.
         tickRef.current += 1;
@@ -559,10 +500,7 @@ export function App() {
               kind: 'error',
               error: `watch list: ${listed.error}`,
             });
-          else if (listed.entries) {
-            setWatchlist(listed.entries);
-            setWatchlistError('');
-          }
+          else if (listed.entries) lists.replaceWatch(listed.entries);
         }
         setWatchWho(
           findings.map(
@@ -828,7 +766,7 @@ export function App() {
     if (cancelled) {
       // Persist first: quitting mid-apply after the deny rule was written would otherwise
       // strand a live ban that the next session lifts.
-      const cancelledPersist = persistDenies(outcome, snapshot);
+      const cancelledPersist = denylist.persist(snapshot, outcome, dryRun);
       // The TUI is about to tear down, so the shell's exit code is the only channel left. A
       // deny live in the WAF but missing from .env.local must not look like a clean quit.
       process.exitCode = anyError || !cancelledPersist.ok ? 1 : 0;
@@ -840,7 +778,7 @@ export function App() {
     // The rules are rebuilt from env on every apply, so a digest that lives only in the WAF is
     // un-banned by the next CI run. Write back whatever ACTUALLY landed — keyed off each deny
     // rule's own outcome, because an unrelated rule failing must not strand a live ban.
-    const persisted = persistDenies(outcome, snapshot);
+    const persisted = denylist.persist(snapshot, outcome, dryRun);
     // Set both ways: a retry that succeeds after a failed apply must not still exit non-zero.
     process.exitCode = anyError || !persisted.ok ? 1 : 0;
     // Back to the editor, not a terminal screen — an apply is a step in a session.
@@ -853,168 +791,11 @@ export function App() {
 
   const creds = { projectId, teamId, token };
 
-  /** Write each deny rule that actually reached the WAF back to .env.local. Returns whether every pending edit was persisted plus a summary suffix — `ok` is load-bearing: a deny live in the WAF but absent from .env.local is lifted by the next apply, so it must fail the run rather than only warn. */
-  const persistDenies = (
-    outcome: Map<string, ApplyStatus>,
-    snapshot: Item[],
-  ): { ok: boolean; summary: string } => {
-    if (!stagedDenies.length && !removedDenies.length)
-      return { ok: true, summary: '' };
-    // A dry run reaches no WAF, so writing the denylist back would enforce or lift a ban the
-    // operator only previewed — .env.local is what the next real apply and CI rebuild from.
-    if (dryRun)
-      return { ok: true, summary: ' · dry-run: .env.local NOT written' };
-    const notes: string[] = [];
-    let wrote = false;
-    // A cancelled run breaks out of applyAll part-way, so `outcome` can hold one deny rule and
-    // not the other. Clearing the staged lists on the strength of the one that landed would
-    // drop the other's values unpersisted, and the next apply rebuilds from env and lifts them.
-    let unreached = false;
-    for (const [ruleName, spec, envKey] of [
-      [JA4_RULE, JA4_DENY, 'FW_BLOCKED_JA4'],
-      [ASN_RULE, ASN_DENY, 'FW_BLOCKED_ASN'],
-      // The challenge tier persists on the same pass, because `stageDeny` PROMOTES off it. Write
-      // the deny without the removal and the next apply rebuilds FW_CHALLENGE_JA4 from a stale
-      // env and puts the digest straight back on both lists — the exact half-applied state the
-      // promotion exists to prevent. Idempotent when nothing was promoted: it writes the rule's
-      // own current values back.
-      [CHALLENGE_SCRAPER_JA4, JA4_DENY, 'FW_CHALLENGE_JA4'],
-    ] as const) {
-      const item = snapshot.find((it) => it.rule.name === ruleName);
-      const status = outcome.get(ruleName);
-      if (!item) continue;
-      if (!status) {
-        unreached = true;
-        continue;
-      }
-      if (status === 'error') {
-        notes.push(`${envKey} NOT saved — ${ruleName} failed to apply`);
-        continue;
-      }
-      try {
-        persistEnvVar(ENV_PATH, envKey, valuesOf(item.rule, spec).join(','));
-        wrote = true;
-      } catch (e) {
-        notes.push(
-          `${envKey} NOT saved (${errMsg(e)}) — the next apply will undo it`,
-        );
-      }
-    }
-    if (wrote && !notes.length && !unreached) {
-      setStagedDenies([]);
-      setRemovedDenies([]);
-      return { ok: true, summary: ' · denylist saved to .env.local' };
-    }
-    if (unreached)
-      notes.push(
-        'a deny rule was never reached, so its staged edits are still unapplied',
-      );
-    return {
-      ok: !notes.length,
-      summary: notes.length ? ` · WARNING: ${notes.join('; ')}` : '',
-    };
-  };
-
-  const denyRuleOf = (name: string) =>
-    items.find((it) => it.rule.name === name);
-  // A rule can sit in the WAF with active:false, or cycled to log/challenge — both states leave
-  // the traffic served normally. Reporting ALREADY DENIED for either tells the operator a
-  // scraper is handled while it is not, which is the most costly kind of wrong. seedItems
-  // prefers the LIVE action, so a stray ←/→ that once reached the WAF persists across applies.
-  const enforcing = (it: Item | undefined) =>
-    Boolean(it?.active && it.action === 'deny');
-  const ja4Item = denyRuleOf(JA4_RULE);
-  const ja4Enforcing = enforcing(ja4Item);
-  const liveJa4 =
-    ja4Item && ja4Enforcing ? valuesOf(ja4Item.rule, JA4_DENY) : [];
-  // The recoverable tier needs its own liveness test: `enforcing` above requires action `deny`,
-  // which a challenge rule is never allowed to be, so reusing it would read every live challenge
-  // as inert — and the advisory would then treat our own suppressed rendering as a measured zero.
-  const challengeItem = denyRuleOf(CHALLENGE_SCRAPER_JA4);
-  const liveChallengeJa4 =
-    challengeItem?.active && challengeItem.action === 'challenge'
-      ? valuesOf(challengeItem.rule, JA4_DENY)
-      : [];
-  const asnItem = denyRuleOf(ASN_RULE);
-  const liveAsn =
-    asnItem && enforcing(asnItem) ? valuesOf(asnItem.rule, ASN_DENY) : [];
-  // Only worth saying for a rule that actually carries denies — a revoked one denying nothing is
-  // the intended resting state, not a fault.
-  const denyNotEnforcing = (
-    [
-      [ja4Item, JA4_DENY],
-      [asnItem, ASN_DENY],
-    ] as const
-  )
-    .filter(
-      ([it, spec]) =>
-        it && !enforcing(it) && valuesOf(it.rule, spec).length > 0,
-    )
-    .map(([it]) => ({
-      rule: it!.rule.name,
-      why: !it!.active
-        ? 'the rule is DEACTIVATED'
-        : `its action is ${it!.action}, not deny — matching traffic is still served`,
-    }));
-  const act = denyActivity.data;
-  const stagedNormalized = (spec: typeof JA4_DENY) =>
-    new Set(stagedDenies.map((v) => spec.normalize(v.trim())));
-  const denyEntries: DenyEntry[] = [
-    ...liveJa4.map((v) => ({
-      kind: 'ja4' as const,
-      value: v,
-      // Normalized both sides: the rule stores the digest normalized while stageDeny keeps what
-      // was typed, so a raw `includes` rendered a staged deny as `live` and hid the
-      // "press a to apply" banner.
-      staged: stagedNormalized(JA4_DENY).has(JA4_DENY.normalize(v)),
-      removed: false,
-      requests: act?.get(v)?.requests,
-      denied: act?.get(v)?.denied,
-    })),
-    ...liveAsn.map((v) => ({
-      kind: 'asn' as const,
-      value: v,
-      staged: stagedNormalized(ASN_DENY).has(ASN_DENY.normalize(v)),
-      removed: false,
-      requests: act?.get(v)?.requests,
-      denied: act?.get(v)?.denied,
-    })),
-    ...removedDenies.map((v) => ({
-      // By shape, not by a substring guess: the two denylists share one flat removal list.
-      kind: (JA4_DENY.valid(v) ? 'ja4' : 'asn') as 'ja4' | 'asn',
-      value: v,
-      staged: false,
-      removed: true,
-      requests: act?.get(v)?.requests,
-      denied: act?.get(v)?.denied,
-    })),
-  ];
   const subjectDigest = ipTabs.active?.data
     ? ipTabs.active.data.subject.kind === 'ja4'
       ? ipTabs.active.data.subject.value
       : (ipTabs.active.data.byJa4[0]?.[0] ?? '')
     : '';
-  // Rules carrying unapplied denylist edits, so the list can say so rather than looking inert.
-  const pendingByRule = new Map<string, string>();
-  for (const [ruleName, spec] of [
-    [JA4_RULE, JA4_DENY],
-    [ASN_RULE, ASN_DENY],
-  ] as const) {
-    const item = denyRuleOf(ruleName);
-    if (!item) continue;
-    const { added, dropped } = pendingEdits(
-      valuesOf(item.rule, spec),
-      stagedDenies,
-      removedDenies,
-      spec,
-    );
-    // Kept terse so it survives a narrow rules column; the footer and denylist pane carry detail.
-    const parts = [
-      added ? `+${added}` : '',
-      dropped ? `−${dropped}` : '',
-    ].filter(Boolean);
-    if (parts.length) pendingByRule.set(ruleName, parts.join(' '));
-  }
 
   // Read once. The error is carried into the pane rather than swallowed: an unreadable
   // allowlist exempts EVERY verified crawler, which is a large silent change in what this pane
@@ -1037,22 +818,9 @@ export function App() {
         statuses: ipTabs.active.data.byStatus,
         digestReach: ipTabs.active.data.digestReach,
         asnReach: ipTabs.active.data.asnReach,
-        // Live-and-applied, NOT merely present in the rule: a staged digest is in the local
-        // rule but has not been written, and calling that "already denied" is a lie.
-        alreadyDeniedJa4: enforcedNow(
-          liveJa4,
-          stagedDenies,
-          removedDenies,
-          subjectDigest,
-          JA4_DENY,
-        ),
-        // From the LIVE challenge rule, matching how alreadyDeniedJa4 is derived. Our own
-        // interstitial stops a browser fetching sub-resources, so its rendering evidence
-        // disappears — and the advisory must not read that silence as a measured zero.
-        challengedJa4: liveChallengeJa4.some(
-          (v) => JA4_DENY.normalize(v) === JA4_DENY.normalize(subjectDigest),
-        ),
-        stagedJa4: stagedDenies.includes(subjectDigest),
+        alreadyDeniedJa4: denylist.enforcedJa4(subjectDigest),
+        challengedJa4: denylist.challengedJa4(subjectDigest),
+        stagedJa4: denylist.stagedJa4(subjectDigest),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
         // in FW_BLOCKED_ASN is caught at staging (the number is typed there), not here.
         alreadyDeniedAsn: false,
@@ -1066,47 +834,24 @@ export function App() {
       })
     : undefined;
 
-  // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
-  const pickList = pickKind === 'ip' ? topIpList : topJa4List;
-  const ipFiltered = (pickList.data ?? []).filter(
-    ([ip]) => !ipInput || ip.includes(ipInput),
-  );
-  // How many count as busy is a property of the traffic, not a constant: a fixed cut hides the
-  // ninth of nine competing leaders. Bounded by the viewport too, since these rows are taken from
-  // the pane below and reportH can be as little as 8.
-  const busiest = busiestCount(
-    ipFiltered,
-    MIN_BUSIEST,
-    Math.min(MAX_BUSIEST, Math.max(MIN_BUSIEST, reportH - QUIET_ROWS)),
-  );
-  const ipMatches = ipFiltered.slice(0, busiest);
-  // Only when browsing. Under a filter the list is already the answer to a question, and a
-  // second column drawn from the same matches would just repeat its tail.
-  // Skips exactly what the busiest column drew, so the two can never overlap as it grows.
-  const quietMatches = ipInput
-    ? []
-    : quietBand(ipFiltered, ipMatches.length, QUIET_ROWS);
-  // One flat list, so the cursor, Enter and what is on screen cannot disagree.
-  const ipPickable = pickable(ipMatches, quietMatches);
-
   // Shared with the width measurement above, so a row can never be drawn wider than it was
   // measured — which is what wraps a row and costs the pane an unreserved line.
   const isOpen = (id: string) =>
     ipTabs.tabs.some((t) => t.subject.value === id);
   /** Free, and independent of volume. Not a verdict — a verified crawler inverts the same tell. */
-  const isFlagged = (id: string) => pickKind === 'ja4' && noAlpn(id);
+  const isFlagged = (id: string) => pickers.kind === 'ja4' && noAlpn(id);
 
-  /** One picker row. `i` indexes ipPickable, so the cursor means the same thing in both columns. */
+  /** One picker row. `i` indexes pickers.pickable, so the cursor means the same thing in both columns. */
   const pickerRow = ([id, count]: [string, number], i: number) => {
     const open = isOpen(id);
     const tell = isFlagged(id);
     return (
       <Box key={id}>
-        <Text color="cyan">{i === ipCursor ? '▶ ' : '  '}</Text>
+        <Text color="cyan">{i === pickers.cursor ? '▶ ' : '  '}</Text>
         <Text dimColor>{String(count).padStart(COUNT_W)} </Text>
         <Text
-          bold={i === ipCursor}
-          color={i === ipCursor ? 'cyan' : tell ? 'yellow' : undefined}
+          bold={i === pickers.cursor}
+          color={i === pickers.cursor ? 'cyan' : tell ? 'yellow' : undefined}
         >
           {id}
         </Text>
@@ -1124,36 +869,22 @@ export function App() {
     // response to whatever key opened this one.
     setCopied('');
     if (kind === 'ip') {
-      setPickKind(pick);
-      setIpInput('');
-      setIpError('');
-      setIpCursor(-1);
+      pickers.begin(pick);
       setFocus('ip-input');
       // Picking from live traffic beats typing an address from memory. Fetched once per session.
-      void loadPickList(pick, ipWindow);
+      pickers.load(creds, pick, ipWindow);
       return;
     }
     setFocus('pane');
     if (kind === 'report' && !report.data)
       void report.load(() => fetchReport(creds));
     // Always re-read: the file is local, and the watch tick or a CLI run may have fed it since.
-    if (kind === 'watchlist') void loadWatchlist();
-    if (kind === 'ignorelist') void loadIgnoreList();
+    if (kind === 'watchlist') void lists.load('watch');
+    if (kind === 'ignorelist') void lists.load('ignore');
     if (kind === 'sitemap' && !sitemap.data)
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
-    if (kind === 'denylist' && !denyActivity.data)
-      void denyActivity.load(async () => {
-        const { activity, error } = await fetchDenyActivity(
-          creds,
-          DENY_ACTIVITY_HOURS,
-          liveJa4,
-        );
-        if (error && !activity.size) throw new Error(error);
-        // Partial is not complete: a nonempty map with an error behind it must still say so, or
-        // a digest missing from it reads as "no traffic — safe to retire".
-        setDenyActivityNote(error ?? '');
-        return activity;
-      });
+    if (kind === 'denylist' && !denylist.activity.data)
+      denylist.loadActivity(creds);
   };
 
   /** Tab from elsewhere surfaces the IP tabs at the one you were last on; only a second press moves. Advancing straight away would skip a tab you had not seen yet. */
@@ -1164,98 +895,12 @@ export function App() {
     else setPane('ip');
   };
 
-  /**
-   * Stage a value into its deny rule. Nothing reaches the WAF until the apply.
-   *
-   * A JA4 deny also PROMOTES: the digest is dropped from the challenge tier in the same edit.
-   * The two lists are alternatives, not layers — `rules.ts` gives the deny live priority, so a
-   * digest on both is denied while `challenge-scraper-ja4` goes on advertising "1 challenged",
-   * which is a rule describing something it is not doing. Doing it here rather than leaving it to
-   * the operator is the point: promoting by hand is two files and an apply, and the half anyone
-   * forgets is the removal, because nothing breaks when they do.
-   */
-  const stageDeny = (kind: 'ja4' | 'asn', value: string) => {
-    const ruleName = kind === 'ja4' ? JA4_RULE : ASN_RULE;
-    const spec = kind === 'ja4' ? JA4_DENY : ASN_DENY;
-    // Validated here, not inside the updater: a throw in a setItems callback escapes the keypress
-    // handler with no error boundary and every deny staged this session dies with the process.
-    if (!spec.valid(spec.normalize(value.trim()))) {
-      setAsnError(`refused — not ${spec.example}`);
-      return;
-    }
-    setItems((prev) =>
-      prev.map((it) =>
-        // Unconditional, not gated on the digest being on the list: withoutValue on an absent
-        // value is a no-op, and a gate here would need the LIVE list, which is exactly the state
-        // a stale read gets wrong.
-        kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4
-          ? {
-              ...it,
-              rule: withoutValue(it.rule, JA4_DENY, value).rule,
-              status: 'idle',
-              detail: undefined,
-            }
-          : it.rule.name === ruleName
-            ? {
-                ...it,
-                rule: withValue(it.rule, spec, value).rule,
-                status: 'idle',
-                detail: undefined,
-              }
-            : it,
-      ),
-    );
-    setStagedDenies((s) => [...new Set([...s, value])]);
-    setRemovedDenies((s) => s.filter((v) => v !== value));
-    setApplied(null);
-  };
-
-  /** Lift a deny. Same staging discipline: visible as pending until applied. */
-  const unstageDeny = (entry: DenyEntry) => {
-    const ruleName = entry.kind === 'ja4' ? JA4_RULE : ASN_RULE;
-    const spec = entry.kind === 'ja4' ? JA4_DENY : ASN_DENY;
-    setItems((prev) =>
-      prev.map((it) =>
-        it.rule.name === ruleName
-          ? {
-              ...it,
-              rule: withoutValue(it.rule, spec, entry.value).rule,
-              status: 'idle',
-              detail: undefined,
-            }
-          : it,
-      ),
-    );
-    setStagedDenies((s) => s.filter((v) => v !== entry.value));
-    // Only a value that actually reached the WAF can be unbanned. Undoing a staged addition is
-    // just dropping the stage; recording it as a removal invents an unban of something that was
-    // never denied, and pendingEdits then counts it against the rule.
-    if (!entry.staged)
-      setRemovedDenies((s) => [...new Set([...s, entry.value])]);
-    setApplied(null);
-  };
-
-  /** Load the picker list for `kind`. Cached per kind so switching back is instant. `force` is required after a window change: reset() is an async state update, so the cache check would still see the old window's rows and skip the fetch. */
-  const loadPickList = (kind: 'ip' | 'ja4', w: Window, force = false) => {
-    const cache = kind === 'ip' ? topIpList : topJa4List;
-    if (cache.data && !force) return;
-    void cache.load(async () => {
-      const { rows, error } =
-        kind === 'ip'
-          ? await topIps(creds, w, TOP_IPS_LIMIT)
-          : await topJa4(creds, w, TOP_IPS_LIMIT);
-      if (error) throw new Error(error);
-      return rows;
-    });
-  };
-
   /** Switch the window: refetch the picker list and re-profile the tab on screen, so flipping timelines is one key. */
   const applyWindow = (w: Window) => {
     setIpWindow(w);
     setRangeError('');
-    topIpList.reset();
-    topJa4List.reset();
-    loadPickList(pickKind, w, true);
+    pickers.reset();
+    pickers.load(creds, pickers.kind, w, true);
     // The sitemap pane is window-scoped too; without this it stayed frozen on whatever window
     // it was first opened with, whatever the header said.
     sitemap.reset();
@@ -1268,14 +913,14 @@ export function App() {
 
   /** Open the timeline list, starting on whatever is in force. */
   const openWindowPick = () => {
-    setWindowCursor(presetIdx >= 0 ? presetIdx : WINDOW_PRESETS.length);
+    setWindowCursor(openCursor(presetIdx));
     windowReturn.current = focus === 'ip-input' ? 'ip-input' : 'pane';
     setFocus('window-pick');
   };
 
   /** Apply the highlighted timeline. The row past the presets is the custom date range. */
   const chooseWindow = () => {
-    if (windowCursor >= WINDOW_PRESETS.length) {
+    if (isCustomRow(windowCursor)) {
       setRangeInput('');
       setRangeError('');
       setFocus('range-input');
@@ -1289,27 +934,18 @@ export function App() {
 
   /** Apply a typed date range to IP lookups. Blank reverts to the rolling default. */
   const submitRange = (raw: string) => {
-    const text = raw.trim();
-    const next = text
-      ? resolveWindow(text, new Date())
-      : { window: rollingWindow(IP_WINDOW_HOURS, new Date()) };
+    const next = rangeSelection(raw, new Date(), IP_WINDOW_HOURS);
     if ('error' in next) {
       setRangeError(next.error);
       return;
     }
-    // Blank reverts to the rolling default, which IS a preset — marking it custom left the
-    // timeline list showing "custom… · in force" over a preset window.
-    setPresetIdx(
-      text
-        ? -1
-        : WINDOW_PRESETS.findIndex((p) => p.minutes === IP_WINDOW_HOURS * 60),
-    );
+    setPresetIdx(next.presetIdx);
     applyWindow(next.window);
     // Back to whoever opened the picker, matching preset selection. Choosing a range from the
     // report or sitemap pane used to drop the operator into the IP picker instead.
     if (windowReturn.current === 'ip-input') {
-      setIpInput('');
-      setIpCursor(-1);
+      pickers.setInput('');
+      pickers.setCursor(-1);
     }
     setFocus(windowReturn.current);
   };
@@ -1323,115 +959,129 @@ export function App() {
    * row worth a look, not for opening wholesale.
    */
   const submitAll = () => {
-    const subjects = ipMatches.slice(0, OPEN_ALL_MAX).map(([value]) => ({
-      kind: pickKind,
-      value: pickKind === 'ja4' ? value.toLowerCase() : value,
-    }));
+    const subjects = subjectsToOpen(
+      pickers.busiest,
+      pickers.kind,
+      OPEN_ALL_MAX,
+    );
     if (!subjects.length) return;
-    setIpError('');
+    pickers.setError('');
     setFocus('pane');
     setReportScroll(0);
     ipTabs.openMany(subjects, ipWindow);
   };
 
-  /** Load the on-disk watch list into the pane, keeping unreadable distinct from empty. */
-  const loadWatchlist = async () => {
-    const list = await readList(ROOT, WATCHLIST_FILE);
-    setWatchlist(list.entries);
-    setWatchlistError(list.ok ? '' : (list.error ?? 'unreadable'));
-    setWatchlistCursor((c) =>
-      Math.max(0, Math.min(c, list.entries.length - 1)),
+  /** Copy an exact identity. A JA4 is 37 characters that must be exact, and retyping one is how a deny ends up matching nothing. */
+  const copyValue = (value: string | undefined) => {
+    if (!value) return;
+    void copyToClipboard(value).then((err) =>
+      setCopied(err ? `copy failed: ${err}` : `copied ${value}`),
     );
   };
 
-  /** Same for the ignore list. */
-  const loadIgnoreList = async () => {
-    const list = await readList(ROOT, IGNORELIST_FILE);
-    setIgnoreList(list.entries);
-    setIgnoreError(list.ok ? '' : (list.error ?? 'unreadable'));
-    setIgnoreCursor((c) => Math.max(0, Math.min(c, list.entries.length - 1)));
+  /** Surface a list-save failure, which is the only thing those calls report. */
+  const noteIfError = (err?: string) => {
+    if (err) setCopied(err);
   };
 
-  /** Put an identity on one list and off the other — watched and ignored are exclusive. */
-  const moveIdentity = async (
-    to: 'watch' | 'ignore',
-    subject: Subject,
-    note: string,
+  /** Open an identity as a profile tab from whichever pane named it. */
+  const profileIdentity = (subject: Subject) => {
+    pickers.setKind(subject.kind);
+    setPane('ip');
+    setReportScroll(0);
+    ipTabs.open(subject, ipWindow);
+  };
+
+  /** Same, for a row on one of the lists. */
+  const profileEntry = (e: WatchlistEntry | undefined) => {
+    if (e) profileIdentity({ kind: e.kind, value: e.id });
+  };
+
+  /** Move a listed identity to the other list, keeping whatever note it carried. */
+  const moveEntry = (
+    to: ListSide,
+    e: WatchlistEntry | undefined,
+    fallback: string,
   ) => {
-    const [addFile, dropFile] =
-      to === 'watch'
-        ? [WATCHLIST_FILE, IGNORELIST_FILE]
-        : [IGNORELIST_FILE, WATCHLIST_FILE];
-    const out = await recordExclusive(
-      ROOT,
-      addFile,
-      dropFile,
-      [{ kind: subject.kind, id: subject.value, source: 'manual', note }],
-      new Date(),
-    );
-    if (out.error) {
-      setCopied(`${to} list: ${out.error}`);
+    if (!e) return;
+    void lists
+      .move(to, { kind: e.kind, value: e.id }, e.note || fallback)
+      .then(setCopied);
+  };
+
+  /**
+   * Stage a deny for the profile on screen, after a confirm.
+   *
+   * The advisory ADVISES; it does not hold the keys. This used to require an OFFERED lever and
+   * then return silently on any blocker, so `b` did nothing at all unless the verdict was `ban` —
+   * and a keypress that silently does nothing reads as a broken tool, not as a refusal. The
+   * protection that matters is on the UNATTENDED path (`autoBanRefusal`), which still fires only
+   * on `ban`. So the veto became a warning.
+   */
+  const denyFromProfile = () => {
+    const lever = ipAdvice?.lever;
+    if (lever?.kind === 'asn') {
+      // The AS number is not derivable from the name observability reports.
+      setAsnInput('');
+      setAsnError('');
+      setFocus('asn-input');
       return;
     }
-    const [added, remaining] = [out.added ?? [], out.remaining ?? []];
-    if (to === 'watch') {
-      setWatchlist(added);
-      setIgnoreList(remaining);
-    } else {
-      setIgnoreList(added);
-      setWatchlist(remaining);
+    // A recommended lever names its own target; otherwise it is the subject's own digest.
+    const target = lever?.value ?? subjectDigest;
+    if (!target) {
+      // Reachable while a tab is still loading, so it needs to say something rather than fall
+      // through to the same silence this exists to remove.
+      setCopied('nothing to deny — this profile carries no fingerprint yet');
+      return;
     }
-    setWatchlistError('');
-    setIgnoreError('');
-    const watchLen = (to === 'watch' ? added : remaining).length;
-    const ignoreLen = (to === 'ignore' ? added : remaining).length;
-    setWatchlistCursor((c) => Math.max(0, Math.min(c, watchLen - 1)));
-    setIgnoreCursor((c) => Math.max(0, Math.min(c, ignoreLen - 1)));
-    setCopied(
-      to === 'watch'
-        ? `watching ${subject.value} — t to view`
-        : `ignoring ${subject.value} — g to view · watch mode now skips it`,
-    );
+    const recommended = ipAdvice?.verdict === 'ban' && Boolean(lever);
+    const subject = ipTabs.active?.data?.subject;
+    const promoting = promotes(denylist.live.challengeValues, target);
+    setConfirm({
+      prompt: promoting
+        ? `PROMOTE ${target} from challenge to DENY?`
+        : `Deny TLS fingerprint ${target}?`,
+      detail: [
+        recommended
+          ? `${ipAdvice?.reasons.length ?? 0} tells agree`
+          : ipAdvice
+            ? overrideWarning(ipAdvice)
+            : 'no advice was computed for this identity',
+        subject ? fingerprintScopeNote(subject, target) : '',
+        promoting
+          ? 'moves it to FW_BLOCKED_JA4 and OFF FW_CHALLENGE_JA4 in one apply — an interstitial becomes a hard 403'
+          : 'stages into FW_BLOCKED_JA4',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      onYes: () => denylist.stageDeny('ja4', target),
+    });
+    setFocus('confirm');
   };
 
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
-    else if (pane === 'watchlist') void loadWatchlist();
-    else if (pane === 'ignorelist') void loadIgnoreList();
+    else if (pane === 'watchlist') void lists.load('watch');
+    else if (pane === 'ignorelist') void lists.load('ignore');
     else if (pane === 'sitemap')
       void sitemap.load(() => fetchSitemapReport(creds, ipWindow));
     else if (pane === 'ip') ipTabs.refresh();
-    else if (pane === 'denylist')
-      void denyActivity.load(async () => {
-        const { activity, error } = await fetchDenyActivity(
-          creds,
-          DENY_ACTIVITY_HOURS,
-          liveJa4,
-        );
-        if (error && !activity.size) throw new Error(error);
-        setDenyActivityNote(error ?? '');
-        return activity;
-      });
+    else if (pane === 'denylist') denylist.loadActivity(creds);
   };
 
   /** Open `value` as a tab; keeps focus in the field when it is not an IP. Takes the value rather than reading state, so a paste that ends in a newline can submit what it just appended. */
   const submitIp = (value: string) => {
-    const ip = value.trim();
-    // Validated per kind: a JA4 contains letters and underscores an IP never can.
-    const valid =
-      pickKind === 'ip' ? IP_CHARS.test(ip) : JA4_DENY.valid(ip.toLowerCase());
-    if (!ip || !valid) {
-      setIpError(pickKind === 'ip' ? 'not an IP address' : 'not a JA4 digest');
+    const out = resolveSubject(pickers.kind, value);
+    if ('error' in out) {
+      pickers.setError(out.error);
       return;
     }
-    setIpError('');
+    pickers.setError('');
     setFocus('pane');
     setReportScroll(0);
-    ipTabs.open(
-      { kind: pickKind, value: pickKind === 'ja4' ? ip.toLowerCase() : ip },
-      ipWindow,
-    );
+    ipTabs.open(out.subject, ipWindow);
   };
 
   /** Edit the highlighted rule, clearing the apply state it invalidates so an edited-but-unapplied row is visibly distinct. */
@@ -1453,6 +1103,309 @@ export function App() {
       action: cycleAction(it.rule, it.action, dir),
     }));
 
+  // Every side-pane key, in precedence order: the first match wins, so a pane-specific binding
+  // sits above the general one it would otherwise be shadowed by.
+  const paneBindings: Binding[] = [
+    {
+      key: 'j/k',
+      label: 'select',
+      panes: ['sitemap'],
+      matches: (p) => press.up(p) || press.down(p),
+      run: (p) => {
+        setSitemapCursor((c) =>
+          isUp(p)
+            ? Math.max(0, c - 1)
+            : Math.min((sitemap.data?.digests.length ?? 1) - 1, c + 1),
+        );
+        setCopied('');
+      },
+    },
+    {
+      key: 'j/k',
+      label: 'select',
+      panes: ['denylist'],
+      matches: (p) => press.up(p) || press.down(p),
+      run: (p) => {
+        denylist.moveCursor(isUp(p) ? -1 : 1);
+        setCopied('');
+      },
+    },
+    {
+      key: 'j/k',
+      label: 'select',
+      panes: ['watchlist'],
+      matches: (p) => press.up(p) || press.down(p),
+      run: (p) => {
+        lists.moveCursor('watch', isUp(p) ? -1 : 1);
+        setCopied('');
+      },
+    },
+    {
+      key: 'j/k',
+      label: 'select',
+      panes: ['ignorelist'],
+      matches: (p) => press.up(p) || press.down(p),
+      run: (p) => {
+        lists.moveCursor('ignore', isUp(p) ? -1 : 1);
+        setCopied('');
+      },
+    },
+    {
+      key: 'j/k',
+      label: 'scroll',
+      panes: ['report', 'ip'],
+      matches: (p) => press.up(p) || press.down(p),
+      run: (p) =>
+        setReportScroll((sc) =>
+          isUp(p) ? Math.max(0, sc - 1) : Math.min(reportMaxScroll, sc + 1),
+        ),
+    },
+    {
+      key: 'pgup/pgdn',
+      label: 'page',
+      // Every pane, including the list ones: j/k moves their cursor, so paging the body is the
+      // only way to reach a row past the fold.
+      unlisted: true,
+      matches: (p) => press.pageUp(p) || press.pageDown(p),
+      run: (p) =>
+        setReportScroll((sc) =>
+          p.pageUp
+            ? Math.max(0, sc - reportH + 2)
+            : Math.min(reportMaxScroll, sc + reportH - 2),
+        ),
+    },
+    { key: 'R', label: 'refresh', matches: press.char('R'), run: refreshPane },
+    {
+      key: 'i',
+      label: 'new ip',
+      matches: press.char('i'),
+      run: () => openPane('ip', 'ip'),
+    },
+    {
+      key: 'f',
+      label: 'ja4',
+      matches: press.char('f'),
+      run: () => openPane('ip', 'ja4'),
+    },
+    {
+      key: 't',
+      label: 'watch-list',
+      matches: press.char('t'),
+      run: () => openPane('watchlist'),
+    },
+    {
+      key: 'g',
+      label: 'ignore',
+      matches: press.char('g'),
+      run: () => openPane('ignorelist'),
+    },
+    {
+      key: 'w',
+      label: 'timeline',
+      matches: press.char('w', 'W'),
+      run: openWindowPick,
+    },
+    {
+      key: 'v',
+      label: watchOn ? 'watch (on)' : 'watch',
+      active: watchOn,
+      matches: press.char('v', 'V'),
+      run: () => setWatchOn((on) => !on),
+    },
+    {
+      key: 'b',
+      label: `deny ${ipAdvice?.lever?.kind === 'asn' ? 'network' : 'fingerprint'}`,
+      panes: ['ip'],
+      matches: press.char('b'),
+      run: denyFromProfile,
+    },
+    {
+      key: 'enter',
+      label: 'copy',
+      panes: ['denylist'],
+      matches: press.enter,
+      run: () => copyValue(denylist.entries[denylist.cursor]?.value),
+    },
+    {
+      key: 'u',
+      label: 'unban',
+      panes: ['denylist'],
+      matches: press.char('u'),
+      run: () => {
+        const entry = denylist.entries[denylist.cursor];
+        if (!entry || entry.removed) return;
+        setConfirm({
+          prompt: `Lift the deny on ${entry.value}?`,
+          detail: `${entry.kind.toUpperCase()} · takes effect on apply`,
+          onYes: () => denylist.unstageDeny(entry),
+        });
+        setFocus('confirm');
+      },
+    },
+    {
+      key: 'enter',
+      label: 'copy',
+      panes: ['sitemap'],
+      matches: press.enter,
+      run: () => copyValue(sitemap.data?.digests[sitemapCursor]?.ja4),
+    },
+    {
+      key: 'o',
+      label: 'profile it',
+      panes: ['sitemap'],
+      // Straight to a profile: the copy exists so the digest can be pasted, but opening it here
+      // skips the paste entirely.
+      matches: press.char('o'),
+      run: () => {
+        const d = sitemap.data?.digests[sitemapCursor];
+        if (d) profileIdentity({ kind: 'ja4', value: d.ja4 });
+      },
+    },
+    {
+      key: 'enter',
+      label: 'copy',
+      panes: ['watchlist'],
+      matches: press.enter,
+      run: () => copyValue(lists.watch.current?.id),
+    },
+    {
+      key: 'o',
+      label: 'profile it',
+      panes: ['watchlist'],
+      matches: press.char('o'),
+      run: () => profileEntry(lists.watch.current),
+    },
+    {
+      key: 'z',
+      label: 'ignore',
+      panes: ['watchlist'],
+      // The successor state: seen, judged, and not worth being told about again.
+      matches: press.char('z'),
+      run: () =>
+        moveEntry('ignore', lists.watch.current, 'moved from watch list'),
+    },
+    {
+      key: 'x',
+      label: 'remove',
+      panes: ['watchlist'],
+      // Removal is cheap to undo (mark it again), so no confirm — unlike lifting a deny.
+      matches: press.char('x'),
+      run: () => void lists.removeAtCursor('watch').then(noteIfError),
+    },
+    {
+      key: 'enter',
+      label: 'copy',
+      panes: ['ignorelist'],
+      matches: press.enter,
+      run: () => copyValue(lists.ignore.current?.id),
+    },
+    {
+      key: 'o',
+      label: 'profile it',
+      panes: ['ignorelist'],
+      // Ignored is muted, not invisible — a profile is still one keystroke away.
+      matches: press.char('o'),
+      run: () => profileEntry(lists.ignore.current),
+    },
+    {
+      key: 'm',
+      label: 'watch it',
+      panes: ['ignorelist'],
+      matches: press.char('m'),
+      run: () =>
+        moveEntry('watch', lists.ignore.current, 'moved from ignore list'),
+    },
+    {
+      key: 'x',
+      label: 'remove',
+      panes: ['ignorelist'],
+      // Un-ignoring needs no ceremony: if it is still active, the next tick re-surfaces it.
+      matches: press.char('x'),
+      run: () => void lists.removeAtCursor('ignore').then(noteIfError),
+    },
+    {
+      key: 'm',
+      label: 'watch',
+      panes: ['ip'],
+      when: Boolean(ipTabs.active),
+      matches: press.char('m'),
+      run: () => {
+        if (ipTabs.active)
+          void lists
+            .move('watch', ipTabs.active.subject, 'marked from profile')
+            .then(setCopied);
+      },
+    },
+    {
+      key: 'z',
+      label: 'ignore',
+      panes: ['ip'],
+      when: Boolean(ipTabs.active),
+      matches: press.char('z'),
+      run: () => {
+        if (ipTabs.active)
+          void lists
+            .move('ignore', ipTabs.active.subject, 'ignored from profile')
+            .then(setCopied);
+      },
+    },
+    {
+      key: 'x',
+      label: 'close tab',
+      panes: ['ip'],
+      when: ipTabs.tabs.length > 0,
+      matches: press.char('x'),
+      run: () => {
+        ipTabs.close();
+        setReportScroll(0);
+      },
+    },
+    {
+      key: 'esc',
+      label: 'rules',
+      matches: press.escape,
+      run: () => setFocus('editor'),
+    },
+    // Unlisted below. The tab indicator names its own keys, quit is on the rules footer, and
+    // r/s/d are reachable from there too — the pane footer has no room to repeat them.
+    {
+      key: 'tab',
+      label: 'cycle ips',
+      unlisted: true,
+      when: ipTabs.tabs.length > 0,
+      matches: press.tab,
+      run: (p) => gotoIpTabs(p.shift ? -1 : 1),
+    },
+    {
+      key: 'q',
+      label: 'quit',
+      unlisted: true,
+      matches: press.char('q'),
+      run: exit,
+    },
+    {
+      key: 'r',
+      label: 'report',
+      unlisted: true,
+      matches: press.char('r'),
+      run: () => openPane('report'),
+    },
+    {
+      key: 's',
+      label: 'sitemap',
+      unlisted: true,
+      matches: press.char('s'),
+      run: () => openPane('sitemap'),
+    },
+    {
+      key: 'd',
+      label: 'denylist',
+      unlisted: true,
+      matches: press.char('d'),
+      run: () => openPane('denylist'),
+    },
+  ];
+
   useInput((input, key) => {
     // A deny can take real users offline, so it never happens on one keystroke.
     if (focus === 'confirm') {
@@ -1469,9 +1422,9 @@ export function App() {
     if (focus === 'window-pick') {
       if (key.escape) setFocus(windowReturn.current);
       else if (key.upArrow || input === 'k')
-        setWindowCursor((c) => Math.max(0, c - 1));
+        setWindowCursor((c) => moveWindowCursor(c, -1));
       else if (key.downArrow || input === 'j')
-        setWindowCursor((c) => Math.min(WINDOW_PRESETS.length, c + 1));
+        setWindowCursor((c) => moveWindowCursor(c, 1));
       else if (key.return) chooseWindow();
       return;
     }
@@ -1481,14 +1434,9 @@ export function App() {
       else if (key.backspace || key.delete)
         setRangeInput((s) => s.slice(0, -1));
       else if (input && !key.ctrl && !key.meta) {
-        // Filter within the chunk and submit on an embedded newline: a pasted range arrives
-        // whole, and testing the whole string would reject every paste.
-        const next = (rangeInput + input.replace(/[^\d\s/.-]/g, '')).slice(
-          0,
-          32,
-        );
+        const next = typeRange(rangeInput, input);
         setRangeInput(next);
-        if (/[\r\n]/.test(input)) submitRange(next);
+        if (submitsOnPaste(input)) submitRange(next);
       }
       return;
     }
@@ -1509,7 +1457,7 @@ export function App() {
           prompt: `Deny AS${num}? The evidence was measured on "${lever?.value ?? ''}"`,
           detail:
             'NOTHING can reconcile that number with that name — the API exposes no AS-number dimension, so check it yourself. Large operators announce many ASNs. An ASN deny hits EVERY client on the network you type.',
-          onYes: () => stageDeny('asn', num),
+          onYes: () => setAsnError(denylist.stageDeny('asn', num) ?? ''),
         });
         setFocus('confirm');
       } else if (key.backspace || key.delete)
@@ -1524,18 +1472,18 @@ export function App() {
       else if (key.return)
         submitIp(
           resolveIpEntry(
-            ipInput,
-            ipCursor,
-            ipPickable.map(([ip]) => ip),
+            pickers.input,
+            pickers.cursor,
+            pickers.pickable.map(([ip]) => ip),
           ),
         );
       else if (key.upArrow)
-        setIpCursor((c) => moveCursor(c, -1, ipPickable.length));
+        pickers.setCursor((c) => moveCursor(c, -1, pickers.pickable.length));
       else if (key.downArrow)
-        setIpCursor((c) => moveCursor(c, 1, ipPickable.length));
+        pickers.setCursor((c) => moveCursor(c, 1, pickers.pickable.length));
       else if (key.backspace || key.delete) {
-        setIpInput((s) => s.slice(0, -1));
-        setIpCursor(-1);
+        pickers.setInput((s) => s.slice(0, -1));
+        pickers.setCursor(-1);
       }
       // `w` cannot occur in an IP, so intercepting it here costs nothing and saves an esc.
       else if (input === 'w' || input === 'W') openWindowPick();
@@ -1543,246 +1491,30 @@ export function App() {
       // digest does either, so filtering by it could only ever match nothing.
       else if (input === 'o' || input === 'O') submitAll();
       else if (input && !key.ctrl && !key.meta) {
-        setIpCursor(-1); // typing re-asserts the typed text over any highlight
-        // A paste arrives as ONE chunk, so filter within it rather than testing the whole
-        // string — requiring the chunk to match meant pasting an IP silently did nothing.
-        const allowed = pickKind === 'ip' ? /[^0-9a-fA-F.:]/g : /[^0-9a-z_]/gi;
-        const next = (ipInput + input.replace(allowed, '')).slice(
-          0,
-          45, // longest IPv6 literal
-        );
-        setIpInput(next);
-        if (/[\r\n]/.test(input)) submitIp(next); // pasted with a trailing newline
+        pickers.setCursor(-1); // typing re-asserts the typed text over any highlight
+        const next = typeIdentity(pickers.kind, pickers.input, input);
+        pickers.setInput(next);
+        if (submitsOnPaste(input)) submitIp(next); // pasted with a trailing newline
       }
       return;
     }
     if (focus === 'pane') {
-      if (input === 'q') exit();
-      // Tab cycles the open IPs from any pane, so comparing clients is one keystroke.
-      else if (key.tab && ipTabs.tabs.length) gotoIpTabs(key.shift ? -1 : 1);
-      else if (input === 'R') refreshPane();
-      else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
-      else if (input === 'w' || input === 'W') openWindowPick();
-      else if (input === 'b' && pane === 'ip') {
-        // The advisory ADVISES; it does not hold the keys.
-        //
-        // This used to require an OFFERED lever and then return silently on any blocker, so `b`
-        // did nothing at all unless the verdict was `ban` — and a keypress that silently does
-        // nothing reads as a broken tool, not as a refusal. It is also the wrong place for that
-        // authority: an operator looking at the evidence can see what the axes cannot, and the
-        // protection that actually matters is on the UNATTENDED path (`autoBanRefusal`), which
-        // is untouched and still fires only on `ban`. So the veto became a warning.
-        const lever = ipAdvice?.lever;
-        if (lever?.kind === 'asn') {
-          // The AS number is not derivable from the name observability reports.
-          setAsnInput('');
-          setAsnError('');
-          setFocus('asn-input');
-          return;
-        }
-        // A recommended lever names its own target; otherwise it is the subject's own digest.
-        const target = lever?.value ?? subjectDigest;
-        if (!target) {
-          // Reachable while a tab is still loading, so it needs to say something rather than
-          // fall through to the same silence this change exists to remove.
-          setCopied(
-            'nothing to deny — this profile carries no fingerprint yet',
-          );
-          return;
-        }
-        const recommended = ipAdvice?.verdict === 'ban' && Boolean(lever);
-        const subject = ipTabs.active?.data?.subject;
-        // The rule's VALUES, not `liveChallengeJa4`, which is gated on the tier being active and
-        // set to challenge. `stageDeny` removes the entry whatever the rule's action is, so
-        // reading liveness here would let the dialog say "Deny" while the edit also promotes —
-        // describing a different action from the one about to happen.
-        const promoting = (
-          challengeItem ? valuesOf(challengeItem.rule, JA4_DENY) : []
-        ).some((v) => JA4_DENY.normalize(v) === JA4_DENY.normalize(target));
-        setConfirm({
-          prompt: promoting
-            ? `PROMOTE ${target} from challenge to DENY?`
-            : `Deny TLS fingerprint ${target}?`,
-          detail: [
-            recommended
-              ? `${ipAdvice?.reasons.length ?? 0} tells agree`
-              : ipAdvice
-                ? overrideWarning(ipAdvice)
-                : 'no advice was computed for this identity',
-            subject ? fingerprintScopeNote(subject, target) : '',
-            promoting
-              ? 'moves it to FW_BLOCKED_JA4 and OFF FW_CHALLENGE_JA4 in one apply — an interstitial becomes a hard 403'
-              : 'stages into FW_BLOCKED_JA4',
-          ]
-            .filter(Boolean)
-            .join(' · '),
-          onYes: () => stageDeny('ja4', target),
-        });
-        setFocus('confirm');
-      } else if (pane === 'denylist' && key.return) {
-        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
-        const entry = denyEntries[denyCursor];
-        if (entry)
-          void copyToClipboard(entry.value).then((err) =>
-            setCopied(err ? `copy failed: ${err}` : `copied ${entry.value}`),
-          );
-      } else if (input === 'u' && pane === 'denylist') {
-        const entry = denyEntries[denyCursor];
-        if (!entry || entry.removed) return;
-        setConfirm({
-          prompt: `Lift the deny on ${entry.value}?`,
-          detail: `${entry.kind.toUpperCase()} · takes effect on apply`,
-          onYes: () => unstageDeny(entry),
-        });
-        setFocus('confirm');
-      } else if (pane === 'sitemap' && key.return) {
-        // A JA4 is 37 characters that must be exact; retyping one is how a deny rule ends up
-        // matching nothing.
-        const d = sitemap.data?.digests[sitemapCursor];
-        if (d) {
-          void copyToClipboard(d.ja4).then((err) =>
-            setCopied(err ? `copy failed: ${err}` : `copied ${d.ja4}`),
-          );
-        }
-      } else if (pane === 'sitemap' && (key.upArrow || input === 'k')) {
-        setSitemapCursor((c) => Math.max(0, c - 1));
-        setCopied('');
-      } else if (pane === 'sitemap' && (key.downArrow || input === 'j')) {
-        setSitemapCursor((c) =>
-          Math.min((sitemap.data?.digests.length ?? 1) - 1, c + 1),
-        );
-        setCopied('');
-      } else if (input === 'o' && pane === 'sitemap') {
-        // Straight to a profile: the copy exists so the digest can be pasted, but opening it
-        // here skips the paste entirely.
-        const d = sitemap.data?.digests[sitemapCursor];
-        if (d) {
-          setPickKind('ja4');
-          setPane('ip');
-          setReportScroll(0);
-          ipTabs.open({ kind: 'ja4', value: d.ja4 }, ipWindow);
-        }
-      } else if (pane === 'watchlist' && key.return) {
-        // Same reasoning as the sitemap pane: a JA4 is 37 characters that must be exact.
-        const e = watchlist[watchlistCursor];
-        if (e)
-          void copyToClipboard(e.id).then((err) =>
-            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
-          );
-      } else if (input === 'o' && pane === 'watchlist') {
-        const e = watchlist[watchlistCursor];
-        if (e) {
-          setPickKind(e.kind);
-          setPane('ip');
-          setReportScroll(0);
-          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
-        }
-      } else if (input === 'x' && pane === 'watchlist') {
-        // Removal is cheap to undo (mark it again), so no confirm — unlike lifting a deny.
-        const e = watchlist[watchlistCursor];
-        if (e) {
-          const next = removeEntry(watchlist, e.kind, e.id);
-          setWatchlist(next);
-          setWatchlistCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
-          void saveList(ROOT, WATCHLIST_FILE, next).then((err) => {
-            if (err) {
-              // The file still holds what the pane just dropped — re-read so they agree.
-              setCopied(`watch list: ${err}`);
-              void loadWatchlist();
-            }
-          });
-        }
-      } else if (input === 'z' && pane === 'watchlist') {
-        // The successor state: seen, judged, and not worth being told about again.
-        const e = watchlist[watchlistCursor];
-        if (e)
-          void moveIdentity(
-            'ignore',
-            { kind: e.kind, value: e.id },
-            e.note || 'moved from watch list',
-          );
-      } else if (pane === 'ignorelist' && key.return) {
-        const e = ignoreList[ignoreCursor];
-        if (e)
-          void copyToClipboard(e.id).then((err) =>
-            setCopied(err ? `copy failed: ${err}` : `copied ${e.id}`),
-          );
-      } else if (input === 'o' && pane === 'ignorelist') {
-        // Ignored is muted, not invisible — a profile is still one keystroke away.
-        const e = ignoreList[ignoreCursor];
-        if (e) {
-          setPickKind(e.kind);
-          setPane('ip');
-          setReportScroll(0);
-          ipTabs.open({ kind: e.kind, value: e.id }, ipWindow);
-        }
-      } else if (input === 'x' && pane === 'ignorelist') {
-        // Un-ignoring needs no ceremony: if it is still active, the next tick re-surfaces it.
-        const e = ignoreList[ignoreCursor];
-        if (e) {
-          const next = removeEntry(ignoreList, e.kind, e.id);
-          setIgnoreList(next);
-          setIgnoreCursor((c) => Math.max(0, Math.min(c, next.length - 1)));
-          void saveList(ROOT, IGNORELIST_FILE, next).then((err) => {
-            if (err) {
-              // Worse here than on the watch list: the pane would show it un-ignored while
-              // the screen keeps skipping it. Re-read so the pane tells the truth.
-              setCopied(`ignore list: ${err}`);
-              void loadIgnoreList();
-            }
-          });
-        }
-      } else if (input === 'm' && pane === 'ignorelist') {
-        const e = ignoreList[ignoreCursor];
-        if (e)
-          void moveIdentity(
-            'watch',
-            { kind: e.kind, value: e.id },
-            e.note || 'moved from ignore list',
-          );
-      } else if (input === 'm' && pane === 'ip' && ipTabs.active) {
-        void moveIdentity(
-          'watch',
-          ipTabs.active.subject,
-          'marked from profile',
-        );
-      } else if (input === 'z' && pane === 'ip' && ipTabs.active) {
-        void moveIdentity(
-          'ignore',
-          ipTabs.active.subject,
-          'ignored from profile',
-        );
-      } else if (input === 'x' && pane === 'ip') {
-        ipTabs.close();
-        setReportScroll(0);
-      } else if (PANE_KEY[input])
-        openPane(PANE_KEY[input], input === 'f' ? 'ja4' : 'ip');
-      else if (key.escape) setFocus('editor');
-      else if (pane === 'denylist' && (key.upArrow || input === 'k')) {
-        setDenyCursor((c) => Math.max(0, c - 1));
-        setCopied('');
-      } else if (pane === 'denylist' && (key.downArrow || input === 'j')) {
-        setDenyCursor((c) => Math.min(denyEntries.length - 1, c + 1));
-        setCopied('');
-      } else if (pane === 'watchlist' && (key.upArrow || input === 'k')) {
-        setWatchlistCursor((c) => Math.max(0, c - 1));
-        setCopied('');
-      } else if (pane === 'watchlist' && (key.downArrow || input === 'j')) {
-        setWatchlistCursor((c) => Math.min(watchlist.length - 1, c + 1));
-        setCopied('');
-      } else if (pane === 'ignorelist' && (key.upArrow || input === 'k')) {
-        setIgnoreCursor((c) => Math.max(0, c - 1));
-        setCopied('');
-      } else if (pane === 'ignorelist' && (key.downArrow || input === 'j')) {
-        setIgnoreCursor((c) => Math.min(ignoreList.length - 1, c + 1));
-        setCopied('');
-      } else if (key.upArrow || input === 'k')
-        setReportScroll((s) => Math.max(0, s - 1));
-      else if (key.downArrow || input === 'j')
-        setReportScroll((s) => Math.min(reportMaxScroll, s + 1));
-      else if (key.pageUp) setReportScroll((s) => Math.max(0, s - reportH + 2));
-      else if (key.pageDown)
-        setReportScroll((s) => Math.min(reportMaxScroll, s + reportH - 2));
+      if (!pane) {
+        if (key.escape) setFocus('editor');
+        return;
+      }
+      const p: Press = {
+        input,
+        return: key.return,
+        escape: key.escape,
+        tab: key.tab,
+        shift: key.shift,
+        upArrow: key.upArrow,
+        downArrow: key.downArrow,
+        pageUp: key.pageUp,
+        pageDown: key.pageDown,
+      };
+      bindingFor(paneBindings, pane, p)?.run(p);
       return;
     }
     if (phase === 'select') {
@@ -1874,56 +1606,9 @@ export function App() {
   // otherwise nothing on screen says the other lookups are still open.
   const showTabNav = pane === 'ip' && ipTabs.tabs.length > 1;
   const paneFooter = showTabNav || focus === 'pane';
-  // The pane footer's keybinds, built once so the layout can both render them and reserve the
-  // rows they wrap to — otherwise a footer that wraps to a second line grows the frame past the
-  // viewport and scrolls the header off. Falsey entries drop out (conditional keys).
+  // Both the footer and the handler read the same table, so a live key is always advertised.
   const paneHints: MaybeHint[] =
-    focus === 'pane'
-      ? [
-          {
-            key: 'j/k',
-            label:
-              pane === 'denylist' ||
-              pane === 'watchlist' ||
-              pane === 'ignorelist'
-                ? 'select'
-                : 'scroll',
-          },
-          { key: 'R', label: 'refresh' },
-          { key: 'i', label: 'new ip' },
-          { key: 'f', label: 'ja4' },
-          { key: 't', label: 'watch-list' },
-          { key: 'g', label: 'ignore' },
-          { key: 'w', label: 'timeline' },
-          {
-            key: 'v',
-            label: watchOn ? 'watch (on)' : 'watch',
-            active: watchOn,
-          },
-          // Shown whenever `b` does something, which is now any profiled identity — the hint and
-          // the handler share one condition, so a key that works cannot go unadvertised.
-          pane === 'ip' && {
-            key: 'b',
-            label: `deny ${ipAdvice?.lever?.kind === 'asn' ? 'network' : 'fingerprint'}`,
-          },
-          pane === 'denylist' && { key: 'enter', label: 'copy' },
-          pane === 'denylist' && { key: 'u', label: 'unban' },
-          pane === 'sitemap' && { key: 'enter', label: 'copy' },
-          pane === 'sitemap' && { key: 'o', label: 'profile it' },
-          pane === 'watchlist' && { key: 'enter', label: 'copy' },
-          pane === 'watchlist' && { key: 'o', label: 'profile it' },
-          pane === 'watchlist' && { key: 'z', label: 'ignore' },
-          pane === 'watchlist' && { key: 'x', label: 'remove' },
-          pane === 'ignorelist' && { key: 'enter', label: 'copy' },
-          pane === 'ignorelist' && { key: 'o', label: 'profile it' },
-          pane === 'ignorelist' && { key: 'm', label: 'watch it' },
-          pane === 'ignorelist' && { key: 'x', label: 'remove' },
-          pane === 'ip' && { key: 'm', label: 'watch' },
-          pane === 'ip' && { key: 'z', label: 'ignore' },
-          pane === 'ip' && { key: 'x', label: 'close tab' },
-          { key: 'esc', label: 'rules' },
-        ]
-      : [];
+    focus === 'pane' && pane ? hintsFor(paneBindings, pane) : [];
   // The tab indicator shares the footer's first line, so its width counts toward the wrap.
   const tabNavWidth = showTabNav
     ? `◂ ${ipTabs.index + 1}/${ipTabs.tabs.length} ▸ tab/shift-tab · `.length
@@ -1933,10 +1618,10 @@ export function App() {
   // depends on what is actually listed. A row that wraps takes the whole Ink list with it, so
   // the quiet band stacks underneath when the width is not there.
   const { twoCol, rows: pickerRows } = pickerLayout(
-    ipMatches.length,
-    quietMatches.length,
-    columnWidth(ipMatches, CAP_BUSIEST, isFlagged, isOpen, ROW_CHROME),
-    columnWidth(quietMatches, CAP_QUIET, isFlagged, isOpen, ROW_CHROME),
+    pickers.busiest.length,
+    pickers.quiet.length,
+    columnWidth(pickers.busiest, CAP_BUSIEST, isFlagged, isOpen, ROW_CHROME),
+    columnWidth(pickers.quiet, CAP_QUIET, isFlagged, isOpen, ROW_CHROME),
     reportW - 4, // the pane's border and padding
     PANE_GAP,
   );
@@ -1980,7 +1665,7 @@ export function App() {
               phase={phase}
               width={rulesW}
               longestName={longestName}
-              pending={pendingByRule.get(it.rule.name)}
+              pending={denylist.pending.get(it.rule.name)}
             />
           ))}
         </Box>
@@ -2022,10 +1707,10 @@ export function App() {
                 ]}
               />
               {paneLoading ? <Text dimColor> (loading…)</Text> : null}
-              {pendingByRule.size ? (
+              {denylist.pending.size ? (
                 <Text color="yellow">
                   {' '}
-                  · {pendingByRule.size} rule(s) unapplied
+                  · {denylist.pending.size} rule(s) unapplied
                 </Text>
               ) : null}
             </Text>
@@ -2199,17 +1884,8 @@ export function App() {
                 sitemap={sitemap}
                 advice={ipAdvice}
                 sitemapCursor={sitemapCursor}
-                denyEntries={denyEntries}
-                denyNotEnforcing={denyNotEnforcing}
-                denyActivityNote={denyActivityNote}
-                denyCursor={denyCursor}
-                denyActivity={denyActivity}
-                watchEntries={watchlist}
-                watchError={watchlistError}
-                watchCursor={watchlistCursor}
-                ignoreEntries={ignoreList}
-                ignoreError={ignoreError}
-                ignoreCursor={ignoreCursor}
+                denylist={denylist}
+                lists={lists}
               />
             </Box>
           </Box>
@@ -2274,14 +1950,12 @@ export function App() {
               ))}
               <Box>
                 <Text color="cyan">
-                  {windowCursor >= WINDOW_PRESETS.length ? '▶ ' : '  '}
+                  {isCustomRow(windowCursor) ? '▶ ' : '  '}
                 </Text>
                 <Text
-                  bold={windowCursor >= WINDOW_PRESETS.length}
-                  color={
-                    windowCursor >= WINDOW_PRESETS.length ? 'cyan' : undefined
-                  }
-                  dimColor={windowCursor < WINDOW_PRESETS.length}
+                  bold={isCustomRow(windowCursor)}
+                  color={isCustomRow(windowCursor) ? 'cyan' : undefined}
+                  dimColor={!isCustomRow(windowCursor)}
                 >
                   {'custom…'.padEnd(10)}
                 </Text>
@@ -2353,28 +2027,28 @@ export function App() {
           )}
           {focus === 'ip-input' && (
             <Box flexDirection="column">
-              {pickList.loading && !pickList.data ? (
+              {pickers.list.loading && !pickers.list.data ? (
                 <Text dimColor>
                   {'  '}loading busiest{' '}
-                  {pickKind === 'ip' ? 'IPs' : 'fingerprints'}…
+                  {pickers.kind === 'ip' ? 'IPs' : 'fingerprints'}…
                 </Text>
               ) : (
-                pickList.data && (
+                pickers.list.data && (
                   <Text dimColor>
                     {'  '}busiest{' '}
-                    {pickKind === 'ip' ? 'IPs' : 'JA4 fingerprints'} ·{' '}
+                    {pickers.kind === 'ip' ? 'IPs' : 'JA4 fingerprints'} ·{' '}
                     {ipWindow.label} ·{' '}
-                    {ipInput
-                      ? `${ipFiltered.length} match` +
-                        (ipFiltered.length > ipMatches.length
-                          ? `, showing ${ipMatches.length}`
+                    {pickers.input
+                      ? `${pickers.filtered.length} match` +
+                        (pickers.filtered.length > pickers.busiest.length
+                          ? `, showing ${pickers.busiest.length}`
                           : '')
-                      : `top ${ipMatches.length} of ${pickList.data.length}` +
+                      : `top ${pickers.busiest.length} of ${pickers.list.data.length}` +
                         // A full list means the API's group cap was reached, and it truncates
                         // silently. The quiet band is drawn from the bottom of what came back,
                         // which is then not the bottom of the traffic — say so rather than let
                         // a partial answer read as the whole picture.
-                        (pickList.data.length >= TOP_IPS_LIMIT
+                        (pickers.list.data.length >= TOP_IPS_LIMIT
                           ? ' (capped)'
                           : '') +
                         (isLive
@@ -2382,7 +2056,7 @@ export function App() {
                           : ', type to filter') +
                         // Names the bound rather than saying "all": the list above can now be
                         // longer than what one keypress will open.
-                        ` · o open top ${Math.min(OPEN_ALL_MAX, ipMatches.length)} · w timeline`}
+                        ` · o open top ${Math.min(OPEN_ALL_MAX, pickers.busiest.length)} · w timeline`}
                   </Text>
                 )
               )}
@@ -2393,46 +2067,50 @@ export function App() {
                       {'  '}
                       {CAP_BUSIEST}
                     </Text>
-                    {ipMatches.map(pickerRow)}
+                    {pickers.busiest.map(pickerRow)}
                   </Box>
                   <Box flexDirection="column">
                     <Text dimColor>
                       {'  '}
                       {CAP_QUIET}
                     </Text>
-                    {quietMatches.map((r, i) =>
-                      pickerRow(r, ipMatches.length + i),
+                    {pickers.quiet.map((r, i) =>
+                      pickerRow(r, pickers.busiest.length + i),
                     )}
                   </Box>
                 </Box>
               ) : (
                 <>
-                  {ipMatches.map(pickerRow)}
-                  {quietMatches.length > 0 && (
+                  {pickers.busiest.map(pickerRow)}
+                  {pickers.quiet.length > 0 && (
                     <Text dimColor>
                       {'  '}
                       {CAP_QUIET} requests, lowest first
                     </Text>
                   )}
-                  {quietMatches.map((r, i) =>
-                    pickerRow(r, ipMatches.length + i),
+                  {pickers.quiet.map((r, i) =>
+                    pickerRow(r, pickers.busiest.length + i),
                   )}
                 </>
               )}
-              {Boolean(pickList.data) && !ipMatches.length && ipInput && (
-                <Text dimColor>
-                  {' '}
-                  no busy {pickKind === 'ip' ? 'IP' : 'fingerprint'} matches —
-                  enter profiles it anyway
-                </Text>
-              )}
+              {Boolean(pickers.list.data) &&
+                !pickers.busiest.length &&
+                pickers.input && (
+                  <Text dimColor>
+                    {' '}
+                    no busy {pickers.kind === 'ip' ? 'IP' : 'fingerprint'}{' '}
+                    matches — enter profiles it anyway
+                  </Text>
+                )}
               <Box>
-                <Text color="cyan">{pickKind === 'ip' ? 'IP: ' : 'JA4: '}</Text>
-                <Text>{ipInput}</Text>
+                <Text color="cyan">
+                  {pickers.kind === 'ip' ? 'IP: ' : 'JA4: '}
+                </Text>
+                <Text>{pickers.input}</Text>
                 <Text color="cyan">▏</Text>
                 <Text dimColor>
-                  {ipError
-                    ? `  ${ipError}`
+                  {pickers.error
+                    ? `  ${pickers.error}`
                     : '  ↑↓ pick · enter profile · esc cancel'}
                 </Text>
               </Box>
@@ -2460,17 +2138,8 @@ function PaneBody({
   sitemap,
   advice,
   sitemapCursor,
-  denyEntries,
-  denyNotEnforcing,
-  denyActivityNote,
-  denyCursor,
-  denyActivity,
-  watchEntries,
-  watchError,
-  watchCursor,
-  ignoreEntries,
-  ignoreError,
-  ignoreCursor,
+  denylist,
+  lists,
 }: {
   kind: PaneKind;
   width: number;
@@ -2479,17 +2148,8 @@ function PaneBody({
   sitemap: Pane<SitemapReport>;
   advice: Advice | undefined;
   sitemapCursor: number;
-  denyEntries: DenyEntry[];
-  denyNotEnforcing: { rule: string; why: string }[];
-  denyActivityNote: string;
-  denyCursor: number;
-  denyActivity: Pane<Map<string, Activity>>;
-  watchEntries: WatchlistEntry[];
-  watchError: string;
-  watchCursor: number;
-  ignoreEntries: WatchlistEntry[];
-  ignoreError: string;
-  ignoreCursor: number;
+  denylist: Denylist;
+  lists: IdentityLists;
 }) {
   if (kind === 'report')
     return (
@@ -2505,11 +2165,12 @@ function PaneBody({
         lines={denylistLines(
           {
             windowHours: DENY_ACTIVITY_HOURS,
-            entries: denyEntries,
-            notEnforcing: denyNotEnforcing,
-            error: denyActivity.error || denyActivityNote || undefined,
+            entries: denylist.entries,
+            notEnforcing: denylist.live.notEnforcing,
+            error:
+              denylist.activity.error || denylist.activityNote || undefined,
           },
-          denyCursor,
+          denylist.cursor,
         )}
         width={width}
       />
@@ -2518,8 +2179,11 @@ function PaneBody({
     return (
       <Lines
         lines={watchlistLines(
-          { entries: watchEntries, error: watchError || undefined },
-          watchCursor,
+          {
+            entries: lists.watch.entries,
+            error: lists.watch.error || undefined,
+          },
+          lists.watch.cursor,
           Date.now(),
         )}
         width={width}
@@ -2529,8 +2193,11 @@ function PaneBody({
     return (
       <Lines
         lines={ignoreListLines(
-          { entries: ignoreEntries, error: ignoreError || undefined },
-          ignoreCursor,
+          {
+            entries: lists.ignore.entries,
+            error: lists.ignore.error || undefined,
+          },
+          lists.ignore.cursor,
           Date.now(),
         )}
         width={width}

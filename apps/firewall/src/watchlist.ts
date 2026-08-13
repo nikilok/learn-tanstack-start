@@ -257,3 +257,48 @@ export async function recordExclusive(
   }
   return { added, remaining };
 }
+
+/** Which list is being addressed. Watched and ignored are exclusive, so every operation names one. */
+export type ListSide = 'watch' | 'ignore';
+
+/** The file a side is stored in, and the one an identity moving there is dropped from. */
+export function filesFor(to: ListSide): { add: string; drop: string } {
+  return to === 'watch'
+    ? { add: WATCHLIST_FILE, drop: IGNORELIST_FILE }
+    : { add: IGNORELIST_FILE, drop: WATCHLIST_FILE };
+}
+
+// An unreadable list is UNKNOWN, not empty. Rendering it as empty says "nothing is being watched"
+// about a file that could not be read, which is the reverse of what the operator needs to know.
+/** The error a load should show, blank when it read cleanly. */
+export function loadError(list: Watchlist): string {
+  return list.ok ? '' : (list.error ?? 'unreadable');
+}
+
+/** Cursor kept inside a list that has just changed length. Never negative — an empty list sits at 0. */
+export function clampCursor(cursor: number, length: number): number {
+  return Math.max(0, Math.min(cursor, length - 1));
+}
+
+/**
+ * Where each list ends up after a move.
+ *
+ * `added` is always the destination and `remaining` always the source, so the two sides have to be
+ * assigned by direction — swapping them silently writes the ignore list into the watch pane.
+ */
+export function afterMove(
+  to: ListSide,
+  added: WatchlistEntry[],
+  remaining: WatchlistEntry[],
+): { watch: WatchlistEntry[]; ignore: WatchlistEntry[] } {
+  return to === 'watch'
+    ? { watch: added, ignore: remaining }
+    : { watch: remaining, ignore: added };
+}
+
+/** What to tell the operator after a move, naming the key that shows the list it landed on. */
+export function moveNote(to: ListSide, id: string): string {
+  return to === 'watch'
+    ? `watching ${id} — t to view`
+    : `ignoring ${id} — g to view · watch mode now skips it`;
+}

@@ -1,4 +1,5 @@
 import { volumeFloor } from './ban-advice';
+import { envText } from './env';
 
 // Screening thresholds, read from .env.local and never written here.
 //
@@ -12,7 +13,7 @@ import { volumeFloor } from './ban-advice';
 
 /** A required positive integer. */
 function envInt(name: string, why: string): number {
-  const raw = process.env[name]?.trim();
+  const raw = envText(name);
   const n = raw ? Number(raw) : Number.NaN;
   if (Number.isInteger(n) && n > 0) return n;
   throw new Error(`${name} must be a positive integer in .env.local — ${why}`);
@@ -62,7 +63,7 @@ export function watchIntervalMs(): number {
  * this at their boundary so the failure surfaces as an error, never mid-advisory.
  */
 export function allowedBots(): string[] {
-  const raw = process.env.FW_ALLOWED_BOTS?.trim();
+  const raw = envText('FW_ALLOWED_BOTS');
   const names = (raw ?? '')
     .split(',')
     .map((n) => n.trim().toLowerCase())

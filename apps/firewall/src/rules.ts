@@ -10,13 +10,13 @@ import {
   denyListRule,
   envMatching,
 } from './deny-list';
+import { envCeiling, envText, isDryRun } from './env';
 import {
   CHALLENGE_SCRAPER_JA4,
   CH_STREAM_REVALIDATE,
   DESKTOP_RELEASE_RECORD,
   isRecoverableRule,
 } from './rule-names';
-import { envCeiling } from './util';
 
 export type RateLimitAction = 'log' | 'challenge' | 'deny'; // rateLimit exceeded-action — bypass is NOT valid here
 export type ActionChoice = 'log' | 'challenge' | 'deny' | 'bypass'; // a rule's switchable mitigate action
@@ -55,8 +55,7 @@ export type Rule = {
 
 // Phase 1 = observe: every rule logs only, nothing is blocked. Flip individual rules to challenge/deny/bypass in the TUI and apply.
 const OBSERVE: RateLimitAction = 'log';
-export const dryRun =
-  process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
+export const dryRun = isDryRun();
 
 /** A REQUIRED ceiling (FW_*_LIMIT) — kept in .env.local, never the repo, so public code doesn't reveal the thresholds. Returns a placeholder in dry-run, which only lists rule names. */
 function envLimit(name: string): number {
@@ -74,7 +73,7 @@ function envLimit(name: string): number {
  * firewall while looking like a successful apply.
  */
 function envRequired(name: string, why: string): string {
-  const v = process.env[name]?.trim();
+  const v = envText(name);
   if (v) return v;
   if (dryRun) return ''; // dry-run lists rule names only
   throw new Error(`${name} must be set in .env.local — ${why}`);

@@ -7,6 +7,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 import { recommendsAction } from './ban-advice';
+import { envText } from './env';
 import { errMsg } from './util';
 import type { WatchReport } from './watch';
 
@@ -244,7 +245,7 @@ export const NOTIFY_TIMEOUT_MS = 20_000;
 export async function notify(body: string): Promise<string | null> {
   if (process.platform !== 'darwin')
     return 'notifications are macOS-only; nothing was sent';
-  const to = process.env[IMESSAGE_TO]?.trim();
+  const to = envText(IMESSAGE_TO);
   const argv = to
     ? iMessageArgs(to, body)
     : [

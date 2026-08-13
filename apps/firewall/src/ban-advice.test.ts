@@ -1550,3 +1550,91 @@ describe('review regressions — the twin that got missed', () => {
       ).toBe(false);
   });
 });
+
+// PR review, 2026-08-13. NaN defeats every comparison in BOTH directions — `NaN < floor` is false
+// so it walks past a lower bound, `NaN > 0` is false so it walks past an upper bound — and arrives
+// looking like a measured clean value. `autoBanRefusal` has guarded this since it shipped; the
+// qualifiers did not, and a wrongly CLEARED lever is the more expensive way to be wrong.
+describe('unmeasured metrics never clear a lever', () => {
+  const reach = (over: Partial<Reach> = {}): Reach => ({
+    label: 'x',
+    ips: 400,
+    countries: 30,
+    total: 50000,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+    ...over,
+  });
+
+  test('CONTROL — the same reach with real numbers still bans', () => {
+    // Without this, every assertion below could pass because the fixture stopped qualifying.
+    const a = adviseBan(scraper({ digestReach: reach(), asnReach: reach() }));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.tier).toBe('deny');
+  });
+
+  test('a NaN reach total does not clear the DENY', () => {
+    const a = adviseBan(
+      scraper({
+        digestReach: reach({ total: Number.NaN }),
+        asnReach: reach({ total: Number.NaN }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
+    expect(a.leverNotes.join(' ')).toContain('not a usable number');
+  });
+
+  test('ONE unreadable rendering field poisons the sum and still does not clear', () => {
+    // browserEvidence adds four fields, so a single NaN makes the whole total NaN — and then
+    // `browsery > 0` is false, which is exactly how "no browser has ever rendered" gets asserted
+    // about data nobody read.
+    for (const f of ['subResources', 'beacons', 'tiles', 'rpcs'] as const) {
+      const a = adviseBan(
+        scraper({
+          digestReach: reach({ [f]: Number.NaN }),
+          asnReach: reach({ [f]: Number.NaN }),
+        }),
+      );
+      expect(a.verdict).not.toBe('ban');
+      expect(a.lever?.tier).not.toBe('deny');
+    }
+  });
+
+  test('a negative count is not a measurement either', () => {
+    const a = adviseBan(
+      scraper({
+        digestReach: reach({ ips: -1 }),
+        asnReach: reach({ ips: -1 }),
+      }),
+    );
+    expect(a.lever?.tier).not.toBe('deny');
+  });
+
+  test('nor does an unmeasured reach fall through to a CHALLENGE', () => {
+    // The finding as reported: the deny is refused, and without the guard qualifyChallenge then
+    // returns ok on the same unreadable data.
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([['/company/a', 9060]]),
+        digestReach: reach({ total: Number.NaN }),
+        asnReach: reach({ total: Number.NaN }),
+      }),
+    );
+    expect(a.verdict).not.toBe('challenge');
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever).toBeUndefined();
+  });
+
+  test('an unreadable WINDOW total is unjudgeable, not "above the floor"', () => {
+    // NaN does not fall under the volume floor, so it used to clear the gate silently and the
+    // identity was judged on a number nobody had.
+    const a = adviseBan(scraper({ total: Number.NaN }));
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('could not be read');
+  });
+});

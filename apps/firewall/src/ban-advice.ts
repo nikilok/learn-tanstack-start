@@ -354,13 +354,45 @@ function unjudgeableFor(input: AdviceInput): string[] {
       'the path sample hit the API group cap, so the rendering counts are floors — a zero here may be a dropped tail rather than a raw-HTML fetcher',
     );
   const floor = volumeFloor(input.windowMinutes);
-  if (input.total < floor)
+  // The same NaN hole as the qualifiers, one layer earlier and pointing the other way: an
+  // unreadable total does not fall UNDER the floor, so it silently clears the volume gate and the
+  // identity proceeds to be judged on a number nobody has.
+  const unusable = unusableMetric([['request total', input.total]]);
+  if (unusable)
+    out.push(
+      `${unusable} — the window's own volume could not be read, so nothing here is judgeable`,
+    );
+  else if (input.total < floor)
     out.push(
       `only ${input.total} requests in this window — under ${floor}, too little to judge sustained volume. Widen the window.`,
     );
   if (!input.ja4.length)
     out.push('no TLS fingerprint recorded — nothing to identify it by');
   return out;
+}
+
+/**
+ * The first metric that is not a usable number, described, or null when all of them are.
+ *
+ * NaN defeats every comparison SILENTLY and in both directions: `NaN < floor` is false, so it
+ * walks past a lower bound, and `NaN > 0` is false, so it walks past an upper bound too. An
+ * unmeasured value therefore arrives looking like a measured clean one — which is this codebase's
+ * defining defect, an error path producing something shaped like an answer.
+ *
+ * `autoBanRefusal` has guarded exactly this since it shipped, for exactly this reason. The
+ * qualifiers below did not, and they are the more dangerous place for it: a refused auto-ban costs
+ * another look, while a wrongly CLEARED lever is what puts a digest in front of an operator with
+ * "no browser has ever rendered from it" attached to it.
+ *
+ * Negatives are refused alongside NaN: a count below zero is not a measurement either.
+ */
+function unusableMetric(
+  metrics: readonly (readonly [string, number])[],
+): string | null {
+  for (const [what, v] of metrics)
+    if (!Number.isFinite(v) || v < 0)
+      return `${what} is not a usable number (${v})`;
+  return null;
 }
 
 /** Whether an identity is safe to deny wholesale, and why not when it is not. */
@@ -406,12 +438,25 @@ export function qualifyLever(
   //
   // Window-independent on purpose: reach is pinned to >= 6 days whatever is on screen, so a
   // 20-minute view must not buy a cheaper reach test than a six-day one.
+  // BEFORE the comparisons, never after: each one below is a `<` or a `>`, and NaN slips past
+  // both. `browserEvidence` sums four fields, so a single unreadable one poisons the whole total
+  // and turns "shows N rendering requests" into a silent pass.
+  const browsery = browserEvidence(reach);
+  const unusable = unusableMetric([
+    ['request total', reach.total],
+    ['IP count', reach.ips],
+    ['rendering requests', browsery],
+  ]);
+  if (unusable)
+    return {
+      ok: false,
+      note: `${kind} ${reach.label}: ${unusable} — unmeasured is not measured-clean, so it is not cleared`,
+    };
   if (reach.total < MIN_VOLUME_FLOOR)
     return {
       ok: false,
       note: `${kind} ${reach.label} has only ${reach.total} requests across the whole reach — under ${MIN_VOLUME_FLOOR}, too little for "nothing here renders" to mean anything. Not cleared, and not condemned either.`,
     };
-  const browsery = browserEvidence(reach);
   if (browsery > 0)
     return {
       ok: false,
@@ -477,12 +522,25 @@ export function qualifyChallenge(
   // "Recoverable, so a lower bar is fine" does not survive contact with the note below, which
   // claims the fingerprint is SHARED. That claim is the entire justification for choosing this
   // tier over a deny, and a reach of a handful of requests cannot support it.
+  // Same NaN guard as the deny qualifier, and it covers the SUBJECT side too: `renders` and
+  // `input.total` are both compared below and both come from a mix that a failed query degrades.
+  const renders = renderingRequests(input.mix);
+  const unusable = unusableMetric([
+    ['reach request total', reach.total],
+    ['reach rendering requests', browserEvidence(reach)],
+    ['window request total', input.total],
+    ['window rendering requests', renders],
+  ]);
+  if (unusable)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label}: ${unusable} — a challenge is the cheaper action but it is still an action, and this one is unmeasured`,
+    };
   if (reach.total < MIN_VOLUME_FLOOR)
     return {
       ok: false,
       note: `fingerprint ${reach.label} has only ${reach.total} requests across the whole reach — under ${MIN_VOLUME_FLOOR}, too little to call it shared, which is the only reason to prefer a challenge over a deny`,
     };
-  const renders = renderingRequests(input.mix);
   if (renders > 0)
     return {
       ok: false,

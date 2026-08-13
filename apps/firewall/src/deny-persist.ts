@@ -89,6 +89,10 @@ export function persistDenies(opts: {
     notes.push(
       'a deny rule was never reached, so its staged edits are still unapplied',
     );
+  // A vacuous pass otherwise: edits are pending, nothing matched, nothing was written, and the
+  // run reports success having persisted none of it.
+  if (!wrote && !notes.length)
+    notes.push('no deny rule was in this config, so nothing was saved');
   return {
     ok: !notes.length,
     summary: notes.length ? ` · WARNING: ${notes.join('; ')}` : '',

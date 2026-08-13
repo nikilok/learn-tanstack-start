@@ -203,6 +203,8 @@ export function denyEntries(opts: {
   // typed, so a raw `includes` rendered a staged deny as `live` and hid the "press a" banner.
   const stagedIn = (spec: DenySpec) =>
     new Set(staged.map((v) => spec.normalize(v.trim())));
+  const stagedJa4 = stagedIn(JA4_DENY);
+  const stagedAsn = stagedIn(ASN_DENY);
   const seen = (value: string) => ({
     requests: activity?.get(value)?.requests,
     denied: activity?.get(value)?.denied,
@@ -211,14 +213,14 @@ export function denyEntries(opts: {
     ...liveJa4.map((value) => ({
       kind: 'ja4' as const,
       value,
-      staged: stagedIn(JA4_DENY).has(JA4_DENY.normalize(value)),
+      staged: stagedJa4.has(JA4_DENY.normalize(value)),
       removed: false,
       ...seen(value),
     })),
     ...liveAsn.map((value) => ({
       kind: 'asn' as const,
       value,
-      staged: stagedIn(ASN_DENY).has(ASN_DENY.normalize(value)),
+      staged: stagedAsn.has(ASN_DENY.normalize(value)),
       removed: false,
       ...seen(value),
     })),

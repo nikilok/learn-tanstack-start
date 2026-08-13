@@ -152,4 +152,15 @@ describe('submitsOnPaste', () => {
   test('ordinary typing does not', () => {
     expect(submitsOnPaste('8')).toBe(false);
   });
+
+  // Found in review 2026-08-13. A newline in the MIDDLE is a multi-line paste, and submitting on
+  // it sends whatever followed the break along with the range.
+  test('a newline in the middle of a chunk does NOT submit', () => {
+    expect(submitsOnPaste('08 09 2026\n08 11 2026')).toBe(false);
+    expect(submitsOnPaste('a\nb')).toBe(false);
+  });
+
+  test('but the same chunk ending in one still does', () => {
+    expect(submitsOnPaste('08 09 2026\n08 11 2026\n')).toBe(true);
+  });
 });

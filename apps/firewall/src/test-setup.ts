@@ -5,6 +5,10 @@
 // every file after it, depending on which ran first. Setting these in a beforeAll is too late —
 // the import has already happened.
 
+import { afterEach } from 'bun:test';
+
+import { restoreTerminal } from './ink-harness';
+
 /** The digest the rule set is seeded with, so a test asserting on a live deny names this one. */
 export const TEST_DENIED_JA4 = 't13d1516h2_8daaf6152771_b0da82dd1658';
 
@@ -18,9 +22,15 @@ process.env.FW_CHALLENGE_JA4 = '';
 process.env.FW_BLOCKED_ASN = '';
 // Never used to reach Vercel — every test stubs the client — but resolveVercelCredentials throws
 // without them, and it runs at import time too.
-process.env.VERCEL_TOKEN ??= 'test-token';
-process.env.VERCEL_PROJECT_ID ??= 'prj_test';
-process.env.VERCEL_TEAM_ID ??= 'team_test';
+// ||=, not ??=: an exported but EMPTY credential is as unusable as an absent one, and
+// resolveVercelCredentials throws on both.
+process.env.VERCEL_TOKEN ||= 'test-token';
+process.env.VERCEL_PROJECT_ID ||= 'prj_test';
+process.env.VERCEL_TEAM_ID ||= 'team_test';
+
+// Registered from the preload so it covers EVERY test file: renderInk patches process.stdout, and
+// a test that fails before reaching unmount would otherwise leave the next one measuring its width.
+afterEach(restoreTerminal);
 
 // Evaluated here, with the values above in place, so the rule set is the same whichever test file
 // happens to pull it in first. `watch.ts` imports it dynamically from inside a try/catch, and a

@@ -19,7 +19,13 @@ const REAL_TERMINAL = {
 
 // Matching the ESC byte is the whole job here — assertions read frames as plain text.
 // eslint-disable-next-line no-control-regex
-const ANSI = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
+const ANSI =
+  /\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B\[[0-9;?]*[ -/]*[@-~]|\u001B/g;
+
+/** Put the real terminal size back. The preload calls this after every test, so a harness abandoned by a failing assertion cannot leave the next one measuring a patched width. */
+export function restoreTerminal(): void {
+  Object.assign(process.stdout, REAL_TERMINAL);
+}
 
 /** Escape sequences for the keys the TUI binds, so a test presses `KEY.down` rather than a literal. */
 export const KEY = {
@@ -114,7 +120,7 @@ export function renderInk(
     },
     unmount: () => {
       app.unmount();
-      Object.assign(process.stdout, REAL_TERMINAL);
+      restoreTerminal();
     },
   };
 }

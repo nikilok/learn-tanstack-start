@@ -211,6 +211,16 @@ describe('persistDenies', () => {
     expect(result.summary).not.toContain('never reached');
   });
 
+  // The vacuous-pass class: edits pending, nothing matched, nothing written, and the run used to
+  // report ok with an empty summary — persisting none of it while looking clean.
+  test('pending edits with no deny rule at all is reported, not silently ok', () => {
+    const { result, writes } = run([], new Map());
+    expect(writes).toEqual([]);
+    expect(result.ok).toBe(false);
+    expect(result.clearStaged).toBe(false);
+    expect(result.summary).toContain('nothing was saved');
+  });
+
   test('an inserted rule persists exactly like an overwritten one', () => {
     const snapshot = [item(JA4_RULE, [DIGEST_A])];
     const { result, wrote } = run(snapshot, allReached(snapshot, 'inserted'));

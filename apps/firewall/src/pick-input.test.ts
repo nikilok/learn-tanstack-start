@@ -116,6 +116,8 @@ describe('resolveSubject', () => {
       accepted('::1');
       accepted('2001:db8:0:0:0:0:0:1');
       accepted('::ffff:1.2.3.4');
+      // All-zeros. It has no groups at all, so the emptiness guard used to refuse it.
+      accepted('::');
     });
 
     test('IPv6 with two elisions or too many groups is refused', () => {

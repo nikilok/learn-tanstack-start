@@ -103,6 +103,36 @@ describe('bindingFor', () => {
     expect(on.ran()).toBe(1);
   });
 
+  // The live hazard in app.tsx's table: `esc` is unscoped. If a pane-scoped esc is ever added
+  // BELOW it, it is unreachable — and nothing about the table's shape says so.
+  test('an unscoped binding placed above a scoped one shadows it', () => {
+    const fallback = bind({ key: 'esc', matches: press.escape });
+    const scoped = bind({
+      key: 'esc',
+      panes: ['denylist'],
+      matches: press.escape,
+    });
+    bindingFor([fallback, scoped], 'denylist', special({ escape: true }))?.run(
+      special({ escape: true }),
+    );
+    expect(fallback.ran()).toBe(1);
+    expect(scoped.ran()).toBe(0);
+  });
+
+  test('the same pair in the other order reaches the scoped one', () => {
+    const scoped = bind({
+      key: 'esc',
+      panes: ['denylist'],
+      matches: press.escape,
+    });
+    const fallback = bind({ key: 'esc', matches: press.escape });
+    bindingFor([scoped, fallback], 'denylist', special({ escape: true }))?.run(
+      special({ escape: true }),
+    );
+    expect(scoped.ran()).toBe(1);
+    expect(fallback.ran()).toBe(0);
+  });
+
   test('an empty input never matches a character binding', () => {
     // Arrow keys arrive with input '', and `includes('')` would otherwise fire every binding.
     expect(bindingFor([bind({ key: 'q' })], 'ip', special({}))).toBeUndefined();
@@ -127,6 +157,13 @@ describe('press matchers', () => {
     expect(press.enter(key('m'))).toBe(false);
     expect(press.escape(special({ escape: true }))).toBe(true);
     expect(press.tab(special({ tab: true }))).toBe(true);
+  });
+
+  test('page up and page down match their own keys only', () => {
+    expect(press.pageUp(special({ pageUp: true }))).toBe(true);
+    expect(press.pageUp(special({ pageDown: true }))).toBe(false);
+    expect(press.pageDown(special({ pageDown: true }))).toBe(true);
+    expect(press.pageDown(special({ pageUp: true }))).toBe(false);
   });
 
   test('a binding can accept several characters, for an upper-case alias', () => {

@@ -69,7 +69,9 @@ export function typeRange(current: string, chunk: string): string {
   return (current + chunk.replace(RANGE_CHARS, '')).slice(0, MAX_RANGE);
 }
 
+// Anchored at the END. A chunk with a newline in the MIDDLE is a multi-line paste, and treating
+// that as a submit sends whatever followed the break along with it.
 /** Whether a chunk ended a line, which submits — a pasted range often carries a trailing newline. */
 export function submitsOnPaste(chunk: string): boolean {
-  return /[\r\n]/.test(chunk);
+  return /[\r\n]$/.test(chunk);
 }

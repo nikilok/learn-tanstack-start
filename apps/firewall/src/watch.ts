@@ -16,6 +16,7 @@ import {
   type Reach,
   adviseBan,
   browserEvidence,
+  recommendsAction,
 } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
@@ -326,7 +327,7 @@ export function exitCodeFor(r: WatchReport): number {
   if (
     r.enforcement.length > 0 ||
     r.reachability.length > 0 ||
-    r.findings.some((f) => f.advice.verdict === 'ban')
+    r.findings.some((f) => recommendsAction(f.advice.verdict))
   )
     return EXIT_FOUND;
   return EXIT_QUIET;
@@ -343,7 +344,7 @@ export function isActionable(r: WatchReport): boolean {
     r.errors.length > 0 ||
     r.enforcement.length > 0 ||
     r.reachability.length > 0 ||
-    r.findings.some((f) => f.advice.verdict === 'ban')
+    r.findings.some((f) => recommendsAction(f.advice.verdict))
   );
 }
 
@@ -375,30 +376,38 @@ export function watchLines(r: WatchReport): Line[] {
     ),
     line(
       seg(
-        `  ${r.candidates} above the volume floor and not already denied`,
+        `  ${r.candidates} above the volume floor and not already handled (denied, challenged, name-banned or ignored)`,
         r.candidates ? 'warn' : 'good',
       ),
     ),
   );
   for (const f of r.findings) {
-    const bad = f.advice.verdict === 'ban';
+    const acts = recommendsAction(f.advice.verdict);
+    // The recoverable tier reads as a warning, not an alarm. Colouring it the same red as a deny
+    // trains the eye to skim both, and the whole point of the tier is that it is the lesser call.
+    const tone =
+      f.advice.verdict === 'ban'
+        ? 'bad'
+        : f.advice.verdict === 'challenge'
+          ? 'warn'
+          : 'dim';
     L.push(
       blank(),
       line(
-        seg(f.advice.verdict.toUpperCase().padEnd(7), bad ? 'bad' : 'dim'),
-        seg(f.digest, bad ? 'key' : 'dim'),
+        seg(f.advice.verdict.toUpperCase().padEnd(9), tone),
+        seg(f.digest, acts ? 'key' : 'dim'),
         seg(`  ${f.allowed} allowed of ${f.total} total`, 'dim'),
       ),
     );
     if (f.advice.lever)
       L.push(
         line(
-          seg('  lever    ', 'bad'),
+          seg('  lever    ', tone === 'dim' ? 'warn' : tone),
           seg(`${f.advice.lever.kind} ${f.advice.lever.value}`, 'key'),
           seg(
             f.advice.lever.needsAsNumber
               ? '  (needs the AS number — type it when staging)'
-              : '  (stage with b in firewall:setup)',
+              : `  (${f.advice.lever.tier === 'challenge' ? 'FW_CHALLENGE_JA4' : 'FW_BLOCKED_JA4'}; stage with b in firewall:setup)`,
             'dim',
           ),
         ),
@@ -491,6 +500,12 @@ export async function findSuspects(
   creds: { projectId: string; teamId: string; token: string },
   window: Window,
   deniedJa4: string[],
+  /**
+   * Digests on FW_CHALLENGE_JA4. Required rather than defaulted: it taints the reach (see the
+   * censorship note in `adviseBan`), and an omitted list reads as "nothing is challenged", which
+   * is the direction that clears a deny on evidence this tool suppressed.
+   */
+  challengedJa4: readonly string[],
   trustedAllowRules?: string[],
   /** Verified crawlers we want. Undefined = every verified one is exempt, as before the list. */
   allowedBots?: string[],
@@ -508,13 +523,25 @@ export async function findSuspects(
     deps,
   );
   const findings: Finding[] = [];
-  // Both levers, plus the ignore list. An identity denied by either lever is handled, and
-  // profiling it again spends ~21 queries — and, unattended, a paid investigation — to
-  // rediscover a ban already in place. An IGNORED identity is the operator saying the same
+  // Both levers, the challenge tier, and the ignore list. An identity denied by either lever is
+  // handled, and profiling it again spends ~21 queries — and, unattended, a paid investigation —
+  // to rediscover a ban already in place. An IGNORED identity is the operator saying the same
   // about a first-party or otherwise-known caller: skip it before the spend, not after.
+  //
+  // CHALLENGED digests are dropped here by operator decision (2026-08-12). A mitigation is in
+  // place, so re-surfacing the digest every tick recommends an action already taken — the finding
+  // even said "stage with b" for something already applied, which invites applying it twice.
+  //
+  // The cost, recorded because it is real and was argued before the call was made: if a challenged
+  // client DEFEATS the challenge, the loop no longer says so. That is the same bargain the ignore
+  // list makes, and it gets the same mitigations — the digest still counts in the aggregate
+  // "reached the app" figure above, so a mitigation failing at volume still moves a number on
+  // screen, and `o` on the watch-list entry profiles it on demand. Verify a challenge by looking
+  // for ALLOWED traffic on the digest (`wafAction ne 'deny' and ne 'challenge'`), which is a
+  // direct query, not something this screen was ever the right place to infer.
   const candidates = worthProfiling(
     rows,
-    [...deniedJa4, ...handled, ...ignoredJa4],
+    [...deniedJa4, ...handled, ...ignoredJa4, ...challengedJa4],
     screenFloor(window.minutes),
   );
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
@@ -541,6 +568,21 @@ export async function findSuspects(
       digestReach: p.digestReach,
       asnReach: p.asnReach,
       alreadyDeniedJa4: false, // filtered out by worthProfiling
+      // ALWAYS false on this path, and deliberately still computed.
+      //
+      // The comment here used to claim the opposite — that a challenged digest reaching the
+      // advisory had defeated its challenge — and that was true until `worthProfiling` began
+      // filtering the same list a few hours later. A comment asserting the reverse of the code is
+      // worse than none, so: `challengedJa4` and the profiling filter read the SAME list, which is
+      // what makes this always false rather than merely usually.
+      //
+      // Kept because it is the only thing standing between a future edit and a silent hole: drop
+      // the suppression from `worthProfiling` and the censorship guard has to work immediately,
+      // without anyone remembering to re-wire it. The guard itself is exercised by the on-demand
+      // paths — `firewall:ip` and the TUI profile — which is where an operator actually reads it.
+      challengedJa4: challengedJa4
+        .map(JA4_DENY.normalize)
+        .includes(JA4_DENY.normalize(c.digest)),
       stagedJa4: false,
       alreadyDeniedAsn: false,
       windowMinutes: p.windowHours * 60,
@@ -613,12 +655,25 @@ export async function screenOnce(
   } catch (e) {
     configErrors.push(`FW_BLOCKED_JA4 unreadable: ${errMsg(e)}`);
   }
-  // The challenge list is deliberately NOT unioned in here. `denied` means "the WAF stops this, so
-  // it cannot appear in the screen anyway" — a denied request never reaches routing. A CHALLENGED
-  // digest is the opposite case: if the challenge works its traffic never arrives either, so it
-  // produces no rows and needs no filter, and if it appears at all that means it DEFEATED the
-  // challenge. Filtering it would hide the one outcome worth escalating and leave watch reporting
-  // a quiet night through an active scrape.
+  // Read separately from `denied`, and used for two different things.
+  //
+  // 1. It SUPPRESSES the digest from the screen (operator decision 2026-08-12 — see the note at
+  //    the `worthProfiling` call, which records what that costs).
+  // 2. It taints the advice wherever a challenged digest IS profiled, on demand or in the TUI: a
+  //    challenged digest's rendering evidence is suppressed BY US, so the advisory must refuse to
+  //    clear a deny on the resulting zero.
+  //
+  // Kept OUT of `denied` rather than folded in, because the two mean different things everywhere
+  // else: `already` renders as "denied, the rule is in place", and saying that about a digest that
+  // is being interstitialed is a claim the operator would act on. Same fail-safe direction as
+  // `denied` — unreadable means the list is empty, so nothing is suppressed and nothing is
+  // tainted, and the failure is reported rather than swallowed.
+  let challenged: string[] = [];
+  try {
+    challenged = envMatching('FW_CHALLENGE_JA4', JA4_DENY, false);
+  } catch (e) {
+    configErrors.push(`FW_CHALLENGE_JA4 unreadable: ${errMsg(e)}`);
+  }
 
   // Read fresh, not cached at startup: a rule edited in the dashboard hours into a watch is the
   // exact drift rule-integrity exists to notice.
@@ -652,6 +707,7 @@ export async function screenOnce(
     creds,
     window,
     denied,
+    challenged,
     trusted,
     allowed,
     deniedUa,

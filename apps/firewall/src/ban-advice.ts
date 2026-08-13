@@ -75,26 +75,100 @@ export function browserEvidence(r: Reach): number {
   return r.subResources + r.beacons + r.tiles + r.rpcs;
 }
 
+/**
+ * Whether a verdict names a lever and therefore wants a human.
+ *
+ * Single-sourced because `verdict === 'ban'` was written out separately in the exit code, the
+ * actionable test, the notification key and the watch display — and the way a second tier goes
+ * silent is being added to three of the four.
+ *
+ * Distinct from `worthInvestigating`, which reads AXES: this asks "is there a live recommendation
+ * a human should see", that asks "is this shaped enough to pay an agent to adjudicate". The only
+ * gate on APPLYING without a human is `autoBanRefusal`, which compares against `'ban'` exactly —
+ * neither of these can widen it.
+ */
+export function recommendsAction(verdict: string): boolean {
+  return verdict === 'ban' || verdict === 'challenge';
+}
+
 export type Lever = {
   kind: 'ja4' | 'asn';
   value: string;
   why: string;
+  /**
+   * Which list the value belongs on. REQUIRED, and deliberately not defaulted: an optional field
+   * meaning "deny unless stated" turns any code path that drops it into a silent escalation from
+   * interstitial to outage. Every construction site has to say which tier it means.
+   */
+  tier: 'deny' | 'challenge';
   /** ASN rules key on AS NUMBER, which observability does not expose — the operator supplies it. */
   needsAsNumber?: boolean;
 };
 
 export type Advice = {
-  // Four distinct states that a coarser verdict kept confusing: act, staged-but-not-live,
-  // live-and-done, and legitimate. 'staged' must never read as 'already' — the WAF has not
-  // been written yet.
-  verdict: 'ban' | 'watch' | 'staged' | 'already' | 'leave';
+  // Five distinct states that a coarser verdict kept confusing: act on the hard lever, act on the
+  // recoverable one, staged-but-not-live, live-and-done, and legitimate. 'staged' must never read
+  // as 'already' — the WAF has not been written yet.
+  verdict: 'ban' | 'challenge' | 'watch' | 'staged' | 'already' | 'leave';
   lever?: Lever;
   digest?: string;
   reasons: string[];
+  /**
+   * The INDEPENDENT axes the evidence fired on, deduplicated by tag.
+   *
+   * Surfaced because `reasons.length` is the wrong measure and always was: "zero sub-resources"
+   * and "pages but no RPCs" are both entailed by not running the app, so counting reasons makes
+   * the two-independent-axes rule meaningless. Anything deciding how scraper-shaped an identity
+   * is — including whether to spend a paid investigation on it — has to read this, not the prose.
+   */
+  axes: string[];
+  /**
+   * True when FW_CHALLENGE_JA4 carries this digest RIGHT NOW, whatever the verdict.
+   *
+   * A statement about live WAF state, not about the evidence, so it survives every verdict. The
+   * `already` path conveyed it through `lever.tier`, which only exists when the challenge tier
+   * qualifies — so a challenged digest whose challenge failed to qualify fell through to `watch`
+   * and rendered as INCONCLUSIVE while the WAF was interstitialing every one of its requests.
+   * An operator reading "no safe lever" concludes nothing is in place and may drop the entry as
+   * inert, or fail to connect a user complaint to a mitigation they do not know is running.
+   *
+   * Output-only and set on every return by `adviseBan`, so no caller can forget it.
+   */
+  challengeLive?: boolean;
   blockers: string[];
   /** Why a lever was ruled out — the useful half when the answer is "nothing safe applies". */
   leverNotes: string[];
 };
+
+/**
+ * Whether an identity is shaped enough like a scraper to spend a paid investigation on.
+ *
+ * The SAME bar a ban needs — two independent axes — and deliberately NOT the verdict, because the
+ * verdict also encodes whether a safe lever happened to exist. An identity can be scraper-shaped
+ * on two axes and still return `watch` because every handle it has is shared, which is exactly
+ * the case that took a human hours on 2026-08-12 and is the one worth automating.
+ *
+ * It does NOT double as a volume gate, and must not be made into one: the axes fire regardless of
+ * volume, and in the watch loop `worthProfiling` has already applied `screenFloor` — never below
+ * this module's own floor — so nothing too thin to judge ever becomes a finding. Where evidence is
+ * unmeasurable rather than thin (a failed query, a truncated sample) an agent is the right spend
+ * precisely because it re-queries live and can get what the screen could not.
+ *
+ * Widens what gets INVESTIGATED, never what gets applied. `autoBanRefusal` still compares against
+ * `'ban'` exactly, and an investigation is read-only by protocol.
+ */
+export function worthInvestigating(
+  advice: Pick<Advice, 'axes' | 'verdict'>,
+): boolean {
+  // Axes are filled on EVERY path, including the ones where the advisory already concluded — a
+  // verified crawler or a first-party service still scores `rendering` and `spread` before
+  // `blockersFor` returns `leave`. Reading axes alone therefore wakes a paid agent on Googlebot,
+  // which is both a cost and an insult to the blocker that just cleared it. `already` and
+  // `staged` are the same shape: the question has an answer, so there is nothing to adjudicate.
+  if (advice.verdict === 'leave') return false;
+  if (advice.verdict === 'already' || advice.verdict === 'staged') return false;
+  return advice.axes.length >= 2;
+}
 
 export type AdviceInput = {
   total: number;
@@ -109,6 +183,14 @@ export type AdviceInput = {
   digestReach?: Reach;
   asnReach?: Reach;
   alreadyDeniedJa4: boolean; // present in the LIVE rule and applied
+  /**
+   * Present in FW_CHALLENGE_JA4 — we are ALREADY interstitialing this fingerprint.
+   *
+   * Required, not optional, and it is not cosmetic: it taints the reach. See `qualifyLever`'s
+   * caller below. A default of `false` would mean "not challenged" on any path that forgot to
+   * pass it, which is the direction that clears a deny.
+   */
+  challengedJa4: boolean;
   stagedJa4: boolean; // staged this session, not yet written to the WAF
   alreadyDeniedAsn: boolean;
   windowMinutes: number;
@@ -285,13 +367,45 @@ function unjudgeableFor(input: AdviceInput): string[] {
       'the path sample hit the API group cap, so the rendering counts are floors — a zero here may be a dropped tail rather than a raw-HTML fetcher',
     );
   const floor = volumeFloor(input.windowMinutes);
-  if (input.total < floor)
+  // The same NaN hole as the qualifiers, one layer earlier and pointing the other way: an
+  // unreadable total does not fall UNDER the floor, so it silently clears the volume gate and the
+  // identity proceeds to be judged on a number nobody has.
+  const unusable = unusableMetric([['request total', input.total]]);
+  if (unusable)
+    out.push(
+      `${unusable} — the window's own volume could not be read, so nothing here is judgeable`,
+    );
+  else if (input.total < floor)
     out.push(
       `only ${input.total} requests in this window — under ${floor}, too little to judge sustained volume. Widen the window.`,
     );
   if (!input.ja4.length)
     out.push('no TLS fingerprint recorded — nothing to identify it by');
   return out;
+}
+
+/**
+ * The first metric that is not a usable number, described, or null when all of them are.
+ *
+ * NaN defeats every comparison SILENTLY and in both directions: `NaN < floor` is false, so it
+ * walks past a lower bound, and `NaN > 0` is false, so it walks past an upper bound too. An
+ * unmeasured value therefore arrives looking like a measured clean one — which is this codebase's
+ * defining defect, an error path producing something shaped like an answer.
+ *
+ * `autoBanRefusal` has guarded exactly this since it shipped, for exactly this reason. The
+ * qualifiers below did not, and they are the more dangerous place for it: a refused auto-ban costs
+ * another look, while a wrongly CLEARED lever is what puts a digest in front of an operator with
+ * "no browser has ever rendered from it" attached to it.
+ *
+ * Negatives are refused alongside NaN: a count below zero is not a measurement either.
+ */
+function unusableMetric(
+  metrics: readonly (readonly [string, number])[],
+): string | null {
+  for (const [what, v] of metrics)
+    if (!Number.isFinite(v) || v < 0)
+      return `${what} is not a usable number (${v})`;
+  return null;
 }
 
 /** Whether an identity is safe to deny wholesale, and why not when it is not. */
@@ -320,7 +434,42 @@ export function qualifyLever(
       ok: false,
       note: `${kind} ${reach.label} could not be fully measured (a query failed or the path sample hit the API's 500-group cap) — absence of evidence is not evidence, so it is not cleared`,
     };
+  // A VACUOUS PASS is the failure this guards, and it was live: `Byteplus Pte. Ltd.` surfaced as
+  // an offered ASN lever on 2 requests site-wide over 6 days. It cleared because zero of 2 render,
+  // which is true and says nothing — "no browser has ever rendered from this network" is an
+  // affirmative claim, and two requests cannot support it. The operator would then have looked up
+  // a cloud provider's AS number and denied the range to stop 0.3% of one scraper.
+  //
+  // The subject's volume has been floored since the beginning; the REACH never was.
+  //
+  // MIN_VOLUME_FLOOR, deliberately, NOT the window-scaled `volumeFloor`. This is the "cannot say
+  // anything at all" line, not the "sustained volume" one — a browser renders many requests per
+  // page, so a few dozen requests with zero sub-resources genuinely is browser-free, while two
+  // requests is not evidence of anything. Scaling it to the reach span instead put the bar an
+  // order of magnitude higher and refused a legitimate low-volume backdoor scanner, which is the
+  // opposite error: a floor that stops the tool acting on real findings is not a safety property.
+  //
+  // Window-independent on purpose: reach is pinned to >= 6 days whatever is on screen, so a
+  // 20-minute view must not buy a cheaper reach test than a six-day one.
+  // BEFORE the comparisons, never after: each one below is a `<` or a `>`, and NaN slips past
+  // both. `browserEvidence` sums four fields, so a single unreadable one poisons the whole total
+  // and turns "shows N rendering requests" into a silent pass.
   const browsery = browserEvidence(reach);
+  const unusable = unusableMetric([
+    ['request total', reach.total],
+    ['IP count', reach.ips],
+    ['rendering requests', browsery],
+  ]);
+  if (unusable)
+    return {
+      ok: false,
+      note: `${kind} ${reach.label}: ${unusable} — unmeasured is not measured-clean, so it is not cleared`,
+    };
+  if (reach.total < MIN_VOLUME_FLOOR)
+    return {
+      ok: false,
+      note: `${kind} ${reach.label} has only ${reach.total} requests across the whole reach — under ${MIN_VOLUME_FLOOR}, too little for "nothing here renders" to mean anything. Not cleared, and not condemned either.`,
+    };
   if (browsery > 0)
     return {
       ok: false,
@@ -329,6 +478,90 @@ export function qualifyLever(
   return {
     ok: true,
     note: `${kind} ${reach.label} has ZERO rendering requests across ${reach.total} requests from ${reach.ips} IPs — no browser has ever rendered from it`,
+  };
+}
+
+/**
+ * Whether the RECOVERABLE tier applies: the identity is scraper-shaped, but its fingerprint is
+ * shared with real browsers, so a deny would hit them.
+ *
+ * This is the case a deny-only tool has no answer for, and it is the common one — a JA4 is a
+ * client BUILD, so the popular ones carry a browser population permanently. Measured 2026-08-12
+ * on `t13d1516h2_cccccccccccc_111111111111`: over six days it carried 73 IPs of real sessions
+ * (map tiles, fonts, `/sw.js`, beacons), and in the last day 416 IPs fetching one page each and
+ * rendering nothing at all. One digest, two populations, split by TIME rather than by address.
+ * `mix` is the window the operator is looking at and `digestReach` is the >= 6 day history, so
+ * that split is already measured — it just had nowhere to go.
+ *
+ * The premise is that a challenge separates them: a browser solves it, a client that never
+ * fetches a sub-resource is not running JavaScript and cannot. So the test is on the SUBJECT
+ * window's rendering being an actual measured zero, not merely low. A client that renders at all
+ * might solve the challenge, and then the interstitial is a tax on users for nothing.
+ *
+ * A verified crawler we want disqualifies this exactly as hard as it disqualifies a deny, and the
+ * "recoverable" framing must not be allowed to soften it: Googlebot cannot solve a challenge
+ * either, so challenging it deindexes the site just as surely as denying it would.
+ */
+export function qualifyChallenge(
+  input: AdviceInput,
+  reach: Reach | undefined,
+  /** Verified crawlers we want. Undefined means unread — every verified name still disqualifies. */
+  allowed?: readonly string[],
+): { ok: boolean; note: string } {
+  if (!reach)
+    return {
+      ok: false,
+      note: 'fingerprint reach unknown — a challenge is recoverable, but it is still an action, and this one is unmeasured',
+    };
+  const shared = welcomeNames(reach.verifiedNames, allowed);
+  if (shared.length)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label} carries verified ${shared.join(', ')} — a crawler cannot answer a challenge any more than it can survive a deny, so this tier is no softer for it`,
+    };
+  if (!reach.complete)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label} could not be fully measured — unknown escalates to a human, it does not decay into the cheaper action`,
+    };
+  // No re-test of mixPartial/failedQueries here: unjudgeableFor returns `watch` for both before
+  // any lever is consulted, so a branch for them could never execute. Reachability is checked
+  // rather than assumed — two guards have shipped in this file that read perfectly and were dead.
+  // THE SAME FLOOR AS `qualifyLever`, and it belongs here for a reason specific to this tier.
+  // Adding it there and not here was the twin-miss this codebase warns about above all others:
+  // one instance fixed, its sibling left, and the sibling is reachable — a thin reach is refused
+  // for the deny and then falls straight through to the challenge.
+  //
+  // "Recoverable, so a lower bar is fine" does not survive contact with the note below, which
+  // claims the fingerprint is SHARED. That claim is the entire justification for choosing this
+  // tier over a deny, and a reach of a handful of requests cannot support it.
+  // Same NaN guard as the deny qualifier, and it covers the SUBJECT side too: `renders` and
+  // `input.total` are both compared below and both come from a mix that a failed query degrades.
+  const renders = renderingRequests(input.mix);
+  const unusable = unusableMetric([
+    ['reach request total', reach.total],
+    ['reach rendering requests', browserEvidence(reach)],
+    ['window request total', input.total],
+    ['window rendering requests', renders],
+  ]);
+  if (unusable)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label}: ${unusable} — a challenge is the cheaper action but it is still an action, and this one is unmeasured`,
+    };
+  if (reach.total < MIN_VOLUME_FLOOR)
+    return {
+      ok: false,
+      note: `fingerprint ${reach.label} has only ${reach.total} requests across the whole reach — under ${MIN_VOLUME_FLOOR}, too little to call it shared, which is the only reason to prefer a challenge over a deny`,
+    };
+  if (renders > 0)
+    return {
+      ok: false,
+      note: `${renders} rendering requests in this window — a challenge only stops a client that cannot run JavaScript, so this would tax real users and catch nothing`,
+    };
+  return {
+    ok: true,
+    note: `zero rendering requests across ${input.total} in this window, while the ${reach.label} reach shows ${browserEvidence(reach)} across ${reach.ips} IPs — the fingerprint is SHARED, so a deny would hit browsers and a challenge separates them`,
   };
 }
 
@@ -444,6 +677,8 @@ export function adviseBan(input: AdviceInput): Advice {
     return {
       verdict: 'leave',
       reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [...blockers, ...denied],
       leverNotes,
     };
@@ -454,6 +689,8 @@ export function adviseBan(input: AdviceInput): Advice {
       verdict: 'already',
       digest,
       reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: denied,
       leverNotes,
     };
@@ -461,18 +698,36 @@ export function adviseBan(input: AdviceInput): Advice {
   // and flipping their screen back to INCONCLUSIVE because one of ~21 queries failed reads as
   // "your keypress was rejected" — so they never press `a` and the deny is never written.
   if (input.stagedJa4)
-    return { verdict: 'staged', digest, reasons, blockers: [], leverNotes };
+    return {
+      verdict: 'staged',
+      digest,
+      reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
+      blockers: [],
+      leverNotes,
+    };
   const unjudgeable = unjudgeableFor(input);
   if (unjudgeable.length)
     return {
       verdict: 'watch',
       digest,
       reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers: [],
       leverNotes: [...leverNotes, ...unjudgeable],
     };
   if (axes.size < 2)
-    return { verdict: 'watch', digest, reasons, blockers, leverNotes };
+    return {
+      verdict: 'watch',
+      digest,
+      reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
+      blockers,
+      leverNotes,
+    };
 
   // Reasons are computed over the subject's WHOLE traffic, but the ja4 lever denies one digest.
   // If the subject carries several, the evidence cannot be attributed to the one being denied —
@@ -483,7 +738,15 @@ export function adviseBan(input: AdviceInput): Advice {
     leverNotes.push(
       `evidence spans ${input.ja4.length} fingerprints (top one is only ${(topShare * 100).toFixed(0)}% of traffic) — it cannot be attributed to the digest a deny would target`,
     );
-    return { verdict: 'watch', digest, reasons, blockers, leverNotes };
+    return {
+      verdict: 'watch',
+      digest,
+      reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
+      blockers,
+      leverNotes,
+    };
   }
 
   // Fingerprint first: it survives IP rotation, which is why it beat the per-IP rules.
@@ -492,13 +755,34 @@ export function adviseBan(input: AdviceInput): Advice {
     'fingerprint',
     input.allowedBots,
   );
+  // OUR OWN CHALLENGE CENSORS THE EVIDENCE THAT WOULD CLEAR THIS DENY.
+  //
+  // A browser that meets the interstitial and does not solve it never goes on to fetch a single
+  // sub-resource, so it contributes ZERO rendering requests. Over a >= 6 day reach the pre-challenge
+  // rendering ages out, `qualifyLever` reads a clean zero, and its note says "no browser has ever
+  // rendered from it" — which by then is a statement this tool manufactured rather than measured.
+  // The verdict would flip from `challenge` to `ban` on the strength of it.
+  //
+  // The coupling is what makes it dangerous rather than merely wrong: the zero only appears if the
+  // challenge is FAILING for real browsers, so the tool would recommend the harsher control in
+  // exactly the case where the softer one is already hurting people. It is this codebase's
+  // recurring defect — an absence read as a measurement — with our own hand on the cause.
+  //
+  // So a challenged digest can never clear the fingerprint deny automatically. Lift the challenge,
+  // let a full reach window pass, and measure again; or override it deliberately with `b`.
+  if (input.challengedJa4 && ja4Ok.ok) {
+    ja4Ok.ok = false;
+    ja4Ok.note = `fingerprint ${input.digestReach?.label ?? digest} reads as having zero rendering requests, but it is ALREADY on FW_CHALLENGE_JA4 — a challenged browser never fetches sub-resources, so that zero is one this tool caused and cannot be used to clear a deny. Lift the challenge and re-measure over a full reach window.`;
+  }
   leverNotes.push(ja4Ok.note);
   if (ja4Ok.ok && digest)
     return {
       verdict: 'ban',
       digest,
-      lever: { kind: 'ja4', value: digest, why: ja4Ok.note },
+      lever: { kind: 'ja4', value: digest, why: ja4Ok.note, tier: 'deny' },
       reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
@@ -520,15 +804,74 @@ export function adviseBan(input: AdviceInput): Advice {
         kind: 'asn',
         value: asn,
         why: asnOk.note,
+        tier: 'deny',
         // Observability reports asnName; FW_BLOCKED_ASN keys on the AS number, and no dimension
         // bridges them, so the number has to be supplied when staging.
         needsAsNumber: true,
       },
       reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
       blockers,
       leverNotes,
     };
 
-  // Scraper-shaped, but every handle it has is shared with something legitimate.
-  return { verdict: 'watch', digest, reasons, blockers, leverNotes };
+  // Scraper-shaped, but every handle it has is shared with something legitimate. That is not a
+  // dead end any more: it is the definition of the recoverable tier's case. Reached only after
+  // both denies were refused, so a challenge is never recommended where a deny was already clean.
+  const challengeOk = qualifyChallenge(
+    input,
+    input.digestReach,
+    input.allowedBots,
+  );
+  leverNotes.push(challengeOk.note);
+  // Already interstitialed: recommending the action that is live invites applying it twice, which
+  // is the same reason `already` exists for the deny tier. The lever is still attached, and its
+  // tier is what tells the view to say ALREADY CHALLENGED rather than ALREADY DENIED — those are
+  // different facts and an operator acts differently on them.
+  if (challengeOk.ok && digest && input.challengedJa4)
+    return {
+      verdict: 'already',
+      digest,
+      lever: {
+        kind: 'ja4',
+        value: digest,
+        why: challengeOk.note,
+        tier: 'challenge',
+      },
+      reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
+      blockers: [
+        'fingerprint is already in FW_CHALLENGE_JA4 — challenged, not denied',
+      ],
+      leverNotes,
+    };
+  if (challengeOk.ok && digest)
+    return {
+      verdict: 'challenge',
+      digest,
+      lever: {
+        kind: 'ja4',
+        value: digest,
+        why: challengeOk.note,
+        tier: 'challenge',
+      },
+      reasons,
+      axes: [...axes],
+      challengeLive: input.challengedJa4,
+      blockers,
+      leverNotes,
+    };
+
+  // Scraper-shaped, and not even the recoverable lever is clear.
+  return {
+    verdict: 'watch',
+    digest,
+    reasons,
+    axes: [...axes],
+    challengeLive: input.challengedJa4,
+    blockers,
+    leverNotes,
+  };
 }

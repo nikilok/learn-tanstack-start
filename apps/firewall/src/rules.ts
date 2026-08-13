@@ -4,6 +4,7 @@ import {
   ASN_DENY,
   JA4_DENY,
   POLICY_PATHS,
+  UNANSWERABLE_PATHS,
   UA_DENY,
   challengeListRule,
   denyListRule,
@@ -273,7 +274,9 @@ const challengedJa4Rule = challengeListRule({
   description: 'Challenge scraper TLS fingerprints (FW_CHALLENGE_JA4).',
   spec: JA4_DENY,
   values: envMatching('FW_CHALLENGE_JA4', JA4_DENY, !dryRun),
-  exemptPaths: POLICY_PATHS,
+  // Policy docs stay readable, and a challenge is confined to paths where it can actually be
+  // answered — see UNANSWERABLE_PATHS.
+  exemptPaths: [...POLICY_PATHS, ...UNANSWERABLE_PATHS],
 });
 
 const blockedAsnRule = denyListRule({

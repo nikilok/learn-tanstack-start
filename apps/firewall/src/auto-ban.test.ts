@@ -302,3 +302,25 @@ describe('dueForRevocation', () => {
     expect(dueForRevocation([], Date.now())).toEqual({ expired: [], live: [] });
   });
 });
+
+// The recoverable tier must never become a thing that fires unattended. `autoBanRefusal` compares
+// against 'ban' exactly, so this holds by construction — pinned because the obvious "improvement"
+// when reading the advisory is to let the softer verdict through, and it is softer for the TARGET,
+// not for the decision to act on a shared fingerprint without a person.
+describe('the challenge tier is not automatable', () => {
+  test('a challenge verdict is refused, by name', () => {
+    expect(autoBanRefusal(candidate({ verdict: 'challenge' }))).toBe(
+      'verdict is challenge, not ban',
+    );
+  });
+
+  test('and it is refused before any blast-radius ceiling is consulted', () => {
+    // Same refusal even with metrics that would clear every ceiling, so the gate cannot be
+    // reached by making the candidate look small.
+    expect(
+      autoBanRefusal(
+        candidate({ verdict: 'challenge', ips: 1, total: 60, windowTotal: 60 }),
+      ),
+    ).toBe('verdict is challenge, not ban');
+  });
+});

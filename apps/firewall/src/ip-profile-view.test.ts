@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { barWidth } from './ip-profile-view';
+import type { Advice } from './ban-advice';
+import {
+  barWidth,
+  envVarFor,
+  fingerprintScopeNote,
+  overrideWarning,
+} from './ip-profile-view';
 
 describe('barWidth', () => {
   test('scales with the pane so a wide split is actually used', () => {
@@ -83,6 +89,9 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
     shape: shapeOf([], 10),
     buckets: [],
     tells: [],
+    // Undecidable is the honest default for a fixture: it must never be the state that renders
+    // as a clean bill of health.
+    uaCheck: { mismatched: null, share: null, note: 'baseline not read' },
     reachHours: 144,
     failedQueries: [],
     errors: [],
@@ -94,6 +103,7 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
 const ADVICE = {
   verdict: 'watch' as const,
   reasons: [],
+  axes: [],
   blockers: [],
   leverNotes: [],
 };
@@ -179,5 +189,191 @@ describe('profileLines — partial data', () => {
     expect(text).toContain('3400 rendering requests');
     // The old line summed assets + beacons only, which for this reach is exactly zero.
     expect(text).not.toMatch(/[^\d]0 rendering requests/);
+  });
+});
+
+describe('envVarFor', () => {
+  const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
+
+  test('the tier decides the list, not the kind — both tiers key on a JA4', () => {
+    expect(envVarFor({ kind: 'ja4', value: DIG, why: '', tier: 'deny' })).toBe(
+      'FW_BLOCKED_JA4',
+    );
+    expect(
+      envVarFor({ kind: 'ja4', value: DIG, why: '', tier: 'challenge' }),
+    ).toBe('FW_CHALLENGE_JA4');
+  });
+
+  test('a network lever names its own list and its manual step', () => {
+    expect(
+      envVarFor({ kind: 'asn', value: 'Some Net', why: '', tier: 'deny' }),
+    ).toContain('FW_BLOCKED_ASN');
+  });
+});
+
+describe('overrideWarning', () => {
+  const advice = (over: Partial<Advice> = {}): Advice => ({
+    verdict: 'leave',
+    reasons: [],
+    axes: [],
+    blockers: [],
+    leverNotes: [],
+    ...over,
+  });
+
+  test('a legitimacy blocker outranks a lever note — it is about the client, not the handle', () => {
+    const w = overrideWarning(
+      advice({
+        blockers: ['verified bot (googlebot:900)'],
+        leverNotes: ['fingerprint x shows 340 rendering requests'],
+      }),
+    );
+    expect(w).toContain('verified bot (googlebot:900)');
+    expect(w).not.toContain('340 rendering');
+  });
+
+  test('falls back to the lever note when nothing blocked', () => {
+    expect(
+      overrideWarning(
+        advice({ verdict: 'watch', leverNotes: ['reach unknown'] }),
+      ),
+    ).toContain('reach unknown');
+  });
+
+  test('always names the verdict being overridden', () => {
+    expect(overrideWarning(advice({ verdict: 'challenge' }))).toContain(
+      'verdict: challenge',
+    );
+  });
+
+  test('says something even when the advisory found nothing at all', () => {
+    // The operator still pressed the key; a blank detail reads as a broken dialog.
+    expect(overrideWarning(advice())).toContain('nothing either way');
+  });
+});
+
+describe('fingerprintScopeNote', () => {
+  const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
+
+  test('warns that an IP profile denies the FINGERPRINT, since there is no IP lever', () => {
+    const note = fingerprintScopeNote({ kind: 'ip', value: '1.2.3.4' }, DIG);
+    expect(note).toContain(DIG);
+    expect(note).toContain('NOT the IP 1.2.3.4');
+  });
+
+  test('says nothing when the subject already IS the fingerprint', () => {
+    expect(fingerprintScopeNote({ kind: 'ja4', value: DIG }, DIG)).toBe('');
+  });
+});
+
+describe('profileLines — the impersonation check', () => {
+  const DIG = 't13d1516h2_cccccccccccc_222222222222';
+
+  test('a contradiction reads as automated and names the rival fingerprint', () => {
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: [
+            {
+              ua: 'Chrome/142.0.0.0 Safari/537.36',
+              requests: 58,
+              subjectShare: 0.071,
+              rivalDigest: DIG,
+              rivalShare: 0.764,
+            },
+          ],
+          share: 0.139,
+          note: '1 of 3 comparable user-agents belong to a DIFFERENT fingerprint',
+        },
+      }),
+    );
+    expect(text).toContain('ua vs TLS');
+    expect(text).toContain('DIFFERENT fingerprint');
+    expect(text).toContain(DIG);
+    expect(text).toContain('58x');
+  });
+
+  test('undecidable renders as a note, NOT as browser evidence', () => {
+    // The failure that matters: a check that could not run reading as a check that passed.
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: null,
+          share: null,
+          note: 'the site-wide user-agent baseline could not be read',
+        },
+      }),
+    );
+    expect(text).toContain('could not be read');
+    expect(text).not.toContain('consistent');
+  });
+
+  test('consistent renders, so a clean identity is visibly cleared rather than silent', () => {
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: [],
+          share: 0,
+          note: 'every comparable user-agent (7) is consistent with this fingerprint',
+        },
+      }),
+    );
+    expect(text).toContain('is consistent with this fingerprint');
+  });
+});
+
+// PR review, 2026-08-13. `challengeLive` is a fact about the WAF, not about the evidence. It used
+// to reach the screen only through `lever.tier` on an `already` verdict, so a challenged digest
+// whose challenge failed to qualify fell to `watch` and rendered INCONCLUSIVE — telling the
+// operator nothing was in place while every request to it was being interstitialed.
+describe('a live challenge is stated whatever the verdict', () => {
+  const watch = (over: Partial<Advice> = {}): Advice => ({
+    verdict: 'watch',
+    reasons: [],
+    axes: ['rendering', 'spread'],
+    blockers: [],
+    leverNotes: [],
+    ...over,
+  });
+  const render = (a: Advice) =>
+    profileLines(profile(), 120, a).map(lineText).join('\n');
+
+  test('CONTROL — an unchallenged watch still reads as plain INCONCLUSIVE', () => {
+    const t = render(watch());
+    expect(t).toContain('INCONCLUSIVE — no safe lever');
+    expect(t).not.toContain('FW_CHALLENGE_JA4');
+  });
+
+  test('a challenged watch says so in the headline', () => {
+    const t = render(watch({ challengeLive: true }));
+    expect(t).toContain('CHALLENGE IS LIVE');
+    expect(t).toContain('FW_CHALLENGE_JA4');
+    expect(t).not.toContain('INCONCLUSIVE — no safe lever');
+  });
+
+  test('and carries a LIVE line, not a green blocker', () => {
+    // Blockers render as reassurance. A running mitigation is a warning: it is costing somebody
+    // something right now.
+    const t = render(watch({ challengeLive: true }));
+    expect(t).toContain('being challenged now');
+  });
+
+  test('every other verdict states it too — leave was the quietest place to lose it', () => {
+    for (const v of ['leave', 'watch', 'ban'] as const)
+      expect(render(watch({ verdict: v, challengeLive: true }))).toContain(
+        'being challenged now',
+      );
+  });
+
+  test('but `already` does not repeat it — its headline says it already', () => {
+    const t = render(
+      watch({
+        verdict: 'already',
+        challengeLive: true,
+        lever: { kind: 'ja4', value: 'x', why: '', tier: 'challenge' },
+      }),
+    );
+    expect(t).toContain('ALREADY CHALLENGED');
+    expect(t).not.toContain('being challenged now');
   });
 });

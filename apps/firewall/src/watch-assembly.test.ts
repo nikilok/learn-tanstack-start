@@ -203,6 +203,13 @@ function fakeProfile(clients: Client[]): ScreenDeps['fetchIpProfile'] {
       byPath: [],
       byReferrer: [],
       byUserAgent: [],
+      // Undecidable, not absent: the Partial cast below hides a missing field from tsc, so a
+      // future test that renders this profile would crash on `p.uaCheck.mismatched`.
+      uaCheck: {
+        mismatched: null,
+        share: null,
+        note: 'not measured in this fixture',
+      },
       digestReach: reach(c, renders),
       asnReach: reach(c, renders),
       windowHours: 24,
@@ -349,6 +356,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -373,6 +381,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -396,6 +405,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         undefined,
         ['googlebot'],
         [],
@@ -422,6 +432,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -445,6 +456,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -461,6 +473,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         ['SomeBot'],
@@ -477,6 +490,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [HARVESTER.digest],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -493,6 +507,7 @@ describe('findSuspects — screen to verdict, end to end', () => {
         CREDS,
         WINDOW,
         [],
+        [], // nothing challenged
         ['allow-ch-stream-revalidate'],
         ['googlebot'],
         [],
@@ -591,5 +606,124 @@ describe('screenOnce — the shared entry both paths use', () => {
     );
     expect(out.rows).toHaveLength(0);
     expect(out.configErrors.join(' ')).toContain('FW_ALLOWED_BOTS');
+  });
+});
+
+// Operator decision 2026-08-12: a digest already on FW_CHALLENGE_JA4 is mitigated, so re-surfacing
+// it every tick recommends an action already taken. Dropped before the profile spend, exactly like
+// the denylist and the ignore list.
+describe('findSuspects — the challenge list suppresses a digest', () => {
+  test('a challenged digest is not profiled and produces no finding', async () => {
+    const { findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [HARVESTER.digest], // already challenged
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(findings).toHaveLength(0);
+  });
+
+  test('the SAME identity is a finding when it is not on the list — the control', async () => {
+    // Without this the test above could pass because the fixture stopped qualifying.
+    const { findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(findings).toHaveLength(1);
+  });
+
+  test('it still reaches the screen, so the aggregate figure does not silently drop', async () => {
+    // The mitigation-failure signal the operator traded away is partly recovered here: a
+    // challenge failing at volume still moves the "reached the app" number on screen.
+    const { rows } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [HARVESTER.digest],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(rows.some((r) => r.digest === HARVESTER.digest)).toBe(true);
+  });
+
+  test('an UNREADABLE list suppresses nothing — the failure widens the screen, never narrows it', async () => {
+    const { findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [], // what an unreadable FW_CHALLENGE_JA4 degrades to
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(findings).toHaveLength(1);
+  });
+});
+
+// CodeRabbit's mergeability note, 2026-08-13: the challenge-awareness passed into the advisory is
+// unreachable from the watch loop, because `worthProfiling` filters the same list. True, and the
+// comment used to claim the reverse. Pinned so the two cannot drift apart again.
+describe('the suppression and the challenge flag read the same list', () => {
+  test('a challenged digest is filtered before profiling, so it never reaches the advisory', async () => {
+    const { findings, rows } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [HARVESTER.digest],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    // Screened, so the aggregate still counts it — but never adjudicated.
+    expect(rows.some((r) => r.digest === HARVESTER.digest)).toBe(true);
+    expect(findings).toHaveLength(0);
+  });
+
+  test('and with the list empty it IS adjudicated, with the flag false — same source, no drift', async () => {
+    // The control. If these ever came from different lists, one of these two assertions breaks.
+    const { findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.advice.challengeLive).toBe(false);
   });
 });

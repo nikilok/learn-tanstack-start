@@ -1,4 +1,9 @@
 reviews:
+  # Default is `chill`. On PR #358 a chill PR review found two Major correctness bugs that three
+  # passes of the local `coderabbit review --agent` CLI reported as clean — both the same shape, a
+  # guard added to one function and not to the sibling that needed it. If chill catches that, the
+  # extra noise assertive brings is worth reading.
+  profile: assertive
   path_filters:
     - '!apps/web/public/sitemap*.xml'
     # Drizzle emits these verbatim from `bun run db:generate` and they are never

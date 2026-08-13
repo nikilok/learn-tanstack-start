@@ -24,9 +24,16 @@ import {
 } from './watch-mode';
 
 const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
-const advice = (verdict: Advice['verdict']): Advice => ({
+// Two axes by default: the gate is `worthInvestigating`, which reads axes rather than the
+// verdict, so a fixture with one axis would silently stop qualifying and every gate test below
+// would pass for the wrong reason.
+const advice = (
+  verdict: Advice['verdict'],
+  axes: string[] = ['rendering', 'spread'],
+): Advice => ({
   verdict,
   reasons: ['zero rendering requests across 9060 requests'],
+  axes,
   blockers: [],
   leverNotes: [],
 });
@@ -77,12 +84,31 @@ describe('shouldInvestigate', () => {
     expect(shouldInvestigate(finding(), none, [], 0)).toBe(true);
   });
 
-  test('nothing softer does', () => {
-    // Waking a billable agent for `watch` every tick is how a watch gets switched off.
+  test('so does a scraper-shaped `watch` — the case a verdict gate never looked at', () => {
+    // Changed 2026-08-13. Two independent axes with every lever SHARED returns `watch`, and that
+    // is precisely the identity worth an agent: the evidence is strongest and the lever hardest.
+    // Under the old verdict gate it was the one thing never investigated.
+    expect(
+      shouldInvestigate(finding({ advice: advice('watch') }), none, [], 0),
+    ).toBe(true);
+  });
+
+  test('but a finding with fewer than two axes never does, whatever its verdict', () => {
+    // The noisy half of `watch`: too little traffic, a failed query, evidence spread across
+    // fingerprints. Waking a billable agent for those every tick is how a watch gets switched
+    // off, and the answer would only be "widen the window", which the advisory already said.
     for (const v of ['watch', 'leave', 'already', 'staged'] as const)
       expect(
-        shouldInvestigate(finding({ advice: advice(v) }), none, [], 0),
+        shouldInvestigate(
+          finding({ advice: advice(v, ['rendering']) }),
+          none,
+          [],
+          0,
+        ),
       ).toBe(false);
+    expect(
+      shouldInvestigate(finding({ advice: advice('ban', []) }), none, [], 0),
+    ).toBe(false);
   });
 
   test('a digest already investigated is skipped', () => {
@@ -297,30 +323,34 @@ describe('verdictFrom', () => {
 // An unattended run that investigates on its own has two ways to go wrong that nobody sees: it
 // buys the same answer every hour, or a growing history quietly switches it off.
 describe('investigable', () => {
-  const f = (digest: string, verdict: string) => ({
+  // Axes, not the verdict: the gate moved to `worthInvestigating` so that a scraper-shaped
+  // identity whose every lever is SHARED gets looked at too — that case returns `watch` and was
+  // the one thing never investigated, while being the one that cost a human hours.
+  const f = (digest: string, axes: string[]) => ({
     digest,
-    advice: { verdict },
+    advice: { axes, verdict: 'ban' as const },
   });
+  const SHAPED = ['rendering', 'spread'];
 
-  test('only ban verdicts are worth paying for', () => {
+  test('only scraper-shaped findings are worth paying for', () => {
     const picked = investigable(
-      [f('a', 'ban'), f('b', 'watch'), f('c', 'leave')],
+      [f('a', SHAPED), f('b', ['rendering']), f('c', [])],
       new Map(),
     );
     expect(picked.map((p) => p.digest)).toEqual(['a']);
   });
 
   test('skips what has already been investigated', () => {
-    const picked = investigable([f('a', 'ban')], new Map([['a', 1]]));
+    const picked = investigable([f('a', SHAPED)], new Map([['a', 1]]));
     expect(picked).toEqual([]);
   });
 
   test('matches history case-insensitively', () => {
-    expect(investigable([f('AB', 'ban')], new Map([['ab', 1]]))).toEqual([]);
+    expect(investigable([f('AB', SHAPED)], new Map([['ab', 1]]))).toEqual([]);
   });
 
   test('caps how many one run starts', () => {
-    const many = ['a', 'b', 'c', 'd'].map((d) => f(d, 'ban'));
+    const many = ['a', 'b', 'c', 'd'].map((d) => f(d, SHAPED));
     expect(investigable(many, new Map()).length).toBe(INVESTIGATIONS_PER_RUN);
   });
 
@@ -330,12 +360,12 @@ describe('investigable', () => {
     const history = new Map(
       Array.from({ length: 50 }, (_, i) => [`old${i}`, 1] as const),
     );
-    expect(investigable([f('new', 'ban')], history).length).toBe(1);
+    expect(investigable([f('new', SHAPED)], history).length).toBe(1);
   });
 
   test('a zero or negative budget investigates nothing', () => {
-    expect(investigable([f('a', 'ban')], new Map(), 0)).toEqual([]);
-    expect(investigable([f('a', 'ban')], new Map(), -1)).toEqual([]);
+    expect(investigable([f('a', SHAPED)], new Map(), 0)).toEqual([]);
+    expect(investigable([f('a', SHAPED)], new Map(), -1)).toEqual([]);
   });
 
   test('nothing to do is empty, not a crash', () => {
@@ -351,6 +381,7 @@ describe('the prompt cannot be mistaken for an answer', () => {
     advice: {
       verdict: 'ban' as const,
       reasons: [],
+      axes: ['rendering', 'spread'],
       blockers: [],
       leverNotes: [],
     },

@@ -25,6 +25,12 @@ import {
   top,
 } from './observability';
 import type { Window } from './time-window';
+import {
+  type UaBaseline,
+  type UaVerdict,
+  buildUaBaseline,
+  uaFingerprintCheck,
+} from './ua-fingerprint';
 import { errMsg } from './util';
 
 // 10-minute buckets resolve a session; hourly hides it. Past 2 days that is too many rows to read.
@@ -99,6 +105,8 @@ export type IpProfile = {
   shape: Shape;
   buckets: { t: string; c: number }[]; // zero-filled series behind `shape`
   tells: Tell[];
+  /** Whether the claimed browser matches the TLS stack. Reported only — NOT an axis in `adviseBan`. */
+  uaCheck: UaVerdict;
   // What the dominant fingerprint and network do BEYOND this IP. Without these a deny
   // recommendation cannot tell a single automated host from a shared identity that real
   // browsers, verified agents or our own services also use.
@@ -138,6 +146,40 @@ async function group(
     errors.push(`${label}: ${errMsg(e)}`);
     failed?.push(label);
     return [];
+  }
+}
+
+/**
+ * Site-wide (user-agent, fingerprint) pairs, for the impersonation check.
+ *
+ * Unfiltered on purpose: the question is where each user-agent string ACTUALLY lives across the
+ * whole site, which a subject-scoped query cannot answer — a client's own traffic is exactly the
+ * evidence that must not define its own baseline.
+ */
+async function uaBaselineOf(
+  ctx: Ctx,
+  errors: string[],
+  failedQueries: string[],
+): Promise<UaBaseline> {
+  try {
+    const resp = await metrics(ctx, ['clientUserAgent', 'clientJa4Digest'], {
+      limit: GROUP_CAP,
+    });
+    const rows = resp.summary ?? [];
+    return buildUaBaseline(
+      rows.map((r) => ({
+        ua: String(r.clientUserAgent ?? '').trim(),
+        digest: String(r.clientJa4Digest ?? '').trim(),
+        count: countOf(r),
+      })),
+      rows.length < GROUP_CAP,
+    );
+  } catch (e) {
+    errors.push(`ua baseline: ${errMsg(e)}`);
+    failedQueries.push('ua baseline');
+    // An EMPTY baseline reads as undecidable downstream, never as "checked and consistent" —
+    // uaFingerprintCheck keys on the map being empty precisely so this path cannot exonerate.
+    return buildUaBaseline([], false);
   }
 }
 
@@ -208,11 +250,14 @@ export async function fetchIpProfile(
   // whatever range is on screen, and a 20-minute live window can miss hashes. A short list
   // undercounts a subject's RPCs, which is the direction that makes a real SPA session read as
   // a raw-HTML fetcher.
-  const { paths: fnPaths, partial: rpcsPartial } = await serverFnPaths(
-    reachCtx,
-    errors,
-    failedQueries,
-  );
+  // Both are properties of the DEPLOYMENT and its population rather than of the window on
+  // screen, so both run over reachCtx: a 20-minute live window discovers almost no fn hashes and
+  // almost no user-agent baseline, and each absence reads as evidence rather than as a short look.
+  const [{ paths: fnPaths, partial: rpcsPartial }, uaBaseline] =
+    await Promise.all([
+      serverFnPaths(reachCtx, errors, failedQueries),
+      uaBaselineOf(reachCtx, errors, failedQueries),
+    ]);
   // Without a list the RPC axis cannot be measured for ANY subject, and a zero there is read as
   // "runs no app code". reachOf already refuses to clear a lever on that (rpcsMeasured); the
   // subject mix has to say so too, or a failed discovery passes as a measured absence.
@@ -467,6 +512,14 @@ export async function fetchIpProfile(
   const byBotVerified = byBotVerifiedRaw.filter(
     ([v]) => v && v !== '(none)' && v !== 'undefined',
   );
+  // The digest a JA4 rule would target: the subject itself, or its dominant fingerprint when the
+  // subject is an address. Matches how the advisory picks `digest`, so the two cannot disagree.
+  const uaCheck = uaFingerprintCheck({
+    digest: subject.kind === 'ja4' ? subject.value : (byJa4[0]?.[0] ?? ''),
+    subjectUas: byUserAgent,
+    subjectTotal: total,
+    baseline: uaBaseline,
+  });
 
   return {
     subject,
@@ -495,6 +548,7 @@ export async function fetchIpProfile(
     rpcsPartial,
     shape,
     buckets,
+    uaCheck,
     digestReach,
     asnReach,
     reachHours: Math.max(hours, REACH_MIN_HOURS),

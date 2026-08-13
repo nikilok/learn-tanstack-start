@@ -6,8 +6,10 @@ import {
   ASN_DENY,
   JA4_DENY,
   POLICY_PATHS,
+  UNANSWERABLE_PATHS,
   UA_DENY,
   denyDescription,
+  challengeListRule,
   denyListRule,
   enforcedNow,
   envMatching,
@@ -599,5 +601,104 @@ describe('the challenge tier', () => {
       values: [digest],
     });
     expect(listShapeOf(plain)).toEqual({ action: 'deny', exemptPaths: [] });
+  });
+});
+
+// A challenge is an interstitial, and an interstitial can only present on a top-level navigation.
+// Measured 2026-08-13: real browsers DO solve Vercel's challenge here — two UK users met one and
+// were through inside the same ten-minute bucket, then rendered 94 and 25 sub-resources. So the
+// tier works where it can be answered, which is the argument for confining it to where it can be.
+describe('a challenge only fires where it can be answered', () => {
+  const DIG = 't13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb';
+  const challenge = () =>
+    challengeListRule({
+      name: 'challenge-scraper-ja4',
+      description: 'x',
+      spec: JA4_DENY,
+      values: [DIG],
+      exemptPaths: [...POLICY_PATHS, ...UNANSWERABLE_PATHS],
+    });
+  const conds = (r: ReturnType<typeof challengeListRule>) =>
+    r.conditionGroup[0]?.conditions ?? [];
+
+  test('sub-resource trees are exempted by PREFIX, not by exact path', () => {
+    // The whole point: `eq` on `/assets/` would exempt the bare directory and still challenge
+    // every hashed bundle under it — a 429 to a script tag, which nobody can clear.
+    const pre = conds(challenge()).filter((c) => c.neg && c.op === 'pre');
+    expect(pre.map((c) => c.value).sort()).toEqual([
+      '/_vercel/',
+      '/api/',
+      '/assets/',
+      '/fonts/',
+    ]);
+  });
+
+  test('the service worker and manifest are exempt too — nobody is watching those', () => {
+    const eq = conds(challenge())
+      .filter((c) => c.neg && c.op === 'eq')
+      .map((c) => c.value);
+    expect(eq).toContain('/sw.js');
+    expect(eq).toContain('/manifest.json');
+  });
+
+  test('policy documents stay readable, as before', () => {
+    const eq = conds(challenge())
+      .filter((c) => c.neg && c.op === 'eq')
+      .map((c) => c.value);
+    for (const p of POLICY_PATHS) expect(eq).toContain(p);
+  });
+
+  test('the navigation surface is STILL challenged — this weakens nothing', () => {
+    // A harvester wants /company/…, which is a navigation and is not exempt. `/_serverFn/` is
+    // deliberately absent: a browser reaching it has already navigated and holds the clearance.
+    const exempt = conds(challenge())
+      .filter((c) => c.neg)
+      .map((c) => String(c.value));
+    expect(exempt).not.toContain('/company/');
+    expect(exempt.some((p) => '/company/x'.startsWith(p))).toBe(false);
+    expect(exempt.some((p) => '/_serverFn/abc'.startsWith(p))).toBe(false);
+  });
+
+  test('REGRESSION: the ops survive a rebuild, which is what staging a digest does', () => {
+    // `withValue` reconstructs the rule from what `listShapeOf` reads back. Reading only the
+    // value downgrades every prefix to `eq`, so the next apply re-challenges the whole /assets/
+    // tree with nothing reporting the change — the exact bug that once dropped the policy docs.
+    const rebuilt = withValue(
+      challenge(),
+      JA4_DENY,
+      't13d1516h2_cccccccccccc_dddddddddddd',
+    ).rule;
+    const pre = (rebuilt.conditionGroup[0]?.conditions ?? []).filter(
+      (c) => c.neg && c.op === 'pre',
+    );
+    expect(pre.map((c) => c.value).sort()).toEqual([
+      '/_vercel/',
+      '/api/',
+      '/assets/',
+      '/fonts/',
+    ]);
+  });
+
+  test('an exact-match exemption round-trips as a plain string', () => {
+    expect(listShapeOf(challenge()).exemptPaths).toContain('/robots.txt');
+    expect(listShapeOf(challenge()).exemptPaths).toContainEqual({
+      path: '/assets/',
+      op: 'pre',
+    });
+  });
+
+  test('the DENY rule is untouched — a denied client has no interstitial to answer', () => {
+    const deny = denyListRule({
+      name: 'deny-scraper-ja4',
+      description: 'x',
+      spec: JA4_DENY,
+      values: [DIG],
+      exemptPaths: POLICY_PATHS,
+    });
+    const negs = (deny.conditionGroup[0]?.conditions ?? []).filter(
+      (c) => c.neg,
+    );
+    expect(negs).toHaveLength(POLICY_PATHS.length);
+    expect(negs.every((c) => c.op === 'eq')).toBe(true);
   });
 });

@@ -17,6 +17,13 @@ beforeAll(async () => {
   // credentials at import time, and watch-assembly's offline test makes an import of it throw —
   // which is permanent, so any later import gets a TDZ error instead of a fresh evaluation.
   const { noLiveConfig } = await import('./seed-items');
+  // Stubbed too: opening the report pane calls fetchReport, which would put a live observability
+  // request on the wire from the suite. The tests below only need the pane to open.
+  mock.module('./report-data', () => ({
+    fetchReport: async () => {
+      throw new Error('report stubbed in tests');
+    },
+  }));
   mock.module('./client', () => ({
     projectId: 'prj_test',
     teamId: 'team_test',

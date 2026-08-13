@@ -7,13 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { rollingWindow } from '../time-window';
 import { watchHours, watchIntervalMs, watchTiming } from '../tuning';
 import { errMsg } from '../util';
-import {
-  adviceSummary,
-  adviceWhy,
-  logShadow,
-  screenOnce,
-  watchlistAdditions,
-} from '../watch';
+import { adviceWhy, logShadow, screenOnce, watchlistAdditions } from '../watch';
 import { clockTime, logWatch } from '../watch-log';
 import {
   caffeinateArgs,
@@ -40,6 +34,15 @@ import type { Creds } from './useIpTabs';
 
 const VERDICT_LINES = 12; // rendered inline; the rest stays in the log
 
+/** One identity a tick judged. Reported in parts, because how much of it fits is the panel's problem. */
+export type Profiled = {
+  digest: string;
+  total: number;
+  verdict: string;
+  /** The tells behind the verdict. Shown only where there is room; the log always has it. */
+  why: string;
+};
+
 export type Watch = {
   on: boolean;
   toggle: () => void;
@@ -49,8 +52,8 @@ export type Watch = {
   /** Whether the machine is being held awake for the loop. */
   keepingAwake: boolean;
   note: string;
-  /** One line per identity the last tick profiled — "1 profiled" alone sends you to the log. */
-  who: string[];
+  /** Every identity the last tick profiled — "1 profiled" alone sends you to the log. */
+  who: Profiled[];
   invokedAt: string;
   invokedCount: number;
   notifiedAt: string;
@@ -74,7 +77,7 @@ export function useWatch(opts: {
   const [watchOn, setWatchOn] = useState(false);
   const [watchNote, setWatchNote] = useState('');
   // Who the last tick actually profiled, one line each — the note above only counts them.
-  const [watchWho, setWatchWho] = useState<string[]>([]);
+  const [watchWho, setWatchWho] = useState<Profiled[]>([]);
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
@@ -161,9 +164,17 @@ export function useWatch(opts: {
         setWatchBusy(false);
         return;
       }
-      await flushPending();
       setWatchBusy(true);
       try {
+        // Inside the try, deliberately: it notifies and writes files, and outside it one failure
+        // rejected tick(), which skipped the reschedule below and killed the loop for good.
+        await flushPending();
+        // Seeded from disk every tick, not only written to it. The in-memory set starts empty on
+        // each arm, so a digest investigated yesterday was investigated again on restart — paying
+        // for an answer the SHARED notify state then suppressed as already sent. Re-reading also
+        // picks up anything the CLI investigated between ticks.
+        for (const d of (await readInvestigated(root, Date.now())).keys())
+          investigatedRef.current.add(d);
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
         // which the CLI uses too. Assembling them here is what let this loop drift three times.
         const { rows, findings, truncated, configErrors } = await screenOnce(
@@ -189,9 +200,12 @@ export function useWatch(opts: {
           else if (listed.entries) onWatchlist(listed.entries);
         }
         setWatchWho(
-          findings.map(
-            (f) => `${f.digest} · ${f.total} req · ${adviceSummary(f.advice)}`,
-          ),
+          findings.map((f) => ({
+            digest: f.digest,
+            total: f.total,
+            verdict: f.advice.verdict,
+            why: adviceWhy(f.advice),
+          })),
         );
         const bans = findings.filter((f) => f.advice.verdict === 'ban');
         // Truncation is carried, not dropped. A capped screen that surfaced nothing is BLIND, and
@@ -371,7 +385,7 @@ export function useWatch(opts: {
         if (!stopped) setWatchNote(`watch failed: ${errMsg(e)}`);
         void logWatch(root, new Date(), { kind: 'error', error: errMsg(e) });
       } finally {
-        if (!stopped) setWatchBusy(false);
+        setWatchBusy(false);
       }
     };
 
@@ -380,11 +394,19 @@ export function useWatch(opts: {
     const schedule = (delay: number) => {
       timer = setTimeout(async () => {
         if (stopped) return;
-        await tick();
-        // Guarded like the tick above: watchIntervalMs() throws when unconfigured, and an
-        // unhandled throw HERE kills the loop one tick after the guard said it was fine.
-        const every = watchTiming() === null ? null : watchIntervalMs();
-        if (!stopped && every !== null) schedule(every);
+        try {
+          await tick();
+        } catch (e) {
+          // A tick that threw past its own handler must not take the loop with it. Silence is
+          // what this mode reports as "nothing found", so a dead loop reads as a quiet night.
+          setWatchNote(`watch tick failed: ${errMsg(e)}`);
+          void logWatch(root, new Date(), { kind: 'error', error: errMsg(e) });
+        } finally {
+          // In a finally: rescheduling only on success is how one bad tick ends the session.
+          // watchIntervalMs() throws when unconfigured, so it stays guarded.
+          const every = watchTiming() === null ? null : watchIntervalMs();
+          if (!stopped && every !== null) schedule(every);
+        }
       }, delay);
     };
     schedule(0); // arming should tell you something now, not in fifteen minutes

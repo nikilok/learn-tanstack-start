@@ -3,9 +3,48 @@
 
 import { Box, Text } from 'ink';
 
-import type { Watch } from '../hooks/useWatch';
+import type { Profiled, Watch } from '../hooks/useWatch';
 import { watchTiming } from '../tuning';
 import { WATCH_LOG } from '../watch-log';
+
+// The panel is about 38 columns wide once the border and padding are taken out, and a JA4 digest
+// alone is 37. So the line is ordered by what an operator needs FIRST — verdict, then which
+// identity, then volume — because `truncate-end` eats the tail. Ordered the other way round, as it
+// was, every row truncated inside the digest: the verdict never appeared at all, and since these
+// digests share their profile prefix the rows were indistinguishable from each other.
+const SHOWN = 6;
+
+// Eight hex characters of the tail, not twelve: the extra four cost the request count its place on
+// the row at the width this panel actually gets, and eight already tells apart every digest that
+// will ever be on screen at once. The full value is in the watch list, where enter copies it.
+/** Head and tail of a digest. The LAST hash is what distinguishes two digests off one TLS build, so a head-only truncation would show identical rows. */
+function shortDigest(d: string): string {
+  return d.length <= 20 ? d : `${d.slice(0, 10)}…${d.slice(-8)}`;
+}
+
+/** Red for a ban, amber for a challenge — the verdicts that cost something if misread. */
+function verdictColour(v: string): string | undefined {
+  if (v === 'ban') return 'red';
+  if (v === 'challenge') return 'yellow';
+  if (v === 'watch') return 'cyan';
+  return undefined;
+}
+
+/** One judged identity, verdict first. */
+function ProfiledRow({ p }: { p: Profiled }) {
+  return (
+    <Text wrap="truncate-end">
+      <Text color={verdictColour(p.verdict)} bold={p.verdict === 'ban'}>
+        {'  '}
+        {p.verdict}
+      </Text>
+      <Text dimColor>
+        {' · '}
+        {shortDigest(p.digest)} · {p.total} req
+      </Text>
+    </Text>
+  );
+}
 
 /** Status for an armed watch loop. Renders nothing when it is not. */
 export function WatchStatus({ watch: w }: { watch: Watch }) {
@@ -46,12 +85,16 @@ export function WatchStatus({ watch: w }: { watch: Watch }) {
         </Text>
       )}
       {/* Name them, or "1 profiled" sends the operator digging through the log. */}
-      {w.who.map((who) => (
-        <Text key={who} dimColor wrap="truncate-end">
-          {'    '}
-          {who}
-        </Text>
+      {w.who.slice(0, SHOWN).map((p) => (
+        <ProfiledRow key={p.digest} p={p} />
       ))}
+      {w.who.length > SHOWN && (
+        // Bounded, or a busy tick grows the panel until it pushes the rule list off screen. The
+        // watch-list pane has every one of them.
+        <Text dimColor>
+          {'  '}… {w.who.length - SHOWN} more · t for the watch list
+        </Text>
+      )}
       {/* Stays up once it has happened. The loop runs while you are in another pane, so an
           invocation you were not watching still has to be visible afterwards. */}
       {w.invokedCount > 0 && (

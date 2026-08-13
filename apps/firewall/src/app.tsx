@@ -15,7 +15,11 @@ import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import { adviseBan } from './ban-advice';
 import { applyItem, fetchLive, projectId, teamId, token } from './client';
 import { copyToClipboard } from './clipboard';
-import { type Confirmation, ConfirmPrompt } from './components/confirm-prompt';
+import {
+  type Confirmation,
+  ConfirmPrompt,
+  confirmRows,
+} from './components/confirm-prompt';
 import {
   FooterHints,
   type MaybeHint,
@@ -1212,7 +1216,7 @@ export function App() {
     (pane === 'ip' && ipTabs.tabs.length ? 1 : 0) +
     // The suggestion overlay grows the prompt, so the box has to give back the same rows.
     (focus === 'ip-input' ? 3 + pickerRows : 0) +
-    (focus === 'confirm' ? 3 : 0) +
+    (focus === 'confirm' && confirm ? confirmRows(confirm, reportW - 4) : 0) +
     (focus === 'asn-input' ? 1 : 0) +
     (focus === 'range-input' ? 1 : 0) +
     // header + one row per preset + the custom row + the hint

@@ -65,12 +65,51 @@ describe('WatchStatus', () => {
   });
 
   // Named, or "1 profiled" sends the operator digging through the log.
-  test('it names every identity the last tick profiled', async () => {
-    const frame = await frameOf({
-      who: ['t13d1516h2… · 900 req · ban', 't13d1517h2… · 400 req · watch'],
+  describe('the identities a tick profiled', () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        digest: `t13d1516h2_8daaf6152771_${String(i).padStart(12, 'a')}`,
+        total: 900 - i * 100,
+        verdict: i === 0 ? 'ban' : 'watch',
+        why: 'rendering, spread',
+      }));
+
+    test('each one is named, with its verdict and volume', async () => {
+      const frame = await frameOf({ who: many(2) });
+      expect(frame).toContain('ban');
+      expect(frame).toContain('watch');
+      expect(frame).toContain('900 req');
+      expect(frame).toContain('800 req');
     });
-    expect(frame).toContain('900 req');
-    expect(frame).toContain('400 req');
+
+    // The row is ~38 columns and a digest alone is 37, so ordering decides what survives
+    // truncation. Verdict-last meant the verdict never appeared at all.
+    test('the verdict survives at the real panel width', async () => {
+      const h = renderInk(<WatchStatus watch={{ ...ARMED, who: many(1) }} />, {
+        columns: 44,
+      });
+      await h.settle();
+      expect(h.frame()).toContain('ban');
+      h.unmount();
+    });
+
+    // These digests share a profile prefix, so a head-only truncation renders identical rows.
+    test('two digests off one TLS build are still told apart', async () => {
+      const frame = await frameOf({ who: many(2) });
+      expect(frame).toContain('aaaaaaa0');
+      expect(frame).toContain('aaaaaaa1');
+    });
+
+    // A busy tick would otherwise grow the panel until it pushes the rule list off screen.
+    test('a long list is capped, and says how many it withheld', async () => {
+      const frame = await frameOf({ who: many(9) });
+      expect(frame).toContain('… 3 more');
+      expect(frame).toContain('watch list');
+    });
+
+    test('a list at the cap says nothing about withholding', async () => {
+      expect(await frameOf({ who: many(6) })).not.toContain('more · t');
+    });
   });
 
   test('an invocation stays on screen once it has happened', async () => {

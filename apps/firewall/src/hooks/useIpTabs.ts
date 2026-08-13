@@ -21,7 +21,6 @@ export type IpTabs = {
   tabs: IpTab[];
   index: number;
   active: IpTab | undefined;
-  /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
   /** Focus `subject`, fetching only if new — or always when `force`, which a window change needs. */
   open: (subject: Subject, window: Window, force?: boolean) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. Pass a window to re-scope it too — live mode advances every tick, and the tab's stored window would otherwise pin it to the period it was opened in. */
@@ -233,11 +232,18 @@ export function useIpTabs(creds: Creds): IpTabs {
   );
 
   const close = useCallback(() => {
+    // Forget the closed tab's request state, or reopening it is dropped as a duplicate of a
+    // fetch nothing is waiting for any more.
+    const going = tabs[index];
+    if (going) {
+      inFlight.current.delete(subjectKey(going.subject));
+      queued.current.delete(subjectKey(going.subject));
+    }
     // Both computed from `tabs`, not from inside the updater: React may invoke an updater twice,
     // and a state setter called from within one is a side effect it is not allowed to have.
     setIndex(indexAfterClose(index, Math.max(0, tabs.length - 1)));
     setTabs((prev) => prev.filter((_, i) => i !== index));
-  }, [index, tabs.length]);
+  }, [index, tabs]);
 
   return {
     tabs,

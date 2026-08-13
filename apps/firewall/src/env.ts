@@ -15,7 +15,7 @@
 // Semantic accessors do NOT belong here. `tuning.ts` stays the only reader of the calibration
 // thresholds, deliberately, so the numbers have exactly one home.
 
-/** Trimmed value of `name`, or undefined when unset or blank. The primitive every other reader is built on. */
+/** Trimmed value of `name`, or undefined when unset or blank. */
 export function envText(name: string): string | undefined {
   const v = process.env[name]?.trim();
   return v ? v : undefined;

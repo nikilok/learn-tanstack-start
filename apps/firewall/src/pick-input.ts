@@ -30,6 +30,7 @@ function isIpv4(v: string): boolean {
 function isIpv6(v: string): boolean {
   if (!v.includes(':')) return false;
   if (v === '::') return true; // all-zeros: legal, and it has no groups to check
+  if (v.includes(':::')) return false; // three colons is not an elision, and filtering empties hid it
   const elisions = v.split('::').length - 1;
   if (elisions > 1) return false; // only one elision is legal
   // A lone leading or trailing colon is not an elision, and `1:2:3` is not an address either —

@@ -34,6 +34,14 @@ export function enforcing(it: Item | undefined): boolean {
   return Boolean(it?.active && it.action === 'deny');
 }
 
+/** Whether a rule is doing the thing its identity says it does — deny for a deny rule, challenge for the recoverable tier. */
+function isEnforcingAs(it: Item | undefined): boolean {
+  if (!it) return false;
+  return it.rule.name === CHALLENGE_SCRAPER_JA4
+    ? Boolean(it.active && it.action === 'challenge')
+    : enforcing(it);
+}
+
 export type LiveDenies = {
   ja4: string[];
   asn: string[];
@@ -57,11 +65,14 @@ export function liveDenies(items: Item[]): LiveDenies {
     [
       [ja4Item, JA4_DENY],
       [asnItem, ASN_DENY],
+      // The challenge tier too: holding digests while deactivated or cycled off `challenge` is
+      // protection that is not there, and it reads as protection that is.
+      [challengeItem, JA4_DENY],
     ] as const
   )
     .filter(
       ([it, spec]) =>
-        it && !enforcing(it) && valuesOf(it.rule, spec).length > 0,
+        it && !isEnforcingAs(it) && valuesOf(it.rule, spec).length > 0,
     )
     .map(([it]) => ({
       rule: it!.rule.name,
@@ -116,11 +127,22 @@ export function stage(
   items: Item[],
   kind: DenyKind,
   value: string,
-): { items: Item[]; error?: string } {
+): { items: Item[]; error?: string; promoted?: string } {
   const { rule: ruleName, spec } = targetOf(kind);
   if (!spec.valid(spec.normalize(value.trim())))
     return { items, error: `refused — not ${spec.example}` };
+  // Reported, because it cannot be recovered afterwards: once the value is off the challenge
+  // rule, nothing distinguishes "promoted off it" from "was never on it", and the rules list
+  // then shows the challenge row as inert while it carries an unapplied removal.
+  const challenge = items.find((it) => it.rule.name === CHALLENGE_SCRAPER_JA4);
+  const promoted =
+    kind === 'ja4' &&
+    challenge &&
+    promotes(valuesOf(challenge.rule, JA4_DENY), value)
+      ? normalizeStaged(value)
+      : undefined;
   return {
+    promoted,
     items: items.map((it) =>
       // Unconditional, not gated on the digest being on the list: withoutValue on an absent
       // value is a no-op, and a gate here would need the LIVE list, which is exactly the state
@@ -159,7 +181,7 @@ export function isStaged(staged: string[], value: string): boolean {
   return staged.includes(normalizeStaged(value));
 }
 
-/** The staged list after adding `value`, and the removed list it must leave. */
+/** The staged list after adding `value`, and the removed list it must leave. Each output depends only on the input list of the same name, so a caller may apply them as two independent state updates. */
 export function afterStage(
   staged: string[],
   removed: string[],
@@ -175,7 +197,7 @@ export function afterStage(
 // Only a value that actually reached the WAF can be unbanned. Undoing a staged addition is just
 // dropping the stage; recording it as a removal invents an unban of something that was never
 // denied, and pendingEdits then counts it against the rule.
-/** The staged and removed lists after lifting `entry`. */
+/** The staged and removed lists after lifting `entry`. Each output depends only on the input list of the same name, so a caller may apply them as two independent state updates. */
 export function afterUnstage(
   staged: string[],
   removed: string[],
@@ -240,8 +262,13 @@ export function pendingByRule(
   items: Item[],
   staged: string[],
   removed: string[],
+  /** Digests taken off the challenge tier by a promotion this session. */
+  promoted: string[] = [],
 ): Map<string, string> {
   const out = new Map<string, string>();
+  // Not derivable from staged/removed: a promotion removes the digest from the challenge rule
+  // without ever appearing in `removed`, so pendingEdits sees nothing on either side.
+  if (promoted.length) out.set(CHALLENGE_SCRAPER_JA4, `−${promoted.length}`);
   for (const [ruleName, spec] of [
     [JA4_RULE, JA4_DENY],
     [ASN_RULE, ASN_DENY],

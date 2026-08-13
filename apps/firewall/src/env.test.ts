@@ -79,10 +79,10 @@ describe('isDryRun', () => {
 describe('useColour', () => {
   // isTTY is false under the test runner, so without forcing it this asserts nothing: the
   // function would return false even if NO_COLOR were ignored entirely.
-  const withTty = (fn: () => void) => {
+  const withTty = (fn: () => void, isTTY = true) => {
     const real = process.stdout.isTTY;
     Object.defineProperty(process.stdout, 'isTTY', {
-      value: true,
+      value: isTTY,
       configurable: true,
     });
     try {
@@ -110,7 +110,10 @@ describe('useColour', () => {
   });
 
   test('a pipe gets no colour whatever NO_COLOR says', () => {
-    delete process.env.NO_COLOR;
-    expect(useColour()).toBe(false);
+    // Forced rather than relying on the runner's ambient isTTY, or this asserts nothing.
+    withTty(() => {
+      delete process.env.NO_COLOR;
+      expect(useColour()).toBe(false);
+    }, false);
   });
 });

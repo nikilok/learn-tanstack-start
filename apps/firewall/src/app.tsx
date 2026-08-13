@@ -140,7 +140,7 @@ export function App() {
   } | null>(null);
   const report = usePane<ReportData>();
   const sitemap = usePane<SitemapReport>();
-  const ipTabs = useIpTabs({ projectId, teamId, token });
+  const ipTabs = useIpTabs(creds);
   // Bound the report pane to the terminal height so the rendered frame never exceeds the viewport —
   // otherwise a tall report makes the terminal itself scroll and the editor cursor disappears above it.
   const reportH = Math.max(8, (process.stdout.rows ?? 24) - 1);
@@ -1375,6 +1375,7 @@ export function App() {
                 sitemap={sitemap}
                 advice={ipAdvice}
                 sitemapCursor={sitemapCursor}
+                allowlistError={allowlist.error}
                 denylist={denylist}
                 lists={lists}
               />

@@ -131,6 +131,12 @@ describe('resolveSubject', () => {
       refused('2a02:c7f:1234');
     });
 
+    test('three colons is not an elision either', () => {
+      refused('1:::2');
+      refused(':::1');
+      refused('1:::');
+    });
+
     test('a lone leading or trailing colon is not an elision', () => {
       refused(':1:2:3:4:5:6:7');
       refused('1:2:3:4:5:6:7:');

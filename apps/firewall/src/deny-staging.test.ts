@@ -136,6 +136,29 @@ describe('liveDenies', () => {
     expect(live.challengeValues).toEqual([DIGEST_B]);
   });
 
+  // A challenge tier holding digests while switched off is protection that is not there.
+  test('a deactivated challenge tier holding digests is reported as not enforcing', () => {
+    const live = liveDenies([
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_B], { active: false }),
+    ]);
+    expect(live.notEnforcing).toEqual([
+      { rule: CHALLENGE_SCRAPER_JA4, why: 'the rule is DEACTIVATED' },
+    ]);
+  });
+
+  test('a challenge tier cycled to log says which action is serving the traffic', () => {
+    const live = liveDenies([
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_B], { action: 'log' }),
+    ]);
+    expect(live.notEnforcing[0].why).toContain('its action is log');
+  });
+
+  test('a live challenge tier is NOT reported as not enforcing', () => {
+    expect(
+      liveDenies([item(CHALLENGE_SCRAPER_JA4, [DIGEST_B])]).notEnforcing,
+    ).toEqual([]);
+  });
+
   test('a config with none of the rules yields empty lists, not a throw', () => {
     expect(liveDenies([])).toEqual({
       ja4: [],
@@ -474,6 +497,31 @@ describe('pendingByRule', () => {
     const pending = pendingByRule(items, [], [AS_NUM]);
     expect(pending.has(JA4_RULE)).toBe(false);
     expect(pending.get(ASN_RULE)).toBe('−1');
+  });
+
+  // A promotion takes the digest off the challenge rule without it ever reaching `removed`, so
+  // pendingEdits sees nothing on either side and the row looked inert while carrying an edit.
+  test('a promotion marks the challenge rule, which nothing else can see', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_A])];
+    const out = stage(items, 'ja4', DIGEST_A);
+    expect(out.promoted).toBe(DIGEST_A);
+    const pending = pendingByRule(out.items, [DIGEST_A], [], [DIGEST_A]);
+    expect(pending.get(CHALLENGE_SCRAPER_JA4)).toBe('−1');
+    expect(pending.get(JA4_RULE)).toBe('+1');
+  });
+
+  test('staging a digest that was NOT challenged promotes nothing', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_B])];
+    const out = stage(items, 'ja4', DIGEST_A);
+    expect(out.promoted).toBeUndefined();
+    expect(
+      pendingByRule(out.items, [DIGEST_A], [], []).has(CHALLENGE_SCRAPER_JA4),
+    ).toBe(false);
+  });
+
+  test('an ASN stage never promotes', () => {
+    const items = [item(ASN_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_A])];
+    expect(stage(items, 'asn', AS_NUM).promoted).toBeUndefined();
   });
 
   test('an addition and a removal on one rule are shown together', () => {

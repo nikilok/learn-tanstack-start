@@ -16,7 +16,6 @@ import type { PaneKind } from '../pane-keys';
 import type { ReportData } from '../report-data';
 import type { SitemapReport } from '../sitemap-readers';
 import { sitemapLines } from '../sitemap-view';
-import { allowedBotsOrUnknown } from '../tuning';
 import { ignoreListLines, watchlistLines } from '../watchlist-view';
 import { Lines } from './lines';
 import { ReportView } from './report-view';
@@ -28,8 +27,10 @@ import { ReportView } from './report-view';
  * crawler, which is a large silent change in what this pane recommends — inferring it from
  * "everything is suddenly legitimate" is not something an operator should have to do.
  */
-function withAllowlistError(p: IpProfile): IpProfile {
-  const { error } = allowedBotsOrUnknown();
+function withAllowlistError(
+  p: IpProfile,
+  error: string | undefined,
+): IpProfile {
   return error
     ? { ...p, errors: [...p.errors, `FW_ALLOWED_BOTS: ${error}`] }
     : p;
@@ -44,6 +45,7 @@ export function PaneBody({
   sitemap,
   advice,
   sitemapCursor,
+  allowlistError,
   denylist,
   lists,
 }: {
@@ -54,6 +56,8 @@ export function PaneBody({
   sitemap: Pane<SitemapReport>;
   advice: Advice | undefined;
   sitemapCursor: number;
+  /** The allowlist read the advice was computed from, so the pane's note cannot describe a different one. */
+  allowlistError?: string;
   denylist: Denylist;
   lists: IdentityLists;
 }) {
@@ -126,7 +130,10 @@ export function PaneBody({
         lines={
           kind === 'ip'
             ? profileLines(
-                withAllowlistError((ipTab as IpTab).data as IpProfile),
+                withAllowlistError(
+                  (ipTab as IpTab).data as IpProfile,
+                  allowlistError,
+                ),
                 width,
                 advice,
               )

@@ -39,6 +39,14 @@ describe('fetchDenyActivity', () => {
     expect(activity.size).toBe(1);
   });
 
+  test('surrounding whitespace resolves to the same entry too', async () => {
+    const { activity } = await withSummary([
+      { clientJa4Digest: `  ${DIGEST} `, wafAction: 'deny', count: 7 },
+    ]);
+    expect(activity.get(DIGEST)).toEqual({ requests: 7, denied: 7 });
+    expect(activity.size).toBe(1);
+  });
+
   test('a digest the query covered but never saw is a real zero', async () => {
     const { activity } = await withSummary([]);
     expect(activity.get(DIGEST)).toEqual({ requests: 0, denied: 0 });

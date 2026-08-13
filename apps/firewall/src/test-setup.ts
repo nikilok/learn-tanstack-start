@@ -22,11 +22,11 @@ process.env.FW_CHALLENGE_JA4 = '';
 process.env.FW_BLOCKED_ASN = '';
 // Never used to reach Vercel — every test stubs the client — but resolveVercelCredentials throws
 // without them, and it runs at import time too.
-// ||=, not ??=: an exported but EMPTY credential is as unusable as an absent one, and
-// resolveVercelCredentials throws on both.
-process.env.VERCEL_TOKEN ||= 'test-token';
-process.env.VERCEL_PROJECT_ID ||= 'prj_test';
-process.env.VERCEL_TEAM_ID ||= 'team_test';
+// Assigned outright, like the FW_* values above. Every test stubs the client, so a real
+// credential is never needed — and inheriting one is how a suite reaches production by accident.
+process.env.VERCEL_TOKEN = 'test-token';
+process.env.VERCEL_PROJECT_ID = 'prj_test';
+process.env.VERCEL_TEAM_ID = 'team_test';
 
 // Registered from the preload so it covers EVERY test file: renderInk patches process.stdout, and
 // a test that fails before reaching unmount would otherwise leave the next one measuring its width.

@@ -78,6 +78,8 @@ export function useDenylist(opts: {
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removed, setRemoved] = useState<string[]>([]);
+  // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
+  const [promoted, setPromoted] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
   const [activityNote, setActivityNote] = useState('');
   const activity = usePane<Map<string, Activity>>();
@@ -90,7 +92,7 @@ export function useDenylist(opts: {
     removed,
     activity: activity.data,
   });
-  const pending = pendingByRule(items, staged, removed);
+  const pending = pendingByRule(items, staged, removed, promoted);
 
   const stageDeny = (kind: DenyKind, value: string): string | undefined => {
     const next = stage(items, kind, value);
@@ -98,6 +100,8 @@ export function useDenylist(opts: {
     setItems(next.items);
     setStaged((s) => afterStage(s, removed, value).staged);
     setRemoved((r) => afterStage(staged, r, value).removed);
+    if (next.promoted)
+      setPromoted((p) => [...new Set([...p, next.promoted as string])]);
     onEdit();
     return undefined;
   };
@@ -135,13 +139,14 @@ export function useDenylist(opts: {
     const out = persistDenies({
       snapshot,
       outcome,
-      pending: Boolean(staged.length || removed.length),
+      pending: Boolean(staged.length || removed.length || promoted.length),
       dryRun,
       write: (envKey, value) => persistEnvVar(ENV_PATH, envKey, value),
     });
     if (out.clearStaged) {
       setStaged([]);
       setRemoved([]);
+      setPromoted([]);
     }
     return { ok: out.ok, summary: out.summary };
   };

@@ -11,9 +11,11 @@ import {
   adviseBan,
   type AdviceInput,
   type Reach,
+  recommendsAction,
   volumeFloor,
   welcomeBots,
   welcomeNames,
+  worthInvestigating,
 } from './ban-advice';
 import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
 import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
@@ -68,6 +70,7 @@ function scraper(over: Partial<AdviceInput> = {}): AdviceInput {
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
+    challengedJa4: false,
     stagedJa4: false,
     alreadyDeniedAsn: false,
     windowMinutes: 1440,
@@ -105,6 +108,7 @@ function human(over: Partial<AdviceInput> = {}): AdviceInput {
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
+    challengedJa4: false,
     stagedJa4: false,
     alreadyDeniedAsn: false,
     windowMinutes: 1440,
@@ -298,6 +302,7 @@ describe('adviseBan — first-party callers', () => {
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
+    challengedJa4: false,
     stagedJa4: false,
     alreadyDeniedAsn: false,
     windowMinutes: 1440,
@@ -376,6 +381,7 @@ describe('adviseBan — the ASN lever', () => {
       verifiedNames: [],
     },
     alreadyDeniedJa4: false,
+    challengedJa4: false,
     stagedJa4: false,
     alreadyDeniedAsn: false,
     windowMinutes: 1440,
@@ -421,8 +427,11 @@ describe('adviseBan — the ASN lever', () => {
         },
       }),
     );
-    expect(a.verdict).toBe('watch');
-    expect(a.lever).toBeUndefined();
+    // Neither DENY lever survives, which is what this test is for. It now falls through to the
+    // recoverable tier instead of to nothing: velia's window renders zero while its fingerprint's
+    // own reach renders 1,200, which is the shared-digest shape exactly.
+    expect(a.verdict).toBe('challenge');
+    expect(a.lever?.tier).toBe('challenge');
     expect(a.leverNotes.join(' ')).toContain('would hit users');
   });
 
@@ -443,13 +452,17 @@ describe('adviseBan — the ASN lever', () => {
         },
       }),
     );
-    expect(a.verdict).toBe('watch');
-    expect(a.lever).toBeUndefined();
+    // Googlebot rides this NETWORK, not this fingerprint, so the ASN deny is refused while the
+    // fingerprint challenge is still available — challenging the digest cannot touch Googlebot.
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
+    expect(a.leverNotes.join(' ')).toContain('shared, not one actor');
   });
 
   test('an unknown network reach is never cleared by default', () => {
     const a = adviseBan(velia({ asnReach: undefined }));
-    expect(a.verdict).toBe('watch');
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
     expect(a.leverNotes.join(' ')).toContain('reach unknown');
   });
 
@@ -645,6 +658,7 @@ describe('adviseBan — is acting worth it', () => {
       verifiedNames: ['bingbot', 'gptbot'],
     },
     alreadyDeniedJa4: false,
+    challengedJa4: false,
     stagedJa4: false,
     alreadyDeniedAsn: false,
     windowMinutes: 1440,
@@ -714,14 +728,17 @@ describe('adviseBan — review regressions', () => {
   test('map tiles alone prove a browser rendered, even with assets and beacons at zero', () => {
     // Hashed bundles cache for a year and beacons are ad-blocked; tiles and RPCs are not.
     const a = adviseBan(scraper({ digestReach: reach({ tiles: 340 }) }));
-    expect(a.lever).toBeUndefined();
+    // The DENY is what a single tile has to stop. A challenge may still be offered — it is the
+    // action whose whole premise is that a rendering client survives it.
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
     expect(a.leverNotes.join(' ')).toContain('would hit users');
   });
 
   test('server-fn RPCs alone do the same', () => {
-    expect(
-      adviseBan(scraper({ digestReach: reach({ rpcs: 900 }) })).lever,
-    ).toBeUndefined();
+    const a = adviseBan(scraper({ digestReach: reach({ rpcs: 900 }) }));
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
   });
 
   test('two tells on the same axis are one tell', () => {
@@ -1093,5 +1110,397 @@ describe('adviseBan — a non-allowlisted verified crawler is not blocked', () =
       }),
     );
     expect(a.blockers.join(' ')).toContain('verified bot');
+  });
+});
+
+// The fourth real client, measured 2026-08-12: t13d1516h2_cccccccccccc_111111111111, a stock
+// Chrome-family digest carrying real browser sessions over six days AND a distributed
+// enumeration in the current window. Deny is unsafe at any evidence level; challenge is the
+// lever that separates them. This is the case the advisory previously had no answer for.
+describe('the shared fingerprint — challenge, never deny', () => {
+  const DIGEST = 't13dsharh2_cccccccccccc_111111111111';
+  function sharedFingerprint(over: Partial<AdviceInput> = {}): AdviceInput {
+    return {
+      total: 417,
+      // 416 IPs, one page each, ZERO sub-resources: nothing here renders.
+      mix: mixOf([
+        ['/company/a', 217],
+        ['/company/b', 196],
+        ['/sitemap.xml', 4],
+      ]),
+      shape: shapeOf(series(Array(144).fill(3), 0, 144), 10),
+      ja4: [[DIGEST, 417]],
+      asns: [['Saudi Telecom Company JSC', 417]],
+      botVerified: [],
+      wafActions: [
+        ['allow', 217],
+        ['challenge', 200],
+      ],
+      wafRules: [],
+      statuses: [['200', 107]],
+      // The >= 6 day reach DOES render — that is the whole point. Real browsers live here.
+      digestReach: {
+        label: DIGEST,
+        ips: 489,
+        countries: 80,
+        total: 650,
+        subResources: 118,
+        beacons: 16,
+        tiles: 18,
+        rpcs: 6,
+        complete: true,
+        verifiedNames: [],
+      },
+      asnReach: {
+        label: 'Saudi Telecom Company JSC',
+        ips: 400,
+        countries: 1,
+        total: 5000,
+        subResources: 900,
+        beacons: 400,
+        tiles: 40,
+        rpcs: 100,
+        complete: true,
+        verifiedNames: [],
+      },
+      alreadyDeniedJa4: false,
+      challengedJa4: false,
+      stagedJa4: false,
+      alreadyDeniedAsn: false,
+      windowMinutes: 1440,
+      ...over,
+    };
+  }
+
+  test('recommends the recoverable tier, targeting FW_CHALLENGE_JA4', () => {
+    const a = adviseBan(sharedFingerprint());
+    expect(a.verdict).toBe('challenge');
+    expect(a.lever).toEqual({
+      kind: 'ja4',
+      value: DIGEST,
+      why: expect.stringContaining('SHARED'),
+      tier: 'challenge',
+    });
+  });
+
+  test('never recommends a deny for it, at any point', () => {
+    const a = adviseBan(sharedFingerprint());
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
+    // And it says why the deny was refused, which is the half an operator acts on.
+    expect(a.leverNotes.join(' ')).toContain('a blanket deny would hit users');
+  });
+
+  test('rendering in the CURRENT window drops it back to watch', () => {
+    // A challenge only stops a client that cannot run JavaScript. One that renders might solve
+    // it, and then the interstitial is a tax on real users for nothing.
+    const a = adviseBan(
+      sharedFingerprint({
+        mix: mixOf([
+          ['/company/a', 217],
+          ['/company/b', 196],
+          ['/api/tiles/x', 30],
+        ]),
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain(
+      'tax real users and catch nothing',
+    );
+  });
+
+  test('an incompletely measured reach is not softened into a challenge', () => {
+    const a = adviseBan(
+      sharedFingerprint({
+        digestReach: {
+          ...sharedFingerprint().digestReach!,
+          complete: false,
+        },
+      }),
+    );
+    expect(a.verdict).toBe('watch');
+    expect(a.leverNotes.join(' ')).toContain('unknown escalates to a human');
+  });
+
+  test('a verified crawler we want blocks it exactly as hard as a deny', () => {
+    // Googlebot cannot answer a challenge either, so "recoverable" must not soften this.
+    const a = adviseBan(
+      sharedFingerprint({
+        digestReach: {
+          ...sharedFingerprint().digestReach!,
+          verifiedNames: ['googlebot'],
+        },
+        allowedBots: ['googlebot'],
+      }),
+    );
+    expect(a.verdict).toBe('leave');
+    expect(a.lever).toBeUndefined();
+  });
+
+  test('too little traffic to judge still outranks it', () => {
+    const a = adviseBan(sharedFingerprint({ total: 10 }));
+    expect(a.verdict).toBe('watch');
+  });
+
+  test('the deniable scraper is untouched — the new branch does not steal it', () => {
+    const a = adviseBan(scraper());
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.tier).toBe('deny');
+  });
+});
+
+describe('recommendsAction', () => {
+  test('covers both tiers that name a lever', () => {
+    expect(recommendsAction('ban')).toBe(true);
+    expect(recommendsAction('challenge')).toBe(true);
+  });
+
+  test('and nothing else', () => {
+    for (const v of ['watch', 'staged', 'already', 'leave', ''])
+      expect(recommendsAction(v)).toBe(false);
+  });
+});
+
+// Found by an adversarial review of the challenge tier shipped 2026-08-12, not by these tests.
+//
+// The loop: a browser that meets our interstitial and does not solve it never fetches a single
+// sub-resource, so it contributes zero rendering requests. Over a >= 6 day reach the pre-challenge
+// evidence ages out, the reach reads a clean zero, and the deny clears — on an absence this tool
+// manufactured. Worse, that zero only appears when the challenge is FAILING for real browsers, so
+// the advisory would recommend the harsher control in exactly the case where the softer one is
+// already hurting people.
+describe('a challenged fingerprint cannot clear its own deny', () => {
+  // The reach a challenge produces after the browsers have been silenced: spotless.
+  const censored = (over = {}) => ({
+    label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
+    ips: 413,
+    countries: 205,
+    total: 171751,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+    ...over,
+  });
+
+  test('the same evidence bans when NOT challenged', () => {
+    // The control. Without this the test below could pass for the wrong reason.
+    const a = adviseBan(scraper({ digestReach: censored() }));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.tier).toBe('deny');
+  });
+
+  test('and does NOT ban once we are challenging it', () => {
+    const a = adviseBan(
+      scraper({ digestReach: censored(), challengedJa4: true }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
+  });
+
+  test('and says the zero is one we caused, not one we measured', () => {
+    const a = adviseBan(
+      scraper({ digestReach: censored(), challengedJa4: true }),
+    );
+    expect(a.leverNotes.join(' ')).toContain('FW_CHALLENGE_JA4');
+    expect(a.leverNotes.join(' ')).toContain('one this tool caused');
+    expect(a.leverNotes.join(' ')).toContain('Lift the challenge');
+  });
+
+  test('the ASN lever is still reachable — the taint is on the fingerprint only', () => {
+    // A challenge on the digest says nothing about a hosting network, and killing both levers
+    // would make challenging an identity a way to make it permanently unactionable.
+    const a = adviseBan(
+      scraper({
+        digestReach: censored(),
+        challengedJa4: true,
+        asnReach: censored({ label: 'velia.net Internetdienste GmbH', ips: 4 }),
+      }),
+    );
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.kind).toBe('asn');
+  });
+
+  test('a genuinely rendering reach is refused for its own reason, not this one', () => {
+    // The note must still name the browsers, or an operator reads "lift the challenge" and does.
+    const a = adviseBan(
+      scraper({
+        digestReach: censored({ tiles: 900 }),
+        challengedJa4: true,
+      }),
+    );
+    expect(a.leverNotes.join(' ')).toContain('real browsers render from it');
+    expect(a.leverNotes.join(' ')).not.toContain('Lift the challenge');
+  });
+});
+
+// Found live 2026-08-13: the TUI offered an ASN lever for `Byteplus Pte. Ltd.` on TWO requests
+// site-wide over six days. It cleared because zero of two rendered — a check reporting agreement
+// having tested nothing, which is this codebase's second-most-common defect after error-path
+// aliasing. The subject's volume had been floored since the beginning; the reach never was.
+describe('a reach too small to judge does not clear a lever', () => {
+  const tiny = {
+    label: 'Byteplus Pte. Ltd.',
+    ips: 2,
+    countries: 1,
+    total: 2,
+    subResources: 0,
+    beacons: 0,
+    tiles: 0,
+    rpcs: 0,
+    complete: true,
+    verifiedNames: [],
+  };
+
+  test('a 2-request network is NOT offered as a DENY lever', () => {
+    const a = adviseBan(scraper({ digestReach: tiny, asnReach: tiny }));
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.tier).not.toBe('deny');
+  });
+
+  test('it says the evidence is too thin, not that the network is clean', () => {
+    // The distinction an operator acts on: "not cleared" must not read as "condemned" either.
+    const notes = adviseBan(
+      scraper({ digestReach: tiny, asnReach: tiny }),
+    ).leverNotes.join(' ');
+    expect(notes).toContain('only 2 requests across the whole reach');
+    expect(notes).toContain('Not cleared, and not condemned either');
+  });
+
+  test('the same network WITH enough traffic and no rendering still clears', () => {
+    // The control. Without it this could pass because the fixture stopped qualifying at all.
+    const big = { ...tiny, total: 50000, ips: 4 };
+    const a = adviseBan(scraper({ digestReach: big, asnReach: big }));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.tier).toBe('deny');
+  });
+
+  test('the bar does not move with the window on screen', () => {
+    // Reach is >= 6 days whatever is displayed, so a 20-minute view must not buy a cheaper reach
+    // test than a six-day one. Same verdict at every window.
+    const thin = { ...tiny, total: 12, ips: 3 };
+    for (const windowMinutes of [20, 1440, 8640])
+      expect(
+        adviseBan(
+          scraper({
+            digestReach: thin,
+            asnReach: thin,
+            windowMinutes,
+            total: 9060,
+          }),
+        ).lever?.tier,
+      ).not.toBe('deny');
+  });
+
+  test('the bar is low enough to still act on a real low-volume scanner', () => {
+    // A 490-request backdoor scanner over 6 days is thin but judgeable — a browser renders many
+    // requests per page, so hundreds with zero sub-resources IS browser-free. An earlier version
+    // of this floor scaled to the reach span, landed far higher, and refused it.
+    const scanner = { ...tiny, total: 490, ips: 8 };
+    const a = adviseBan(scraper({ digestReach: scanner, asnReach: scanner }));
+    expect(a.verdict).toBe('ban');
+    expect(a.lever?.tier).toBe('deny');
+  });
+});
+
+// CodeRabbit, 2026-08-13: the challenge tier had no `already` state, so a digest whose challenge
+// was live still read as CHALLENGE RECOMMENDED — the deny tier's own reason for having one.
+describe('an already-challenged fingerprint reads as handled, not as a fresh recommendation', () => {
+  const shared = (over: Partial<AdviceInput> = {}) =>
+    scraper({
+      mix: mixOf([
+        ['/company/a', 9000],
+        ['/sitemap-1.xml', 60],
+      ]),
+      digestReach: {
+        label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
+        ips: 413,
+        countries: 205,
+        total: 171751,
+        subResources: 900,
+        beacons: 40,
+        tiles: 10,
+        rpcs: 5,
+        complete: true,
+        verifiedNames: [],
+      },
+      ...over,
+    });
+
+  test('unchallenged, it recommends the challenge', () => {
+    // The control: without it the assertion below could pass for the wrong reason.
+    expect(adviseBan(shared()).verdict).toBe('challenge');
+  });
+
+  test('challenged, it reports handled instead', () => {
+    const a = adviseBan(shared({ challengedJa4: true }));
+    expect(a.verdict).toBe('already');
+    expect(a.blockers.join(' ')).toContain('already in FW_CHALLENGE_JA4');
+  });
+
+  test('and carries the tier, so the view cannot claim it is DENIED', () => {
+    // 'ALREADY DENIED' on something only being interstitialed reads as handled while the traffic
+    // is still served — the more costly way to be wrong.
+    expect(adviseBan(shared({ challengedJa4: true })).lever?.tier).toBe(
+      'challenge',
+    );
+  });
+});
+
+// The gate that decides whether an unattended run pays for an agent. Changed 2026-08-13 from
+// `verdict === 'ban'` to two independent axes, so the case that took a human most of a night —
+// scraper-shaped, every lever shared — is adjudicated automatically instead of sitting in `watch`.
+describe('worthInvestigating', () => {
+  test('the deniable scraper qualifies', () => {
+    expect(worthInvestigating(adviseBan(scraper()))).toBe(true);
+  });
+
+  test('and so does the SHARED fingerprint, which never reached an agent before', () => {
+    const a = adviseBan(
+      scraper({
+        mix: mixOf([
+          ['/company/a', 9000],
+          ['/sitemap-1.xml', 60],
+        ]),
+        digestReach: {
+          label: 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb',
+          ips: 413,
+          countries: 205,
+          total: 171751,
+          subResources: 900,
+          beacons: 40,
+          tiles: 10,
+          rpcs: 5,
+          complete: true,
+          verifiedNames: [],
+        },
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(worthInvestigating(a)).toBe(true);
+  });
+
+  test('a real user does not', () => {
+    expect(worthInvestigating(adviseBan(human()))).toBe(false);
+  });
+
+  test('a low-volume identity still scores axes — the volume gate is upstream, not here', () => {
+    // Worth pinning because it corrects the obvious assumption. The axes fire regardless of
+    // volume; `unjudgeableFor` is what downgrades the verdict. In the watch loop this case cannot
+    // reach the gate at all — `worthProfiling` applies `screenFloor`, which is never below the
+    // advisory's own floor, so nothing this thin ever becomes a finding. And where the evidence is
+    // unmeasurable rather than thin (a failed query, a truncated sample), an agent is exactly the
+    // right spend: it re-queries live and can get the answer the screen could not.
+    const a = adviseBan(scraper({ total: 40 }));
+    expect(a.verdict).toBe('watch');
+    expect(a.axes.length).toBeGreaterThanOrEqual(2);
+    expect(worthInvestigating(a)).toBe(true);
+  });
+
+  test('one axis is never enough, however loud', () => {
+    expect(worthInvestigating({ axes: ['rendering'] })).toBe(false);
+    expect(worthInvestigating({ axes: [] })).toBe(false);
   });
 });

@@ -6,6 +6,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 
+import { recommendsAction } from './ban-advice';
 import { errMsg } from './util';
 import type { WatchReport } from './watch';
 
@@ -27,8 +28,10 @@ export const NOTIFY_STATE = '.firewall-watch-state';
 export function actionableKey(r: WatchReport): string {
   return [
     ...r.findings
-      .filter((f) => f.advice.verdict === 'ban')
-      .map((f) => `ban:${f.digest.toLowerCase()}`)
+      .filter((f) => recommendsAction(f.advice.verdict))
+      // Keyed by VERDICT as well as digest, so an identity that hardens from challenge to deny is
+      // news rather than the same news. Hard-coding `ban:` here would have silenced exactly that.
+      .map((f) => `${f.advice.verdict}:${f.digest.toLowerCase()}`)
       .sort(),
     ...r.enforcement.map((e) => `enforce:${e}`).sort(),
     ...r.reachability.map((e) => `reach:${e}`).sort(),
@@ -78,9 +81,13 @@ export function concludedText(concluded: readonly string[]): string {
       .filter((c) => c.startsWith(prefix))
       .map((c) => shortDigest(c.slice(prefix.length)));
   const bans = named('ban:');
+  const challenges = named('challenge:');
   const unclear = named('unclear:');
   const parts: string[] = [];
   if (bans.length) parts.push(`DENY ${bans.join(', ')}`);
+  // Named distinctly from a deny: they go on different lists and cost different things to be
+  // wrong about, and a phone message that blurs them invites the harsher one being applied.
+  if (challenges.length) parts.push(`CHALLENGE ${challenges.join(', ')}`);
   if (unclear.length) parts.push(`inconclusive ${unclear.join(', ')}`);
   if (!parts.length) return 'nothing conclusive';
   return `${parts.join(' · ')} — see firewall-watch.log`;
@@ -121,8 +128,12 @@ export function iMessageArgs(handle: string, body: string): string[] {
 /** One line a human reads on a lock screen — never a digest, which is unreadable there anyway. */
 export function notifyText(r: WatchReport): string {
   const bans = r.findings.filter((f) => f.advice.verdict === 'ban').length;
+  const challenges = r.findings.filter(
+    (f) => f.advice.verdict === 'challenge',
+  ).length;
   const parts: string[] = [];
   if (bans) parts.push(`${bans} fingerprint(s) worth denying`);
+  if (challenges) parts.push(`${challenges} worth challenging`);
   if (r.enforcement.length)
     parts.push(`${r.enforcement.length} rule(s) not enforcing`);
   if (r.errors.length) parts.push(`${r.errors.length} error(s)`);

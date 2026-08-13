@@ -6,7 +6,7 @@
 // false-positive rate is a number nobody has. An ungated version would start an investigation per
 // tick the first time Vercel's classification shifts under us.
 
-import { type Advice } from './ban-advice';
+import { type Advice, worthInvestigating } from './ban-advice';
 
 /** Investigations per hour, whatever the screen says. Caps our spend, not our detection. */
 export const SPAWN_CEILING = 3;
@@ -43,8 +43,14 @@ export type Suspicious = {
 };
 
 /**
- * Whether a finding warrants starting an investigation. `ban` is the bar: anything softer is for a
- * human reading the screen, not for spending an agent on.
+ * Whether a finding warrants starting an investigation. TWO INDEPENDENT AXES is the bar — the same
+ * one a ban needs — not the verdict.
+ *
+ * It used to be `verdict === 'ban'`, which meant an identity was only investigated once a safe
+ * lever already existed. That excluded exactly the case worth automating: scraper-shaped on two
+ * axes with every handle SHARED returns `watch`, and on 2026-08-12 it cost a human most of a night
+ * to adjudicate by hand. The noisy half of `watch` — too little traffic, a failed query, evidence
+ * spread across fingerprints — scores under two axes and is still skipped.
  *
  * Two guards, and both exist because the loop repeats. A digest already investigated this session
  * is skipped whatever the verdict — the same scraper is still there on the next tick, and without
@@ -60,7 +66,12 @@ export function shouldInvestigate(
   ceiling = SPAWN_CEILING,
   windowMs = CEILING_WINDOW_MS,
 ): boolean {
-  if (f.advice.verdict !== 'ban') return false;
+  // Two independent axes, NOT `verdict === 'ban'`. The bar used to be the verdict, which meant an
+  // identity was only investigated once a safe lever already existed — so the shared-fingerprint
+  // case, where the evidence is strongest and the lever hardest, was the one thing never looked
+  // at. Cost is unchanged: the ceiling below and INVESTIGATIONS_PER_RUN bound spawns regardless of
+  // how many findings qualify.
+  if (!worthInvestigating(f.advice)) return false;
   if (seen.has(f.digest.toLowerCase())) return false;
   return spawnsAt.filter((t) => now - t < windowMs).length < ceiling;
 }
@@ -92,8 +103,18 @@ export function investigationPrompt(f: Suspicious, hours: number): string {
     `The firewall watch flagged JA4 ${digest} over the last ${hours}h.`,
     `Vercel classified it browser_impersonation and allowed it: ${f.allowed} of ${f.total} requests.`,
     '',
-    'The local advisory returned "ban" on this evidence:',
+    // The real verdict, not a hardcoded "ban". Telling the agent the advisory said ban when it
+    // said watch is a false premise it will then try to justify — and the shared-fingerprint case
+    // is exactly where the advisory's own answer is the most informative part of the brief.
+    `The local advisory returned "${f.advice.verdict}" on this evidence (${f.advice.axes.length} independent axes):`,
     reasons || '- (none recorded)',
+    ...(f.advice.leverNotes.length
+      ? [
+          '',
+          'Why it could not name a safe lever:',
+          f.advice.leverNotes.map((n) => `- ${n}`).join('\n'),
+        ]
+      : []),
     '',
     'Load the firewall-operator skill and work its investigation protocol against live data.',
     '',
@@ -102,11 +123,18 @@ export function investigationPrompt(f: Suspicious, hours: number): string {
     // a refusal, an error, a restatement — parsed as the first one, `ban`. The reader tolerates
     // a preamble by design, which is what made an echoed menu indistinguishable from an answer.
     'Begin your reply with one line: the word VERDICT, a colon, then exactly one of',
-    'ban / leave / unclear. Nothing before that line, and do not restate these options.',
+    'ban / challenge / leave / unclear. Nothing before that line, and do not restate these',
+    'options.',
     '',
-    'Then the evidence behind it, and — if it is a ban — the exact staging command and how to',
-    'roll it back. Answer "unclear" rather than guessing: it reaches a human either way, and a',
-    'confident wrong answer is the one thing this cannot recover from.',
+    'Choose challenge over ban when the identity is automated but its fingerprint is SHARED —',
+    'real browsers render from it in the >= 6 day reach — AND its traffic in this window renders',
+    'nothing. That client cannot answer an interstitial while a browser can, so a challenge is',
+    'terminal for it at near-zero cost to the people sharing the TLS build. It targets',
+    'FW_CHALLENGE_JA4 rather than FW_BLOCKED_JA4.',
+    '',
+    'Then the evidence behind it, and — if it is a ban or a challenge — the exact staging command',
+    'and how to roll it back. Answer "unclear" rather than guessing: it reaches a human either',
+    'way, and a confident wrong answer is the one thing this cannot recover from.',
     '',
     'Do not apply anything. Do not run firewall:setup, do not write .env.local, and do not',
     'change the WAF. A human runs the command.',
@@ -154,7 +182,7 @@ export function investigationArgs(f: Suspicious, hours: number): string[] {
 }
 
 /** What the investigation concluded, read from its own structured first line. */
-export type Verdict = 'ban' | 'leave' | 'unclear';
+export type Verdict = 'ban' | 'challenge' | 'leave' | 'unclear';
 
 /**
  * The verdict line, or `unclear` when there is not one.
@@ -171,7 +199,12 @@ export function verdictFrom(text: string): Verdict {
     ?.replace(/^VERDICT:\s*/i, '')
     .toLowerCase()
     .trim();
-  return word === 'ban' || word === 'leave' ? word : 'unclear';
+  // `challenge` is a real conclusion, not a hedge: a shared fingerprint carrying a non-JS client
+  // is the common case, and forcing that answer into `unclear` loses the one recommendation that
+  // is both safe and actionable. Anything unrecognised is still `unclear`.
+  return word === 'ban' || word === 'challenge' || word === 'leave'
+    ? word
+    : 'unclear';
 }
 
 export type Investigation =
@@ -293,7 +326,7 @@ export const INVESTIGATIONS_PER_RUN = 2;
  * conflate a week of past runs with what this one has started.
  */
 export function investigable<
-  T extends { digest: string; advice: { verdict: string } },
+  T extends { digest: string; advice: Pick<Advice, 'axes'> },
 >(
   findings: readonly T[],
   seen: ReadonlyMap<string, number>,
@@ -301,7 +334,7 @@ export function investigable<
 ): T[] {
   return findings
     .filter(
-      (f) => f.advice.verdict === 'ban' && !seen.has(f.digest.toLowerCase()),
+      (f) => worthInvestigating(f.advice) && !seen.has(f.digest.toLowerCase()),
     )
     .slice(0, Math.max(0, budget));
 }

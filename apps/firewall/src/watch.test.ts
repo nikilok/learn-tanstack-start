@@ -331,10 +331,12 @@ describe('watchLines', () => {
   const advice = (over: Partial<Advice> = {}): Advice => ({
     verdict: 'ban',
     digest: DIG,
+    axes: ['rendering', 'spread'],
     lever: {
       kind: 'ja4',
       value: DIG,
       why: 'no browser has ever rendered from it',
+      tier: 'deny',
     },
     reasons: [
       'zero rendering requests across 9060 requests — a raw-HTML fetcher',
@@ -393,6 +395,7 @@ describe('watchLines', () => {
                 kind: 'asn',
                 value: 'Some Network',
                 why: 'x',
+                tier: 'deny',
                 needsAsNumber: true,
               },
             }),
@@ -484,7 +487,13 @@ describe('isActionable', () => {
         allowed: 500,
         total: 500,
         why: [],
-        advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
+        advice: {
+          verdict: v,
+          reasons: [],
+          axes: [],
+          blockers: [],
+          leverNotes: [],
+        },
         autoBanRefusal: 'fixture: not evaluated',
       },
     ],
@@ -546,7 +555,13 @@ describe('exitCodeFor', () => {
         allowed: 1,
         total: 1,
         why: [],
-        advice: { verdict: v, reasons: [], blockers: [], leverNotes: [] },
+        advice: {
+          verdict: v,
+          reasons: [],
+          axes: [],
+          blockers: [],
+          leverNotes: [],
+        },
         autoBanRefusal: 'fixture: not evaluated',
       },
     ],
@@ -733,6 +748,7 @@ describe('adviceWhy / adviceSummary / watchlistAdditions', () => {
   const advice = (over: Partial<Advice> = {}): Advice => ({
     verdict: 'leave',
     reasons: ['zero rendering requests'],
+    axes: ['rendering'],
     blockers: ['matched allow-ch-stream-revalidate (267x)'],
     leverNotes: ['no safe lever'],
     ...over,

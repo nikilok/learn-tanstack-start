@@ -43,6 +43,7 @@ const ban = (digest: string) => ({
   advice: {
     verdict: 'ban' as const,
     reasons: [],
+    axes: ['rendering', 'spread'],
     blockers: [],
     leverNotes: [],
   },

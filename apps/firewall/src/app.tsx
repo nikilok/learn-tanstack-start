@@ -57,9 +57,16 @@ import {
 } from './identity-list';
 import { moveCursor, resolveIpEntry } from './ip-entry';
 import { type IpProfile, type Subject, topIps, topJa4 } from './ip-profile';
-import { profileLines } from './ip-profile-view';
+import {
+  fingerprintScopeNote,
+  overrideWarning,
+  profileLines,
+} from './ip-profile-view';
 import { type ReportData, fetchReport } from './report-data';
 import { trustedRules } from './rule-integrity';
+// Imported, never re-typed here: the same constant keys `RECOVERABLE_RULES`, and a second
+// hand-written copy of the name would drift out of that guard without anything noticing.
+import { CHALLENGE_SCRAPER_JA4 } from './rule-names';
 import { dryRun, rules } from './rules';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
@@ -866,6 +873,12 @@ export function App() {
     for (const [ruleName, spec, envKey] of [
       [JA4_RULE, JA4_DENY, 'FW_BLOCKED_JA4'],
       [ASN_RULE, ASN_DENY, 'FW_BLOCKED_ASN'],
+      // The challenge tier persists on the same pass, because `stageDeny` PROMOTES off it. Write
+      // the deny without the removal and the next apply rebuilds FW_CHALLENGE_JA4 from a stale
+      // env and puts the digest straight back on both lists — the exact half-applied state the
+      // promotion exists to prevent. Idempotent when nothing was promoted: it writes the rule's
+      // own current values back.
+      [CHALLENGE_SCRAPER_JA4, JA4_DENY, 'FW_CHALLENGE_JA4'],
     ] as const) {
       const item = snapshot.find((it) => it.rule.name === ruleName);
       const status = outcome.get(ruleName);
@@ -914,6 +927,14 @@ export function App() {
   const ja4Enforcing = enforcing(ja4Item);
   const liveJa4 =
     ja4Item && ja4Enforcing ? valuesOf(ja4Item.rule, JA4_DENY) : [];
+  // The recoverable tier needs its own liveness test: `enforcing` above requires action `deny`,
+  // which a challenge rule is never allowed to be, so reusing it would read every live challenge
+  // as inert — and the advisory would then treat our own suppressed rendering as a measured zero.
+  const challengeItem = denyRuleOf(CHALLENGE_SCRAPER_JA4);
+  const liveChallengeJa4 =
+    challengeItem?.active && challengeItem.action === 'challenge'
+      ? valuesOf(challengeItem.rule, JA4_DENY)
+      : [];
   const asnItem = denyRuleOf(ASN_RULE);
   const liveAsn =
     asnItem && enforcing(asnItem) ? valuesOf(asnItem.rule, ASN_DENY) : [];
@@ -1024,6 +1045,12 @@ export function App() {
           removedDenies,
           subjectDigest,
           JA4_DENY,
+        ),
+        // From the LIVE challenge rule, matching how alreadyDeniedJa4 is derived. Our own
+        // interstitial stops a browser fetching sub-resources, so its rendering evidence
+        // disappears — and the advisory must not read that silence as a measured zero.
+        challengedJa4: liveChallengeJa4.some(
+          (v) => JA4_DENY.normalize(v) === JA4_DENY.normalize(subjectDigest),
         ),
         stagedJa4: stagedDenies.includes(subjectDigest),
         // AS numbers cannot be derived from the name observability reports, so an ASN already
@@ -1137,7 +1164,16 @@ export function App() {
     else setPane('ip');
   };
 
-  /** Stage a value into its deny rule. Nothing reaches the WAF until the apply. */
+  /**
+   * Stage a value into its deny rule. Nothing reaches the WAF until the apply.
+   *
+   * A JA4 deny also PROMOTES: the digest is dropped from the challenge tier in the same edit.
+   * The two lists are alternatives, not layers — `rules.ts` gives the deny live priority, so a
+   * digest on both is denied while `challenge-scraper-ja4` goes on advertising "1 challenged",
+   * which is a rule describing something it is not doing. Doing it here rather than leaving it to
+   * the operator is the point: promoting by hand is two files and an apply, and the half anyone
+   * forgets is the removal, because nothing breaks when they do.
+   */
   const stageDeny = (kind: 'ja4' | 'asn', value: string) => {
     const ruleName = kind === 'ja4' ? JA4_RULE : ASN_RULE;
     const spec = kind === 'ja4' ? JA4_DENY : ASN_DENY;
@@ -1149,14 +1185,24 @@ export function App() {
     }
     setItems((prev) =>
       prev.map((it) =>
-        it.rule.name === ruleName
+        // Unconditional, not gated on the digest being on the list: withoutValue on an absent
+        // value is a no-op, and a gate here would need the LIVE list, which is exactly the state
+        // a stale read gets wrong.
+        kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4
           ? {
               ...it,
-              rule: withValue(it.rule, spec, value).rule,
+              rule: withoutValue(it.rule, JA4_DENY, value).rule,
               status: 'idle',
               detail: undefined,
             }
-          : it,
+          : it.rule.name === ruleName
+            ? {
+                ...it,
+                rule: withValue(it.rule, spec, value).rule,
+                status: 'idle',
+                detail: undefined,
+              }
+            : it,
       ),
     );
     setStagedDenies((s) => [...new Set([...s, value])]);
@@ -1517,22 +1563,60 @@ export function App() {
       else if (input === 'R') refreshPane();
       else if (input === 'v' || input === 'V') setWatchOn((on) => !on);
       else if (input === 'w' || input === 'W') openWindowPick();
-      else if (input === 'b' && pane === 'ip' && ipAdvice?.lever) {
-        // Only an OFFERED lever is stageable. A blocked client, or one whose every handle is
-        // shared with something legitimate, has no lever and no keystroke gets past that.
-        if (ipAdvice.blockers.length) return;
-        const lever = ipAdvice.lever;
-        if (lever.kind === 'asn') {
+      else if (input === 'b' && pane === 'ip') {
+        // The advisory ADVISES; it does not hold the keys.
+        //
+        // This used to require an OFFERED lever and then return silently on any blocker, so `b`
+        // did nothing at all unless the verdict was `ban` — and a keypress that silently does
+        // nothing reads as a broken tool, not as a refusal. It is also the wrong place for that
+        // authority: an operator looking at the evidence can see what the axes cannot, and the
+        // protection that actually matters is on the UNATTENDED path (`autoBanRefusal`), which
+        // is untouched and still fires only on `ban`. So the veto became a warning.
+        const lever = ipAdvice?.lever;
+        if (lever?.kind === 'asn') {
           // The AS number is not derivable from the name observability reports.
           setAsnInput('');
           setAsnError('');
           setFocus('asn-input');
           return;
         }
+        // A recommended lever names its own target; otherwise it is the subject's own digest.
+        const target = lever?.value ?? subjectDigest;
+        if (!target) {
+          // Reachable while a tab is still loading, so it needs to say something rather than
+          // fall through to the same silence this change exists to remove.
+          setCopied(
+            'nothing to deny — this profile carries no fingerprint yet',
+          );
+          return;
+        }
+        const recommended = ipAdvice?.verdict === 'ban' && Boolean(lever);
+        const subject = ipTabs.active?.data?.subject;
+        // The rule's VALUES, not `liveChallengeJa4`, which is gated on the tier being active and
+        // set to challenge. `stageDeny` removes the entry whatever the rule's action is, so
+        // reading liveness here would let the dialog say "Deny" while the edit also promotes —
+        // describing a different action from the one about to happen.
+        const promoting = (
+          challengeItem ? valuesOf(challengeItem.rule, JA4_DENY) : []
+        ).some((v) => JA4_DENY.normalize(v) === JA4_DENY.normalize(target));
         setConfirm({
-          prompt: `Deny TLS fingerprint ${lever.value}?`,
-          detail: `${ipAdvice.reasons.length} tells agree · stages into FW_BLOCKED_JA4`,
-          onYes: () => stageDeny('ja4', lever.value),
+          prompt: promoting
+            ? `PROMOTE ${target} from challenge to DENY?`
+            : `Deny TLS fingerprint ${target}?`,
+          detail: [
+            recommended
+              ? `${ipAdvice?.reasons.length ?? 0} tells agree`
+              : ipAdvice
+                ? overrideWarning(ipAdvice)
+                : 'no advice was computed for this identity',
+            subject ? fingerprintScopeNote(subject, target) : '',
+            promoting
+              ? 'moves it to FW_BLOCKED_JA4 and OFF FW_CHALLENGE_JA4 in one apply — an interstitial becomes a hard 403'
+              : 'stages into FW_BLOCKED_JA4',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          onYes: () => stageDeny('ja4', target),
         });
         setFocus('confirm');
       } else if (pane === 'denylist' && key.return) {
@@ -1816,12 +1900,12 @@ export function App() {
             label: watchOn ? 'watch (on)' : 'watch',
             active: watchOn,
           },
-          // Shown exactly when `b` does something: the advisor offered a lever.
-          pane === 'ip' &&
-            ipAdvice?.lever && {
-              key: 'b',
-              label: `deny ${ipAdvice.lever.kind === 'ja4' ? 'fingerprint' : 'network'}`,
-            },
+          // Shown whenever `b` does something, which is now any profiled identity — the hint and
+          // the handler share one condition, so a key that works cannot go unadvertised.
+          pane === 'ip' && {
+            key: 'b',
+            label: `deny ${ipAdvice?.lever?.kind === 'asn' ? 'network' : 'fingerprint'}`,
+          },
           pane === 'denylist' && { key: 'enter', label: 'copy' },
           pane === 'denylist' && { key: 'u', label: 'unban' },
           pane === 'sitemap' && { key: 'enter', label: 'copy' },

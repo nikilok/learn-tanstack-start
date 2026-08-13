@@ -158,6 +158,17 @@ async function main() {
           : (profile.byJa4[0]?.[0] ?? ''),
       ),
     ),
+    // Our own challenge suppresses the rendering evidence that would clear a deny, so the
+    // advisory has to know we are already interstitialing this fingerprint.
+    challengedJa4: challengedJa4
+      .map(JA4_DENY.normalize)
+      .includes(
+        JA4_DENY.normalize(
+          profile.subject.kind === 'ja4'
+            ? profile.subject.value
+            : (profile.byJa4[0]?.[0] ?? ''),
+        ),
+      ),
     stagedJa4: false, // the CLI has no staging step
 
     // The CLI cannot map an AS name to its number, so it never claims one is already denied.

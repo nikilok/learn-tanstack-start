@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { barWidth } from './ip-profile-view';
+import type { Advice } from './ban-advice';
+import {
+  barWidth,
+  envVarFor,
+  fingerprintScopeNote,
+  overrideWarning,
+} from './ip-profile-view';
 
 describe('barWidth', () => {
   test('scales with the pane so a wide split is actually used', () => {
@@ -83,6 +89,9 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
     shape: shapeOf([], 10),
     buckets: [],
     tells: [],
+    // Undecidable is the honest default for a fixture: it must never be the state that renders
+    // as a clean bill of health.
+    uaCheck: { mismatched: null, share: null, note: 'baseline not read' },
     reachHours: 144,
     failedQueries: [],
     errors: [],
@@ -94,6 +103,7 @@ function profile(over: Partial<IpProfile> = {}): IpProfile {
 const ADVICE = {
   verdict: 'watch' as const,
   reasons: [],
+  axes: [],
   blockers: [],
   leverNotes: [],
 };
@@ -179,5 +189,135 @@ describe('profileLines — partial data', () => {
     expect(text).toContain('3400 rendering requests');
     // The old line summed assets + beacons only, which for this reach is exactly zero.
     expect(text).not.toMatch(/[^\d]0 rendering requests/);
+  });
+});
+
+describe('envVarFor', () => {
+  const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
+
+  test('the tier decides the list, not the kind — both tiers key on a JA4', () => {
+    expect(envVarFor({ kind: 'ja4', value: DIG, why: '', tier: 'deny' })).toBe(
+      'FW_BLOCKED_JA4',
+    );
+    expect(
+      envVarFor({ kind: 'ja4', value: DIG, why: '', tier: 'challenge' }),
+    ).toBe('FW_CHALLENGE_JA4');
+  });
+
+  test('a network lever names its own list and its manual step', () => {
+    expect(
+      envVarFor({ kind: 'asn', value: 'Some Net', why: '', tier: 'deny' }),
+    ).toContain('FW_BLOCKED_ASN');
+  });
+});
+
+describe('overrideWarning', () => {
+  const advice = (over: Partial<Advice> = {}): Advice => ({
+    verdict: 'leave',
+    reasons: [],
+    axes: [],
+    blockers: [],
+    leverNotes: [],
+    ...over,
+  });
+
+  test('a legitimacy blocker outranks a lever note — it is about the client, not the handle', () => {
+    const w = overrideWarning(
+      advice({
+        blockers: ['verified bot (googlebot:900)'],
+        leverNotes: ['fingerprint x shows 340 rendering requests'],
+      }),
+    );
+    expect(w).toContain('verified bot (googlebot:900)');
+    expect(w).not.toContain('340 rendering');
+  });
+
+  test('falls back to the lever note when nothing blocked', () => {
+    expect(
+      overrideWarning(
+        advice({ verdict: 'watch', leverNotes: ['reach unknown'] }),
+      ),
+    ).toContain('reach unknown');
+  });
+
+  test('always names the verdict being overridden', () => {
+    expect(overrideWarning(advice({ verdict: 'challenge' }))).toContain(
+      'verdict: challenge',
+    );
+  });
+
+  test('says something even when the advisory found nothing at all', () => {
+    // The operator still pressed the key; a blank detail reads as a broken dialog.
+    expect(overrideWarning(advice())).toContain('nothing either way');
+  });
+});
+
+describe('fingerprintScopeNote', () => {
+  const DIG = 't13dnewx00_abcabcabcabc_defdefdefdef';
+
+  test('warns that an IP profile denies the FINGERPRINT, since there is no IP lever', () => {
+    const note = fingerprintScopeNote({ kind: 'ip', value: '1.2.3.4' }, DIG);
+    expect(note).toContain(DIG);
+    expect(note).toContain('NOT the IP 1.2.3.4');
+  });
+
+  test('says nothing when the subject already IS the fingerprint', () => {
+    expect(fingerprintScopeNote({ kind: 'ja4', value: DIG }, DIG)).toBe('');
+  });
+});
+
+describe('profileLines — the impersonation check', () => {
+  const DIG = 't13d1516h2_cccccccccccc_222222222222';
+
+  test('a contradiction reads as automated and names the rival fingerprint', () => {
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: [
+            {
+              ua: 'Chrome/142.0.0.0 Safari/537.36',
+              requests: 58,
+              subjectShare: 0.071,
+              rivalDigest: DIG,
+              rivalShare: 0.764,
+            },
+          ],
+          share: 0.139,
+          note: '1 of 3 comparable user-agents belong to a DIFFERENT fingerprint',
+        },
+      }),
+    );
+    expect(text).toContain('ua vs TLS');
+    expect(text).toContain('DIFFERENT fingerprint');
+    expect(text).toContain(DIG);
+    expect(text).toContain('58x');
+  });
+
+  test('undecidable renders as a note, NOT as browser evidence', () => {
+    // The failure that matters: a check that could not run reading as a check that passed.
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: null,
+          share: null,
+          note: 'the site-wide user-agent baseline could not be read',
+        },
+      }),
+    );
+    expect(text).toContain('could not be read');
+    expect(text).not.toContain('consistent');
+  });
+
+  test('consistent renders, so a clean identity is visibly cleared rather than silent', () => {
+    const text = render(
+      profile({
+        uaCheck: {
+          mismatched: [],
+          share: 0,
+          note: 'every comparable user-agent (7) is consistent with this fingerprint',
+        },
+      }),
+    );
+    expect(text).toContain('is consistent with this fingerprint');
   });
 });

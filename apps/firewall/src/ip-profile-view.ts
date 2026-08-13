@@ -1,7 +1,7 @@
 // Lays out an IpProfile as lines. Free of both ANSI and Ink, so the CLI and the TUI pane render
 // the same layout through their own backends.
 
-import type { Advice } from './ban-advice';
+import type { Advice, Lever } from './ban-advice';
 import type { IpProfile } from './ip-profile';
 import type { Shape, Tell } from './ip-signals';
 import {
@@ -12,6 +12,7 @@ import {
   line,
   seg,
 } from './line-model';
+import { mismatchLines } from './ua-fingerprint';
 
 const BAR_GUTTER = 26; // stamp + count columns before a bar starts
 const BAR_MIN = 20;
@@ -108,6 +109,35 @@ function tellLines(tells: Tell[]): Line[] {
   );
 }
 
+/**
+ * The impersonation check, in the SIGNALS block beside the other evidence.
+ *
+ * Three distinct states, rendered distinctly. Undecidable is `note`, not `browser` — a check that
+ * could not run is not a check that passed, and the two have been collapsed here before.
+ */
+function impersonationLines(p: IpProfile): Line[] {
+  const v = p.uaCheck;
+  const tag =
+    v.mismatched === null
+      ? seg('note     ', 'dim')
+      : v.mismatched.length
+        ? seg('automated', 'bad')
+        : seg('browser  ', 'good');
+  const L: Line[] = [
+    line('  ', tag, `  ${'ua vs TLS'.padEnd(17)} `, seg(v.note, 'dim')),
+  ];
+  for (const detail of mismatchLines(v))
+    L.push(
+      line(
+        '  ',
+        seg('         ', 'dim'),
+        `  ${''.padEnd(17)} `,
+        seg(detail, 'dim'),
+      ),
+    );
+  return L;
+}
+
 function reachLine(
   what: string,
   r: IpProfile['digestReach'],
@@ -142,12 +172,58 @@ function reachLine(
   ];
 }
 
+/** The `.env.local` list a lever's value belongs on. Both tiers key on a JA4, so the TIER decides, not the kind. */
+export function envVarFor(lever: Lever): string {
+  if (lever.kind === 'asn') return 'FW_BLOCKED_ASN — needs the AS number';
+  return lever.tier === 'challenge' ? 'FW_CHALLENGE_JA4' : 'FW_BLOCKED_JA4';
+}
+
+/**
+ * What the operator is overriding when they deny something the advisory did not recommend.
+ *
+ * The advisory ADVISES. It used to hold the keys as well — `b` did nothing at all unless a `ban`
+ * verdict had attached a lever — which is the wrong place for that authority: a human looking at
+ * the evidence can see things the axes cannot, and a keypress that silently does nothing reads
+ * as a broken tool rather than as a refusal. So the veto became a warning, and this is its text.
+ *
+ * Ordered by what actually decides the case: a legitimacy blocker is a statement about the
+ * client, and outranks a lever note, which is only a statement about the handle.
+ */
+export function overrideWarning(a: Advice): string {
+  const objection =
+    a.blockers[0] ??
+    a.leverNotes[0] ??
+    'the advisory found nothing either way on this identity';
+  return `The advisory did NOT recommend this (verdict: ${a.verdict}). Its objection: ${objection}`;
+}
+
+/**
+ * The clarification shown when staging a deny from an IP profile.
+ *
+ * There is NO IP lever in this tool: `Condition['type']` offers path, query, header, user_agent,
+ * ja4_digest and geo_as_number, and nothing else, so the deny rules cannot key on an address.
+ * Pressing `b` on an IP profile therefore stages that IP's DOMINANT FINGERPRINT, which is a far
+ * wider thing than the address on screen — on a Chrome-family digest, wider than the whole site's
+ * traffic. That has to be said in the confirmation rather than assumed to be understood, because
+ * the two look identical once the dialog is open.
+ */
+export function fingerprintScopeNote(
+  subject: { kind: 'ip' | 'ja4'; value: string },
+  digest: string,
+): string {
+  return subject.kind === 'ip'
+    ? `NOTE: this denies FINGERPRINT ${digest}, NOT the IP ${subject.value} — there is no IP lever. Every client sharing that TLS build is denied.`
+    : '';
+}
+
 /** The recommendation block. Blockers and rejected levers print even on a `ban`-less verdict — knowing WHY something is untouchable is the useful part. */
 function adviceLines(a: Advice, p: IpProfile): Line[] {
   const tone =
     a.verdict === 'ban'
       ? 'bad'
-      : a.verdict === 'watch' || a.verdict === 'staged'
+      : a.verdict === 'challenge' ||
+          a.verdict === 'watch' ||
+          a.verdict === 'staged'
         ? 'warn'
         : a.verdict === 'already'
           ? 'dim'
@@ -155,13 +231,20 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
   const headline =
     a.verdict === 'ban'
       ? `DENY RECOMMENDED (${a.lever?.kind.toUpperCase()}) — press b to stage, a to apply`
-      : a.verdict === 'staged'
-        ? 'STAGED — not live yet; press a to apply, or u in the denylist to drop it'
-        : a.verdict === 'watch'
-          ? 'INCONCLUSIVE — no safe lever, do not deny'
-          : a.verdict === 'already'
-            ? 'ALREADY DENIED — the evidence stands, the rule is in place'
-            : 'DO NOT DENY';
+      : a.verdict === 'challenge'
+        ? 'CHALLENGE RECOMMENDED — the fingerprint is SHARED, so deny would hit real browsers'
+        : a.verdict === 'staged'
+          ? 'STAGED — not live yet; press a to apply, or u in the denylist to drop it'
+          : a.verdict === 'watch'
+            ? 'INCONCLUSIVE — no safe lever, do not deny'
+            : a.verdict === 'already'
+              ? // Which tier is live is not a detail: "denied" and "challenged" lead to different
+                // next actions, and saying DENIED about an interstitial is the more costly way
+                // round — it reads as handled when the traffic is still being served.
+                a.lever?.tier === 'challenge'
+                ? 'ALREADY CHALLENGED — live on FW_CHALLENGE_JA4; press b to promote it to a deny'
+                : 'ALREADY DENIED — the evidence stands, the rule is in place'
+              : 'DO NOT DENY';
   const L: Line[] = [blank(), line(seg('RECOMMENDATION', 'bold'))];
   L.push(line('  ', seg(headline, tone)));
   if (a.lever)
@@ -169,12 +252,10 @@ function adviceLines(a: Advice, p: IpProfile): Line[] {
       line(
         seg('  target  ', 'dim'),
         seg(a.lever.value, 'key'),
-        seg(
-          a.lever.kind === 'ja4'
-            ? '  (FW_BLOCKED_JA4)'
-            : '  (FW_BLOCKED_ASN — needs the AS number)',
-          'dim',
-        ),
+        // Read off the lever's own tier, never inferred from `kind`: both tiers key on a JA4, so
+        // a kind-only label names FW_BLOCKED_JA4 for a challenge and tells the operator the
+        // recommendation is a deny.
+        seg(`  (${envVarFor(a.lever)})`, 'dim'),
       ),
     );
   L.push(...reachLine('fingerprint', p.digestReach, p.reachHours));
@@ -207,7 +288,11 @@ export function profileLines(
     line(`${p.total} requests`),
   );
 
-  L.push(...heading('SIGNALS'), ...tellLines(p.tells));
+  L.push(
+    ...heading('SIGNALS'),
+    ...tellLines(p.tells),
+    ...impersonationLines(p),
+  );
   if (advice) L.push(...adviceLines(advice, p));
 
   L.push(...heading(`SESSION SHAPE (${p.shape.bucketMinutes}-min buckets)`));

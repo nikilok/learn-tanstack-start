@@ -130,7 +130,8 @@ export function usePickers(paneHeight: number): Pickers {
     },
     refreshLive: (creds, window) => {
       const cache = kindRef.current === 'ip' ? ipRef.current : ja4Ref.current;
-      cache.reset();
+      // No reset(): it clears `data` even when the load below is dropped as a duplicate, which
+      // blanks the picker for a tick. A completed load replaces the rows by itself.
       // The outcome comes from load itself: it catches every rejection, so a flag set inside the
       // fetcher cannot see a request the pane dropped as a duplicate, and that reset the backoff
       // to zero on the exact ticks it was supposed to be lengthening.

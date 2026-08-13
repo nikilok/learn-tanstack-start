@@ -112,7 +112,7 @@ export function useWatch(opts: {
     // the watch has to hold the machine up. Failing to start it is not fatal: a watch that runs
     // and may be suspended still beats no watch, and the status line says which one you have.
     let awake: ReturnType<typeof Bun.spawn> | null = null;
-    if (canKeepAwake(process.platform)) {
+    if (watchTiming() !== null && canKeepAwake(process.platform)) {
       try {
         awake = Bun.spawn(['caffeinate', ...caffeinateArgs(process.pid)], {
           stdout: 'ignore',

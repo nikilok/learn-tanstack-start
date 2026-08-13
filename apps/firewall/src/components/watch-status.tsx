@@ -30,10 +30,10 @@ export function WatchStatus({ watch: w }: { watch: Watch }) {
         </Text>
       )}
       {/* Name them, or "1 profiled" sends the operator digging through the log. */}
-      {w.who.map((w) => (
-        <Text key={w} dimColor wrap="truncate-end">
+      {w.who.map((who) => (
+        <Text key={who} dimColor wrap="truncate-end">
           {'    '}
-          {w}
+          {who}
         </Text>
       ))}
       {/* Stays up once it has happened. The loop runs while you are in another pane, so an

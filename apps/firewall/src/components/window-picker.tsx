@@ -3,7 +3,7 @@
 import { Box, Text } from 'ink';
 
 import { WINDOW_PRESETS } from '../time-window';
-import { isCustomRow } from '../window-pick';
+import { CUSTOM, isCustomRow } from '../window-pick';
 import { FooterHints } from './footer-hints';
 
 export function WindowPicker({
@@ -14,17 +14,16 @@ export function WindowPicker({
   cursor: number;
   presetIdx: number;
 }) {
-  const windowCursor = cursor;
   return (
     <Box flexDirection="column">
       <Text dimColor>{'  '}timeline</Text>
       {WINDOW_PRESETS.map((p, i) => (
         <Box key={p.label}>
-          <Text color="cyan">{i === windowCursor ? '▶ ' : '  '}</Text>
+          <Text color="cyan">{i === cursor ? '▶ ' : '  '}</Text>
           <Text
-            bold={i === windowCursor}
-            color={i === windowCursor ? 'cyan' : undefined}
-            dimColor={i !== windowCursor}
+            bold={i === cursor}
+            color={i === cursor ? 'cyan' : undefined}
+            dimColor={i !== cursor}
           >
             {p.label.padEnd(10)}
           </Text>
@@ -35,15 +34,17 @@ export function WindowPicker({
         </Box>
       ))}
       <Box>
-        <Text color="cyan">{isCustomRow(windowCursor) ? '▶ ' : '  '}</Text>
+        <Text color="cyan">{isCustomRow(cursor) ? '▶ ' : '  '}</Text>
         <Text
-          bold={isCustomRow(windowCursor)}
-          color={isCustomRow(windowCursor) ? 'cyan' : undefined}
-          dimColor={!isCustomRow(windowCursor)}
+          bold={isCustomRow(cursor)}
+          color={isCustomRow(cursor) ? 'cyan' : undefined}
+          dimColor={!isCustomRow(cursor)}
         >
           {'custom…'.padEnd(10)}
         </Text>
-        <Text dimColor>type dates{presetIdx < 0 ? '  ·  in force' : ''}</Text>
+        <Text dimColor>
+          type dates{presetIdx === CUSTOM ? '  ·  in force' : ''}
+        </Text>
       </Box>
       <Text wrap="wrap">
         {'  '}

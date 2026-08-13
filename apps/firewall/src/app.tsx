@@ -15,7 +15,7 @@ import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import { adviseBan } from './ban-advice';
 import { applyItem, fetchLive, projectId, teamId, token } from './client';
 import { copyToClipboard } from './clipboard';
-import { ConfirmPrompt } from './components/confirm-prompt';
+import { type Confirmation, ConfirmPrompt } from './components/confirm-prompt';
 import {
   FooterHints,
   type MaybeHint,
@@ -177,11 +177,7 @@ export function App() {
   const [copied, setCopied] = useState('');
   const lists = useIdentityLists(ROOT);
   const watch = useWatch({ creds, onWatchlist: lists.replaceWatch });
-  const [confirm, setConfirm] = useState<{
-    prompt: string;
-    detail: string;
-    onYes: () => void;
-  } | null>(null);
+  const [confirm, setConfirm] = useState<Confirmation | null>(null);
   const failuresRef = useRef(0); // consecutive live-refresh failures, drives the backoff
   const tickRef = useRef(0);
   const activeTabRef = useRef(ipTabs.active);

@@ -31,7 +31,12 @@ import type { Creds } from './useIpTabs';
 import { type Pane, usePane } from './usePane';
 
 // Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
-const ENV_PATH = fileURLToPath(new URL('../../../.env.local', import.meta.url));
+// Depth-sensitive, and it broke silently when this file moved into hooks/ — a deny then landed in
+// apps/.env.local, so the next apply rebuilt from the untouched root file and LIFTED the ban.
+// envPathIsRepoRoot in the test locks it against the next move.
+export const ENV_PATH = fileURLToPath(
+  new URL('../../../../.env.local', import.meta.url),
+);
 const DENY_ACTIVITY_HOURS = 144;
 
 export type Denylist = {

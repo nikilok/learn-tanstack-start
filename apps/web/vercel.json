@@ -2,5 +2,5 @@
   "regions": ["lhr1"],
   "outputDirectory": ".vercel/output",
   "installCommand": "bun install --frozen-lockfile",
-  "ignoreCommand": "! git diff --name-only HEAD^ HEAD | grep -qv '^docs/'"
+  "ignoreCommand": "! git diff --name-only HEAD^ HEAD | grep -qvE '^(docs/|apps/(firewall|desktop|ch-stream)/|packages/gemma/|\\.github/|\\.claude/|\\.coderabbit\\.yaml$|README\\.md$)'"
 }

@@ -31,7 +31,16 @@ CHANGED=$(git diff --name-only "$BASE" HEAD) || exit 1
 # least arguable, they change rarely, and the cost of being wrong is asymmetric.
 IGNORED='^(docs/|apps/(firewall|desktop|ch-stream)/|packages/gemma/|\.github/|\.claude/|\.coderabbit\.yaml$|README\.md$)'
 
-# Anything outside the list means build. `grep -q` exits 0 when it finds such a path.
-echo "$CHANGED" | grep -qvE "$IGNORED" && exit 1
-
-exit 0
+# Anything outside the list means build.
+#
+# Read the status EXPLICITLY rather than with `&&`. grep has three outcomes, not two: 0 found,
+# 1 not found, 2 ERROR — a bad pattern, a missing binary, an unreadable locale. `grep … && exit 1`
+# treats 2 exactly like 1, so a grep that failed to run fell through to the skip. That is the same
+# shape as every other bug on this branch: the error path quietly produces the permissive answer,
+# and here the permissive answer is "do not deploy".
+echo "$CHANGED" | grep -qvE "$IGNORED"
+case $? in
+  0) exit 1 ;; # a path outside the list — build
+  1) exit 0 ;; # everything is ignorable — skip
+  *) exit 1 ;; # grep could not answer — build
+esac

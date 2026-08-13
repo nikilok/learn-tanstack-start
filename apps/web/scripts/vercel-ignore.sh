@@ -21,7 +21,11 @@ BASE=${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}
 # A range git cannot resolve — a shallow clone without HEAD^, a SHA from a force-pushed branch —
 # used to produce an empty diff, which then read as "nothing changed" and skipped. A build that
 # cannot tell what changed must build.
-CHANGED=$(git diff --name-only "$BASE" HEAD) || exit 1
+# --no-renames because rename detection collapses a delete-plus-add into the DESTINATION path
+# only. Move a file out of apps/web into an ignored tree and the apps/web side disappears from the
+# diff entirely, so the filter skips a build for a file the app just lost. Reproduced: without the
+# flag `git mv apps/web/page.ts apps/firewall/page.ts` reports one path and skips; with it, both.
+CHANGED=$(git diff --name-only --no-renames "$BASE" HEAD) || exit 1
 [ -z "$CHANGED" ] && exit 1
 
 # Paths that cannot affect this app's build output. @ss/web depends on @ss/db and @ss/skyline only,
@@ -38,7 +42,10 @@ IGNORED='^(docs/|apps/(firewall|desktop|ch-stream)/|packages/gemma/|\.github/|\.
 # treats 2 exactly like 1, so a grep that failed to run fell through to the skip. That is the same
 # shape as every other bug on this branch: the error path quietly produces the permissive answer,
 # and here the permissive answer is "do not deploy".
-echo "$CHANGED" | grep -qvE "$IGNORED"
+# printf, not echo: `echo` is implementation-defined in POSIX sh for arguments containing
+# backslashes or a leading dash, and a path is attacker-adjacent input in a repo anyone can open a
+# PR against. A mangled path here silently changes which side of the filter it lands on.
+printf '%s\n' "$CHANGED" | grep -qvE "$IGNORED"
 case $? in
   0) exit 1 ;; # a path outside the list — build
   1) exit 0 ;; # everything is ignorable — skip

@@ -3,13 +3,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
+import type { ReactNode } from 'react';
+
 import { KEY, renderInk } from './ink-harness';
 import { TEST_DENIED_JA4 } from './test-setup';
 
 // Every value the rule set is seeded from is set by the preload, before any module reads it.
 const DIGEST = TEST_DENIED_JA4;
 
-let App: () => React.ReactNode;
+let App: () => ReactNode;
 
 beforeAll(async () => {
   const { mock } = await import('bun:test');

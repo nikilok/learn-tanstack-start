@@ -22,15 +22,17 @@ export async function fetchDenyActivity(
   if (!ja4.length) return { activity };
   const { ctx } = makeCtx(creds, { hours });
   // Interpolated into the filter DSL, so only digests the spec already validated.
-  const list = ja4.map((v) => `'${v}'`).join(',');
+  // Normalized once: the filter and the seeded keys must be the same strings, or a row comes
+  // back under a key nothing looks up.
+  const wanted = ja4.map((v) => JA4_DENY.normalize(v.trim()));
+  const list = wanted.map((v) => `'${v}'`).join(',');
   try {
     const resp = await metrics(ctx, ['clientJa4Digest', 'wafAction'], {
       filter: `clientJa4Digest in (${list})`,
       limit: 500,
     });
     // The query succeeded, so a digest with no rows genuinely saw nothing.
-    for (const v of ja4)
-      activity.set(JA4_DENY.normalize(v.trim()), { requests: 0, denied: 0 });
+    for (const v of wanted) activity.set(v, { requests: 0, denied: 0 });
     for (const row of resp.summary ?? []) {
       // Normalized to match how the seeded keys are stored. The API can return a digest
       // upper-cased, which then created a SECOND entry and left the seeded one at zero — and a

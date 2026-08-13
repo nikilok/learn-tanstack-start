@@ -2,7 +2,7 @@
 // leaves disk changed and the panes describing the state before it.
 
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -87,6 +87,30 @@ describe('useIdentityLists.removeAtCursor', () => {
       }
     },
   );
+});
+
+describe('useIdentityLists, unreadable list', () => {
+  // "Unreadable is not empty" holds on the WRITE path too: saving the in-memory list over a file
+  // we could not read is how a hand edit gets destroyed.
+  test('a removal aborts rather than saving over a file it could not read', async () => {
+    const root = tmp();
+    writeFileSync(join(root, WATCHLIST_FILE), line('on-disk'));
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+
+    // Malformed: parseWatchlist refuses the whole file, so the late read reports not-ok.
+    writeFileSync(join(root, WATCHLIST_FILE), 'not|a|valid|line\n');
+    const msg = await get().removeAtCursor('watch');
+    await h.settle();
+
+    expect(msg).toContain('nothing removed');
+    // The file is untouched — the removal did not overwrite what it could not parse.
+    expect(readFileSync(join(root, WATCHLIST_FILE), 'utf8')).toContain(
+      'not|a|valid|line',
+    );
+    h.unmount();
+  });
 });
 
 describe('useIdentityLists.move', () => {

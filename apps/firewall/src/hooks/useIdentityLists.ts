@@ -104,11 +104,13 @@ export function useIdentityLists(root: string): IdentityLists {
     // same file on its own timer, and writing the in-memory list back would drop whatever it
     // added since this pane last loaded. Not a lock — a read-modify-write that reads late.
     const latest = await readList(root, file);
-    const next = removeEntry(
-      latest.ok ? latest.entries : entriesOf(side),
-      entry.kind,
-      entry.id,
-    );
+    if (!latest.ok) {
+      // Unreadable is not empty. Saving the in-memory list over a file we could not read is how
+      // a hand edit gets destroyed — the same reason parseWatchlist refuses a partial load.
+      await load(side);
+      return `${side} list: ${latest.error ?? 'unreadable'} — nothing removed`;
+    }
+    const next = removeEntry(latest.entries, entry.kind, entry.id);
     const err = await saveList(root, file, next);
     if (!err) return undefined;
     // The file still holds what the pane just dropped — re-read so the two agree.

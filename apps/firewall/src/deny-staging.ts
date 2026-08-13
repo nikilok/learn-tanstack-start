@@ -87,7 +87,7 @@ export function liveDenies(items: Item[]): LiveDenies {
     // a challenge rule is never allowed to be, so reusing it would read every live challenge as
     // inert — and the advisory would then treat our own suppressed rendering as a measured zero.
     challenged:
-      challengeItem?.active && challengeItem.action === 'challenge'
+      challengeItem && isEnforcingAs(challengeItem)
         ? valuesOf(challengeItem.rule, JA4_DENY)
         : [],
     challengeValues: challengeItem

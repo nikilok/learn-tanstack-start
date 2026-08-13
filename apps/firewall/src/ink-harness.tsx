@@ -12,10 +12,16 @@ const FLUSH_MS = 25;
 // Captured once, before any harness has patched it. Restoring the value that was current when a
 // given harness started would hand back another harness's patch if two overlap, or if one is
 // abandoned by a failing assertion before it reaches unmount.
-const REAL_TERMINAL = {
-  columns: process.stdout.columns,
-  rows: process.stdout.rows,
-};
+let REAL_TERMINAL: { columns: number; rows: number } | undefined;
+
+/** Capture the true size once, on first use rather than at import, so nothing that ran earlier can be mistaken for it. */
+function realTerminal() {
+  REAL_TERMINAL ??= {
+    columns: process.stdout.columns,
+    rows: process.stdout.rows,
+  };
+  return REAL_TERMINAL;
+}
 
 // Matching the ESC byte is the whole job here — assertions read frames as plain text.
 const ANSI =
@@ -24,7 +30,7 @@ const ANSI =
 
 /** Put the real terminal size back. The preload calls this after every test, so a harness abandoned by a failing assertion cannot leave the next one measuring a patched width. */
 export function restoreTerminal(): void {
-  Object.assign(process.stdout, REAL_TERMINAL);
+  Object.assign(process.stdout, realTerminal());
 }
 
 /** Escape sequences for the keys the TUI binds, so a test presses `KEY.down` rather than a literal. */
@@ -66,6 +72,7 @@ export function renderInk(
   node: ReactElement,
   opts: { columns?: number; rows?: number } = {},
 ): Harness {
+  realTerminal(); // before the patch below, or the patch becomes the "real" size
   const columns = opts.columns ?? 120;
   const rows = opts.rows ?? 40;
   const written: string[] = [];

@@ -27,7 +27,8 @@ function wrappedRows(text: string, width: number): number {
       // charging it one is how the reservation ends up short again.
       if (w > width) {
         inLine += Math.ceil(w / width) - 1;
-        used = w % width;
+        // `|| width`: an exact multiple leaves the row FULL, not empty, so the next word wraps.
+        used = w % width || width;
       } else used = used === 0 ? w : used + 1 + w;
     }
     rows += inLine;

@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { envCeiling, envText, isDryRun, useColour } from './env';
+import { envCeiling, envText, isApply, isDryRun, useColour } from './env';
 
 const KEY = 'FW_ENV_TEST_VALUE';
 const saved = { ...process.env };
@@ -73,6 +73,22 @@ describe('isDryRun', () => {
     expect(isDryRun()).toBe(true);
     process.env.DRY_RUN = '0';
     expect(isDryRun()).toBe(false);
+  });
+});
+
+describe('isApply and isInteractive', () => {
+  test('--apply is read from argv', () => {
+    const argv = process.argv;
+    try {
+      process.argv = [...argv, '--apply'];
+      expect(isApply()).toBe(true);
+    } finally {
+      process.argv = argv;
+    }
+  });
+
+  test('without the flag it is not an apply', () => {
+    expect(isApply()).toBe(false);
   });
 });
 

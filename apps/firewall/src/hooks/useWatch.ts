@@ -71,6 +71,10 @@ export function useWatch(opts: {
   onWatchlist: (entries: WatchlistEntry[]) => void;
 }): Watch {
   const { creds, onWatchlist } = opts;
+  // Through a ref: the effect is armed once, so the callback captured then would be the one used
+  // for the whole session.
+  const onWatchlistRef = useRef(onWatchlist);
+  onWatchlistRef.current = onWatchlist;
   // Watch mode. Runs off the app's own timer whatever pane is open, since the point is to be
   // left running. State lives in refs where the loop reads it: the effect is armed once and its
   // closure would otherwise keep whatever the values were at arming.
@@ -197,7 +201,7 @@ export function useWatch(opts: {
               kind: 'error',
               error: `watch list: ${listed.error}`,
             });
-          else if (listed.entries) onWatchlist(listed.entries);
+          else if (listed.entries) onWatchlistRef.current(listed.entries);
         }
         setWatchWho(
           findings.map((f) => ({

@@ -49,6 +49,12 @@ describe('confirmRows', () => {
     expect(confirmRows(of('x', digest), 12)).toBeGreaterThanOrEqual(1 + 3 + 1);
   });
 
+  // An exact multiple left the row measured as empty, so the next word did not wrap and the
+  // reservation came up one short again.
+  test('a word that is an exact multiple of the width fills its last row', () => {
+    expect(confirmRows(of('x', `${'a'.repeat(24)} b`), 12)).toBe(1 + 3 + 1);
+  });
+
   test('an explicit newline starts a new row', () => {
     expect(confirmRows(of('x', 'a\nb\nc'), 80)).toBe(1 + 3 + 1);
   });

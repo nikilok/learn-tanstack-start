@@ -121,6 +121,10 @@ export function useIpTabs(creds: Creds): IpTabs {
   const inFlight = useRef(new Set<string>());
   // A forced re-profile that arrives mid-fetch, held until the running one lands.
   const queued = useRef(new Map<string, Window>());
+  // Bumped when a subject's tab is closed. A fetch that was already running still resolves, and
+  // it patches by subject — so without this it would fill a REOPENED tab with the result of a
+  // request nobody was waiting for, rendered as though it were current.
+  const epoch = useRef(new Map<string, number>());
 
   const run = useCallback(
     async function run(
@@ -136,11 +140,18 @@ export function useIpTabs(creds: Creds): IpTabs {
         return;
       }
       inFlight.current.add(key);
+      const mine = epoch.current.get(key) ?? 0;
       const patch = (p: Partial<IpTab>) =>
-        // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
-        setTabs((prev) =>
-          prev.map((t) => (subjectKey(t.subject) === key ? { ...t, ...p } : t)),
-        );
+        // Dropped if the tab was closed while this ran: the subject may be open again, and this
+        // result belongs to the tab that is gone.
+        epoch.current.get(key) !== mine
+          ? undefined
+          : // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
+            setTabs((prev) =>
+              prev.map((t) =>
+                subjectKey(t.subject) === key ? { ...t, ...p } : t,
+              ),
+            );
       patch({ loading: true, error: '' });
       try {
         patch({
@@ -236,8 +247,10 @@ export function useIpTabs(creds: Creds): IpTabs {
     // fetch nothing is waiting for any more.
     const going = tabs[index];
     if (going) {
-      inFlight.current.delete(subjectKey(going.subject));
-      queued.current.delete(subjectKey(going.subject));
+      const key = subjectKey(going.subject);
+      inFlight.current.delete(key);
+      queued.current.delete(key);
+      epoch.current.set(key, (epoch.current.get(key) ?? 0) + 1);
     }
     // Both computed from `tabs`, not from inside the updater: React may invoke an updater twice,
     // and a state setter called from within one is a side effect it is not allowed to have.

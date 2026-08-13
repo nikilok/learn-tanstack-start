@@ -5,13 +5,13 @@
 
 import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { ENV_PATH } from './hooks/useDenylist';
 
 describe('ENV_PATH', () => {
   test('names .env.local', () => {
-    expect(ENV_PATH.endsWith('/.env.local')).toBe(true);
+    expect(basename(ENV_PATH)).toBe('.env.local');
   });
 
   // Asserted by MARKER, not by counting `../` segments: a depth check would have to be edited by
@@ -23,7 +23,6 @@ describe('ENV_PATH', () => {
   });
 
   test('is NOT inside apps/, which is where the last move put it', () => {
-    expect(dirname(ENV_PATH).endsWith('/apps')).toBe(false);
-    expect(ENV_PATH).not.toContain('/apps/');
+    expect(basename(dirname(ENV_PATH))).not.toBe('apps');
   });
 });

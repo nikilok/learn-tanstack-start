@@ -5,11 +5,38 @@ import type { Subject } from './ip-profile';
 
 export type PickKind = 'ip' | 'ja4';
 
-// Everything an IPv4/IPv6 literal can contain. A JA4 also carries letters past f and underscores.
-const IP_CHARS = /^[0-9a-fA-F.:]+$/;
 const IP_TYPED = /[^0-9a-fA-F.:]/g;
 const JA4_TYPED = /[^0-9a-z_]/gi;
 const MAX_TYPED = 45; // the longest IPv6 literal
+
+/** One IPv4 octet: 0-255, and no leading zeros, which some resolvers read as octal. */
+const OCTET = /^(0|[1-9]\d{0,2})$/;
+
+/** A complete IPv4 literal. Four octets in range — not merely four things made of digits. */
+function isIpv4(v: string): boolean {
+  const parts = v.split('.');
+  return (
+    parts.length === 4 && parts.every((p) => OCTET.test(p) && Number(p) <= 255)
+  );
+}
+
+/**
+ * A plausible IPv6 literal: hex groups, at most one `::`, optionally ending in an IPv4 tail.
+ *
+ * Deliberately looser than the IPv4 check. The cost of the two errors is not symmetric — a
+ * rejected address is one an operator can SEE in the traffic and cannot look up, while an
+ * over-permissive one only costs an empty tab.
+ */
+function isIpv6(v: string): boolean {
+  if (!v.includes(':')) return false;
+  if (v.split('::').length > 2) return false; // only one elision is legal
+  const parts = v.split(':').filter(Boolean);
+  if (!parts.length || parts.length > 8) return false;
+  return parts.every(
+    (g, i) =>
+      /^[0-9a-f]{1,4}$/i.test(g) || (i === parts.length - 1 && isIpv4(g)),
+  );
+}
 
 /** The identity as it is stored and queried. JA4 digests are case-insensitive handles; IPs are kept as written. */
 export function normalizeIdentity(kind: PickKind, value: string): string {
@@ -23,7 +50,9 @@ export function resolveSubject(
   value: string,
 ): { subject: Subject } | { error: string } {
   const v = normalizeIdentity(kind, value);
-  const valid = kind === 'ip' ? IP_CHARS.test(v) : JA4_DENY.valid(v);
+  // The whole literal, not just its permitted characters. A character check passed
+  // `999.999.999.999` and `1.2.3.4.5`, which open a tab and query an address that cannot exist.
+  const valid = kind === 'ip' ? isIpv4(v) || isIpv6(v) : JA4_DENY.valid(v);
   if (!v || !valid)
     return { error: kind === 'ip' ? 'not an IP address' : 'not a JA4 digest' };
   return { subject: { kind, value: v } };
@@ -45,12 +74,16 @@ export function typeIdentity(
 }
 
 // Substring, not prefix: an IP is often recognised by its tail as much as its network part.
+// Case-insensitive because the field accepts either: dashboards render digests upper-case, and
+// a digest pasted from one filtered the list to nothing against the lower-case rows.
 /** Rows matching what has been typed. A blank query matches everything. */
 export function filterIdentities(
   rows: [string, number][],
   query: string,
 ): [string, number][] {
-  return query ? rows.filter(([id]) => id.includes(query)) : rows;
+  if (!query) return rows;
+  const q = query.toLowerCase();
+  return rows.filter(([id]) => id.toLowerCase().includes(q));
 }
 
 /**

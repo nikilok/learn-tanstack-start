@@ -18,6 +18,7 @@ import {
   afterUnstage,
   denyEntries,
   enforcing,
+  isStaged,
   liveDenies,
   pendingByRule,
   promotes,
@@ -315,6 +316,78 @@ describe('afterStage / afterUnstage', () => {
     expect(
       afterUnstage([DIGEST_A], [], { value: DIGEST_A, staged: true }),
     ).toEqual({ staged: [], removed: [] });
+  });
+
+  // Found in review 2026-08-13. The lists were compared with raw equality while everything that
+  // reads them normalizes, so a digest staged upper-case could never be matched again: lifting it
+  // left a phantom entry staged forever, and the advisory read the identity as never touched.
+  describe('case', () => {
+    const UPPER = DIGEST_A.toUpperCase();
+
+    test('a value staged upper-case is held normalized', () => {
+      expect(afterStage([], [], UPPER).staged).toEqual([DIGEST_A]);
+    });
+
+    test('staging the same digest in both cases is ONE entry', () => {
+      const once = afterStage([], [], DIGEST_A);
+      expect(afterStage(once.staged, once.removed, UPPER).staged).toEqual([
+        DIGEST_A,
+      ]);
+    });
+
+    test('lifting removes a digest that was staged in the other case', () => {
+      const staged = afterStage([], [], UPPER).staged;
+      expect(
+        afterUnstage(staged, [], { value: DIGEST_A, staged: true }).staged,
+      ).toEqual([]);
+    });
+
+    test('staging cancels a pending removal recorded in the other case', () => {
+      const lifted = afterUnstage([], [], { value: UPPER, staged: false });
+      expect(lifted.removed).toEqual([DIGEST_A]);
+      expect(afterStage([], lifted.removed, DIGEST_A).removed).toEqual([]);
+    });
+
+    test('a lifted value is recorded normalized', () => {
+      expect(
+        afterUnstage([], [], { value: UPPER, staged: false }).removed,
+      ).toEqual([DIGEST_A]);
+    });
+
+    test('an AS number is untouched — the normalization must be safe for both lists', () => {
+      expect(afterStage([], [], AS_NUM).staged).toEqual([AS_NUM]);
+      expect(
+        afterUnstage([], [], { value: AS_NUM, staged: false }).removed,
+      ).toEqual([AS_NUM]);
+    });
+
+    test('surrounding whitespace never creates a second entry', () => {
+      expect(afterStage([DIGEST_A], [], ` ${DIGEST_A} `).staged).toEqual([
+        DIGEST_A,
+      ]);
+    });
+  });
+});
+
+// The advisory asks this about the digest on screen, which is normalized; the list holds what was
+// typed. An exact `includes` reported a digest staged upper-case as unstaged.
+describe('isStaged', () => {
+  test('finds a staged value', () => {
+    expect(isStaged([DIGEST_A], DIGEST_A)).toBe(true);
+  });
+
+  test('finds it whatever case the caller asks in', () => {
+    expect(isStaged([DIGEST_A], DIGEST_A.toUpperCase())).toBe(true);
+  });
+
+  test('finds one staged upper-case, because the list normalizes on the way in', () => {
+    const staged = afterStage([], [], DIGEST_A.toUpperCase()).staged;
+    expect(isStaged(staged, DIGEST_A)).toBe(true);
+  });
+
+  test('does not find a value that was never staged', () => {
+    expect(isStaged([DIGEST_A], DIGEST_B)).toBe(false);
+    expect(isStaged([], DIGEST_A)).toBe(false);
   });
 });
 

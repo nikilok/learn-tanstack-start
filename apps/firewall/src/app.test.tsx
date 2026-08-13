@@ -186,6 +186,34 @@ describe('App', () => {
     h.unmount();
   });
 
+  // The endpoint intermittently answers 504 Query timed out. The spinner used to vanish after
+  // ~90s of retries leaving an empty pane and no message, which reads as a broken tool.
+  test('a failed identity list says so, and says how to retry', async () => {
+    const { mock } = await import('bun:test');
+    const real = await import('./ip-profile');
+    mock.module('./ip-profile', () => ({
+      ...real,
+      topJa4: async () => ({
+        rows: [],
+        error: 'metrics 504: {"error":{"code":"TIMEOUT"}}',
+      }),
+    }));
+    const fresh = await import('./app');
+    const h = renderInk(<fresh.App />, { columns: 140, rows: 40 });
+    await h.settle();
+    await h.settle();
+    await h.press('f');
+    await h.settle();
+
+    const frame = h.frame();
+    expect(frame).toContain('fingerprint list failed');
+    expect(frame).toContain('504');
+    expect(frame).toContain('esc then f retries');
+    expect(frame).not.toContain('loading busiest');
+    h.unmount();
+    mock.module('./ip-profile', () => real);
+  });
+
   test('the picker refuses a value that is not an address', async () => {
     const h = await mountApp();
     await h.press('i');

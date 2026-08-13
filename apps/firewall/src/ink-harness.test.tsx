@@ -118,11 +118,31 @@ describe('renderInk', () => {
     h.unmount();
   });
 
-  test('unmount restores the real terminal size', async () => {
-    const before = process.stdout.columns;
-    const h = renderInk(<Text>x</Text>, { columns: 37 });
+  // A leaked patch silently changes what every later test measures, which is the same class of
+  // cross-test pollution the --preload exists to stop.
+  test('unmount restores BOTH terminal dimensions', async () => {
+    const before = { cols: process.stdout.columns, rows: process.stdout.rows };
+    const h = renderInk(<Text>x</Text>, { columns: 37, rows: 11 });
     await h.settle();
+    expect(process.stdout.columns).toBe(37);
+    expect(process.stdout.rows).toBe(11);
     h.unmount();
-    expect(process.stdout.columns).toBe(before);
+    expect(process.stdout.columns).toBe(before.cols);
+    expect(process.stdout.rows).toBe(before.rows);
+  });
+
+  test('a harness abandoned without unmount does not corrupt the next one', async () => {
+    // A failing assertion skips unmount. The restore must return the REAL size rather than
+    // whichever patch happened to be in place when this harness started.
+    const real = { cols: process.stdout.columns, rows: process.stdout.rows };
+    const leaked = renderInk(<Text>x</Text>, { columns: 61, rows: 13 });
+    await leaked.settle();
+
+    const next = renderInk(<Text>y</Text>, { columns: 37, rows: 11 });
+    await next.settle();
+    next.unmount();
+    expect(process.stdout.columns).toBe(real.cols);
+    expect(process.stdout.rows).toBe(real.rows);
+    leaked.unmount();
   });
 });

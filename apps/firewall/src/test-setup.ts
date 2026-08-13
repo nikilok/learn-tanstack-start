@@ -8,11 +8,14 @@
 /** The digest the rule set is seeded with, so a test asserting on a live deny names this one. */
 export const TEST_DENIED_JA4 = 't13d1516h2_8daaf6152771_b0da82dd1658';
 
+// Assigned outright, not with ??=. These ARE the fixture the assertions are written against, so
+// a developer with FW_BLOCKED_JA4 exported in their shell would otherwise change what the tests
+// see — the determinism this file exists for.
 // Dry-run: placeholder ceilings, and the deny lists become optional rather than required.
-process.env.DRY_RUN ??= '1';
-process.env.FW_BLOCKED_JA4 ??= TEST_DENIED_JA4;
-process.env.FW_CHALLENGE_JA4 ??= '';
-process.env.FW_BLOCKED_ASN ??= '';
+process.env.DRY_RUN = '1';
+process.env.FW_BLOCKED_JA4 = TEST_DENIED_JA4;
+process.env.FW_CHALLENGE_JA4 = '';
+process.env.FW_BLOCKED_ASN = '';
 // Never used to reach Vercel — every test stubs the client — but resolveVercelCredentials throws
 // without them, and it runs at import time too.
 process.env.VERCEL_TOKEN ??= 'test-token';

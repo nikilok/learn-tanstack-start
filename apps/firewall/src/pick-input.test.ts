@@ -69,6 +69,64 @@ describe('resolveSubject', () => {
       error: 'not a JA4 digest',
     });
   });
+
+  // Found in review 2026-08-13. The check tested permitted CHARACTERS, so anything built from
+  // digits, dots and colons resolved — opening a tab that queries an address that cannot exist.
+  describe('the whole literal, not just its characters', () => {
+    const refused = (v: string) =>
+      expect(resolveSubject('ip', v)).toEqual({ error: 'not an IP address' });
+    const accepted = (v: string) =>
+      expect(resolveSubject('ip', v)).toEqual({
+        subject: { kind: 'ip', value: v },
+      });
+
+    test('an octet above 255 is refused', () => {
+      refused('999.999.999.999');
+      refused('1.2.3.256');
+    });
+
+    test('the wrong number of octets is refused', () => {
+      refused('1.2.3');
+      refused('1.2.3.4.5');
+      refused('....');
+    });
+
+    test('an empty or leading-zero octet is refused', () => {
+      // A leading zero is read as octal by some resolvers, so it is not the address it looks like.
+      refused('1..3.4');
+      refused('01.2.3.4');
+    });
+
+    test('bare punctuation is refused', () => {
+      refused('.');
+      refused(':');
+      refused('...');
+    });
+
+    test('ordinary IPv4 still resolves, including the edges', () => {
+      accepted('1.2.3.4');
+      accepted('0.0.0.0');
+      accepted('255.255.255.255');
+    });
+
+    // Looser on purpose: a rejected address is one the operator can SEE in the traffic and
+    // cannot look up, which costs more than an empty tab.
+    test('the IPv6 forms that show up in traffic still resolve', () => {
+      accepted('2a02:c7f:1234::1');
+      accepted('::1');
+      accepted('2001:db8:0:0:0:0:0:1');
+      accepted('::ffff:1.2.3.4');
+    });
+
+    test('IPv6 with two elisions or too many groups is refused', () => {
+      refused('1::2::3');
+      refused('1:2:3:4:5:6:7:8:9');
+    });
+
+    test('a hex group longer than four digits is refused', () => {
+      refused('2a02:c7f12345::1');
+    });
+  });
 });
 
 describe('typeIdentity', () => {
@@ -124,6 +182,45 @@ describe('filterIdentities', () => {
     expect(filterIdentities(rows, '.').map(([, n]) => n)).toEqual([
       900, 500, 100,
     ]);
+  });
+
+  // Found in review 2026-08-13. The JA4 field accepts upper case (its typed filter is /i), and
+  // dashboards render digests upper case, so a pasted digest filtered the list to nothing while
+  // Enter on the same text would have resolved it — the picker looked empty, not wrong.
+  describe('case', () => {
+    const digests: [string, number][] = [
+      ['t13d1516h2_8daaf6152771_b0da82dd1658', 400],
+      ['t13d1517h2_8daaf6152771_02713d6af862', 200],
+    ];
+
+    test('an upper-case query matches lower-case rows', () => {
+      expect(filterIdentities(digests, 'T13D1516H2').map(([id]) => id)).toEqual(
+        ['t13d1516h2_8daaf6152771_b0da82dd1658'],
+      );
+    });
+
+    test('a whole digest pasted upper-case matches its row', () => {
+      const [[id]] = digests;
+      expect(filterIdentities(digests, id.toUpperCase())).toHaveLength(1);
+    });
+
+    test('a lower-case query matches upper-case rows, since the API may return either', () => {
+      const upper: [string, number][] = digests.map(([id, n]) => [
+        id.toUpperCase(),
+        n,
+      ]);
+      expect(filterIdentities(upper, 't13d1516h2')).toHaveLength(1);
+    });
+
+    test('whatever the case, filtering still narrows rather than matching everything', () => {
+      expect(filterIdentities(digests, 'T13D1517H2')).toHaveLength(1);
+      expect(filterIdentities(digests, 'ZZZZ')).toHaveLength(0);
+    });
+
+    test('IPv6 hex matches in either case too', () => {
+      const v6: [string, number][] = [['2a02:c7f:1234::1', 50]];
+      expect(filterIdentities(v6, '2A02:C7F')).toHaveLength(1);
+    });
   });
 });
 

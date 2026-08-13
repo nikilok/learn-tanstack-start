@@ -18,6 +18,7 @@ import {
   afterUnstage,
   denyEntries,
   liveDenies,
+  isStaged,
   pendingByRule,
   stage,
   unstage,
@@ -150,7 +151,7 @@ export function useDenylist(opts: {
     // has not been written, and calling that "already denied" is a lie.
     enforcedJa4: (digest) =>
       enforcedNow(live.ja4, staged, removed, digest, JA4_DENY),
-    stagedJa4: (digest) => staged.includes(digest),
+    stagedJa4: (digest) => isStaged(staged, digest),
     // Our own interstitial stops a browser fetching sub-resources, so its rendering evidence
     // disappears — and the advisory must not read that silence as a measured zero.
     challengedJa4: (digest) =>

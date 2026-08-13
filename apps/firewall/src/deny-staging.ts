@@ -144,15 +144,31 @@ export function unstage(items: Item[], kind: DenyKind, value: string): Item[] {
   );
 }
 
+// One form for both lists. They are flat and hold JA4 digests and AS numbers together, so the
+// normalization has to be the one that is safe for either: lowercasing a digest is what its spec
+// does, and an AS number is digits, which it cannot affect. Stored normalized rather than compared
+// that way at each site, because the comparisons are spread across the pane, the advisory and the
+// pending-edit count, and one of them was always going to be missed.
+/** How a staged or lifted value is held, whatever case it was typed in. */
+export function normalizeStaged(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** Whether `value` is staged this session. Normalizes the lookup, because the list is normalized. */
+export function isStaged(staged: string[], value: string): boolean {
+  return staged.includes(normalizeStaged(value));
+}
+
 /** The staged list after adding `value`, and the removed list it must leave. */
 export function afterStage(
   staged: string[],
   removed: string[],
   value: string,
 ): { staged: string[]; removed: string[] } {
+  const v = normalizeStaged(value);
   return {
-    staged: [...new Set([...staged, value])],
-    removed: removed.filter((v) => v !== value),
+    staged: [...new Set([...staged.map(normalizeStaged), v])],
+    removed: removed.filter((x) => normalizeStaged(x) !== v),
   };
 }
 
@@ -165,9 +181,12 @@ export function afterUnstage(
   removed: string[],
   entry: { value: string; staged: boolean },
 ): { staged: string[]; removed: string[] } {
+  const v = normalizeStaged(entry.value);
   return {
-    staged: staged.filter((v) => v !== entry.value),
-    removed: entry.staged ? removed : [...new Set([...removed, entry.value])],
+    staged: staged.filter((x) => normalizeStaged(x) !== v),
+    removed: entry.staged
+      ? removed
+      : [...new Set([...removed.map(normalizeStaged), v])],
   };
 }
 

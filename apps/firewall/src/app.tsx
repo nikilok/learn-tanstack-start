@@ -2030,7 +2030,19 @@ export function App() {
               {pickers.list.loading && !pickers.list.data ? (
                 <Text dimColor>
                   {'  '}loading busiest{' '}
-                  {pickers.kind === 'ip' ? 'IPs' : 'fingerprints'}…
+                  {pickers.kind === 'ip' ? 'IPs' : 'fingerprints'}… (up to ~90s
+                  — the endpoint retries a timeout twice)
+                </Text>
+              ) : pickers.list.error ? (
+                // Said out loud. The endpoint intermittently answers 504 Query timed out, and
+                // the spinner used to simply vanish after ~90s leaving an empty pane — which
+                // reads as a broken tool rather than as an upstream failure you can retry.
+                <Text color="red" wrap="truncate-end">
+                  {'  '}
+                  {pickers.kind === 'ip' ? 'IP' : 'fingerprint'} list failed:{' '}
+                  {pickers.list.error} · esc then{' '}
+                  {pickers.kind === 'ip' ? 'i' : 'f'} retries · typing an id and
+                  pressing enter still works
                 </Text>
               ) : (
                 pickers.list.data && (

@@ -9,6 +9,14 @@ import type { ReactElement } from 'react';
 // Outlasts Ink's 20ms hold on a lone ESC, or a bare escape never arrives.
 const FLUSH_MS = 25;
 
+// Captured once, before any harness has patched it. Restoring the value that was current when a
+// given harness started would hand back another harness's patch if two overlap, or if one is
+// abandoned by a failing assertion before it reaches unmount.
+const REAL_TERMINAL = {
+  columns: process.stdout.columns,
+  rows: process.stdout.rows,
+};
+
 // Matching the ESC byte is the whole job here — assertions read frames as plain text.
 // eslint-disable-next-line no-control-regex
 const ANSI = /\u001B\[[0-9;?]*[ -/]*[@-~]/g;
@@ -70,7 +78,6 @@ export function renderInk(
     unref() {},
   }) as unknown as NodeJS.ReadStream;
 
-  const real = { columns: process.stdout.columns, rows: process.stdout.rows };
   Object.assign(process.stdout, { columns, rows });
 
   const app = render(node, {
@@ -107,7 +114,7 @@ export function renderInk(
     },
     unmount: () => {
       app.unmount();
-      Object.assign(process.stdout, real);
+      Object.assign(process.stdout, REAL_TERMINAL);
     },
   };
 }

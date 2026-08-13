@@ -11,7 +11,9 @@ import { WATCH_LOG } from '../watch-log';
 export function WatchStatus({ watch: w }: { watch: Watch }) {
   if (!w.on) return null;
   return (
-    <Box flexDirection="column" marginTop={1}>
+    // Spaced on both sides: it sits between the rule list and the shortcuts footer, and without
+    // the lower margin it reads as part of the hints.
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
       <Text>
         <Text color={w.busy ? 'yellow' : 'green'} bold>
           ◉ watch{' '}

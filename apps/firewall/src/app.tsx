@@ -1250,9 +1250,12 @@ export function App() {
             />
           ))}
         </Box>
-        {/* Absorbs the slack between the rule list and the footer, anchoring the footer to the
-            bottom edge instead of floating under the last rule. */}
+        {/* Absorbs the slack between the rule list and what sits at the bottom, anchoring both
+            to the bottom edge instead of floating under the last rule. */}
         <Box flexGrow={1} />
+        {/* Above the shortcuts: the watch panel changes as the loop runs, and the key hints do
+            not — so the thing worth re-reading belongs where the eye lands last. */}
+        <WatchStatus watch={watch} />
         {phase === 'select' && (
           <Box flexDirection="column">
             {applied && (
@@ -1331,7 +1334,6 @@ export function App() {
         {phase === 'applying' && (
           <Text color="yellow">applying… · q stops after the current rule</Text>
         )}
-        <WatchStatus watch={watch} />
       </Box>
       {showPane && (
         <Box flexDirection="column" width={reportW}>

@@ -2,5 +2,5 @@
   "regions": ["lhr1"],
   "outputDirectory": ".vercel/output",
   "installCommand": "bun install --frozen-lockfile",
-  "ignoreCommand": "BASE=${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}; CHANGED=$(git diff --name-only \"$BASE\" HEAD) || exit 1; [ -z \"$CHANGED\" ] && exit 1; echo \"$CHANGED\" | grep -qvE '^(docs/|apps/(firewall|desktop|ch-stream)/|packages/gemma/|\\.github/|\\.claude/|\\.coderabbit\\.yaml$|README\\.md$)' && exit 1 || exit 0"
+  "ignoreCommand": "sh \"$(git rev-parse --show-toplevel)/apps/web/scripts/vercel-ignore.sh\""
 }

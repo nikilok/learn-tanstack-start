@@ -186,23 +186,28 @@ export function valuesOf(rule: Rule, spec: DenySpec): string[] {
  */
 export function listShapeOf(rule: Rule): {
   action: ListAction;
-  exemptPaths: string[];
+  exemptPaths: ExemptPath[];
 } {
   // From the rule's IDENTITY, not its current action. A recoverable rule switched to `log` fell
   // through to 'deny' here, so merely staging an entry on a disabled tier rebuilt it as a hard
   // deny — an escalation needing no action keypress at all.
   const action = rule.action.mitigate.action;
-  const exempt = new Set<string>();
+  // Keyed on op AND path. Reading back only the value silently downgraded every prefix exemption
+  // to an exact match on the first rebuild — and `withValue` rebuilds on every staged digest, so
+  // the next apply would have re-challenged the whole /assets/ tree with nothing reporting it.
+  const exempt = new Map<string, { path: string; op: 'eq' | 'pre' }>();
   for (const g of rule.conditionGroup)
     for (const c of g.conditions)
-      if (c.type === 'path' && c.neg && typeof c.value === 'string')
-        exempt.add(c.value);
+      if (c.type === 'path' && c.neg && typeof c.value === 'string') {
+        const op = c.op === 'pre' ? 'pre' : 'eq';
+        exempt.set(`${op}|${c.value}`, { path: c.value, op });
+      }
   return {
     action:
       isRecoverableRule(rule.name) || action === 'challenge'
         ? 'challenge'
         : 'deny',
-    exemptPaths: [...exempt],
+    exemptPaths: [...exempt.values()].map(denormalizeExempt),
   };
 }
 
@@ -327,6 +332,54 @@ export function pendingEdits(
 export const POLICY_PATHS = ['/robots.txt', '/llms.txt'];
 
 /**
+ * A path a list rule must not act on. A bare string means an exact match, which is what the
+ * policy documents need; the object form carries a prefix for whole trees.
+ *
+ * Widened rather than replacing the string form so `POLICY_PATHS` stays usable as raw paths
+ * elsewhere, and so an `eq` exemption round-trips through `listShapeOf` unchanged.
+ */
+export type ExemptPath = string | { path: string; op: 'eq' | 'pre' };
+
+/**
+ * Paths where a CHALLENGE cannot be answered, so issuing one there is just a broken request.
+ *
+ * A challenge is an interstitial, and an interstitial can only present itself on a top-level
+ * navigation. Everything below is fetched by the page or by the service worker with no user in
+ * front of it: a 429 to a font, a hashed bundle, an analytics beacon or a map tile is an error
+ * nobody can clear, and it breaks the app for someone who would happily have solved the challenge.
+ *
+ * Measured 2026-08-13: real browsers DO solve Vercel's challenge here — two UK users on Three and
+ * BT met one and were through inside the same ten-minute bucket, then rendered 94 and 25
+ * sub-resource requests. So the tier works where it can be answered, which is the argument for
+ * confining it to where it can be.
+ *
+ * `/_serverFn/` is deliberately NOT here. It is a data surface worth protecting, and a browser
+ * reaching it has already navigated and carries the clearance cookie, so the challenge costs it
+ * nothing. `/sw.js` IS here: the service worker updates in the background with no user present.
+ *
+ * This weakens nothing against a harvester — it wants `/company/…`, which is a navigation and
+ * stays covered.
+ */
+export const UNANSWERABLE_PATHS: ExemptPath[] = [
+  { path: '/assets/', op: 'pre' }, // hashed bundles, also precached by the service worker
+  { path: '/fonts/', op: 'pre' },
+  { path: '/_vercel/', op: 'pre' }, // insights + speed-insights beacons
+  { path: '/api/', op: 'pre' }, // map tiles and the rest of the XHR surface
+  { path: '/sw.js', op: 'eq' },
+  { path: '/manifest.json', op: 'eq' },
+];
+
+/** Exemptions in one shape, for emitting conditions. */
+function normalizeExempt(e: ExemptPath): { path: string; op: 'eq' | 'pre' } {
+  return typeof e === 'string' ? { path: e, op: 'eq' } : e;
+}
+
+/** And back, so an exact-match exemption round-trips as the plain string it came in as. */
+function denormalizeExempt(e: { path: string; op: 'eq' | 'pre' }): ExemptPath {
+  return e.op === 'eq' ? e.path : e;
+}
+
+/**
  * A list rule that CHALLENGES, for the tier an unattended writer may reach.
  *
  * Deliberately a separate builder taking no `action`, rather than an option on denyListRule. The
@@ -375,7 +428,7 @@ export function denyListRule(opts: {
   spec: DenySpec;
   values: string[];
   /** Paths exempt from the deny, so the stated policy stays readable. */
-  exemptPaths?: readonly string[];
+  exemptPaths?: readonly ExemptPath[];
   /**
    * What the rule does on a match. `deny` unless a caller asks otherwise.
    *
@@ -405,14 +458,13 @@ export function denyListRule(opts: {
     conditionGroup: values.map((value) => ({
       conditions: [
         { type: opts.spec.type, op: opts.spec.op ?? 'eq', value },
-        ...(opts.exemptPaths ?? []).map(
-          (path): Condition => ({
-            type: 'path',
-            op: 'eq',
-            value: path,
-            neg: true,
-          }),
-        ),
+        // The op is carried, not assumed. Emitting every exemption as `eq` would make a prefix
+        // exemption match only the bare directory — so `/assets/` would be exempt and every file
+        // under it still challenged, which is the failure this whole change exists to remove.
+        ...(opts.exemptPaths ?? []).map((e): Condition => {
+          const { path, op } = normalizeExempt(e);
+          return { type: 'path', op, value: path, neg: true };
+        }),
       ],
     })),
     action: { mitigate: { action: opts.action ?? 'deny' } },

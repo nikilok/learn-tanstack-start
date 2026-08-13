@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { tabWindow } from './useIpTabs';
+import { ARROW, tabWindow } from './useIpTabs';
 
 const w = (n: number, each = 18) => Array.from({ length: n }, () => each);
 
@@ -38,7 +38,9 @@ describe('tabWindow', () => {
       const used = w(8)
         .slice(r.start, r.end)
         .reduce((a, b) => a + b, 0);
-      const fits = used <= Math.max(0, avail - 4);
+      // ARROW * 2 from the source, not a literal 4: both ends are budgeted for even when
+      // only one arrow shows, so the window does not resize as it slides.
+      const fits = used <= Math.max(0, avail - ARROW * 2);
       // The renderer clips an oversized lone chip; the window's job is never to return zero.
       expect(fits || r.end - r.start === 1).toBe(true);
       expect(r.end).toBeGreaterThan(r.start);

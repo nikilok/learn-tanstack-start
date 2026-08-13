@@ -77,8 +77,40 @@ describe('isDryRun', () => {
 });
 
 describe('useColour', () => {
-  test('NO_COLOR turns colour off however the terminal is set up', () => {
-    process.env.NO_COLOR = '1';
+  // isTTY is false under the test runner, so without forcing it this asserts nothing: the
+  // function would return false even if NO_COLOR were ignored entirely.
+  const withTty = (fn: () => void) => {
+    const real = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, 'isTTY', {
+      value: true,
+      configurable: true,
+    });
+    try {
+      fn();
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        value: real,
+        configurable: true,
+      });
+    }
+  };
+
+  test('a TTY with no NO_COLOR gets colour', () => {
+    withTty(() => {
+      delete process.env.NO_COLOR;
+      expect(useColour()).toBe(true);
+    });
+  });
+
+  test('NO_COLOR turns it off even on a TTY', () => {
+    withTty(() => {
+      process.env.NO_COLOR = '1';
+      expect(useColour()).toBe(false);
+    });
+  });
+
+  test('a pipe gets no colour whatever NO_COLOR says', () => {
+    delete process.env.NO_COLOR;
     expect(useColour()).toBe(false);
   });
 });

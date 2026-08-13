@@ -75,6 +75,16 @@ export function usePickers(paneHeight: number): Pickers {
   const ja4Ref = useRef(ja4List);
   ja4Ref.current = ja4List;
 
+  /** The busiest rows for `want`. One definition, so `load` and `refreshLive` cannot drift. */
+  const fetchTop = async (creds: Creds, want: PickKind, window: Window) => {
+    const { rows, error: failed } =
+      want === 'ip'
+        ? await topIps(creds, window, TOP_IPS_LIMIT)
+        : await topJa4(creds, window, TOP_IPS_LIMIT);
+    if (failed) throw new Error(failed);
+    return rows;
+  };
+
   const list = kind === 'ip' ? ipList : ja4List;
   const filtered = filterIdentities(list.data ?? [], input);
   // How many count as busy is a property of the traffic, not a constant: a fixed cut hides the
@@ -115,34 +125,23 @@ export function usePickers(paneHeight: number): Pickers {
     load: (creds, want, window, force = false) => {
       const cache = want === 'ip' ? ipList : ja4List;
       if (cache.data && !force) return;
-      void cache.load(async () => {
-        const { rows, error: failed } =
-          want === 'ip'
-            ? await topIps(creds, window, TOP_IPS_LIMIT)
-            : await topJa4(creds, window, TOP_IPS_LIMIT);
-        if (failed) throw new Error(failed);
-        return rows;
-      });
+      void cache.load(() => fetchTop(creds, want, window));
     },
     reset: () => {
       ipList.reset();
       ja4List.reset();
     },
     refreshLive: (creds, window) => {
-      const cache = kindRef.current === 'ip' ? ipRef.current : ja4Ref.current;
+      // Captured once. Read again inside the fetcher, a kind switch mid-tick would put one
+      // pane's rows into the other's cache.
+      const want = kindRef.current;
+      const cache = want === 'ip' ? ipRef.current : ja4Ref.current;
       // No reset(): it clears `data` even when the load below is dropped as a duplicate, which
       // blanks the picker for a tick. A completed load replaces the rows by itself.
       // The outcome comes from load itself: it catches every rejection, so a flag set inside the
       // fetcher cannot see a request the pane dropped as a duplicate, and that reset the backoff
       // to zero on the exact ticks it was supposed to be lengthening.
-      return cache.load(async () => {
-        const { rows, error: failed } =
-          kindRef.current === 'ip'
-            ? await topIps(creds, window, TOP_IPS_LIMIT)
-            : await topJa4(creds, window, TOP_IPS_LIMIT);
-        if (failed) throw new Error(failed);
-        return rows;
-      });
+      return cache.load(() => fetchTop(creds, want, window));
     },
   };
 }

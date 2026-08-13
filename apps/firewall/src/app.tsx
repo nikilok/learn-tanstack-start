@@ -9,7 +9,7 @@ import {
   useApp,
   useInput,
 } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { actionColor, actionOptions, cycleAction, isLogOnly } from './actions';
 import { adviseBan } from './ban-advice';
@@ -119,7 +119,9 @@ const OPEN_ALL_MAX = 8;
 /** Interactive firewall manager: toggle each rule on/off and switch its action (log/challenge/deny/bypass), view the report in a side pane, then apply (upsert) to Vercel. */
 export function App() {
   const { exit } = useApp();
-  const creds = { projectId, teamId, token };
+  // Memoized: it feeds the tab hook's callback dependencies, and a fresh object every render
+  // rebuilt all of them for nothing.
+  const creds = useMemo(() => ({ projectId, teamId, token }), []);
   const [phase, setPhase] = useState<Phase>('loading');
   const [items, setItems] = useState<Item[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -640,7 +642,9 @@ export function App() {
       ]
         .filter(Boolean)
         .join(' · '),
-      onYes: () => denylist.stageDeny('ja4', target),
+      // Surfaced, like the ASN path. Discarded, a refused stage closed the dialog and looked
+      // exactly like a successful one.
+      onYes: () => setCopied(denylist.stageDeny('ja4', target) ?? ''),
     });
     setFocus('confirm');
   };

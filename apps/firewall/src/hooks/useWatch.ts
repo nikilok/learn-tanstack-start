@@ -300,13 +300,15 @@ export function useWatch(opts: {
         // unnoticed on the unattended path specifically.
         const envPath = `${root}/.env.local`;
         const beforeCfg = await fingerprintConfig(envPath);
-        let child: { kill: () => void } | null = null;
+        // A property, not a local: TypeScript narrows a callback-assigned local to `never` across
+        // the await, so the comparison below could not be written against it.
+        const spawned: { child: { kill: () => void } | null } = { child: null };
         const out = await runInvestigation(
           next,
           process.cwd(),
           watchHours(),
           (c) => {
-            child = c;
+            spawned.child = c;
             // A child arriving after disarm has nobody left to stop it.
             if (stopped) c.kill();
             else investigationRef.current = c;
@@ -315,7 +317,8 @@ export function useWatch(opts: {
         // Only if it still points at OUR child. A disarm-and-rearm during the await leaves this
         // continuation running while the new effect has already stored its own handle, and
         // clearing unconditionally strands that child with nothing able to kill it.
-        if (investigationRef.current === child) investigationRef.current = null;
+        if (investigationRef.current === spawned.child)
+          investigationRef.current = null;
         if (
           investigationChangedConfig(
             beforeCfg,

@@ -41,4 +41,15 @@ describe('confirmRows', () => {
   test('a degenerate width still reserves something rather than zero', () => {
     expect(confirmRows(of('x', 'y'), 0)).toBeGreaterThan(0);
   });
+
+  // A JA4 digest is 37 characters and never breaks, so in a narrow pane it occupies more than one
+  // row on its own. Charging it one is how the reservation ends up short again.
+  test('a word wider than the row counts as the rows it actually spans', () => {
+    const digest = 't13d1516h2_8daaf6152771_b0da82dd1658'; // 36
+    expect(confirmRows(of('x', digest), 12)).toBeGreaterThanOrEqual(1 + 3 + 1);
+  });
+
+  test('an explicit newline starts a new row', () => {
+    expect(confirmRows(of('x', 'a\nb\nc'), 80)).toBe(1 + 3 + 1);
+  });
 });

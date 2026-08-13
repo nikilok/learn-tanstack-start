@@ -2,7 +2,7 @@
 // leaves disk changed and the panes describing the state before it.
 
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,6 +55,35 @@ const tmp = () => mkdtempSync(join(tmpdir(), 'fw-lists-'));
 
 afterEach(() => {
   mock.restore();
+});
+
+describe('useIdentityLists.removeAtCursor', () => {
+  // The pane drops the row optimistically. If the save then fails, the file still holds what the
+  // pane just removed — so it re-reads rather than leaving the two disagreeing.
+  //
+  // The failure is a real one: a read-only directory, not a mocked saveList. mock.module does not
+  // reliably revert for modules already instantiated, and a leaked mock broke the next test.
+  test('a failed save re-reads the pane from disk and reports it', async () => {
+    const root = tmp();
+    writeFileSync(join(root, WATCHLIST_FILE), line('on-disk'));
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+    expect(h.frame()).toContain('watch=on-disk');
+
+    chmodSync(root, 0o500); // readable and traversable, not writable
+    try {
+      const msg = await get().removeAtCursor('watch');
+      await h.settle();
+      expect(msg).toBeTruthy();
+      expect(msg).toContain('watch list');
+      // Restored, not left showing the row it optimistically dropped.
+      expect(h.frame()).toContain('watch=on-disk');
+    } finally {
+      chmodSync(root, 0o700);
+      h.unmount();
+    }
+  });
 });
 
 describe('useIdentityLists.move', () => {

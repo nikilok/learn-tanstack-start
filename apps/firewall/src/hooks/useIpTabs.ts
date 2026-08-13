@@ -73,7 +73,8 @@ export function indexAfterClose(current: number, remaining: number): number {
   return Math.max(0, Math.min(current, remaining - 1));
 }
 
-const ARROW = 2; // '‹ ' / ' ›'
+/** Width the ends of a windowed tab bar cost. Exported so the test measures against the same number the layout uses. */
+export const ARROW = 2; // '‹ ' / ' ›'
 
 /**
  * The slice of tabs that fits `available` columns, always including `active`. Overflowing the row
@@ -128,7 +129,7 @@ export function useIpTabs(creds: Creds): IpTabs {
       window: Window,
       force = false,
     ): Promise<void> {
-      const key = `${subject.kind}:${subject.value}`;
+      const key = subjectKey(subject);
       const disposition = runDisposition(inFlight.current, key, force);
       if (disposition !== 'run') {
         // Last one wins: only the newest window is worth running when this finally lands.
@@ -139,11 +140,7 @@ export function useIpTabs(creds: Creds): IpTabs {
       const patch = (p: Partial<IpTab>) =>
         // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
         setTabs((prev) =>
-          prev.map((t) =>
-            t.subject.kind === subject.kind && t.subject.value === subject.value
-              ? { ...t, ...p }
-              : t,
-          ),
+          prev.map((t) => (subjectKey(t.subject) === key ? { ...t, ...p } : t)),
         );
       patch({ loading: true, error: '' });
       try {
@@ -169,8 +166,7 @@ export function useIpTabs(creds: Creds): IpTabs {
     (subject: Subject, window: Window, force = false) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
       const existing = tabs.findIndex(
-        (t) =>
-          t.subject.kind === subject.kind && t.subject.value === subject.value,
+        (t) => subjectKey(t.subject) === subjectKey(subject),
       );
       if (existing !== -1) {
         setIndex(existing);

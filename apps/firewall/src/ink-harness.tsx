@@ -55,7 +55,13 @@ export type Harness = {
   unmount: () => void;
 };
 
-/** Mount `node` on a fake terminal. `columns`/`rows` also patch process.stdout, which the layout reads directly, and are restored on unmount. */
+/**
+ * Mount `node` on a fake terminal.
+ *
+ * `columns`/`rows` also patch process.stdout, which the layout reads directly, and are restored on
+ * unmount — but that patch is PROCESS-WIDE. Two live harnesses cannot hold different terminal
+ * sizes, and unmounting either restores the real dimensions rather than the other one's.
+ */
 export function renderInk(
   node: ReactElement,
   opts: { columns?: number; rows?: number } = {},

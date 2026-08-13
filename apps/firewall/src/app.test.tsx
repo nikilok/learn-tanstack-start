@@ -207,18 +207,23 @@ describe('App', () => {
     }));
     const fresh = await import('./app');
     const h = renderInk(<fresh.App />, { columns: 140, rows: 40 });
-    await h.settle();
-    await h.settle();
-    await h.press('f');
-    await h.settle();
+    try {
+      await h.settle();
+      await h.settle();
+      await h.press('f');
+      await h.settle();
 
-    const frame = h.frame();
-    expect(frame).toContain('fingerprint list failed');
-    expect(frame).toContain('504');
-    expect(frame).toContain('esc then f retries');
-    expect(frame).not.toContain('loading busiest');
-    h.unmount();
-    mock.module('./ip-profile', () => real);
+      const frame = h.frame();
+      expect(frame).toContain('fingerprint list failed');
+      expect(frame).toContain('504');
+      expect(frame).toContain('esc then f retries');
+      expect(frame).not.toContain('loading busiest');
+    } finally {
+      // In a finally: a failed assertion would otherwise leave the app mounted and ./ip-profile
+      // mocked for every test after it.
+      h.unmount();
+      mock.module('./ip-profile', () => real);
+    }
   });
 
   test('the picker refuses a value that is not an address', async () => {

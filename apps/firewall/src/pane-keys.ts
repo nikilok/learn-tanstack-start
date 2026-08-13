@@ -4,15 +4,19 @@
 // go unadvertised and a hint cannot describe a key that does nothing. Those were two hand-written
 // lists, and on 2026-08-12 they disagreed: `b` worked while its hint was hidden.
 
-import type { MaybeHint } from './components/footer-hints';
+import type { Hint } from './components/footer-hints';
 
-export type PaneKind =
-  | 'report'
-  | 'ip'
-  | 'sitemap'
-  | 'denylist'
-  | 'watchlist'
-  | 'ignorelist';
+/** Every side pane, in the order the footer walks them. Derived from, never restated — a second list is one that can disagree. */
+export const PANE_KINDS = [
+  'report',
+  'ip',
+  'sitemap',
+  'denylist',
+  'watchlist',
+  'ignorelist',
+] as const;
+
+export type PaneKind = (typeof PANE_KINDS)[number];
 
 /** A keypress reduced to what a binding matches on. */
 export type Press = {
@@ -84,10 +88,7 @@ export function bindingFor(
 }
 
 /** Footer hints for exactly the bindings that are live and listed. */
-export function hintsFor(
-  table: readonly Binding[],
-  pane: PaneKind,
-): MaybeHint[] {
+export function hintsFor(table: readonly Binding[], pane: PaneKind): Hint[] {
   return liveBindings(table, pane)
     .filter((b) => !b.unlisted)
     .map((b) => ({ key: b.key, label: b.label, active: b.active }));

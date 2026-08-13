@@ -12,7 +12,8 @@ export const PANE_GAP = 2; // marginRight between the two columns
 const CURSOR_W = 2; // '▶ ' / '  '
 export const COUNT_W = 7; // right-aligned request count
 const ROW_W = CURSOR_W + COUNT_W + 1; // ... and the space before the identity
-const FLAG_W = 3; // ' ⚑' — budgeted at 2 cells, since the glyph is ambiguous-width
+// The glyph is ambiguous-width so it is budgeted at 2 cells, and the leading space makes 3.
+const FLAG_W = 3; // ' ⚑'
 const OPEN_W = 7; // ' (open)'
 export const ROW_CHROME = {
   row: ROW_W,

@@ -96,18 +96,16 @@ export function useDenylist(opts: {
     const next = stage(items, kind, value);
     if (next.error) return next.error;
     setItems(next.items);
-    const lists = afterStage(staged, removed, value);
-    setStaged(lists.staged);
-    setRemoved(lists.removed);
+    setStaged((s) => afterStage(s, removed, value).staged);
+    setRemoved((r) => afterStage(staged, r, value).removed);
     onEdit();
     return undefined;
   };
 
   const unstageDeny = (entry: DenyEntry) => {
     setItems(unstage(items, entry.kind, entry.value));
-    const lists = afterUnstage(staged, removed, entry);
-    setStaged(lists.staged);
-    setRemoved(lists.removed);
+    setStaged((s) => afterUnstage(s, removed, entry).staged);
+    setRemoved((r) => afterUnstage(staged, r, entry).removed);
     onEdit();
   };
 

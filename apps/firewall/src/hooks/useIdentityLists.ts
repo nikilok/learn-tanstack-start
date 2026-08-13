@@ -80,8 +80,7 @@ export function useIdentityLists(root: string): IdentityLists {
       // The add file is written BEFORE the drop, so a half-move has already changed disk while
       // the panes still show the pre-move state. Re-read both so they tell the truth — the same
       // discipline removeAtCursor follows when its save fails.
-      await load('watch');
-      await load('ignore');
+      await Promise.all([load('watch'), load('ignore')]);
       return `${to} list: ${out.error}`;
     }
     const next = afterMove(to, out.added ?? [], out.remaining ?? []);

@@ -29,7 +29,8 @@ export async function fetchDenyActivity(
       limit: 500,
     });
     // The query succeeded, so a digest with no rows genuinely saw nothing.
-    for (const v of ja4) activity.set(v, { requests: 0, denied: 0 });
+    for (const v of ja4)
+      activity.set(JA4_DENY.normalize(v.trim()), { requests: 0, denied: 0 });
     for (const row of resp.summary ?? []) {
       // Normalized to match how the seeded keys are stored. The API can return a digest
       // upper-cased, which then created a SECOND entry and left the seeded one at zero — and a

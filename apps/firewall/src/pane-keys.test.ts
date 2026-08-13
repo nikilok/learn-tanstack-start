@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   type Binding,
-  type PaneKind,
+  PANE_KINDS,
   type Press,
   bindingFor,
   hintsFor,
@@ -15,14 +15,7 @@ import {
   press,
 } from './pane-keys';
 
-const PANES: PaneKind[] = [
-  'report',
-  'ip',
-  'sitemap',
-  'denylist',
-  'watchlist',
-  'ignorelist',
-];
+const PANES = PANE_KINDS;
 
 const key = (input: string): Press => ({ input });
 const special = (k: Partial<Press>): Press => ({ input: '', ...k });

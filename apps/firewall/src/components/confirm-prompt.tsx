@@ -13,15 +13,24 @@ export type Confirmation = {
 /** Lines `text` occupies once wrapped to `width`. */
 function wrappedRows(text: string, width: number): number {
   if (width <= 0) return 1;
-  let rows = 1;
-  let used = 0;
-  for (const word of text.split(' ')) {
-    if (used === 0) used = word.length;
-    else if (used + 1 + word.length <= width) used += 1 + word.length;
-    else {
-      rows++;
-      used = word.length;
+  let rows = 0;
+  for (const line of text.split('\n')) {
+    let inLine = 1;
+    let used = 0;
+    for (const word of line.split(' ')) {
+      const w = word.length;
+      if (used !== 0 && used + 1 + w > width) {
+        inLine++;
+        used = 0;
+      }
+      // A word wider than the row is not one row — a JA4 digest in a narrow pane is two, and
+      // charging it one is how the reservation ends up short again.
+      if (w > width) {
+        inLine += Math.ceil(w / width) - 1;
+        used = w % width;
+      } else used = used === 0 ? w : used + 1 + w;
     }
+    rows += inLine;
   }
   return rows;
 }

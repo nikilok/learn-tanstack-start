@@ -125,6 +125,22 @@ describe('resolveSubject', () => {
       refused('1:2:3:4:5:6:7:8:9');
     });
 
+    // Counting groups rather than requiring eight of them accepted both of these.
+    test('too FEW groups without an elision is refused', () => {
+      refused('1:2:3');
+      refused('2a02:c7f:1234');
+    });
+
+    test('a lone leading or trailing colon is not an elision', () => {
+      refused(':1:2:3:4:5:6:7');
+      refused('1:2:3:4:5:6:7:');
+    });
+
+    test('an IPv4 tail counts as the two groups it stands for', () => {
+      accepted('1:2:3:4:5:6:1.2.3.4'); // six groups + a tail = eight
+      refused('1:2:3:4:5:6:7:1.2.3.4'); // seven + a tail = nine
+    });
+
     test('a hex group longer than four digits is refused', () => {
       refused('2a02:c7f12345::1');
     });

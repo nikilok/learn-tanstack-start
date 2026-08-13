@@ -30,13 +30,22 @@ function isIpv4(v: string): boolean {
 function isIpv6(v: string): boolean {
   if (!v.includes(':')) return false;
   if (v === '::') return true; // all-zeros: legal, and it has no groups to check
-  if (v.split('::').length > 2) return false; // only one elision is legal
+  const elisions = v.split('::').length - 1;
+  if (elisions > 1) return false; // only one elision is legal
+  // A lone leading or trailing colon is not an elision, and `1:2:3` is not an address either —
+  // counting groups rather than checking their shape accepted both.
+  if (v.startsWith(':') && !v.startsWith('::')) return false;
+  if (v.endsWith(':') && !v.endsWith('::')) return false;
   const parts = v.split(':').filter(Boolean);
-  if (!parts.length || parts.length > 8) return false;
-  return parts.every(
-    (g, i) =>
-      /^[0-9a-f]{1,4}$/i.test(g) || (i === parts.length - 1 && isIpv4(g)),
-  );
+  if (!parts.length) return false;
+  let units = 0;
+  for (const [i, g] of parts.entries()) {
+    if (/^[0-9a-f]{1,4}$/i.test(g)) units += 1;
+    // An IPv4 tail stands for the last two groups.
+    else if (i === parts.length - 1 && isIpv4(g)) units += 2;
+    else return false;
+  }
+  return elisions === 1 ? units < 8 : units === 8;
 }
 
 /** The identity as it is stored and queried. JA4 digests are case-insensitive handles; IPs are kept as written. */

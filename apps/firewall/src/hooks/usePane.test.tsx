@@ -148,6 +148,51 @@ describe('usePane', () => {
     h.unmount();
   });
 
+  // applyWindow does reset() then load() back to back. A plain in-flight flag dropped that load
+  // as a duplicate, so changing the window while one was pending left the pane empty until
+  // something else happened to refetch it.
+  test('a load started right after reset() runs, even with one still pending', async () => {
+    const { h, get } = await mountPane();
+    const first = deferred<string>();
+    void get().load(() => first.promise);
+    await h.settle();
+
+    get().reset();
+    const second = deferred<string>();
+    const outcome = get().load(() => second.promise);
+    await h.settle();
+
+    first.resolve('stale');
+    second.resolve('fresh');
+    expect(await outcome).toBe('ok');
+    await h.settle();
+    expect(h.frame()).toContain('data=fresh');
+    expect(h.frame()).toContain('loading=false');
+    h.unmount();
+  });
+
+  test('the superseded load cannot clear the newer one’s spinner', async () => {
+    const { h, get } = await mountPane();
+    const first = deferred<string>();
+    void get().load(() => first.promise);
+    await h.settle();
+
+    get().reset();
+    const second = deferred<string>();
+    void get().load(() => second.promise);
+    await h.settle();
+
+    first.resolve('stale'); // the older one lands first
+    await h.settle();
+    expect(h.frame()).toContain('loading=true');
+    expect(h.frame()).toContain('data=-');
+
+    second.resolve('fresh');
+    await h.settle();
+    expect(h.frame()).toContain('loading=false');
+    h.unmount();
+  });
+
   test('reset drops the data so the next load actually refetches', async () => {
     const { h, get } = await mountPane();
     const d = deferred<string>();

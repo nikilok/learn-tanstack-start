@@ -684,3 +684,46 @@ describe('findSuspects — the challenge list suppresses a digest', () => {
     expect(findings).toHaveLength(1);
   });
 });
+
+// CodeRabbit's mergeability note, 2026-08-13: the challenge-awareness passed into the advisory is
+// unreachable from the watch loop, because `worthProfiling` filters the same list. True, and the
+// comment used to claim the reverse. Pinned so the two cannot drift apart again.
+describe('the suppression and the challenge flag read the same list', () => {
+  test('a challenged digest is filtered before profiling, so it never reaches the advisory', async () => {
+    const { findings, rows } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [HARVESTER.digest],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    // Screened, so the aggregate still counts it — but never adjudicated.
+    expect(rows.some((r) => r.digest === HARVESTER.digest)).toBe(true);
+    expect(findings).toHaveLength(0);
+  });
+
+  test('and with the list empty it IS adjudicated, with the flag false — same source, no drift', async () => {
+    // The control. If these ever came from different lists, one of these two assertions breaks.
+    const { findings } = await atFloor(() =>
+      findSuspects(
+        CREDS,
+        WINDOW,
+        [],
+        [],
+        ['allow-ch-stream-revalidate'],
+        ['googlebot'],
+        [],
+        [],
+        deps([HARVESTER]),
+      ),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.advice.challengeLive).toBe(false);
+  });
+});

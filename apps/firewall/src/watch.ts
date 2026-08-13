@@ -568,8 +568,18 @@ export async function findSuspects(
       digestReach: p.digestReach,
       asnReach: p.asnReach,
       alreadyDeniedJa4: false, // filtered out by worthProfiling
-      // NOT filtered out by worthProfiling — a challenged digest that still shows up is one that
-      // defeated the challenge, which is the case most worth judging correctly.
+      // ALWAYS false on this path, and deliberately still computed.
+      //
+      // The comment here used to claim the opposite — that a challenged digest reaching the
+      // advisory had defeated its challenge — and that was true until `worthProfiling` began
+      // filtering the same list a few hours later. A comment asserting the reverse of the code is
+      // worse than none, so: `challengedJa4` and the profiling filter read the SAME list, which is
+      // what makes this always false rather than merely usually.
+      //
+      // Kept because it is the only thing standing between a future edit and a silent hole: drop
+      // the suppression from `worthProfiling` and the censorship guard has to work immediately,
+      // without anyone remembering to re-wire it. The guard itself is exercised by the on-demand
+      // paths — `firewall:ip` and the TUI profile — which is where an operator actually reads it.
       challengedJa4: challengedJa4
         .map(JA4_DENY.normalize)
         .includes(JA4_DENY.normalize(c.digest)),

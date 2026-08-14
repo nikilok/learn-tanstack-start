@@ -14,6 +14,7 @@ import { IGNORELIST_FILE, WATCHLIST_FILE } from '../watchlist';
 import { type IdentityLists, useIdentityLists } from './useIdentityLists';
 
 const DIGEST = 't13d1516h2_8daaf6152771_b0da82dd1658';
+const OTHER = 't13d1517h2_8daaf6152771_02713d6af862';
 
 /** One on-disk list line. The note is what each assertion below reads back. */
 const line = (note: string) =>
@@ -193,6 +194,30 @@ describe('useIdentityLists, loading and cursors', () => {
     expect(h.frame()).toContain('watch=from-the-tick');
     expect(get().watch.error).toBe('');
     h.unmount();
+  });
+
+  // The tick's list can be SHORTER than what the pane held. Left past the end, `current` is
+  // undefined and x lands on nothing, with no sign of why.
+  test('a shorter list from the tick pulls the cursor back onto a real row', async () => {
+    const { h, get } = await mountLists(tmp());
+    const row = (id: string, note: string) => ({
+      kind: 'ja4' as const,
+      id,
+      addedAt: '2026-08-14T06:00:00.000Z',
+      lastSeen: '2026-08-14T06:00:00.000Z',
+      seen: 1,
+      source: 'watch' as const,
+      note,
+    });
+    get().replaceWatch([row(DIGEST, 'first'), row(OTHER, 'second')]);
+    await h.settle();
+    get().moveCursor('watch', 1);
+    await h.settle();
+    expect(get().watch.current?.note).toBe('second');
+
+    get().replaceWatch([row(DIGEST, 'first')]);
+    await h.settle();
+    expect(get().watch.current?.note).toBe('first');
   });
 });
 

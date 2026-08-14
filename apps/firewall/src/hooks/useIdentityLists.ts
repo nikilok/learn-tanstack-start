@@ -153,6 +153,10 @@ export function useIdentityLists(root: string): IdentityLists {
       ),
     replaceWatch: (entries) => {
       setWatchEntries(entries);
+      // Clamped: the tick's list can be SHORTER than what the pane held — the CLI or a hand edit
+      // can drop rows between ticks — and a cursor left past the end makes `current` undefined,
+      // so x and z land on nothing with no sign of why.
+      setWatchCursor((c) => clampCursor(c, entries.length));
       setWatchError('');
     },
   };

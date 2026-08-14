@@ -1294,7 +1294,9 @@ export function App() {
         <Box flexGrow={1} />
         {/* Above the shortcuts: the watch panel changes as the loop runs, and the key hints do
             not — so the thing worth re-reading belongs where the eye lands last. */}
-        <WatchStatus watch={watch} />
+        {/* Half the column, floored so it stays useful on a small terminal. The panel shrinks
+            into this rather than growing the column past the viewport. */}
+        <WatchStatus watch={watch} maxRows={Math.max(7, Math.floor(reportH / 2))} />
         {phase === 'select' && (
           <Box flexDirection="column">
             {applied && (

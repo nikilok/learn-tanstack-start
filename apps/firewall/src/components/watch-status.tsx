@@ -46,9 +46,56 @@ function ProfiledRow({ p }: { p: Profiled }) {
   );
 }
 
+// What the panel costs before either list: the border, the header, the note and the logging line.
+const CHROME = 5;
+// The verdict's own heading, and the blank line above it.
+const VERDICT_CHROME = 2;
+
+/**
+ * Rows to give each list within `maxRows`.
+ *
+ * Profiles keep their room and the verdict yields, because the verdict already says where its
+ * full text is and the profile rows are the only place the current tick's identities appear.
+ * Exported so the sizing is tested as arithmetic rather than by counting rendered lines.
+ */
+export function panelRows(
+  maxRows: number,
+  profiles: number,
+  verdictLines: number,
+): { profiles: number; verdict: number } {
+  const room = Math.max(0, maxRows - CHROME);
+  let shownProfiles = Math.min(SHOWN, profiles, room);
+  // The "… N more" line costs a row too, and comes out of the SAME room — counted afterwards it
+  // pushed the panel one row past the budget it was given.
+  if (profiles > shownProfiles && shownProfiles === room)
+    shownProfiles = Math.max(0, room - 1);
+  const overflowRow = profiles > shownProfiles ? 1 : 0;
+  const left = room - shownProfiles - overflowRow;
+  const budget = left - VERDICT_CHROME;
+  // Its own "… N more line(s)" row costs one, and shows exactly when the verdict does not fit —
+  // so it has to be reserved in the case that creates it, not counted as fixed chrome.
+  const verdict = verdictLines
+    ? Math.max(0, Math.min(verdictLines, budget - (verdictLines > budget ? 1 : 0)))
+    : 0;
+  return { profiles: shownProfiles, verdict };
+}
+
 /** Status for an armed watch loop. Renders nothing when it is not. */
-export function WatchStatus({ watch: w }: { watch: Watch }) {
+export function WatchStatus({
+  watch: w,
+  /** Rows the panel may occupy. It shrinks to fit rather than growing the column past the viewport — an overflowing frame scrolls the terminal and takes the editor cursor with it. */
+  maxRows = Number.MAX_SAFE_INTEGER,
+}: {
+  watch: Watch;
+  maxRows?: number;
+}) {
   if (!w.on) return null;
+  const verdictAll = w.verdictHead ? w.verdictHead.split('\n') : [];
+  const room = panelRows(maxRows, w.who.length, verdictAll.length);
+  const verdictShown = verdictAll.slice(0, room.verdict);
+  // Both the lines useWatch already dropped and the ones that did not fit here, or the count
+  // understates what is missing and a clipped verdict reads as a complete one.
+  const clipped = w.verdictClipped + (verdictAll.length - verdictShown.length);
   return (
     // Boxed so an armed loop reads as its own panel rather than more footer. The border carries
     // the state the ◉ marker already shows — amber mid-tick, green between them — so whether it
@@ -85,14 +132,14 @@ export function WatchStatus({ watch: w }: { watch: Watch }) {
         </Text>
       )}
       {/* Name them, or "1 profiled" sends the operator digging through the log. */}
-      {w.who.slice(0, SHOWN).map((p) => (
+      {w.who.slice(0, room.profiles).map((p) => (
         <ProfiledRow key={p.digest} p={p} />
       ))}
-      {w.who.length > SHOWN && (
+      {w.who.length > room.profiles && (
         // Bounded, or a busy tick grows the panel until it pushes the rule list off screen. The
         // watch-list pane has every one of them.
         <Text dimColor>
-          {'  '}… {w.who.length - SHOWN} more · t for the watch list
+          {'  '}… {w.who.length - room.profiles} more · t for the watch list
         </Text>
       )}
       {/* Stays up once it has happened. The loop runs while you are in another pane, so an
@@ -113,19 +160,20 @@ export function WatchStatus({ watch: w }: { watch: Watch }) {
       )}
       {/* Not truncated: a verdict is the one thing here worth reading in full, and a
           clipped one is worse than none — it reads as complete. */}
-      {Boolean(w.verdictHead) && (
+      {verdictShown.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text color="cyan" bold>
             investigation{' '}
             {w.verdictOf ? <Text dimColor>{w.verdictOf}</Text> : null}
           </Text>
-          {/* Clamped. This pane's height is reserved in advance, and an unbounded verdict
-              overflows the frame — which scrolls the terminal and hides the editor cursor,
-              the same defect reportH and the pane height already exist to prevent. */}
-          <Text>{w.verdictHead}</Text>
-          {w.verdictClipped > 0 && (
+          {/* Clamped to what the column can actually give it. Measured before this existed: an
+              armed panel with six profiles and a verdict came to 26 rows against a frame that
+              already filled a 24-row terminal — which scrolls it and takes the editor cursor
+              with it, the same defect reportH and the pane height exist to prevent. */}
+          <Text>{verdictShown.join('\n')}</Text>
+          {clipped > 0 && (
             <Text dimColor>
-              {'  '}… {w.verdictClipped} more line(s) — full text in {WATCH_LOG}
+              {'  '}… {clipped} more line(s) — full text in {WATCH_LOG}
             </Text>
           )}
         </Box>

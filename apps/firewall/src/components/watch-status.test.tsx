@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 
 import type { Watch } from '../hooks/useWatch';
 import { renderInk } from '../ink-harness';
-import { WatchStatus } from './watch-status';
+import { WatchStatus, panelRows } from './watch-status';
 
 const ARMED: Watch = {
   on: true,
@@ -150,5 +150,70 @@ describe('WatchStatus', () => {
     });
     expect(frame).toContain('7 more line(s)');
     expect(frame).toContain('firewall-watch.log');
+  });
+});
+
+// Measured before this existed: an armed panel with six profiles and a verdict came to 26 rows,
+// against an app frame that already filled a 24-row terminal. Bounded is not the same as fits.
+describe('panelRows', () => {
+  test('a generous budget gives both lists everything they asked for', () => {
+    expect(panelRows(40, 6, 12)).toEqual({ profiles: 6, verdict: 12 });
+  });
+
+  test('a tight budget sheds the verdict first — it says where its full text is', () => {
+    const room = panelRows(14, 6, 12);
+    expect(room.profiles).toBe(6);
+    expect(room.verdict).toBeLessThan(12);
+  });
+
+  test('a budget with no room at all shows neither, and never a negative count', () => {
+    const room = panelRows(5, 6, 12);
+    expect(room.profiles).toBe(0);
+    expect(room.verdict).toBe(0);
+  });
+
+  test('the panel never exceeds the budget it was given', async () => {
+    const who = Array.from({ length: 9 }, (_, i) => ({
+      digest: `t13d17${i}4h1_5b57614c22b0_7baf387fc6ff`,
+      total: 900,
+      verdict: 'watch',
+      why: 'rendering',
+    }));
+    const verdictHead = Array.from({ length: 12 }, (_, i) => `line ${i}`).join(
+      '\n',
+    );
+    for (let maxRows = 6; maxRows <= 26; maxRows++) {
+      const h = renderInk(
+        <WatchStatus
+          watch={{ ...ARMED, who, verdictHead, verdictOf: 'x', invokedCount: 1 }}
+          maxRows={maxRows}
+        />,
+        { columns: 140 },
+      );
+      await h.settle();
+      const lines = h.frame().split('\n').filter((l) => l.trim()).length;
+      h.unmount();
+      expect(lines).toBeLessThanOrEqual(maxRows);
+    }
+  });
+
+  test('a clipped verdict counts what the LAYOUT dropped too, not just useWatch', async () => {
+    const h = renderInk(
+      <WatchStatus
+        watch={{
+          ...ARMED,
+          verdictHead: Array.from({ length: 10 }, (_, i) => `l${i}`).join('\n'),
+          verdictClipped: 3,
+          verdictOf: 'x',
+        }}
+        maxRows={12}
+      />,
+      { columns: 140 },
+    );
+    await h.settle();
+    const frame = h.frame();
+    h.unmount();
+    // 3 already dropped, plus whatever did not fit — never just the 3.
+    expect(frame).toMatch(/… (?!3 more line)\d+ more line/);
   });
 });

@@ -337,6 +337,33 @@ describe('useDenylist', () => {
       t.h.unmount();
     });
 
+    test('lifting a LIVE challenge marks the tier, not the deny rule', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+      ]);
+      t.get().unstageDeny(t.get().entries[0]);
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([]);
+      expect(t.h.frame()).toContain(`${CHALLENGE_SCRAPER_JA4}=−1`);
+      expect(t.h.frame()).not.toContain(`${JA4_RULE}=`);
+      t.h.unmount();
+    });
+
+    test('lifting one staged this session just drops the stage', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      t.get().unstageDeny(t.get().entries[0]);
+      await t.h.settle();
+      // Nothing pending either way: it was never live, so there is no removal to record.
+      expect(t.h.frame()).toContain('pending= |');
+      t.h.unmount();
+    });
+
     test('an applied challenge is written to FW_CHALLENGE_JA4', async () => {
       const t = await mount([
         item(JA4_RULE, []),

@@ -735,3 +735,47 @@ describe('staging a challenge', () => {
     expect(entries[0].staged).toBe(true);
   });
 });
+
+// A challenge taken off the tier went onto the shared `removed` list, which is classified by
+// SHAPE — so it came back as a JA4 removal and the tier's marker fired on neither rule, leaving
+// the lift showing as pending nowhere.
+describe('lifting a challenge', () => {
+  test('is listed as a challenge removal, not a JA4 one', () => {
+    const entries = denyEntries({
+      liveJa4: [],
+      liveAsn: [],
+      staged: [],
+      removed: [],
+      activity: null,
+      removedChallenge: [DIGEST_A],
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].kind).toBe('challenge');
+    expect(entries[0].removed).toBe(true);
+  });
+
+  test('marks the challenge rule, so the lift is visible as pending', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_A])];
+    expect(pendingByRule(items, [], [], [], [], [DIGEST_A])).toEqual(
+      new Map([[CHALLENGE_SCRAPER_JA4, '−1']]),
+    );
+  });
+
+  test('a lift and a promotion both count off the tier', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    expect(
+      pendingByRule(items, [], [], [DIGEST_B], [], [DIGEST_A]).get(
+        CHALLENGE_SCRAPER_JA4,
+      ),
+    ).toBe('−2');
+  });
+
+  test('an addition alongside a lift reports both directions', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    expect(
+      pendingByRule(items, [], [], [], [DIGEST_B], [DIGEST_A]).get(
+        CHALLENGE_SCRAPER_JA4,
+      ),
+    ).toBe('+1 −1');
+  });
+});

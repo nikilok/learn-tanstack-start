@@ -281,6 +281,8 @@ export function denyEntries(opts: {
   stagedChallenge?: string[];
   /** What the tier is already challenging, so a staged one is not listed twice. */
   liveChallenge?: string[];
+  /** Digests LIFTED off the challenge tier this session. Its own list for the same reason as the staged one: the shared removal list is classified by shape, and a challenge is shaped like a deny. */
+  removedChallenge?: string[];
 }): DenyEntry[] {
   const {
     liveJa4,
@@ -290,6 +292,7 @@ export function denyEntries(opts: {
     activity,
     stagedChallenge = [],
     liveChallenge = [],
+    removedChallenge = [],
   } = opts;
   // Staged values whose rule is not enforcing are absent from the live lists, so without this a
   // deny staged onto a deactivated rule showed NOTHING — the edit existed and the pane denied it.
@@ -348,6 +351,13 @@ export function denyEntries(opts: {
       removed: false,
       ...seen(value),
     })),
+    ...removedChallenge.map((value) => ({
+      kind: 'challenge' as DenyKind,
+      value,
+      staged: false,
+      removed: true,
+      ...seen(value),
+    })),
     ...removed.map((value) => ({
       // By shape, not by a substring guess: the two denylists share one flat removal list.
       // Normalized first, exactly as the staged branch does. Validating the RAW value sent an
@@ -373,14 +383,19 @@ export function pendingByRule(
   promoted: string[] = [],
   /** Digests ADDED to the challenge tier this session. Its own list because the shared staged one is classified by SHAPE, and a challenge is the same shape as a deny. */
   stagedChallenge: string[] = [],
+  /** Digests LIFTED off the challenge tier this session, for the same reason. */
+  removedChallenge: string[] = [],
 ): Map<string, string> {
   const out = new Map<string, string>();
   // Neither side is derivable from staged/removed: a promotion drops the digest from the
   // challenge rule without ever appearing in `removed`, and a staged challenge is indistinguishable
   // by shape from a staged deny.
+  // A lift and a promotion both take a digest OFF the tier, so they count together — the rule
+  // marker says how much is leaving, not which keypress did it.
+  const offTier = promoted.length + removedChallenge.length;
   const challengeParts = [
     stagedChallenge.length ? `+${stagedChallenge.length}` : '',
-    promoted.length ? `−${promoted.length}` : '',
+    offTier ? `−${offTier}` : '',
   ].filter(Boolean);
   if (challengeParts.length)
     out.set(CHALLENGE_SCRAPER_JA4, challengeParts.join(' '));

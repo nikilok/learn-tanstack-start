@@ -94,6 +94,10 @@ export function useDenylist(opts: {
   // Its own list: `staged` is classified by SHAPE downstream, and a challenged digest and a denied
   // one are the same shape — folded together, every staged challenge rendered as a deny.
   const [stagedChallenge, setStagedChallenge] = useState<string[]>([]);
+  // And its mirror for lifts. A challenge taken off the tier went onto the shared `removed` list,
+  // which is classified by shape — so the pane called it a JA4 removal and the rule marker fired
+  // on neither rule, leaving the lift showing as pending nowhere.
+  const [removedChallenge, setRemovedChallenge] = useState<string[]>([]);
   // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
   const [promoted, setPromoted] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -108,10 +112,13 @@ export function useDenylist(opts: {
     removed,
     activity: activity.data,
     stagedChallenge,
-    // Live ones the operator has NOT just staged, or a digest staged this session would appear
-    // twice: once as live and once as pending.
+    removedChallenge,
+    // Live ones the operator has NOT just staged or lifted, or a digest touched this session
+    // would appear twice: once as live and once as pending.
     liveChallenge: live.challenged.filter(
-      (v) => !stagedChallenge.includes(normalizeStaged(v)),
+      (v) =>
+        !stagedChallenge.includes(normalizeStaged(v)) &&
+        !removedChallenge.includes(normalizeStaged(v)),
     ),
   });
   const pending = pendingByRule(
@@ -120,6 +127,7 @@ export function useDenylist(opts: {
     removed,
     promoted,
     stagedChallenge,
+    removedChallenge,
   );
 
   const stageChallenge = (digest: string): string | undefined => {
@@ -158,7 +166,14 @@ export function useDenylist(opts: {
     setItems((prev) => unstage(prev, entry.kind, entry.value, wasPromoted));
     if (wasPromoted)
       setPromoted((p) => p.filter((v) => v !== normalizeStaged(entry.value)));
-    setEdits((e) => afterUnstage(e.staged, e.removed, entry));
+    if (entry.kind === 'challenge') {
+      const v = normalizeStaged(entry.value);
+      // A lift of something STAGED this session just drops the stage; only a live one is a
+      // removal, the same distinction afterUnstage draws for the deny lists.
+      setStagedChallenge((c) => c.filter((x) => x !== v));
+      if (!entry.staged)
+        setRemovedChallenge((r) => [...new Set([...r, v])]);
+    } else setEdits((e) => afterUnstage(e.staged, e.removed, entry));
     onEdit();
   };
 
@@ -204,6 +219,7 @@ export function useDenylist(opts: {
       setEdits({ staged: [], removed: [] });
       setPromoted([]);
       setStagedChallenge([]);
+      setRemovedChallenge([]);
     }
     return { ok: out.ok, summary: out.summary };
   };

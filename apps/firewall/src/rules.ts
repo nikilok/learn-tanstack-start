@@ -53,8 +53,11 @@ export type Rule = {
   };
 };
 
-// Phase 1 = observe: every rule logs only, nothing is blocked. Flip individual rules to challenge/deny/bypass in the TUI and apply.
+// The default: log only, nothing blocked. Flip individual rules to challenge/deny/bypass in the TUI and apply.
 const OBSERVE: RateLimitAction = 'log';
+// Recoverable enforcement. Never `deny` on a rate limit: a trip applies to EVERY path, not just
+// the rule's conditions, so a false positive takes the whole site off that address.
+const CHALLENGE: RateLimitAction = 'challenge';
 export const dryRun = isDryRun();
 
 /** A REQUIRED ceiling (FW_*_LIMIT) — kept in .env.local, never the repo, so public code doesn't reveal the thresholds. Returns a placeholder in dry-run, which only lists rule names. */
@@ -417,21 +420,23 @@ export const rules: Rule[] = [
   rateLimitRule({
     name: 'rl-company-ip',
     description:
-      'Per-IP BURST ceiling (60s) on company page fetches — the corpus surface. Sized several times above the busiest verified crawler so search engines are never throttled. Phase 1: log.',
+      'Per-IP BURST ceiling (60s) on company page fetches — the corpus surface. Sized several times above the busiest verified crawler so search engines are never throttled.',
     conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
     limit: COMPANY_LIMIT,
     keys: ['ip'],
     actionDuration: '10m',
+    action: CHALLENGE,
   }),
   rateLimitRule({
     name: 'rl-company-ip-sustained',
     description:
-      'Per-IP SUSTAINED ceiling (10m) on company page fetches. Holds flat-rate enumeration below what a bulk harvest needs, forcing address rotation — which is the only part of a scrape that costs real money. Phase 1: log.',
+      'Per-IP SUSTAINED ceiling (10m) on company page fetches. Holds flat-rate enumeration below what a bulk harvest needs, forcing address rotation — the only part of a scrape that costs real money.',
     conditions: [{ type: 'path', op: 'pre', value: '/company/' }],
     limit: COMPANY_SUSTAINED_LIMIT,
     keys: ['ip'],
     window: SUSTAINED_WINDOW,
     actionDuration: '1h',
+    action: CHALLENGE,
   }),
   rateLimitRule({
     name: 'rl-ssr-search-ip',

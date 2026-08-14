@@ -120,6 +120,18 @@ describe('resolveSubject', () => {
       accepted('::');
     });
 
+    // The observability filter matches clientIp literally, so an upper-case digest would query a
+    // value the API never returns.
+    test('IPv6 resolves to its canonical lower-case form', () => {
+      expect(resolveSubject('ip', '2A02:C7F:1234::1')).toEqual({
+        subject: { kind: 'ip', value: '2a02:c7f:1234::1' },
+      });
+    });
+
+    test('IPv4 is left exactly as written — it has no case to fold', () => {
+      accepted('1.2.3.4');
+    });
+
     test('IPv6 with two elisions or too many groups is refused', () => {
       refused('1::2::3');
       refused('1:2:3:4:5:6:7:8:9');

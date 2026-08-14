@@ -237,6 +237,10 @@ export function denyEntries(opts: {
   activity: Map<string, Activity> | null;
 }): DenyEntry[] {
   const { liveJa4, liveAsn, staged, removed, activity } = opts;
+  // Staged values whose rule is not enforcing are absent from the live lists, so without this a
+  // deny staged onto a deactivated rule showed NOTHING — the edit existed and the pane denied it.
+  const live = new Set([...liveJa4, ...liveAsn].map((v) => normalizeStaged(v)));
+  const orphanStaged = staged.filter((v) => !live.has(normalizeStaged(v)));
   // Normalized both sides: the rule stores the digest normalized while staging keeps what was
   // typed, so a raw `includes` rendered a staged deny as `live` and hid the "press a" banner.
   const stagedIn = (spec: DenySpec) =>
@@ -261,6 +265,16 @@ export function denyEntries(opts: {
       kind: 'asn' as const,
       value,
       staged: stagedAsn.has(ASN_DENY.normalize(value)),
+      removed: false,
+      ...seen(value),
+    })),
+    ...orphanStaged.map((value) => ({
+      // Shape, not the rule it came from: the two lists share one flat staged list.
+      kind: (JA4_DENY.valid(normalizeStaged(value))
+        ? 'ja4'
+        : 'asn') as DenyKind,
+      value,
+      staged: true,
       removed: false,
       ...seen(value),
     })),

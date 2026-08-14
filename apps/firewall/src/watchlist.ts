@@ -272,7 +272,7 @@ export function filesFor(to: ListSide): { add: string; drop: string } {
 // about a file that could not be read, which is the reverse of what the operator needs to know.
 /** The error a load should show, blank when it read cleanly. */
 export function loadError(list: Watchlist): string {
-  return list.ok ? '' : (list.error ?? 'unreadable');
+  return list.ok ? '' : list.error || 'unreadable';
 }
 
 /** Cursor kept inside a list that has just changed length. Never negative — an empty list sits at 0. */

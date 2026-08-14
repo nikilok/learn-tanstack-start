@@ -98,8 +98,11 @@ export function useIdentityLists(root: string): IdentityLists {
     if (!entry) return undefined;
     const file = side === 'watch' ? WATCHLIST_FILE : IGNORELIST_FILE;
     // Dropped from the pane straight away — the removal must feel immediate.
-    setEntries(side, removeEntry(entriesOf(side), entry.kind, entry.id));
-    setCursor(side, clampCursor(cursorOf(side), entriesOf(side).length - 1));
+    const shown = removeEntry(entriesOf(side), entry.kind, entry.id);
+    setEntries(side, shown);
+    // Clamped against the array just computed. entriesOf() still reads PRE-removal state here,
+    // so `length - 1` was only ever right while the entry was certain to be found.
+    setCursor(side, clampCursor(cursorOf(side), shown.length));
     // But SAVED from a fresh read, not from what the pane had. The watch tick appends to this
     // same file on its own timer, and writing the in-memory list back would drop whatever it
     // added since this pane last loaded. Not a lock — a read-modify-write that reads late.
@@ -112,7 +115,13 @@ export function useIdentityLists(root: string): IdentityLists {
     }
     const next = removeEntry(latest.entries, entry.kind, entry.id);
     const err = await saveList(root, file, next);
-    if (!err) return undefined;
+    // What was SAVED is what the pane should show: the late read may carry entries the watch
+    // tick appended since this pane last loaded.
+    if (!err) {
+      setEntries(side, next);
+      setCursor(side, clampCursor(cursorOf(side), next.length));
+      return undefined;
+    }
     // The file still holds what the pane just dropped — re-read so the two agree.
     await load(side);
     return `${side} list: ${err}`;

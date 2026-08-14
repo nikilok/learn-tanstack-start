@@ -263,7 +263,9 @@ export function useWatch(opts: {
           const key = `alarm:${alarms.join('|')}`;
           if (!stopped && (await shouldNotify(root, key))) {
             const failed = await notify(alarms.join(' · '));
-            if (failed) setWatchNote(failed);
+            // Appended: replacing it threw away the screen's own result — how many were allowed
+            // through, and whether it was BLIND.
+            if (failed) setWatchNote((n) => (n ? `${n} · ${failed}` : failed));
             else {
               await rememberNotified(root, key);
               setNotifiedAt(clockTime(new Date()));

@@ -126,6 +126,22 @@ describe('bindingFor', () => {
     expect(fallback.ran()).toBe(0);
   });
 
+  // Ink reports Ctrl-D as input 'd' with ctrl set. Unfiltered, every terminal control sequence
+  // doubled as a pane shortcut — Ctrl-D opened the bans pane, Ctrl-Q quit.
+  test('a modified press does NOT fire a character binding', () => {
+    const d = bind({ key: 'd' });
+    expect(bindingFor([d], 'ip', { input: 'd', ctrl: true })).toBeUndefined();
+    expect(bindingFor([d], 'ip', { input: 'd', meta: true })).toBeUndefined();
+    expect(bindingFor([d], 'ip', key('d'))).toBeDefined();
+  });
+
+  test('shift is still allowed, because shift-tab is a real binding', () => {
+    const t = bind({ key: 'tab', matches: press.tab });
+    expect(
+      bindingFor([t], 'ip', special({ tab: true, shift: true })),
+    ).toBeDefined();
+  });
+
   test('an empty input never matches a character binding', () => {
     // Arrow keys arrive with input '', and `includes('')` would otherwise fire every binding.
     expect(bindingFor([bind({ key: 'q' })], 'ip', special({}))).toBeUndefined();

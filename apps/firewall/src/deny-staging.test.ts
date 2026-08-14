@@ -489,6 +489,28 @@ describe('denyEntries', () => {
     expect(e.staged).toBe(true);
   });
 
+  // The rule is deactivated, so liveDenies reports nothing for it — and the staged edit used to
+  // disappear with it, leaving the operator staring at a pane that denied their own edit existed.
+  test('a value staged onto a NON-enforcing rule is still shown as staged', () => {
+    const [e] = denyEntries({ ...base, staged: [DIGEST_A] });
+    expect(e).toMatchObject({ kind: 'ja4', value: DIGEST_A, staged: true });
+  });
+
+  test('a staged ASN on a non-enforcing rule is classified by shape', () => {
+    const [e] = denyEntries({ ...base, staged: [AS_NUM] });
+    expect(e.kind).toBe('asn');
+  });
+
+  test('a staged value already live is not listed twice', () => {
+    const out = denyEntries({
+      ...base,
+      liveJa4: [DIGEST_A],
+      staged: [DIGEST_A],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].staged).toBe(true);
+  });
+
   test('a lifted value is listed as removed', () => {
     const [e] = denyEntries({ ...base, removed: [DIGEST_A] });
     expect(e).toMatchObject({ value: DIGEST_A, removed: true, staged: false });

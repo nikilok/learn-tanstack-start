@@ -52,7 +52,9 @@ function isIpv6(v: string): boolean {
 /** The identity as it is stored and queried. JA4 digests are case-insensitive handles; IPs are kept as written. */
 export function normalizeIdentity(kind: PickKind, value: string): string {
   const v = value.trim();
-  return kind === 'ja4' ? v.toLowerCase() : v;
+  // IPv6 hex is case-insensitive but the observability filter matches the string literally, so a
+  // digest typed 2A02:… would query a value the API never returns. IPv4 has no case to fold.
+  return kind === 'ja4' || v.includes(':') ? v.toLowerCase() : v;
 }
 
 /** The subject `value` names, or the message saying why it is not one. */

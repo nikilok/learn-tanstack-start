@@ -29,6 +29,9 @@ export type Press = {
   downArrow?: boolean;
   pageUp?: boolean;
   pageDown?: boolean;
+  /** Held modifiers. A character binding must not fire on Ctrl-D or Cmd-R — Ink reports those with the plain letter in `input`. */
+  ctrl?: boolean;
+  meta?: boolean;
 };
 
 export type Binding = {
@@ -53,7 +56,9 @@ export const press = {
   char:
     (...chars: string[]) =>
     (p: Press) =>
-      Boolean(p.input) && chars.includes(p.input),
+      // Modified presses are excluded: Ink reports Ctrl-D as input 'd' with ctrl set, so without
+      // this every terminal control sequence doubled as a pane shortcut.
+      Boolean(p.input) && !p.ctrl && !p.meta && chars.includes(p.input),
   enter: (p: Press) => Boolean(p.return),
   escape: (p: Press) => Boolean(p.escape),
   tab: (p: Press) => Boolean(p.tab),

@@ -62,6 +62,9 @@ describe('loadError', () => {
 
   test('a failure with no reason still reads as unreadable, never as empty', () => {
     expect(loadError({ ok: false, entries: [] })).toBe('unreadable');
+    // An EMPTY string is a reason too — and `?? 'unreadable'` passed it straight through, so the
+    // pane showed a failed read as no failure at all.
+    expect(loadError({ ok: false, entries: [], error: '' })).toBe('unreadable');
   });
 });
 

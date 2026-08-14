@@ -1103,6 +1103,8 @@ export function App() {
         downArrow: key.downArrow,
         pageUp: key.pageUp,
         pageDown: key.pageDown,
+        ctrl: key.ctrl,
+        meta: key.meta,
       };
       bindingFor(paneBindings, pane, p)?.run(p);
       return;

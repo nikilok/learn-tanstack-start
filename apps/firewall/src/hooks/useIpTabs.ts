@@ -129,9 +129,9 @@ export function useIpTabs(creds: Creds): IpTabs {
   // tick both read zero and both focus the first tab — the second subject opens without being
   // shown, which reads as the keypress having done nothing. Advanced on every append and
   // reconciled from the rendered array below, so a close cannot leave it drifting.
-  const nextIndex = useRef(0);
+  const appendAt = useRef(0);
   useEffect(() => {
-    nextIndex.current = tabs.length;
+    appendAt.current = tabs.length;
   }, [tabs.length]);
 
   const run = useCallback(
@@ -210,8 +210,8 @@ export function useIpTabs(creds: Creds): IpTabs {
         ...prev,
         { subject, window, data: null, error: '', loading: true },
       ]);
-      setIndex(nextIndex.current); // where the append lands
-      nextIndex.current += 1;
+      setIndex(appendAt.current); // where the append lands
+      appendAt.current += 1;
       void run(subject, window);
     },
     [run, tabs],
@@ -234,8 +234,8 @@ export function useIpTabs(creds: Creds): IpTabs {
           loading: true,
         })),
       ]);
-      setIndex(nextIndex.current); // the first of the appended block
-      nextIndex.current += toAdd.length;
+      setIndex(appendAt.current); // the first of the appended block
+      appendAt.current += toAdd.length;
       // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
       // so these queue rather than stampede, and every tab has its data by the time you reach it.
       for (const s of toAdd) void run(s, window);

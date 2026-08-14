@@ -6,8 +6,19 @@
 // the import has already happened.
 
 import { afterEach } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { restoreTerminal } from './ink-harness';
+
+// The app resolves its state files from process.cwd(), and the suite runs from the repo root —
+// where the OPERATOR's live .firewall-watchlist and .firewall-ignorelist sit. A pane test seeded
+// a row at that path and unlinked it afterwards, which DELETED the real watch list out from under
+// a running TUI: entries vanished, and the next screen re-added one as though it were new.
+// Every test process gets a throwaway cwd, so no test can reach those files however it builds the
+// path. Done first, before anything imports a module that captures cwd at evaluation time.
+process.chdir(mkdtempSync(join(tmpdir(), 'fw-test-cwd-')));
 
 /** The digest the rule set is seeded with, so a test asserting on a live deny names this one. */
 export const TEST_DENIED_JA4 = 't13d1516h2_8daaf6152771_b0da82dd1658';

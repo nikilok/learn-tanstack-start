@@ -6,7 +6,6 @@ import {
   type Dispatch,
   type SetStateAction,
   useCallback,
-  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -102,13 +101,39 @@ export function useDenylist(opts: {
   const [removedChallenge, setRemovedChallenge] = useState<string[]>([]);
   // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
   const [promoted, setPromoted] = useState<string[]>([]);
-  // Projected, for the same reason the tab list is: `promoted` is the RENDERED array, so a
-  // promotion and its lift in one tick read an empty list and skipped the restore — leaving the
-  // digest on NEITHER tier, which is strictly less protection than before the keypress.
-  const promotedRef = useRef<string[]>([]);
-  useEffect(() => {
-    promotedRef.current = promoted;
-  }, [promoted]);
+
+  // ONE advancing snapshot of the edit buffer.
+  //
+  // Every guard and every derivation in this hook — validity, already-denied, already-challenged,
+  // promotes(), cancels-a-lift — used to read RENDERED state while the writes went through
+  // updaters, so within a single tick the reads and the writes described different revisions.
+  // Seven defects came out of that, the worst of them leaving a digest on NEITHER tier.
+  //
+  // Each ref is re-synced from its state on EVERY render, which is the part an earlier attempt
+  // got wrong: refs seeded once and only advanced by the setters drift the moment anything else
+  // changes the state. Assigning on render means the ref runs ahead within a tick and is pulled
+  // back into line by the next render, so reads and writes always see one revision.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const promotedRef = useRef(promoted);
+  promotedRef.current = promoted;
+  const stagedChallengeRef = useRef(stagedChallenge);
+  stagedChallengeRef.current = stagedChallenge;
+  const removedChallengeRef = useRef(removedChallenge);
+  removedChallengeRef.current = removedChallenge;
+
+  /** Advance items in the snapshot and in state together, so the next call this tick sees it. */
+  const commitItems = (next: Item[]) => {
+    itemsRef.current = next;
+    setItems(next);
+  };
+  /** Same for the challenge lists — a lift and its re-stage in one tick must see each other. */
+  const commitChallenge = (staged: string[], removed: string[]) => {
+    stagedChallengeRef.current = staged;
+    removedChallengeRef.current = removed;
+    setStagedChallenge(staged);
+    setRemovedChallenge(removed);
+  };
 
   const [cursor, setCursor] = useState(0);
   const [activityNote, setActivityNote] = useState('');
@@ -141,18 +166,24 @@ export function useDenylist(opts: {
   );
 
   const stageChallenge = (digest: string): string | undefined => {
-    const next = stage(items, 'challenge', digest);
+    const next = stage(itemsRef.current, 'challenge', digest);
     if (next.error) return next.error;
     // Through an updater, like stageDeny: assigned from the render-time list, a challenge staged
     // in the same tick as another edit overwrote it.
-    setItems((prev) => stage(prev, 'challenge', digest).items);
+    commitItems(next.items);
     const v = normalizeStaged(digest);
     // Cancelling a pending lift is not a new stage — the digest was live on the tier before and
     // is live after, so NOTHING is pending. afterStage draws exactly this distinction for the
     // deny lists; dropping only the removal left a bare +1 on a rule back where it started.
-    const cancelsLift = removedChallenge.includes(v);
-    if (cancelsLift) setRemovedChallenge((r) => r.filter((x) => x !== v));
-    else setStagedChallenge((c) => [...new Set([...c, v])]);
+    const cancelsLift = removedChallengeRef.current.includes(v);
+    commitChallenge(
+      cancelsLift
+        ? stagedChallengeRef.current
+        : [...new Set([...stagedChallengeRef.current, v])],
+      cancelsLift
+        ? removedChallengeRef.current.filter((x) => x !== v)
+        : removedChallengeRef.current,
+    );
     onEdit();
     return undefined;
   };
@@ -161,13 +192,13 @@ export function useDenylist(opts: {
     if (kind === 'challenge') return stageChallenge(value);
     // Checked against the rendered items — the refusal has to be returned to the caller, and a
     // state updater cannot return anything.
-    const next = stage(items, kind, value);
+    const next = stage(itemsRef.current, kind, value);
     if (next.error) return next.error;
     // But APPLIED through an updater, re-running the same pure function against whatever the
     // queue already holds. Computed from the render-time list, two edits in one tick both started
     // from the same snapshot and the second overwrote the first — a staged deny silently gone,
     // with the pane showing it and the apply never writing it.
-    setItems((prev) => stage(prev, kind, value).items);
+    commitItems(next.items);
     setEdits((e) => afterStage(e.staged, e.removed, value));
     if (next.promoted) {
       const v = next.promoted;
@@ -176,7 +207,10 @@ export function useDenylist(opts: {
       // A promotion takes the digest OFF the challenge rule, so a stage of it this session is no
       // longer pending — left in place, one digest drew two rows and marked the tier +1 for
       // something it no longer holds.
-      setStagedChallenge((c) => c.filter((x) => x !== v));
+      commitChallenge(
+        stagedChallengeRef.current.filter((x) => x !== v),
+        removedChallengeRef.current,
+      );
     }
     onEdit();
     return undefined;
@@ -189,7 +223,9 @@ export function useDenylist(opts: {
     // From the projection, not the render: a promotion staged earlier in this same tick has not
     // reached `promoted` yet, and reading it there loses the restore.
     const wasPromoted = promotedRef.current.includes(v);
-    setItems((prev) => unstage(prev, entry.kind, entry.value, wasPromoted));
+    commitItems(
+      unstage(itemsRef.current, entry.kind, entry.value, wasPromoted),
+    );
     if (wasPromoted) {
       promotedRef.current = promotedRef.current.filter((x) => x !== v);
       setPromoted((p) => p.filter((x) => x !== v));
@@ -198,8 +234,12 @@ export function useDenylist(opts: {
       const v = normalizeStaged(entry.value);
       // A lift of something STAGED this session just drops the stage; only a live one is a
       // removal, the same distinction afterUnstage draws for the deny lists.
-      setStagedChallenge((c) => c.filter((x) => x !== v));
-      if (!entry.staged) setRemovedChallenge((r) => [...new Set([...r, v])]);
+      commitChallenge(
+        stagedChallengeRef.current.filter((x) => x !== v),
+        entry.staged
+          ? removedChallengeRef.current
+          : [...new Set([...removedChallengeRef.current, v])],
+      );
     } else setEdits((e) => afterUnstage(e.staged, e.removed, entry));
     onEdit();
   };
@@ -249,8 +289,7 @@ export function useDenylist(opts: {
       // The REF too, not just the state. Left holding applied promotions, a later lift restores a
       // challenge the apply already wrote — putting a digest back on a tier it is no longer on.
       promotedRef.current = [];
-      setStagedChallenge([]);
-      setRemovedChallenge([]);
+      commitChallenge([], []);
     }
     return { ok: out.ok, summary: out.summary };
   };

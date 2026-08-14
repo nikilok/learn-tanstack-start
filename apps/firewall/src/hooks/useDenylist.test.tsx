@@ -436,6 +436,40 @@ describe('useDenylist', () => {
       t.h.unmount();
     });
 
+    // NO settle between the calls — that gap is what made the earlier version of the re-stage
+    // test pass. stage() read render-time items, still showing the digest on the tier, and
+    // refused the re-stage as "already challenged" while the lift stayed pending.
+    test('lift then re-stage in ONE tick is not refused as already challenged', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+      ]);
+      t.get().unstageDeny(t.get().entries[0]);
+      expect(t.get().stageChallenge(DIGEST)).toBeUndefined();
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      // Back to its original value, so nothing is pending on the tier either way.
+      expect(t.h.frame()).not.toContain(`${CHALLENGE_SCRAPER_JA4}=`);
+      t.h.unmount();
+    });
+
+    // promotes() ran against a render where the digest was not on the tier yet, so `promoted` was
+    // never recorded and the lift below could not restore it — digest on NEITHER list.
+    test('challenge then promote in ONE tick still records the promotion', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      t.get().stageChallenge(DIGEST);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      expect(t.ja4Of(JA4_RULE)).toEqual([DIGEST]);
+      t.get().unstageDeny(t.get().entries.find((e) => e.value === DIGEST)!);
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      t.h.unmount();
+    });
+
     test('an applied challenge is written to FW_CHALLENGE_JA4', async () => {
       const t = await mount([
         item(JA4_RULE, []),

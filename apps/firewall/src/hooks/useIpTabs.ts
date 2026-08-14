@@ -125,14 +125,15 @@ export function useIpTabs(creds: Creds): IpTabs {
   // it patches by subject — so without this it would fill a REOPENED tab with the result of a
   // request nobody was waiting for, rendered as though it were current.
   const epoch = useRef(new Map<string, number>());
-  // Where the next append will land. `tabs.length` is the RENDERED count, so two opens in one
-  // tick both read zero and both focus the first tab — the second subject opens without being
-  // shown, which reads as the keypress having done nothing. Advanced on every append and
-  // reconciled from the rendered array below, so a close cannot leave it drifting.
-  const appendAt = useRef(0);
+  // The tab list as it will be, not as it was last drawn. `tabs` is the RENDERED array, so a
+  // second call in the same tick still sees the state before the first: two opens focused the
+  // first tab, and two opens of the SAME subject both passed the already-open check and made two
+  // tabs for one identity. Every call projects onto this, and it is reconciled from the rendered
+  // array on each render — so a close cannot leave it drifting.
+  const projected = useRef<IpTab[]>([]);
   useEffect(() => {
-    appendAt.current = tabs.length;
-  }, [tabs.length]);
+    projected.current = tabs;
+  }, [tabs]);
 
   const run = useCallback(
     async function run(
@@ -192,7 +193,8 @@ export function useIpTabs(creds: Creds): IpTabs {
   const open = useCallback(
     (subject: Subject, window: Window, force = false) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
-      const existing = tabs.findIndex(
+      // Against the projection, so a subject opened earlier in this same tick counts as open.
+      const existing = projected.current.findIndex(
         (t) => subjectKey(t.subject) === subjectKey(subject),
       );
       if (existing !== -1) {
@@ -206,41 +208,43 @@ export function useIpTabs(creds: Creds): IpTabs {
         }
         return;
       }
-      setTabs((prev) => [
-        ...prev,
-        { subject, window, data: null, error: '', loading: true },
-      ]);
-      setIndex(appendAt.current); // where the append lands
-      appendAt.current += 1;
+      const added: IpTab = {
+        subject,
+        window,
+        data: null,
+        error: '',
+        loading: true,
+      };
+      setTabs((prev) => [...prev, added]);
+      setIndex(projected.current.length); // where the append lands
+      projected.current = [...projected.current, added];
       void run(subject, window);
     },
-    [run, tabs],
+    [run],
   );
 
   const openMany = useCallback(
     (subjects: Subject[], window: Window) => {
       const toAdd = newSubjects(
-        tabs.map((t) => t.subject),
+        projected.current.map((t) => t.subject),
         subjects,
       );
       if (!toAdd.length) return;
-      setTabs((prev) => [
-        ...prev,
-        ...toAdd.map((subject) => ({
-          subject,
-          window,
-          data: null,
-          error: '',
-          loading: true,
-        })),
-      ]);
-      setIndex(appendAt.current); // the first of the appended block
-      appendAt.current += toAdd.length;
+      const added: IpTab[] = toAdd.map((subject) => ({
+        subject,
+        window,
+        data: null,
+        error: '',
+        loading: true,
+      }));
+      setTabs((prev) => [...prev, ...added]);
+      setIndex(projected.current.length); // the first of the appended block
+      projected.current = [...projected.current, ...added];
       // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
       // so these queue rather than stampede, and every tab has its data by the time you reach it.
       for (const s of toAdd) void run(s, window);
     },
-    [run, tabs],
+    [run],
   );
 
   const refresh = useCallback(
@@ -275,6 +279,9 @@ export function useIpTabs(creds: Creds): IpTabs {
     // and a state setter called from within one is a side effect it is not allowed to have.
     setIndex(indexAfterClose(index, Math.max(0, tabs.length - 1)));
     setTabs((prev) => prev.filter((_, i) => i !== index));
+    // The projection drops it too, or a close followed by an open in the same tick appends past
+    // the end and focuses a tab that is not there.
+    projected.current = projected.current.filter((_, i) => i !== index);
   }, [index, tabs]);
 
   return {

@@ -173,6 +173,8 @@ export async function readInvestigated(
   return out;
 }
 
+let writeSeq = 0;
+
 /** Persist it. Never throws: losing this costs a repeat investigation, not a missed one. */
 export async function writeInvestigated(
   dir: string,
@@ -181,7 +183,9 @@ export async function writeInvestigated(
   // Write-then-rename, like saveList: this file is what stops a digest being investigated twice,
   // and an investigation costs money. A truncated write loses entries, and every lost entry is
   // one the next tick pays to rediscover.
-  const tmp = `${dir}/${INVESTIGATED}.tmp-${process.pid}`;
+  // Per INVOCATION, not per process: the pid alone is the same string for two overlapping calls,
+  // and they would then write the same temp file and rename each other's half of it.
+  const tmp = `${dir}/${INVESTIGATED}.tmp-${process.pid}-${++writeSeq}`;
   try {
     await writeFile(
       tmp,

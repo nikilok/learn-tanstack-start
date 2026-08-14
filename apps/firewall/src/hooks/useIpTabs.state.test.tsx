@@ -157,6 +157,40 @@ describe('useIpTabs', () => {
     }
   });
 
+  // The duplicate check read the RENDERED tabs, so the same subject opened twice before a render
+  // passed it twice and got two tabs for one identity — with focus on the duplicate.
+  test('the same subject opened twice in one tick makes ONE tab', async () => {
+    const { h, get, restore } = await mountTabs(async (s) => profile(s, 900));
+    try {
+      get().open(IP, WINDOW);
+      get().open(IP, WINDOW);
+      await h.settle();
+      expect(h.frame()).toContain('tabs=1');
+      expect(h.frame()).toContain('total=900');
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
+  test('close then open in one tick focuses the reopened tab, not past the end', async () => {
+    const { h, get, restore } = await mountTabs(async (s) =>
+      profile(s, s.kind === 'ip' ? 900 : 417),
+    );
+    try {
+      get().open(IP, WINDOW);
+      await h.settle();
+      get().close();
+      get().open(JA4, WINDOW);
+      await h.settle();
+      expect(h.frame()).toContain('tabs=1');
+      expect(h.frame()).toContain('total=417');
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
   test('a close puts the next append back at the right index', async () => {
     const { h, get, restore } = await mountTabs(async (s) =>
       profile(s, s.kind === 'ip' ? 900 : 417),

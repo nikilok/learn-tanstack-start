@@ -118,6 +118,15 @@ describe('resolveSubject', () => {
       accepted('::ffff:1.2.3.4');
       // All-zeros. It has no groups at all, so the emptiness guard used to refuse it.
       accepted('::');
+      // Both real tails, to prove the end-of-address check did not cost the accepted forms.
+      accepted('1:2:3:4:5:6:1.2.3.4');
+    });
+
+    // An IPv4 tail has to END the address. filter(Boolean) drops the empties an elision leaves,
+    // so the IPv4 group looked last when the address actually ended with the elision.
+    test('an IPv4 group that is not the tail is refused', () => {
+      refused('1.2.3.4::');
+      refused('1.2.3.4::5');
     });
 
     // The observability filter matches clientIp literally, so an upper-case digest would query a

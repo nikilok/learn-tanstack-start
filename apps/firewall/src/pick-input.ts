@@ -42,8 +42,11 @@ function isIpv6(v: string): boolean {
   let units = 0;
   for (const [i, g] of parts.entries()) {
     if (/^[0-9a-f]{1,4}$/i.test(g)) units += 1;
-    // An IPv4 tail stands for the last two groups.
-    else if (i === parts.length - 1 && isIpv4(g)) units += 2;
+    // An IPv4 tail stands for the last two groups — and a TAIL has to end the address. Checked
+    // against `v`, not against the filtered parts: filter(Boolean) drops the empties an elision
+    // leaves behind, so in `1.2.3.4::` the IPv4 group looked like the last part when the address
+    // actually ends with the elision.
+    else if (i === parts.length - 1 && v.endsWith(g) && isIpv4(g)) units += 2;
     else return false;
   }
   return elisions === 1 ? units < 8 : units === 8;

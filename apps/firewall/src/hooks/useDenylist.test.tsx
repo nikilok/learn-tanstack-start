@@ -211,6 +211,28 @@ describe('useDenylist', () => {
     });
   });
 
+  // Grok's audit, verified here before acting: `wasPromoted` was read from render-time state, so
+  // promoting a challenged digest and lifting it in the SAME tick saw an empty promoted list and
+  // skipped the restore. The digest ends on NEITHER list — the exact "less protection than you
+  // started with" the promotion path exists to prevent, reachable without waiting for a render.
+  test('promoting then lifting in one tick still restores the challenge', async () => {
+    const t = await mount([
+      item(JA4_RULE, []),
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+    ]);
+    t.get().stageDeny('ja4', DIGEST);
+    t.get().unstageDeny({
+      kind: 'ja4',
+      value: DIGEST,
+      staged: true,
+      removed: false,
+    } as never);
+    await t.h.settle();
+    expect(t.ja4Of(JA4_RULE)).toEqual([]);
+    expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+    t.h.unmount();
+  });
+
   describe('lifting a live deny', () => {
     test('is shown as removed and marks the rule', async () => {
       const t = await mount([item(JA4_RULE, [DIGEST])]);

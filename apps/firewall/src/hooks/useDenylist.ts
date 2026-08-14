@@ -6,6 +6,8 @@ import {
   type Dispatch,
   type SetStateAction,
   useCallback,
+  useEffect,
+  useRef,
   useState,
 } from 'react';
 
@@ -100,6 +102,14 @@ export function useDenylist(opts: {
   const [removedChallenge, setRemovedChallenge] = useState<string[]>([]);
   // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
   const [promoted, setPromoted] = useState<string[]>([]);
+  // Projected, for the same reason the tab list is: `promoted` is the RENDERED array, so a
+  // promotion and its lift in one tick read an empty list and skipped the restore — leaving the
+  // digest on NEITHER tier, which is strictly less protection than before the keypress.
+  const promotedRef = useRef<string[]>([]);
+  useEffect(() => {
+    promotedRef.current = promoted;
+  }, [promoted]);
+
   const [cursor, setCursor] = useState(0);
   const [activityNote, setActivityNote] = useState('');
   const activity = usePane<Map<string, Activity>>();
@@ -153,8 +163,11 @@ export function useDenylist(opts: {
     // with the pane showing it and the apply never writing it.
     setItems((prev) => stage(prev, kind, value).items);
     setEdits((e) => afterStage(e.staged, e.removed, value));
-    if (next.promoted)
-      setPromoted((p) => [...new Set([...p, next.promoted as string])]);
+    if (next.promoted) {
+      const v = next.promoted;
+      promotedRef.current = [...new Set([...promotedRef.current, v])];
+      setPromoted((p) => [...new Set([...p, v])]);
+    }
     onEdit();
     return undefined;
   };
@@ -162,10 +175,15 @@ export function useDenylist(opts: {
   const unstageDeny = (entry: DenyEntry) => {
     // A lifted promotion goes back to the challenge tier it was taken from, or the operator is
     // left with less protection than they started with.
-    const wasPromoted = promoted.includes(normalizeStaged(entry.value));
+    const v = normalizeStaged(entry.value);
+    // From the projection, not the render: a promotion staged earlier in this same tick has not
+    // reached `promoted` yet, and reading it there loses the restore.
+    const wasPromoted = promotedRef.current.includes(v);
     setItems((prev) => unstage(prev, entry.kind, entry.value, wasPromoted));
-    if (wasPromoted)
-      setPromoted((p) => p.filter((v) => v !== normalizeStaged(entry.value)));
+    if (wasPromoted) {
+      promotedRef.current = promotedRef.current.filter((x) => x !== v);
+      setPromoted((p) => p.filter((x) => x !== v));
+    }
     if (entry.kind === 'challenge') {
       const v = normalizeStaged(entry.value);
       // A lift of something STAGED this session just drops the stage; only a live one is a

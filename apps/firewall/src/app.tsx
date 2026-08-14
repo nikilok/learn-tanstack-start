@@ -585,6 +585,28 @@ export function App() {
     if (e) profileIdentity({ kind: e.kind, value: e.id });
   };
 
+  /**
+   * Confirm before dropping a row from a list.
+   *
+   * These used to remove outright, on the reasoning that re-marking is cheap. That holds when the
+   * press was deliberate — and `x` sits next to keys that are, while Ctrl-X reached it too. A
+   * removal you did not mean is silent, and the entry it drops is the record of an identity
+   * somebody already judged.
+   */
+  const confirmRemove = (side: ListSide, entry: WatchlistEntry | undefined) => {
+    if (!entry) return;
+    setConfirm({
+      prompt: `Remove ${entry.id} from the ${side} list?`,
+      detail: `${entry.kind.toUpperCase()} · ${
+        side === 'watch'
+          ? 'it can be marked again from a profile'
+          : 'the next screen may re-surface it'
+      }`,
+      onYes: () => void lists.removeAtCursor(side).then(noteIfError),
+    });
+    setFocus('confirm');
+  };
+
   /** Move a listed identity to the other list, keeping whatever note it carried. */
   const moveEntry = (
     to: ListSide,
@@ -878,9 +900,9 @@ export function App() {
       key: 'x',
       label: 'remove',
       panes: ['watchlist'],
-      // Removal is cheap to undo (mark it again), so no confirm — unlike lifting a deny.
+      // Confirmed, like every other remove: a drop you did not mean is silent.
       matches: press.char('x'),
-      run: () => void lists.removeAtCursor('watch').then(noteIfError),
+      run: () => confirmRemove('watch', lists.watch.current),
     },
     {
       key: 'enter',
@@ -909,9 +931,10 @@ export function App() {
       key: 'x',
       label: 'remove',
       panes: ['ignorelist'],
-      // Un-ignoring needs no ceremony: if it is still active, the next tick re-surfaces it.
+      // Confirmed, like every other remove. Un-ignoring is not harmless either: it puts an
+      // identity back in front of the screen that somebody deliberately muted.
       matches: press.char('x'),
-      run: () => void lists.removeAtCursor('ignore').then(noteIfError),
+      run: () => confirmRemove('ignore', lists.ignore.current),
     },
     {
       key: 'm',

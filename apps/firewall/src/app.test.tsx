@@ -2,11 +2,14 @@
 // them, which is the half a refactor breaks and a pure test cannot see.
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type { ReactNode } from 'react';
 
 import { KEY, renderInk } from './ink-harness';
 import { TEST_DENIED_JA4 } from './test-setup';
+import { IGNORELIST_FILE, WATCHLIST_FILE } from './watchlist';
 
 // Every value the rule set is seeded from is set by the preload, before any module reads it.
 const DIGEST = TEST_DENIED_JA4;
@@ -185,6 +188,105 @@ describe('App', () => {
     await h.press('r');
     expect(h.frame()).toContain('j/k scroll');
     h.unmount();
+  });
+
+  // Every remove is confirmed, on both list panes and the bans pane. A drop you did not mean is
+  // silent, and Ctrl-X reached these keys before the modifier guard landed.
+  describe('removes are guarded', () => {
+    // The pane reads process.cwd(), so the row has to exist on disk for `x` to have anything to
+    // act on. Without a real row the test passes whether or not the guard is there at all.
+    const WATCHED = 't13d1516h2_8daaf6152771_aaaabbbbcccc';
+    const listFile = join(process.cwd(), WATCHLIST_FILE);
+    const seedList = () =>
+      writeFileSync(
+        listFile,
+        `ja4|${WATCHED}|2026-08-14T06:00:00.000Z|2026-08-14T06:00:00.000Z|1|manual|seeded\n`,
+      );
+    const dropList = () => {
+      try {
+        unlinkSync(listFile);
+      } catch {
+        // already gone
+      }
+    };
+
+    test('x on the watch list asks before removing', async () => {
+      seedList();
+      const h = await mountApp();
+      try {
+        await h.press('t');
+        expect(h.frame()).toContain('seeded');
+        await h.press('x');
+        expect(h.frame()).toContain('Remove');
+        expect(h.frame()).toContain(WATCHED);
+        // Still listed: nothing happens until the prompt is answered.
+        await h.press('n');
+        expect(h.frame()).toContain('seeded');
+      } finally {
+        h.unmount();
+        dropList();
+      }
+    });
+
+    test('answering y actually removes it', async () => {
+      seedList();
+      const h = await mountApp();
+      try {
+        await h.press('t');
+        await h.press('x');
+        await h.press('y');
+        await h.settle();
+        expect(h.frame()).not.toContain('seeded');
+      } finally {
+        h.unmount();
+        dropList();
+      }
+    });
+
+    test('x on the ignore list asks too', async () => {
+      // Un-ignoring is not harmless either: it puts an identity back in front of the screen that
+      // somebody deliberately muted.
+      const ignoreFile = join(process.cwd(), IGNORELIST_FILE);
+      writeFileSync(
+        ignoreFile,
+        `ja4|${WATCHED}|2026-08-14T06:00:00.000Z|2026-08-14T06:00:00.000Z|1|manual|muted\n`,
+      );
+      const h = await mountApp();
+      try {
+        await h.press('g');
+        expect(h.frame()).toContain('muted');
+        await h.press('x');
+        expect(h.frame()).toContain('Remove');
+        await h.press('n');
+        expect(h.frame()).toContain('muted');
+      } finally {
+        h.unmount();
+        try {
+          unlinkSync(ignoreFile);
+        } catch {
+          // already gone
+        }
+      }
+    });
+
+    test('x on an empty list prompts nothing', async () => {
+      dropList();
+      const h = await mountApp();
+      await h.press('t');
+      await h.press('x');
+      expect(h.frame()).not.toContain('Remove');
+      h.unmount();
+    });
+
+    test('the bans pane asks before lifting, and n cancels', async () => {
+      const h = await mountApp();
+      await h.press('d');
+      await h.press('u');
+      expect(h.frame()).toContain('Lift the deny on');
+      await h.press('n');
+      expect(h.frame()).not.toContain('UNBANNED');
+      h.unmount();
+    });
   });
 
   test('i opens the IP picker and takes typed input', async () => {

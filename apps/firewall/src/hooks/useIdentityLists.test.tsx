@@ -196,6 +196,31 @@ describe('useIdentityLists, loading and cursors', () => {
   });
 });
 
+describe('useIdentityLists.removeAtCursor, confirmed path', () => {
+  // The confirm lives in the container; what this asserts is that the removal it triggers still
+  // does the right thing, and that nothing is dropped when there is no row under the cursor.
+  test('removing the row under the cursor takes it off disk', async () => {
+    const root = tmp();
+    writeFileSync(join(root, WATCHLIST_FILE), line('doomed'));
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+
+    expect(await get().removeAtCursor('watch')).toBeUndefined();
+    await h.settle();
+    expect(h.frame()).toContain('watch=-');
+    expect(readFileSync(join(root, WATCHLIST_FILE), 'utf8').trim()).toBe('');
+    h.unmount();
+  });
+
+  test('an empty list removes nothing and reports nothing', async () => {
+    const { h, get } = await mountLists(tmp());
+    expect(await get().removeAtCursor('watch')).toBeUndefined();
+    await h.settle();
+    h.unmount();
+  });
+});
+
 describe('useIdentityLists.move', () => {
   test('a successful move puts the identity on one list and off the other', async () => {
     const root = tmp();

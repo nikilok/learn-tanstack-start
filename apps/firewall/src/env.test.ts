@@ -134,9 +134,13 @@ describe('useColour', () => {
   });
 
   test('a pipe gets no colour whatever NO_COLOR says', () => {
-    // Forced rather than relying on the runner's ambient isTTY, or this asserts nothing.
+    // BOTH ways round, or the title claims more than the test checks: with NO_COLOR unset this
+    // passes on the pipe alone and would still pass if the two conditions were swapped.
+    // Forced rather than relying on the runner's ambient isTTY, or this asserts nothing either.
     withTty(() => {
       delete process.env.NO_COLOR;
+      expect(useColour()).toBe(false);
+      process.env.NO_COLOR = '1';
       expect(useColour()).toBe(false);
     }, false);
   });

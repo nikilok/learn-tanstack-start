@@ -218,6 +218,7 @@ describe('useIdentityLists, loading and cursors', () => {
     get().replaceWatch([row(DIGEST, 'first')]);
     await h.settle();
     expect(get().watch.current?.note).toBe('first');
+    h.unmount();
   });
 });
 

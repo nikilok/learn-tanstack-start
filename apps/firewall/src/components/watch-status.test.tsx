@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { Watch } from '../hooks/useWatch';
+import { Box, Text } from 'ink';
 import { renderInk } from '../ink-harness';
 import { WatchStatus, panelRows } from './watch-status';
 
@@ -157,7 +158,11 @@ describe('WatchStatus', () => {
 // against an app frame that already filled a 24-row terminal. Bounded is not the same as fits.
 describe('panelRows', () => {
   test('a generous budget gives both lists everything they asked for', () => {
-    expect(panelRows(40, 6, 12)).toEqual({ profiles: 6, verdict: 12 });
+    expect(panelRows(40, 6, 12)).toEqual({
+      profiles: 6,
+      verdict: 12,
+      overflow: false,
+    });
   });
 
   test('a tight budget sheds the verdict first — it says where its full text is', () => {
@@ -182,22 +187,29 @@ describe('panelRows', () => {
     const verdictHead = Array.from({ length: 12 }, (_, i) => `line ${i}`).join(
       '\n',
     );
-    // From CHROME upward: the panel cannot render in fewer rows than its own frame costs, and
-    // app.tsx floors the budget at that same number.
+    // Measured by where a SIBLING lands, not by counting the panel's own lines. Two earlier
+    // versions of this test counted the frame and both were blind to the very rows that were
+    // overflowing: filtering blanks hid the margins, and trimming trailing newlines hid the
+    // bottom one. What the column actually gives up is where the next element starts.
     for (let maxRows = 7; maxRows <= 30; maxRows++) {
       const h = renderInk(
-        <WatchStatus
-          watch={{ ...ARMED, who, verdictHead, verdictOf: 'x', invokedCount: 1 }}
-          maxRows={maxRows}
-        />,
+        <Box flexDirection="column">
+          <WatchStatus
+            watch={{ ...ARMED, who, verdictHead, verdictOf: 'x', invokedCount: 1 }}
+            maxRows={maxRows}
+          />
+          <Text>ZZMARKERZZ</Text>
+        </Box>,
         { columns: 140 },
       );
       await h.settle();
-      // EVERY line, blanks included: the panel's own margins are blank rows that occupy the
-      // column exactly like text does, and filtering them out is what hid two of them.
-      const lines = h.frame().replace(/\n+$/, '').split('\n').length;
+      const occupied = h
+        .frame()
+        .split('\n')
+        .findIndex((l) => l.includes('ZZMARKERZZ'));
       h.unmount();
-      expect(lines).toBeLessThanOrEqual(maxRows);
+      expect(occupied).toBeGreaterThan(0);
+      expect(occupied).toBeLessThanOrEqual(maxRows);
     }
   });
 
@@ -227,7 +239,10 @@ describe('WatchStatus floor', () => {
   // floors the budget at exactly this. Asserted so a change to CHROME that breaks the pairing
   // fails here rather than by overflowing a terminal.
   test('a budget under the chrome yields no rows for either list', () => {
-    expect(panelRows(7, 9, 12)).toEqual({ profiles: 0, verdict: 0 });
-    expect(panelRows(0, 9, 12)).toEqual({ profiles: 0, verdict: 0 });
+    // overflow false as well: with no room there is no row to spend saying rows are hidden,
+    // and drawing it anyway is what put the panel over its budget at the floor.
+    const floor = { profiles: 0, verdict: 0, overflow: false };
+    expect(panelRows(7, 9, 12)).toEqual(floor);
+    expect(panelRows(0, 9, 12)).toEqual(floor);
   });
 });

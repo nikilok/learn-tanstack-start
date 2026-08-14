@@ -64,22 +64,25 @@ export function panelRows(
   maxRows: number,
   profiles: number,
   verdictLines: number,
-): { profiles: number; verdict: number } {
+): { profiles: number; verdict: number; overflow: boolean } {
   const room = Math.max(0, maxRows - CHROME);
   let shownProfiles = Math.min(SHOWN, profiles, room);
   // The "… N more" line costs a row too, and comes out of the SAME room — counted afterwards it
   // pushed the panel one row past the budget it was given.
   if (profiles > shownProfiles && shownProfiles === room)
     shownProfiles = Math.max(0, room - 1);
-  const overflowRow = profiles > shownProfiles ? 1 : 0;
-  const left = room - shownProfiles - overflowRow;
+  // Only when there is a row to spend on it. With no room at all the renderer still drew it,
+  // because "are any hidden?" is a different question from "is there space to say so?" — at the
+  // floor that alone put the panel one row over.
+  const overflow = profiles > shownProfiles && room > 0;
+  const left = room - shownProfiles - (overflow ? 1 : 0);
   const budget = left - VERDICT_CHROME;
   // Its own "… N more line(s)" row costs one, and shows exactly when the verdict does not fit —
   // so it has to be reserved in the case that creates it, not counted as fixed chrome.
   const verdict = verdictLines
     ? Math.max(0, Math.min(verdictLines, budget - (verdictLines > budget ? 1 : 0)))
     : 0;
-  return { profiles: shownProfiles, verdict };
+  return { profiles: shownProfiles, verdict, overflow };
 }
 
 /** Status for an armed watch loop. Renders nothing when it is not. */
@@ -137,7 +140,7 @@ export function WatchStatus({
       {w.who.slice(0, room.profiles).map((p) => (
         <ProfiledRow key={p.digest} p={p} />
       ))}
-      {w.who.length > room.profiles && (
+      {room.overflow && (
         // Bounded, or a busy tick grows the panel until it pushes the rule list off screen. The
         // watch-list pane has every one of them.
         <Text dimColor>

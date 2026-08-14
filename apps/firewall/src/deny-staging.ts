@@ -288,7 +288,9 @@ export function denyEntries(opts: {
       // Normalized first, exactly as the staged branch does. Validating the RAW value sent an
       // upper-cased digest down the 'asn' branch, and unstageDeny then lifted it off the ASN
       // rule — the JA4 deny stayed live while the pane reported the lift as done.
-      kind: (JA4_DENY.valid(normalizeStaged(value)) ? 'ja4' : 'asn') as DenyKind,
+      kind: (JA4_DENY.valid(normalizeStaged(value))
+        ? 'ja4'
+        : 'asn') as DenyKind,
       value,
       staged: false,
       removed: true,

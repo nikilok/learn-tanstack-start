@@ -167,6 +167,26 @@ describe('useIdentityLists, loading and cursors', () => {
     h.unmount();
   });
 
+  // Computed from the RENDERED cursor, two presses in one tick both started from the same value
+  // and the second overwrote the first — a held j moved one row instead of two.
+  test('two moves in one tick advance twice, not once', async () => {
+    const root = tmp();
+    writeFileSync(
+      join(root, WATCHLIST_FILE),
+      line('one') +
+        line('two').replace(DIGEST, `${DIGEST.slice(0, -1)}9`) +
+        line('three').replace(DIGEST, `${DIGEST.slice(0, -1)}8`),
+    );
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+    get().moveCursor('watch', 1);
+    get().moveCursor('watch', 1);
+    await h.settle();
+    expect(get().watch.cursor).toBe(2);
+    h.unmount();
+  });
+
   test('an empty list parks the cursor at 0, never at -1', async () => {
     const { h, get } = await mountLists(tmp());
     get().moveCursor('watch', 1);

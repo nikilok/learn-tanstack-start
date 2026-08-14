@@ -146,11 +146,14 @@ export function useIdentityLists(root: string): IdentityLists {
     load,
     move,
     removeAtCursor,
-    moveCursor: (side, dir) =>
-      setCursor(
-        side,
-        clampCursor(cursorOf(side) + dir, entriesOf(side).length),
-      ),
+    // Through an updater: computed from the RENDERED cursor, two keypresses in one tick both
+    // started from the same value and the second overwrote the first, so a held j moved one row.
+    moveCursor: (side, dir) => {
+      const len = entriesOf(side).length;
+      (side === 'watch' ? setWatchCursor : setIgnoreCursor)((c) =>
+        clampCursor(c + dir, len),
+      );
+    },
     replaceWatch: (entries) => {
       setWatchEntries(entries);
       // Clamped: the tick's list can be SHORTER than what the pane held — the CLI or a hand edit

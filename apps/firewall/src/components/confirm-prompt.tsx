@@ -30,7 +30,11 @@ export function wrappedRows(text: string, width: number): number {
         inLine += Math.ceil(w / width) - 1;
         // `|| width`: an exact multiple leaves the row FULL, not empty, so the next word wraps.
         used = w % width || width;
-      } else used = used === 0 ? w : used + 1 + w;
+        // `w > 0` matters: split(' ') yields a zero-length word per leading space, and the
+        // used === 0 branch left `used` at zero for each of them — indentation cost no columns
+        // at all. An indented verdict line then measured one row and rendered two, which is
+        // exactly the overflow the watch panel's budget uses this to prevent.
+      } else used = used === 0 && w > 0 ? w : used + 1 + w;
     }
     rows += inLine;
   }

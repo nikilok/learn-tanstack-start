@@ -110,6 +110,28 @@ describe('useDenylist', () => {
       t.h.unmount();
     });
 
+    // Both edits computed from the render-time items, so the second started from a snapshot
+    // taken before the first and overwrote it. The pane showed the lost deny as staged while the
+    // rule never carried it, and the apply wrote a list missing one of them.
+    test('two denies staged in ONE tick both reach the rule', async () => {
+      const t = await mount([item(JA4_RULE, [])]);
+      t.get().stageDeny('ja4', DIGEST);
+      t.get().stageDeny('ja4', OTHER);
+      await t.h.settle();
+      expect(t.ja4Of(JA4_RULE).sort()).toEqual([DIGEST, OTHER].sort());
+      t.h.unmount();
+    });
+
+    test('a lift straight after a stage does not resurrect the staged value', async () => {
+      const t = await mount([item(JA4_RULE, [DIGEST])]);
+      t.get().stageDeny('ja4', OTHER);
+      t.get().unstageDeny(t.get().entries[0]);
+      await t.h.settle();
+      // OTHER was added and DIGEST lifted — both edits survive, in order.
+      expect(t.ja4Of(JA4_RULE)).toEqual([OTHER]);
+      t.h.unmount();
+    });
+
     test('a refused value returns the message and changes nothing', async () => {
       const t = await mount([item(JA4_RULE, [])]);
       expect(t.get().stageDeny('ja4', 'nonsense')).toContain('refused');

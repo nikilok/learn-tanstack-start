@@ -3,8 +3,9 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import type { Watch } from '../hooks/useWatch';
 import { Box, Text } from 'ink';
+
+import type { Watch } from '../hooks/useWatch';
 import { renderInk } from '../ink-harness';
 import { WatchStatus, panelRows } from './watch-status';
 
@@ -190,8 +191,7 @@ describe('panelRows', () => {
       why: 'rendering',
     }));
     // The loop's real note and a real verdict, both long enough to wrap at a narrow width.
-    const note =
-      '33 fingerprint(s) allowed through · 1 profiled · 0 would ban';
+    const note = '33 fingerprint(s) allowed through · 1 profiled · 0 would ban';
     const verdictHead = Array.from(
       { length: 12 },
       (_, i) => `line ${i} of a verdict long enough to wrap in a narrow column`,

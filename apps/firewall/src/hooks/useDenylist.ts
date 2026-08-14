@@ -101,9 +101,15 @@ export function useDenylist(opts: {
   const pending = pendingByRule(items, staged, removed, promoted);
 
   const stageDeny = (kind: DenyKind, value: string): string | undefined => {
+    // Checked against the rendered items — the refusal has to be returned to the caller, and a
+    // state updater cannot return anything.
     const next = stage(items, kind, value);
     if (next.error) return next.error;
-    setItems(next.items);
+    // But APPLIED through an updater, re-running the same pure function against whatever the
+    // queue already holds. Computed from the render-time list, two edits in one tick both started
+    // from the same snapshot and the second overwrote the first — a staged deny silently gone,
+    // with the pane showing it and the apply never writing it.
+    setItems((prev) => stage(prev, kind, value).items);
     setStaged((s) => afterStage(s, removed, value).staged);
     setRemoved((r) => afterStage(staged, r, value).removed);
     if (next.promoted)
@@ -116,7 +122,7 @@ export function useDenylist(opts: {
     // A lifted promotion goes back to the challenge tier it was taken from, or the operator is
     // left with less protection than they started with.
     const wasPromoted = promoted.includes(normalizeStaged(entry.value));
-    setItems(unstage(items, entry.kind, entry.value, wasPromoted));
+    setItems((prev) => unstage(prev, entry.kind, entry.value, wasPromoted));
     if (wasPromoted)
       setPromoted((p) => p.filter((v) => v !== normalizeStaged(entry.value)));
     setStaged((s) => afterUnstage(s, removed, entry).staged);
@@ -177,7 +183,10 @@ export function useDenylist(opts: {
       live.challenged.some(
         (v) => JA4_DENY.normalize(v) === JA4_DENY.normalize(digest),
       ),
-    cursor,
+    // Clamped on READ, not only on move: the entries list shrinks when an apply clears the staged
+    // rows, and a cursor left past the end makes `current` undefined — u and x then land on
+    // nothing, with nothing on screen saying why.
+    cursor: Math.max(0, Math.min(cursor, Math.max(0, entries.length - 1))),
     moveCursor: (dir) =>
       setCursor((c) => Math.max(0, Math.min(entries.length - 1, c + dir))),
     activity,

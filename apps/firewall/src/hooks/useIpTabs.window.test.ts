@@ -52,11 +52,19 @@ describe('tabWindow', () => {
   // loses the entire bar rather than one chip.
   test('the window respects a width already spent on the live marker', () => {
     const LIVE_MARKER_W = 2;
-    const widths = w(8);
-    const avail = 84;
-    const r = tabWindow(widths, 4, avail - LIVE_MARKER_W);
-    const used = widths.slice(r.start, r.end).reduce((a, b) => a + b, 0);
-    expect(used + LIVE_MARKER_W).toBeLessThanOrEqual(avail);
+    const widths = w(8); // chips of 18
+    // Chosen so the two columns CHANGE the answer: 94 - 4 arrow columns is 90, which admits five
+    // chips at 90; 92 - 4 is 88, which admits four. At the width this used to test, both spent
+    // and unspent budgets admitted exactly four, so the assertion held with or without the
+    // subtraction — it could not fail against the regression it names.
+    const avail = 94;
+    const spent = tabWindow(widths, 4, avail - LIVE_MARKER_W);
+    const unspent = tabWindow(widths, 4, avail);
+    const total = (r: { start: number; end: number }) =>
+      widths.slice(r.start, r.end).reduce((a, b) => a + b, 0);
+    expect(spent.end - spent.start).toBe(4);
+    expect(unspent.end - unspent.start).toBe(5);
+    expect(total(spent) + LIVE_MARKER_W).toBeLessThanOrEqual(avail);
   });
 
   test('arrows mark exactly the ends that are cut off', () => {

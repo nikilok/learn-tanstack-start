@@ -31,7 +31,9 @@ describe('test isolation', () => {
   test('the list files resolved from cwd are not the operator list files', () => {
     for (const file of [WATCHLIST_FILE, IGNORELIST_FILE]) {
       const underTest = resolve(join(process.cwd(), file));
-      expect(underTest).not.toBe(resolve(join(import.meta.dir, '../../..', file)));
+      expect(underTest).not.toBe(
+        resolve(join(import.meta.dir, '../../..', file)),
+      );
     }
   });
 });

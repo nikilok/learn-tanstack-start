@@ -267,15 +267,20 @@ export function useIpTabs(creds: Creds): IpTabs {
       const t = projected.current[at];
       if (!t) return;
       if (window)
-        setTabs((prev) => prev.map((x, i) => (i === at ? { ...x, window } : x)));
+        setTabs((prev) =>
+          prev.map((x, i) => (i === at ? { ...x, window } : x)),
+        );
       void run(t.subject, window ?? t.window, Boolean(window));
     },
     [run],
   );
 
-  const cycle = useCallback((dir: 1 | -1) => {
-    focus(nextIndex(focusedAt.current, projected.current.length, dir));
-  }, [focus]);
+  const cycle = useCallback(
+    (dir: 1 | -1) => {
+      focus(nextIndex(focusedAt.current, projected.current.length, dir));
+    },
+    [focus],
+  );
 
   const close = useCallback(() => {
     // Forget the closed tab's request state, or reopening it is dropped as a duplicate of a

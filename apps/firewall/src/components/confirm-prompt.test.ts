@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { type Confirmation, confirmRows } from './confirm-prompt';
+import { type Confirmation, confirmRows, wrappedRows } from './confirm-prompt';
 
 const of = (prompt: string, detail: string): Confirmation => ({
   prompt,
@@ -57,5 +57,37 @@ describe('confirmRows', () => {
 
   test('an explicit newline starts a new row', () => {
     expect(confirmRows(of('x', 'a\nb\nc'), 80)).toBe(1 + 3 + 1);
+  });
+});
+
+// The watch panel's row budget is built from this, so anything it under-counts is a row the
+// panel takes without having reserved it.
+describe('wrappedRows', () => {
+  test('a line that fits is one row', () => {
+    expect(wrappedRows('short', 40)).toBe(1);
+  });
+
+  // split(' ') yields a zero-length word per leading space, and those left `used` at zero — so
+  // indentation cost no columns and an indented line measured one row while Ink drew two.
+  test('leading spaces cost columns, like every other character', () => {
+    expect(wrappedRows(`  ${'x'.repeat(39)}`, 40)).toBe(2);
+  });
+
+  test('an indented bullet wraps where an unindented one would not', () => {
+    const text = 'x'.repeat(38);
+    expect(wrappedRows(text, 40)).toBe(1);
+    expect(wrappedRows(`    ${text}`, 40)).toBe(2);
+  });
+
+  test('a word wider than the row spans the rows it needs', () => {
+    expect(wrappedRows('x'.repeat(85), 40)).toBe(3);
+  });
+
+  test('each newline starts a new row', () => {
+    expect(wrappedRows('a\nb\nc', 40)).toBe(3);
+  });
+
+  test('a zero width is one row rather than a division by zero', () => {
+    expect(wrappedRows('anything', 0)).toBe(1);
   });
 });

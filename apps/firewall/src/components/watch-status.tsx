@@ -4,9 +4,9 @@
 import { Box, Text } from 'ink';
 
 import type { Profiled, Watch } from '../hooks/useWatch';
-import { wrappedRows } from './confirm-prompt';
 import { watchTiming } from '../tuning';
 import { WATCH_LOG } from '../watch-log';
+import { wrappedRows } from './confirm-prompt';
 
 // The panel is about 38 columns wide once the border and padding are taken out, and a JA4 digest
 // alone is 37. So the line is ordered by what an operator needs FIRST — verdict, then which
@@ -123,7 +123,8 @@ export function WatchStatus({
   // The panel's own content width: the column less its border and horizontal padding.
   const inner = Math.max(0, width - 4);
   const timing =
-    watchTiming() ?? 'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN';
+    watchTiming() ??
+    'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN';
   const last = w.at ? ` · last ${w.at}` : ' · starting…';
   const awake = w.keepingAwake ? ' · holding the mac awake' : '';
   // Measured, not assumed: both of these wrap, and at this panel's real width — about 38

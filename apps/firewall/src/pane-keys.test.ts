@@ -135,6 +135,15 @@ describe('bindingFor', () => {
     expect(bindingFor([d], 'ip', key('d'))).toBeDefined();
   });
 
+  // j/k are characters too, so a modified press must not move a cursor.
+  test('the j/k aliases reject modifiers, while the arrows never carry them', () => {
+    expect(press.up({ input: 'k', ctrl: true })).toBe(false);
+    expect(press.down({ input: 'j', meta: true })).toBe(false);
+    expect(press.up(key('k'))).toBe(true);
+    expect(press.down(key('j'))).toBe(true);
+    expect(press.up(special({ upArrow: true }))).toBe(true);
+  });
+
   test('shift is still allowed, because shift-tab is a real binding', () => {
     const t = bind({ key: 'tab', matches: press.tab });
     expect(

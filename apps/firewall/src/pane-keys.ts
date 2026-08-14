@@ -51,6 +51,9 @@ export type Binding = {
   run: (p: Press) => void;
 };
 
+/** Whether a press carries no Ctrl or Meta. Shift is allowed — shift-tab is a real binding. */
+const unmodified = (p: Press) => !p.ctrl && !p.meta;
+
 /** Matchers, so a binding names the key rather than re-deriving it from the Press shape. */
 export const press = {
   char:
@@ -58,12 +61,15 @@ export const press = {
     (p: Press) =>
       // Modified presses are excluded: Ink reports Ctrl-D as input 'd' with ctrl set, so without
       // this every terminal control sequence doubled as a pane shortcut.
-      Boolean(p.input) && !p.ctrl && !p.meta && chars.includes(p.input),
+      Boolean(p.input) && unmodified(p) && chars.includes(p.input),
   enter: (p: Press) => Boolean(p.return),
   escape: (p: Press) => Boolean(p.escape),
   tab: (p: Press) => Boolean(p.tab),
-  up: (p: Press) => Boolean(p.upArrow) || p.input === 'k',
-  down: (p: Press) => Boolean(p.downArrow) || p.input === 'j',
+  // The arrows always count; the letter aliases are characters, so they carry the same modifier
+  // guard as press.char — Ctrl-K must not move a cursor.
+  up: (p: Press) => Boolean(p.upArrow) || (unmodified(p) && p.input === 'k'),
+  down: (p: Press) =>
+    Boolean(p.downArrow) || (unmodified(p) && p.input === 'j'),
   pageUp: (p: Press) => Boolean(p.pageUp),
   pageDown: (p: Press) => Boolean(p.pageDown),
 };

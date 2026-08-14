@@ -75,7 +75,9 @@ describe('WatchStatus', () => {
       }));
 
     test('each one is named, with its verdict and volume', async () => {
-      const frame = await frameOf({ who: many(2) });
+      // note cleared: the default one says "0 would ban", so these assertions could be satisfied
+      // by the header while ProfiledRow rendered nothing at all.
+      const frame = await frameOf({ note: '', who: many(2) });
       expect(frame).toContain('ban');
       expect(frame).toContain('watch');
       expect(frame).toContain('900 req');
@@ -85,9 +87,10 @@ describe('WatchStatus', () => {
     // The row is ~38 columns and a digest alone is 37, so ordering decides what survives
     // truncation. Verdict-last meant the verdict never appeared at all.
     test('the verdict survives at the real panel width', async () => {
-      const h = renderInk(<WatchStatus watch={{ ...ARMED, who: many(1) }} />, {
-        columns: 44,
-      });
+      const h = renderInk(
+        <WatchStatus watch={{ ...ARMED, note: '', who: many(1) }} />,
+        { columns: 44 },
+      );
       await h.settle();
       expect(h.frame()).toContain('ban');
       h.unmount();

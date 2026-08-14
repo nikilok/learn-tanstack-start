@@ -149,7 +149,9 @@ export function stage(
       // Unconditional, not gated on the digest being on the list: withoutValue on an absent
       // value is a no-op, and a gate here would need the LIVE list, which is exactly the state
       // a stale read gets wrong.
-      kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4
+      // Only when something actually came off it. Rebuilding regardless cleared the row's apply
+      // status on a rule this edit never touched, which reads as an unapplied change.
+      kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4 && promoted
         ? edited(it, withoutValue(it.rule, JA4_DENY, value).rule)
         : it.rule.name === ruleName
           ? edited(it, withValue(it.rule, spec, value).rule)

@@ -262,6 +262,9 @@ export function useWatch(opts: {
         if (alarms.length) {
           const key = `alarm:${alarms.join('|')}`;
           if (!stopped && (await shouldNotify(root, key))) {
+            // Rechecked AFTER the await, like the conclusion path below: shouldNotify reads a
+            // file, and a disarm landing in that window otherwise still sends the message.
+            if (stopped) return;
             const failed = await notify(alarms.join(' · '));
             // Appended: replacing it threw away the screen's own result — how many were allowed
             // through, and whether it was BLIND.

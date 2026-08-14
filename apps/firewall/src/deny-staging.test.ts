@@ -653,20 +653,14 @@ describe('staging a challenge', () => {
   // The deny rule wins, so the challenge would never be seen by the traffic. Reporting success
   // would show protection that is not there.
   test('a digest already DENIED is refused rather than quietly added', () => {
-    const items = [
-      item(JA4_RULE, [DIGEST_A]),
-      item(CHALLENGE_SCRAPER_JA4, []),
-    ];
+    const items = [item(JA4_RULE, [DIGEST_A]), item(CHALLENGE_SCRAPER_JA4, [])];
     const out = stage(items, 'challenge', DIGEST_A);
     expect(out.error).toContain('already on the deny list');
     expect(ja4Of(out.items, CHALLENGE_SCRAPER_JA4)).toEqual([]);
   });
 
   test('the refusal is case-insensitive, like every other digest comparison', () => {
-    const items = [
-      item(JA4_RULE, [DIGEST_A]),
-      item(CHALLENGE_SCRAPER_JA4, []),
-    ];
+    const items = [item(JA4_RULE, [DIGEST_A]), item(CHALLENGE_SCRAPER_JA4, [])];
     expect(
       stage(items, 'challenge', DIGEST_A.toUpperCase()).error,
     ).toBeTruthy();

@@ -123,9 +123,7 @@ export function useDenylist(opts: {
     // Through an updater, like stageDeny: assigned from the render-time list, a challenge staged
     // in the same tick as another edit overwrote it.
     setItems((prev) => stage(prev, 'challenge', digest).items);
-    setStagedChallenge((c) => [
-      ...new Set([...c, normalizeStaged(digest)]),
-    ]);
+    setStagedChallenge((c) => [...new Set([...c, normalizeStaged(digest)])]);
     onEdit();
     return undefined;
   };
@@ -192,9 +190,9 @@ export function useDenylist(opts: {
       // the same shape of silent failure the deny path has been bitten by twice.
       pending: Boolean(
         staged.length ||
-          removed.length ||
-          promoted.length ||
-          stagedChallenge.length,
+        removed.length ||
+        promoted.length ||
+        stagedChallenge.length,
       ),
       dryRun,
       write: writeEnv,

@@ -683,7 +683,9 @@ export function App() {
     const lever = ipAdvice?.lever;
     const target = lever?.value ?? subjectDigest;
     if (!target) {
-      setCopied('nothing to challenge — this profile carries no fingerprint yet');
+      setCopied(
+        'nothing to challenge — this profile carries no fingerprint yet',
+      );
       return;
     }
     const recommended = ipAdvice?.verdict === 'challenge';

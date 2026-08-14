@@ -253,7 +253,10 @@ describe('useDenylist', () => {
   // browsers, and acting on that used to mean hand-editing .env.local.
   describe('staging a challenge', () => {
     test('it reaches the challenge rule and marks it pending', async () => {
-      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
       expect(t.get().stageChallenge(DIGEST)).toBeUndefined();
       await t.h.settle();
       expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
@@ -263,7 +266,10 @@ describe('useDenylist', () => {
     });
 
     test('it is listed as staged, so the pane shows it before the apply', async () => {
-      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
       t.get().stageChallenge(DIGEST);
       await t.h.settle();
       expect(t.h.frame()).toContain(`${DIGEST}:s`);
@@ -275,7 +281,9 @@ describe('useDenylist', () => {
         item(JA4_RULE, [DIGEST]),
         item(CHALLENGE_SCRAPER_JA4, []),
       ]);
-      expect(t.get().stageChallenge(DIGEST)).toContain('already on the deny list');
+      expect(t.get().stageChallenge(DIGEST)).toContain(
+        'already on the deny list',
+      );
       await t.h.settle();
       expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([]);
       expect(t.edits()).toBe(0);
@@ -301,7 +309,10 @@ describe('useDenylist', () => {
     });
 
     test('an applied challenge is written to FW_CHALLENGE_JA4', async () => {
-      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
       t.get().stageChallenge(DIGEST);
       await t.h.settle();
       const applied = new Map<string, ApplyStatus>(

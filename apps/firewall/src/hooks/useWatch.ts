@@ -202,8 +202,13 @@ export function useWatch(opts: {
               kind: 'error',
               error: `watch list: ${listed.error}`,
             });
-          else if (listed.entries) onWatchlistRef.current(listed.entries);
+          else if (listed.entries && !stopped)
+            onWatchlistRef.current(listed.entries);
         }
+        // Re-checked after the awaits above, like the check before them: logShadow and
+        // recordAdditions both touch disk, and a disarm landing in that window otherwise repaints
+        // the panel of a loop the operator has switched off.
+        if (stopped) return;
         setWatchWho(
           findings.map((f) => ({
             digest: f.digest,

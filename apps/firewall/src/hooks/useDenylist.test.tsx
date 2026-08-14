@@ -92,6 +92,12 @@ async function mount(initial: Item[]) {
   };
 }
 
+/** Every rule reported as having applied cleanly, which is what persist gates its writes on. */
+const applied = (items: Item[]) =>
+  new Map<string, ApplyStatus>(
+    items.map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
+  );
+
 describe('useDenylist', () => {
   test('a live deny is listed', async () => {
     const t = await mount([item(JA4_RULE, [DIGEST])]);
@@ -395,10 +401,7 @@ describe('useDenylist', () => {
       ]);
       t.get().unstageDeny(t.get().entries[0]);
       await t.h.settle();
-      const applied = new Map<string, ApplyStatus>(
-        t.items().map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
-      );
-      t.get().persist(t.items(), applied, false);
+      t.get().persist(t.items(), applied(t.items()), false);
       await t.h.settle();
       expect(new Map(t.writes).get('FW_CHALLENGE_JA4')).toBe('');
       t.h.unmount();
@@ -467,6 +470,53 @@ describe('useDenylist', () => {
       t.get().unstageDeny(t.get().entries.find((e) => e.value === DIGEST)!);
       await t.h.settle();
       expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      // The rule holding it is only half of it: the digest was never applied, so the restore owes
+      // a write. Asserting the values alone passed while `pending` was false and the apply below
+      // wrote nothing — the tier read as live and protected by nothing.
+      expect(t.h.frame()).toContain(`${CHALLENGE_SCRAPER_JA4}=+1`);
+      const out = t.get().persist(t.items(), applied(t.items()), false);
+      await t.h.settle();
+      expect(out.ok).toBe(true);
+      expect(new Map(t.writes).get('FW_CHALLENGE_JA4')).toBe(DIGEST);
+      t.h.unmount();
+    });
+
+    // The mirror case, and the reason the fix cannot just mark the tier pending on every lifted
+    // promotion: here the digest WAS live on the tier, so promote-then-lift is a round trip that
+    // ends where it started. Reporting an edit would invent an apply nobody asked for.
+    test('promoting a LIVE challenge and lifting it again leaves nothing pending', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+      ]);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      t.get().unstageDeny(t.get().entries.find((e) => e.value === DIGEST)!);
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      expect(t.ja4Of(JA4_RULE)).toEqual([]);
+      expect(t.h.frame()).not.toContain(`${CHALLENGE_SCRAPER_JA4}=`);
+      const out = t.get().persist(t.items(), applied(t.items()), false);
+      await t.h.settle();
+      expect(out.ok).toBe(true);
+      expect(t.writes).toEqual([]);
+      t.h.unmount();
+    });
+
+    // Same missing bit one step earlier: a promotion off a SAME-SESSION stage takes nothing off
+    // the tier, because the tier never held it. Counted with the live removals it drew −1 for a
+    // digest that was only ever pending, marking a rule the apply will not change.
+    test('promoting a digest staged this session marks no removal on the tier', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      t.get().stageChallenge(DIGEST);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([]);
+      expect(t.h.frame()).toContain(`${JA4_RULE}=+1`);
+      expect(t.h.frame()).not.toContain(`${CHALLENGE_SCRAPER_JA4}=`);
       t.h.unmount();
     });
 
@@ -477,10 +527,7 @@ describe('useDenylist', () => {
       ]);
       t.get().stageChallenge(DIGEST);
       await t.h.settle();
-      const applied = new Map<string, ApplyStatus>(
-        t.items().map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
-      );
-      const out = t.get().persist(t.items(), applied, false);
+      const out = t.get().persist(t.items(), applied(t.items()), false);
       await t.h.settle();
       expect(out.ok).toBe(true);
       expect(new Map(t.writes).get('FW_CHALLENGE_JA4')).toBe(DIGEST);
@@ -491,11 +538,6 @@ describe('useDenylist', () => {
   });
 
   describe('persist', () => {
-    const applied = (items: Item[]) =>
-      new Map<string, ApplyStatus>(
-        items.map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
-      );
-
     test('a dry run writes nothing and keeps the staging', async () => {
       const t = await mount([item(JA4_RULE, [])]);
       t.get().stageDeny('ja4', DIGEST);

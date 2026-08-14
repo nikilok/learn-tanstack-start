@@ -41,6 +41,9 @@ export const ENV_PATH = fileURLToPath(
 );
 const DENY_ACTIVITY_HOURS = 144;
 
+/** A digest denied off the challenge tier this session, and whether the tier was only staged to hold it. */
+type Promotion = { value: string; fromStage: boolean };
+
 export type Denylist = {
   live: LiveDenies;
   entries: DenyEntry[];
@@ -100,7 +103,13 @@ export function useDenylist(opts: {
   // on neither rule, leaving the lift showing as pending nowhere.
   const [removedChallenge, setRemovedChallenge] = useState<string[]>([]);
   // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
-  const [promoted, setPromoted] = useState<string[]>([]);
+  //
+  // `fromStage` is the whole reason this is not a bare list of digests. A promotion off a LIVE
+  // tier entry removes something the WAF is enforcing; a promotion off a stage made this session
+  // only cancels a pending addition. The two need opposite treatment on both sides — what the
+  // rule marker counts, and what a later lift restores — and the distinction is destroyed the
+  // moment the stage is cleared, so it is recorded here rather than derived later.
+  const [promoted, setPromoted] = useState<Promotion[]>([]);
 
   // ONE advancing snapshot of the edit buffer.
   //
@@ -156,11 +165,15 @@ export function useDenylist(opts: {
         !removedChallenge.includes(normalizeStaged(v)),
     ),
   });
+  // Only a promotion off a LIVE tier entry takes anything off the rule. One off a stage made this
+  // session cancels a pending addition and leaves the tier where it started, so counting it drew
+  // −1 for a digest the tier never held and marked a rule the apply would not change.
+  const offTier = promoted.filter((p) => !p.fromStage).map((p) => p.value);
   const pending = pendingByRule(
     items,
     staged,
     removed,
-    promoted,
+    offTier,
     stagedChallenge,
     removedChallenge,
   );
@@ -202,8 +215,14 @@ export function useDenylist(opts: {
     setEdits((e) => afterStage(e.staged, e.removed, value));
     if (next.promoted) {
       const v = next.promoted;
-      promotedRef.current = [...new Set([...promotedRef.current, v])];
-      setPromoted((p) => [...new Set([...p, v])]);
+      // Read BEFORE the stage is cleared below, because clearing it is what destroys the answer.
+      const fromStage = stagedChallengeRef.current.includes(v);
+      const record = (p: Promotion[]) => [
+        ...p.filter((x) => x.value !== v),
+        { value: v, fromStage },
+      ];
+      promotedRef.current = record(promotedRef.current);
+      setPromoted(record);
       // A promotion takes the digest OFF the challenge rule, so a stage of it this session is no
       // longer pending — left in place, one digest drew two rows and marked the tier +1 for
       // something it no longer holds.
@@ -222,13 +241,13 @@ export function useDenylist(opts: {
     const v = normalizeStaged(entry.value);
     // From the projection, not the render: a promotion staged earlier in this same tick has not
     // reached `promoted` yet, and reading it there loses the restore.
-    const wasPromoted = promotedRef.current.includes(v);
+    const promotion = promotedRef.current.find((p) => p.value === v);
     commitItems(
-      unstage(itemsRef.current, entry.kind, entry.value, wasPromoted),
+      unstage(itemsRef.current, entry.kind, entry.value, Boolean(promotion)),
     );
-    if (wasPromoted) {
-      promotedRef.current = promotedRef.current.filter((x) => x !== v);
-      setPromoted((p) => p.filter((x) => x !== v));
+    if (promotion) {
+      promotedRef.current = promotedRef.current.filter((x) => x.value !== v);
+      setPromoted((p) => p.filter((x) => x.value !== v));
     }
     if (entry.kind === 'challenge') {
       const v = normalizeStaged(entry.value);
@@ -240,7 +259,19 @@ export function useDenylist(opts: {
           ? removedChallengeRef.current
           : [...new Set([...removedChallengeRef.current, v])],
       );
-    } else setEdits((e) => afterUnstage(e.staged, e.removed, entry));
+    } else {
+      setEdits((e) => afterUnstage(e.staged, e.removed, entry));
+      // A promotion off a stage made this session goes back to being that stage. `unstage` puts
+      // the digest back on the rule either way, but restoring the RULE without restoring the
+      // STAGE left nothing pending: the pane drew it as live and applied, and the apply took its
+      // early return and wrote nothing — the digest ending up on no tier at all. A promotion off
+      // a LIVE entry needs none of this, because the tier is already back where it started.
+      if (promotion?.fromStage)
+        commitChallenge(
+          [...new Set([...stagedChallengeRef.current, v])],
+          removedChallengeRef.current,
+        );
+    }
     onEdit();
   };
 

@@ -21,3 +21,6 @@ export const ROW_CHROME = {
   flag: FLAG_W,
   open: OPEN_W,
 };
+
+/** The '● ' live marker drawn ahead of the tab chips, which the bar's width budget must allow for. */
+export const LIVE_MARKER_W = 2;

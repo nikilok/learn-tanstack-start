@@ -54,6 +54,7 @@ import {
 } from './pane-keys';
 import {
   COUNT_W,
+  LIVE_MARKER_W,
   MIN_PANE_W,
   MIN_RULES_W,
   PANE_GAP,
@@ -1184,7 +1185,9 @@ export function App() {
     // fits while idle would otherwise wrap the moment one of them refreshes.
     ipTabs.tabs.map((t) => tabLabel(t).length + (t.loading ? 4 : 3)),
     ipTabs.index,
-    reportW,
+    // Live mode draws a '● ' marker ahead of the chips. Not subtracting it let the bar overflow
+    // by exactly those two columns — and an overflowing bar wraps, which loses all of it.
+    reportW - (isLive ? LIVE_MARKER_W : 0),
   );
   const rulesW = showPane ? cols - reportW - PANE_GAP : cols;
   const longestName = items.reduce(

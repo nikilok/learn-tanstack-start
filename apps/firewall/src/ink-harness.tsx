@@ -6,8 +6,9 @@ import { PassThrough } from 'node:stream';
 import { render } from 'ink';
 import type { ReactElement } from 'react';
 
-// Outlasts Ink's 20ms hold on a lone ESC, or a bare escape never arrives.
-const FLUSH_MS = 25;
+// Outlasts Ink's 20ms hold on a lone ESC, or a bare escape never arrives. 25 left five
+// milliseconds of margin on a timer race; 40 costs nothing and stops the suite flaking under load.
+const FLUSH_MS = 40;
 
 // Captured once, before any harness has patched it. Restoring the value that was current when a
 // given harness started would hand back another harness's patch if two overlap, or if one is

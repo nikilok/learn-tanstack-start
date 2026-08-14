@@ -47,6 +47,18 @@ describe('tabWindow', () => {
     }
   });
 
+  // Live mode draws a '● ' marker before the chips. The caller must hand tabWindow the width that
+  // is actually left, or the bar overflows by those two columns — and an overflow wraps, which
+  // loses the entire bar rather than one chip.
+  test('the window respects a width already spent on the live marker', () => {
+    const LIVE_MARKER_W = 2;
+    const widths = w(8);
+    const avail = 84;
+    const r = tabWindow(widths, 4, avail - LIVE_MARKER_W);
+    const used = widths.slice(r.start, r.end).reduce((a, b) => a + b, 0);
+    expect(used + LIVE_MARKER_W).toBeLessThanOrEqual(avail);
+  });
+
   test('arrows mark exactly the ends that are cut off', () => {
     const first = tabWindow(w(8), 0, 84);
     expect(first.left).toBe(false);

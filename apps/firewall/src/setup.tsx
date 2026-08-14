@@ -5,17 +5,17 @@
 //   - no TTY, neither:     refuse (a piped/redirected run must NOT silently mutate the live WAF)
 // Run from the repo root so bun loads .env.local:  bun run firewall:setup
 //
-// `dryRun`/`apply` are read from argv directly (not imported) so a missing-env throw in the
-// firewall modules surfaces via main().catch() as a clean message rather than a raw import-time stack.
+// From env.ts, which imports nothing and cannot throw — so a missing-env failure in the firewall
+// modules still surfaces via main().catch() as a clean message rather than an import-time stack.
 
 import { render } from 'ink';
 
+import { isApply, isDryRun, isInteractive } from './env';
 import { errMsg } from './util';
 
-const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-const dryRun =
-  process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
-const apply = process.argv.includes('--apply');
+const interactive = isInteractive();
+const dryRun = isDryRun();
+const apply = isApply();
 
 async function main() {
   if (apply && dryRun) {

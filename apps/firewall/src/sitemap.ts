@@ -2,6 +2,7 @@
 // Read-only. Also available as the `s` pane inside `bun run firewall:setup`.
 
 import { resolveVercelCredentials } from './credentials';
+import { useColour } from './env';
 import { toAnsi } from './line-model';
 import { fetchSitemapReport } from './sitemap-readers';
 import { sitemapLines } from './sitemap-view';
@@ -31,7 +32,7 @@ async function main() {
   );
   console.log(
     toAnsi(sitemapLines(report), {
-      colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
+      colour: useColour(),
     }),
   );
 }

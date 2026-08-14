@@ -3,7 +3,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-import { errMsg } from './util';
+import { errMsg } from '../util';
 
 /** `skipped` means a concurrent load was already running and this call did nothing. */
 export type LoadResult = 'ok' | 'error' | 'skipped';
@@ -22,16 +22,21 @@ export function usePane<T>(): Pane<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const inFlight = useRef(false);
+  // The generation whose load is currently running, or null. Not a boolean: a plain in-flight
+  // flag also blocked the load that reset() is immediately followed by, so a window change left
+  // the pane empty until something else happened to refetch it.
+  const flying = useRef<number | null>(null);
   // Bumped by reset(). A load that started before it belongs to a window no longer on screen,
   // so its result must be dropped rather than written back over the cleared state.
   const generation = useRef(0);
 
   const load = useCallback(
     async (fetcher: () => Promise<T>): Promise<LoadResult> => {
-      if (inFlight.current) return 'skipped';
-      inFlight.current = true;
+      // Only a duplicate WITHIN the same generation is dropped. A newer generation supersedes
+      // whatever is in flight — that one's result is already going to be discarded.
+      if (flying.current === generation.current) return 'skipped';
       const mine = generation.current;
+      flying.current = mine;
       setLoading(true);
       setError('');
       try {
@@ -44,10 +49,13 @@ export function usePane<T>(): Pane<T> {
         setError(errMsg(e));
         return 'error';
       } finally {
-        inFlight.current = false;
-        // Only the current generation owns the spinner; a superseded load clearing it would
-        // hide the one that replaced it.
-        if (mine === generation.current) setLoading(false);
+        // Only the newest load owns the spinner. A superseded one clearing it would hide the
+        // successor's; keying that on the generation rather than on "did anything supersede me"
+        // is what stops a superseded load with NO successor leaving the spinner up forever.
+        if (flying.current === mine) {
+          flying.current = null;
+          setLoading(false);
+        }
       }
     },
     [],

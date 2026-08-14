@@ -4,9 +4,10 @@
 // repeating itself until it is ignored. So a notification is sent when the actionable set CHANGES,
 // not whenever it is non-empty — a finding that is still there next hour is not news.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 
 import { recommendsAction } from './ban-advice';
+import { envText } from './env';
 import { errMsg } from './util';
 import type { WatchReport } from './watch';
 
@@ -172,19 +173,29 @@ export async function readInvestigated(
   return out;
 }
 
+let writeSeq = 0;
+
 /** Persist it. Never throws: losing this costs a repeat investigation, not a missed one. */
 export async function writeInvestigated(
   dir: string,
   seen: ReadonlyMap<string, number>,
 ): Promise<void> {
+  // Write-then-rename, like saveList: this file is what stops a digest being investigated twice,
+  // and an investigation costs money. A truncated write loses entries, and every lost entry is
+  // one the next tick pays to rediscover.
+  // Per INVOCATION, not per process: the pid alone is the same string for two overlapping calls,
+  // and they would then write the same temp file and rename each other's half of it.
+  const tmp = `${dir}/${INVESTIGATED}.tmp-${process.pid}-${++writeSeq}`;
   try {
     await writeFile(
-      `${dir}/${INVESTIGATED}`,
+      tmp,
       [...seen].map(([d, t]) => `${d}|${t}`).join('\n'),
       'utf8',
     );
+    await rename(tmp, `${dir}/${INVESTIGATED}`);
   } catch {
-    // Deliberately empty.
+    // Best-effort, as before — but never leave the temp file behind.
+    await unlink(tmp).catch(() => undefined);
   }
 }
 
@@ -244,7 +255,7 @@ export const NOTIFY_TIMEOUT_MS = 20_000;
 export async function notify(body: string): Promise<string | null> {
   if (process.platform !== 'darwin')
     return 'notifications are macOS-only; nothing was sent';
-  const to = process.env[IMESSAGE_TO]?.trim();
+  const to = envText(IMESSAGE_TO);
   const argv = to
     ? iMessageArgs(to, body)
     : [

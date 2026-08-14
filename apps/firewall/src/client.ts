@@ -3,37 +3,19 @@
 
 import { Vercel } from '@vercel/sdk';
 
-import {
-  actionOptions,
-  asChoice,
-  effectiveAction,
-  withAction,
-} from './actions';
+import { asChoice, effectiveAction, withAction } from './actions';
 import { resolveVercelCredentials } from './credentials';
 import { headerKeysByGroup } from './rule-integrity';
-import { type ActionChoice, type Rule, dryRun, rules } from './rules';
-import { errMsg } from './util';
+import { type ActionChoice, type Rule, dryRun } from './rules';
+import {
+  type ApplyStatus,
+  type Item,
+  type LiveConfig,
+  seedItems,
+} from './seed-items';
 
-export type ApplyStatus =
-  | 'idle'
-  | 'applying'
-  | 'inserted'
-  | 'overwrote'
-  | 'error';
-export type LiveConfig = {
-  idByName: Map<string, string>;
-  activeByName: Map<string, boolean>;
-  actionByName: Map<string, ActionChoice>;
-  /** Header keys each live rule requires, PER condition group — groups are OR'd, so the weakest one governs. */
-  headerKeysByName: Map<string, Set<string>[]>;
-};
-export type Item = {
-  rule: Rule;
-  active: boolean;
-  action: ActionChoice;
-  status: ApplyStatus;
-  detail?: string;
-};
+export type { ApplyStatus, Item, LiveConfig };
+import { errMsg } from './util';
 
 export const { projectId, teamId, token } = resolveVercelCredentials();
 const vercel = new Vercel({ bearerToken: token });
@@ -58,27 +40,6 @@ export async function fetchLive(): Promise<LiveConfig> {
     if (c) actionByName.set(r.name, c);
   }
   return { idByName, activeByName, actionByName, headerKeysByName };
-}
-
-/** Seed each code rule's desired active + action, preferring the LIVE config so a run never silently downgrades operator-tuned enforcement; the action is clamped to the rule's valid options (so drift like a bypass on a rate-limit rule can't be re-applied as an invalid value). New rules fall back to code defaults. */
-export function seedItems(live: LiveConfig): Item[] {
-  return rules.map((rule) => {
-    const opts = actionOptions(rule);
-    const liveAction = live.actionByName.get(rule.name);
-    const codeAction = asChoice(effectiveAction(rule.action.mitigate)) ?? 'log';
-    const action =
-      liveAction && opts.includes(liveAction)
-        ? liveAction
-        : opts.includes(codeAction)
-          ? codeAction
-          : opts[0];
-    return {
-      rule,
-      active: live.activeByName.get(rule.name) ?? rule.active,
-      action,
-      status: 'idle',
-    };
-  });
 }
 
 /** Upsert one rule (insert if new, overwrite if it already exists), honouring dry-run. Returns the outcome for display. */

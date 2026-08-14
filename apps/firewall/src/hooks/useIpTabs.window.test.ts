@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { tabWindow } from './use-ip-tabs';
+import { ARROW, tabWindow } from './useIpTabs';
 
 const w = (n: number, each = 18) => Array.from({ length: n }, () => each);
 
@@ -38,11 +38,33 @@ describe('tabWindow', () => {
       const used = w(8)
         .slice(r.start, r.end)
         .reduce((a, b) => a + b, 0);
-      const fits = used <= Math.max(0, avail - 4);
+      // ARROW * 2 from the source, not a literal 4: both ends are budgeted for even when
+      // only one arrow shows, so the window does not resize as it slides.
+      const fits = used <= Math.max(0, avail - ARROW * 2);
       // The renderer clips an oversized lone chip; the window's job is never to return zero.
       expect(fits || r.end - r.start === 1).toBe(true);
       expect(r.end).toBeGreaterThan(r.start);
     }
+  });
+
+  // Live mode draws a '● ' marker before the chips. The caller must hand tabWindow the width that
+  // is actually left, or the bar overflows by those two columns — and an overflow wraps, which
+  // loses the entire bar rather than one chip.
+  test('the window respects a width already spent on the live marker', () => {
+    const LIVE_MARKER_W = 2;
+    const widths = w(8); // chips of 18
+    // Chosen so the two columns CHANGE the answer: 94 - 4 arrow columns is 90, which admits five
+    // chips at 90; 92 - 4 is 88, which admits four. At the width this used to test, both spent
+    // and unspent budgets admitted exactly four, so the assertion held with or without the
+    // subtraction — it could not fail against the regression it names.
+    const avail = 94;
+    const spent = tabWindow(widths, 4, avail - LIVE_MARKER_W);
+    const unspent = tabWindow(widths, 4, avail);
+    const total = (r: { start: number; end: number }) =>
+      widths.slice(r.start, r.end).reduce((a, b) => a + b, 0);
+    expect(spent.end - spent.start).toBe(4);
+    expect(unspent.end - unspent.start).toBe(5);
+    expect(total(spent) + LIVE_MARKER_W).toBeLessThanOrEqual(avail);
   });
 
   test('arrows mark exactly the ends that are cut off', () => {

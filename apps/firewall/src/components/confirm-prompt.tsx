@@ -1,0 +1,75 @@
+// The y/n gate. A deny can take real users offline, so it never happens on one keystroke.
+
+import { Box, Text } from 'ink';
+
+export type Confirmation = {
+  prompt: string;
+  detail: string;
+  onYes: () => void;
+};
+
+// Rows greedily, the way `wrap` does: a word is never split, so counting characters would
+// under-count and the frame would still overflow.
+/** Lines `text` occupies once wrapped to `width`. */
+/** Rows `text` costs at `width`, counting soft wraps. Shared with the watch panel, whose budget has to know that one logical line is not always one row. */
+export function wrappedRows(text: string, width: number): number {
+  if (width <= 0) return 1;
+  let rows = 0;
+  for (const line of text.split('\n')) {
+    let inLine = 1;
+    let used = 0;
+    for (const word of line.split(' ')) {
+      const w = word.length;
+      if (used !== 0 && used + 1 + w > width) {
+        inLine++;
+        used = 0;
+      }
+      // A word wider than the row is not one row — a JA4 digest in a narrow pane is two, and
+      // charging it one is how the reservation ends up short again.
+      if (w > width) {
+        inLine += Math.ceil(w / width) - 1;
+        // `|| width`: an exact multiple leaves the row FULL, not empty, so the next word wraps.
+        used = w % width || width;
+        // `w > 0` matters: split(' ') yields a zero-length word per leading space, and the
+        // used === 0 branch left `used` at zero for each of them — indentation cost no columns
+        // at all. An indented verdict line then measured one row and rendered two, which is
+        // exactly the overflow the watch panel's budget uses this to prevent.
+      } else used = used === 0 && w > 0 ? w : used + 1 + w;
+    }
+    rows += inLine;
+  }
+  return rows;
+}
+
+/**
+ * Rows this dialog will occupy, so the pane can reserve them.
+ *
+ * A flat three was assumed, and the ASN detail is a paragraph — it wrapped to five or six lines,
+ * grew the frame past the viewport, and scrolled the header and the editor cursor off screen. The
+ * detail is the safety warning, so it wraps rather than truncating; what has to give is the
+ * reservation, not the text.
+ */
+export function confirmRows(c: Confirmation, width: number): number {
+  return wrappedRows(c.prompt, width) + wrappedRows(c.detail, width) + 1;
+}
+
+export function ConfirmPrompt({ confirm: c }: { confirm: Confirmation }) {
+  return (
+    <Box flexDirection="column">
+      <Text color="yellow" bold>
+        {c.prompt}
+      </Text>
+      <Box>
+        <Text dimColor>{c.detail}</Text>
+      </Box>
+      <Text>
+        <Text color="yellow" bold>
+          y
+        </Text>
+        <Text dimColor> yes · </Text>
+        <Text bold>n</Text>
+        <Text dimColor> no (esc cancels)</Text>
+      </Text>
+    </Box>
+  );
+}

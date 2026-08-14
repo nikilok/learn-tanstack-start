@@ -20,6 +20,7 @@ import {
 } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
+import { useColour } from './env';
 import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
@@ -945,7 +946,7 @@ async function main() {
   };
   console.log(
     toAnsi(watchLines(report), {
-      colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
+      colour: useColour(),
     }),
   );
 

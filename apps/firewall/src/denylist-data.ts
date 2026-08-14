@@ -6,6 +6,7 @@
 // therefore reports UNKNOWN, never zero: zero reads as "safe to retire", and a zero-filled
 // version of this said exactly that about a denied network still under active load.
 
+import { JA4_DENY } from './deny-list';
 import { countOf, makeCtx, metrics } from './observability';
 import { errMsg } from './util';
 
@@ -21,16 +22,23 @@ export async function fetchDenyActivity(
   if (!ja4.length) return { activity };
   const { ctx } = makeCtx(creds, { hours });
   // Interpolated into the filter DSL, so only digests the spec already validated.
-  const list = ja4.map((v) => `'${v}'`).join(',');
+  // Normalized once: the filter and the seeded keys must be the same strings, or a row comes
+  // back under a key nothing looks up.
+  const wanted = ja4.map((v) => JA4_DENY.normalize(v.trim()));
+  const list = wanted.map((v) => `'${v}'`).join(',');
   try {
     const resp = await metrics(ctx, ['clientJa4Digest', 'wafAction'], {
       filter: `clientJa4Digest in (${list})`,
       limit: 500,
     });
     // The query succeeded, so a digest with no rows genuinely saw nothing.
-    for (const v of ja4) activity.set(v, { requests: 0, denied: 0 });
+    for (const v of wanted) activity.set(v, { requests: 0, denied: 0 });
     for (const row of resp.summary ?? []) {
-      const key = String(row.clientJa4Digest ?? '');
+      // Normalized to match how the seeded keys are stored. The API can return a digest
+      // upper-cased, which then created a SECOND entry and left the seeded one at zero — and a
+      // zero here reads as "safe to retire" about a ban that is still catching traffic, which is
+      // the exact failure this module's header exists to warn about.
+      const key = JA4_DENY.normalize(String(row.clientJa4Digest ?? '').trim());
       if (!key) continue;
       const count = countOf(row);
       const cur = activity.get(key) ?? { requests: 0, denied: 0 };

@@ -2,6 +2,7 @@
 // Reports measured PEAKS, never window averages — a rate limit is a ceiling on a 60s/600s
 // window. Window is the last ~6 days (`observability_chart_free` caps startTime at 7).
 
+import { envCeiling } from './env';
 import {
   type Bucket,
   type Ctx,
@@ -15,7 +16,7 @@ import {
   seriesBy,
   top,
 } from './observability';
-import { envCeiling, errMsg } from './util';
+import { errMsg } from './util';
 
 // Bursts are located with 10-minute buckets, not hourly: hourly volume hides a one-minute spike.
 const PEAK_IPS = 6; // IPs measured — matches the 6 rows the pane renders

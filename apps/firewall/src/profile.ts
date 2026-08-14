@@ -9,6 +9,7 @@
 import { adviseBan } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { JA4_DENY, envMatching } from './deny-list';
+import { useColour } from './env';
 import { type Subject, fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
@@ -181,7 +182,7 @@ async function main() {
   });
   console.log(
     toAnsi(profileLines(profile, process.stdout.columns, advice), {
-      colour: Boolean(process.stdout.isTTY) && !process.env.NO_COLOR,
+      colour: useColour(),
     }),
   );
   // "ALREADY DENIED" here means "listed in FW_BLOCKED_JA4", which is not the same as being

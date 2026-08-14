@@ -9,7 +9,7 @@
     "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "sitemap": "bun --env-file=../../.env.local src/sitemap.ts",
     "watch": "bun --env-file=../../.env.local src/watch.ts",
-    "test": "bun test",
+    "test": "bun test --preload ./src/test-setup.ts",
     "verify": "bun --env-file=../../.env.local src/verify.ts"
   },
   "dependencies": {

@@ -136,6 +136,9 @@ export function envMatching(
   spec: DenySpec,
   required: boolean,
 ): string[] {
+  // Read RAW, deliberately NOT through env.ts's envText: this is the one place where absent and
+  // blank mean different things — absent throws when required, blank revokes the list. envText
+  // collapses both to undefined, which would turn a missing var into a silent revocation.
   const raw = process.env[name];
   if (raw === undefined) {
     if (!required) return [];

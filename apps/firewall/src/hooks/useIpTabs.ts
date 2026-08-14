@@ -1,11 +1,11 @@
 // Every IP looked up in a session stays open as a tab. Investigating means comparing clients, so
 // revisiting one must be instant — re-querying an IP you already pulled is the thing to avoid.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { type IpProfile, type Subject, fetchIpProfile } from './ip-profile';
-import type { Window } from './time-window';
-import { errMsg } from './util';
+import { type IpProfile, type Subject, fetchIpProfile } from '../ip-profile';
+import type { Window } from '../time-window';
+import { errMsg } from '../util';
 
 export type Creds = { projectId: string; teamId: string; token: string };
 
@@ -21,7 +21,6 @@ export type IpTabs = {
   tabs: IpTab[];
   index: number;
   active: IpTab | undefined;
-  /** Focus `ip`, fetching only if it is new. An IP already open is switched to, never refetched. */
   /** Focus `subject`, fetching only if new — or always when `force`, which a window change needs. */
   open: (subject: Subject, window: Window, force?: boolean) => void;
   /** Re-query the focused tab, keeping the stale profile on screen until the new one lands. Pass a window to re-scope it too — live mode advances every tick, and the tab's stored window would otherwise pin it to the period it was opened in. */
@@ -73,7 +72,8 @@ export function indexAfterClose(current: number, remaining: number): number {
   return Math.max(0, Math.min(current, remaining - 1));
 }
 
-const ARROW = 2; // '‹ ' / ' ›'
+/** Width the ends of a windowed tab bar cost. Exported so the test measures against the same number the layout uses. */
+export const ARROW = 2; // '‹ ' / ' ›'
 
 /**
  * The slice of tabs that fits `available` columns, always including `active`. Overflowing the row
@@ -121,6 +121,32 @@ export function useIpTabs(creds: Creds): IpTabs {
   const inFlight = useRef(new Set<string>());
   // A forced re-profile that arrives mid-fetch, held until the running one lands.
   const queued = useRef(new Map<string, Window>());
+  // Bumped when a subject's tab is closed. A fetch that was already running still resolves, and
+  // it patches by subject — so without this it would fill a REOPENED tab with the result of a
+  // request nobody was waiting for, rendered as though it were current.
+  const epoch = useRef(new Map<string, number>());
+  // The tab list as it will be, not as it was last drawn. `tabs` is the RENDERED array, so a
+  // second call in the same tick still sees the state before the first: two opens focused the
+  // first tab, and two opens of the SAME subject both passed the already-open check and made two
+  // tabs for one identity. Every call projects onto this, and it is reconciled from the rendered
+  // array on each render — so a close cannot leave it drifting.
+  const projected = useRef<IpTab[]>([]);
+  useEffect(() => {
+    projected.current = tabs;
+  }, [tabs]);
+  // And which of them has focus, for the same reason. `index` is the RENDERED focus, so a close
+  // straight after an open read the focus from before it: opening a tab and closing it in one
+  // tick removed the PREVIOUS tab instead — the one the operator meant to keep.
+  const focusedAt = useRef(0);
+  useEffect(() => {
+    focusedAt.current = index;
+  }, [index]);
+
+  /** Move focus in both the state and the projection, so a later call in the same tick sees it. */
+  const focus = useCallback((to: number) => {
+    setIndex(to);
+    focusedAt.current = to;
+  }, []);
 
   const run = useCallback(
     async function run(
@@ -128,7 +154,7 @@ export function useIpTabs(creds: Creds): IpTabs {
       window: Window,
       force = false,
     ): Promise<void> {
-      const key = `${subject.kind}:${subject.value}`;
+      const key = subjectKey(subject);
       const disposition = runDisposition(inFlight.current, key, force);
       if (disposition !== 'run') {
         // Last one wins: only the newest window is worth running when this finally lands.
@@ -136,15 +162,22 @@ export function useIpTabs(creds: Creds): IpTabs {
         return;
       }
       inFlight.current.add(key);
+      // Both sides through the same default. Read raw, a subject that has never been closed has
+      // NO entry, so `undefined !== 0` was true for every first lookup — every patch was dropped
+      // and the tab sat on "Loading IP profile…" for ever.
+      const epochOf = () => epoch.current.get(key) ?? 0;
+      const mine = epochOf();
       const patch = (p: Partial<IpTab>) =>
-        // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.subject.kind === subject.kind && t.subject.value === subject.value
-              ? { ...t, ...p }
-              : t,
-          ),
-        );
+        // Dropped if the tab was closed while this ran: the subject may be open again, and this
+        // result belongs to the tab that is gone.
+        epochOf() !== mine
+          ? undefined
+          : // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
+            setTabs((prev) =>
+              prev.map((t) =>
+                subjectKey(t.subject) === key ? { ...t, ...p } : t,
+              ),
+            );
       patch({ loading: true, error: '' });
       try {
         patch({
@@ -154,11 +187,16 @@ export function useIpTabs(creds: Creds): IpTabs {
       } catch (e) {
         patch({ error: errMsg(e), loading: false });
       } finally {
-        inFlight.current.delete(key);
-        const next = queued.current.get(key);
-        if (next) {
-          queued.current.delete(key);
-          void run(subject, next, true);
+        // Only the current run cleans up. A stale one — the tab was closed and reopened while it
+        // was in flight — would otherwise clear the NEW run's in-flight marker and swallow the
+        // window queued against it.
+        if (epochOf() === mine) {
+          inFlight.current.delete(key);
+          const next = queued.current.get(key);
+          if (next) {
+            queued.current.delete(key);
+            void run(subject, next, true);
+          }
         }
       }
     },
@@ -168,12 +206,12 @@ export function useIpTabs(creds: Creds): IpTabs {
   const open = useCallback(
     (subject: Subject, window: Window, force = false) => {
       // Already open: switching to it is the whole point, so do not re-query. Use R to refresh.
-      const existing = tabs.findIndex(
-        (t) =>
-          t.subject.kind === subject.kind && t.subject.value === subject.value,
+      // Against the projection, so a subject opened earlier in this same tick counts as open.
+      const existing = projected.current.findIndex(
+        (t) => subjectKey(t.subject) === subjectKey(subject),
       );
       if (existing !== -1) {
-        setIndex(existing);
+        focus(existing);
         if (force) {
           // The window changed under it, so its data is for a period no longer on screen.
           setTabs((prev) =>
@@ -183,65 +221,87 @@ export function useIpTabs(creds: Creds): IpTabs {
         }
         return;
       }
-      setTabs((prev) => [
-        ...prev,
-        { subject, window, data: null, error: '', loading: true },
-      ]);
-      setIndex(tabs.length); // where the append lands
+      const added: IpTab = {
+        subject,
+        window,
+        data: null,
+        error: '',
+        loading: true,
+      };
+      setTabs((prev) => [...prev, added]);
+      focus(projected.current.length); // where the append lands
+      projected.current = [...projected.current, added];
       void run(subject, window);
     },
-    [run, tabs],
+    [run, focus],
   );
 
   const openMany = useCallback(
     (subjects: Subject[], window: Window) => {
       const toAdd = newSubjects(
-        tabs.map((t) => t.subject),
+        projected.current.map((t) => t.subject),
         subjects,
       );
       if (!toAdd.length) return;
-      setTabs((prev) => [
-        ...prev,
-        ...toAdd.map((subject) => ({
-          subject,
-          window,
-          data: null,
-          error: '',
-          loading: true,
-        })),
-      ]);
-      setIndex(tabs.length); // the first of the appended block
+      const added: IpTab[] = toAdd.map((subject) => ({
+        subject,
+        window,
+        data: null,
+        error: '',
+        loading: true,
+      }));
+      setTabs((prev) => [...prev, ...added]);
+      focus(projected.current.length); // the first of the appended block
+      projected.current = [...projected.current, ...added];
       // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
       // so these queue rather than stampede, and every tab has its data by the time you reach it.
       for (const s of toAdd) void run(s, window);
     },
-    [run, tabs],
+    [run, focus],
   );
 
   const refresh = useCallback(
     (window?: Window) => {
-      const t = tabs[index];
+      // From the projection: a refresh straight after an open re-queried the PREVIOUS tab.
+      const at = focusedAt.current;
+      const t = projected.current[at];
       if (!t) return;
       if (window)
         setTabs((prev) =>
-          prev.map((x, i) => (i === index ? { ...x, window } : x)),
+          prev.map((x, i) => (i === at ? { ...x, window } : x)),
         );
       void run(t.subject, window ?? t.window, Boolean(window));
     },
-    [tabs, index, run],
+    [run],
   );
 
   const cycle = useCallback(
-    (dir: 1 | -1) => setIndex((i) => nextIndex(i, tabs.length, dir)),
-    [tabs.length],
+    (dir: 1 | -1) => {
+      focus(nextIndex(focusedAt.current, projected.current.length, dir));
+    },
+    [focus],
   );
 
   const close = useCallback(() => {
-    // Both computed from `tabs`, not from inside the updater: React may invoke an updater twice,
-    // and a state setter called from within one is a side effect it is not allowed to have.
-    setIndex(indexAfterClose(index, Math.max(0, tabs.length - 1)));
-    setTabs((prev) => prev.filter((_, i) => i !== index));
-  }, [index, tabs.length]);
+    // Forget the closed tab's request state, or reopening it is dropped as a duplicate of a
+    // fetch nothing is waiting for any more.
+    const at = focusedAt.current;
+    const going = projected.current[at];
+    if (going) {
+      const key = subjectKey(going.subject);
+      inFlight.current.delete(key);
+      queued.current.delete(key);
+      epoch.current.set(key, (epoch.current.get(key) ?? 0) + 1);
+    }
+    // Computed OUTSIDE the updater: React may invoke an updater twice, and a state setter called
+    // from within one is a side effect it is not allowed to have.
+    const remaining = projected.current.filter((_, i) => i !== at);
+    setTabs((prev) => prev.filter((_, i) => i !== at));
+    // The projection drops it too, or a close followed by an open in the same tick appends past
+    // the end and focuses a tab that is not there.
+    projected.current = remaining;
+    focus(indexAfterClose(at, remaining.length));
+  }, [focus]);
 
   return {
     tabs,

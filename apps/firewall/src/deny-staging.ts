@@ -160,6 +160,13 @@ export function stage(
         items,
         error: 'refused — already on the deny list, which outranks a challenge',
       };
+    // Already challenged: withValue is idempotent so the rule would not change, but the caller
+    // still records it as staged — a +1 on screen and an apply asked to write what is already
+    // written. Reporting work that is not work is how a lever loses its meaning.
+    const tier = items.find((it) => it.rule.name === CHALLENGE_SCRAPER_JA4);
+    const already = tier ? valuesOf(tier.rule, JA4_DENY) : [];
+    if (already.some((v) => normalizeStaged(v) === normalizeStaged(value)))
+      return { items, error: 'refused — already on the challenge tier' };
   }
   const challenge = items.find((it) => it.rule.name === CHALLENGE_SCRAPER_JA4);
   const promoted =

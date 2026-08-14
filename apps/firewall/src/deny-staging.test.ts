@@ -676,6 +676,27 @@ describe('staging a challenge', () => {
     expect(ja4Of(out.items, CHALLENGE_SCRAPER_JA4)).toEqual([]);
   });
 
+  // withValue is idempotent, so the rule would not change — but the caller records the value as
+  // staged regardless, showing a +1 and asking for an apply that writes what is already written.
+  test('a digest already CHALLENGED is refused rather than staged again', () => {
+    const items = [
+      item(JA4_RULE, []),
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_A]),
+    ];
+    const out = stage(items, 'challenge', DIGEST_A);
+    expect(out.error).toContain('already on the challenge tier');
+  });
+
+  test('that refusal normalizes too', () => {
+    const items = [
+      item(JA4_RULE, []),
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_A]),
+    ];
+    expect(
+      stage(items, 'challenge', DIGEST_A.toUpperCase()).error,
+    ).toBeTruthy();
+  });
+
   test('the refusal is case-insensitive, like every other digest comparison', () => {
     const items = [item(JA4_RULE, [DIGEST_A]), item(CHALLENGE_SCRAPER_JA4, [])];
     expect(

@@ -17,6 +17,7 @@ import {
   recordExclusive,
   removeEntry,
   saveList,
+  withListLock,
 } from '../watchlist';
 
 export type ListState = {
@@ -105,26 +106,28 @@ export function useIdentityLists(root: string): IdentityLists {
     setCursor(side, clampCursor(cursorOf(side), shown.length));
     // But SAVED from a fresh read, not from what the pane had. The watch tick appends to this
     // same file on its own timer, and writing the in-memory list back would drop whatever it
-    // added since this pane last loaded. Not a lock — a read-modify-write that reads late.
-    const latest = await readList(root, file);
-    if (!latest.ok) {
-      // Unreadable is not empty. Saving the in-memory list over a file we could not read is how
-      // a hand edit gets destroyed — the same reason parseWatchlist refuses a partial load.
-      await load(side);
-      return `${side} list: ${latest.error ?? 'unreadable'} — nothing removed`;
-    }
-    const next = removeEntry(latest.entries, entry.kind, entry.id);
-    const err = await saveList(root, file, next);
+    // added since this pane last loaded. Under the shared lock, so the read and the write are
+    // one step and a tick cannot land between them.
+    const outcome = await withListLock(async () => {
+      const latest = await readList(root, file);
+      if (!latest.ok)
+        // Unreadable is not empty. Saving the in-memory list over a file we could not read is
+        // how a hand edit gets destroyed — the same reason parseWatchlist refuses a partial load.
+        return { error: `${latest.error ?? 'unreadable'} — nothing removed` };
+      const next = removeEntry(latest.entries, entry.kind, entry.id);
+      const err = await saveList(root, file, next);
+      return err ? { error: err } : { next };
+    });
     // What was SAVED is what the pane should show: the late read may carry entries the watch
     // tick appended since this pane last loaded.
-    if (!err) {
-      setEntries(side, next);
-      setCursor(side, clampCursor(cursorOf(side), next.length));
+    if (outcome.next) {
+      setEntries(side, outcome.next);
+      setCursor(side, clampCursor(cursorOf(side), outcome.next.length));
       return undefined;
     }
     // The file still holds what the pane just dropped — re-read so the two agree.
     await load(side);
-    return `${side} list: ${err}`;
+    return `${side} list: ${outcome.error}`;
   };
 
   return {

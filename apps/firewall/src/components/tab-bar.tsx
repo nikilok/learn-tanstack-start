@@ -5,11 +5,15 @@ import { Box, Text } from 'ink';
 
 import type { IpTab, IpTabs } from '../hooks/useIpTabs';
 
-/** A tab's chip text. A JA4 is 37 chars, so it is shortened to its distinguishing head. */
+/**
+ * A tab's chip text. A JA4 is 36 chars, so it is shortened — head AND tail, because the head
+ * alone is the least distinguishing part of it: the first section is the TLS version and ALPN
+ * summary, shared by every client built on the same stack, so two unrelated scrapers drew
+ * identical chips. The trailing extension hash is what tells them apart.
+ */
 export function tabLabel(t: IpTab): string {
-  return t.subject.kind === 'ja4'
-    ? `${t.subject.value.slice(0, 14)}…`
-    : t.subject.value;
+  const v = t.subject.value;
+  return t.subject.kind === 'ja4' ? `${v.slice(0, 10)}…${v.slice(-6)}` : v;
 }
 
 export function TabBar({

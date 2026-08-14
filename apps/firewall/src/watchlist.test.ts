@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import {
   IGNORELIST_FILE,
   WATCHLIST_FILE,
+  type WatchAddition,
   type WatchlistEntry,
   formatWatchlist,
   parseWatchlist,
@@ -300,6 +301,44 @@ describe('recordExclusive', () => {
     expect(out.error).toBeUndefined();
     // The drop side stayed absent: nothing manufactured an empty file to overwrite later.
     expect(() => readFileSync(join(dir, WATCHLIST_FILE), 'utf8')).toThrow();
+  });
+
+  // The operator's keystrokes and the watch tick both write these files, in ONE process, each
+  // across an await. Interleaved, the later write is built on a read taken before the earlier
+  // one landed, so the earlier edit is silently gone — a curated entry that vanishes with no
+  // error anywhere.
+  test('a concurrent record does not overwrite one already in flight', async () => {
+    const dir = tmp();
+    const one: WatchAddition[] = [
+      { kind: 'ja4', id: DIG, source: 'watch', note: 'first' },
+    ];
+    const two: WatchAddition[] = [
+      { kind: 'ja4', id: OTHER, source: 'watch', note: 'second' },
+    ];
+    const [a, b] = await Promise.all([
+      recordAdditions(dir, WATCHLIST_FILE, one, AT),
+      recordAdditions(dir, WATCHLIST_FILE, two, AT),
+    ]);
+    expect(a.error).toBeUndefined();
+    expect(b.error).toBeUndefined();
+    const ids = (await readList(dir, WATCHLIST_FILE)).entries.map((e) => e.id);
+    expect(ids.sort()).toEqual([DIG, OTHER].sort());
+  });
+
+  test('a concurrent move and record both survive', async () => {
+    const dir = tmp();
+    const moved: WatchAddition[] = [
+      { kind: 'ja4', id: DIG, source: 'manual', note: 'ignore' },
+    ];
+    const ticked: WatchAddition[] = [
+      { kind: 'ja4', id: OTHER, source: 'watch', note: 'seen' },
+    ];
+    await Promise.all([
+      recordExclusive(dir, IGNORELIST_FILE, WATCHLIST_FILE, moved, AT),
+      recordAdditions(dir, IGNORELIST_FILE, ticked, AT),
+    ]);
+    const ids = (await readList(dir, IGNORELIST_FILE)).entries.map((e) => e.id);
+    expect(ids.sort()).toEqual([DIG, OTHER].sort());
   });
 
   test('refuses when EITHER side is unreadable — a half-move leaves both meanings live', async () => {

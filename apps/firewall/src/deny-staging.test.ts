@@ -539,6 +539,9 @@ describe('denyEntries', () => {
       activity: new Map([[DIGEST_A, { requests: 12, denied: 12 }]]),
     });
     expect(e.requests).toBe(12);
+    // And it is still a JA4. Classified from the RAW value, an upper-cased digest failed the
+    // JA4 check and came back 'asn', which sends unstageDeny to lift it off the wrong rule.
+    expect(e.kind).toBe('ja4');
   });
 
   test('a value the lookup missed stays undefined, never zero', () => {

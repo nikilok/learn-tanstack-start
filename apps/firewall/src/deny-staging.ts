@@ -146,11 +146,9 @@ export function stage(
   return {
     promoted,
     items: items.map((it) =>
-      // Unconditional, not gated on the digest being on the list: withoutValue on an absent
-      // value is a no-op, and a gate here would need the LIVE list, which is exactly the state
-      // a stale read gets wrong.
-      // Only when something actually came off it. Rebuilding regardless cleared the row's apply
-      // status on a rule this edit never touched, which reads as an unapplied change.
+      // Gated on `promoted`, so the challenge rule is rebuilt only when something actually came
+      // off it. Rebuilding regardless cleared the row's apply status on a rule this edit never
+      // touched, which reads as an unapplied change.
       kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4 && promoted
         ? edited(it, withoutValue(it.rule, JA4_DENY, value).rule)
         : it.rule.name === ruleName
@@ -282,7 +280,10 @@ export function denyEntries(opts: {
     })),
     ...removed.map((value) => ({
       // By shape, not by a substring guess: the two denylists share one flat removal list.
-      kind: (JA4_DENY.valid(value) ? 'ja4' : 'asn') as DenyKind,
+      // Normalized first, exactly as the staged branch does. Validating the RAW value sent an
+      // upper-cased digest down the 'asn' branch, and unstageDeny then lifted it off the ASN
+      // rule — the JA4 deny stayed live while the pane reported the lift as done.
+      kind: (JA4_DENY.valid(normalizeStaged(value)) ? 'ja4' : 'asn') as DenyKind,
       value,
       staged: false,
       removed: true,

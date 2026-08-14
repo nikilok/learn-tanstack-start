@@ -1070,7 +1070,10 @@ export function App() {
           prompt: `Deny AS${num}? The evidence was measured on "${lever?.value ?? ''}"`,
           detail:
             'NOTHING can reconcile that number with that name — the API exposes no AS-number dimension, so check it yourself. Large operators announce many ASNs. An ASN deny hits EVERY client on the network you type.',
-          onYes: () => setAsnError(denylist.stageDeny('asn', num) ?? ''),
+          // Through `copied`, not `asnError`: the confirm hands focus back to the pane, and
+          // asnError only draws while focus is still on the input, so a refusal written there
+          // would never reach the screen. The JA4 path answers the same way.
+          onYes: () => setCopied(denylist.stageDeny('asn', num) ?? ''),
         });
         setFocus('confirm');
       } else if (key.backspace || key.delete)

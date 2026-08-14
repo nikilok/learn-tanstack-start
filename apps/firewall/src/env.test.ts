@@ -87,8 +87,16 @@ describe('isApply', () => {
     }
   });
 
+  // argv is set explicitly rather than trusted: read as the runner happens to have invoked us,
+  // this passes whether or not isApply looks at argv at all.
   test('without the flag it is not an apply', () => {
-    expect(isApply()).toBe(false);
+    const argv = process.argv;
+    try {
+      process.argv = ['bun', 'firewall', '--dry-run'];
+      expect(isApply()).toBe(false);
+    } finally {
+      process.argv = argv;
+    }
   });
 });
 

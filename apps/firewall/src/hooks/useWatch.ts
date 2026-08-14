@@ -288,7 +288,11 @@ export function useWatch(opts: {
         const persisted = await readInvestigated(root, Date.now());
         persisted.set(next.digest.toLowerCase(), Date.now());
         await writeInvestigated(root, persisted);
-        spawnsRef.current = [...spawnsRef.current, now];
+        // Stamped HERE, not from the `now` taken before the alarm and investigated-state awaits.
+        // notify() is a network call, so that value can be seconds stale by the time the spawn
+        // actually happens, and the rate limiter then treats this investigation as older than it
+        // is — letting the next paid one through early.
+        spawnsRef.current = [...spawnsRef.current, Date.now()];
         setInvokedAt(clockTime(new Date()));
         setInvokedCount((n) => n + 1);
         setWatchNote(`invoked claude on ${next.digest}…`);
@@ -414,7 +418,10 @@ export function useWatch(opts: {
         } catch (e) {
           // A tick that threw past its own handler must not take the loop with it. Silence is
           // what this mode reports as "nothing found", so a dead loop reads as a quiet night.
-          setWatchNote(`watch tick failed: ${errMsg(e)}`);
+          // The note is guarded but the log is not, matching the handler inside tick(): a
+          // failure after disarm must not paint a status onto a loop the operator switched off,
+          // and it still genuinely happened, so the log is where it belongs.
+          if (!stopped) setWatchNote(`watch tick failed: ${errMsg(e)}`);
           void logWatch(root, new Date(), { kind: 'error', error: errMsg(e) });
         } finally {
           // In a finally: rescheduling only on success is how one bad tick ends the session.

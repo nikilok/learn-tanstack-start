@@ -36,7 +36,7 @@ describe('TabBar', () => {
   test('renders the chips on the IP pane', async () => {
     expect(
       await frameOf(true, tabs('t13d1516h2_8daaf6152771_b0da82dd1658')),
-    ).toContain('t13d1516h2_8da');
+    ).toContain('t13d1516h2…dd1658');
   });
 
   // The regression: the bar guarded only on tab count once it was extracted, so open tabs made it
@@ -55,10 +55,19 @@ describe('TabBar', () => {
 });
 
 describe('tabLabel', () => {
-  test('a JA4 is shortened to its distinguishing head', () => {
+  test('a JA4 is shortened but keeps both ends', () => {
     const label = tabLabel(tab('t13d1516h2_8daaf6152771_b0da82dd1658'));
     expect(label.length).toBeLessThan(20);
     expect(label).toContain('t13d1516h2');
+    expect(label).toContain('dd1658');
+  });
+
+  // The head is the TLS/ALPN summary, shared across a whole class of clients. Truncating to it
+  // alone drew one chip for two unrelated fingerprints, and switching tabs looked like a no-op.
+  test('two digests sharing a head still get different chips', () => {
+    expect(tabLabel(tab('t13d1516h2_8daaf6152771_b0da82dd1658'))).not.toBe(
+      tabLabel(tab('t13d1516h2_8daaf6152771_02713d6af862')),
+    );
   });
 
   test('an IP is shown whole — it already fits', () => {

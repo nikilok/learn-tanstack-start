@@ -1,7 +1,7 @@
 // Every IP looked up in a session stays open as a tab. Investigating means comparing clients, so
 // revisiting one must be instant — re-querying an IP you already pulled is the thing to avoid.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type IpProfile, type Subject, fetchIpProfile } from '../ip-profile';
 import type { Window } from '../time-window';
@@ -125,6 +125,14 @@ export function useIpTabs(creds: Creds): IpTabs {
   // it patches by subject — so without this it would fill a REOPENED tab with the result of a
   // request nobody was waiting for, rendered as though it were current.
   const epoch = useRef(new Map<string, number>());
+  // Where the next append will land. `tabs.length` is the RENDERED count, so two opens in one
+  // tick both read zero and both focus the first tab — the second subject opens without being
+  // shown, which reads as the keypress having done nothing. Advanced on every append and
+  // reconciled from the rendered array below, so a close cannot leave it drifting.
+  const nextIndex = useRef(0);
+  useEffect(() => {
+    nextIndex.current = tabs.length;
+  }, [tabs.length]);
 
   const run = useCallback(
     async function run(
@@ -202,7 +210,8 @@ export function useIpTabs(creds: Creds): IpTabs {
         ...prev,
         { subject, window, data: null, error: '', loading: true },
       ]);
-      setIndex(tabs.length); // where the append lands
+      setIndex(nextIndex.current); // where the append lands
+      nextIndex.current += 1;
       void run(subject, window);
     },
     [run, tabs],
@@ -225,7 +234,8 @@ export function useIpTabs(creds: Creds): IpTabs {
           loading: true,
         })),
       ]);
-      setIndex(tabs.length); // the first of the appended block
+      setIndex(nextIndex.current); // the first of the appended block
+      nextIndex.current += toAdd.length;
       // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
       // so these queue rather than stampede, and every tab has its data by the time you reach it.
       for (const s of toAdd) void run(s, window);

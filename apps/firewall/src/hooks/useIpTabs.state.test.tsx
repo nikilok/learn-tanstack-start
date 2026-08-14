@@ -139,6 +139,43 @@ describe('useIpTabs', () => {
     }
   });
 
+  // Focus came from the RENDERED tabs.length, so two opens before a render both read zero and
+  // both focused the first tab. The second subject opened without ever being shown.
+  test('two opens in one tick focus the SECOND, not the first', async () => {
+    const { h, get, restore } = await mountTabs(async (s) =>
+      profile(s, s.kind === 'ip' ? 900 : 417),
+    );
+    try {
+      get().open(IP, WINDOW);
+      get().open(JA4, WINDOW);
+      await h.settle();
+      expect(h.frame()).toContain('tabs=2');
+      expect(h.frame()).toContain('total=417');
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
+  test('a close puts the next append back at the right index', async () => {
+    const { h, get, restore } = await mountTabs(async (s) =>
+      profile(s, s.kind === 'ip' ? 900 : 417),
+    );
+    try {
+      get().open(IP, WINDOW);
+      await h.settle();
+      get().close();
+      await h.settle();
+      get().open(JA4, WINDOW);
+      await h.settle();
+      expect(h.frame()).toContain('tabs=1');
+      expect(h.frame()).toContain('total=417');
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
   // The edge the epoch guard exists for: a tab closed mid-fetch, then opened again.
   test('a subject closed while loading can be opened again and still loads', async () => {
     let release!: (p: IpProfile) => void;

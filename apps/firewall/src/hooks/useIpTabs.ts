@@ -134,6 +134,19 @@ export function useIpTabs(creds: Creds): IpTabs {
   useEffect(() => {
     projected.current = tabs;
   }, [tabs]);
+  // And which of them has focus, for the same reason. `index` is the RENDERED focus, so a close
+  // straight after an open read the focus from before it: opening a tab and closing it in one
+  // tick removed the PREVIOUS tab instead — the one the operator meant to keep.
+  const focusedAt = useRef(0);
+  useEffect(() => {
+    focusedAt.current = index;
+  }, [index]);
+
+  /** Move focus in both the state and the projection, so a later call in the same tick sees it. */
+  const focus = useCallback((to: number) => {
+    setIndex(to);
+    focusedAt.current = to;
+  }, []);
 
   const run = useCallback(
     async function run(
@@ -198,7 +211,7 @@ export function useIpTabs(creds: Creds): IpTabs {
         (t) => subjectKey(t.subject) === subjectKey(subject),
       );
       if (existing !== -1) {
-        setIndex(existing);
+        focus(existing);
         if (force) {
           // The window changed under it, so its data is for a period no longer on screen.
           setTabs((prev) =>
@@ -216,11 +229,11 @@ export function useIpTabs(creds: Creds): IpTabs {
         loading: true,
       };
       setTabs((prev) => [...prev, added]);
-      setIndex(projected.current.length); // where the append lands
+      focus(projected.current.length); // where the append lands
       projected.current = [...projected.current, added];
       void run(subject, window);
     },
-    [run],
+    [run, focus],
   );
 
   const openMany = useCallback(
@@ -238,51 +251,52 @@ export function useIpTabs(creds: Creds): IpTabs {
         loading: true,
       }));
       setTabs((prev) => [...prev, ...added]);
-      setIndex(projected.current.length); // the first of the appended block
+      focus(projected.current.length); // the first of the appended block
       projected.current = [...projected.current, ...added];
       // Fired together on purpose: `gated` in observability caps concurrent calls process-wide,
       // so these queue rather than stampede, and every tab has its data by the time you reach it.
       for (const s of toAdd) void run(s, window);
     },
-    [run],
+    [run, focus],
   );
 
   const refresh = useCallback(
     (window?: Window) => {
-      const t = tabs[index];
+      // From the projection: a refresh straight after an open re-queried the PREVIOUS tab.
+      const at = focusedAt.current;
+      const t = projected.current[at];
       if (!t) return;
       if (window)
-        setTabs((prev) =>
-          prev.map((x, i) => (i === index ? { ...x, window } : x)),
-        );
+        setTabs((prev) => prev.map((x, i) => (i === at ? { ...x, window } : x)));
       void run(t.subject, window ?? t.window, Boolean(window));
     },
-    [tabs, index, run],
+    [run],
   );
 
-  const cycle = useCallback(
-    (dir: 1 | -1) => setIndex((i) => nextIndex(i, tabs.length, dir)),
-    [tabs.length],
-  );
+  const cycle = useCallback((dir: 1 | -1) => {
+    focus(nextIndex(focusedAt.current, projected.current.length, dir));
+  }, [focus]);
 
   const close = useCallback(() => {
     // Forget the closed tab's request state, or reopening it is dropped as a duplicate of a
     // fetch nothing is waiting for any more.
-    const going = tabs[index];
+    const at = focusedAt.current;
+    const going = projected.current[at];
     if (going) {
       const key = subjectKey(going.subject);
       inFlight.current.delete(key);
       queued.current.delete(key);
       epoch.current.set(key, (epoch.current.get(key) ?? 0) + 1);
     }
-    // Both computed from `tabs`, not from inside the updater: React may invoke an updater twice,
-    // and a state setter called from within one is a side effect it is not allowed to have.
-    setIndex(indexAfterClose(index, Math.max(0, tabs.length - 1)));
-    setTabs((prev) => prev.filter((_, i) => i !== index));
+    // Computed OUTSIDE the updater: React may invoke an updater twice, and a state setter called
+    // from within one is a side effect it is not allowed to have.
+    const remaining = projected.current.filter((_, i) => i !== at);
+    setTabs((prev) => prev.filter((_, i) => i !== at));
     // The projection drops it too, or a close followed by an open in the same tick appends past
     // the end and focuses a tab that is not there.
-    projected.current = projected.current.filter((_, i) => i !== index);
-  }, [index, tabs]);
+    projected.current = remaining;
+    focus(indexAfterClose(at, remaining.length));
+  }, [focus]);
 
   return {
     tabs,

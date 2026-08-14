@@ -46,8 +46,10 @@ function ProfiledRow({ p }: { p: Profiled }) {
   );
 }
 
-// What the panel costs before either list: the border, the header, the note and the logging line.
-const CHROME = 5;
+// What the panel costs before either list: its two margin rows, the border, the header, the note
+// and the logging line. The margins count — they are rows in the column like any other, and the
+// first version of this budget left them out, so the panel ran two rows past what it was given.
+const CHROME = 7;
 // The verdict's own heading, and the blank line above it.
 const VERDICT_CHROME = 2;
 

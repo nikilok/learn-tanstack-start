@@ -182,7 +182,9 @@ describe('panelRows', () => {
     const verdictHead = Array.from({ length: 12 }, (_, i) => `line ${i}`).join(
       '\n',
     );
-    for (let maxRows = 6; maxRows <= 26; maxRows++) {
+    // From CHROME upward: the panel cannot render in fewer rows than its own frame costs, and
+    // app.tsx floors the budget at that same number.
+    for (let maxRows = 7; maxRows <= 30; maxRows++) {
       const h = renderInk(
         <WatchStatus
           watch={{ ...ARMED, who, verdictHead, verdictOf: 'x', invokedCount: 1 }}
@@ -191,7 +193,9 @@ describe('panelRows', () => {
         { columns: 140 },
       );
       await h.settle();
-      const lines = h.frame().split('\n').filter((l) => l.trim()).length;
+      // EVERY line, blanks included: the panel's own margins are blank rows that occupy the
+      // column exactly like text does, and filtering them out is what hid two of them.
+      const lines = h.frame().replace(/\n+$/, '').split('\n').length;
       h.unmount();
       expect(lines).toBeLessThanOrEqual(maxRows);
     }
@@ -215,5 +219,15 @@ describe('panelRows', () => {
     h.unmount();
     // 3 already dropped, plus whatever did not fit — never just the 3.
     expect(frame).toMatch(/… (?!3 more line)\d+ more line/);
+  });
+});
+
+describe('WatchStatus floor', () => {
+  // Below its own chrome the panel cannot shrink further, so the caller must not ask. app.tsx
+  // floors the budget at exactly this. Asserted so a change to CHROME that breaks the pairing
+  // fails here rather than by overflowing a terminal.
+  test('a budget under the chrome yields no rows for either list', () => {
+    expect(panelRows(7, 9, 12)).toEqual({ profiles: 0, verdict: 0 });
+    expect(panelRows(0, 9, 12)).toEqual({ profiles: 0, verdict: 0 });
   });
 });

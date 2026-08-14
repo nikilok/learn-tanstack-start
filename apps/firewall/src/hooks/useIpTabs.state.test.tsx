@@ -191,6 +191,52 @@ describe('useIpTabs', () => {
     }
   });
 
+  // close read the RENDERED focus, so a close straight after an open removed the tab the operator
+  // had been on and kept the one they had just opened — the exact opposite of both intents.
+  test('open then close in one tick drops the tab that was just opened', async () => {
+    const { h, get, restore } = await mountTabs(async (s) =>
+      profile(s, s.kind === 'ip' ? 900 : 417),
+    );
+    try {
+      get().open(IP, WINDOW);
+      await h.settle();
+      get().open(JA4, WINDOW);
+      get().close();
+      await h.settle();
+      expect(h.frame()).toContain('tabs=1');
+      // The IP survives; the JA4 opened a moment earlier is the one that went.
+      expect(h.frame()).toContain('total=900');
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
+  test('open then refresh in one tick re-queries the tab just opened', async () => {
+    const seen: string[] = [];
+    const { h, get, restore } = await mountTabs(async (s) => {
+      seen.push(s.value);
+      return profile(s, 1);
+    });
+    try {
+      get().open(IP, WINDOW);
+      await h.settle();
+      seen.length = 0;
+      get().open(JA4, WINDOW);
+      get().refresh(WINDOW);
+      await h.settle();
+      await h.settle();
+      // Counted, not just present: the open fetches it once and the forced refresh queues a
+      // second behind that. Asserting presence alone cannot tell a refresh that hit the right
+      // tab from one that read a stale closure and returned without doing anything.
+      expect(seen.filter((v) => v === JA4.value).length).toBeGreaterThan(1);
+      expect(seen).not.toContain(IP.value);
+    } finally {
+      h.unmount();
+      restore();
+    }
+  });
+
   test('a close puts the next append back at the right index', async () => {
     const { h, get, restore } = await mountTabs(async (s) =>
       profile(s, s.kind === 'ip' ? 900 : 417),

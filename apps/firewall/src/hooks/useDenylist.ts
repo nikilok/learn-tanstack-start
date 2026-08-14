@@ -146,7 +146,12 @@ export function useDenylist(opts: {
     // Through an updater, like stageDeny: assigned from the render-time list, a challenge staged
     // in the same tick as another edit overwrote it.
     setItems((prev) => stage(prev, 'challenge', digest).items);
-    setStagedChallenge((c) => [...new Set([...c, normalizeStaged(digest)])]);
+    const v = normalizeStaged(digest);
+    setStagedChallenge((c) => [...new Set([...c, v])]);
+    // Re-staging cancels a pending lift rather than sitting beside it, exactly as afterStage does
+    // for the deny lists — otherwise the pane shows the digest as both staged and removed, and the
+    // marker reads +1 −1 for a rule that is back where it started.
+    setRemovedChallenge((r) => r.filter((x) => x !== v));
     onEdit();
     return undefined;
   };
@@ -227,7 +232,8 @@ export function useDenylist(opts: {
         staged.length ||
         removed.length ||
         promoted.length ||
-        stagedChallenge.length,
+        stagedChallenge.length ||
+        removedChallenge.length,
       ),
       dryRun,
       write: writeEnv,
@@ -235,6 +241,9 @@ export function useDenylist(opts: {
     if (out.clearStaged) {
       setEdits({ staged: [], removed: [] });
       setPromoted([]);
+      // The REF too, not just the state. Left holding applied promotions, a later lift restores a
+      // challenge the apply already wrote — putting a digest back on a tier it is no longer on.
+      promotedRef.current = [];
       setStagedChallenge([]);
       setRemovedChallenge([]);
     }

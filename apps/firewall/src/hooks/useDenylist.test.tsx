@@ -386,6 +386,38 @@ describe('useDenylist', () => {
       t.h.unmount();
     });
 
+    // The gate omitted removedChallenge, so a lift on its own took persistDenies' !pending early
+    // return: success reported, nothing written, the challenge still live on the next apply.
+    test('lifting a challenge ALONE still writes FW_CHALLENGE_JA4', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+      ]);
+      t.get().unstageDeny(t.get().entries[0]);
+      await t.h.settle();
+      const applied = new Map<string, ApplyStatus>(
+        t.items().map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
+      );
+      t.get().persist(t.items(), applied, false);
+      await t.h.settle();
+      expect(new Map(t.writes).get('FW_CHALLENGE_JA4')).toBe('');
+      t.h.unmount();
+    });
+
+    test('re-staging a lifted challenge cancels the lift rather than doubling it', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, [DIGEST]),
+      ]);
+      t.get().unstageDeny(t.get().entries[0]);
+      await t.h.settle();
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      // Back to its original value: staged only, never staged AND removed.
+      expect(t.h.frame()).not.toContain('+1 −1');
+      t.h.unmount();
+    });
+
     test('an applied challenge is written to FW_CHALLENGE_JA4', async () => {
       const t = await mount([
         item(JA4_RULE, []),

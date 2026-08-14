@@ -205,6 +205,19 @@ describe('stage', () => {
     expect(ja4Of(items, JA4_RULE)).toEqual([DIGEST_A]);
   });
 
+  // Refused, not silently dropped: the map is a no-op when nothing carries the name, so the value
+  // was staged, drawn as pending, and reported applied while denying nothing.
+  test('refuses when the target rule is not in the set', () => {
+    const out = stage([], 'ja4', DIGEST_A);
+    expect(out.error).toContain(JA4_RULE);
+    expect(out.items).toEqual([]);
+  });
+
+  test('an ASN with no ASN rule present is refused too', () => {
+    const out = stage([item(JA4_RULE, [])], 'asn', AS_NUM);
+    expect(out.error).toContain(ASN_RULE);
+  });
+
   test('an ASN goes to the ASN rule', () => {
     const items = [item(JA4_RULE, []), item(ASN_RULE, [])];
     const out = stage(items, 'asn', AS_NUM);

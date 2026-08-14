@@ -133,6 +133,11 @@ export function stage(
   const { rule: ruleName, spec } = targetOf(kind);
   if (!spec.valid(spec.normalize(value.trim())))
     return { items, error: `refused — not ${spec.example}` };
+  // The map below is a no-op when nothing carries this name, so without the guard the value was
+  // marked staged, drawn as pending, and reported applied — while reaching no rule and denying
+  // nothing. A deny that says it landed and did not is the worst answer this tool can give.
+  if (!items.some((it) => it.rule.name === ruleName))
+    return { items, error: `refused — ${ruleName} is not in the rule set` };
   // Reported, because it cannot be recovered afterwards: once the value is off the challenge
   // rule, nothing distinguishes "promoted off it" from "was never on it", and the rules list
   // then shows the challenge row as inert while it carries an unapplied removal.

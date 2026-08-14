@@ -259,17 +259,23 @@ describe('useIdentityLists.move', () => {
     const fresh = await import('./useIdentityLists');
     const { h, get } = await mountLists(root, fresh.useIdentityLists);
 
-    const msg = await get().move(
-      'watch',
-      { kind: 'ja4', value: DIGEST },
-      'attempted',
-    );
-    await h.settle();
+    // In a finally: a throw above would otherwise leave recordExclusive stubbed for every test
+    // after this one, and a stub that never writes makes a broken save look like a passing save.
+    try {
+      const msg = await get().move(
+        'watch',
+        { kind: 'ja4', value: DIGEST },
+        'attempted',
+      );
+      await h.settle();
 
-    expect(msg).toContain('half-moved');
-    // Both panes now describe the files rather than the attempt.
-    expect(h.frame()).toContain('watch=on-disk-watch');
-    expect(h.frame()).toContain('ignore=still-on-ignore');
-    h.unmount();
+      expect(msg).toContain('half-moved');
+      // Both panes now describe the files rather than the attempt.
+      expect(h.frame()).toContain('watch=on-disk-watch');
+      expect(h.frame()).toContain('ignore=still-on-ignore');
+    } finally {
+      h.unmount();
+      mock.module('../watchlist', () => real);
+    }
   });
 });

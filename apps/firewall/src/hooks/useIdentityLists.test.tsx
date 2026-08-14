@@ -113,6 +113,89 @@ describe('useIdentityLists, unreadable list', () => {
   });
 });
 
+describe('useIdentityLists, loading and cursors', () => {
+  test('a list is read from disk into the pane', async () => {
+    const root = tmp();
+    writeFileSync(join(root, WATCHLIST_FILE), line('from-disk'));
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+    expect(h.frame()).toContain('watch=from-disk');
+    h.unmount();
+  });
+
+  test('a missing file is an empty list, not an error', async () => {
+    const { h, get } = await mountLists(tmp());
+    await get().load('watch');
+    await h.settle();
+    expect(h.frame()).toContain('watch=-');
+    expect(get().watch.error).toBe('');
+    h.unmount();
+  });
+
+  // Unreadable and empty are different answers, and the pane must not show one as the other.
+  test('an unreadable list reports why rather than reading as empty', async () => {
+    const root = tmp();
+    writeFileSync(join(root, WATCHLIST_FILE), 'not|a|valid|line\n');
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+    expect(get().watch.error).toBeTruthy();
+    h.unmount();
+  });
+
+  test('the cursor moves within the list and never leaves it', async () => {
+    const root = tmp();
+    writeFileSync(
+      join(root, WATCHLIST_FILE),
+      line('one') + line('two').replace(DIGEST, `${DIGEST.slice(0, -1)}9`),
+    );
+    const { h, get } = await mountLists(root);
+    await get().load('watch');
+    await h.settle();
+    get().moveCursor('watch', 1);
+    await h.settle();
+    expect(get().watch.cursor).toBe(1);
+    get().moveCursor('watch', 1);
+    await h.settle();
+    expect(get().watch.cursor).toBe(1);
+    get().moveCursor('watch', -1);
+    get().moveCursor('watch', -1);
+    await h.settle();
+    expect(get().watch.cursor).toBe(0);
+    h.unmount();
+  });
+
+  test('an empty list parks the cursor at 0, never at -1', async () => {
+    const { h, get } = await mountLists(tmp());
+    get().moveCursor('watch', 1);
+    await h.settle();
+    expect(get().watch.cursor).toBe(0);
+    expect(get().watch.current).toBeUndefined();
+    h.unmount();
+  });
+
+  // The watch tick feeds the pane as it screens, so a list open on screen stays current.
+  test('replaceWatch swaps the entries and clears the error', async () => {
+    const { h, get } = await mountLists(tmp());
+    get().replaceWatch([
+      {
+        kind: 'ja4',
+        id: DIGEST,
+        addedAt: '2026-08-14T06:00:00.000Z',
+        lastSeen: '2026-08-14T06:00:00.000Z',
+        seen: 1,
+        source: 'watch',
+        note: 'from-the-tick',
+      },
+    ]);
+    await h.settle();
+    expect(h.frame()).toContain('watch=from-the-tick');
+    expect(get().watch.error).toBe('');
+    h.unmount();
+  });
+});
+
 describe('useIdentityLists.move', () => {
   test('a successful move puts the identity on one list and off the other', async () => {
     const root = tmp();

@@ -73,8 +73,13 @@ export function useDenylist(opts: {
   setItems: Dispatch<SetStateAction<Item[]>>;
   /** Called on every edit, so the last apply's banner cannot describe stale state. */
   onEdit: () => void;
+  /** How a persisted value reaches disk. Injectable so a test can exercise the write path without touching the real .env.local — the file an apply actually rewrites. */
+  writeEnv?: (key: string, value: string) => void;
 }): Denylist {
   const { items, setItems, onEdit } = opts;
+  const writeEnv =
+    opts.writeEnv ??
+    ((key: string, value: string) => persistEnvVar(ENV_PATH, key, value));
   const [staged, setStaged] = useState<string[]>([]);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
@@ -147,7 +152,7 @@ export function useDenylist(opts: {
       outcome,
       pending: Boolean(staged.length || removed.length || promoted.length),
       dryRun,
-      write: (envKey, value) => persistEnvVar(ENV_PATH, envKey, value),
+      write: writeEnv,
     });
     if (out.clearStaged) {
       setStaged([]);

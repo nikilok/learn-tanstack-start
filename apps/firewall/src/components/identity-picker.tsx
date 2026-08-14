@@ -32,7 +32,9 @@ export function IdentityPicker({
   return (
     <Box flexDirection="column">
       {pickers.list.loading && !pickers.list.data ? (
-        <Text dimColor>
+        // truncate-end like the error branch beside it: the pane reserves ONE row for this
+        // header, and at a narrow width an untruncated one wraps into the rows meant for the list.
+        <Text dimColor wrap="truncate-end">
           {'  '}loading busiest {pickers.kind === 'ip' ? 'IPs' : 'fingerprints'}
           … (up to ~90s — the endpoint retries a timeout twice)
         </Text>
@@ -48,7 +50,9 @@ export function IdentityPicker({
         </Text>
       ) : (
         pickers.list.data && (
-          <Text dimColor>
+          // One row, like the other two branches. This is the longest header of the three and
+          // the one on screen for the whole session.
+          <Text dimColor wrap="truncate-end">
             {'  '}busiest {pickers.kind === 'ip' ? 'IPs' : 'JA4 fingerprints'} ·{' '}
             {ipWindow.label} ·{' '}
             {pickers.input

@@ -342,7 +342,9 @@ export function useWatch(opts: {
           )
         ) {
           const alarm = `.env.local CHANGED during the investigation of ${next.digest} — the run was told not to apply anything.`;
-          setWatchNote(alarm);
+          // Note guarded, log not — the same split the other writers use. A disarm mid-await must
+          // not paint a status onto a loop that is off, but the change genuinely happened.
+          if (!stopped) setWatchNote(alarm);
           void logWatch(root, new Date(), { kind: 'error', error: alarm });
         }
         if (stopped) return;

@@ -235,6 +235,43 @@ describe('panelRows', () => {
     }
   }, 30_000);
 
+  // The clipped row shows whenever ANYTHING is missing, including lines useWatch dropped before
+  // the panel saw them. Reserved only when the panel itself did the dropping, that row still
+  // rendered on a verdict that fit — one past the budget, on the case with the least slack.
+  test('a verdict that fits but was already clipped upstream still reserves its row', async () => {
+    for (const width of [140, 44]) {
+      for (let maxRows = 12; maxRows <= 20; maxRows++) {
+        const h = renderInk(
+          <Box flexDirection="column" width={width}>
+            <WatchStatus
+              watch={{
+                ...ARMED,
+                verdictHead: 'one\ntwo',
+                verdictClipped: 40,
+                verdictOf: 'x',
+              }}
+              maxRows={maxRows}
+              width={width}
+            />
+            <Text>ZZMARKERZZ</Text>
+          </Box>,
+          { columns: width + 4 },
+        );
+        await h.settle();
+        const occupied = h
+          .frame()
+          .split('\n')
+          .findIndex((l) => l.includes('ZZMARKERZZ'));
+        h.unmount();
+        expect({ width, maxRows, occupied }).toEqual({
+          width,
+          maxRows,
+          occupied: Math.min(occupied, maxRows),
+        });
+      }
+    }
+  }, 30_000);
+
   test('a clipped verdict counts what the LAYOUT dropped too, not just useWatch', async () => {
     const h = renderInk(
       <WatchStatus

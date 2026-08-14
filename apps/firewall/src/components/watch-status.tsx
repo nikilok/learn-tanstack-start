@@ -69,6 +69,8 @@ export function panelRows(
   verdictCosts: readonly number[],
   /** Rows everything of fixed content costs once wrapped: the box, header, note and status line. */
   fixedRows: number,
+  /** Verdict lines useWatch already dropped before this panel saw them. */
+  alreadyClipped = 0,
 ): { profiles: number; verdict: number; overflow: boolean } {
   const room = Math.max(0, maxRows - fixedRows);
   let shownProfiles = Math.min(SHOWN, profiles, room);
@@ -86,9 +88,13 @@ export function panelRows(
   // is regularly two rows. Its own "… N more line(s)" row is reserved only in the case that
   // creates it, not counted as fixed chrome.
   const total = verdictCosts.reduce((a, b) => a + b, 0);
+  // The clipped row shows when ANYTHING is missing — including lines useWatch dropped before this
+  // panel ever saw them. Reserved only when this panel did the dropping, the row still rendered
+  // on a verdict that fit here but had already been cut upstream, one past the budget.
+  const reserve = alreadyClipped > 0 ? 1 : 0;
   let verdict = 0;
   if (verdictCosts.length && budget > 0) {
-    if (total <= budget) verdict = verdictCosts.length;
+    if (total <= budget - reserve) verdict = verdictCosts.length;
     else {
       let used = 0;
       for (const cost of verdictCosts) {
@@ -147,6 +153,7 @@ export function WatchStatus({
     w.who.length,
     verdictAll.map((l) => wrappedRows(l, inner)),
     fixed,
+    w.verdictClipped,
   );
   const verdictShown = verdictAll.slice(0, room.verdict);
   // Both the lines useWatch already dropped and the ones that did not fit here, or the count

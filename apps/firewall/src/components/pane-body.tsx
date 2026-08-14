@@ -113,6 +113,11 @@ export function PaneBody({
         width={width}
       />
     );
+  // Every other kind returned above. Checked HERE rather than only at the render below, which is
+  // where the first version of this guard stopped: an unhandled kind still fell through to the
+  // sitemap's state and reported ITS loading, error and empty text under its own name.
+  if (kind !== 'ip' && kind !== 'sitemap')
+    return <Text dimColor>nothing to show for this pane</Text>;
   const what = kind === 'ip' ? 'IP profile' : 'sitemap readers';
   const state = kind === 'ip' ? ipTab : sitemap;
   if (!state) return <Text dimColor>no {what} yet — i to look one up</Text>;

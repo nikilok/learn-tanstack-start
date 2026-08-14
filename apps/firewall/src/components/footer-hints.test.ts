@@ -9,33 +9,33 @@ import { hintRows, hintSegments } from './footer-hints';
 const NB = ' ';
 
 describe('hintSegments', () => {
-  test('a key is the accent, its label is dim and joined by a non-breaking space', () => {
+  test('a key is bold, its label is dim and joined by a colon', () => {
     expect(hintSegments([{ key: 'R', label: 'refresh' }])).toEqual([
       { text: 'R', tone: 'key' },
-      { text: `${NB}refresh`, tone: 'dim' },
+      { text: `:refresh`, tone: 'dim' },
     ]);
   });
 
   test('spaces WITHIN a hint are non-breaking, so a multi-word hint cannot split', () => {
     // The terminal only breaks on ordinary spaces; a hint carries none, only the separators do.
     const [, label] = hintSegments([{ key: 'i', label: 'new ip' }]);
-    expect(label.text).toBe(`${NB}new${NB}ip`);
+    expect(label.text).toBe(`:new${NB}ip`);
     expect(label.text).not.toContain(' ');
   });
 
-  test('hints are joined by a dim ordinary-space separator — the only break point', () => {
+  test('hints are joined by a dim pipe separator — the only break point', () => {
     const segs = hintSegments([
       { key: 'i', label: 'ip' },
       { key: 'f', label: 'ja4' },
     ]);
     expect(segs.map((s) => s.text)).toEqual([
       'i',
-      `${NB}ip`,
-      ' · ',
+      ':ip',
+      ' │ ',
       'f',
-      `${NB}ja4`,
+      ':ja4',
     ]);
-    expect(segs.find((s) => s.text === ' · ')?.tone).toBe('dim');
+    expect(segs.find((s) => s.text === ' │ ')?.tone).toBe('dim');
   });
 
   test('an active hint takes the green tone, not the accent — watch stays green when live', () => {
@@ -53,10 +53,10 @@ describe('hintSegments', () => {
     ]);
     expect(segs.map((s) => s.text)).toEqual([
       'v',
-      `${NB}watch`,
-      ' · ',
+      ':watch',
+      ' │ ',
       'esc',
-      `${NB}rules`,
+      ':rules',
     ]);
   });
 

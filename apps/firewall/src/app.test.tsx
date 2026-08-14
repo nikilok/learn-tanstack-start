@@ -184,9 +184,9 @@ describe('App', () => {
     // hand-written list that did not know which keys the handler had bound.
     const h = await mountApp();
     await h.press('d');
-    expect(h.frame()).toContain('j/k select');
+    expect(h.frame()).toContain('j/k:select');
     await h.press('r');
-    expect(h.frame()).toContain('j/k scroll');
+    expect(h.frame()).toContain('j/k:scroll');
     h.unmount();
   });
 

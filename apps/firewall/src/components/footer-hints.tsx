@@ -1,5 +1,5 @@
 // The footer key/label bar, one definition so every footer in the TUI reads the same way:
-// the key you press in the accent colour, what it does dimmed beside it, lazygit-style.
+// the key you press in bold, a colon, then what it does dimmed beside it.
 //
 // The segment mapping and the wrapped-row count are pure and tested; the Ink wrapper is a thin
 // render of them. A hint may be false/null so a caller can inline conditional keys with
@@ -14,30 +14,33 @@ export type MaybeHint = Hint | false | null | undefined;
 export type HintTone = 'key' | 'active' | 'dim';
 export type HintSeg = { text: string; tone: HintTone };
 
-const TONE_COLOUR: Record<'key' | 'active', string> = {
-  key: 'cyan',
-  active: 'green',
-};
+// Only the live-toggle gets a colour. A key is BOLD and otherwise the terminal's own foreground,
+// which is what makes it read as bright against the dimmed label without assuming a dark theme —
+// a hard-coded white would vanish on a light one.
+const TONE_COLOUR: Record<'active', string> = { active: 'green' };
 
 // A hint is one unbreakable unit when wrapped, so its own spaces are non-breaking and only the
 // separators between hints break — otherwise `w timeline` splits with the key stranded a line up.
 const NBSP = ' ';
 const nbsp = (s: string) => s.replace(/ /g, NBSP);
-const SEP = ' · ';
+const SEP = ' │ ';
+// Binds the key to its label tighter than a space does, so the pairs read as units across a long
+// row and the eye can skip the labels entirely when hunting for a key.
+const JOIN = ':';
 
-/** The width one hint occupies: key, a joining space, and its label. */
+/** The width one hint occupies: key, the joining colon, and its label. */
 function hintWidth(h: Hint): number {
-  return h.key.length + 1 + h.label.length;
+  return h.key.length + JOIN.length + h.label.length;
 }
 
-/** Flatten hints to coloured segments: `key label · key label`, separators and labels dim. */
+/** Flatten hints to coloured segments: `key:label │ key:label`, separators and labels dim. */
 export function hintSegments(hints: readonly MaybeHint[]): HintSeg[] {
   const shown = hints.filter((h): h is Hint => Boolean(h));
   const out: HintSeg[] = [];
   shown.forEach((h, i) => {
     if (i > 0) out.push({ text: SEP, tone: 'dim' });
     out.push({ text: nbsp(h.key), tone: h.active ? 'active' : 'key' });
-    out.push({ text: NBSP + nbsp(h.label), tone: 'dim' });
+    out.push({ text: JOIN + nbsp(h.label), tone: 'dim' });
   });
   return out;
 }
@@ -86,8 +89,9 @@ export function FooterHints({ hints }: { hints: readonly MaybeHint[] }) {
         <Text
           key={i}
           dimColor={s.tone === 'dim'}
-          bold={s.tone === 'active'}
-          color={s.tone === 'dim' ? undefined : TONE_COLOUR[s.tone]}
+          // Both key tones are bold; only the active one takes a colour.
+          bold={s.tone !== 'dim'}
+          color={s.tone === 'active' ? TONE_COLOUR.active : undefined}
         >
           {s.text}
         </Text>

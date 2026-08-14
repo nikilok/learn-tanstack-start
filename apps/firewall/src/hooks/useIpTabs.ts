@@ -161,11 +161,16 @@ export function useIpTabs(creds: Creds): IpTabs {
       } catch (e) {
         patch({ error: errMsg(e), loading: false });
       } finally {
-        inFlight.current.delete(key);
-        const next = queued.current.get(key);
-        if (next) {
-          queued.current.delete(key);
-          void run(subject, next, true);
+        // Only the current run cleans up. A stale one — the tab was closed and reopened while it
+        // was in flight — would otherwise clear the NEW run's in-flight marker and swallow the
+        // window queued against it.
+        if (epoch.current.get(key) === mine) {
+          inFlight.current.delete(key);
+          const next = queued.current.get(key);
+          if (next) {
+            queued.current.delete(key);
+            void run(subject, next, true);
+          }
         }
       }
     },

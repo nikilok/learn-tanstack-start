@@ -78,7 +78,9 @@ export function liveDenies(items: Item[]): LiveDenies {
       rule: it!.rule.name,
       why: !it!.active
         ? 'the rule is DEACTIVATED'
-        : `its action is ${it!.action}, not deny — matching traffic is still served`,
+        : `its action is ${it!.action}, not ${
+            it!.rule.name === CHALLENGE_SCRAPER_JA4 ? 'challenge' : 'deny'
+          } — matching traffic is still served`,
     }));
   return {
     ja4: ja4Item && enforcing(ja4Item) ? valuesOf(ja4Item.rule, JA4_DENY) : [],
@@ -156,14 +158,28 @@ export function stage(
   };
 }
 
-/** Lift a deny. Same staging discipline: visible as pending until applied. */
-export function unstage(items: Item[], kind: DenyKind, value: string): Item[] {
+/**
+ * Lift a deny. Same staging discipline: visible as pending until applied.
+ *
+ * `restore` puts the digest BACK on the challenge tier, and is what a lifted promotion needs.
+ * Without it, promoting a challenged digest and then changing your mind left it on NEITHER list:
+ * the deny went, and the challenge it was promoted off never came back. The operator ends up with
+ * less protection than before they touched it, and nothing on screen says so.
+ */
+export function unstage(
+  items: Item[],
+  kind: DenyKind,
+  value: string,
+  restore = false,
+): Item[] {
   const { rule: ruleName, spec } = targetOf(kind);
-  return items.map((it) =>
-    it.rule.name === ruleName
-      ? edited(it, withoutValue(it.rule, spec, value).rule)
-      : it,
-  );
+  return items.map((it) => {
+    if (it.rule.name === ruleName)
+      return edited(it, withoutValue(it.rule, spec, value).rule);
+    if (restore && kind === 'ja4' && it.rule.name === CHALLENGE_SCRAPER_JA4)
+      return edited(it, withValue(it.rule, JA4_DENY, value).rule);
+    return it;
+  });
 }
 
 // One form for both lists. They are flat and hold JA4 digests and AS numbers together, so the
@@ -172,7 +188,7 @@ export function unstage(items: Item[], kind: DenyKind, value: string): Item[] {
 // that way at each site, because the comparisons are spread across the pane, the advisory and the
 // pending-edit count, and one of them was always going to be missed.
 /** How a staged or lifted value is held, whatever case it was typed in. */
-function normalizeStaged(value: string): string {
+export function normalizeStaged(value: string): string {
   return value.trim().toLowerCase();
 }
 
@@ -227,10 +243,12 @@ export function denyEntries(opts: {
     new Set(staged.map((v) => spec.normalize(v.trim())));
   const stagedJa4 = stagedIn(JA4_DENY);
   const stagedAsn = stagedIn(ASN_DENY);
-  const seen = (value: string) => ({
-    requests: activity?.get(value)?.requests,
-    denied: activity?.get(value)?.denied,
-  });
+  // Normalized, because fetchDenyActivity stores its keys that way. A removal entry keeps the
+  // value as it was typed, so a raw lookup missed it and reported a live ban as seeing nothing.
+  const seen = (value: string) => {
+    const hit = activity?.get(normalizeStaged(value));
+    return { requests: hit?.requests, denied: hit?.denied };
+  };
   return [
     ...liveJa4.map((value) => ({
       kind: 'ja4' as const,

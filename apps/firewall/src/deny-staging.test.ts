@@ -153,6 +153,14 @@ describe('liveDenies', () => {
     expect(live.notEnforcing[0].why).toContain('its action is log');
   });
 
+  test('the challenge tier is told it is not CHALLENGING, not "not deny"', () => {
+    const live = liveDenies([
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_B], { action: 'log' }),
+    ]);
+    expect(live.notEnforcing[0].why).toContain('not challenge');
+    expect(live.notEnforcing[0].why).not.toContain('not deny');
+  });
+
   test('a live challenge tier is NOT reported as not enforcing', () => {
     expect(
       liveDenies([item(CHALLENGE_SCRAPER_JA4, [DIGEST_B])]).notEnforcing,
@@ -314,6 +322,44 @@ describe('unstage', () => {
   });
 });
 
+// Promote, then think better of it. Without the restore the digest ends up on NEITHER list, so
+// the operator is left with LESS protection than before they pressed b — and nothing says so.
+describe('lifting a promotion', () => {
+  const promoted = () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_A])];
+    return stage(items, 'ja4', DIGEST_A).items;
+  };
+
+  test('the digest goes back to the challenge tier it was taken from', () => {
+    const after = unstage(promoted(), 'ja4', DIGEST_A, true);
+    expect(ja4Of(after, JA4_RULE)).toEqual([]);
+    expect(ja4Of(after, CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST_A]);
+  });
+
+  test('the restored rule is still a CHALLENGE rule, not rebuilt as a deny', () => {
+    const after = unstage(promoted(), 'ja4', DIGEST_A, true);
+    const challenge = after.find(
+      (it) => it.rule.name === CHALLENGE_SCRAPER_JA4,
+    )!;
+    expect(challenge.rule.action.mitigate.action).toBe('challenge');
+  });
+
+  test('a deny that was NOT a promotion restores nothing', () => {
+    const items = [item(JA4_RULE, [DIGEST_A]), item(CHALLENGE_SCRAPER_JA4, [])];
+    const after = unstage(items, 'ja4', DIGEST_A);
+    expect(ja4Of(after, CHALLENGE_SCRAPER_JA4)).toEqual([]);
+  });
+
+  test('an ASN lift never touches the challenge tier', () => {
+    const items = [
+      item(ASN_RULE, [AS_NUM]),
+      item(CHALLENGE_SCRAPER_JA4, [DIGEST_A]),
+    ];
+    const after = unstage(items, 'asn', AS_NUM, true);
+    expect(ja4Of(after, CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST_A]);
+  });
+});
+
 describe('afterStage / afterUnstage', () => {
   test('staging records the value and cancels any pending removal of it', () => {
     expect(afterStage([], [DIGEST_A], DIGEST_A)).toEqual({
@@ -461,6 +507,16 @@ describe('denyEntries', () => {
     });
     expect(e.requests).toBe(40);
     expect(e.denied).toBe(39);
+  });
+
+  // fetchDenyActivity stores its keys normalized; a removal entry keeps whatever was typed.
+  test('activity is found for a removal entry recorded upper-case', () => {
+    const [e] = denyEntries({
+      ...base,
+      removed: [DIGEST_A.toUpperCase()],
+      activity: new Map([[DIGEST_A, { requests: 12, denied: 12 }]]),
+    });
+    expect(e.requests).toBe(12);
   });
 
   test('a value the lookup missed stays undefined, never zero', () => {

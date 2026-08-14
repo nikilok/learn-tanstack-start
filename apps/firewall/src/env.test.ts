@@ -76,7 +76,7 @@ describe('isDryRun', () => {
   });
 });
 
-describe('isApply and isInteractive', () => {
+describe('isApply', () => {
   test('--apply is read from argv', () => {
     const argv = process.argv;
     try {

@@ -19,6 +19,7 @@ import {
   denyEntries,
   liveDenies,
   isStaged,
+  normalizeStaged,
   pendingByRule,
   stage,
   unstage,
@@ -107,7 +108,12 @@ export function useDenylist(opts: {
   };
 
   const unstageDeny = (entry: DenyEntry) => {
-    setItems(unstage(items, entry.kind, entry.value));
+    // A lifted promotion goes back to the challenge tier it was taken from, or the operator is
+    // left with less protection than they started with.
+    const wasPromoted = promoted.includes(normalizeStaged(entry.value));
+    setItems(unstage(items, entry.kind, entry.value, wasPromoted));
+    if (wasPromoted)
+      setPromoted((p) => p.filter((v) => v !== normalizeStaged(entry.value)));
     setStaged((s) => afterUnstage(s, removed, entry).staged);
     setRemoved((r) => afterUnstage(staged, r, entry).removed);
     onEdit();

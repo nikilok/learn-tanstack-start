@@ -30,6 +30,7 @@ import {
 } from '../watch-notify';
 import type { WatchlistEntry } from '../watchlist';
 import { recordAdditions, WATCHLIST_FILE } from '../watchlist';
+import { ENV_PATH } from './useDenylist';
 import type { Creds } from './useIpTabs';
 
 const VERDICT_LINES = 12; // rendered inline; the rest stays in the log
@@ -302,7 +303,9 @@ export function useWatch(opts: {
         // adding one is an append plus an apply, and Bash has to stay available for the
         // protocol's read-only queries. Unchecked here, a spawned agent that wrote one went
         // unnoticed on the unattended path specifically.
-        const envPath = `${root}/.env.local`;
+        // The same constant useDenylist writes through, not a path rebuilt from cwd: run from
+        // anywhere but the repo root and the tamper check would fingerprint a different file.
+        const envPath = ENV_PATH;
         const beforeCfg = await fingerprintConfig(envPath);
         // A property, not a local: TypeScript narrows a callback-assigned local to `never` across
         // the await, so the comparison below could not be written against it.

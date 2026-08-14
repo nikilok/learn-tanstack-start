@@ -1,6 +1,7 @@
 // The IP/JA4 picker overlay: the busiest list, the quiet band beside it, and the input line.
 
 import { Box, Text } from 'ink';
+import type { ReactNode } from 'react';
 
 import type { Pickers } from '../hooks/usePickers';
 import { CAP_BUSIEST, CAP_QUIET, TOP_IPS_LIMIT } from '../hooks/usePickers';
@@ -26,7 +27,7 @@ export function IdentityPicker({
   /** Whether the quiet band fits beside the busiest column at this width. */
   twoCol: boolean;
   /** One picker row. `i` indexes pickers.pickable, so the cursor means the same in both columns. */
-  row: (r: [string, number], i: number) => React.ReactNode;
+  row: (r: [string, number], i: number) => ReactNode;
 }) {
   return (
     <Box flexDirection="column">

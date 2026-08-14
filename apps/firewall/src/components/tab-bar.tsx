@@ -13,18 +13,21 @@ export function tabLabel(t: IpTab): string {
 }
 
 export function TabBar({
+  show,
   ipTabs,
   tabBar,
   isLive,
   blink,
 }: {
+  /** Whether the IP pane is the one on screen. The row is only RESERVED for that pane, so drawing it anywhere else grows the frame past the viewport. */
+  show: boolean;
   ipTabs: IpTabs;
   tabBar: { start: number; end: number; left: boolean; right: boolean };
   isLive: boolean;
   /** Drives the live marker, so a watch screen reads as live rather than frozen. */
   blink: boolean;
 }) {
-  if (!ipTabs.tabs.length) return null;
+  if (!show || !ipTabs.tabs.length) return null;
   return (
     <Box>
       {isLive && (

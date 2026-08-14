@@ -1349,6 +1349,7 @@ export function App() {
       {showPane && (
         <Box flexDirection="column" width={reportW}>
           <TabBar
+            show={pane === 'ip'}
             ipTabs={ipTabs}
             tabBar={tabBar}
             isLive={isLive}

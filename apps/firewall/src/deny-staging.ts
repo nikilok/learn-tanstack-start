@@ -222,15 +222,25 @@ export function isStaged(staged: string[], value: string): boolean {
   return staged.includes(normalizeStaged(value));
 }
 
-/** The staged list after adding `value`, and the removed list it must leave. Each output depends only on the input list of the same name, so a caller may apply them as two independent state updates. */
+/**
+ * The staged and removed lists after adding `value`.
+ *
+ * Apply BOTH from one transition over the same snapshot. The outputs are no longer independent —
+ * `staged` reads `removed` — because re-staging a value that is currently lifted CANCELS the lift
+ * rather than adding anything: the value was live before, it is live after, and nothing changed.
+ * Counted as a fresh addition, a lift-and-re-deny left the rule exactly as it started while the
+ * pane still reported a pending +1 and the apply persisted an edit nobody made.
+ */
 export function afterStage(
   staged: string[],
   removed: string[],
   value: string,
 ): { staged: string[]; removed: string[] } {
   const v = normalizeStaged(value);
+  const cancelsLift = removed.some((x) => normalizeStaged(x) === v);
+  const norm = staged.map(normalizeStaged);
   return {
-    staged: [...new Set([...staged.map(normalizeStaged), v])],
+    staged: cancelsLift ? norm : [...new Set([...norm, v])],
     removed: removed.filter((x) => normalizeStaged(x) !== v),
   };
 }

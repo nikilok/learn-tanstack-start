@@ -150,6 +150,35 @@ describe('useDenylist', () => {
     });
   });
 
+  // staged and removed were updated by two setters that each read the OTHER from the render-time
+  // closure. Lift a live deny and re-deny it before a render and the rule comes back to where it
+  // started, but the value stays on `staged` — so `pending` is true and the apply treats a
+  // cancelled edit as work to persist.
+  describe('an edit and its reversal in one tick', () => {
+    test('lifting then re-denying leaves nothing pending', async () => {
+      const t = await mount([item(JA4_RULE, [DIGEST])]);
+      t.get().unstageDeny(t.get().entries[0]);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      // Back where it started: the rule still denies it...
+      expect(t.ja4Of(JA4_RULE)).toEqual([DIGEST]);
+      // ...and nothing is left marked as an unapplied change.
+      expect(t.h.frame()).toContain('pending= |');
+      t.h.unmount();
+    });
+
+    test('denying then lifting the same value also settles', async () => {
+      const t = await mount([item(JA4_RULE, [])]);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      t.get().unstageDeny(t.get().entries[0]);
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      expect(t.ja4Of(JA4_RULE)).toEqual([DIGEST]);
+      t.h.unmount();
+    });
+  });
+
   describe('promotion', () => {
     const withChallenge = () => [
       item(JA4_RULE, []),

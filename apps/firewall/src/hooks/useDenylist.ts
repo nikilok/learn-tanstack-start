@@ -82,13 +82,18 @@ export function useDenylist(opts: {
   const writeEnv =
     opts.writeEnv ??
     ((key: string, value: string) => persistEnvVar(ENV_PATH, key, value));
-  const [staged, setStaged] = useState<string[]>([]);
+  // ONE piece of state, not two. As separate lists each setter read the OTHER from the render-time
+  // closure, so a lift and a re-deny in the same tick disagreed: the removal was cleared while the
+  // value stayed staged, leaving `pending` true with nothing actually changed and the apply
+  // persisting a cancelled edit. Both now come out of a single transition over the same snapshot.
+  const [edits, setEdits] = useState<{ staged: string[]; removed: string[] }>({
+    staged: [],
+    removed: [],
+  });
+  const { staged, removed } = edits;
   // Its own list: `staged` is classified by SHAPE downstream, and a challenged digest and a denied
   // one are the same shape — folded together, every staged challenge rendered as a deny.
   const [stagedChallenge, setStagedChallenge] = useState<string[]>([]);
-  // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
-  // on screen as a pending change until applied.
-  const [removed, setRemoved] = useState<string[]>([]);
   // Taken off the challenge tier by a promotion, so the rules list can mark that rule too.
   const [promoted, setPromoted] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
@@ -139,8 +144,7 @@ export function useDenylist(opts: {
     // from the same snapshot and the second overwrote the first — a staged deny silently gone,
     // with the pane showing it and the apply never writing it.
     setItems((prev) => stage(prev, kind, value).items);
-    setStaged((s) => afterStage(s, removed, value).staged);
-    setRemoved((r) => afterStage(staged, r, value).removed);
+    setEdits((e) => afterStage(e.staged, e.removed, value));
     if (next.promoted)
       setPromoted((p) => [...new Set([...p, next.promoted as string])]);
     onEdit();
@@ -154,8 +158,7 @@ export function useDenylist(opts: {
     setItems((prev) => unstage(prev, entry.kind, entry.value, wasPromoted));
     if (wasPromoted)
       setPromoted((p) => p.filter((v) => v !== normalizeStaged(entry.value)));
-    setStaged((s) => afterUnstage(s, removed, entry).staged);
-    setRemoved((r) => afterUnstage(staged, r, entry).removed);
+    setEdits((e) => afterUnstage(e.staged, e.removed, entry));
     onEdit();
   };
 
@@ -198,8 +201,7 @@ export function useDenylist(opts: {
       write: writeEnv,
     });
     if (out.clearStaged) {
-      setStaged([]);
-      setRemoved([]);
+      setEdits({ staged: [], removed: [] });
       setPromoted([]);
       setStagedChallenge([]);
     }

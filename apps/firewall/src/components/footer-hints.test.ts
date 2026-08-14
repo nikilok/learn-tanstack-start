@@ -28,13 +28,7 @@ describe('hintSegments', () => {
       { key: 'i', label: 'ip' },
       { key: 'f', label: 'ja4' },
     ]);
-    expect(segs.map((s) => s.text)).toEqual([
-      'i',
-      ':ip',
-      ' │ ',
-      'f',
-      ':ja4',
-    ]);
+    expect(segs.map((s) => s.text)).toEqual(['i', ':ip', ' │ ', 'f', ':ja4']);
     expect(segs.find((s) => s.text === ' │ ')?.tone).toBe('dim');
   });
 

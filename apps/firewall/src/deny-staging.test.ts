@@ -374,9 +374,26 @@ describe('lifting a promotion', () => {
 });
 
 describe('afterStage / afterUnstage', () => {
-  test('staging records the value and cancels any pending removal of it', () => {
+  // Only a LIVE value can be on `removed`, so re-staging one is changing your mind about the
+  // lift — not adding anything. Recorded as an addition, the rule ended exactly where it started
+  // while the pane reported a pending +1 and the apply persisted an edit nobody made.
+  test('staging a value that is currently lifted cancels the lift and stages nothing', () => {
     expect(afterStage([], [DIGEST_A], DIGEST_A)).toEqual({
+      staged: [],
+      removed: [],
+    });
+  });
+
+  test('staging a value that was NOT lifted still records it', () => {
+    expect(afterStage([], [], DIGEST_A)).toEqual({
       staged: [DIGEST_A],
+      removed: [],
+    });
+  });
+
+  test('cancelling one lift leaves another value staged and another lifted', () => {
+    expect(afterStage([DIGEST_B], [DIGEST_A], DIGEST_A)).toEqual({
+      staged: [DIGEST_B],
       removed: [],
     });
   });

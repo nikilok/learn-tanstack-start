@@ -171,8 +171,7 @@ export function useDenylist(opts: {
       // A lift of something STAGED this session just drops the stage; only a live one is a
       // removal, the same distinction afterUnstage draws for the deny lists.
       setStagedChallenge((c) => c.filter((x) => x !== v));
-      if (!entry.staged)
-        setRemovedChallenge((r) => [...new Set([...r, v])]);
+      if (!entry.staged) setRemovedChallenge((r) => [...new Set([...r, v])]);
     } else setEdits((e) => afterUnstage(e.staged, e.removed, entry));
     onEdit();
   };

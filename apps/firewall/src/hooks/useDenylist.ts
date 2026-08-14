@@ -147,11 +147,12 @@ export function useDenylist(opts: {
     // in the same tick as another edit overwrote it.
     setItems((prev) => stage(prev, 'challenge', digest).items);
     const v = normalizeStaged(digest);
-    setStagedChallenge((c) => [...new Set([...c, v])]);
-    // Re-staging cancels a pending lift rather than sitting beside it, exactly as afterStage does
-    // for the deny lists — otherwise the pane shows the digest as both staged and removed, and the
-    // marker reads +1 −1 for a rule that is back where it started.
-    setRemovedChallenge((r) => r.filter((x) => x !== v));
+    // Cancelling a pending lift is not a new stage — the digest was live on the tier before and
+    // is live after, so NOTHING is pending. afterStage draws exactly this distinction for the
+    // deny lists; dropping only the removal left a bare +1 on a rule back where it started.
+    const cancelsLift = removedChallenge.includes(v);
+    if (cancelsLift) setRemovedChallenge((r) => r.filter((x) => x !== v));
+    else setStagedChallenge((c) => [...new Set([...c, v])]);
     onEdit();
     return undefined;
   };
@@ -172,6 +173,10 @@ export function useDenylist(opts: {
       const v = next.promoted;
       promotedRef.current = [...new Set([...promotedRef.current, v])];
       setPromoted((p) => [...new Set([...p, v])]);
+      // A promotion takes the digest OFF the challenge rule, so a stage of it this session is no
+      // longer pending — left in place, one digest drew two rows and marked the tier +1 for
+      // something it no longer holds.
+      setStagedChallenge((c) => c.filter((x) => x !== v));
     }
     onEdit();
     return undefined;

@@ -413,8 +413,26 @@ describe('useDenylist', () => {
       await t.h.settle();
       t.get().stageChallenge(DIGEST);
       await t.h.settle();
-      // Back to its original value: staged only, never staged AND removed.
-      expect(t.h.frame()).not.toContain('+1 −1');
+      // Back to its original value, so NOTHING is pending on the tier. The first version of this
+      // asserted only `not.toContain('+1 −1')`, which passes on a bare `+1` — it tested the
+      // symptom that had been seen rather than the state that is correct.
+      expect(t.h.frame()).not.toContain(`${CHALLENGE_SCRAPER_JA4}=`);
+      t.h.unmount();
+    });
+
+    // Stage a challenge, then promote it with `b` before applying. The promotion takes it off the
+    // challenge rule, but stagedChallenge kept holding it — one digest drawn as two rows.
+    test('promoting a digest staged this session clears its challenge stage', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      t.get().stageDeny('ja4', DIGEST);
+      await t.h.settle();
+      expect(t.get().entries.filter((e) => e.value === DIGEST)).toHaveLength(1);
+      expect(t.h.frame()).not.toContain(`${CHALLENGE_SCRAPER_JA4}=+1`);
       t.h.unmount();
     });
 

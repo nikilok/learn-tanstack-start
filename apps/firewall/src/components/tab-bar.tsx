@@ -13,7 +13,11 @@ import type { IpTab, IpTabs } from '../hooks/useIpTabs';
  */
 export function tabLabel(t: IpTab): string {
   const v = t.subject.value;
-  return t.subject.kind === 'ja4' ? `${v.slice(0, 10)}…${v.slice(-6)}` : v;
+  // Short values unchanged: head-plus-tail on something already shorter than the two slices
+  // returns a LONGER string than it was given, which is the opposite of shortening it.
+  return t.subject.kind === 'ja4' && v.length > 17
+    ? `${v.slice(0, 10)}…${v.slice(-6)}`
+    : v;
 }
 
 export function TabBar({

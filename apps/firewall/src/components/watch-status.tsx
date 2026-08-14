@@ -4,6 +4,7 @@
 import { Box, Text } from 'ink';
 
 import type { Profiled, Watch } from '../hooks/useWatch';
+import { wrappedRows } from './confirm-prompt';
 import { watchTiming } from '../tuning';
 import { WATCH_LOG } from '../watch-log';
 
@@ -46,10 +47,11 @@ function ProfiledRow({ p }: { p: Profiled }) {
   );
 }
 
-// What the panel costs before either list: its two margin rows, the border, the header, the note
-// and the logging line. The margins count — they are rows in the column like any other, and the
-// first version of this budget left them out, so the panel ran two rows past what it was given.
-const CHROME = 7;
+// The only rows whose height is FIXED: two margins and the border's two. Everything else on this
+// panel wraps, and every earlier version of this budget assumed one row per logical line —
+// header, note, invoked line — then swept at 140 columns where none of them do. They are measured
+// by the caller now and passed in, so the arithmetic below cannot silently assume a height again.
+const BOX_CHROME = 4;
 // The verdict's own heading, and the blank line above it.
 const VERDICT_CHROME = 2;
 
@@ -63,9 +65,12 @@ const VERDICT_CHROME = 2;
 export function panelRows(
   maxRows: number,
   profiles: number,
-  verdictLines: number,
+  /** Rows each verdict line costs once wrapped — not a count of lines. */
+  verdictCosts: readonly number[],
+  /** Rows everything of fixed content costs once wrapped: the box, header, note and status line. */
+  fixedRows: number,
 ): { profiles: number; verdict: number; overflow: boolean } {
-  const room = Math.max(0, maxRows - CHROME);
+  const room = Math.max(0, maxRows - fixedRows);
   let shownProfiles = Math.min(SHOWN, profiles, room);
   // The "… N more" line costs a row too, and comes out of the SAME room — counted afterwards it
   // pushed the panel one row past the budget it was given.
@@ -77,11 +82,22 @@ export function panelRows(
   const overflow = profiles > shownProfiles && room > 0;
   const left = room - shownProfiles - (overflow ? 1 : 0);
   const budget = left - VERDICT_CHROME;
-  // Its own "… N more line(s)" row costs one, and shows exactly when the verdict does not fit —
-  // so it has to be reserved in the case that creates it, not counted as fixed chrome.
-  const verdict = verdictLines
-    ? Math.max(0, Math.min(verdictLines, budget - (verdictLines > budget ? 1 : 0)))
-    : 0;
+  // Taken line by line against what each COSTS once wrapped, because a verdict line at this width
+  // is regularly two rows. Its own "… N more line(s)" row is reserved only in the case that
+  // creates it, not counted as fixed chrome.
+  const total = verdictCosts.reduce((a, b) => a + b, 0);
+  let verdict = 0;
+  if (verdictCosts.length && budget > 0) {
+    if (total <= budget) verdict = verdictCosts.length;
+    else {
+      let used = 0;
+      for (const cost of verdictCosts) {
+        if (used + cost > budget - 1) break;
+        used += cost;
+        verdict++;
+      }
+    }
+  }
   return { profiles: shownProfiles, verdict, overflow };
 }
 
@@ -90,13 +106,48 @@ export function WatchStatus({
   watch: w,
   /** Rows the panel may occupy. It shrinks to fit rather than growing the column past the viewport — an overflowing frame scrolls the terminal and takes the editor cursor with it. */
   maxRows = Number.MAX_SAFE_INTEGER,
+  /** Column width the panel is drawn in. Its note and verdict wrap, so the budget cannot be met without knowing it. */
+  width = Number.MAX_SAFE_INTEGER,
 }: {
   watch: Watch;
   maxRows?: number;
+  width?: number;
 }) {
   if (!w.on) return null;
+  // The panel's own content width: the column less its border and horizontal padding.
+  const inner = Math.max(0, width - 4);
+  const timing =
+    watchTiming() ?? 'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN';
+  const last = w.at ? ` · last ${w.at}` : ' · starting…';
+  const awake = w.keepingAwake ? ' · holding the mac awake' : '';
+  // Measured, not assumed: both of these wrap, and at this panel's real width — about 38
+  // columns — the loop's own note is three rows. Every earlier version of this budget counted
+  // one row per logical line and was swept at 140 columns, where nothing wraps at all.
+  const headerWrapped = wrappedRows(`◉ watch ${timing}${last}${awake}`, inner);
+  const noteWrapped = w.note ? wrappedRows(w.note, inner) : 0;
+  // The invoked line wraps as readily as the other two, and it replaces the logging line rather
+  // than joining it — so exactly one of the pair is on screen and only that one is measured.
+  const statusText =
+    w.invokedCount > 0
+      ? `⇢ claude invoked ${w.invokedCount}× this session · last ${w.invokedAt}${w.notifiedAt ? ` · notified ${w.notifiedAt}` : ''} · ${WATCH_LOG}`
+      : w.at
+        ? `logging to ${WATCH_LOG}`
+        : '';
+  const statusWrapped = statusText ? wrappedRows(statusText, inner) : 0;
+  // Collapsed to one row each ONLY when they genuinely do not fit. Truncating unconditionally
+  // cost the header its last-tick time, which is the one thing on that line saying it is alive.
+  const full = BOX_CHROME + headerWrapped + noteWrapped + statusWrapped;
+  const tight = full > maxRows;
+  const fixed = tight
+    ? BOX_CHROME + 1 + (w.note ? 1 : 0) + (statusText ? 1 : 0)
+    : full;
   const verdictAll = w.verdictHead ? w.verdictHead.split('\n') : [];
-  const room = panelRows(maxRows, w.who.length, verdictAll.length);
+  const room = panelRows(
+    maxRows,
+    w.who.length,
+    verdictAll.map((l) => wrappedRows(l, inner)),
+    fixed,
+  );
   const verdictShown = verdictAll.slice(0, room.verdict);
   // Both the lines useWatch already dropped and the ones that did not fit here, or the count
   // understates what is missing and a clipped verdict reads as a complete one.
@@ -118,21 +169,20 @@ export function WatchStatus({
       borderColor={w.busy ? 'yellow' : 'green'}
       backgroundColor="#151b23"
     >
-      <Text>
+      <Text wrap={tight ? 'truncate-end' : 'wrap'}>
         <Text color={w.busy ? 'yellow' : 'green'} bold>
           ◉ watch{' '}
         </Text>
         <Text dimColor>
-          {watchTiming() ??
-            'window unset — set FW_WATCH_HOURS and FW_WATCH_INTERVAL_MIN'}
-          {w.at ? ` · last ${w.at}` : ' · starting…'}
-          {w.keepingAwake ? ' · holding the mac awake' : ''}
+          {timing}
+          {last}
+          {awake}
         </Text>
       </Text>
       {Boolean(w.note) && (
         // Wrapped, not truncated: the border costs four columns and this line carries the actual
         // result — "0 profiled · 0 would ban" was the half being clipped away.
-        <Text dimColor wrap="wrap">
+        <Text dimColor wrap={tight ? 'truncate-end' : 'wrap'}>
           {w.note}
         </Text>
       )}
@@ -143,14 +193,16 @@ export function WatchStatus({
       {room.overflow && (
         // Bounded, or a busy tick grows the panel until it pushes the rule list off screen. The
         // watch-list pane has every one of them.
-        <Text dimColor>
+        // truncate-end, so this costs EXACTLY one row. It is short, terse, and the budget
+        // cannot keep predicting the height of something that wraps.
+        <Text dimColor wrap="truncate-end">
           {'  '}… {w.who.length - room.profiles} more · t for the watch list
         </Text>
       )}
       {/* Stays up once it has happened. The loop runs while you are in another pane, so an
           invocation you were not watching still has to be visible afterwards. */}
       {w.invokedCount > 0 && (
-        <Text>
+        <Text wrap={tight ? 'truncate-end' : 'wrap'}>
           <Text color="magenta" bold>
             ⇢ claude invoked{' '}
           </Text>
@@ -161,7 +213,9 @@ export function WatchStatus({
         </Text>
       )}
       {w.invokedCount === 0 && Boolean(w.at) && (
-        <Text dimColor>logging to {WATCH_LOG}</Text>
+        <Text dimColor wrap={tight ? 'truncate-end' : 'wrap'}>
+          logging to {WATCH_LOG}
+        </Text>
       )}
       {/* Not truncated: a verdict is the one thing here worth reading in full, and a
           clipped one is worse than none — it reads as complete. */}
@@ -177,7 +231,8 @@ export function WatchStatus({
               with it, the same defect reportH and the pane height exist to prevent. */}
           <Text>{verdictShown.join('\n')}</Text>
           {clipped > 0 && (
-            <Text dimColor>
+            // One row by construction, for the same reason as the profile overflow line.
+            <Text dimColor wrap="truncate-end">
               {'  '}… {clipped} more line(s) — full text in {WATCH_LOG}
             </Text>
           )}

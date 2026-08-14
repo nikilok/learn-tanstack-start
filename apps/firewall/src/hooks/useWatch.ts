@@ -441,7 +441,10 @@ export function useWatch(opts: {
       investigationRef.current?.kill();
       investigationRef.current = null;
       setKeepingAwake(false);
-      void logWatch(root, new Date(), { kind: 'disarmed' });
+      // Guarded like the armed log above it: with the window unconfigured the loop never
+      // screened, so logging that it disarmed writes a session that did not happen.
+      if (watchTiming() !== null)
+        void logWatch(root, new Date(), { kind: 'disarmed' });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchOn]);

@@ -1296,7 +1296,11 @@ export function App() {
             not — so the thing worth re-reading belongs where the eye lands last. */}
         {/* Half the column, floored so it stays useful on a small terminal. The panel shrinks
             into this rather than growing the column past the viewport. */}
-        <WatchStatus watch={watch} maxRows={Math.max(7, Math.floor(reportH / 2))} />
+        <WatchStatus
+          watch={watch}
+          maxRows={Math.max(7, Math.floor(reportH / 2))}
+          width={rulesW}
+        />
         {phase === 'select' && (
           <Box flexDirection="column">
             {applied && (

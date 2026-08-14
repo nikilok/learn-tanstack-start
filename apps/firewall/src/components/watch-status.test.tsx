@@ -156,9 +156,14 @@ describe('WatchStatus', () => {
 
 // Measured before this existed: an armed panel with six profiles and a verdict came to 26 rows,
 // against an app frame that already filled a 24-row terminal. Bounded is not the same as fits.
+/** Verdict costs when nothing wraps: one row per line. */
+const oneRow = (n: number) => Array.from({ length: n }, () => 1);
+/** Fixed rows when nothing wraps: the box's four, plus header, note and status at one each. */
+const FIXED = 7;
+
 describe('panelRows', () => {
   test('a generous budget gives both lists everything they asked for', () => {
-    expect(panelRows(40, 6, 12)).toEqual({
+    expect(panelRows(40, 6, oneRow(12), FIXED)).toEqual({
       profiles: 6,
       verdict: 12,
       overflow: false,
@@ -166,52 +171,69 @@ describe('panelRows', () => {
   });
 
   test('a tight budget sheds the verdict first — it says where its full text is', () => {
-    const room = panelRows(14, 6, 12);
+    const room = panelRows(14, 6, oneRow(12), FIXED);
     expect(room.profiles).toBe(6);
     expect(room.verdict).toBeLessThan(12);
   });
 
   test('a budget with no room at all shows neither, and never a negative count', () => {
-    const room = panelRows(5, 6, 12);
+    const room = panelRows(5, 6, oneRow(12), FIXED);
     expect(room.profiles).toBe(0);
     expect(room.verdict).toBe(0);
   });
 
-  test('the panel never exceeds the budget it was given', async () => {
+  test('the panel never exceeds the budget it was given, at any width', async () => {
     const who = Array.from({ length: 9 }, (_, i) => ({
       digest: `t13d17${i}4h1_5b57614c22b0_7baf387fc6ff`,
       total: 900,
       verdict: 'watch',
       why: 'rendering',
     }));
-    const verdictHead = Array.from({ length: 12 }, (_, i) => `line ${i}`).join(
-      '\n',
-    );
-    // Measured by where a SIBLING lands, not by counting the panel's own lines. Two earlier
-    // versions of this test counted the frame and both were blind to the very rows that were
-    // overflowing: filtering blanks hid the margins, and trimming trailing newlines hid the
-    // bottom one. What the column actually gives up is where the next element starts.
-    for (let maxRows = 7; maxRows <= 30; maxRows++) {
-      const h = renderInk(
-        <Box flexDirection="column">
-          <WatchStatus
-            watch={{ ...ARMED, who, verdictHead, verdictOf: 'x', invokedCount: 1 }}
-            maxRows={maxRows}
-          />
-          <Text>ZZMARKERZZ</Text>
-        </Box>,
-        { columns: 140 },
-      );
-      await h.settle();
-      const occupied = h
-        .frame()
-        .split('\n')
-        .findIndex((l) => l.includes('ZZMARKERZZ'));
-      h.unmount();
-      expect(occupied).toBeGreaterThan(0);
-      expect(occupied).toBeLessThanOrEqual(maxRows);
+    // The loop's real note and a real verdict, both long enough to wrap at a narrow width.
+    const note =
+      '33 fingerprint(s) allowed through · 1 profiled · 0 would ban';
+    const verdictHead = Array.from(
+      { length: 12 },
+      (_, i) => `line ${i} of a verdict long enough to wrap in a narrow column`,
+    ).join('\n');
+    // Widths as well as budgets. Every earlier version of this swept budgets at 140 columns,
+    // where nothing wraps — so it could not see the case that was actually overflowing.
+    // Measured by where a SIBLING lands: counting the panel's own lines hid its margins twice.
+    for (const width of [140, 44, 38]) {
+      for (let maxRows = 7; maxRows <= 24; maxRows++) {
+        const h = renderInk(
+          <Box flexDirection="column" width={width}>
+            <WatchStatus
+              watch={{
+                ...ARMED,
+                note,
+                who,
+                verdictHead,
+                verdictOf: 'x',
+                invokedCount: 1,
+              }}
+              maxRows={maxRows}
+              width={width}
+            />
+            <Text>ZZMARKERZZ</Text>
+          </Box>,
+          { columns: width + 4 },
+        );
+        await h.settle();
+        const occupied = h
+          .frame()
+          .split('\n')
+          .findIndex((l) => l.includes('ZZMARKERZZ'));
+        h.unmount();
+        expect(occupied).toBeGreaterThan(0);
+        expect({ width, maxRows, occupied }).toEqual({
+          width,
+          maxRows,
+          occupied: Math.min(occupied, maxRows),
+        });
+      }
     }
-  });
+  }, 30_000);
 
   test('a clipped verdict counts what the LAYOUT dropped too, not just useWatch', async () => {
     const h = renderInk(
@@ -242,7 +264,7 @@ describe('WatchStatus floor', () => {
     // overflow false as well: with no room there is no row to spend saying rows are hidden,
     // and drawing it anyway is what put the panel over its budget at the floor.
     const floor = { profiles: 0, verdict: 0, overflow: false };
-    expect(panelRows(7, 9, 12)).toEqual(floor);
-    expect(panelRows(0, 9, 12)).toEqual(floor);
+    expect(panelRows(7, 9, oneRow(12), FIXED)).toEqual(floor);
+    expect(panelRows(0, 9, oneRow(12), FIXED)).toEqual(floor);
   });
 });

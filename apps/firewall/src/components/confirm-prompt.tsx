@@ -11,7 +11,8 @@ export type Confirmation = {
 // Rows greedily, the way `wrap` does: a word is never split, so counting characters would
 // under-count and the frame would still overflow.
 /** Lines `text` occupies once wrapped to `width`. */
-function wrappedRows(text: string, width: number): number {
+/** Rows `text` costs at `width`, counting soft wraps. Shared with the watch panel, whose budget has to know that one logical line is not always one row. */
+export function wrappedRows(text: string, width: number): number {
   if (width <= 0) return 1;
   let rows = 0;
   for (const line of text.split('\n')) {

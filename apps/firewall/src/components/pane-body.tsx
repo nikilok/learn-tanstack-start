@@ -123,24 +123,24 @@ export function PaneBody({
         {state.loading ? `Loading ${what}…` : `no ${what} yet`}
       </Text>
     );
+  // Narrowed on the kind rather than cast, and anything unhandled says so. The casts here made
+  // 'ip' and everything-else exhaustive by assertion: a seventh pane kind would have fallen into
+  // the sitemap branch and drawn the sitemap's rows under its own name, with the types silent.
+  const lines =
+    kind === 'ip' && ipTab?.data
+      ? profileLines(
+          withAllowlistError(ipTab.data, allowlistError),
+          width,
+          advice,
+        )
+      : kind === 'sitemap' && sitemap?.data
+        ? sitemapLines(sitemap.data, sitemapCursor)
+        : null;
+  if (!lines) return <Text dimColor>nothing to show for this pane</Text>;
   return (
     <Box flexDirection="column">
       {state.loading && <Text dimColor>refreshing…</Text>}
-      <Lines
-        lines={
-          kind === 'ip'
-            ? profileLines(
-                withAllowlistError(
-                  (ipTab as IpTab).data as IpProfile,
-                  allowlistError,
-                ),
-                width,
-                advice,
-              )
-            : sitemapLines(sitemap.data as SitemapReport, sitemapCursor)
-        }
-        width={width}
-      />
+      <Lines lines={lines} width={width} />
     </Box>
   );
 }

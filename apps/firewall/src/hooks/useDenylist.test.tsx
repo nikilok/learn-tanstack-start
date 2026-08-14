@@ -249,6 +249,74 @@ describe('useDenylist', () => {
     });
   });
 
+  // The `c` key's whole path: the advisory recommends CHALLENGE when a deny would hit real
+  // browsers, and acting on that used to mean hand-editing .env.local.
+  describe('staging a challenge', () => {
+    test('it reaches the challenge rule and marks it pending', async () => {
+      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      expect(t.get().stageChallenge(DIGEST)).toBeUndefined();
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      expect(t.ja4Of(JA4_RULE)).toEqual([]);
+      expect(t.h.frame()).toContain(`${CHALLENGE_SCRAPER_JA4}=+1`);
+      t.h.unmount();
+    });
+
+    test('it is listed as staged, so the pane shows it before the apply', async () => {
+      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      expect(t.h.frame()).toContain(`${DIGEST}:s`);
+      t.h.unmount();
+    });
+
+    test('a digest already denied is refused, and nothing is staged', async () => {
+      const t = await mount([
+        item(JA4_RULE, [DIGEST]),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      expect(t.get().stageChallenge(DIGEST)).toContain('already on the deny list');
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([]);
+      expect(t.edits()).toBe(0);
+      t.h.unmount();
+    });
+
+    // The challenge path came from a branch cut before the batching fix, so it carried the same
+    // assign-from-rendered-state defect. Pinned here, or a later merge quietly reintroduces it.
+    test('a challenge and a deny staged in one tick both survive', async () => {
+      const t = await mount([
+        item(JA4_RULE, []),
+        item(CHALLENGE_SCRAPER_JA4, []),
+      ]);
+      // Deny FIRST, challenge second. The other order passes either way: a fixed stageDeny
+      // updater receives the challenge's result as `prev` and carries it, so the challenge's own
+      // defect never shows. Whichever call is SECOND is the one under test.
+      t.get().stageDeny('ja4', OTHER);
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      expect(t.ja4Of(CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST]);
+      expect(t.ja4Of(JA4_RULE)).toEqual([OTHER]);
+      t.h.unmount();
+    });
+
+    test('an applied challenge is written to FW_CHALLENGE_JA4', async () => {
+      const t = await mount([item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])]);
+      t.get().stageChallenge(DIGEST);
+      await t.h.settle();
+      const applied = new Map<string, ApplyStatus>(
+        t.items().map((i) => [i.rule.name, 'overwrote' as ApplyStatus]),
+      );
+      const out = t.get().persist(t.items(), applied, false);
+      await t.h.settle();
+      expect(out.ok).toBe(true);
+      expect(new Map(t.writes).get('FW_CHALLENGE_JA4')).toBe(DIGEST);
+      // And NOT onto the deny list, which is the whole point of the separate key.
+      expect(new Map(t.writes).get('FW_BLOCKED_JA4')).not.toBe(DIGEST);
+      t.h.unmount();
+    });
+  });
+
   describe('persist', () => {
     const applied = (items: Item[]) =>
       new Map<string, ApplyStatus>(

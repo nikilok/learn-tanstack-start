@@ -17,13 +17,21 @@ import type { Item } from './seed-items';
 export const JA4_RULE = 'deny-scraper-ja4';
 export const ASN_RULE = 'deny-scraper-asn';
 
-export type DenyKind = 'ja4' | 'asn';
+/**
+ * Which list an edit targets.
+ *
+ * 'challenge' is the RECOVERABLE tier: the digest is interstitialed rather than refused, so a
+ * shared fingerprint costs real browsers a challenge they can answer instead of a 403 they
+ * cannot. The advisory recommends it precisely when a deny would hit people.
+ */
+export type DenyKind = 'ja4' | 'asn' | 'challenge';
 
 /** The rule a kind edits and the shape its values must take. */
 export function targetOf(kind: DenyKind): { rule: string; spec: DenySpec } {
-  return kind === 'ja4'
-    ? { rule: JA4_RULE, spec: JA4_DENY }
-    : { rule: ASN_RULE, spec: ASN_DENY };
+  if (kind === 'ja4') return { rule: JA4_RULE, spec: JA4_DENY };
+  if (kind === 'challenge')
+    return { rule: CHALLENGE_SCRAPER_JA4, spec: JA4_DENY };
+  return { rule: ASN_RULE, spec: ASN_DENY };
 }
 
 // A rule can sit in the WAF with active:false, or cycled to log/challenge — both states leave the
@@ -141,6 +149,18 @@ export function stage(
   // Reported, because it cannot be recovered afterwards: once the value is off the challenge
   // rule, nothing distinguishes "promoted off it" from "was never on it", and the rules list
   // then shows the challenge row as inert while it carries an unapplied removal.
+  // Already denied: adding it to the challenge tier changes nothing, because the deny rule wins
+  // and the digest keeps getting 403s. Reporting success would show a challenge the traffic never
+  // sees — protection that reads as real and is not.
+  if (kind === 'challenge') {
+    const denyItem = items.find((it) => it.rule.name === JA4_RULE);
+    const live = denyItem ? valuesOf(denyItem.rule, JA4_DENY) : [];
+    if (live.some((v) => normalizeStaged(v) === normalizeStaged(value)))
+      return {
+        items,
+        error: 'refused — already on the deny list, which outranks a challenge',
+      };
+  }
   const challenge = items.find((it) => it.rule.name === CHALLENGE_SCRAPER_JA4);
   const promoted =
     kind === 'ja4' &&
@@ -240,8 +260,20 @@ export function denyEntries(opts: {
   staged: string[];
   removed: string[];
   activity: Map<string, Activity> | null;
+  /** Digests staged onto the CHALLENGE tier this session. */
+  stagedChallenge?: string[];
+  /** What the tier is already challenging, so a staged one is not listed twice. */
+  liveChallenge?: string[];
 }): DenyEntry[] {
-  const { liveJa4, liveAsn, staged, removed, activity } = opts;
+  const {
+    liveJa4,
+    liveAsn,
+    staged,
+    removed,
+    activity,
+    stagedChallenge = [],
+    liveChallenge = [],
+  } = opts;
   // Staged values whose rule is not enforcing are absent from the live lists, so without this a
   // deny staged onto a deactivated rule showed NOTHING — the edit existed and the pane denied it.
   const live = new Set([...liveJa4, ...liveAsn].map((v) => normalizeStaged(v)));
@@ -283,6 +315,22 @@ export function denyEntries(opts: {
       removed: false,
       ...seen(value),
     })),
+    // The recoverable tier, live and staged. This pane is where an operator reads what the WAF is
+    // doing to a fingerprint, and challenging is one of the things it does.
+    ...liveChallenge.map((value) => ({
+      kind: 'challenge' as DenyKind,
+      value,
+      staged: false,
+      removed: false,
+      ...seen(value),
+    })),
+    ...stagedChallenge.map((value) => ({
+      kind: 'challenge' as DenyKind,
+      value,
+      staged: true,
+      removed: false,
+      ...seen(value),
+    })),
     ...removed.map((value) => ({
       // By shape, not by a substring guess: the two denylists share one flat removal list.
       // Normalized first, exactly as the staged branch does. Validating the RAW value sent an
@@ -306,11 +354,19 @@ export function pendingByRule(
   removed: string[],
   /** Digests taken off the challenge tier by a promotion this session. */
   promoted: string[] = [],
+  /** Digests ADDED to the challenge tier this session. Its own list because the shared staged one is classified by SHAPE, and a challenge is the same shape as a deny. */
+  stagedChallenge: string[] = [],
 ): Map<string, string> {
   const out = new Map<string, string>();
-  // Not derivable from staged/removed: a promotion removes the digest from the challenge rule
-  // without ever appearing in `removed`, so pendingEdits sees nothing on either side.
-  if (promoted.length) out.set(CHALLENGE_SCRAPER_JA4, `−${promoted.length}`);
+  // Neither side is derivable from staged/removed: a promotion drops the digest from the
+  // challenge rule without ever appearing in `removed`, and a staged challenge is indistinguishable
+  // by shape from a staged deny.
+  const challengeParts = [
+    stagedChallenge.length ? `+${stagedChallenge.length}` : '',
+    promoted.length ? `−${promoted.length}` : '',
+  ].filter(Boolean);
+  if (challengeParts.length)
+    out.set(CHALLENGE_SCRAPER_JA4, challengeParts.join(' '));
   for (const [ruleName, spec] of [
     [JA4_RULE, JA4_DENY],
     [ASN_RULE, ASN_DENY],

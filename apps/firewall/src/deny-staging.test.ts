@@ -626,3 +626,86 @@ describe('pendingByRule', () => {
     );
   });
 });
+
+// The recoverable tier, staged from the TUI rather than by hand-editing .env.local. The advisory
+// recommends CHALLENGE exactly when a deny would hit real browsers, and until this existed the
+// only way to act on that recommendation was to edit the secrets file the tool otherwise owns.
+describe('staging a challenge', () => {
+  test('the digest lands on the challenge rule, not the deny rule', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    const out = stage(items, 'challenge', DIGEST_A);
+    expect(out.error).toBeUndefined();
+    expect(ja4Of(out.items, CHALLENGE_SCRAPER_JA4)).toEqual([DIGEST_A]);
+    expect(ja4Of(out.items, JA4_RULE)).toEqual([]);
+  });
+
+  // Promotion is challenge -> deny. Staging a challenge is the opposite direction, and firing the
+  // promotion here would take the digest off the very rule it was being added to.
+  test('it does not promote, so nothing is taken off the challenge tier', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [DIGEST_B])];
+    const out = stage(items, 'challenge', DIGEST_A);
+    expect(out.promoted).toBeUndefined();
+    expect(ja4Of(out.items, CHALLENGE_SCRAPER_JA4).sort()).toEqual(
+      [DIGEST_A, DIGEST_B].sort(),
+    );
+  });
+
+  // The deny rule wins, so the challenge would never be seen by the traffic. Reporting success
+  // would show protection that is not there.
+  test('a digest already DENIED is refused rather than quietly added', () => {
+    const items = [
+      item(JA4_RULE, [DIGEST_A]),
+      item(CHALLENGE_SCRAPER_JA4, []),
+    ];
+    const out = stage(items, 'challenge', DIGEST_A);
+    expect(out.error).toContain('already on the deny list');
+    expect(ja4Of(out.items, CHALLENGE_SCRAPER_JA4)).toEqual([]);
+  });
+
+  test('the refusal is case-insensitive, like every other digest comparison', () => {
+    const items = [
+      item(JA4_RULE, [DIGEST_A]),
+      item(CHALLENGE_SCRAPER_JA4, []),
+    ];
+    expect(
+      stage(items, 'challenge', DIGEST_A.toUpperCase()).error,
+    ).toBeTruthy();
+  });
+
+  test('a value that is not a digest is refused', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    expect(stage(items, 'challenge', 'nonsense').error).toContain('refused');
+  });
+
+  test('a missing challenge rule is refused, not silently dropped', () => {
+    expect(stage([item(JA4_RULE, [])], 'challenge', DIGEST_A).error).toContain(
+      CHALLENGE_SCRAPER_JA4,
+    );
+  });
+
+  test('the rules list marks the challenge rule as having a pending addition', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    const pending = pendingByRule(items, [], [], [], [DIGEST_A]);
+    expect(pending.get(CHALLENGE_SCRAPER_JA4)).toBe('+1');
+  });
+
+  test('an addition and a promotion on the same rule are both reported', () => {
+    const items = [item(JA4_RULE, []), item(CHALLENGE_SCRAPER_JA4, [])];
+    const pending = pendingByRule(items, [], [], [DIGEST_B], [DIGEST_A]);
+    expect(pending.get(CHALLENGE_SCRAPER_JA4)).toBe('+1 −1');
+  });
+
+  test('a staged challenge is listed as its own kind, never as a deny', () => {
+    const entries = denyEntries({
+      liveJa4: [],
+      liveAsn: [],
+      staged: [],
+      removed: [],
+      activity: null,
+      stagedChallenge: [DIGEST_A],
+    });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].kind).toBe('challenge');
+    expect(entries[0].staged).toBe(true);
+  });
+});

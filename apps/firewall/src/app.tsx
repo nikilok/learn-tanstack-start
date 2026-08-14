@@ -672,6 +672,42 @@ export function App() {
     setFocus('confirm');
   };
 
+  /**
+   * Stage the open profile onto the recoverable tier, after a confirm.
+   *
+   * Separate from `b` rather than a mode of it: the advisory recommends CHALLENGE precisely when
+   * a deny would hit real people, and the only way to act on that used to be hand-editing
+   * .env.local — the one file this tool otherwise writes for you.
+   */
+  const confirmChallenge = () => {
+    const lever = ipAdvice?.lever;
+    const target = lever?.value ?? subjectDigest;
+    if (!target) {
+      setCopied('nothing to challenge — this profile carries no fingerprint yet');
+      return;
+    }
+    const recommended = ipAdvice?.verdict === 'challenge';
+    const subject = ipTabs.active?.data?.subject;
+    setConfirm({
+      prompt: `Challenge TLS fingerprint ${target}?`,
+      detail: [
+        recommended
+          ? 'the advisory recommends CHALLENGE for this fingerprint'
+          : ipAdvice
+            ? `the advisory says ${ipAdvice.verdict}, not challenge — you are overriding it`
+            : 'no advice was computed for this identity',
+        subject ? fingerprintScopeNote(subject, target) : '',
+        // Said plainly, because it is the reason to prefer this over b: a challenge is answerable
+        // and a deny is not, so the cost of being wrong here is a delay rather than an outage.
+        'stages into FW_CHALLENGE_JA4 — an interstitial a real browser can answer, not a 403',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      onYes: () => setCopied(denylist.stageChallenge(target) ?? ''),
+    });
+    setFocus('confirm');
+  };
+
   /** Re-query whatever is on screen, so a pane is never stuck on a stale answer. */
   const refreshPane = () => {
     if (pane === 'report') void report.load(() => fetchReport(creds));
@@ -830,6 +866,14 @@ export function App() {
       panes: ['ip'],
       matches: press.char('b'),
       run: denyFromProfile,
+    },
+    {
+      key: 'c',
+      // Named for what it does to the traffic, beside `b`, so the pair reads as the choice it is.
+      label: 'challenge',
+      panes: ['ip'],
+      matches: press.char('c'),
+      run: confirmChallenge,
     },
     {
       key: 'enter',

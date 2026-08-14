@@ -52,6 +52,8 @@ export type Denylist = {
   activityNote: string;
   /** Stage a deny. Returns the refusal message when the value is malformed, never throws. */
   stageDeny: (kind: DenyKind, value: string) => string | undefined;
+  /** Stage a digest onto the RECOVERABLE tier. Returns a refusal to show, or undefined. */
+  stageChallenge: (digest: string) => string | undefined;
   unstageDeny: (entry: DenyEntry) => void;
   /** Whether the WAF is denying `digest` right now, as opposed to the local edit buffer. */
   enforcedJa4: (digest: string) => boolean;
@@ -81,6 +83,9 @@ export function useDenylist(opts: {
     opts.writeEnv ??
     ((key: string, value: string) => persistEnvVar(ENV_PATH, key, value));
   const [staged, setStaged] = useState<string[]>([]);
+  // Its own list: `staged` is classified by SHAPE downstream, and a challenged digest and a denied
+  // one are the same shape — folded together, every staged challenge rendered as a deny.
+  const [stagedChallenge, setStagedChallenge] = useState<string[]>([]);
   // Unbanned this session: the value is gone from the rule, so it needs its own record to stay
   // on screen as a pending change until applied.
   const [removed, setRemoved] = useState<string[]>([]);
@@ -97,10 +102,36 @@ export function useDenylist(opts: {
     staged,
     removed,
     activity: activity.data,
+    stagedChallenge,
+    // Live ones the operator has NOT just staged, or a digest staged this session would appear
+    // twice: once as live and once as pending.
+    liveChallenge: live.challenged.filter(
+      (v) => !stagedChallenge.includes(normalizeStaged(v)),
+    ),
   });
-  const pending = pendingByRule(items, staged, removed, promoted);
+  const pending = pendingByRule(
+    items,
+    staged,
+    removed,
+    promoted,
+    stagedChallenge,
+  );
+
+  const stageChallenge = (digest: string): string | undefined => {
+    const next = stage(items, 'challenge', digest);
+    if (next.error) return next.error;
+    // Through an updater, like stageDeny: assigned from the render-time list, a challenge staged
+    // in the same tick as another edit overwrote it.
+    setItems((prev) => stage(prev, 'challenge', digest).items);
+    setStagedChallenge((c) => [
+      ...new Set([...c, normalizeStaged(digest)]),
+    ]);
+    onEdit();
+    return undefined;
+  };
 
   const stageDeny = (kind: DenyKind, value: string): string | undefined => {
+    if (kind === 'challenge') return stageChallenge(value);
     // Checked against the rendered items — the refusal has to be returned to the caller, and a
     // state updater cannot return anything.
     const next = stage(items, kind, value);
@@ -156,7 +187,15 @@ export function useDenylist(opts: {
     const out = persistDenies({
       snapshot,
       outcome,
-      pending: Boolean(staged.length || removed.length || promoted.length),
+      // stagedChallenge counts as pending like the rest. Left out, a challenge staged on its own
+      // took the `!pending` early return: the apply reported success and wrote nothing, which is
+      // the same shape of silent failure the deny path has been bitten by twice.
+      pending: Boolean(
+        staged.length ||
+          removed.length ||
+          promoted.length ||
+          stagedChallenge.length,
+      ),
       dryRun,
       write: writeEnv,
     });
@@ -164,6 +203,7 @@ export function useDenylist(opts: {
       setStaged([]);
       setRemoved([]);
       setPromoted([]);
+      setStagedChallenge([]);
     }
     return { ok: out.ok, summary: out.summary };
   };
@@ -192,6 +232,7 @@ export function useDenylist(opts: {
     activity,
     activityNote,
     stageDeny,
+    stageChallenge,
     unstageDeny,
     loadActivity,
     persist,

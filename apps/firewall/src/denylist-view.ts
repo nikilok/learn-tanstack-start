@@ -7,7 +7,8 @@
 import { type Line, blank, line, seg } from './line-model';
 
 export type DenyEntry = {
-  kind: 'ja4' | 'asn';
+  /** 'challenge' is the recoverable tier — interstitialed, not refused, and it must never render as a deny. */
+  kind: 'ja4' | 'asn' | 'challenge';
   value: string;
   staged: boolean; // added this session, not yet applied to the WAF
   removed: boolean; // unbanned this session, not yet applied
@@ -36,7 +37,12 @@ function entryLines(e: DenyEntry, isCursor: boolean): Line[] {
     line(
       seg(marker, 'key'),
       state,
-      seg(e.kind.toUpperCase().padEnd(5), 'dim'),
+      // CHALL, not CHALLENGE: the column is five wide and a longer label pushes the value off
+      // the row, while still reading as distinct from JA4 at a glance.
+      seg(
+        (e.kind === 'challenge' ? 'CHALL' : e.kind.toUpperCase()).padEnd(5),
+        'dim',
+      ),
       seg(e.value, isCursor ? 'key' : 'plain'),
     ),
   ];

@@ -140,11 +140,15 @@ export function useIpTabs(creds: Creds): IpTabs {
         return;
       }
       inFlight.current.add(key);
-      const mine = epoch.current.get(key) ?? 0;
+      // Both sides through the same default. Read raw, a subject that has never been closed has
+      // NO entry, so `undefined !== 0` was true for every first lookup — every patch was dropped
+      // and the tab sat on "Loading IP profile…" for ever.
+      const epochOf = () => epoch.current.get(key) ?? 0;
+      const mine = epochOf();
       const patch = (p: Partial<IpTab>) =>
         // Dropped if the tab was closed while this ran: the subject may be open again, and this
         // result belongs to the tab that is gone.
-        epoch.current.get(key) !== mine
+        epochOf() !== mine
           ? undefined
           : // Matched by identity, not index: tabs can be closed or reordered mid-fetch.
             setTabs((prev) =>
@@ -164,7 +168,7 @@ export function useIpTabs(creds: Creds): IpTabs {
         // Only the current run cleans up. A stale one — the tab was closed and reopened while it
         // was in flight — would otherwise clear the NEW run's in-flight marker and swallow the
         // window queued against it.
-        if (epoch.current.get(key) === mine) {
+        if (epochOf() === mine) {
           inFlight.current.delete(key);
           const next = queued.current.get(key);
           if (next) {

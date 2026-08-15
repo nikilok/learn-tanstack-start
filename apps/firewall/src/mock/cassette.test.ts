@@ -18,6 +18,7 @@ import {
   appendCassette,
   cassetteAgeDays,
   ensureOwnerOnly,
+  ensureOwnerOnlyFile,
   loadCassette,
   metricsKeys,
 } from './cassette';
@@ -359,5 +360,40 @@ describe('a cassette must be a regular file', () => {
     const path = join(dir, 'fine.jsonl');
     expect(() => ensureOwnerOnly(path)).not.toThrow();
     expect(loadCassette(path).version).toBe(CASSETTE_VERSION);
+  });
+});
+
+describe('tightening a file that already exists', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-tighten-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('an existing world-readable file is tightened, not left alone', () => {
+    const path = join(dir, 'log');
+    writeFileSync(path, 'old\n');
+    chmodSync(path, 0o644);
+    ensureOwnerOnlyFile(path, '', 'miss log');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('old\n');
+  });
+
+  test('a missing one is created owner-only with the given initial content', () => {
+    const path = join(dir, 'fresh');
+    ensureOwnerOnlyFile(path, 'header\n', 'miss log');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('header\n');
+  });
+
+  // chmod follows a symlink, so the target's permissions would change instead.
+  test('a symlink is refused, and what it points at is untouched', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'important\n');
+    chmodSync(target, 0o644);
+    const link = join(dir, 'link');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnlyFile(link, '', 'miss log')).toThrow('symlink');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
   });
 });

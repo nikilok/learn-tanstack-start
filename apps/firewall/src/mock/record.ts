@@ -13,7 +13,17 @@ import {
 } from './cassette';
 import { encodeLiveConfig, encodeRuleNames } from './codec';
 
+/**
+ * What the recording actually managed to write.
+ *
+ * Counted rather than merely swallowed. A session where every append failed — an unwritable path,
+ * a full disk — used to report "recording appended to <path>" and produce nothing, which is the
+ * same silent-nothing the version guard exists to prevent at the other end.
+ */
+export type RecordingStats = { written: number; failed: number };
+
 function capture(
+  stats: RecordingStats,
   path: string,
   key: string,
   value: unknown,
@@ -21,8 +31,10 @@ function capture(
 ): void {
   try {
     appendCassette(path, key, value, loose);
+    stats.written++;
   } catch {
-    // A cassette that cannot be written is not a reason to fail an operator's live session.
+    // Still not a reason to fail an operator's live session — but the summary says how many.
+    stats.failed++;
   }
 }
 
@@ -30,28 +42,33 @@ function capture(
 export function recordingObservability(
   live: ObservabilityBackend,
   path: string,
+  stats: RecordingStats,
 ): ObservabilityBackend {
   return {
     async metrics(ctx, groupBy, opts) {
       const response = await live.metrics(ctx, groupBy, opts);
       const { exact, loose } = metricsKeys(ctx, groupBy, opts);
-      capture(path, exact, response, loose);
+      capture(stats, path, exact, response, loose);
       return response;
     },
     async ruleNames(ctx) {
       const names = await live.ruleNames(ctx);
-      capture(path, RULE_NAMES_KEY, encodeRuleNames(names));
+      capture(stats, path, RULE_NAMES_KEY, encodeRuleNames(names));
       return names;
     },
   };
 }
 
 /** Wrap the live WAF read. Writes pass straight through untouched — a recording session applies for real. */
-export function recordingWaf(live: WafBackend, path: string): WafBackend {
+export function recordingWaf(
+  live: WafBackend,
+  path: string,
+  stats: RecordingStats,
+): WafBackend {
   return {
     async fetchLive() {
       const config = await live.fetchLive();
-      capture(path, LIVE_CONFIG_KEY, encodeLiveConfig(config));
+      capture(stats, path, LIVE_CONFIG_KEY, encodeLiveConfig(config));
       return config;
     },
     applyItem: live.applyItem,

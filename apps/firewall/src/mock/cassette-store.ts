@@ -202,7 +202,10 @@ export function prepareCassettesDir(
   dir: string | undefined = cassettesDir(),
 ): string | undefined {
   if (!dir) return undefined;
-  mkdirSync(dir, { recursive: true });
+  // 0700 on creation only. The files inside are 0600, but a world-listable directory still hands
+  // out the cassette NAMES, which an operator picks to describe an incident. An existing directory
+  // is left alone: it is inside someone else's repo and its mode is their business.
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
 

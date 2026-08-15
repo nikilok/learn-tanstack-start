@@ -41,6 +41,9 @@ const LIVE_CONFIG: LiveConfig = {
 let dir: string;
 let path: string;
 
+/** A fresh counter per call, for the tests that do not assert on it. */
+const stats = () => ({ written: 0, failed: 0 });
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'fw-record-'));
   path = join(dir, 'cassette.jsonl');
@@ -49,12 +52,12 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('recording observability', () => {
   test('returns exactly what the live call returned', async () => {
-    const backend = recordingObservability(LIVE_OBSERVABILITY, path);
+    const backend = recordingObservability(LIVE_OBSERVABILITY, path, stats());
     expect(await backend.metrics(CTX, ['clientIp'], {})).toEqual(RESPONSE);
   });
 
   test('writes the response under both keys, so a replay can fall back across windows', async () => {
-    const backend = recordingObservability(LIVE_OBSERVABILITY, path);
+    const backend = recordingObservability(LIVE_OBSERVABILITY, path, stats());
     await backend.metrics(CTX, ['clientIp'], {});
     const { exact, loose } = metricsKeys(CTX, ['clientIp'], {});
     const loaded = loadCassette(path);
@@ -63,7 +66,7 @@ describe('recording observability', () => {
   });
 
   test('records the rule-name lookup in a form JSON can hold', async () => {
-    const backend = recordingObservability(LIVE_OBSERVABILITY, path);
+    const backend = recordingObservability(LIVE_OBSERVABILITY, path, stats());
     await backend.ruleNames(CTX);
     expect(loadCassette(path).entries.get(RULE_NAMES_KEY)).toEqual([
       ['rule_1', 'ja4-denylist'],
@@ -73,7 +76,7 @@ describe('recording observability', () => {
   // A recording session is a LIVE session with a side effect. Losing a line of corpus must never
   // cost the operator the run.
   test('a cassette that cannot be written does not fail the call', async () => {
-    const backend = recordingObservability(LIVE_OBSERVABILITY, dir); // a directory, not a file
+    const backend = recordingObservability(LIVE_OBSERVABILITY, dir, stats()); // a directory, not a file
     expect(await backend.metrics(CTX, ['clientIp'], {})).toEqual(RESPONSE);
   });
 
@@ -84,7 +87,7 @@ describe('recording observability', () => {
       },
       ruleNames: async () => new Map(),
     };
-    const backend = recordingObservability(failing, path);
+    const backend = recordingObservability(failing, path, stats());
     await expect(backend.metrics(CTX, ['clientIp'], {})).rejects.toThrow(
       'metrics 429',
     );
@@ -97,7 +100,7 @@ describe('recording the WAF', () => {
       fetchLive: async () => LIVE_CONFIG,
       applyItem: async () => ({ status: 'overwrote' }),
     };
-    const backend = recordingWaf(live, path);
+    const backend = recordingWaf(live, path, stats());
     expect(await backend.fetchLive()).toEqual(LIVE_CONFIG);
     expect(loadCassette(path).entries.get(LIVE_CONFIG_KEY)).toMatchObject({
       idByName: [['ja4-denylist', 'rule_1']],
@@ -108,6 +111,47 @@ describe('recording the WAF', () => {
   test('the write path is the live one, untouched', () => {
     const applyItem = async (_i: Item) => ({ status: 'inserted' as const });
     const live: WafBackend = { fetchLive: async () => LIVE_CONFIG, applyItem };
-    expect(recordingWaf(live, path).applyItem).toBe(applyItem);
+    expect(recordingWaf(live, path, stats()).applyItem).toBe(applyItem);
+  });
+});
+
+describe('what the recording managed to write', () => {
+  // A session where every append failed used to report success and produce nothing — the same
+  // silent-nothing the version guard exists to prevent at the other end.
+  test('counts the writes that landed', async () => {
+    const counter = { written: 0, failed: 0 };
+    const backend = recordingObservability(LIVE_OBSERVABILITY, path, counter);
+    await backend.metrics(CTX, ['clientIp'], {});
+    await backend.ruleNames(CTX);
+    expect(counter).toEqual({ written: 2, failed: 0 });
+  });
+
+  test('counts the ones that could not be written', async () => {
+    const counter = { written: 0, failed: 0 };
+    // A directory, so every append throws.
+    const backend = recordingObservability(LIVE_OBSERVABILITY, dir, counter);
+    await backend.metrics(CTX, ['clientIp'], {});
+    await backend.metrics(CTX, ['requestPath'], {});
+    expect(counter).toEqual({ written: 0, failed: 2 });
+  });
+
+  test('a failed write still returns the live response', async () => {
+    const counter = { written: 0, failed: 0 };
+    const backend = recordingObservability(LIVE_OBSERVABILITY, dir, counter);
+    expect(await backend.metrics(CTX, ['clientIp'], {})).toEqual(RESPONSE);
+  });
+
+  test('the WAF read is counted too', async () => {
+    const counter = { written: 0, failed: 0 };
+    const backend = recordingWaf(
+      {
+        fetchLive: async () => LIVE_CONFIG,
+        applyItem: async () => ({ status: 'overwrote' }),
+      },
+      path,
+      counter,
+    );
+    await backend.fetchLive();
+    expect(counter.written).toBe(1);
   });
 });

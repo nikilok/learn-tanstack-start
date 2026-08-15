@@ -69,6 +69,7 @@ export function CassettePicker(opts: {
         </Text>
         <Text dimColor> · pick a cassette to replay</Text>
       </Box>
+
       {opts.drawer ? <Text dimColor>{opts.drawer}</Text> : null}
       <Box marginTop={1} flexDirection="column">
         {rows.map((row, i) => (

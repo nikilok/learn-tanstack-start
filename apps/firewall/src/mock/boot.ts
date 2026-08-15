@@ -16,6 +16,7 @@ import {
   CASSETTE_VERSION,
   cassetteAgeDays,
   ensureOwnerOnly,
+  ensureOwnerOnlyFile,
   loadCassette,
 } from './cassette';
 import {
@@ -181,6 +182,13 @@ export async function bootMock(
 
   const ageDays = cassetteAgeDays(cassetteFile);
   const log = missLogPath();
+  // Once, up front, like the cassette: a log left over from an earlier session keeps whatever mode
+  // it had, and appending never tightens it. Diagnostics must not take the session down.
+  try {
+    ensureOwnerOnlyFile(log, '', 'miss log');
+  } catch {
+    // A miss log that cannot be secured is still worth writing; the session is sandboxed anyway.
+  }
   const misses = new Map<string, number>();
   const onMiss = (miss: Miss) => {
     misses.set(miss.reason, (misses.get(miss.reason) ?? 0) + 1);
@@ -249,14 +257,28 @@ export async function bootRecording(name: string): Promise<Boot> {
     return { kind: 'refused', message: errMsg(error) };
   }
   const { recordingObservability, recordingWaf } = await import('./record');
+  const stats = { written: 0, failed: 0 };
   const observability = await import('../observability');
   observability.installObservabilityBackend(
-    recordingObservability(observability.liveObservability, path),
+    recordingObservability(observability.liveObservability, path, stats),
   );
   const client = await import('../client');
-  client.installWafBackend(recordingWaf(client.liveWaf, path));
+  client.installWafBackend(recordingWaf(client.liveWaf, path, stats));
   return {
     kind: 'started',
-    session: { summary: () => `recording appended to ${path}` },
+    session: {
+      summary: () =>
+        [
+          `recorded ${stats.written} ${stats.written === 1 ? 'response' : 'responses'} to ${path}`,
+          stats.failed
+            ? `${stats.failed} could NOT be written — the cassette is incomplete`
+            : '',
+          stats.written === 0
+            ? 'nothing was recorded; a mock session will refuse this cassette'
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+    },
   };
 }

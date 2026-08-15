@@ -149,3 +149,30 @@ describe('an empty list', () => {
     h.unmount();
   });
 });
+
+describe('the drawer label', () => {
+  // Recording and replaying can resolve to different drawers, and a split is otherwise invisible.
+  test('shows which drawer the list came from', async () => {
+    const h = renderInk(
+      <CassettePicker
+        available={AVAILABLE}
+        drawer="/somewhere/ops/firewall-cassettes"
+        onPick={() => {}}
+      />,
+      { columns: 90, rows: 12 },
+    );
+    await h.settle();
+    expect(h.frame()).toContain('/somewhere/ops/firewall-cassettes');
+    h.unmount();
+  });
+
+  test('is omitted when there is nothing to say', async () => {
+    const h = renderInk(
+      <CassettePicker available={AVAILABLE} onPick={() => {}} />,
+      { columns: 90, rows: 12 },
+    );
+    await h.settle();
+    expect(h.frame()).not.toContain('firewall-cassettes');
+    h.unmount();
+  });
+});

@@ -211,19 +211,33 @@ export function loadCassette(path: string): LoadedCassette {
  * per query.
  */
 export function ensureOwnerOnly(path: string): void {
-  // A symlink is refused rather than followed. chmod and append both act on the TARGET, so a link
-  // planted at the cassette path would have this tool change the permissions of, and write JSON
-  // into, a file somewhere else entirely. Listing skips links for the same reason.
-  if (existsSync(path) && lstatSync(path).isSymbolicLink())
-    throw new Error(
-      `${path} is a symlink, and a cassette must be a regular file — writing through it would rewrite whatever it points at`,
-    );
+  ensureOwnerOnlyFile(path, headerLine(), 'cassette');
+}
+
+/**
+ * Create `path` owner-only with `initial` if it is not there, and tighten it if it is.
+ *
+ * Shared with the miss log, which carries the same material: a miss line records the QUERY, and a
+ * query's filter names the client IP or fingerprint it was about.
+ */
+export function ensureOwnerOnlyFile(
+  path: string,
+  initial: string,
+  what = 'file',
+): void {
   try {
-    // 'wx' fails if the path exists, which closes the gap between the check above and this write:
-    // a symlink planted in between would otherwise be created through.
-    writeFileSync(path, headerLine(), { mode: 0o600, flag: 'wx' });
+    // 'wx' both creates atomically and tells us the path was already there — including when it is
+    // a symlink, which it refuses to create through. One check, after this, therefore covers a
+    // link that was already present AND one planted a moment ago; a check before it was redundant.
+    writeFileSync(path, initial, { mode: 0o600, flag: 'wx' });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    if (lstatSync(path).isSymbolicLink())
+      throw new Error(
+        `${path} is a symlink, and a ${what} must be a regular file — writing through it would rewrite whatever it points at`,
+      );
+    // chmod follows a link and would change the TARGET's permissions, so ask what this really is
+    // before touching it. Listing skips links for the same reason.
   }
   chmodSync(path, 0o600);
 }

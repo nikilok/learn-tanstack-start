@@ -22,6 +22,7 @@
     "firewall:setup": "bun --env-file=.env.local apps/firewall/src/setup.tsx",
     "firewall:mock": "bun --no-env-file apps/firewall/src/setup.tsx --mock",
     "firewall:record": "bun --env-file=.env.local apps/firewall/src/setup.tsx --record",
+    "firewall:synth": "bun --no-env-file apps/firewall/src/synth.ts",
     "firewall:sitemap": "bun --env-file=.env.local apps/firewall/src/sitemap.ts",
     "firewall:watch": "bun --env-file=.env.local apps/firewall/src/watch.ts",
     "format": "oxfmt",

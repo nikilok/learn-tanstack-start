@@ -192,18 +192,26 @@ export async function bootMock(
   process.chdir(dir);
 
   const ageDays = cassetteAgeDays(cassetteFile);
-  const log = missLogPath();
+  const logPath = missLogPath();
   // Once, up front, like the cassette: a log left over from an earlier session keeps whatever mode
-  // it had, and appending never tightens it. Diagnostics must not take the session down.
+  // it had, and appending never tightens it.
+  //
+  // FAIL CLOSED. Swallowing this and writing anyway defeated the guard entirely: a symlink at the
+  // miss-log path was refused here, the refusal was discarded as "diagnostics", and every later
+  // append went through the link into whatever it pointed at. Diagnostics still must not take the
+  // session down — so the log is dropped, not forced.
+  let log: string | undefined = logPath;
+  let logRefusal: string | undefined;
   try {
-    ensureOwnerOnlyFile(log, '', 'miss log');
-  } catch {
-    // A miss log that cannot be secured is still worth writing; the session is sandboxed anyway.
+    ensureOwnerOnlyFile(logPath, '', 'miss log');
+  } catch (error) {
+    log = undefined;
+    logRefusal = errMsg(error);
   }
   const misses = new Map<string, number>();
   const onMiss = (miss: Miss) => {
     misses.set(miss.reason, (misses.get(miss.reason) ?? 0) + 1);
-    appendMissLog(log, `${miss.reason}  ${miss.key}`);
+    if (log) appendMissLog(log, `${miss.reason}  ${miss.key}`);
   };
 
   const { mockObservability, mockWaf, recordedLiveConfig } =
@@ -218,12 +226,13 @@ export async function bootMock(
     mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
   );
 
-  appendMissLog(
-    log,
-    `session  "${cassetteName}", ${cassette.entries.size} recordings, ${cassette.skipped} unreadable lines${
-      inherited ? ', launched with a real credential in the environment' : ''
-    }`,
-  );
+  if (log)
+    appendMissLog(
+      log,
+      `session  "${cassetteName}", ${cassette.entries.size} recordings, ${cassette.skipped} unreadable lines${
+        inherited ? ', launched with a real credential in the environment' : ''
+      }`,
+    );
   return {
     kind: 'started',
     session: {
@@ -237,7 +246,10 @@ export async function bootMock(
             : '',
           unrecorded ? `${unrecorded} queries had nothing recorded` : '',
           substituted ? `${substituted} answered from another window` : '',
-          unrecorded || substituted ? `see ${log}` : '',
+          log && (unrecorded || substituted) ? `see ${log}` : '',
+          // Said out loud rather than swallowed: without it, a session whose misses went nowhere
+          // looks identical to one that had none.
+          logRefusal ? `miss log disabled — ${logRefusal}` : '',
           inherited
             ? 'note: a real VERCEL_TOKEN was in the environment and was overwritten — run `bun run firewall:mock` to keep it out of the process entirely'
             : '',

@@ -217,3 +217,22 @@ describe('the sandbox must not be a symlink', () => {
     expect(() => prepareSandbox(join(dir, 'plain'))).not.toThrow();
   });
 });
+
+describe('a dangling symlink in the sandbox', () => {
+  // existsSync FOLLOWS the link, so a dangling one reported false, skipped the guard, and
+  // prepareSandbox wrote through it — CREATING the file it pointed at.
+  test('is refused, and its target is not created', () => {
+    const box = join(dir, 'box');
+    mkdirSync(box, { recursive: true });
+    const wouldBeCreated = join(dir, 'not-yet-there');
+    symlinkSync(wouldBeCreated, join(box, '.env.local'));
+    expect(() => prepareSandbox(box)).toThrow('symlink');
+    expect(existsSync(wouldBeCreated)).toBe(false);
+  });
+
+  test('a dangling link as the sandbox directory itself is refused too', () => {
+    const link = join(dir, 'box');
+    symlinkSync(join(dir, 'nowhere'), link);
+    expect(() => prepareSandbox(link)).toThrow('symlink');
+  });
+});

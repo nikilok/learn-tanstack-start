@@ -66,7 +66,17 @@ const REFUSED_ENV = ['FW_NOTIFY_IMESSAGE', 'FW_AUTO_BAN'];
 
 /** Refuse a path that is a symlink: every writer here follows one, so it would act on the target. */
 function refuseLink(path: string, what: string): void {
-  if (existsSync(path) && lstatSync(path).isSymbolicLink())
+  // lstatSync directly, NOT existsSync first: existsSync FOLLOWS the link, so a DANGLING one
+  // reported false, skipped this guard, and prepareSandbox then wrote through it and created the
+  // link's target. Only an absent path is allowed to pass; anything else is re-thrown.
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw e;
+  }
+  if (stat.isSymbolicLink())
     throw new Error(
       `${path} is a symlink, and the ${what} must not be — a mock session would write through it`,
     );

@@ -12,7 +12,11 @@ import {
   loadCassette,
   metricsKeys,
 } from './cassette';
-import { recordingObservability, recordingWaf } from './record';
+import {
+  type RecordingStats,
+  recordingObservability,
+  recordingWaf,
+} from './record';
 
 const CTX: Ctx = {
   projectId: 'prj',
@@ -132,7 +136,24 @@ describe('what the recording managed to write', () => {
     const backend = recordingObservability(LIVE_OBSERVABILITY, dir, counter);
     await backend.metrics(CTX, ['clientIp'], {});
     await backend.metrics(CTX, ['requestPath'], {});
-    expect(counter).toEqual({ written: 0, failed: 2 });
+    expect(counter.written).toBe(0);
+    expect(counter.failed).toBe(2);
+  });
+
+  // A count alone says a recording is incomplete without saying what to fix.
+  test('keeps why the first one failed', async () => {
+    const counter: RecordingStats = { written: 0, failed: 0 };
+    const backend = recordingObservability(LIVE_OBSERVABILITY, dir, counter);
+    await backend.metrics(CTX, ['clientIp'], {});
+    await backend.metrics(CTX, ['requestPath'], {});
+    expect(counter.firstError).toContain('EISDIR');
+  });
+
+  test('and keeps the FIRST one, not the last', async () => {
+    const counter = { written: 0, failed: 0, firstError: 'the original' };
+    const backend = recordingObservability(LIVE_OBSERVABILITY, dir, counter);
+    await backend.metrics(CTX, ['clientIp'], {});
+    expect(counter.firstError).toBe('the original');
   });
 
   test('a failed write still returns the live response', async () => {

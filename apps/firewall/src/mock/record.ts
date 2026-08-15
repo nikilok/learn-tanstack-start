@@ -5,6 +5,7 @@
 
 import type { WafBackend } from '../client';
 import type { ObservabilityBackend } from '../observability';
+import { errMsg } from '../util';
 import {
   LIVE_CONFIG_KEY,
   RULE_NAMES_KEY,
@@ -20,7 +21,12 @@ import { encodeLiveConfig, encodeRuleNames } from './codec';
  * a full disk — used to report "recording appended to <path>" and produce nothing, which is the
  * same silent-nothing the version guard exists to prevent at the other end.
  */
-export type RecordingStats = { written: number; failed: number };
+export type RecordingStats = {
+  written: number;
+  failed: number;
+  /** Why the first failure happened. A count alone says a recording is incomplete without saying what to fix. */
+  firstError?: string;
+};
 
 function capture(
   stats: RecordingStats,
@@ -32,9 +38,11 @@ function capture(
   try {
     appendCassette(path, key, value, loose);
     stats.written++;
-  } catch {
-    // Still not a reason to fail an operator's live session — but the summary says how many.
+  } catch (error) {
+    // Still not a reason to fail an operator's live session — but the summary says how many, and
+    // what went wrong the first time.
     stats.failed++;
+    stats.firstError ??= errMsg(error);
   }
 }
 

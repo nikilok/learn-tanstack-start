@@ -159,7 +159,15 @@ export function listCassettes(
   const now = opts.now ?? new Date();
   if (!dir || !existsSync(dir)) return [];
   const out: CassetteInfo[] = [];
-  for (const entry of readdirSync(dir)) {
+  // A drawer that exists but cannot be read — wrong permissions, or removed between the check
+  // above and here — is an empty drawer, not a crashed picker.
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  for (const entry of names) {
     if (!entry.endsWith(SUFFIX)) continue;
     const name = entry.slice(0, -SUFFIX.length);
     // A file dropped in by hand can be named anything; only offer what could be recorded.

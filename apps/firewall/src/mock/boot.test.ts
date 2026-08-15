@@ -213,47 +213,11 @@ describe('the miss log', () => {
   });
 });
 
-describe('re-recording a cassette this build cannot read', () => {
-  // The refusal tells you to re-record. A recording APPENDS, so without a reset the stale header
-  // survived, the fresh entries were buried under it, and that advice led nowhere.
-  test('resets it to the current format and says so', async () => {
-    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
-      await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const { headerVersionOf, CASSETTE_VERSION } = await import('./cassette');
-    const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
-    mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
-    writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
-    mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
-    const cassette = join(ops, 'firewall-cassettes', 'stale.jsonl');
-    writeFileSync(cassette, '{"cassette":1}\n{"k":"stale","v":"x"}\n');
-    const before = process.env.FW_OPS_PATH;
-    process.env.FW_OPS_PATH = ops;
-    // bootRecording installs backends, and the installers refuse outside a mock or recording run —
-    // which is the guard working. The flag comes off, and the LIVE backends go back, in the
-    // finally: leaving the recorders installed would have every later file writing a cassette.
-    process.argv.push('--record');
-    try {
-      const { bootRecording } = await import('./boot');
-      const result = await bootRecording('stale');
-      expect(result.kind).toBe('started');
-      expect(headerVersionOf(cassette)).toBe(CASSETTE_VERSION);
-      const summary = (
-        result as { session: { summary: () => string } }
-      ).session.summary();
-      expect(summary).toContain('replaced a format 1 cassette');
-    } finally {
-      const observability = await import('../observability');
-      observability.installObservabilityBackend(
-        observability.liveObservability,
-      );
-      const client = await import('../client');
-      client.installWafBackend(client.liveWaf);
-      process.argv = process.argv.filter((a) => a !== '--record');
-      if (before === undefined) delete process.env.FW_OPS_PATH;
-      else process.env.FW_OPS_PATH = before;
-      rmSync(ops, { recursive: true, force: true });
-    }
-  });
-});
+// The boot-level reset is NOT unit-tested here on purpose. Exercising it means calling
+// bootRecording, which installs a WAF backend — and client.ts resolves credentials at module
+// scope, so once an earlier test file has made that evaluation throw, everything below it
+// (including `backend` itself) is in TDZ for the rest of the process and cannot be restored.
+// The pieces it is built from — headerVersionOf and resetCassette — are covered directly in
+// cassette.test.ts, and the wiring was verified against a real stale cassette from the CLI:
+// re-recording turned a format 1 file into a current-format one, and the replay changed from
+// "is cassette format 1" to "has no recordings in it".

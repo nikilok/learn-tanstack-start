@@ -5,6 +5,7 @@ import { Vercel } from '@vercel/sdk';
 
 import { asChoice, effectiveAction, withAction } from './actions';
 import { resolveVercelCredentials } from './credentials';
+import { isMock, isRecording } from './env';
 import { headerKeysByGroup } from './rule-integrity';
 import { type ActionChoice, type Rule, dryRun } from './rules';
 import {
@@ -21,7 +22,7 @@ export const { projectId, teamId, token } = resolveVercelCredentials();
 const vercel = new Vercel({ bearerToken: token });
 
 /** Fetch the active firewall config and index our rules' current id + active state + governing action by name. */
-export async function fetchLive(): Promise<LiveConfig> {
+async function liveFetchLive(): Promise<LiveConfig> {
   const config = await vercel.security.getFirewallConfig({
     projectId,
     teamId,
@@ -67,7 +68,7 @@ async function applyRule(
 }
 
 /** Build the live rule for an item (active + chosen action applied) and upsert it. Shared by the TUI (applyAll) and headless paths so they apply rules identically. */
-export async function applyItem(
+async function liveApplyItem(
   item: Item,
   idByName: Map<string, string>,
 ): Promise<{ status: ApplyStatus; detail?: string }> {
@@ -75,6 +76,45 @@ export async function applyItem(
     withAction({ ...item.rule, active: item.active }, item.action),
     idByName,
   );
+}
+
+/** Every read and write this tool makes against the live WAF, behind one replaceable object. */
+export type WafBackend = {
+  fetchLive: () => Promise<LiveConfig>;
+  applyItem: (
+    item: Item,
+    idByName: Map<string, string>,
+  ) => Promise<{ status: ApplyStatus; detail?: string }>;
+};
+
+/** The real thing, exported so a recording session can wrap it rather than reimplement it. */
+export const liveWaf: WafBackend = {
+  fetchLive: liveFetchLive,
+  applyItem: liveApplyItem,
+};
+
+let backend: WafBackend = liveWaf;
+
+/** Redirect the WAF read/write pair. Refuses outside a mock or recording session. */
+export function installWafBackend(next: WafBackend): void {
+  if (!isMock() && !isRecording())
+    throw new Error(
+      'the WAF backend is only replaceable under --mock or --record',
+    );
+  backend = next;
+}
+
+/** The active firewall config, indexed by rule name. */
+export function fetchLive(): Promise<LiveConfig> {
+  return backend.fetchLive();
+}
+
+/** Upsert one item's rule, honouring dry-run. */
+export function applyItem(
+  item: Item,
+  idByName: Map<string, string>,
+): Promise<{ status: ApplyStatus; detail?: string }> {
+  return backend.applyItem(item, idByName);
 }
 
 /** Non-interactive apply (CI / piped, no TTY): ensure every rule exists, preserving each rule's LIVE active + action (never reverting enforcement). Sets a non-zero exit code if any rule fails. */

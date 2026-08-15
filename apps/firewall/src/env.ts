@@ -42,6 +42,16 @@ export function isApply(): boolean {
   return process.argv.includes('--apply');
 }
 
+/** Whether this is a mock session: recorded data, a sandboxed state directory, and fabricated credentials. */
+export function isMock(): boolean {
+  return process.argv.includes('--mock');
+}
+
+/** Whether this run captures its live responses into the cassette a later mock session replays. */
+export function isRecording(): boolean {
+  return process.argv.includes('--record');
+}
+
 /** Whether output should carry colour. A pipe or NO_COLOR means plain text. */
 export function useColour(): boolean {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;

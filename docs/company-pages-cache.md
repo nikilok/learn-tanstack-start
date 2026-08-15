@@ -3,7 +3,7 @@
 Status: DECIDED, 2026-08-02 — **the simple design shipped**; the queue below is
 preserved as the escalation path, not the plan.
 
-## What shipped: one population tag, purged nightly
+## What shipped: one population tag, purged after every sweep
 
 Every long-cached company-scoped response — the SSR document (population tag
 alone when the sponsor has no CH mapping) and the company RPCs
@@ -12,8 +12,8 @@ slugForHash) — carries the edge-cache tag `company-pages`, alongside its own
 `company-{number}` where the number is known. One header write via
 `setCompanyCacheTag` in `src/api/cache-headers.ts` (the pure
 `src/api/cache-tags.ts` owns both tag spellings), because
-`setResponseHeader` overwrites and two calls would drop a tag. After the
-nightly sweep, its workflow makes one call:
+`setResponseHeader` overwrites and two calls would drop a tag. After each
+sweep run, its workflow makes one call:
 `POST /api/revalidate?purge=company-pages` (fixed whitelist, same secret) —
 awaited, 200 on success, 500 on API failure so the workflow step goes red —
 which is a single `invalidateByTags` call regardless of population size.
@@ -22,9 +22,12 @@ Two facts collapsed the case for anything fancier:
 
 - **Every production deploy already purges the entire edge cache, and this
   repo deploys most days.** The site has always lived with resets harder than
-  this one; the nightly invalidation is gentler still (see below).
-- **Promotions arrive once a day in a batch** (the 21:43 sweep). Sub-day purge
-  latency — the queue's main virtue — has no consumer.
+  this one; the sweep's invalidation is gentler still (see below).
+- **Promotions arrive in batches, on the sweep's schedule** (05:43, 13:43 and
+  21:43 since the search discoverer went to four runs a day and the sweep to
+  three). Sub-batch purge latency — the queue's main virtue — still has no
+  consumer: the sweep is the only writer of what a company page renders, so
+  there is no promotion that lands between its runs and waits.
 
 What the purge actually does: `invalidateByTags` marks entries STALE, it does
 not delete them. The next request per page serves the stale copy instantly and
@@ -71,7 +74,7 @@ Two producers of staleness exist today, and more are plausible:
 | producer | event | today |
 |---|---|---|
 | ch-stream (Railway) | CH profile changed | drained via trails table + cursor |
-| website sweep (nightly) | render outcome flipped | **nothing — the gap** |
+| website sweep (3x daily) | render outcome flipped | **nothing — the gap** |
 | future: manual edits, name backfills, … | page-affecting write | nothing |
 
 ## The existing mechanism, precisely

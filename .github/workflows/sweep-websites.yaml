@@ -1,7 +1,8 @@
 name: Sweep Company Websites
 
-# Nightly liveness pass over company_websites. Fetches each stored URL, checks
-# it still resolves, and looks for the company's registered number on the site.
+# Liveness pass over company_websites, three times a day. Fetches each stored
+# URL, checks it still resolves, and looks for the company's registered number
+# on the site.
 #
 # This is what makes a row renderable at all: the render gate is
 # `status = 'verified' AND checked_at IS NOT NULL`, and the registry importer
@@ -11,11 +12,28 @@ name: Sweep Company Websites
 # Own concurrency group, NOT phase5-sweep: GitHub keeps only one pending run per
 # group and the five sweep workflows are already staggered to avoid evicting one
 # another. This job touches no table they write and makes no Companies House
-# calls, so there is nothing to serialise against. 21:43 sits in the long gap
-# between the 17:00 ingest and the 01:17 tier-1 sweep.
+# calls, so there is nothing to serialise against — including the 05:37 tier-2
+# sweep the 05:43 slot sits alongside on Sundays and Wednesdays.
+#
+# Three eight-hourly runs, because search discovery now runs four times a day
+# and a run's worth of new rows lands ahead of every re-check: never-checked
+# rows sort first, so at 600 a night they would have taken 511 of the 600 slots
+# and left 89 for re-checking everything already published. Run size cannot
+# absorb that — 6.5s/row against the 120-minute timeout caps a run near 1,100,
+# and DEFAULT_MAX_ROWS sits at 600 for margin (sweep-websites.ts) — so the
+# cadence carries it: 1,800 a night holds a ~31-day liveness cycle against the
+# ~55,000 rows discovery is heading for.
+#
+# Each run purges the company-pages tag, so promotions now publish up to three
+# times a day rather than in one nightly batch. That is a change of premise for
+# docs/company-pages-cache.md, not just of frequency; the purge marks entries
+# stale rather than deleting them, so the cost is background revalidation and
+# never a cold miss.
 
 on:
   schedule:
+    - cron: '43 5 * * *'
+    - cron: '43 13 * * *'
     - cron: '43 21 * * *'
   workflow_dispatch:
     inputs:
@@ -24,7 +42,7 @@ on:
         type: boolean
         default: false
       max-rows:
-        description: 'Rows to process this run (default 900)'
+        description: 'Rows to process this run (default 600)'
         required: false
         type: number
 
@@ -83,8 +101,8 @@ jobs:
           bun apps/web/scripts/sweep-websites.ts $DRY_FLAG $ROWS_FLAG | tee /tmp/sweep-websites.log
 
       - name: Purge company-pages edge cache
-        # The sweep is the once-daily writer that changes what company pages
-        # render, so one population-tag invalidation after it is the whole
+        # The sweep is the only writer that changes what company pages render,
+        # so one population-tag invalidation after each run is the whole
         # freshness story (docs/company-pages-cache.md). invalidateByTags marks
         # entries stale for background revalidation — gentler than a deploy's
         # full purge. always(): the sweep writes promotions incrementally, so

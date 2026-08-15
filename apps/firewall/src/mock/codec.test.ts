@@ -65,6 +65,16 @@ describe('the live config codec', () => {
     expect(back.actionByName.has('other')).toBe(false);
   });
 
+  // Filtering the bad member out invented a group that was never recorded — and groups are OR'd
+  // with the weakest governing, so a fabricated group is a claim about what the live rule requires.
+  test('drops the whole rule when a header group holds a non-string', () => {
+    const back = decodeLiveConfig({
+      ...encodeLiveConfig(CONFIG),
+      headerKeysByName: [['allow-x', [['x-token', 42]]]],
+    });
+    expect(back.headerKeysByName.has('allow-x')).toBe(false);
+  });
+
   test('drops a pair whose value is the wrong type rather than storing it', () => {
     const back = decodeLiveConfig({
       ...encodeLiveConfig(CONFIG),

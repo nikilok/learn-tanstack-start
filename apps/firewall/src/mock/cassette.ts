@@ -90,7 +90,10 @@ export function loadCassette(path: string): LoadedCassette {
     if (!line.trim()) continue;
     try {
       const row = JSON.parse(line) as { k?: unknown; l?: unknown; v?: unknown };
-      if (typeof row.k !== 'string') {
+      // The value is checked as well as the key. Storing a row with no value put the key in the
+      // map with `undefined` behind it, so `has()` said yes, the replay returned undefined, and
+      // the first reader to touch `.summary` threw — a truncated line taking out a pane.
+      if (typeof row.k !== 'string' || row.v === undefined || row.v === null) {
         skipped++;
         continue;
       }
@@ -113,5 +116,8 @@ export function appendCassette(
   loose?: string,
 ): void {
   const row = loose ? { k: key, l: loose, v: value } : { k: key, v: value };
-  appendFileSync(path, `${JSON.stringify(row)}\n`);
+  // 0600 on creation: the corpus is real client IPs and TLS fingerprints, and the default 0644
+  // makes it readable by every account on the machine. umask cannot widen it — it only clears
+  // bits, and there are no group or other bits here to clear.
+  appendFileSync(path, `${JSON.stringify(row)}\n`, { mode: 0o600 });
 }

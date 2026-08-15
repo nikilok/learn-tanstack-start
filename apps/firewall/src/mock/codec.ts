@@ -52,15 +52,16 @@ export function decodeLiveConfig(raw: unknown): LiveConfig {
       return choice ? ([[name, choice]] as const) : [];
     }),
   );
+  // A non-string anywhere drops the whole rule, rather than being filtered out of its group.
+  // Filtering invented a group that was never recorded — and since groups are OR'd and the
+  // weakest governs, a fabricated one is a claim about what the live rule requires.
   const headerKeysByName = new Map(
     pairs(
       src.headerKeysByName,
       (v): v is string[][] =>
-        Array.isArray(v) && v.every((g) => Array.isArray(g)),
-    ).map(([name, groups]) => [
-      name,
-      groups.map((g) => new Set(g.filter(isString))),
-    ]),
+        Array.isArray(v) &&
+        v.every((g) => Array.isArray(g) && g.every(isString)),
+    ).map(([name, groups]) => [name, groups.map((g) => new Set(g))]),
   );
   return {
     idByName: new Map(pairs(src.idByName, isString)),

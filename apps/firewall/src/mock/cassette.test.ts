@@ -141,6 +141,24 @@ describe('the cassette file', () => {
     expect(loaded.skipped).toBe(1);
   });
 
+  // A key with nothing behind it used to be STORED, so has() said yes, the replay handed back
+  // undefined, and the first reader to touch .summary threw. A truncated line took out a pane.
+  test.each([
+    ['no value at all', '{"k":"orphan"}'],
+    ['a null value', '{"k":"orphan","v":null}'],
+  ])('a row with %s is skipped, not stored', (_label, line) => {
+    writeFileSync(path, `${line}\n`);
+    const loaded = loadCassette(path);
+    expect(loaded.entries.has('orphan')).toBe(false);
+    expect(loaded.skipped).toBe(1);
+  });
+
+  // The corpus is real client IPs and TLS fingerprints; 0644 is every account on the machine.
+  test('creates the cassette readable only by its owner', () => {
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
   test('an entry recorded without a loose key stays out of the fallback index', () => {
     appendCassette(path, 'k', { summary: [] });
     const loaded = loadCassette(path);

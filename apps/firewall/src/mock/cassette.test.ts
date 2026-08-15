@@ -215,6 +215,8 @@ describe('the cassette file', () => {
   test.each([
     ['no value at all', '{"k":"orphan"}'],
     ['a null value', '{"k":"orphan","v":null}'],
+    ['a value that is not packed', '{"k":"orphan","v":{"summary":[]}}'],
+    ['a value that is not valid gzip', '{"k":"orphan","v":"bm90Z3ppcA=="}'],
   ])('a row with %s is skipped, not stored', (_label, line) => {
     writeFileSync(path, `${line}\n`);
     const loaded = loadCassette(path);
@@ -308,16 +310,15 @@ describe('the version header', () => {
     expect(loaded.skipped).toBe(0);
   });
 
-  // Recorded before versioning existed. Its keys cannot be assumed to mean anything.
+  // Recorded before versioning existed. Its keys cannot be assumed to mean anything, which is
+  // exactly why boot refuses it rather than replaying it to silence.
   test('a cassette with no header reads as unversioned', () => {
-    writeFileSync(path, '{"k":"a","v":1}\n');
-    const loaded = loadCassette(path);
-    expect(loaded.version).toBe(UNVERSIONED);
-    expect(loaded.entries.has('a')).toBe(true);
+    appendCassette(path, 'a', { summary: [] }, 'la');
+    expect(loadCassette(path).version).toBe(UNVERSIONED);
   });
 
   test('a future format is reported as itself, not clamped', () => {
-    writeFileSync(path, '{"cassette":99}\n{"k":"a","v":1}\n');
+    writeFileSync(path, '{"cassette":99}\n');
     expect(loadCassette(path).version).toBe(99);
   });
 
@@ -328,7 +329,8 @@ describe('the version header', () => {
   });
 
   test('a first line that is an entry is kept as one', () => {
-    writeFileSync(path, '{"k":"first","v":1}\n{"k":"second","v":2}\n');
+    appendCassette(path, 'first', { summary: [] }, 'l1');
+    appendCassette(path, 'second', { summary: [] }, 'l2');
     expect(loadCassette(path).entries.size).toBe(2);
   });
 });

@@ -124,7 +124,11 @@ describe('a cassette that recorded nothing', () => {
     const before = process.env.FW_CASSETTES_DIR;
     process.env.FW_CASSETTES_DIR = dir;
     try {
-      writeFileSync(join(dir, 'blank.jsonl'), '{"cassette":1}\n');
+      const { CASSETTE_VERSION } = await import('./cassette');
+      writeFileSync(
+        join(dir, 'blank.jsonl'),
+        `${JSON.stringify({ cassette: CASSETTE_VERSION })}\n`,
+      );
       const result = await bootMock({ named: 'blank' });
       expect(result.kind).toBe('refused');
       expect((result as { message: string }).message).toContain(

@@ -14,6 +14,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 import type { Ctx, MetricsOpts } from '../observability';
 
@@ -27,8 +28,10 @@ export const LIVE_CONFIG_KEY = 'fetchLive';
  * is indistinguishable from a recording that never captured those panes. That is exactly what
  * happened when granularity moved ahead of span — a real 108 MB corpus went dead and looked like
  * an operator error.
+ *
+ * 2: values are gzipped. 3: keys carry granularity ahead of span. 1: unversioned keys.
  */
-export const CASSETTE_VERSION = 1;
+export const CASSETTE_VERSION = 2;
 
 /** A cassette with no header at all: recorded before versioning, so nothing can be assumed about its keys. */
 export const UNVERSIONED = 0;
@@ -118,6 +121,28 @@ export function cassetteAgeDays(
   );
 }
 
+/**
+ * A recorded value on disk: gzipped JSON, base64'd so it still fits one JSONL line.
+ *
+ * A corpus is mostly per-bucket `data` arrays — measured at 112.8 MB against 0.7 MB of `summary`
+ * on a real recording — which compresses about 28x. That is the difference between a cassette
+ * that can be committed to the ops repo and one that exceeds GitHub's file limit outright.
+ * The KEY stays plaintext, so the file is still greppable by query.
+ */
+function packValue(value: unknown): string {
+  return gzipSync(Buffer.from(JSON.stringify(value))).toString('base64');
+}
+
+/** Undefined when the row cannot be unpacked, which the caller counts as skipped rather than storing. */
+function unpackValue(raw: unknown): unknown {
+  if (typeof raw !== 'string') return undefined;
+  try {
+    return JSON.parse(gunzipSync(Buffer.from(raw, 'base64')).toString());
+  } catch {
+    return undefined;
+  }
+}
+
 export type Cassette = Map<string, unknown>;
 
 export type LoadedCassette = {
@@ -152,17 +177,18 @@ export function loadCassette(path: string): LoadedCassette {
     }
     try {
       const row = JSON.parse(line) as { k?: unknown; l?: unknown; v?: unknown };
-      // The value is checked as well as the key. Storing a row with no value put the key in the
-      // map with `undefined` behind it, so `has()` said yes, the replay returned undefined, and
-      // the first reader to touch `.summary` threw — a truncated line taking out a pane.
-      if (typeof row.k !== 'string' || row.v === undefined || row.v === null) {
+      // The value is checked as well as the key, and unpacked before either map sees it. Storing
+      // a row with no value put the key in the map with `undefined` behind it, so `has()` said
+      // yes, the replay returned undefined, and the first reader to touch `.summary` threw.
+      const value = unpackValue(row.v);
+      if (typeof row.k !== 'string' || value === undefined || value === null) {
         skipped++;
         continue;
       }
-      entries.set(row.k, row.v);
+      entries.set(row.k, value);
       // Stored rather than derived from the exact key: a filter is interpolated user data and
       // splitting the key back apart on a separator it could contain is how that goes wrong.
-      if (typeof row.l === 'string') loose.set(row.l, row.v);
+      if (typeof row.l === 'string') loose.set(row.l, value);
     } catch {
       skipped++;
     }
@@ -197,7 +223,8 @@ export function appendCassette(
   value: unknown,
   loose?: string,
 ): void {
-  const row = loose ? { k: key, l: loose, v: value } : { k: key, v: value };
+  const packed = packValue(value);
+  const row = loose ? { k: key, l: loose, v: packed } : { k: key, v: packed };
   // 0600 on creation: the corpus is real client IPs and TLS fingerprints, and the default 0644
   // makes it readable by every account on the machine. umask cannot widen it — it only clears
   // bits, and there are no group or other bits here to clear.

@@ -117,16 +117,22 @@ describe('a cassette that recorded nothing', () => {
   // sit in the picker looking like a valid choice.
   test('is listed but refused, with the command to re-record', async () => {
     const { bootMock } = await import('./boot');
-    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
+      await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const dir = mkdtempSync(join(tmpdir(), 'fw-empty-'));
-    const before = process.env.FW_CASSETTES_DIR;
-    process.env.FW_CASSETTES_DIR = dir;
+    // A faithful fake ops repo: the marker file is what identifies one, so the drawer resolves
+    // here rather than to the operator's real corpus.
+    const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
+    mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
+    writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
+    mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
+    const before = process.env.FW_OPS_PATH;
+    process.env.FW_OPS_PATH = ops;
     try {
       const { CASSETTE_VERSION } = await import('./cassette');
       writeFileSync(
-        join(dir, 'blank.jsonl'),
+        join(ops, 'firewall-cassettes', 'blank.jsonl'),
         `${JSON.stringify({ cassette: CASSETTE_VERSION })}\n`,
       );
       const result = await bootMock({ named: 'blank' });
@@ -135,9 +141,9 @@ describe('a cassette that recorded nothing', () => {
         'no recordings',
       );
     } finally {
-      if (before === undefined) delete process.env.FW_CASSETTES_DIR;
-      else process.env.FW_CASSETTES_DIR = before;
-      rmSync(dir, { recursive: true, force: true });
+      if (before === undefined) delete process.env.FW_OPS_PATH;
+      else process.env.FW_OPS_PATH = before;
+      rmSync(ops, { recursive: true, force: true });
     }
   });
 });

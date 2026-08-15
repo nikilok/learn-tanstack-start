@@ -21,10 +21,9 @@ import {
 import {
   type CassetteInfo,
   NAME_RULE,
-  NO_OPS_REPO,
   cassettePathFor,
-  cassettesDir,
   listCassettes,
+  resolveDrawer,
   prepareCassettesDir,
   validCassetteName,
 } from './cassette-store';
@@ -105,11 +104,13 @@ export async function chooseCassette(
       };
     return { kind: 'chose', info: found };
   }
-  if (!available.length)
+  if (!available.length) {
+    const where = resolveDrawer();
     return {
       kind: 'refused',
-      message: cassettesDir() ? RECORD_FIRST : NO_OPS_REPO,
+      message: where.kind === 'found' ? RECORD_FIRST : where.message,
     };
+  }
   if (!pick)
     return {
       kind: 'refused',
@@ -230,8 +231,10 @@ export async function bootRecording(name: string): Promise<Boot> {
       kind: 'refused',
       message: `"${name}" is not a usable cassette name — ${NAME_RULE}`,
     };
-  const drawer = prepareCassettesDir();
-  if (!drawer) return { kind: 'refused', message: NO_OPS_REPO };
+  const where = resolveDrawer();
+  if (where.kind === 'missing')
+    return { kind: 'refused', message: where.message };
+  const drawer = prepareCassettesDir(where.dir) as string;
   const path = cassettePathFor(name, drawer) as string;
   // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
   try {

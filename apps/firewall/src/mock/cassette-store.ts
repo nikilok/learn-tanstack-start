@@ -8,6 +8,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { envText } from '../env';
+import { readFwVars } from '../env-file';
 import { REPO_ROOT } from '../repo-root';
 
 /** Where corpora live inside the ops repo. Not a dotted name: it is tracked there, not hidden local state. */
@@ -21,7 +22,26 @@ const SUFFIX = '.jsonl';
 /** What identifies the ops repo, whatever its directory is called. Renaming the checkout must not break the tool, and a name match alone would. */
 const OPS_MARKER = join('firewall-operator', 'SKILL.md');
 
-/** The ops-repo checkout, found by its contents rather than its name. */
+/** The env key holding the ops repo's absolute path, read from the repo-root `.env.local`. */
+export const OPS_PATH_KEY = 'FW_OPS_PATH';
+
+/** Whether `dir` actually is the ops repo, rather than merely existing. */
+export function isOpsRepo(dir: string): boolean {
+  return existsSync(join(dir, OPS_MARKER));
+}
+
+/** The configured ops-repo path, from the environment or the repo-root env file. Undefined when it is not configured at all — which is different from configured wrongly. */
+export function configuredOpsPath(): string | undefined {
+  // process.env first so an exported value still wins, then the file, which is what a
+  // `--no-env-file` mock session cannot see any other way.
+  return (
+    envText(OPS_PATH_KEY) ??
+    readFwVars(join(REPO_ROOT, '.env.local'))[OPS_PATH_KEY]?.trim() ??
+    undefined
+  );
+}
+
+/** The ops-repo checkout, found by its contents rather than its name. Used only when nothing is configured. */
 export function opsRepoDir(): string | undefined {
   const named = resolve(REPO_ROOT, '..', OPS_REPO);
   if (existsSync(join(named, OPS_MARKER))) return named;
@@ -41,29 +61,63 @@ export function opsRepoDir(): string | undefined {
   return undefined;
 }
 
+/** Where corpora live, or why they cannot be reached. */
+export type Drawer =
+  | { kind: 'found'; dir: string; source: 'configured' | 'found' }
+  | { kind: 'missing'; message: string };
+
 /**
- * Where recorded corpora live, or undefined when the ops repo cannot be found.
+ * Resolve the cassette drawer.
  *
  * A recorded corpus is real client IPs, TLS fingerprints, UAs and paths — traffic data, which
  * belongs in the private repo and never in this one.
  *
- * FW_CASSETTES_DIR overrides, and must be EXPORTED rather than set in `.env.local`: a mock
- * session runs with `--no-env-file` to keep credentials out of the process, so a value living in
- * that file reaches a recording and not a replay — which would record into one drawer and read
- * from another, silently.
+ * `FW_OPS_PATH` in the repo-root `.env.local` is the answer when it is set, and a wrong value is
+ * REFUSED rather than falling through to the search: a typo that silently resolves somewhere else
+ * is how you record into one drawer and replay from another without noticing.
  */
-export function cassettesDir(): string | undefined {
-  const override = envText('FW_CASSETTES_DIR');
-  if (override) return resolve(override);
+export function resolveDrawer(): Drawer {
+  return drawerFor(configuredOpsPath());
+}
+
+/** The decision itself, over an explicit configured value. Separate from resolveDrawer because a default parameter cannot express "nothing configured" — passing undefined re-triggers the default. */
+export function drawerFor(configured: string | undefined): Drawer {
+  if (configured) {
+    const dir = resolve(configured);
+
+    if (!existsSync(dir))
+      return {
+        kind: 'missing',
+        message: `${OPS_PATH_KEY} points at ${dir}, which does not exist.`,
+      };
+    if (!isOpsRepo(dir))
+      return {
+        kind: 'missing',
+        message: `${OPS_PATH_KEY} points at ${dir}, which does not hold ${OPS_MARKER} — that is not the ops repo.`,
+      };
+    return {
+      kind: 'found',
+      dir: join(dir, CASSETTES_DIR),
+      source: 'configured',
+    };
+  }
   const ops = opsRepoDir();
-  return ops ? join(ops, CASSETTES_DIR) : undefined;
+  return ops
+    ? { kind: 'found', dir: join(ops, CASSETTES_DIR), source: 'found' }
+    : { kind: 'missing', message: NO_OPS_REPO };
+}
+
+/** The drawer path, or undefined when there is not one. */
+export function cassettesDir(): string | undefined {
+  const drawer = resolveDrawer();
+  return drawer.kind === 'found' ? drawer.dir : undefined;
 }
 
 export const NO_OPS_REPO =
   `Cassettes live in the private ${OPS_REPO} repo, and it could not be found.\n` +
   `Looked for a directory holding ${OPS_MARKER} beside this repo.\n\n` +
-  'Clone it as a sibling, or export FW_CASSETTES_DIR pointing at its cassettes directory.\n' +
-  'Export it in your shell — a value in .env.local reaches a recording but not a replay.';
+  `Set its absolute path as ${OPS_PATH_KEY} in the repo-root .env.local:\n` +
+  `  ${OPS_PATH_KEY}=/absolute/path/to/${OPS_REPO}`;
 
 // Interpolated into a path, so it is validated the way every other operator-supplied string in
 // this tool is: an allow-list of what is legal, never a deny-list of what is not.

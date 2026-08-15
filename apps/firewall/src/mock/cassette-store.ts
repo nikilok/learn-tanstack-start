@@ -18,23 +18,52 @@ export const OPS_REPO = 'sponsorsearch-ops';
 
 const SUFFIX = '.jsonl';
 
+/** What identifies the ops repo, whatever its directory is called. Renaming the checkout must not break the tool, and a name match alone would. */
+const OPS_MARKER = join('firewall-operator', 'SKILL.md');
+
+/** The ops-repo checkout, found by its contents rather than its name. */
+export function opsRepoDir(): string | undefined {
+  const named = resolve(REPO_ROOT, '..', OPS_REPO);
+  if (existsSync(join(named, OPS_MARKER))) return named;
+  // Renamed, or cloned under another name. Its siblings are a handful of directories, and one
+  // readdir at boot is cheaper than an operator wondering why the drawer is empty.
+  const parent = resolve(REPO_ROOT, '..');
+  let entries: string[];
+  try {
+    entries = readdirSync(parent).sort();
+  } catch {
+    return undefined;
+  }
+  for (const entry of entries) {
+    const candidate = join(parent, entry);
+    if (existsSync(join(candidate, OPS_MARKER))) return candidate;
+  }
+  return undefined;
+}
+
 /**
- * The ops-repo checkout, or undefined when there is not one to find.
+ * Where recorded corpora live, or undefined when the ops repo cannot be found.
  *
  * A recorded corpus is real client IPs, TLS fingerprints, UAs and paths — traffic data, which
- * belongs in the private repo and never in this one. FW_CASSETTES_DIR overrides for a checkout
- * that is not a sibling; there are two of them.
+ * belongs in the private repo and never in this one.
+ *
+ * FW_CASSETTES_DIR overrides, and must be EXPORTED rather than set in `.env.local`: a mock
+ * session runs with `--no-env-file` to keep credentials out of the process, so a value living in
+ * that file reaches a recording and not a replay — which would record into one drawer and read
+ * from another, silently.
  */
 export function cassettesDir(): string | undefined {
   const override = envText('FW_CASSETTES_DIR');
   if (override) return resolve(override);
-  const ops = resolve(REPO_ROOT, '..', OPS_REPO);
-  return existsSync(ops) ? join(ops, CASSETTES_DIR) : undefined;
+  const ops = opsRepoDir();
+  return ops ? join(ops, CASSETTES_DIR) : undefined;
 }
 
 export const NO_OPS_REPO =
-  `Cassettes live in the private ${OPS_REPO} repo, and it is not checked out beside this one.\n` +
-  `Clone it as a sibling of this repo, or point FW_CASSETTES_DIR at where it is.`;
+  `Cassettes live in the private ${OPS_REPO} repo, and it could not be found.\n` +
+  `Looked for a directory holding ${OPS_MARKER} beside this repo.\n\n` +
+  'Clone it as a sibling, or export FW_CASSETTES_DIR pointing at its cassettes directory.\n' +
+  'Export it in your shell — a value in .env.local reaches a recording but not a replay.';
 
 // Interpolated into a path, so it is validated the way every other operator-supplied string in
 // this tool is: an allow-list of what is legal, never a deny-list of what is not.

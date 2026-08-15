@@ -36,12 +36,14 @@ async function pickCassette(
   available: readonly CassetteInfo[],
 ): Promise<Choice> {
   const { CassettePicker } = await import('./mock/cassette-picker');
+  const { cassettesDir } = await import('./mock/cassette-store');
   // Quit unless something says otherwise: a picker torn down without a choice must not start a
   // session on whatever happened to be first.
   let picked: Choice = { kind: 'quit' };
   const app = render(
     <CassettePicker
       available={available}
+      drawer={cassettesDir()}
       onPick={(choice) => {
         picked = choice;
       }}

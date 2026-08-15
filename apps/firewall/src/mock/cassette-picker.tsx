@@ -33,6 +33,8 @@ export function moveCursor(
 
 export function CassettePicker(opts: {
   available: readonly CassetteInfo[];
+  /** Which drawer these came from. Shown because recording and replaying can resolve differently, and a split drawer is otherwise invisible. */
+  drawer?: string;
   onPick: (choice: Choice) => void;
 }) {
   const rows = rowsFor(opts.available);
@@ -62,6 +64,7 @@ export function CassettePicker(opts: {
         </Text>
         <Text dimColor> · pick a cassette to replay</Text>
       </Box>
+      {opts.drawer ? <Text dimColor>{opts.drawer}</Text> : null}
       <Box marginTop={1} flexDirection="column">
         {rows.map((row, i) => (
           <Box key={row.label}>

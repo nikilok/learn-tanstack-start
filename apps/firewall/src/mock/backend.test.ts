@@ -4,7 +4,12 @@ import type { Ctx } from '../observability';
 import type { Rule } from '../rules';
 import type { Item, LiveConfig } from '../seed-items';
 import { type Miss, mockObservability, mockWaf } from './backend';
-import { type LoadedCassette, RULE_NAMES_KEY, metricsKeys } from './cassette';
+import {
+  CASSETTE_VERSION,
+  type LoadedCassette,
+  RULE_NAMES_KEY,
+  metricsKeys,
+} from './cassette';
 
 const CTX: Ctx = {
   projectId: 'prj',
@@ -22,7 +27,12 @@ function cassetteWith(
   entries: [string, unknown][],
   loose: [string, unknown][] = [],
 ): LoadedCassette {
-  return { entries: new Map(entries), loose: new Map(loose), skipped: 0 };
+  return {
+    version: CASSETTE_VERSION,
+    entries: new Map(entries),
+    loose: new Map(loose),
+    skipped: 0,
+  };
 }
 
 function collecting(): { misses: Miss[]; onMiss: (m: Miss) => void } {

@@ -4,7 +4,7 @@
 // later lines win per key, so a single shared cassette drifts toward whatever was recorded most
 // recently. A scraper incident worth replaying next month has to be its own file.
 
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO_ROOT } from '../repo-root';
@@ -41,8 +41,10 @@ export type CassetteInfo = {
   name: string;
   path: string;
   bytes: number;
-  /** Whole days since it was last written. */
+  /** Whole days since it was last written, for display. */
   ageDays: number;
+  /** Exact write time, which is what the ordering uses — a whole-day figure cannot rank two recorded this morning. */
+  writtenMs: number;
 };
 
 /** Every cassette in the drawer, newest first. A missing directory is an empty drawer, not an error. */
@@ -59,12 +61,14 @@ export function listCassettes(
     // A file dropped in by hand can be named anything; only offer what could be recorded.
     if (!validCassetteName(name)) continue;
     const path = join(dir, entry);
-    // Anything unstattable is skipped rather than thrown over: statSync follows symlinks, so a
-    // DANGLING one raises ENOENT and takes the whole picker down before it draws — and a file
-    // removed between the listing and the stat does the same.
+    // lstat, NOT stat: it describes the entry itself rather than what it points at, so a symlink
+    // and a dangling symlink both simply fail the isFile check below instead of being followed or
+    // raising ENOENT. A cassette is a regular file — the write side refuses a link for the same
+    // reason, so listing one we would then refuse to record into would be a lie.
+    // The try/catch remains for the race: an entry removed between the readdir and the stat.
     let stat;
     try {
-      stat = statSync(path);
+      stat = lstatSync(path);
     } catch {
       continue;
     }
@@ -75,14 +79,17 @@ export function listCassettes(
       name,
       path,
       bytes: stat.size,
+      writtenMs: written,
       ageDays: Math.max(
         0,
         Math.floor((now.getTime() - written) / (24 * 60 * 60 * 1000)),
       ),
     });
   }
+  // By the real write time, not the rounded day: everything recorded today has ageDays 0, so
+  // sorting on that left the newest-first contract to whatever order readdir happened to return.
   return out.sort(
-    (a, b) => a.ageDays - b.ageDays || a.name.localeCompare(b.name),
+    (a, b) => b.writtenMs - a.writtenMs || a.name.localeCompare(b.name),
   );
 }
 

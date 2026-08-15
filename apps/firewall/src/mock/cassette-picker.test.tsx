@@ -11,12 +11,14 @@ const AVAILABLE: CassetteInfo[] = [
     path: '/d/fresh-scrape.jsonl',
     bytes: 2048,
     ageDays: 0,
+    writtenMs: 1000000,
   },
   {
     name: 'quiet-tuesday',
     path: '/d/quiet-tuesday.jsonl',
     bytes: 900,
     ageDays: 12,
+    writtenMs: 999988,
   },
 ];
 

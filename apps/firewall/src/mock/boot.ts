@@ -10,8 +10,14 @@
 // bootMock, after fabricateEnv.
 import { appendFileSync } from 'node:fs';
 
+import { errMsg } from '../util';
 import type { Miss } from './backend';
-import { cassetteAgeDays, ensureOwnerOnly, loadCassette } from './cassette';
+import {
+  CASSETTE_VERSION,
+  cassetteAgeDays,
+  ensureOwnerOnly,
+  loadCassette,
+} from './cassette';
 import {
   type CassetteInfo,
   NAME_RULE,
@@ -124,6 +130,20 @@ export async function bootMock(
   if (chosen.kind !== 'chose') return chosen;
   const { name: cassetteName, path: cassetteFile } = chosen.info;
 
+  // Read and checked BEFORE the sandbox is built or the environment is replaced, so a refusal
+  // leaves the process exactly as it found it. A cassette whose keys mean something else answers
+  // NOTHING, and an empty pane reads as "the recorder missed this" rather than "wrong format" —
+  // which is how a real 108 MB corpus went dead unnoticed.
+  const cassette = loadCassette(cassetteFile);
+  if (cassette.version !== CASSETTE_VERSION)
+    return {
+      kind: 'refused',
+      message:
+        `"${cassetteName}" is cassette format ${cassette.version} and this build reads ${CASSETTE_VERSION}.\n` +
+        'Its keys no longer mean the same thing, so every query would silently miss.\n\n' +
+        `Re-record it:  bun run firewall:record --cassette ${cassetteName}`,
+    };
+
   const dir = prepareSandbox();
   // Read BEFORE the overwrite, which is the only moment it is knowable. A real token here means
   // the session was launched through firewall:setup rather than firewall:mock, so it is running on
@@ -135,7 +155,6 @@ export async function bootMock(
   // does exactly this, for exactly the same reason.
   process.chdir(dir);
 
-  const cassette = loadCassette(cassetteFile);
   const ageDays = cassetteAgeDays(cassetteFile);
   const log = missLogPath();
   const misses = new Map<string, number>();
@@ -197,7 +216,11 @@ export async function bootRecording(name: string): Promise<Boot> {
   prepareCassettesDir();
   const path = cassettePathFor(name) as string;
   // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
-  ensureOwnerOnly(path);
+  try {
+    ensureOwnerOnly(path);
+  } catch (error) {
+    return { kind: 'refused', message: errMsg(error) };
+  }
   const { recordingObservability, recordingWaf } = await import('./record');
   const observability = await import('../observability');
   observability.installObservabilityBackend(

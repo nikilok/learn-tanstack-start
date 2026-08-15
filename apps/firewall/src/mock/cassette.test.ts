@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +13,8 @@ import { join } from 'node:path';
 
 import type { Ctx } from '../observability';
 import {
+  CASSETTE_VERSION,
+  UNVERSIONED,
   appendCassette,
   cassetteAgeDays,
   ensureOwnerOnly,
@@ -278,5 +282,80 @@ describe('cassetteAgeDays', () => {
     const path = join(dir, 'c.jsonl');
     appendCassette(path, 'k', {}, 'l');
     expect(cassetteAgeDays(path)).toBe(0);
+  });
+});
+
+describe('the version header', () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-ver-'));
+    path = join(dir, 'c.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('a cassette this build creates declares its format', () => {
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).version).toBe(CASSETTE_VERSION);
+  });
+
+  test('the header survives the entries appended after it', () => {
+    ensureOwnerOnly(path);
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.has('k')).toBe(true);
+    expect(loaded.skipped).toBe(0);
+  });
+
+  // Recorded before versioning existed. Its keys cannot be assumed to mean anything.
+  test('a cassette with no header reads as unversioned', () => {
+    writeFileSync(path, '{"k":"a","v":1}\n');
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(UNVERSIONED);
+    expect(loaded.entries.has('a')).toBe(true);
+  });
+
+  test('a future format is reported as itself, not clamped', () => {
+    writeFileSync(path, '{"cassette":99}\n{"k":"a","v":1}\n');
+    expect(loadCassette(path).version).toBe(99);
+  });
+
+  // The header is not an entry, and an entry is not a header.
+  test('the header is not counted as a skipped line', () => {
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).skipped).toBe(0);
+  });
+
+  test('a first line that is an entry is kept as one', () => {
+    writeFileSync(path, '{"k":"first","v":1}\n{"k":"second","v":2}\n');
+    expect(loadCassette(path).entries.size).toBe(2);
+  });
+});
+
+describe('a cassette must be a regular file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-link-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // chmod and append both act on the TARGET, so a link planted at the cassette path would have
+  // this tool rewrite the permissions of, and append JSON into, a file somewhere else.
+  test('refuses to write through a symlink', () => {
+    const target = join(dir, 'somebody-elses-file');
+    writeFileSync(target, 'important\n');
+    chmodSync(target, 0o644);
+    const link = join(dir, 'innocent.jsonl');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnly(link)).toThrow('symlink');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readFileSync(target, 'utf8')).toBe('important\n');
+  });
+
+  test('a plain new cassette is still fine', () => {
+    const path = join(dir, 'fine.jsonl');
+    expect(() => ensureOwnerOnly(path)).not.toThrow();
+    expect(loadCassette(path).version).toBe(CASSETTE_VERSION);
   });
 });

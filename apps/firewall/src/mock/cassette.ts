@@ -9,6 +9,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -18,6 +19,39 @@ import type { Ctx, MetricsOpts } from '../observability';
 
 export const RULE_NAMES_KEY = 'ruleNames';
 export const LIVE_CONFIG_KEY = 'fetchLive';
+
+/**
+ * Bumped whenever a recorded key or value stops meaning what it used to.
+ *
+ * Without this a format change is SILENT: every lookup misses, and a cassette that answers nothing
+ * is indistinguishable from a recording that never captured those panes. That is exactly what
+ * happened when granularity moved ahead of span — a real 108 MB corpus went dead and looked like
+ * an operator error.
+ */
+export const CASSETTE_VERSION = 1;
+
+/** A cassette with no header at all: recorded before versioning, so nothing can be assumed about its keys. */
+export const UNVERSIONED = 0;
+
+type Header = { cassette: number };
+
+/** The first line of a cassette, written when it is created. */
+function headerLine(): string {
+  return `${JSON.stringify({ cassette: CASSETTE_VERSION } satisfies Header)}\n`;
+}
+
+/** Read a line as a version header, or undefined when it is an ordinary entry. */
+function versionOf(line: string): number | undefined {
+  try {
+    const parsed = JSON.parse(line) as Partial<Header> & { k?: unknown };
+    // `k` distinguishes it from an entry: an entry always has one, a header never does.
+    return parsed.k === undefined && typeof parsed.cassette === 'number'
+      ? parsed.cassette
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The two keys one metrics query answers to. */
 export type Keys = {
@@ -87,6 +121,8 @@ export function cassetteAgeDays(
 export type Cassette = Map<string, unknown>;
 
 export type LoadedCassette = {
+  /** The format the file declares, or UNVERSIONED when it predates the header. */
+  version: number;
   /** Keyed by the exact query. */
   entries: Cassette;
   /** The same recordings keyed by their window-independent key, for the fallback lookup. */
@@ -99,10 +135,21 @@ export type LoadedCassette = {
 export function loadCassette(path: string): LoadedCassette {
   const entries: Cassette = new Map();
   const loose: Cassette = new Map();
-  if (!existsSync(path)) return { entries, loose, skipped: 0 };
+  if (!existsSync(path))
+    return { version: CASSETTE_VERSION, entries, loose, skipped: 0 };
   let skipped = 0;
+  let version = UNVERSIONED;
+  let first = true;
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     if (!line.trim()) continue;
+    if (first) {
+      first = false;
+      const declared = versionOf(line);
+      if (declared !== undefined) {
+        version = declared;
+        continue;
+      }
+    }
     try {
       const row = JSON.parse(line) as { k?: unknown; l?: unknown; v?: unknown };
       // The value is checked as well as the key. Storing a row with no value put the key in the
@@ -120,7 +167,7 @@ export function loadCassette(path: string): LoadedCassette {
       skipped++;
     }
   }
-  return { entries, loose, skipped };
+  return { version, entries, loose, skipped };
 }
 
 /**
@@ -132,7 +179,14 @@ export function loadCassette(path: string): LoadedCassette {
  * per query.
  */
 export function ensureOwnerOnly(path: string): void {
-  if (!existsSync(path)) writeFileSync(path, '', { mode: 0o600 });
+  // A symlink is refused rather than followed. chmod and append both act on the TARGET, so a link
+  // planted at the cassette path would have this tool change the permissions of, and write JSON
+  // into, a file somewhere else entirely. Listing skips links for the same reason.
+  if (existsSync(path) && lstatSync(path).isSymbolicLink())
+    throw new Error(
+      `${path} is a symlink, and a cassette must be a regular file — writing through it would rewrite whatever it points at`,
+    );
+  if (!existsSync(path)) writeFileSync(path, headerLine(), { mode: 0o600 });
   chmodSync(path, 0o600);
 }
 

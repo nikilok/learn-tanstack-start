@@ -1,6 +1,6 @@
 // The bans pane's state: what this session staged or lifted, and the activity behind each ban.
 
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import {
   type Dispatch,
@@ -27,18 +27,22 @@ import {
 } from '../deny-staging';
 import { type Activity, fetchDenyActivity } from '../denylist-data';
 import type { DenyEntry } from '../denylist-view';
+import { isMock } from '../env';
 import { persistEnvVar } from '../env-file';
+import { REPO_ROOT } from '../repo-root';
 import type { ApplyStatus, Item } from '../seed-items';
 import type { Creds } from './useIpTabs';
 import { type Pane, usePane } from './usePane';
 
-// Repo root, the single source of truth the denylist rules are rebuilt from on every apply.
-// Depth-sensitive, and it broke silently when this file moved into hooks/ — a deny then landed in
-// apps/.env.local, so the next apply rebuilt from the untouched root file and LIFTED the ban.
-// envPathIsRepoRoot in the test locks it against the next move.
-export const ENV_PATH = fileURLToPath(
-  new URL('../../../../.env.local', import.meta.url),
-);
+// The single source of truth the denylist rules are rebuilt from on every apply. Derived from
+// repo-root.ts, which is the one place in the tool that walks up from a module's own location.
+export const ENV_PATH = join(REPO_ROOT, '.env.local');
+
+/** Where a persisted deny is actually written: the sandbox copy in a mock session, the real file otherwise. */
+export function envPath(): string {
+  return isMock() ? join(process.cwd(), '.env.local') : ENV_PATH;
+}
+
 const DENY_ACTIVITY_HOURS = 144;
 
 /** A digest denied off the challenge tier this session, and whether the tier was only staged to hold it. */
@@ -85,7 +89,7 @@ export function useDenylist(opts: {
   const { items, setItems, onEdit } = opts;
   const writeEnv =
     opts.writeEnv ??
-    ((key: string, value: string) => persistEnvVar(ENV_PATH, key, value));
+    ((key: string, value: string) => persistEnvVar(envPath(), key, value));
   // ONE piece of state, not two. As separate lists each setter read the OTHER from the render-time
   // closure, so a lift and a re-deny in the same tick disagreed: the removal was cleared while the
   // value stayed staged, leaving `pending` true with nothing actually changed and the apply

@@ -147,3 +147,80 @@ describe('a cassette that recorded nothing', () => {
     }
   });
 });
+
+describe('a cassette this build cannot read', () => {
+  /** A faithful fake ops repo holding one cassette with the given header line. */
+  async function withCassette(
+    header: string,
+    body: string[],
+    fn: (bootMock: typeof import('./boot').bootMock) => Promise<void>,
+  ): Promise<void> {
+    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
+      await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
+    mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
+    writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
+    mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
+    writeFileSync(
+      join(ops, 'firewall-cassettes', 'old.jsonl'),
+      [header, ...body].join('\n'),
+    );
+    const before = process.env.FW_OPS_PATH;
+    process.env.FW_OPS_PATH = ops;
+    try {
+      const { bootMock } = await import('./boot');
+      await fn(bootMock);
+    } finally {
+      if (before === undefined) delete process.env.FW_OPS_PATH;
+      else process.env.FW_OPS_PATH = before;
+      rmSync(ops, { recursive: true, force: true });
+    }
+  }
+
+  // Literal 1, not CASSETTE_VERSION - 1: this asserts that an OLDER format is refused, and it must
+  // keep saying that after the constant moves.
+  test('an older format is refused, naming both versions', async () => {
+    await withCassette(
+      '{"cassette":1}',
+      ['{"k":"a","v":"x"}'],
+      async (boot) => {
+        const result = await boot({ named: 'old' });
+        expect(result.kind).toBe('refused');
+        const message = (result as { message: string }).message;
+        expect(message).toContain('format 1');
+        expect(message).toContain('firewall:record --cassette old');
+      },
+    );
+  });
+
+  test('a cassette with no header at all is refused too', async () => {
+    await withCassette('{"k":"a","v":"x"}', [], async (boot) => {
+      const result = await boot({ named: 'old' });
+      expect(result.kind).toBe('refused');
+      expect((result as { message: string }).message).toContain('format 0');
+    });
+  });
+});
+
+describe('the miss log', () => {
+  // A miss line carries the QUERY, and a query's filter names the client IP or TLS fingerprint it
+  // was about. Measured at 375 such lines in one session.
+  test('is created readable only by its owner', async () => {
+    const { mkdtempSync, rmSync, statSync, existsSync } =
+      await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { appendMissLog } = await import('./boot');
+    const dir = mkdtempSync(join(tmpdir(), 'fw-misslog-'));
+    const log = join(dir, 'mock-misses.log');
+    try {
+      appendMissLog(log, 'unrecorded  metrics["x"]');
+      expect(existsSync(log)).toBe(true);
+      expect(statSync(log).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -47,7 +47,12 @@ export function CassettePicker(opts: {
     else if (key.downArrow || input === 'j')
       setCursor((c) => moveCursor(c, 1, rows.length));
     else if (key.return) {
-      opts.onPick(rows[cursor].choice);
+      // Guarded because an empty list has nothing under the cursor. Boot refuses an empty drawer
+      // before the picker is shown, so this should be unreachable — but a crash on enter is a
+      // worse way to find out that it was not.
+      const chosen = rows[cursor];
+      if (!chosen) return;
+      opts.onPick(chosen.choice);
       exit();
     } else if (input === 'q' || key.escape) {
       opts.onPick({ kind: 'quit' });

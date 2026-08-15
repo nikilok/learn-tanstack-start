@@ -29,7 +29,13 @@ export const LIVE_CONFIG_KEY = 'fetchLive';
  * happened when granularity moved ahead of span — a real 108 MB corpus went dead and looked like
  * an operator error.
  *
- * 2: values are gzipped. 3: keys carry granularity ahead of span. 1: unversioned keys.
+ * History, newest first:
+ *   2 — values gzipped and base64'd
+ *   1 — the first versioned format; keys already carried granularity ahead of span
+ *   0 — UNVERSIONED, no header at all, key layout unknown
+ *
+ * The key layout has NOT changed since versioning began: granularity moved ahead of span in the
+ * commit before the header existed, which is what made that corpus die silently and prompted this.
  */
 export const CASSETTE_VERSION = 2;
 
@@ -212,7 +218,13 @@ export function ensureOwnerOnly(path: string): void {
     throw new Error(
       `${path} is a symlink, and a cassette must be a regular file — writing through it would rewrite whatever it points at`,
     );
-  if (!existsSync(path)) writeFileSync(path, headerLine(), { mode: 0o600 });
+  try {
+    // 'wx' fails if the path exists, which closes the gap between the check above and this write:
+    // a symlink planted in between would otherwise be created through.
+    writeFileSync(path, headerLine(), { mode: 0o600, flag: 'wx' });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+  }
   chmodSync(path, 0o600);
 }
 

@@ -63,9 +63,15 @@ export type Boot =
   | { kind: 'quit' }
   | { kind: 'refused'; message: string };
 
-function note(path: string, line: string): void {
+/** Append one diagnostic line to the miss log, creating it owner-only. */
+export function appendMissLog(path: string, line: string): void {
   try {
-    appendFileSync(path, `${new Date().toISOString()}  ${line}\n`);
+    // 0600 like the cassette: a miss line carries the QUERY, and a query's filter names the client
+    // IP or TLS fingerprint it was about. The default 0644 makes that readable by every account on
+    // the machine — measured at 375 such lines in one session's log.
+    appendFileSync(path, `${new Date().toISOString()}  ${line}\n`, {
+      mode: 0o600,
+    });
   } catch {
     // The miss log is diagnostics. Losing it must not take the session down.
   }
@@ -178,7 +184,7 @@ export async function bootMock(
   const misses = new Map<string, number>();
   const onMiss = (miss: Miss) => {
     misses.set(miss.reason, (misses.get(miss.reason) ?? 0) + 1);
-    note(log, `${miss.reason}  ${miss.key}`);
+    appendMissLog(log, `${miss.reason}  ${miss.key}`);
   };
 
   const { mockObservability, mockWaf, recordedLiveConfig } =
@@ -193,7 +199,7 @@ export async function bootMock(
     mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
   );
 
-  note(
+  appendMissLog(
     log,
     `session  "${cassetteName}", ${cassette.entries.size} recordings, ${cassette.skipped} unreadable lines${
       inherited ? ', launched with a real credential in the environment' : ''

@@ -18,7 +18,10 @@ import { decodeRuleNames } from './codec';
 /** How a replayed query was answered. A pane full of zeroes is either a quiet window or a gap in the corpus, and only this can tell them apart. */
 export type Miss = { key: string; reason: 'unrecorded' | 'window-substituted' };
 
-const EMPTY: MetricsResponse = { data: [], summary: [] };
+/** A fresh copy of a recorded response, for the same reason fetchLive clones: a caller that mutates what it read must not rewrite the corpus for every later query in the session. Cheap next to the gunzip that produced it. */
+function isolate(value: unknown): MetricsResponse {
+  return structuredClone(value) as MetricsResponse;
+}
 
 /** Observability reads answered from a recording. An unrecorded query returns a well-formed empty response — the same thing a genuinely quiet window returns, so every reader already handles it — and is reported rather than thrown. */
 export function mockObservability(
@@ -29,15 +32,15 @@ export function mockObservability(
     async metrics(ctx, groupBy, opts) {
       const { exact, loose } = metricsKeys(ctx, groupBy, opts);
       if (cassette.entries.has(exact))
-        return cassette.entries.get(exact) as MetricsResponse;
+        return isolate(cassette.entries.get(exact));
       // Recorded for a different range. Returned deliberately: the operator moves the window
       // constantly and a corpus that only answers the range it was recorded at is barely a corpus.
       if (cassette.loose.has(loose)) {
         onMiss({ key: exact, reason: 'window-substituted' });
-        return cassette.loose.get(loose) as MetricsResponse;
+        return isolate(cassette.loose.get(loose));
       }
       onMiss({ key: exact, reason: 'unrecorded' });
-      return EMPTY;
+      return { data: [], summary: [] };
     },
     async ruleNames() {
       const raw = cassette.entries.get(RULE_NAMES_KEY);

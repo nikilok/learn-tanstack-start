@@ -133,3 +133,19 @@ describe('the picker', () => {
     h.unmount();
   });
 });
+
+describe('an empty list', () => {
+  // Boot refuses an empty drawer before the picker is shown, so this should be unreachable — but
+  // a crash on enter is a worse way to find out that it was not.
+  test('enter does nothing rather than throwing', async () => {
+    let picked: Choice | undefined;
+    const h = renderInk(
+      <CassettePicker available={[]} onPick={(c) => (picked = c)} />,
+      { columns: 60, rows: 8 },
+    );
+    await h.settle();
+    await h.press(KEY.enter);
+    expect(picked).toBeUndefined();
+    h.unmount();
+  });
+});

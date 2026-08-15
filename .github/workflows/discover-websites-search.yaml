@@ -16,8 +16,9 @@ name: Discover Company Websites (Search)
 # Own concurrency group, four times a day at six-hourly spacing. The loop is
 # serial with a per-company delay, so 300 rows takes 50-90 minutes and the
 # schedule has to clear that with room for GitHub's own lag, which has been
-# running around 90 minutes: only one pending run is kept per group, so slots
-# closer together would have a late run evict its successor. Cadence, not run
+# running around 90 minutes: only one run may sit pending per group and a
+# newer arrival cancels whichever was already waiting, so slots close enough to
+# stack up would silently drop the one in the middle. Cadence, not run
 # size, is the lever — the 120-minute job timeout puts roughly 600 rows out of
 # reach in a single run.
 #

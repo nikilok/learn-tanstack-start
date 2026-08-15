@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -442,5 +443,33 @@ describe('resetting a cassette this build cannot read', () => {
     expect(loaded.version).toBe(CASSETTE_VERSION);
     expect(loaded.entries.has('fresh')).toBe(true);
     expect(loaded.entries.has('stale')).toBe(false);
+  });
+});
+
+describe('a path that is not a regular file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-notfile-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // A directory survives 'wx' as EEXIST just like a symlink does, and would be chmod'd and then
+  // appended to — failing later as EISDIR instead of here.
+  test('a directory at the cassette path is refused', () => {
+    const path = join(dir, 'c.jsonl');
+    mkdirSync(path);
+    expect(() => ensureOwnerOnlyFile(path, '', 'cassette')).toThrow(
+      'not a regular file',
+    );
+  });
+
+  test('and a symlink still says it is a symlink', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'x\n');
+    const link = join(dir, 'c.jsonl');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnlyFile(link, '', 'cassette')).toThrow(
+      'a symlink',
+    );
   });
 });

@@ -263,12 +263,17 @@ export function ensureOwnerOnlyFile(
     writeFileSync(path, initial, { mode: 0o600, flag: 'wx' });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    if (lstatSync(path).isSymbolicLink())
-      throw new Error(
-        `${path} is a symlink, and a ${what} must be a regular file — writing through it would rewrite whatever it points at`,
-      );
     // chmod follows a link and would change the TARGET's permissions, so ask what this really is
-    // before touching it. Listing skips links for the same reason.
+    // before touching it. One lstat, and anything that is not a REGULAR file is refused: a
+    // directory here also survives 'wx' as EEXIST, and would be chmod'd and then appended to,
+    // failing later as EISDIR instead of here. Listing skips both for the same reason.
+    const stat = lstatSync(path);
+    if (!stat.isFile())
+      throw new Error(
+        `${path} is ${
+          stat.isSymbolicLink() ? 'a symlink' : 'not a regular file'
+        }, and a ${what} must be one — writing through it would rewrite something else`,
+      );
   }
   chmodSync(path, 0o600);
 }

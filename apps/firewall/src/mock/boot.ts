@@ -5,9 +5,13 @@
 // below is dynamic and why this runs from the entrypoint rather than from a module that something
 // else already imported.
 
-// The static imports below reach only ../repo-root, so none of them reads the environment.
-// Anything that does — ../rules, ../client, ../observability — MUST stay a dynamic import inside
-// bootMock, after fabricateEnv.
+// The static imports below are all safe: ../util, ../env, ../env-file and ../repo-root reach the
+// environment only from inside functions, never at module evaluation — env.ts says so in its own
+// header, and that is the property this depends on.
+//
+// The three that DO read at evaluation — ../rules, ../client, ../observability — must stay dynamic
+// imports inside bootMock, after fabricateEnv. A static import of any of them is what silently
+// breaks the credential fabrication.
 import { appendFileSync } from 'node:fs';
 
 import { errMsg } from '../util';

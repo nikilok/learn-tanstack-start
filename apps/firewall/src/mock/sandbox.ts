@@ -127,6 +127,10 @@ export function prepareSandbox(dir: string = sandboxPath()): string {
   // real. The cassette and the miss log refuse links for the same reason.
   refuseLink(dir, 'sandbox directory');
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Checked AGAIN after the mkdir. mkdir on a path that is already a symlink to a directory
+  // succeeds by following it, so the first check describes a filesystem the writes below may no
+  // longer be acting on. This one runs after the last chance to substitute it.
+  refuseLink(dir, 'sandbox directory');
   const env = sandboxEnvPath(dir);
   refuseLink(env, 'sandbox .env.local');
   if (!existsSync(env))
@@ -139,6 +143,9 @@ export function prepareSandbox(dir: string = sandboxPath()): string {
         ...Object.entries(MOCK_ENV).map(([k, v]) => `${k}=${v}`),
         '',
       ].join('\n'),
+      // 'wx' rather than a plain write: it fails outright if anything is at the path by the time
+      // it runs, so a link appearing after the check above cannot be created through.
+      { mode: 0o600, flag: 'wx' },
     );
   return dir;
 }

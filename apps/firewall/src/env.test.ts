@@ -4,7 +4,14 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { envCeiling, envText, isApply, isDryRun, useColour } from './env';
+import {
+  cassetteArg,
+  envCeiling,
+  envText,
+  isApply,
+  isDryRun,
+  useColour,
+} from './env';
 
 const KEY = 'FW_ENV_TEST_VALUE';
 const saved = { ...process.env };
@@ -143,5 +150,32 @@ describe('useColour', () => {
       process.env.NO_COLOR = '1';
       expect(useColour()).toBe(false);
     }, false);
+  });
+});
+
+describe('cassetteArg', () => {
+  const argv = process.argv;
+  afterEach(() => {
+    process.argv = argv;
+  });
+
+  test.each([
+    ['--cassette august', ['--cassette', 'august'], 'august'],
+    ['--cassette=august', ['--cassette=august'], 'august'],
+    ['padded', ['--cassette', '  august  '], 'august'],
+    ['absent', ['--mock'], undefined],
+    ['empty value', ['--cassette', ''], undefined],
+    ['nothing after it', ['--cassette'], undefined],
+    // Swallowing the next flag reports it back as an invalid NAME, which sends you looking at the
+    // wrong half of the command line.
+    ['a flag after it', ['--cassette', '--apply'], undefined],
+    [
+      'a flag after it, inline form unaffected',
+      ['--cassette=--weird'],
+      '--weird',
+    ],
+  ])('%s', (_label, args, expected) => {
+    process.argv = ['bun', 'setup.tsx', ...args];
+    expect(cassetteArg()).toBe(expected as never);
   });
 });

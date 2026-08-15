@@ -59,6 +59,39 @@ describe('metricsKeys', () => {
     expect(overridden.exact).toBe(metricsKeys(day, ['clientIp'], {}).exact);
   });
 
+  // Declined in an earlier round as unreachable (every construction site builds a single-key
+  // object). The JSON key rework made canonicalising free, so the class is closed rather than
+  // argued about.
+  test('two equivalent granularities key the same however they were built', () => {
+    const a = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { hours: 1, minutes: 5 },
+    });
+    const b = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { minutes: 5, hours: 1 },
+    });
+    expect(a.exact).toBe(b.exact);
+  });
+
+  // The filter is the one free-form field and it carries request paths, which are client-supplied.
+  test('a filter cannot be confused with the field after it', () => {
+    const packed = metricsKeys(MORNING, ['clientIp'], {
+      filter: 'x|25',
+      limit: 500,
+    });
+    const split = metricsKeys(MORNING, ['clientIp'], {
+      filter: 'x',
+      limit: 25,
+    });
+    expect(packed.exact).not.toBe(split.exact);
+    expect(packed.loose).not.toBe(split.loose);
+  });
+
+  test('a filter cannot be confused with the group list before it', () => {
+    const a = metricsKeys(MORNING, ['clientIp'], { filter: 'wafAction' });
+    const b = metricsKeys(MORNING, ['clientIp', 'wafAction'], {});
+    expect(a.exact).not.toBe(b.exact);
+  });
+
   test('granularity separates two queries over the same window', () => {
     expect(
       metricsKeys(MORNING, ['clientIp'], { granularity: { minutes: 5 } }).exact,

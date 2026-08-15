@@ -56,7 +56,12 @@ export function isRecording(): boolean {
 export function cassetteArg(): string | undefined {
   const argv = process.argv;
   const at = argv.indexOf('--cassette');
-  if (at >= 0) return argv[at + 1]?.trim() || undefined;
+  if (at >= 0) {
+    const next = argv[at + 1]?.trim();
+    // `--cassette --apply` names no cassette. Swallowing the following flag as a name reports it
+    // back as an invalid name, which sends you looking at the wrong half of the command line.
+    return !next || next.startsWith('--') ? undefined : next;
+  }
   const inline = argv.find((a) => a.startsWith('--cassette='));
   return inline?.slice('--cassette='.length).trim() || undefined;
 }

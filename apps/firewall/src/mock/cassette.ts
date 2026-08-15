@@ -35,21 +35,36 @@ export function metricsKeys(
   groupBy: string[],
   opts: MetricsOpts,
 ): Keys {
-  const loose = [
-    'metrics',
+  // A JSON array, not delimiter-joined text. The filter is the one free-form field and it carries
+  // request paths, which are ultimately client-supplied — so it can hold whatever separator the
+  // key uses. No collision was reachable with the old format (the limit is numeric and terminal,
+  // which made it unambiguous), but that is an accident of the field order rather than a property
+  // of the encoding, and the next field appended after `limit` would end it.
+  const parts: unknown[] = [
     opts.event ?? 'incomingRequest',
-    [...groupBy].join('+'),
+    [...groupBy],
     opts.filter ?? '',
-    String(opts.limit ?? 500),
-  ].join('|');
+    opts.limit ?? 500,
+  ];
   const start = Date.parse(opts.startTime ?? ctx.startTime);
   const end = Date.parse(opts.endTime ?? ctx.endTime);
   const span =
     Number.isFinite(start) && Number.isFinite(end)
       ? Math.round((end - start) / 60_000)
       : 0;
-  const granularity = JSON.stringify(opts.granularity ?? ctx.granularity);
-  return { loose, exact: `${loose}|${span}m|${granularity}` };
+  return {
+    loose: `metrics${JSON.stringify(parts)}`,
+    exact: `metrics${JSON.stringify([
+      ...parts,
+      span,
+      canonical(opts.granularity ?? ctx.granularity),
+    ])}`,
+  };
+}
+
+/** Key-value pairs in a fixed order, so two equivalent objects serialise identically whatever order they were built in. */
+function canonical(value: Record<string, number>): [string, number][] {
+  return Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
 }
 
 /** Whole days since the cassette was last written, or undefined when there is none. Traffic shapes drift, and a corpus read as current when it is months old is misleading in the same direction every time. */

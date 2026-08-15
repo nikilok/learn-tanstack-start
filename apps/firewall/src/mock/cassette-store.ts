@@ -60,6 +60,9 @@ export function listCassettes(
     if (!validCassetteName(name)) continue;
     const path = join(dir, entry);
     const stat = statSync(path);
+    // A directory named `x.jsonl` reads as a cassette right up until loading it throws EISDIR and
+    // takes the boot down. statSync follows symlinks, so a link to a real file still counts.
+    if (!stat.isFile()) continue;
     const written = Math.floor(stat.mtimeMs);
     out.push({
       name,

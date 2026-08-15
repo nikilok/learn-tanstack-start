@@ -3,8 +3,8 @@
 //   - no TTY + --apply:    non-interactive apply (CI / automation)
 //   - no TTY + --dry-run:  preview what would change, no writes
 //   - no TTY, neither:     refuse (a piped/redirected run must NOT silently mutate the live WAF)
-//   - --mock:              the TUI on recorded data, in a sandbox, with no real credentials
-//   - --record:            a live run that also writes its responses to the cassette
+//   - --mock:              the TUI on a recorded cassette, sandboxed, with no real credentials
+//   - --record --cassette: a live run that also writes its responses to a named cassette
 // Run from the repo root so bun loads .env.local:  bun run firewall:setup
 //
 // From env.ts, which imports nothing and cannot throw — so a missing-env failure in the firewall
@@ -12,8 +12,16 @@
 
 import { render } from 'ink';
 
-import { isApply, isDryRun, isInteractive, isMock, isRecording } from './env';
-import type { Session } from './mock/boot';
+import {
+  cassetteArg,
+  isApply,
+  isDryRun,
+  isInteractive,
+  isMock,
+  isRecording,
+} from './env';
+import type { Boot, Choice, Session } from './mock/boot';
+import type { CassetteInfo } from './mock/cassette-store';
 import { errMsg } from './util';
 
 const interactive = isInteractive();
@@ -21,6 +29,27 @@ const dryRun = isDryRun();
 const apply = isApply();
 const mock = isMock();
 const recording = isRecording();
+const cassette = cassetteArg();
+
+/** Show the cassette list and wait for a choice. Its own Ink render, before the app exists, so nothing has drawn itself from a corpus that has not been chosen yet. */
+async function pickCassette(
+  available: readonly CassetteInfo[],
+): Promise<Choice> {
+  const { CassettePicker } = await import('./mock/cassette-picker');
+  // Quit unless something says otherwise: a picker torn down without a choice must not start a
+  // session on whatever happened to be first.
+  let picked: Choice = { kind: 'quit' };
+  const app = render(
+    <CassettePicker
+      available={available}
+      onPick={(choice) => {
+        picked = choice;
+      }}
+    />,
+  );
+  await app.waitUntilExit();
+  return picked;
+}
 
 async function main() {
   if (apply && dryRun) {
@@ -35,12 +64,34 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  if (recording && !cassette) {
+    console.error(
+      'A recording needs a name: bun run firewall:record --cassette <name>\n' +
+        'One cassette per scenario — recordings append, so a shared one drifts toward whatever was recorded last.',
+    );
+    process.exitCode = 1;
+    return;
+  }
   // Before anything else imports: client.ts and rules.ts read the environment at import time, and
   // a mock session is only credential-free if the fabrication happens first.
   let session: Session | undefined;
   if (mock || recording) {
     const boot = await import('./mock/boot');
-    session = mock ? await boot.bootMock() : await boot.bootRecording();
+    // The picker is an Ink render of its own, so it needs a terminal. Without one, --cassette is
+    // the only way to choose, and bootMock says so rather than silently picking.
+    const result: Boot = mock
+      ? await boot.bootMock({
+          named: cassette,
+          pick: interactive ? pickCassette : undefined,
+        })
+      : await boot.bootRecording(cassette as string);
+    if (result.kind === 'quit') return;
+    if (result.kind === 'refused') {
+      console.error(result.message);
+      process.exitCode = 1;
+      return;
+    }
+    session = result.session;
   }
   if (interactive) {
     const { App } = await import('./app');

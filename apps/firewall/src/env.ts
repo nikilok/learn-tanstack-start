@@ -52,6 +52,15 @@ export function isRecording(): boolean {
   return process.argv.includes('--record');
 }
 
+/** The cassette named on the command line, as `--cassette name` or `--cassette=name`. Undefined when absent or empty, which a mock session answers with the picker. */
+export function cassetteArg(): string | undefined {
+  const argv = process.argv;
+  const at = argv.indexOf('--cassette');
+  if (at >= 0) return argv[at + 1]?.trim() || undefined;
+  const inline = argv.find((a) => a.startsWith('--cassette='));
+  return inline?.slice('--cassette='.length).trim() || undefined;
+}
+
 /** Whether output should carry colour. A pipe or NO_COLOR means plain text. */
 export function useColour(): boolean {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;

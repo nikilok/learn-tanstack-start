@@ -11,7 +11,15 @@
 import { appendFileSync } from 'node:fs';
 
 import type { Miss } from './backend';
-import { cassetteAgeDays, cassettePath, loadCassette } from './cassette';
+import { cassetteAgeDays, loadCassette } from './cassette';
+import {
+  type CassetteInfo,
+  NAME_RULE,
+  cassettePathFor,
+  listCassettes,
+  prepareCassettesDir,
+  validCassetteName,
+} from './cassette-store';
 import {
   fabricateEnv,
   missLogPath,
@@ -28,6 +36,26 @@ export type Session = {
   summary: () => string;
 };
 
+/** What the picker settled on. */
+export type Choice =
+  | { kind: 'cassette'; info: CassetteInfo }
+  | { kind: 'quit' };
+
+/** How a mock session asks which corpus to replay. Injected so the ordering rules above stay in this module and a test can answer without a terminal. */
+export type Picker = (available: readonly CassetteInfo[]) => Promise<Choice>;
+
+/**
+ * How a boot ended.
+ *
+ * A mock session with nothing to replay is refused rather than started empty: every traffic pane
+ * would read zero, which looks exactly like a working session over a quiet window, and an operator
+ * cannot tell those two apart from inside the TUI.
+ */
+export type Boot =
+  | { kind: 'started'; session: Session }
+  | { kind: 'quit' }
+  | { kind: 'refused'; message: string };
+
 function note(path: string, line: string): void {
   try {
     appendFileSync(path, `${new Date().toISOString()}  ${line}\n`);
@@ -36,8 +64,66 @@ function note(path: string, line: string): void {
   }
 }
 
-/** Boot a mock session: sandbox the state, fabricate the environment, and serve every read from the cassette. */
-export async function bootMock(): Promise<Session> {
+export const RECORD_FIRST =
+  'No cassettes recorded yet, and a mock session has nothing to replay without one.\n' +
+  'Record one from a live session, driving the panes you want covered:\n\n' +
+  '  bun run firewall:record --cassette <name>';
+
+export type Chosen = { kind: 'chose'; info: CassetteInfo };
+
+/** Resolve which cassette to replay: the one named on the command line, or whatever the picker returns. Takes the drawer's contents rather than reading them, so the decision is testable without one. */
+export async function chooseCassette(
+  available: readonly CassetteInfo[],
+  named: string | undefined,
+  pick: Picker | undefined,
+): Promise<Boot | Chosen> {
+  if (named !== undefined) {
+    if (!validCassetteName(named))
+      return {
+        kind: 'refused',
+        message: `"${named}" is not a usable cassette name — ${NAME_RULE}`,
+      };
+    const found = available.find((c) => c.name === named);
+    // Named-but-missing is reported rather than started empty. A typo produces exactly the same
+    // silent nothing as a real empty corpus, and an operator reads that as a broken tool.
+    if (!found)
+      return {
+        kind: 'refused',
+        message: `No cassette named "${named}".${
+          available.length
+            ? `\nRecorded: ${available.map((c) => c.name).join(', ')}`
+            : `\n\n${RECORD_FIRST}`
+        }`,
+      };
+    return { kind: 'chose', info: found };
+  }
+  if (!available.length) return { kind: 'refused', message: RECORD_FIRST };
+  if (!pick)
+    return {
+      kind: 'refused',
+      message: 'no way to choose a cassette — pass --cassette <name>',
+    };
+  const choice = await pick(available);
+  return choice.kind === 'quit'
+    ? { kind: 'quit' }
+    : { kind: 'chose', info: choice.info };
+}
+
+/**
+ * Boot a mock session: choose a corpus, sandbox the state, fabricate the environment, and serve
+ * every read from the recording.
+ *
+ * The cassette is chosen FIRST, before anything is created, so quitting at the picker leaves no
+ * trace — and because the corpus decides what every pane will say, which makes it the wrong thing
+ * to pick after the panes have already drawn themselves from a different one.
+ */
+export async function bootMock(
+  opts: { named?: string; pick?: Picker } = {},
+): Promise<Boot> {
+  const chosen = await chooseCassette(listCassettes(), opts.named, opts.pick);
+  if (chosen.kind !== 'chose') return chosen;
+  const { name: cassetteName, path: cassetteFile } = chosen.info;
+
   const dir = prepareSandbox();
   // Read BEFORE the overwrite, which is the only moment it is knowable. A real token here means
   // the session was launched through firewall:setup rather than firewall:mock, so it is running on
@@ -49,8 +135,8 @@ export async function bootMock(): Promise<Session> {
   // does exactly this, for exactly the same reason.
   process.chdir(dir);
 
-  const cassette = loadCassette(cassettePath());
-  const ageDays = cassetteAgeDays(cassettePath());
+  const cassette = loadCassette(cassetteFile);
+  const ageDays = cassetteAgeDays(cassetteFile);
   const log = missLogPath();
   const misses = new Map<string, number>();
   const onMiss = (miss: Miss) => {
@@ -72,34 +158,44 @@ export async function bootMock(): Promise<Session> {
 
   note(
     log,
-    `session  ${cassette.entries.size} recordings, ${cassette.skipped} unreadable lines${
+    `session  "${cassetteName}", ${cassette.entries.size} recordings, ${cassette.skipped} unreadable lines${
       inherited ? ', launched with a real credential in the environment' : ''
     }`,
   );
   return {
-    summary: () => {
-      const unrecorded = misses.get('unrecorded') ?? 0;
-      const substituted = misses.get('window-substituted') ?? 0;
-      const parts = [
-        `mock session over ${cassette.entries.size} recordings`,
-        ageDays !== undefined && ageDays >= STALE_CASSETTE_DAYS
-          ? `the cassette is ${ageDays} days old — re-record it, or delete it (it holds real client IPs and fingerprints)`
-          : '',
-        unrecorded ? `${unrecorded} queries had nothing recorded` : '',
-        substituted ? `${substituted} answered from another window` : '',
-        unrecorded || substituted ? `see ${log}` : '',
-        inherited
-          ? 'note: a real VERCEL_TOKEN was in the environment and was overwritten — run `bun run firewall:mock` to keep it out of the process entirely'
-          : '',
-      ].filter(Boolean);
-      return parts.join(' · ');
+    kind: 'started',
+    session: {
+      summary: () => {
+        const unrecorded = misses.get('unrecorded') ?? 0;
+        const substituted = misses.get('window-substituted') ?? 0;
+        return [
+          `mock session over ${cassette.entries.size} recordings from "${cassetteName}"`,
+          ageDays !== undefined && ageDays >= STALE_CASSETTE_DAYS
+            ? `the cassette is ${ageDays} days old — re-record it, or delete it (it holds real client IPs and fingerprints)`
+            : '',
+          unrecorded ? `${unrecorded} queries had nothing recorded` : '',
+          substituted ? `${substituted} answered from another window` : '',
+          unrecorded || substituted ? `see ${log}` : '',
+          inherited
+            ? 'note: a real VERCEL_TOKEN was in the environment and was overwritten — run `bun run firewall:mock` to keep it out of the process entirely'
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+      },
     },
   };
 }
 
-/** Boot a recording session: a fully live run that also writes every response to the cassette. */
-export async function bootRecording(): Promise<Session> {
-  const path = cassettePath();
+/** Boot a recording session: a fully live run that also writes every response to the named cassette. */
+export async function bootRecording(name: string): Promise<Boot> {
+  if (!validCassetteName(name))
+    return {
+      kind: 'refused',
+      message: `"${name}" is not a usable cassette name — ${NAME_RULE}`,
+    };
+  prepareCassettesDir();
+  const path = cassettePathFor(name) as string;
   const { recordingObservability, recordingWaf } = await import('./record');
   const observability = await import('../observability');
   observability.installObservabilityBackend(
@@ -107,5 +203,8 @@ export async function bootRecording(): Promise<Session> {
   );
   const client = await import('../client');
   client.installWafBackend(recordingWaf(client.liveWaf, path));
-  return { summary: () => `recording appended to ${path}` };
+  return {
+    kind: 'started',
+    session: { summary: () => `recording appended to ${path}` },
+  };
 }

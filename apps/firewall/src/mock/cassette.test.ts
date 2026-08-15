@@ -19,7 +19,9 @@ import {
   cassetteAgeDays,
   ensureOwnerOnly,
   ensureOwnerOnlyFile,
+  headerVersionOf,
   loadCassette,
+  resetCassette,
   metricsKeys,
 } from './cassette';
 
@@ -395,5 +397,50 @@ describe('tightening a file that already exists', () => {
     symlinkSync(target, link);
     expect(() => ensureOwnerOnlyFile(link, '', 'miss log')).toThrow('symlink');
     expect(statSync(target).mode & 0o777).toBe(0o644);
+  });
+});
+
+describe('resetting a cassette this build cannot read', () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-reset-'));
+    path = join(dir, 'c.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('reads the declared version without loading the rest', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"a","v":"x"}\n');
+    expect(headerVersionOf(path)).toBe(1);
+  });
+
+  test('a file with no header reads as unversioned', () => {
+    writeFileSync(path, '{"k":"a","v":"x"}\n');
+    expect(headerVersionOf(path)).toBe(UNVERSIONED);
+  });
+
+  test('an absent file has no version, which is not the same as zero', () => {
+    expect(headerVersionOf(join(dir, 'absent.jsonl'))).toBeUndefined();
+  });
+
+  // A recording APPENDS, so without this the old header survived and buried the fresh entries
+  // under it — the file stayed refused and the refusal's own advice led nowhere.
+  test('reset leaves a bare header of the current format', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"stale","v":"x"}\n');
+    resetCassette(path);
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.size).toBe(0);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('and what is appended after it loads', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"stale","v":"x"}\n');
+    resetCassette(path);
+    appendCassette(path, 'fresh', { summary: [] }, 'loose');
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.has('fresh')).toBe(true);
+    expect(loaded.entries.has('stale')).toBe(false);
   });
 });

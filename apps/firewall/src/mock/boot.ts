@@ -17,7 +17,9 @@ import {
   cassetteAgeDays,
   ensureOwnerOnly,
   ensureOwnerOnlyFile,
+  headerVersionOf,
   loadCassette,
+  resetCassette,
 } from './cassette';
 import {
   type CassetteInfo,
@@ -100,15 +102,24 @@ export async function chooseCassette(
     const found = available.find((c) => c.name === named);
     // Named-but-missing is reported rather than started empty. A typo produces exactly the same
     // silent nothing as a real empty corpus, and an operator reads that as a broken tool.
-    if (!found)
+    if (!found) {
+      if (available.length)
+        return {
+          kind: 'refused',
+          message: `No cassette named "${named}".\nRecorded: ${available
+            .map((c) => c.name)
+            .join(', ')}`,
+        };
+      // Empty for two very different reasons: nothing recorded yet, or the drawer is unreachable.
+      // Telling someone to record into a drawer that cannot be found sends them in a circle.
+      const where = resolveDrawer();
       return {
         kind: 'refused',
-        message: `No cassette named "${named}".${
-          available.length
-            ? `\nRecorded: ${available.map((c) => c.name).join(', ')}`
-            : `\n\n${RECORD_FIRST}`
+        message: `No cassette named "${named}".\n\n${
+          where.kind === 'found' ? RECORD_FIRST : where.message
         }`,
       };
+    }
     return { kind: 'chose', info: found };
   }
   if (!available.length) {
@@ -252,6 +263,8 @@ export async function bootRecording(name: string): Promise<Boot> {
   // and unhandled, so a read-only ops checkout surfaced a raw `EACCES: permission denied, mkdir`
   // through main().catch() instead of a refusal naming the cassette.
   let path: string;
+  /** The format that was discarded, when re-recording had to reset a stale cassette. */
+  let replaced: number | undefined;
   try {
     const drawer = prepareCassettesDir(where.dir);
     // Neither can be undefined here — the drawer is `found` and the name was validated above — but
@@ -267,6 +280,15 @@ export async function bootRecording(name: string): Promise<Boot> {
       };
     // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
     ensureOwnerOnly(target);
+    // A recording APPENDS. Into a cassette this build cannot read, that buries fresh entries under
+    // a stale header and the file stays refused — which made the refusal's own advice, "re-record
+    // it", lead nowhere. Reset it to a bare current header first.
+    const existing = headerVersionOf(target);
+    if (existing !== undefined && existing !== CASSETTE_VERSION) {
+      resetCassette(target);
+      replaced = existing;
+    }
+
     path = target;
   } catch (error) {
     return { kind: 'refused', message: errMsg(error) };
@@ -285,6 +307,9 @@ export async function bootRecording(name: string): Promise<Boot> {
       summary: () =>
         [
           `recorded ${stats.written} ${stats.written === 1 ? 'response' : 'responses'} to ${path}`,
+          replaced !== undefined
+            ? `replaced a format ${replaced} cassette this build could not read`
+            : '',
           stats.failed
             ? `${stats.failed} could NOT be written — the cassette is incomplete`
             : '',

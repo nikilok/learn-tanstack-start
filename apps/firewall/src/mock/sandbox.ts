@@ -4,7 +4,13 @@
 // boolean somebody has to get right at every write; this is a process whose credentials are fake
 // and whose cwd is not the repo, so the writes have nowhere real to land.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { REPO_ROOT } from '../repo-root';
@@ -58,6 +64,14 @@ const MOCK_ENV: Record<string, string> = {
 // unattended tick stage bans off synthetic traffic.
 const REFUSED_ENV = ['FW_NOTIFY_IMESSAGE', 'FW_AUTO_BAN'];
 
+/** Refuse a path that is a symlink: every writer here follows one, so it would act on the target. */
+function refuseLink(path: string, what: string): void {
+  if (existsSync(path) && lstatSync(path).isSymbolicLink())
+    throw new Error(
+      `${path} is a symlink, and the ${what} must not be — a mock session would write through it`,
+    );
+}
+
 /** FW_* assignments from a sandbox .env.local, so a deny persisted by one mock session is live in the next. */
 export function readSandboxEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
@@ -98,8 +112,13 @@ export function fabricateEnv(sandboxEnv: Record<string, string> = {}): void {
 
 /** Create the sandbox if it is not there yet and return it. Existing contents are left alone: a watch list built up over a few sessions is the point of a directory rather than a temp dir. */
 export function prepareSandbox(dir: string = sandboxPath()): string {
-  mkdirSync(dir, { recursive: true });
+  // Neither the sandbox nor its env file may be a symlink. Everything a mock session writes lands
+  // under here, so a link would put an applied deny — and the whole cwd-derived state — somewhere
+  // real. The cassette and the miss log refuse links for the same reason.
+  refuseLink(dir, 'sandbox directory');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const env = sandboxEnvPath(dir);
+  refuseLink(env, 'sandbox .env.local');
   if (!existsSync(env))
     writeFileSync(
       env,

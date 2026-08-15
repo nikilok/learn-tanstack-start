@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -187,5 +189,31 @@ describe('preparing the sandbox', () => {
 
   test('the default sandbox is a directory in the repo, not the repo itself', () => {
     expect(sandboxPath().endsWith('.firewall-mock')).toBe(true);
+  });
+});
+
+describe('the sandbox must not be a symlink', () => {
+  // Everything a mock session writes lands under here, so a link would put an applied deny — and
+  // the whole cwd-derived state — somewhere real.
+  test('refuses a symlinked sandbox directory', () => {
+    const real = join(dir, 'somewhere-real');
+    mkdirSync(real, { recursive: true });
+    const link = join(dir, 'box');
+    symlinkSync(real, link);
+    expect(() => prepareSandbox(link)).toThrow('symlink');
+  });
+
+  test('refuses a symlinked env file inside it', () => {
+    const box = join(dir, 'box');
+    mkdirSync(box, { recursive: true });
+    const victim = join(dir, 'victim');
+    writeFileSync(victim, 'important\n');
+    symlinkSync(victim, join(box, '.env.local'));
+    expect(() => prepareSandbox(box)).toThrow('symlink');
+    expect(readFileSync(victim, 'utf8')).toBe('important\n');
+  });
+
+  test('an ordinary directory is still fine', () => {
+    expect(() => prepareSandbox(join(dir, 'plain'))).not.toThrow();
   });
 });

@@ -8,9 +8,12 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
   lstatSync,
+  openSync,
   readFileSync,
+  readSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -212,6 +215,34 @@ export function loadCassette(path: string): LoadedCassette {
  */
 export function ensureOwnerOnly(path: string): void {
   ensureOwnerOnlyFile(path, headerLine(), 'cassette');
+}
+
+/** The format an existing cassette declares, without reading the rest of it. A stale corpus can be 100 MB, and it is about to be discarded. */
+export function headerVersionOf(path: string): number | undefined {
+  if (!existsSync(path)) return undefined;
+  const fd = openSync(path, 'r');
+  try {
+    const buffer = Buffer.alloc(4096);
+    const read = readSync(fd, buffer, 0, buffer.length, 0);
+    const text = buffer.subarray(0, read).toString();
+    const end = text.indexOf('\n');
+    return versionOf(end === -1 ? text : text.slice(0, end)) ?? UNVERSIONED;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Truncate a cassette back to a bare header of the CURRENT format.
+ *
+ * A recording appends, so re-recording into a cassette this build cannot read left the old header
+ * in place and buried fresh entries under it — the file stayed refused, and the refusal's own
+ * advice ("re-record it") led nowhere. Destructive on purpose: the old content is unreadable by
+ * definition, and re-recording is how an operator asks for it to be replaced.
+ */
+export function resetCassette(path: string): void {
+  writeFileSync(path, headerLine(), { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 /**

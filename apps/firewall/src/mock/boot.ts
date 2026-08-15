@@ -21,7 +21,9 @@ import {
 import {
   type CassetteInfo,
   NAME_RULE,
+  NO_OPS_REPO,
   cassettePathFor,
+  cassettesDir,
   listCassettes,
   prepareCassettesDir,
   validCassetteName,
@@ -103,7 +105,11 @@ export async function chooseCassette(
       };
     return { kind: 'chose', info: found };
   }
-  if (!available.length) return { kind: 'refused', message: RECORD_FIRST };
+  if (!available.length)
+    return {
+      kind: 'refused',
+      message: cassettesDir() ? RECORD_FIRST : NO_OPS_REPO,
+    };
   if (!pick)
     return {
       kind: 'refused',
@@ -141,6 +147,17 @@ export async function bootMock(
       message:
         `"${cassetteName}" is cassette format ${cassette.version} and this build reads ${CASSETTE_VERSION}.\n` +
         'Its keys no longer mean the same thing, so every query would silently miss.\n\n' +
+        `Re-record it:  bun run firewall:record --cassette ${cassetteName}`,
+    };
+
+  // A cassette that recorded nothing is refused for the same reason an empty drawer is: every
+  // pane reads zero, which is indistinguishable from a working session over a quiet window. A
+  // recording session that failed to boot leaves exactly this behind.
+  if (cassette.entries.size === 0)
+    return {
+      kind: 'refused',
+      message:
+        `"${cassetteName}" has no recordings in it.\n` +
         `Re-record it:  bun run firewall:record --cassette ${cassetteName}`,
     };
 
@@ -213,8 +230,9 @@ export async function bootRecording(name: string): Promise<Boot> {
       kind: 'refused',
       message: `"${name}" is not a usable cassette name — ${NAME_RULE}`,
     };
-  prepareCassettesDir();
-  const path = cassettePathFor(name) as string;
+  const drawer = prepareCassettesDir();
+  if (!drawer) return { kind: 'refused', message: NO_OPS_REPO };
+  const path = cassettePathFor(name, drawer) as string;
   // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
   try {
     ensureOwnerOnly(path);

@@ -5,17 +5,36 @@
 // recently. A scraper incident worth replaying next month has to be its own file.
 
 import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
+import { envText } from '../env';
 import { REPO_ROOT } from '../repo-root';
 
-export const CASSETTES_DIR = '.firewall-cassettes';
+/** Where corpora live inside the ops repo. Not a dotted name: it is tracked there, not hidden local state. */
+export const CASSETTES_DIR = 'firewall-cassettes';
+
+/** The private repo that holds them, as a sibling checkout of this one. */
+export const OPS_REPO = 'sponsorsearch-ops';
+
 const SUFFIX = '.jsonl';
 
-/** The directory holding every recorded corpus. */
-export function cassettesDir(): string {
-  return join(REPO_ROOT, CASSETTES_DIR);
+/**
+ * The ops-repo checkout, or undefined when there is not one to find.
+ *
+ * A recorded corpus is real client IPs, TLS fingerprints, UAs and paths — traffic data, which
+ * belongs in the private repo and never in this one. FW_CASSETTES_DIR overrides for a checkout
+ * that is not a sibling; there are two of them.
+ */
+export function cassettesDir(): string | undefined {
+  const override = envText('FW_CASSETTES_DIR');
+  if (override) return resolve(override);
+  const ops = resolve(REPO_ROOT, '..', OPS_REPO);
+  return existsSync(ops) ? join(ops, CASSETTES_DIR) : undefined;
 }
+
+export const NO_OPS_REPO =
+  `Cassettes live in the private ${OPS_REPO} repo, and it is not checked out beside this one.\n` +
+  `Clone it as a sibling of this repo, or point FW_CASSETTES_DIR at where it is.`;
 
 // Interpolated into a path, so it is validated the way every other operator-supplied string in
 // this tool is: an allow-list of what is legal, never a deny-list of what is not.
@@ -32,9 +51,11 @@ export const NAME_RULE =
 /** Absolute path for a cassette name, or undefined when the name is not one. */
 export function cassettePathFor(
   name: string,
-  dir: string = cassettesDir(),
+  dir: string | undefined = cassettesDir(),
 ): string | undefined {
-  return validCassetteName(name) ? join(dir, `${name}${SUFFIX}`) : undefined;
+  return dir && validCassetteName(name)
+    ? join(dir, `${name}${SUFFIX}`)
+    : undefined;
 }
 
 export type CassetteInfo = {
@@ -53,7 +74,7 @@ export function listCassettes(
 ): CassetteInfo[] {
   const dir = opts.dir ?? cassettesDir();
   const now = opts.now ?? new Date();
-  if (!existsSync(dir)) return [];
+  if (!dir || !existsSync(dir)) return [];
   const out: CassetteInfo[] = [];
   for (const entry of readdirSync(dir)) {
     if (!entry.endsWith(SUFFIX)) continue;
@@ -93,8 +114,11 @@ export function listCassettes(
   );
 }
 
-/** Create the drawer so a recording has somewhere to land. */
-export function prepareCassettesDir(dir: string = cassettesDir()): string {
+/** Create the drawer so a recording has somewhere to land. Undefined when the ops repo is not there — never created, because that would mean inventing the private repo. */
+export function prepareCassettesDir(
+  dir: string | undefined = cassettesDir(),
+): string | undefined {
+  if (!dir) return undefined;
   mkdirSync(dir, { recursive: true });
   return dir;
 }

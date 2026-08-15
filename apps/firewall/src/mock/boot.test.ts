@@ -111,3 +111,29 @@ describe('with no picker available', () => {
     expect(message).toContain('--cassette');
   });
 });
+
+describe('a cassette that recorded nothing', () => {
+  // A recording session that failed to boot leaves an empty cassette behind, and it would then
+  // sit in the picker looking like a valid choice.
+  test('is listed but refused, with the command to re-record', async () => {
+    const { bootMock } = await import('./boot');
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'fw-empty-'));
+    const before = process.env.FW_CASSETTES_DIR;
+    process.env.FW_CASSETTES_DIR = dir;
+    try {
+      writeFileSync(join(dir, 'blank.jsonl'), '{"cassette":1}\n');
+      const result = await bootMock({ named: 'blank' });
+      expect(result.kind).toBe('refused');
+      expect((result as { message: string }).message).toContain(
+        'no recordings',
+      );
+    } finally {
+      if (before === undefined) delete process.env.FW_CASSETTES_DIR;
+      else process.env.FW_CASSETTES_DIR = before;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -20,6 +20,8 @@
     "dev:desktop:unreachable": "DESKTOP_SIMULATE_UNREACHABLE=1 turbo run dev --filter @ss/desktop",
     "firewall:ip": "bun --env-file=.env.local apps/firewall/src/profile.ts",
     "firewall:setup": "bun --env-file=.env.local apps/firewall/src/setup.tsx",
+    "firewall:mock": "bun --no-env-file apps/firewall/src/setup.tsx --mock",
+    "firewall:record": "bun --env-file=.env.local apps/firewall/src/setup.tsx --record",
     "firewall:sitemap": "bun --env-file=.env.local apps/firewall/src/sitemap.ts",
     "firewall:watch": "bun --env-file=.env.local apps/firewall/src/watch.ts",
     "format": "oxfmt",

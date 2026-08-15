@@ -7,6 +7,7 @@
 // tick the first time Vercel's classification shifts under us.
 
 import { type Advice, worthInvestigating } from './ban-advice';
+import { isMock } from './env';
 
 /** Investigations per hour, whatever the screen says. Caps our spend, not our detection. */
 export const SPAWN_CEILING = 3;
@@ -249,6 +250,14 @@ export async function runInvestigation(
     kill: (signal?: number | NodeJS.Signals) => void;
   }) => void,
 ): Promise<Investigation> {
+  // A mock session must not spawn a real agent: it costs real money and would adjudicate synthetic
+  // traffic. Labelled rather than silent, so nobody reads the pane as a real conclusion.
+  if (isMock())
+    return {
+      ok: true,
+      verdict: `MOCK: no investigation was run for ${f.digest}. This text is a placeholder so the verdict pane renders.`,
+      provenance: 'mock session',
+    };
   try {
     const proc = Bun.spawn(['claude', ...investigationArgs(f, hours)], {
       cwd,

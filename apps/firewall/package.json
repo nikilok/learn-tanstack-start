@@ -6,6 +6,8 @@
     "ip": "bun --env-file=../../.env.local src/profile.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
+    "mock": "bun --no-env-file src/setup.tsx --mock",
+    "record": "bun --env-file=../../.env.local src/setup.tsx --record",
     "setup": "bun --env-file=../../.env.local src/setup.tsx",
     "sitemap": "bun --env-file=../../.env.local src/sitemap.ts",
     "watch": "bun --env-file=../../.env.local src/watch.ts",

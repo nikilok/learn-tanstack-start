@@ -13,11 +13,21 @@ name: Discover Company Websites (Search)
 # stays the single thing that decides a URL is live and renderable. Two jobs
 # claiming that would be two jobs to keep in agreement.
 #
-# Own concurrency group. Runs at 02:37, in the gap between the 01:17 tier-1
-# sweep and the 05:37 job, and well clear of the 21:43 website sweep whose rows
-# this one creates.
+# Own concurrency group, four times a day at six-hourly spacing. The loop is
+# serial with a per-company delay, so 300 rows takes 50-90 minutes and the
+# schedule has to clear that with room for GitHub's own lag, which has been
+# running around 90 minutes: only one run may sit pending per group and a
+# newer arrival cancels whichever was already waiting, so slots close enough to
+# stack up would silently drop the one in the middle. Cadence, not run
+# size, is the lever — the 120-minute job timeout puts roughly 600 rows out of
+# reach in a single run.
 #
-# COSTS MONEY. Every search spends one Serper credit. Both the rows taken and
+# Overlapping the 21:43 website sweep is harmless: that job selects on
+# `url IS NOT NULL`, and a row this one has banked but not settled has no URL,
+# so it cannot be picked up half-written.
+#
+# COSTS MONEY, now 4x what it did. Every search spends one Serper credit, so a
+# day at the default 300 rows a run is 1,200 credits. Both the rows taken and
 # the searches run are capped, and the script clamps the total to its own
 # ABSOLUTE_MAX_SEARCHES regardless of what is dispatched here — the inputs
 # below can lower the spend but never raise it past that ceiling.
@@ -25,6 +35,9 @@ name: Discover Company Websites (Search)
 on:
   schedule:
     - cron: '37 2 * * *'
+    - cron: '37 8 * * *'
+    - cron: '37 14 * * *'
+    - cron: '37 20 * * *'
   workflow_dispatch:
     inputs:
       dry-run:

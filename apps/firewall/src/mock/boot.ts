@@ -248,11 +248,26 @@ export async function bootRecording(name: string): Promise<Boot> {
   const where = resolveDrawer();
   if (where.kind === 'missing')
     return { kind: 'refused', message: where.message };
-  const drawer = prepareCassettesDir(where.dir) as string;
-  const path = cassettePathFor(name, drawer) as string;
-  // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
+  // One try covers creating the drawer and securing the file. Creating it was outside the guard
+  // and unhandled, so a read-only ops checkout surfaced a raw `EACCES: permission denied, mkdir`
+  // through main().catch() instead of a refusal naming the cassette.
+  let path: string;
   try {
-    ensureOwnerOnly(path);
+    const drawer = prepareCassettesDir(where.dir);
+    // Neither can be undefined here — the drawer is `found` and the name was validated above — but
+    // asserting that with a cast means a future change to either fails as `undefined is not a
+    // string` somewhere further on.
+    if (!drawer)
+      return { kind: 'refused', message: `could not prepare ${where.dir}` };
+    const target = cassettePathFor(name, drawer);
+    if (!target)
+      return {
+        kind: 'refused',
+        message: `"${name}" is not a usable cassette name — ${NAME_RULE}`,
+      };
+    // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
+    ensureOwnerOnly(target);
+    path = target;
   } catch (error) {
     return { kind: 'refused', message: errMsg(error) };
   }

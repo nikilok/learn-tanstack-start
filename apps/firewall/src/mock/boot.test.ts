@@ -112,79 +112,67 @@ describe('with no picker available', () => {
   });
 });
 
+/**
+ * Run `fn` against a fake ops repo holding one cassette of the given lines.
+ *
+ * The marker file is what identifies an ops repo, so the drawer resolves here rather than to the
+ * operator's real corpus — which is the whole reason these tests can run at all.
+ */
+async function withCassette(
+  name: string,
+  lines: string[],
+  fn: (bootMock: typeof import('./boot').bootMock) => Promise<void>,
+): Promise<void> {
+  const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
+    await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
+  mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
+  writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
+  mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
+  writeFileSync(
+    join(ops, 'firewall-cassettes', `${name}.jsonl`),
+    `${lines.join('\n')}\n`,
+  );
+  const before = process.env.FW_OPS_PATH;
+  process.env.FW_OPS_PATH = ops;
+  try {
+    const { bootMock } = await import('./boot');
+    await fn(bootMock);
+  } finally {
+    if (before === undefined) delete process.env.FW_OPS_PATH;
+    else process.env.FW_OPS_PATH = before;
+    rmSync(ops, { recursive: true, force: true });
+  }
+}
+
 describe('a cassette that recorded nothing', () => {
   // A recording session that failed to boot leaves an empty cassette behind, and it would then
   // sit in the picker looking like a valid choice.
   test('is listed but refused, with the command to re-record', async () => {
-    const { bootMock } = await import('./boot');
-    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
-      await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    // A faithful fake ops repo: the marker file is what identifies one, so the drawer resolves
-    // here rather than to the operator's real corpus.
-    const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
-    mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
-    writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
-    mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
-    const before = process.env.FW_OPS_PATH;
-    process.env.FW_OPS_PATH = ops;
-    try {
-      const { CASSETTE_VERSION } = await import('./cassette');
-      writeFileSync(
-        join(ops, 'firewall-cassettes', 'blank.jsonl'),
-        `${JSON.stringify({ cassette: CASSETTE_VERSION })}\n`,
-      );
-      const result = await bootMock({ named: 'blank' });
-      expect(result.kind).toBe('refused');
-      expect((result as { message: string }).message).toContain(
-        'no recordings',
-      );
-    } finally {
-      if (before === undefined) delete process.env.FW_OPS_PATH;
-      else process.env.FW_OPS_PATH = before;
-      rmSync(ops, { recursive: true, force: true });
-    }
+    const { CASSETTE_VERSION } = await import('./cassette');
+    await withCassette(
+      'blank',
+      [JSON.stringify({ cassette: CASSETTE_VERSION })],
+      async (boot) => {
+        const result = await boot({ named: 'blank' });
+        expect(result.kind).toBe('refused');
+        expect((result as { message: string }).message).toContain(
+          'no recordings',
+        );
+      },
+    );
   });
 });
 
 describe('a cassette this build cannot read', () => {
-  /** A faithful fake ops repo holding one cassette with the given header line. */
-  async function withCassette(
-    header: string,
-    body: string[],
-    fn: (bootMock: typeof import('./boot').bootMock) => Promise<void>,
-  ): Promise<void> {
-    const { mkdirSync, mkdtempSync, writeFileSync, rmSync } =
-      await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const ops = mkdtempSync(join(tmpdir(), 'fw-ops-'));
-    mkdirSync(join(ops, 'firewall-operator'), { recursive: true });
-    writeFileSync(join(ops, 'firewall-operator', 'SKILL.md'), '# fake\n');
-    mkdirSync(join(ops, 'firewall-cassettes'), { recursive: true });
-    writeFileSync(
-      join(ops, 'firewall-cassettes', 'old.jsonl'),
-      [header, ...body].join('\n'),
-    );
-    const before = process.env.FW_OPS_PATH;
-    process.env.FW_OPS_PATH = ops;
-    try {
-      const { bootMock } = await import('./boot');
-      await fn(bootMock);
-    } finally {
-      if (before === undefined) delete process.env.FW_OPS_PATH;
-      else process.env.FW_OPS_PATH = before;
-      rmSync(ops, { recursive: true, force: true });
-    }
-  }
-
   // Literal 1, not CASSETTE_VERSION - 1: this asserts that an OLDER format is refused, and it must
   // keep saying that after the constant moves.
   test('an older format is refused, naming both versions', async () => {
     await withCassette(
-      '{"cassette":1}',
-      ['{"k":"a","v":"x"}'],
+      'old',
+      ['{"cassette":1}', '{"k":"a","v":"x"}'],
       async (boot) => {
         const result = await boot({ named: 'old' });
         expect(result.kind).toBe('refused');
@@ -196,7 +184,7 @@ describe('a cassette this build cannot read', () => {
   });
 
   test('a cassette with no header at all is refused too', async () => {
-    await withCassette('{"k":"a","v":"x"}', [], async (boot) => {
+    await withCassette('old', ['{"k":"a","v":"x"}'], async (boot) => {
       const result = await boot({ named: 'old' });
       expect(result.kind).toBe('refused');
       expect((result as { message: string }).message).toContain('format 0');

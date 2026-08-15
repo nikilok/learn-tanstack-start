@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +13,7 @@ import type { Ctx } from '../observability';
 import {
   appendCassette,
   cassetteAgeDays,
+  ensureOwnerOnly,
   loadCassette,
   metricsKeys,
 } from './cassette';
@@ -70,6 +77,31 @@ describe('metricsKeys', () => {
       granularity: { minutes: 5, hours: 1 },
     });
     expect(a.exact).toBe(b.exact);
+  });
+
+  // Granularity is the BUCKET SIZE. A 10-minute-bucket query answered from an hourly recording
+  // gets a series whose points mean something else, and the session shape is computed off it.
+  test('the live window does not fall back to an hourly recording', () => {
+    const live = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { minutes: 10 },
+    });
+    const hourly = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { hours: 1 },
+    });
+    expect(live.loose).not.toBe(hourly.loose);
+  });
+
+  // ...while the substitution the fallback exists for still works: every window from 1h up is
+  // hourly, so a 6h recording still answers a 24h query.
+  test('two hourly windows of different lengths still share a loose key', () => {
+    const six = metricsKeys(MORNING, ['clientIp'], {});
+    const day = metricsKeys(
+      ctxOver('2026-08-14T10:00:00.000Z', '2026-08-15T10:00:00.000Z'),
+      ['clientIp'],
+      {},
+    );
+    expect(six.loose).toBe(day.loose);
+    expect(six.exact).not.toBe(day.exact);
   });
 
   // The filter is the one free-form field and it carries request paths, which are client-supplied.
@@ -184,6 +216,27 @@ describe('the cassette file', () => {
     const loaded = loadCassette(path);
     expect(loaded.entries.has('orphan')).toBe(false);
     expect(loaded.skipped).toBe(1);
+  });
+
+  // A corpus copied in from the ops repo arrives with whatever mode it had, and copying one in is
+  // a documented workflow. appendCassette's create-mode does not cover a file it did not create.
+  test('tightens an existing world-readable cassette', () => {
+    writeFileSync(path, '{"k":"a","v":1}\n');
+    chmodSync(path, 0o644);
+    ensureOwnerOnly(path);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('creates the cassette when it is not there yet', () => {
+    ensureOwnerOnly(path);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(loadCassette(path).entries.size).toBe(0);
+  });
+
+  test('leaves what is already recorded alone', () => {
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).entries.has('k')).toBe(true);
   });
 
   // The corpus is real client IPs and TLS fingerprints; 0644 is every account on the machine.

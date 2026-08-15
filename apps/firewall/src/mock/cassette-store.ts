@@ -59,9 +59,16 @@ export function listCassettes(
     // A file dropped in by hand can be named anything; only offer what could be recorded.
     if (!validCassetteName(name)) continue;
     const path = join(dir, entry);
-    const stat = statSync(path);
-    // A directory named `x.jsonl` reads as a cassette right up until loading it throws EISDIR and
-    // takes the boot down. statSync follows symlinks, so a link to a real file still counts.
+    // Anything unstattable is skipped rather than thrown over: statSync follows symlinks, so a
+    // DANGLING one raises ENOENT and takes the whole picker down before it draws — and a file
+    // removed between the listing and the stat does the same.
+    let stat;
+    try {
+      stat = statSync(path);
+    } catch {
+      continue;
+    }
+    // A directory named `x.jsonl` reads as a cassette right up until loading it throws EISDIR.
     if (!stat.isFile()) continue;
     const written = Math.floor(stat.mtimeMs);
     out.push({

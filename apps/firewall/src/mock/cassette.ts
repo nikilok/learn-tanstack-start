@@ -5,18 +5,16 @@
 // below the cap, `botCategory` accepts a filter and matches zero rows, `botVerified` is 'pass' not
 // 'true' — so a written fixture encodes what we BELIEVE and a recorded one encodes the API.
 
-import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 
 import type { Ctx, MetricsOpts } from '../observability';
-import { REPO_ROOT } from '../repo-root';
-
-export const CASSETTE_FILE = '.firewall-cassette.jsonl';
-
-/** Where recordings are written and read. Absolute, because a recording runs from the repo root and a mock session runs from its sandbox. */
-export function cassettePath(): string {
-  return join(REPO_ROOT, CASSETTE_FILE);
-}
 
 export const RULE_NAMES_KEY = 'ruleNames';
 export const LIVE_CONFIG_KEY = 'fetchLive';
@@ -52,13 +50,15 @@ export function metricsKeys(
     Number.isFinite(start) && Number.isFinite(end)
       ? Math.round((end - start) / 60_000)
       : 0;
+  // Granularity is in the LOOSE key, not just the exact one. It is the bucket size, so a
+  // 10-minute-bucket query answered from an hourly recording gets a series whose points mean
+  // something else — and the session shape and duty cycle are computed straight off it. Dropping
+  // only the span still lets 1h/3h/6h/24h/6d substitute for each other, which is the whole point
+  // of the fallback; it is the live window, the one that buckets differently, that is excluded.
+  const shape = [...parts, canonical(opts.granularity ?? ctx.granularity)];
   return {
-    loose: `metrics${JSON.stringify(parts)}`,
-    exact: `metrics${JSON.stringify([
-      ...parts,
-      span,
-      canonical(opts.granularity ?? ctx.granularity),
-    ])}`,
+    loose: `metrics${JSON.stringify(shape)}`,
+    exact: `metrics${JSON.stringify([...shape, span])}`,
   };
 }
 
@@ -121,6 +121,19 @@ export function loadCassette(path: string): LoadedCassette {
     }
   }
   return { entries, loose, skipped };
+}
+
+/**
+ * Make sure the cassette exists and only its owner can read it, once, before a recording starts.
+ *
+ * `appendCassette`'s create-mode covers a file this tool made. It does NOT cover one that arrived
+ * some other way — and copying a corpus in from the ops repo is a documented workflow, which
+ * brings 0644 with it. Done here rather than per append so a recording pays one syscall, not one
+ * per query.
+ */
+export function ensureOwnerOnly(path: string): void {
+  if (!existsSync(path)) writeFileSync(path, '', { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 /** Append one recorded response. Synchronous, so concurrent queries serialise on the event loop instead of interleaving half-written lines. */

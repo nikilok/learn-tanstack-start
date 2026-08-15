@@ -11,7 +11,7 @@
 import { appendFileSync } from 'node:fs';
 
 import type { Miss } from './backend';
-import { cassetteAgeDays, loadCassette } from './cassette';
+import { cassetteAgeDays, ensureOwnerOnly, loadCassette } from './cassette';
 import {
   type CassetteInfo,
   NAME_RULE,
@@ -196,6 +196,8 @@ export async function bootRecording(name: string): Promise<Boot> {
     };
   prepareCassettesDir();
   const path = cassettePathFor(name) as string;
+  // Once, up front: a cassette copied in from elsewhere arrives with whatever mode it had.
+  ensureOwnerOnly(path);
   const { recordingObservability, recordingWaf } = await import('./record');
   const observability = await import('../observability');
   observability.installObservabilityBackend(

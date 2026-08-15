@@ -682,21 +682,50 @@ describe('adviseBan — is acting worth it', () => {
     );
   });
 
-  test('distinguishes probing from harvesting when every response is 4xx', () => {
-    expect(adviseBan(prober()).leverNotes.join(' ')).toContain(
-      'probing rather than harvesting',
-    );
+  // 404 is the SITE's answer — the client asked for something that is not there.
+  test('404s read as probing rather than harvesting', () => {
+    const a = adviseBan({ ...prober(), statuses: [['404', 490]] });
+    expect(a.leverNotes.join(' ')).toContain('probing rather than harvesting');
   });
 
-  test('a client that actually gets 200s is not called a prober', () => {
+  // 429 is OUR answer, and the fixture above had it labelled as probing — a fully mitigated
+  // crawler read as a scanner, which is the opposite diagnosis. Measured on a real Googlebot
+  // impersonator: 502 of 502 were 429s against 497 valid company pages.
+  test('429s read as our mitigation, not as the client finding nothing', () => {
+    const notes = adviseBan(prober()).leverNotes.join(' ');
+    expect(notes).toContain('already being turned away');
+    expect(notes).not.toContain('probing rather than harvesting');
+  });
+
+  test('403s read the same way — a deny is also our answer', () => {
+    const a = adviseBan({ ...prober(), statuses: [['403', 490]] });
+    expect(a.leverNotes.join(' ')).toContain('already being turned away');
+  });
+
+  // Both would be true of a client we block that is also asking for nothing real. The site's
+  // answer is the more informative one, so it wins rather than printing both.
+  test('a mix of 404s and 429s reports the probing, not the mitigation', () => {
+    const a = adviseBan({
+      ...prober(),
+      statuses: [
+        ['404', 460],
+        ['429', 30],
+      ],
+    });
+    const notes = a.leverNotes.join(' ');
+    expect(notes).toContain('probing rather than harvesting');
+    expect(notes).not.toContain('already being turned away');
+  });
+
+  test('a client that actually gets 200s is neither', () => {
     const a = adviseBan({
       ...prober(),
       statuses: [['200', 490]],
       wafActions: [['log', 490]],
     });
-    expect(a.leverNotes.join(' ')).not.toContain(
-      'probing rather than harvesting',
-    );
+    const notes = a.leverNotes.join(' ');
+    expect(notes).not.toContain('probing rather than harvesting');
+    expect(notes).not.toContain('already being turned away');
   });
 });
 

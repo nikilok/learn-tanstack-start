@@ -657,17 +657,31 @@ export function adviseBan(input: AdviceInput): Advice {
   const acted = input.wafActions
     .filter(([a]) => a === 'challenge' || a === 'deny')
     .reduce((n, [, c]) => n + c, 0);
-  const missed = input.statuses
-    .filter(([code]) => code.startsWith('4'))
-    .reduce((n, [, c]) => n + c, 0);
+  // 4xx is TWO different findings and they were counted as one.
+  //
+  // A 404 is the SITE's answer: the client asked for something that does not exist, which is
+  // probing. A 403 or 429 is OUR answer: the paths may be perfectly real and we are simply turning
+  // it away. Lumped together, a fully-mitigated crawler read as a scanner — the opposite
+  // diagnosis, and it would have argued against a lever that was working. Measured on a real
+  // Googlebot impersonator: 502 of 502 responses were 429s, against 497 valid company pages.
+  const statusesMatching = (match: (code: string) => boolean): number =>
+    input.statuses
+      .filter(([code]) => match(code))
+      .reduce((n, [, c]) => n + c, 0);
+  const notFound = statusesMatching((c) => c === '404' || c === '410');
+  const turnedAway = statusesMatching((c) => c === '403' || c === '429');
   const context: string[] = [];
   if (acted >= input.total * 0.9)
     context.push(
       `managed rules already challenge or deny ${acted} of ${input.total} — an explicit deny mainly saves the challenge round-trip`,
     );
-  if (missed >= input.total * 0.9)
+  if (notFound >= input.total * 0.9)
     context.push(
-      `${missed} of ${input.total} responses are 4xx — it is finding nothing, so this is probing rather than harvesting`,
+      `${notFound} of ${input.total} responses are 404 — it is finding nothing, so this is probing rather than harvesting`,
+    );
+  else if (turnedAway >= input.total * 0.9)
+    context.push(
+      `${turnedAway} of ${input.total} responses are 403 or 429 — it is already being turned away, so this measures our mitigation and not what it was reaching for`,
     );
 
   const digest = input.ja4[0]?.[0];

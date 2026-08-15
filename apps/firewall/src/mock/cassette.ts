@@ -14,7 +14,6 @@ import {
   openSync,
   readFileSync,
   readSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -111,23 +110,6 @@ export function metricsKeys(
 /** Key-value pairs in a fixed order, so two equivalent objects serialise identically whatever order they were built in. */
 function canonical(value: Record<string, number>): [string, number][] {
   return Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-}
-
-/** Whole days since the cassette was last written, or undefined when there is none. Traffic shapes drift, and a corpus read as current when it is months old is misleading in the same direction every time. */
-export function cassetteAgeDays(
-  path: string,
-  now: Date = new Date(),
-): number | undefined {
-  if (!existsSync(path)) return undefined;
-  // Whole milliseconds on both sides: mtimeMs carries sub-millisecond precision and a Date does
-  // not, so comparing them directly loses a day at the boundary.
-  const written = Math.floor(statSync(path).mtimeMs);
-  // Floored at zero: a filesystem mtime can read AHEAD of Date.now(), and Math.floor of a small
-  // negative is -1 — a cassette written moments ago reported as "-1 days old".
-  return Math.max(
-    0,
-    Math.floor((now.getTime() - written) / (24 * 60 * 60 * 1000)),
-  );
 }
 
 /**

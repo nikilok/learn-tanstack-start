@@ -18,7 +18,6 @@ import { errMsg } from '../util';
 import type { Miss } from './backend';
 import {
   CASSETTE_VERSION,
-  cassetteAgeDays,
   ensureOwnerOnly,
   ensureOwnerOnlyFile,
   headerVersionOf,
@@ -157,7 +156,9 @@ export async function bootMock(
 ): Promise<Boot> {
   const chosen = await chooseCassette(listCassettes(), opts.named, opts.pick);
   if (chosen.kind !== 'chose') return chosen;
-  const { name: cassetteName, path: cassetteFile } = chosen.info;
+  // ageDays comes from the listing rather than a second stat: listCassettes already read the
+  // mtime to rank the drawer, and re-reading it after the chdir was a redundant syscall.
+  const { name: cassetteName, path: cassetteFile, ageDays } = chosen.info;
 
   // Read and checked BEFORE the sandbox is built or the environment is replaced, so a refusal
   // leaves the process exactly as it found it. A cassette whose keys mean something else answers
@@ -195,7 +196,6 @@ export async function bootMock(
   // does exactly this, for exactly the same reason.
   process.chdir(dir);
 
-  const ageDays = cassetteAgeDays(cassetteFile);
   const logPath = missLogPath();
   // Once, up front, like the cassette: a log left over from an earlier session keeps whatever mode
   // it had, and appending never tightens it.
@@ -245,7 +245,7 @@ export async function bootMock(
         const substituted = misses.get('window-substituted') ?? 0;
         return [
           `mock session over ${cassette.entries.size} recordings from "${cassetteName}"`,
-          ageDays !== undefined && ageDays >= STALE_CASSETTE_DAYS
+          ageDays >= STALE_CASSETTE_DAYS
             ? `the cassette is ${ageDays} days old — re-record it, or delete it (it holds real client IPs and fingerprints)`
             : '',
           unrecorded ? `${unrecorded} queries had nothing recorded` : '',

@@ -17,7 +17,6 @@ import {
   CASSETTE_VERSION,
   UNVERSIONED,
   appendCassette,
-  cassetteAgeDays,
   ensureOwnerOnly,
   ensureOwnerOnlyFile,
   headerVersionOf,
@@ -260,34 +259,6 @@ describe('the cassette file', () => {
     const loaded = loadCassette(path);
     expect(loaded.entries.size).toBe(1);
     expect(loaded.loose.size).toBe(0);
-  });
-});
-
-describe('cassetteAgeDays', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'fw-age-'));
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  test('an absent cassette has no age, which is not the same as a fresh one', () => {
-    expect(cassetteAgeDays(join(dir, 'absent.jsonl'))).toBeUndefined();
-  });
-
-  test('reports whole days since it was last written', () => {
-    const path = join(dir, 'c.jsonl');
-    appendCassette(path, 'k', {}, 'l');
-    // Built from the same whole-millisecond value the helper reads, or the sub-millisecond part
-    // of mtimeMs lands the difference just short of 31 days and it floors to 30.
-    const written = Math.floor(statSync(path).mtimeMs);
-    const later = new Date(written + 31 * 24 * 60 * 60 * 1000);
-    expect(cassetteAgeDays(path, later)).toBe(31);
-  });
-
-  test('a cassette written moments ago is zero days old, not undefined', () => {
-    const path = join(dir, 'c.jsonl');
-    appendCassette(path, 'k', {}, 'l');
-    expect(cassetteAgeDays(path)).toBe(0);
   });
 });
 

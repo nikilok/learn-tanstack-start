@@ -141,6 +141,18 @@ export function cassettePathFor(
     : undefined;
 }
 
+/**
+ * Whole days between two instants, floored at zero.
+ *
+ * Floored because a filesystem mtime can read AHEAD of Date.now(), and Math.floor of a small
+ * negative is -1 — a cassette written moments ago reported as "-1 days old". Callers pass whole
+ * milliseconds on both sides: mtimeMs carries sub-millisecond precision and a Date does not, so
+ * comparing them directly loses a day at the boundary.
+ */
+export function ageInDays(writtenMs: number, nowMs: number): number {
+  return Math.max(0, Math.floor((nowMs - writtenMs) / (24 * 60 * 60 * 1000)));
+}
+
 export type CassetteInfo = {
   name: string;
   path: string;
@@ -192,10 +204,7 @@ export function listCassettes(
       path,
       bytes: stat.size,
       writtenMs: written,
-      ageDays: Math.max(
-        0,
-        Math.floor((now.getTime() - written) / (24 * 60 * 60 * 1000)),
-      ),
+      ageDays: ageInDays(written, now.getTime()),
     });
   }
   // By the real write time, not the rounded day: everything recorded today has ageDays 0, so

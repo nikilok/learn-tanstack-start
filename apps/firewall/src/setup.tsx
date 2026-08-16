@@ -74,6 +74,16 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  // Checked BEFORE the boot below, which creates the sandbox, replaces the environment and chdirs.
+  // Refusing after all that left `.firewall-mock` behind on a run that never started.
+  if (!interactive && !apply && !dryRun) {
+    console.error(
+      'firewall:setup is interactive — no TTY detected.\n' +
+        'Run it in a terminal for the TUI, or pass --apply to apply non-interactively (CI), or --dry-run to preview.',
+    );
+    process.exitCode = 1;
+    return;
+  }
   // Before anything else imports: client.ts and rules.ts read the environment at import time, and
   // a mock session is only credential-free if the fabrication happens first.
   let session: Session | undefined;
@@ -108,12 +118,6 @@ async function main() {
   } else if (apply || dryRun) {
     const { runHeadless } = await import('./client');
     await runHeadless();
-  } else {
-    console.error(
-      'firewall:setup is interactive — no TTY detected.\n' +
-        'Run it in a terminal for the TUI, or pass --apply to apply non-interactively (CI), or --dry-run to preview.',
-    );
-    process.exitCode = 1;
   }
   // After the TUI has given the terminal back, or it is written to a buffer that is about to go.
   if (session) console.log(session.summary());

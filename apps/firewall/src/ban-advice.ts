@@ -680,7 +680,7 @@ export function adviseBan(input: AdviceInput): Advice {
     );
   if (notFound >= input.total * 0.9)
     context.push(
-      `${notFound} of ${input.total} responses are 404 — it is finding nothing, so this is probing rather than harvesting`,
+      `${notFound} of ${input.total} responses say the page is not there (404/410) — it is finding nothing, so this is probing rather than harvesting`,
     );
 
   const digest = input.ja4[0]?.[0];

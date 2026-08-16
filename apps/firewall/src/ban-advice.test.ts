@@ -10,6 +10,7 @@ import {
   WAF_RULE_QUERY,
   adviseBan,
   type AdviceInput,
+  leverCoverage,
   type Reach,
   recommendsAction,
   sustainedByDuration,
@@ -259,6 +260,28 @@ describe('adviseBan — the blockers that matter', () => {
       }),
     );
     expect(a.leverNotes.join(' ')).toContain('present in only 5 of its 24');
+  });
+});
+
+describe('leverCoverage', () => {
+  test('an ordinary share is the count over the total', () => {
+    expect(leverCoverage('AWS', [['AWS', 50]], 200)).toBe(0.25);
+    expect(leverCoverage('AWS', [['AWS', 200]], 200)).toBe(1);
+  });
+
+  test('impossible counts refuse rather than resolve', () => {
+    // Both are reachable: the breakdown and the total come from different queries, and the
+    // total falls back to a route-derived figure that excludes denied requests.
+    expect(leverCoverage('AWS', [['AWS', 7783]], 100)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', -5]], 100)).toBeNull();
+  });
+
+  test('an absent label or unreadable measure is unknown, not zero', () => {
+    expect(leverCoverage('AWS', [['Other', 50]], 200)).toBeNull();
+    expect(leverCoverage(undefined, [['AWS', 50]], 200)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', Number.NaN]], 200)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', 50]], 0)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', 50]], Number.NaN)).toBeNull();
   });
 });
 
@@ -1501,6 +1524,26 @@ describe('a challenged fingerprint cannot clear its own deny', () => {
     expect(a.verdict).not.toBe('ban');
     expect(a.leverNotes.join(' ')).toContain('only 1%');
     expect(a.leverNotes.join(' ')).toContain('the wrong trade');
+  });
+
+  test('an ASN count larger than the identity is impossible, so it is refused', () => {
+    // `total` and `asns` come from DIFFERENT queries, and `total` falls back to a route-derived
+    // figure when the status query degrades to []. Routes exclude denied requests while an ASN
+    // grouping counts them, so a heavily-denied identity yields a count above its own total.
+    // That ratio is >1, which cleared the coverage bar exactly as a strong majority does — and
+    // silently, because the coverage note only prints when it refuses.
+    const asn = 'Some Hosting Ltd';
+    const a = adviseBan(
+      scraper({
+        digestReach: censored(),
+        challengedJa4: true,
+        asns: [[asn, 20_000]], // against a total of 9060
+        asnReach: censored({ label: asn, ips: 40 }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.kind).not.toBe('asn');
+    expect(a.leverNotes.join(' ')).toContain('an unknown share');
   });
 
   test('an ASN whose share cannot be computed is refused, not assumed', () => {

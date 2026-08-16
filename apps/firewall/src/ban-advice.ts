@@ -63,9 +63,21 @@ export function leverCoverage(
   total: number,
 ): number | null {
   if (!label || !Number.isFinite(total) || total <= 0) return null;
-  const row = breakdown.find(([name]) => name === label);
-  if (!row || !Number.isFinite(row[1])) return null;
-  return row[1] / total;
+  const count = breakdown.find(([name]) => name === label)?.[1];
+  // An impossible pair refuses rather than resolves, and the pair CAN be impossible: `total` and
+  // this breakdown come from different queries, and `total` falls back to a route-derived figure
+  // when the status query degrades to []. Routes exclude denied requests while an ASN grouping
+  // counts them, so a heavily-denied identity yields a count far larger than its total. That
+  // produced a ratio above 1, which cleared the coverage bar exactly as a strong majority does
+  // and offered the network for denial — silently, because the note only prints on refusal.
+  if (
+    count === undefined ||
+    !Number.isFinite(count) ||
+    count < 0 ||
+    count > total
+  )
+    return null;
+  return count / total;
 }
 
 /**

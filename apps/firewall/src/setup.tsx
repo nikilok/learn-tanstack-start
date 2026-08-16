@@ -105,22 +105,29 @@ async function main() {
     }
     session = result.session;
   }
-  if (interactive) {
-    const { App } = await import('./app');
-    const { enterTuiScreen, leaveTuiScreen } = await import('./terminal');
-    enterTuiScreen();
-    try {
-      await render(<App />).waitUntilExit();
-    } finally {
-      // Before anything prints: an error surfaced while still on the app buffer vanishes with it.
-      leaveTuiScreen();
+  try {
+    if (interactive) {
+      const { App } = await import('./app');
+      const { enterTuiScreen, leaveTuiScreen } = await import('./terminal');
+      enterTuiScreen();
+      try {
+        await render(<App />).waitUntilExit();
+      } finally {
+        // Before anything prints: an error surfaced while still on the app buffer vanishes with it.
+        leaveTuiScreen();
+      }
+    } else if (apply || dryRun) {
+      const { runHeadless } = await import('./client');
+      await runHeadless();
     }
-  } else if (apply || dryRun) {
-    const { runHeadless } = await import('./client');
-    await runHeadless();
+  } finally {
+    // In a finally, because a crashed RECORDING is exactly when this matters most: the summary is
+    // the only thing that says how many responses landed, how many failed and why, and whether the
+    // cassette is usable at all. Printed on the way out either way, before main().catch() reports
+    // the failure itself. After the TUI has given the terminal back, or it goes to a buffer that
+    // is about to be discarded.
+    if (session) console.log(session.summary());
   }
-  // After the TUI has given the terminal back, or it is written to a buffer that is about to go.
-  if (session) console.log(session.summary());
 }
 
 main().catch((error) => {

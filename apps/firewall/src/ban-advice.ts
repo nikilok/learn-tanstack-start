@@ -669,8 +669,11 @@ export function adviseBan(input: AdviceInput): Advice {
       .filter(([code]) => match(code))
       .reduce((n, [, c]) => n + c, 0);
   const notFound = statusesMatching((c) => c === '404' || c === '410');
-  const turnedAway = statusesMatching((c) => c === '403' || c === '429');
   const context: string[] = [];
+  // Mitigation is reported from wafActions, NOT from status codes. A 403 or 429 says the client
+  // was turned away but not BY WHOM — the origin can answer either — whereas wafAction is
+  // attributed by construction. A second note keyed on 4xx said the same thing as this one on
+  // every real case, and said it without knowing whether we were the ones who did it.
   if (acted >= input.total * 0.9)
     context.push(
       `managed rules already challenge or deny ${acted} of ${input.total} — an explicit deny mainly saves the challenge round-trip`,
@@ -678,10 +681,6 @@ export function adviseBan(input: AdviceInput): Advice {
   if (notFound >= input.total * 0.9)
     context.push(
       `${notFound} of ${input.total} responses are 404 — it is finding nothing, so this is probing rather than harvesting`,
-    );
-  else if (turnedAway >= input.total * 0.9)
-    context.push(
-      `${turnedAway} of ${input.total} responses are 403 or 429 — it is already being turned away, so this measures our mitigation and not what it was reaching for`,
     );
 
   const digest = input.ja4[0]?.[0];

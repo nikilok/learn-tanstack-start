@@ -223,6 +223,15 @@ export function headerVersionOf(path: string): number | undefined {
  * definition, and re-recording is how an operator asks for it to be replaced.
  */
 export function resetCassette(path: string): void {
+  // Validated like its sibling. This TRUNCATES, and it is exported, so a symlink or a directory
+  // here would destroy whatever the path really points at rather than a stale cassette.
+  const stat = lstatSync(path);
+  if (!stat.isFile())
+    throw new Error(
+      `${path} is ${
+        stat.isSymbolicLink() ? 'a symlink' : 'not a regular file'
+      }, and a cassette must be one — resetting it would truncate something else`,
+    );
   writeFileSync(path, headerLine(), { mode: 0o600 });
   chmodSync(path, 0o600);
 }

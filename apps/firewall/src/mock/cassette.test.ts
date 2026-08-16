@@ -444,3 +444,27 @@ describe('a path that is not a regular file', () => {
     );
   });
 });
+
+describe('resetting through something that is not a cassette', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-reset2-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // resetCassette TRUNCATES and is exported, so a link here destroys the target.
+  test('refuses a symlink, leaving the target intact', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'important\n');
+    symlinkSync(target, join(dir, 'c.jsonl'));
+    expect(() => resetCassette(join(dir, 'c.jsonl'))).toThrow('a symlink');
+    expect(readFileSync(target, 'utf8')).toBe('important\n');
+  });
+
+  test('refuses a directory', () => {
+    mkdirSync(join(dir, 'c.jsonl'));
+    expect(() => resetCassette(join(dir, 'c.jsonl'))).toThrow(
+      'not a regular file',
+    );
+  });
+});

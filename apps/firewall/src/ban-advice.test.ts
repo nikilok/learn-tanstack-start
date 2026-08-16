@@ -691,20 +691,34 @@ describe('adviseBan — is acting worth it', () => {
   // 429 is OUR answer, and the fixture above had it labelled as probing — a fully mitigated
   // crawler read as a scanner, which is the opposite diagnosis. Measured on a real Googlebot
   // impersonator: 502 of 502 were 429s against 497 valid company pages.
-  test('429s read as our mitigation, not as the client finding nothing', () => {
-    const notes = adviseBan(prober()).leverNotes.join(' ');
-    expect(notes).toContain('already being turned away');
-    expect(notes).not.toContain('probing rather than harvesting');
+  // 429 is OUR answer, and the fixture above had it labelled as probing — a fully mitigated
+  // crawler read as a scanner, the opposite diagnosis. Measured on a real Googlebot impersonator:
+  // 502 of 502 were 429s against 497 valid company pages.
+  test('429s are not called probing', () => {
+    expect(adviseBan(prober()).leverNotes.join(' ')).not.toContain(
+      'probing rather than harvesting',
+    );
   });
 
-  test('403s read the same way — a deny is also our answer', () => {
+  test('403s are not either — a deny is also our answer, not the site saying "not here"', () => {
     const a = adviseBan({ ...prober(), statuses: [['403', 490]] });
-    expect(a.leverNotes.join(' ')).toContain('already being turned away');
+    expect(a.leverNotes.join(' ')).not.toContain(
+      'probing rather than harvesting',
+    );
   });
 
-  // Both would be true of a client we block that is also asking for nothing real. The site's
-  // answer is the more informative one, so it wins rather than printing both.
-  test('a mix of 404s and 429s reports the probing, not the mitigation', () => {
+  // Attribution comes from wafActions, which knows who answered. A status code does not: the
+  // origin can return 403 or 429 just as the WAF can.
+  test('the mitigation note comes from the waf action, not the status', () => {
+    const a = adviseBan({
+      ...prober(),
+      statuses: [['403', 490]],
+      wafActions: [['log', 490]],
+    });
+    expect(a.leverNotes.join(' ')).not.toContain('saves the challenge');
+  });
+
+  test('a mix still reports probing when the 404s dominate', () => {
     const a = adviseBan({
       ...prober(),
       statuses: [
@@ -712,20 +726,18 @@ describe('adviseBan — is acting worth it', () => {
         ['429', 30],
       ],
     });
-    const notes = a.leverNotes.join(' ');
-    expect(notes).toContain('probing rather than harvesting');
-    expect(notes).not.toContain('already being turned away');
+    expect(a.leverNotes.join(' ')).toContain('probing rather than harvesting');
   });
 
-  test('a client that actually gets 200s is neither', () => {
+  test('a client that actually gets 200s is not called a prober', () => {
     const a = adviseBan({
       ...prober(),
       statuses: [['200', 490]],
       wafActions: [['log', 490]],
     });
-    const notes = a.leverNotes.join(' ');
-    expect(notes).not.toContain('probing rather than harvesting');
-    expect(notes).not.toContain('already being turned away');
+    expect(a.leverNotes.join(' ')).not.toContain(
+      'probing rather than harvesting',
+    );
   });
 });
 

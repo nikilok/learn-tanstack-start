@@ -185,6 +185,10 @@ export async function bootMock(
         `Re-record it:  bun run firewall:record --cassette ${cassetteName}`,
     };
 
+  // Captured before the chdir below. bootMock runs IN-PROCESS in tests, so a failure after it
+  // would leave every later test running from the sandbox — the exact live-state hazard the test
+  // preload's own chdir exists to prevent.
+  const startedIn = process.cwd();
   const dir = prepareSandbox();
   // Read BEFORE the overwrite, which is the only moment it is knowable. A real token here means
   // the session was launched through firewall:setup rather than firewall:mock, so it is running on
@@ -218,17 +222,26 @@ export async function bootMock(
     if (log) appendMissLog(log, `${miss.reason}  ${miss.key}`);
   };
 
-  const { mockObservability, mockWaf, recordedLiveConfig } =
-    await import('./backend');
-  const { decodeLiveConfig } = await import('./codec');
-  const observability = await import('../observability');
-  observability.installObservabilityBackend(
-    mockObservability(cassette, onMiss),
-  );
-  const client = await import('../client');
-  client.installWafBackend(
-    mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
-  );
+  // Everything from here can throw — a dynamic import of a module poisoned by a failed evaluation,
+  // or an installer refusing. The cwd goes back before the refusal so the caller is left where it
+  // started; in a test process that is the difference between one failed case and every later
+  // case running from the sandbox.
+  try {
+    const { mockObservability, mockWaf, recordedLiveConfig } =
+      await import('./backend');
+    const { decodeLiveConfig } = await import('./codec');
+    const observability = await import('../observability');
+    observability.installObservabilityBackend(
+      mockObservability(cassette, onMiss),
+    );
+    const client = await import('../client');
+    client.installWafBackend(
+      mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
+    );
+  } catch (error) {
+    process.chdir(startedIn);
+    return { kind: 'refused', message: errMsg(error) };
+  }
 
   if (log)
     appendMissLog(

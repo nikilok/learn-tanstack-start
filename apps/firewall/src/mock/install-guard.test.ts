@@ -11,17 +11,21 @@ import {
 
 const FLAGS = ['--mock', '--record'];
 
+// Restored by snapshot, not by filtering: a filter also strips a flag the process was genuinely
+// started with, which would change what isMock()/isRecording() report for every later file.
 function withFlag<T>(flag: string, fn: () => T): T {
+  const before = [...process.argv];
   process.argv.push(flag);
   try {
     return fn();
   } finally {
-    process.argv = process.argv.filter((a) => a !== flag);
+    process.argv = before;
   }
 }
 
+const ORIGINAL_ARGV = [...process.argv];
 afterEach(() => {
-  process.argv = process.argv.filter((a) => !FLAGS.includes(a));
+  process.argv = [...ORIGINAL_ARGV];
 });
 
 describe('installing an observability backend', () => {

@@ -79,6 +79,13 @@ export function recordingWaf(
       capture(stats, path, LIVE_CONFIG_KEY, encodeLiveConfig(config));
       return config;
     },
-    applyItem: live.applyItem,
+    // REFUSED, not passed through. A recording exists to capture reads, and nobody records in
+    // order to apply — but it is a live TUI with the apply key live, and that is not theoretical:
+    // an apply fired during a recording in this repo's own development, from a stray keystroke.
+    // The read path is what a cassette needs; the write path is what an accident reaches.
+    applyItem: async () => ({
+      status: 'error' as const,
+      detail: 'recording is read-only — re-run without --record to apply',
+    }),
   };
 }

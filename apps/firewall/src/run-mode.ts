@@ -30,9 +30,15 @@ export function badgeFor(mode: RunMode): ModeBadge {
   return BADGES[mode];
 }
 
-/** The one-line caption under the header, or undefined when there is nothing to say. Only a mock session has something: everything on screen is recorded or synthetic, and nothing it writes leaves the sandbox. */
+/**
+ * The one-line caption under the header, or undefined when there is nothing to say.
+ *
+ * "recorded", not "synthetic". The traffic on screen is a real recording — real client IPs, real
+ * fingerprints — and calling it synthetic invites someone to treat the screen as safe to share.
+ * What IS synthetic is the seeded rule config, which is not what this line is about.
+ */
 export function modeNote(mode: RunMode): string | undefined {
   return mode === 'mock'
-    ? 'synthetic data · sandboxed state · no credentials'
+    ? 'recorded traffic · sandboxed state · no credentials'
     : undefined;
 }

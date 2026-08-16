@@ -15,6 +15,7 @@
 import { appendFileSync } from 'node:fs';
 
 import { errMsg } from '../util';
+import type { RecordingStats } from './record';
 import type { Miss } from './backend';
 import {
   CASSETTE_VERSION,
@@ -236,11 +237,15 @@ export async function bootMock(
     const { mockObservability, mockWaf, recordedLiveConfig } =
       await import('./backend');
     const { decodeLiveConfig } = await import('./codec');
+    // BOTH modules resolve before EITHER backend is installed. Installing observability and then
+    // failing to import ../client left the process with a mock reader and a live writer — and
+    // ../client is exactly the module that can fail to import, since a failed evaluation of its
+    // module-scope credential read poisons it for the rest of the process.
     const observability = await import('../observability');
+    const client = await import('../client');
     observability.installObservabilityBackend(
       mockObservability(cassette, onMiss),
     );
-    const client = await import('../client');
     client.installWafBackend(
       mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
     );
@@ -331,14 +336,20 @@ export async function bootRecording(name: string): Promise<Boot> {
   } catch (error) {
     return { kind: 'refused', message: errMsg(error) };
   }
-  const { recordingObservability, recordingWaf } = await import('./record');
-  const stats = { written: 0, failed: 0 };
-  const observability = await import('../observability');
-  observability.installObservabilityBackend(
-    recordingObservability(observability.liveObservability, path, stats),
-  );
-  const client = await import('../client');
-  client.installWafBackend(recordingWaf(client.liveWaf, path, stats));
+  const stats: RecordingStats = { written: 0, failed: 0 };
+  try {
+    const { recordingObservability, recordingWaf } = await import('./record');
+    // Both first, then install — same reason as bootMock: a half-installed pair leaves a mock
+    // reader against a live writer, which is the worst of both.
+    const observability = await import('../observability');
+    const client = await import('../client');
+    observability.installObservabilityBackend(
+      recordingObservability(observability.liveObservability, path, stats),
+    );
+    client.installWafBackend(recordingWaf(client.liveWaf, path, stats));
+  } catch (error) {
+    return { kind: 'refused', message: errMsg(error) };
+  }
   return {
     kind: 'started',
     session: {
@@ -349,7 +360,9 @@ export async function bootRecording(name: string): Promise<Boot> {
             ? `replaced a format ${replaced} cassette this build could not read`
             : '',
           stats.failed
-            ? `${stats.failed} could NOT be written — the cassette is incomplete`
+            ? `${stats.failed} could NOT be written — the cassette is incomplete${
+                stats.firstError ? ` (${stats.firstError})` : ''
+              }`
             : '',
           stats.written === 0
             ? 'nothing was recorded; a mock session will refuse this cassette'

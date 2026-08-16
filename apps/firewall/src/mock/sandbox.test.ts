@@ -275,3 +275,34 @@ describe('undoing the fabricated environment', () => {
     expect(process.env.FW_BLOCKED_JA4).toBe('original');
   });
 });
+
+describe('the sandbox env reader', () => {
+  // It was a second copy of readFwVars and the two had diverged: only the other stripped a
+  // leading `export `, so the same file gave different answers depending on which one loaded it.
+  test('reads an exported assignment, like the parser it delegates to', () => {
+    const path = join(dir, '.env.local');
+    writeFileSync(path, 'export FW_WATCH_HOURS=12\nFW_JA4_LIMIT=7\n');
+    expect(readSandboxEnv(path)).toEqual({
+      FW_WATCH_HOURS: '12',
+      FW_JA4_LIMIT: '7',
+    });
+  });
+
+  test('still reads FW_ keys only', () => {
+    const path = join(dir, '.env.local');
+    writeFileSync(path, 'export VERCEL_TOKEN=a-real-looking-token\nFW_WATCH_HOURS=3\n');
+    const read = readSandboxEnv(path);
+    expect(read.VERCEL_TOKEN).toBeUndefined();
+    expect(read.FW_WATCH_HOURS).toBe('3');
+  });
+});
+
+describe('a sandbox .env.local that is not a regular file', () => {
+  // A directory here survived every guard and then threw EISDIR from readSandboxEnv, outside any
+  // try — a crash rather than a refusal.
+  test('a directory is refused', () => {
+    const box = join(dir, 'box');
+    mkdirSync(join(box, '.env.local'), { recursive: true });
+    expect(() => prepareSandbox(box)).toThrow('not a regular file');
+  });
+});

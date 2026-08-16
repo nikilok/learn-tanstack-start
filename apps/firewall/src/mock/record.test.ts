@@ -111,11 +111,23 @@ describe('recording the WAF', () => {
     });
   });
 
-  // Writes are not recorded, and they are not intercepted either: --record applies for real.
-  test('the write path is the live one, untouched', () => {
-    const applyItem = async (_i: Item) => ({ status: 'inserted' as const });
-    const live: WafBackend = { fetchLive: async () => LIVE_CONFIG, applyItem };
-    expect(recordingWaf(live, path, stats()).applyItem).toBe(applyItem);
+  // A recording captures READS. It is still a live TUI with the apply key live, and an apply
+  // fired during one from a stray keystroke during this repo's own development — so the write
+  // path is refused rather than passed through.
+  test('the write path is refused, never reaching the live one', async () => {
+    let reached = false;
+    const live: WafBackend = {
+      fetchLive: async () => LIVE_CONFIG,
+      applyItem: async () => {
+        reached = true;
+        return { status: 'inserted' as const };
+      },
+    };
+    const backend = recordingWaf(live, path, stats());
+    const result = await backend.applyItem({} as Item, new Map());
+    expect(reached).toBe(false);
+    expect(result.status).toBe('error');
+    expect(result.detail).toContain('read-only');
   });
 });
 

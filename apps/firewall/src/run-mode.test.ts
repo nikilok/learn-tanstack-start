@@ -47,8 +47,15 @@ describe('the header badge', () => {
 
 describe('the caption', () => {
   test('only a mock session has something to add', () => {
-    expect(modeNote('mock')).toContain('synthetic');
+    expect(modeNote('mock')).toContain('sandboxed');
     expect(modeNote('live')).toBeUndefined();
     expect(modeNote('dry-run')).toBeUndefined();
+  });
+
+  // It said "synthetic data" while replaying a recording of real traffic — real client IPs and
+  // real fingerprints — which invites an operator to treat the screen as safe to share.
+  test('does not call recorded traffic synthetic', () => {
+    expect(modeNote('mock')).not.toContain('synthetic');
+    expect(modeNote('mock')).toContain('recorded');
   });
 });

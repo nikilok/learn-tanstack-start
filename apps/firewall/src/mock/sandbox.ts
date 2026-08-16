@@ -4,15 +4,10 @@
 // boolean somebody has to get right at every write; this is a process whose credentials are fake
 // and whose cwd is not the repo, so the writes have nowhere real to land.
 
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { readFwVars } from '../env-file';
 import { REPO_ROOT } from '../repo-root';
 
 export const SANDBOX_DIR = '.firewall-mock';
@@ -82,24 +77,16 @@ function refuseLink(path: string, what: string): void {
     );
 }
 
-/** FW_* assignments from a sandbox .env.local, so a deny persisted by one mock session is live in the next. */
+/**
+ * FW_* assignments from a sandbox .env.local, so a deny persisted by one mock session is live in
+ * the next.
+ *
+ * Delegates rather than parsing. This was a second copy of the same reader and the two had already
+ * diverged — only the other stripped a leading `export `, so the same file gave different answers
+ * depending on which one loaded it.
+ */
 export function readSandboxEnv(path: string): Record<string, string> {
-  if (!existsSync(path)) return {};
-  const out: Record<string, string> = {};
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    // FW_* only. A real token pasted into the sandbox file must still not become a credential.
-    if (!key.startsWith('FW_')) continue;
-    out[key] = trimmed
-      .slice(eq + 1)
-      .trim()
-      .replace(/^(['"])(.*)\1$/, '$2');
-  }
-  return out;
+  return readFwVars(path);
 }
 
 /**
@@ -154,6 +141,12 @@ export function prepareSandbox(dir: string = sandboxPath()): string {
   refuseLink(dir, 'sandbox directory');
   const env = sandboxEnvPath(dir);
   refuseLink(env, 'sandbox .env.local');
+  // A DIRECTORY here survives refuseLink and the `wx` write below, and then readSandboxEnv throws
+  // EISDIR from outside any guard. A cassette is held to the same rule for the same reason.
+  if (existsSync(env) && !lstatSync(env).isFile())
+    throw new Error(
+      `${env} is not a regular file, and the sandbox .env.local must be one`,
+    );
   if (!existsSync(env))
     writeFileSync(
       env,

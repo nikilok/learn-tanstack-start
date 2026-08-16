@@ -227,7 +227,7 @@ export function installObservabilityBackend(next: ObservabilityBackend): void {
   backend = next;
 }
 
-/** POST the dashboard observability endpoint. Hourly buckets over the whole window unless overridden. */
+/** One traffic read, through whatever backend is installed — the live endpoint by default, a recording under --mock. Hourly buckets over the whole window unless overridden. */
 export function metrics(
   ctx: Ctx,
   groupBy: string[],

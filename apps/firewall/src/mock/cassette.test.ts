@@ -200,7 +200,7 @@ describe('the cassette file', () => {
   // What a crash mid-record leaves behind. The rest of the corpus is still good.
   test('a truncated last line is counted, not thrown, and the rest still loads', () => {
     appendCassette(path, 'good', { summary: [] }, 'loose');
-    writeFileSync(path, `${'{"k":"half'}`, { flag: 'a' });
+    writeFileSync(path, '{"k":"half', { flag: 'a' });
     const loaded = loadCassette(path);
     expect(loaded.entries.has('good')).toBe(true);
     expect(loaded.skipped).toBe(1);

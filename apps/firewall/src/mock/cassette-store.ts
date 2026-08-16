@@ -34,12 +34,16 @@ export function isOpsRepo(dir: string): boolean {
 export function configuredOpsPath(): string | undefined {
   // process.env first so an exported value still wins, then the file, which is what a
   // `--no-env-file` mock session cannot see any other way.
+  const exported = envText(OPS_PATH_KEY);
+  if (exported) return exported;
+  // Read only when the environment did not answer — the previous shape computed this first and so
+  // opened the file on every call, including the ones that never used it.
+  //
   // `|| undefined`, not `?? undefined`: a blank assignment trims to '' and nullish coalescing
   // keeps it, which would hand a caller an empty path where envText gives undefined.
-  const fromFile =
-    readFwVars(join(REPO_ROOT, '.env.local'))[OPS_PATH_KEY]?.trim() ||
-    undefined;
-  return envText(OPS_PATH_KEY) ?? fromFile;
+  return (
+    readFwVars(join(REPO_ROOT, '.env.local'))[OPS_PATH_KEY]?.trim() || undefined
+  );
 }
 
 /** The ops-repo checkout, found by its contents rather than its name. Used only when nothing is configured. */

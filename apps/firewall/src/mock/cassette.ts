@@ -204,6 +204,8 @@ export function headerVersionOf(path: string): number | undefined {
   if (!existsSync(path)) return undefined;
   const fd = openSync(path, 'r');
   try {
+    // 4096 is far beyond any header this build writes (~16 bytes), so a first line that fills it
+    // is an ENTRY, not a header — and UNVERSIONED is the right answer for that file.
     const buffer = Buffer.alloc(4096);
     const read = readSync(fd, buffer, 0, buffer.length, 0);
     const text = buffer.subarray(0, read).toString();

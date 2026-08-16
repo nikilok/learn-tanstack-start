@@ -103,14 +103,29 @@ export function readSandboxEnv(path: string): Record<string, string> {
 }
 
 /**
- * Replace this process's environment with the mock one, before any module has read it.
+ * Replace this process's environment with the mock one, before any module has read it. Returns the
+ * undo, for a session that refuses after this point.
  *
  * The VERCEL_* overwrite is the second of two layers. The first is the script: `--no-env-file`
  * stops bun auto-loading the repo's own .env.local, so the real token is never in the process at
  * all. This one covers a hand-run `bun src/setup.tsx --mock`, where it is — `credentials.ts` reads
  * process.env, so once these are fake there is no path left that can produce the real one.
  */
-export function fabricateEnv(sandboxEnv: Record<string, string> = {}): void {
+export function fabricateEnv(
+  sandboxEnv: Record<string, string> = {},
+): () => void {
+  const touched = [
+    'VERCEL_TOKEN',
+    'VERCEL_PROJECT_ID',
+    'VERCEL_TEAM_ID',
+    ...Object.keys(MOCK_ENV),
+    ...Object.keys(sandboxEnv),
+    ...REFUSED_ENV,
+  ];
+  // Snapshot before anything moves. bootMock runs IN-PROCESS in tests, so a session that refuses
+  // after this point would otherwise leave fabricated credentials in place for every later file —
+  // the same hazard as the chdir, which was restored while this was not.
+  const before = new Map(touched.map((k) => [k, process.env[k]]));
   process.env.VERCEL_TOKEN = 'mock-token-not-a-credential';
   process.env.VERCEL_PROJECT_ID = 'prj_mock';
   process.env.VERCEL_TEAM_ID = 'team_mock';
@@ -118,6 +133,12 @@ export function fabricateEnv(sandboxEnv: Record<string, string> = {}): void {
   for (const [key, value] of Object.entries(sandboxEnv))
     process.env[key] = value;
   for (const key of REFUSED_ENV) delete process.env[key];
+  return () => {
+    for (const [key, value] of before) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
 }
 
 /** Create the sandbox if it is not there yet and return it. Existing contents are left alone: a watch list built up over a few sessions is the point of a directory rather than a temp dir. */

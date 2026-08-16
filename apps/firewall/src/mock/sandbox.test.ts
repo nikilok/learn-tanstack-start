@@ -236,3 +236,42 @@ describe('a dangling symlink in the sandbox', () => {
     expect(() => prepareSandbox(link)).toThrow('symlink');
   });
 });
+
+describe('undoing the fabricated environment', () => {
+  // bootMock runs IN-PROCESS in tests, so a session that refuses after fabricateEnv would leave
+  // fabricated credentials for every later file. The cwd was already restored; this was not.
+  test('puts back what was there', () => {
+    process.env.VERCEL_TOKEN = 'a-real-looking-token';
+    process.env.FW_WATCH_HOURS = '99';
+    const restore = fabricateEnv();
+    expect(process.env.VERCEL_TOKEN).toBe('mock-token-not-a-credential');
+    restore();
+    expect(process.env.VERCEL_TOKEN).toBe('a-real-looking-token');
+    expect(process.env.FW_WATCH_HOURS).toBe('99');
+  });
+
+  test('removes what was not there before', () => {
+    delete process.env.FW_BLOCKED_ASN;
+    const restore = fabricateEnv();
+    expect(process.env.FW_BLOCKED_ASN).toBeTruthy();
+    restore();
+    expect(process.env.FW_BLOCKED_ASN).toBeUndefined();
+  });
+
+  // The refused keys are DELETED by fabricateEnv, so restoring has to put them back too.
+  test('restores a key fabricateEnv deleted', () => {
+    process.env.FW_AUTO_BAN = '1';
+    const restore = fabricateEnv();
+    expect(process.env.FW_AUTO_BAN).toBeUndefined();
+    restore();
+    expect(process.env.FW_AUTO_BAN).toBe('1');
+  });
+
+  test('restores a value that came from the sandbox file', () => {
+    process.env.FW_BLOCKED_JA4 = 'original';
+    const restore = fabricateEnv({ FW_BLOCKED_JA4: 'from-the-sandbox' });
+    expect(process.env.FW_BLOCKED_JA4).toBe('from-the-sandbox');
+    restore();
+    expect(process.env.FW_BLOCKED_JA4).toBe('original');
+  });
+});

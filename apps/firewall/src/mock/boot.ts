@@ -69,7 +69,13 @@ export type Boot =
   | { kind: 'quit' }
   | { kind: 'refused'; message: string };
 
-/** Append one diagnostic line to the miss log, creating it owner-only. */
+/**
+ * Append one diagnostic line to the miss log, creating it owner-only.
+ *
+ * PRECONDITION: an EXISTING log must already have been secured — the create-mode below covers a
+ * file this writes, not one that was already there. bootMock does that once at session start and
+ * drops the log entirely if it cannot. Do not call this on an unvalidated path.
+ */
 export function appendMissLog(path: string, line: string): void {
   try {
     // 0600 like the cassette: a miss line carries the QUERY, and a query's filter names the client
@@ -194,7 +200,7 @@ export async function bootMock(
   // the session was launched through firewall:setup rather than firewall:mock, so it is running on
   // one safety layer instead of two — still sandboxed, but worth saying out loud.
   const inherited = Boolean(process.env.VERCEL_TOKEN);
-  fabricateEnv(readSandboxEnv(sandboxEnvPath()));
+  const restoreEnv = fabricateEnv(readSandboxEnv(sandboxEnvPath()));
   // Every state file this tool keeps is resolved from cwd, so one chdir redirects the watch list,
   // the ignore list, the watch log and the investigated set at once. The test preload already
   // does exactly this, for exactly the same reason.
@@ -239,7 +245,10 @@ export async function bootMock(
       mockWaf(decodeLiveConfig(recordedLiveConfig(cassette))),
     );
   } catch (error) {
+    // Both halves. Restoring the cwd and leaving fabricated credentials behind is the same bug
+    // with a smaller blast radius.
     process.chdir(startedIn);
+    restoreEnv();
     return { kind: 'refused', message: errMsg(error) };
   }
 

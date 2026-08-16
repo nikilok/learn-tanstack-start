@@ -290,7 +290,10 @@ describe('the sandbox env reader', () => {
 
   test('still reads FW_ keys only', () => {
     const path = join(dir, '.env.local');
-    writeFileSync(path, 'export VERCEL_TOKEN=a-real-looking-token\nFW_WATCH_HOURS=3\n');
+    writeFileSync(
+      path,
+      'export VERCEL_TOKEN=a-real-looking-token\nFW_WATCH_HOURS=3\n',
+    );
     const read = readSandboxEnv(path);
     expect(read.VERCEL_TOKEN).toBeUndefined();
     expect(read.FW_WATCH_HOURS).toBe('3');

@@ -15,7 +15,6 @@
 import { appendFileSync } from 'node:fs';
 
 import { errMsg } from '../util';
-import type { RecordingStats } from './record';
 import type { Miss } from './backend';
 import {
   CASSETTE_VERSION,
@@ -35,6 +34,7 @@ import {
   prepareCassettesDir,
   validCassetteName,
 } from './cassette-store';
+import type { RecordingStats } from './record';
 import {
   fabricateEnv,
   missLogPath,

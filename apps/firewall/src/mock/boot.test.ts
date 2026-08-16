@@ -26,6 +26,19 @@ const never = async (): Promise<never> => {
   throw new Error('the picker should not have been reached');
 };
 
+// Passed explicitly rather than resolved. These messages depend on whether the drawer is
+// reachable, and reading that from the environment is why they passed locally — where a private
+// ops checkout exists — and failed in CI, where one never will.
+const REACHABLE = {
+  kind: 'found',
+  dir: '/d',
+  source: 'found',
+} as const;
+const UNREACHABLE = {
+  kind: 'missing',
+  message: 'the ops repo could not be found',
+} as const;
+
 function refusal(result: Boot | Chosen): string {
   expect(result.kind).toBe('refused');
   return (result as { kind: 'refused'; message: string }).message;
@@ -54,7 +67,9 @@ describe('choosing by name', () => {
   });
 
   test('a name given against an empty drawer says to record one', async () => {
-    const message = refusal(await chooseCassette([], 'august', never));
+    const message = refusal(
+      await chooseCassette([], 'august', never, REACHABLE),
+    );
     expect(message).toContain('firewall:record --cassette');
   });
 });
@@ -91,14 +106,33 @@ describe('with nothing recorded', () => {
   // Starting empty would make every traffic pane read zero, which is indistinguishable from a
   // working session over a quiet window.
   test('refuses and says how to record one', async () => {
-    const message = refusal(await chooseCassette([], undefined, never));
+    const message = refusal(
+      await chooseCassette([], undefined, never, REACHABLE),
+    );
     expect(message).toContain('No cassettes recorded yet');
     expect(message).toContain('bun run firewall:record --cassette <name>');
   });
 
   test('the picker is never shown an empty list', async () => {
     // `never` throws if reached; reaching it is the failure.
-    await chooseCassette([], undefined, never);
+    await chooseCassette([], undefined, never, REACHABLE);
+  });
+
+  // Empty for two very different reasons. Telling someone to record into a drawer that cannot be
+  // found sends them in a circle.
+  test('an unreachable drawer says so instead of saying to record one', async () => {
+    const message = refusal(
+      await chooseCassette([], undefined, never, UNREACHABLE),
+    );
+    expect(message).toContain('could not be found');
+    expect(message).not.toContain('No cassettes recorded yet');
+  });
+
+  test('and the same when a name was given', async () => {
+    const message = refusal(
+      await chooseCassette([], 'august', never, UNREACHABLE),
+    );
+    expect(message).toContain('could not be found');
   });
 });
 

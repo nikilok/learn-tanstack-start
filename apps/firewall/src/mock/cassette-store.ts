@@ -31,7 +31,10 @@ export function isOpsRepo(dir: string): boolean {
 }
 
 /** The configured ops-repo path, from the environment or the repo-root env file. Undefined when it is not configured at all — which is different from configured wrongly. */
-export function configuredOpsPath(): string | undefined {
+export function configuredOpsPath(
+  /** Injected so the file branch is testable. Hardcoded, its test could only assert against the developer's own .env.local — and in CI, where neither that file nor an ops checkout exists, it compared undefined to undefined and passed vacuously. */
+  envFile: string = join(REPO_ROOT, '.env.local'),
+): string | undefined {
   // process.env first so an exported value still wins, then the file, which is what a
   // `--no-env-file` mock session cannot see any other way.
   const exported = envText(OPS_PATH_KEY);
@@ -41,18 +44,18 @@ export function configuredOpsPath(): string | undefined {
   //
   // `|| undefined`, not `?? undefined`: a blank assignment trims to '' and nullish coalescing
   // keeps it, which would hand a caller an empty path where envText gives undefined.
-  return (
-    readFwVars(join(REPO_ROOT, '.env.local'))[OPS_PATH_KEY]?.trim() || undefined
-  );
+  return readFwVars(envFile)[OPS_PATH_KEY]?.trim() || undefined;
 }
 
 /** The ops-repo checkout, found by its contents rather than its name. Used only when nothing is configured. */
-export function opsRepoDir(): string | undefined {
-  const named = resolve(REPO_ROOT, '..', OPS_REPO);
+export function opsRepoDir(
+  /** Injected so the search is testable against a temp layout. CI has no ops checkout — it is a private repo — so a test that asserted the real one existed could only ever pass on a developer's machine. */
+  parent: string = resolve(REPO_ROOT, '..'),
+): string | undefined {
+  const named = join(parent, OPS_REPO);
   if (existsSync(join(named, OPS_MARKER))) return named;
   // Renamed, or cloned under another name. Its siblings are a handful of directories, and one
   // readdir at boot is cheaper than an operator wondering why the drawer is empty.
-  const parent = resolve(REPO_ROOT, '..');
   let entries: string[];
   try {
     entries = readdirSync(parent).sort();

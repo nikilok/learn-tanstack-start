@@ -26,6 +26,7 @@ import {
 } from './cassette';
 import {
   type CassetteInfo,
+  type Drawer,
   NAME_RULE,
   cassettePathFor,
   listCassettes,
@@ -101,6 +102,8 @@ export async function chooseCassette(
   available: readonly CassetteInfo[],
   named: string | undefined,
   pick: Picker | undefined,
+  /** Injected for the same reason `available` is. Reading it here made every message depend on whether a private repo happened to be checked out, which is why these passed locally and failed in CI. */
+  drawer: Drawer = resolveDrawer(),
 ): Promise<Boot | Chosen> {
   if (named !== undefined) {
     if (!validCassetteName(named))
@@ -121,23 +124,20 @@ export async function chooseCassette(
         };
       // Empty for two very different reasons: nothing recorded yet, or the drawer is unreachable.
       // Telling someone to record into a drawer that cannot be found sends them in a circle.
-      const where = resolveDrawer();
       return {
         kind: 'refused',
         message: `No cassette named "${named}".\n\n${
-          where.kind === 'found' ? RECORD_FIRST : where.message
+          drawer.kind === 'found' ? RECORD_FIRST : drawer.message
         }`,
       };
     }
     return { kind: 'chose', info: found };
   }
-  if (!available.length) {
-    const where = resolveDrawer();
+  if (!available.length)
     return {
       kind: 'refused',
-      message: where.kind === 'found' ? RECORD_FIRST : where.message,
+      message: drawer.kind === 'found' ? RECORD_FIRST : drawer.message,
     };
-  }
   if (!pick)
     return {
       kind: 'refused',

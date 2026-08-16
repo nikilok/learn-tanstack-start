@@ -17,6 +17,7 @@ import {
   adviseBan,
   browserEvidence,
   recommendsAction,
+  sustainedByDuration,
 } from './ban-advice';
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
@@ -29,7 +30,12 @@ import { bypassPaths, reachabilityFindings } from './reachability';
 import { trustedRules } from './rule-integrity';
 import { isRecoverableRule } from './rule-names';
 import { type Window, rollingWindow } from './time-window';
-import { allowedBots, screenFloor, watchHours } from './tuning';
+import {
+  allowedBots,
+  screenFloor,
+  sustainedDutyOrUnknown,
+  watchHours,
+} from './tuning';
 import { errMsg } from './util';
 import { logWatch } from './watch-log';
 import {
@@ -433,24 +439,97 @@ export function watchLines(r: WatchReport): Line[] {
   return L;
 }
 
+/** How long each digest was present for. Measured by the screen, which knows nothing of tuning. */
+export type Presence = {
+  /** Buckets each digest actually sent something in, keyed by NORMALISED digest. */
+  activeBuckets: ReadonlyMap<string, number>;
+  bucketMinutes: number;
+  windowMinutes: number;
+};
+
+/** Presence plus the threshold it is judged against, which only a tuning reader can supply. */
+export type Persistence = Presence & { duty: number };
+
 /**
- * Which screened digests are worth the cost of a full profile: enough volume to be judgeable,
- * not already denied, and capped so a classification change cannot trigger a query storm.
+ * Buckets in which each digest actually sent something, keyed by normalised digest.
+ *
+ * The observability API ZERO-FILLS: every group gets a row at every bucket, so a response's row
+ * count is groups times buckets and counting rows would report every identity as present
+ * throughout. Only a non-zero measure counts as presence. Getting this wrong does not fail
+ * loudly — it makes the persistence gate clear for everyone, which is the direction that spends
+ * profiles on the whole window and admits identities nothing has established anything about.
+ */
+export function activeBucketsByDigest(
+  responses: readonly { data?: Row[] }[],
+): Map<string, number> {
+  const seen = new Map<string, Set<string>>();
+  for (const resp of responses)
+    for (const r of resp.data ?? []) {
+      if (countOf(r) <= 0) continue;
+      const raw = String(r.clientJa4Digest ?? '');
+      if (!raw || raw === '(none)' || raw === '?') continue;
+      const t = String(r.timestamp ?? '');
+      if (!t) continue;
+      const d = JA4_DENY.normalize(raw);
+      const at = seen.get(d);
+      if (at) at.add(t);
+      else seen.set(d, new Set([t]));
+    }
+  return new Map([...seen].map(([d, at]) => [d, at.size]));
+}
+
+/**
+ * Which screened digests are worth the cost of a full profile: judgeable, not already denied, and
+ * capped so a classification change cannot trigger a query storm.
+ *
+ * Judgeable means enough volume OR enough duration. The floor alone made a self-paced client
+ * permanently invisible: it scales per day, so a client staying under it is under it at every
+ * window, and the loop dropped it before the profile every tick forever. `sustainedByDuration`
+ * answers the same question from presence instead, and it is the ONLY thing this adds — a
+ * candidate admitted that way still faces every blocker, both axes and the reach test unchanged.
+ *
+ * `persistence` omitted means no series was read, which is not the same as nothing being
+ * persistent: it falls back to the volume floor alone, the behaviour before this existed.
  */
 export function worthProfiling(
   rows: Screened[],
   denied: string[],
   floor: number,
+  persistence?: Persistence,
   cap = MAX_PROFILES,
 ): Screened[] {
   const already = new Set(denied.map((d) => JA4_DENY.normalize(d)));
-  return rows
-    .filter(({ digest, allowed }) => {
-      if (!digest || digest === '(none)') return false;
-      if (allowed < floor) return false;
-      return !already.has(JA4_DENY.normalize(digest));
-    })
-    .slice(0, cap);
+  const sustained = ({ digest, allowed }: Screened): boolean =>
+    persistence !== undefined &&
+    sustainedByDuration(
+      persistence.activeBuckets.get(JA4_DENY.normalize(digest)) ?? 0,
+      persistence.bucketMinutes,
+      persistence.windowMinutes,
+      allowed,
+      persistence.duty,
+    );
+  return (
+    rows
+      .filter((r) => {
+        if (!r.digest || r.digest === '(none)') return false;
+        if (r.allowed < floor && !sustained(r)) return false;
+        return !already.has(JA4_DENY.normalize(r.digest));
+      })
+      // Said on the candidate itself, because "why is this here on 137 requests" is the first
+      // question the finding has to answer and the floor is no longer the whole story.
+      .map((r) =>
+        r.allowed < floor
+          ? {
+              ...r,
+              why: [
+                ...r.why,
+                'under the volume floor but present across most of the window',
+              ],
+            }
+          : r,
+      )
+      .slice(0, cap)
+  );
 }
 
 /**
@@ -515,14 +594,25 @@ export async function findSuspects(
   /** Operator-curated noise: never profiled, so never recorded, logged, or displayed. */
   ignoredJa4: readonly string[] = [],
   deps: ScreenDeps = LIVE_DEPS,
+  /**
+   * FW_SUSTAINED_DUTY_PCT, as a fraction. Undefined means it could not be read, and the gate then
+   * does not fire at all — the volume floor governs alone, exactly as before it existed. Last and
+   * optional so the many test call sites that predate it keep the old behaviour by construction.
+   */
+  sustainedDuty?: number,
 ): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
-  const { rows, truncated, handled } = await screen(
+  const { rows, truncated, handled, presence } = await screen(
     creds,
     window,
     allowedBots,
     deniedUa,
     deps,
   );
+  // The screen measures presence; only a tuning reader knows what share counts as sustained.
+  const persistence =
+    sustainedDuty === undefined
+      ? undefined
+      : { ...presence, duty: sustainedDuty };
   const findings: Finding[] = [];
   // Both levers, the challenge tier, and the ignore list. An identity denied by either lever is
   // handled, and profiling it again spends ~21 queries — and, unattended, a paid investigation —
@@ -544,6 +634,7 @@ export async function findSuspects(
     rows,
     [...deniedJa4, ...handled, ...ignoredJa4, ...challengedJa4],
     screenFloor(window.minutes),
+    persistence,
   );
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
   // on the quiet nights, which is nearly all of them.
@@ -593,6 +684,7 @@ export async function findSuspects(
       mixPartial: p.mixPartial,
       verifiedBots: p.verifiedBots,
       allowedBots,
+      sustainedDuty,
     });
     findings.push({
       ...c,
@@ -704,6 +796,13 @@ export async function screenOnce(
   } catch (e) {
     configErrors.push(`FW_BLOCKED_UA unreadable: ${errMsg(e)}`);
   }
+
+  // Unreadable turns the persistence gate OFF — the opposite direction to the allowlist above,
+  // and for the same reason: whichever answer widens nothing is the one an unread config gets.
+  // Reported rather than swallowed, because silently reverting to the volume floor would leave a
+  // self-paced client invisible again with nothing on screen to say why.
+  const duty = sustainedDutyOrUnknown();
+  if (duty.error) configErrors.push(`FW_SUSTAINED_DUTY_PCT: ${duty.error}`);
   const found = await findSuspects(
     creds,
     window,
@@ -714,6 +813,7 @@ export async function screenOnce(
     deniedUa,
     ignored,
     deps,
+    duty.duty,
   );
   return { ...found, configErrors };
 }
@@ -829,7 +929,12 @@ export async function screen(
   /** Denied user-agent tokens, so an identity already banned by name is not re-nominated. */
   deniedUa: readonly string[] = [],
   deps: ScreenDeps = LIVE_DEPS,
-): Promise<{ rows: Screened[]; truncated: boolean; handled: Set<string> }> {
+): Promise<{
+  rows: Screened[];
+  truncated: boolean;
+  handled: Set<string>;
+  presence: Presence;
+}> {
   const { metrics } = deps;
   const { ctx } = makeCtx(creds, window);
   const [routeResp, verifiedResp] = await Promise.all([
@@ -872,6 +977,17 @@ export async function screen(
   // run only the category screen and say the window was truncated than to invent a suspect.
   const verifiedComplete = verifiedRows.length < GROUP_CAP;
   return {
+    // Free: these two responses already carry an hourly series per group, and the screen was
+    // reading only their summaries. No extra query buys the persistence gate.
+    presence: {
+      activeBuckets: activeBucketsByDigest([resp, routeResp]),
+      // What makeCtx actually asked for, not the window's own granularity — anything from an
+      // hour up is bucketed hourly, and a bucket size the series was not built at turns the duty
+      // cycle into a number about nothing.
+      bucketMinutes:
+        window.granularityMinutes < 60 ? window.granularityMinutes : 60,
+      windowMinutes: window.minutes,
+    },
     // Both screens, merged. The category screen carries Vercel's own judgement; the behavioural
     // one sees what Vercel never classified, which is where anything that evaded it will sit.
     rows: mergeScreens(

@@ -10,8 +10,10 @@ import {
   WAF_RULE_QUERY,
   adviseBan,
   type AdviceInput,
+  leverCoverage,
   type Reach,
   recommendsAction,
+  sustainedByDuration,
   volumeFloor,
   welcomeBots,
   welcomeNames,
@@ -19,6 +21,11 @@ import {
 } from './ban-advice';
 import { type Mix, dutyCycleOf, mixOf, shapeOf } from './ip-signals';
 import { CH_STREAM_REVALIDATE, DESKTOP_RELEASE_RECORD } from './rule-names';
+
+// The duty share these tests judge against. Deliberately NOT the configured value: that one lives
+// in .env.local so it stays out of a public repo, and pinning it here would hand it straight back.
+// Any share works — the behaviour under test is the comparison, not the number.
+const TEST_DUTY = 0.75;
 
 function series(counts: number[], offset: number, length: number) {
   const base = Date.parse('2026-08-03T00:00:00.000Z');
@@ -197,11 +204,141 @@ describe('adviseBan — the blockers that matter', () => {
   test('too little traffic to judge is INCONCLUSIVE, never a green all-clear', () => {
     // Rendering "too few requests" as DO NOT DENY told the operator the client was fine when
     // the truth was that the window was too narrow to say anything.
-    const a = adviseBan(scraper({ total: 40 }));
+    const a = adviseBan(scraper({ total: 40, sustainedDuty: TEST_DUTY }));
     expect(a.verdict).toBe('watch');
     expect(a.blockers).toEqual([]);
-    expect(a.leverNotes.join(' ')).toContain('too little to judge');
-    expect(a.leverNotes.join(' ')).toContain('Widen the window');
+    expect(a.leverNotes.join(' ')).toContain('under 200');
+    // 40 requests cannot be rescued by duration, however long they are spread over: below the
+    // flat minimum, "it was here all week" is a statement about nothing.
+    expect(a.leverNotes.join(' ')).toContain(
+      'too few for how long it was present',
+    );
+  });
+
+  test('a client pacing itself under the floor is judged on duration instead', () => {
+    // The real one this was written for: 899 requests over six days, 217 IPs, zero rendering,
+    // present in most hours of every window it was looked at. Under the floor at 144h AND at
+    // the API's maximum week, because the floor rises per day and a self-paced client does not
+    // — so "widen the window" could never be taken, and it went unprofiled for ten days.
+    const a = adviseBan(scraper({ total: 150, sustainedDuty: TEST_DUTY }));
+    expect(a.leverNotes.join(' ')).not.toContain('under 200');
+    expect(a.verdict).toBe('ban');
+  });
+
+  test('an unread duty threshold leaves the volume floor governing alone', () => {
+    // The gate is tuned outside the repo, so "not configured" has to mean the pre-gate
+    // behaviour rather than a default nobody chose. Same input as above, no threshold.
+    const a = adviseBan(scraper({ total: 150 }));
+    expect(a.verdict).not.toBe('ban');
+    expect(a.leverNotes.join(' ')).toContain('under 200');
+    expect(a.leverNotes.join(' ')).toContain(
+      'duty threshold could not be read',
+    );
+  });
+
+  test('duration cannot substitute on a window too short to hold the measure', () => {
+    // Ten hourly buckets, every one of them busy. "Present throughout" is what an ordinary
+    // visit looks like over ten hours, so the objection stands — and it must say the WINDOW is
+    // the problem, not describe a client present in all ten as present in "only" ten.
+    const a = adviseBan(
+      scraper({
+        total: 70,
+        sustainedDuty: TEST_DUTY,
+        windowMinutes: 600,
+        shape: shapeOf(series(Array(10).fill(7), 0, 10), 60),
+      }),
+    );
+    expect(a.leverNotes.join(' ')).toContain('holds only 10 buckets');
+  });
+
+  test('a thin client that is genuinely absent most of the window still says so', () => {
+    const a = adviseBan(
+      scraper({
+        total: 137,
+        sustainedDuty: TEST_DUTY,
+        shape: shapeOf(series(Array(5).fill(27), 0, 24), 60),
+      }),
+    );
+    expect(a.leverNotes.join(' ')).toContain('present in only 5 of its 24');
+  });
+});
+
+describe('leverCoverage', () => {
+  test('an ordinary share is the count over the total', () => {
+    expect(leverCoverage('AWS', [['AWS', 50]], 200)).toBe(0.25);
+    expect(leverCoverage('AWS', [['AWS', 200]], 200)).toBe(1);
+  });
+
+  test('impossible counts refuse rather than resolve', () => {
+    // Both are reachable: the breakdown and the total come from different queries, and the
+    // total falls back to a route-derived figure that excludes denied requests.
+    expect(leverCoverage('AWS', [['AWS', 7783]], 100)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', -5]], 100)).toBeNull();
+  });
+
+  test('an absent label or unreadable measure is unknown, not zero', () => {
+    expect(leverCoverage('AWS', [['Other', 50]], 200)).toBeNull();
+    expect(leverCoverage(undefined, [['AWS', 50]], 200)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', Number.NaN]], 200)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', 50]], 0)).toBeNull();
+    expect(leverCoverage('AWS', [['AWS', 50]], Number.NaN)).toBeNull();
+  });
+});
+
+describe('sustainedByDuration', () => {
+  // 24 hourly buckets across a day, the shape the watch loop actually screens on. The duty share
+  // is passed explicitly here and everywhere else: it lives in .env.local, and a test that read
+  // the environment would pass or fail depending on the operator's current tuning.
+  //
+  // Deliberately NOT the configured value. Pinning the real one here would put the threshold back
+  // in the public repo, which is the whole reason it was moved out.
+  const day = (
+    active: number,
+    total: number,
+    duty: number | undefined = TEST_DUTY,
+  ) => sustainedByDuration(active, 60, 1440, total, duty);
+
+  test('presence across most of the window stands in for volume', () => {
+    expect(day(22, 137)).toBe(true);
+    expect(day(18, 137)).toBe(true); // exactly on the threshold
+  });
+
+  test('a client seen in a minority of buckets is not sustained', () => {
+    expect(day(17, 137)).toBe(false); // one bucket short
+    expect(day(1, 137)).toBe(false);
+  });
+
+  test('the flat minimum is not negotiable by being around a long time', () => {
+    // One request an hour all day clears the duty test and proves nothing.
+    expect(day(24, 24)).toBe(false);
+    expect(day(24, 49)).toBe(false);
+    expect(day(24, 50)).toBe(true);
+  });
+
+  test('a window too short to hold the measure never qualifies', () => {
+    // 11 buckets is under MIN_PACING_BUCKETS however completely they are filled.
+    expect(sustainedByDuration(11, 60, 660, 5000, TEST_DUTY)).toBe(false);
+    expect(sustainedByDuration(12, 60, 720, 5000, TEST_DUTY)).toBe(true);
+  });
+
+  test('an unconfigured duty threshold refuses everything', () => {
+    // The threshold lives in .env.local so it can be absent. Absent must not become a default:
+    // that would put the number back in a public repo AND widen what gets judged.
+    // Called directly, not through `day`: a default parameter treats an explicit `undefined` as
+    // "not passed" and substitutes the default, so the helper cannot express the absent case.
+    expect(sustainedByDuration(24, 60, 1440, 5000, undefined)).toBe(false);
+    expect(day(24, 5000, Number.NaN)).toBe(false);
+    expect(day(24, 5000, 0)).toBe(false);
+  });
+
+  test('unreadable inputs refuse rather than resolve', () => {
+    // Same NaN hole as the qualifiers: a missing measure must not clear a gate.
+    expect(day(Number.NaN, 137)).toBe(false);
+    expect(day(22, Number.NaN)).toBe(false);
+    expect(sustainedByDuration(22, 0, 1440, 137, TEST_DUTY)).toBe(false);
+    expect(sustainedByDuration(22, Number.NaN, 1440, 137, TEST_DUTY)).toBe(
+      false,
+    );
   });
 
   test('an already-denied fingerprint stays ALREADY DENIED in a narrow window', () => {
@@ -1353,15 +1490,73 @@ describe('a challenged fingerprint cannot clear its own deny', () => {
   test('the ASN lever is still reachable — the taint is on the fingerprint only', () => {
     // A challenge on the digest says nothing about a hosting network, and killing both levers
     // would make challenging an identity a way to make it permanently unactionable.
+    //
+    // `asns` names the same network as the reach because in production it IS the same row —
+    // ip-profile builds asnReach.label from byAsn[0]. Leaving them mismatched here made the
+    // fixture describe a client whose top network carries none of its traffic, and the coverage
+    // guard below refuses that, correctly.
+    const asn = 'velia.net Internetdienste GmbH';
     const a = adviseBan(
       scraper({
         digestReach: censored(),
         challengedJa4: true,
-        asnReach: censored({ label: 'velia.net Internetdienste GmbH', ips: 4 }),
+        asns: [[asn, 9060]],
+        asnReach: censored({ label: asn, ips: 4 }),
       }),
     );
     expect(a.verdict).toBe('ban');
     expect(a.lever?.kind).toBe('asn');
+  });
+
+  test('a network carrying a sliver of the client is not offered as a lever', () => {
+    // The vacuous pass, one layer above the volume floor. A client spread across a proxy pool
+    // has an arbitrary top ASN, and it clears the reach test honestly: nothing rendered, because
+    // barely anything happened. Offering it denies a telecom's whole range to stop a fraction.
+    const asn = 'Earthlink Telecommunications DMCC';
+    const a = adviseBan(
+      scraper({
+        digestReach: censored(),
+        challengedJa4: true,
+        asns: [[asn, 53]], // 53 of 9060 — the flat tail of a 101-country pool
+        asnReach: censored({ label: asn, ips: 53, total: 53 }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.leverNotes.join(' ')).toContain('only 1%');
+    expect(a.leverNotes.join(' ')).toContain('the wrong trade');
+  });
+
+  test('an ASN count larger than the identity is impossible, so it is refused', () => {
+    // `total` and `asns` come from DIFFERENT queries, and `total` falls back to a route-derived
+    // figure when the status query degrades to []. Routes exclude denied requests while an ASN
+    // grouping counts them, so a heavily-denied identity yields a count above its own total.
+    // That ratio is >1, which cleared the coverage bar exactly as a strong majority does — and
+    // silently, because the coverage note only prints when it refuses.
+    const asn = 'Some Hosting Ltd';
+    const a = adviseBan(
+      scraper({
+        digestReach: censored(),
+        challengedJa4: true,
+        asns: [[asn, 20_000]], // against a total of 9060
+        asnReach: censored({ label: asn, ips: 40 }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.lever?.kind).not.toBe('asn');
+    expect(a.leverNotes.join(' ')).toContain('an unknown share');
+  });
+
+  test('an ASN whose share cannot be computed is refused, not assumed', () => {
+    const a = adviseBan(
+      scraper({
+        digestReach: censored(),
+        challengedJa4: true,
+        asns: [],
+        asnReach: censored({ label: 'Somewhere Ltd', ips: 60 }),
+      }),
+    );
+    expect(a.verdict).not.toBe('ban');
+    expect(a.leverNotes.join(' ')).toContain('an unknown share');
   });
 
   test('a genuinely rendering reach is refused for its own reason, not this one', () => {

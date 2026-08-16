@@ -14,7 +14,7 @@ import { type Subject, fetchIpProfile, topIps } from './ip-profile';
 import { profileLines } from './ip-profile-view';
 import { toAnsi } from './line-model';
 import { rollingWindow } from './time-window';
-import { allowedBotsOrUnknown } from './tuning';
+import { allowedBotsOrUnknown, sustainedDutyOrUnknown } from './tuning';
 import { errMsg } from './util';
 
 const DEFAULT_HOURS = 24;
@@ -133,7 +133,12 @@ async function main() {
   const allowlist = allowedBotsOrUnknown();
   if (allowlist.error)
     profile.errors.push(`FW_ALLOWED_BOTS: ${allowlist.error}`);
+  // Same treatment, opposite fallback: unread leaves the persistence gate off, so a slow client
+  // reads as unjudgeable rather than being judged against a threshold nobody configured.
+  const duty = sustainedDutyOrUnknown();
+  if (duty.error) profile.errors.push(`FW_SUSTAINED_DUTY_PCT: ${duty.error}`);
   const advice = adviseBan({
+    sustainedDuty: duty.duty,
     total: profile.total,
     mix: profile.mix,
     shape: profile.shape,

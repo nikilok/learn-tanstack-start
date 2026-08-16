@@ -9,7 +9,9 @@ import { type Advice, type Reach } from './ban-advice';
 import { lineText } from './line-model';
 import { rollingWindow } from './time-window';
 import {
+  type Persistence,
   type WatchReport,
+  activeBucketsByDigest,
   adviceSummary,
   adviceWhy,
   banCandidate,
@@ -65,12 +67,117 @@ describe('worthProfiling', () => {
     const many = Array.from({ length: 40 }, (_, i) =>
       sc(`t13dq${String(i).padStart(3, '0')}h2_cccccccccccc_dddddddddddd`, 500),
     );
-    expect(worthProfiling(many, [], 100, 6)).toHaveLength(6);
+    expect(worthProfiling(many, [], 100, undefined, 6)).toHaveLength(6);
   });
 
   test('preserves the screen order — the API returns it ranked by volume', () => {
     const out = worthProfiling([sc(A, 900), sc(B, 500)], [], 100);
     expect(out.map((c) => c.digest)).toEqual([A, B]);
+  });
+
+  // A 24h window in hourly buckets: 24 of them, comfortably past MIN_PACING_BUCKETS. The duty
+  // share is explicit — it lives in .env.local, so reading it here would make the test's result
+  // depend on the operator's current tuning.
+  // Not the configured share — that lives in .env.local so it stays out of a public repo.
+  const TEST_DUTY = 0.75;
+  const persist = (
+    active: Record<string, number>,
+    duty = TEST_DUTY,
+  ): Persistence => ({
+    activeBuckets: new Map(Object.entries(active)),
+    bucketMinutes: 60,
+    windowMinutes: 1440,
+    duty,
+  });
+
+  test('a sub-floor fingerprint present across most of the window survives', () => {
+    // The hole this closes: the floor scales per day, so a client pacing itself under it is
+    // under it at every window, and was dropped before the profile on every tick forever.
+    const out = worthProfiling([sc(A, 137)], [], 200, persist({ [A]: 22 }));
+    expect(out.map((c) => c.digest)).toEqual([A]);
+    expect(out[0]?.why.join(' ')).toContain(
+      'present across most of the window',
+    );
+  });
+
+  test('a sub-floor fingerprint seen in a handful of buckets is still dropped', () => {
+    expect(worthProfiling([sc(A, 137)], [], 200, persist({ [A]: 5 }))).toEqual(
+      [],
+    );
+  });
+
+  test('presence cannot rescue a fingerprint below the flat minimum', () => {
+    // One request an hour for a whole day is 24 buckets of nothing much. Duration only means
+    // something once there is enough traffic for it to be about.
+    expect(worthProfiling([sc(A, 24)], [], 200, persist({ [A]: 24 }))).toEqual(
+      [],
+    );
+  });
+
+  test('no series read means the floor alone, not "nothing is persistent"', () => {
+    // Undefined is unmeasured. Treating it as "present in zero buckets" would be the same
+    // answer here, but saying so out loud is what keeps a failed read from looking like a fact.
+    expect(worthProfiling([sc(A, 137)], [], 200)).toEqual([]);
+    expect(worthProfiling([sc(A, 500)], [], 200)).toEqual([sc(A, 500)]);
+  });
+
+  test('a persistent fingerprint that is already denied is still skipped', () => {
+    expect(
+      worthProfiling([sc(A, 137)], [A], 200, persist({ [A]: 22 })),
+    ).toEqual([]);
+  });
+});
+
+describe('activeBucketsByDigest', () => {
+  const at = (t: string, digest: string, count: number) => ({
+    timestamp: t,
+    count_sum: count,
+    clientJa4Digest: digest,
+  });
+
+  test('a zero-filled bucket is not presence', () => {
+    // The API returns every group at every bucket, so counting rows reports every identity as
+    // present throughout — and the persistence gate would then clear for the entire window.
+    const rows = [
+      at('T1', A, 4),
+      at('T2', A, 0),
+      at('T3', A, 0),
+      at('T4', A, 2),
+    ];
+    expect(activeBucketsByDigest([{ data: rows }]).get(A)).toBe(2);
+  });
+
+  test('unions buckets across responses and dedupes within one', () => {
+    // Two groupings of the same traffic: a digest active at an hour in either was active then,
+    // and the same hour arriving twice is still one hour.
+    const first = [at('T1', A, 1), at('T2', A, 1)];
+    const second = [at('T2', A, 1), at('T3', A, 1)];
+    expect(
+      activeBucketsByDigest([{ data: first }, { data: second }]).get(A),
+    ).toBe(3);
+  });
+
+  test('folds the two casings the API echoes into one fingerprint', () => {
+    const rows = [at('T1', A.toUpperCase(), 1), at('T2', A, 1)];
+    const out = activeBucketsByDigest([{ data: rows }]);
+    expect(out.get(A)).toBe(2);
+    expect(out.size).toBe(1);
+  });
+
+  test('drops placeholder digests and rows with no timestamp', () => {
+    const rows = [
+      at('T1', '(none)', 9),
+      at('T1', '?', 9),
+      at('', A, 9),
+      at('T1', A, 9),
+    ];
+    const out = activeBucketsByDigest([{ data: rows }]);
+    expect([...out.keys()]).toEqual([A]);
+    expect(out.get(A)).toBe(1);
+  });
+
+  test('a response with no series is empty, not an error', () => {
+    expect(activeBucketsByDigest([{}]).size).toBe(0);
   });
 });
 

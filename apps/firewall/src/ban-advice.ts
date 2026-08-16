@@ -47,6 +47,115 @@ const WIDE_SPREAD = 8;
 const MIN_PACING_BUCKETS = 12;
 // The top digest must own this share of the subject's traffic before its evidence is attributable.
 const DOMINANT_SHARE = 0.9;
+// An ASN deny takes a whole network offline, so it must answer most of the identity, not a sliver.
+const MIN_ASN_COVERAGE = 0.5;
+
+/**
+ * Share of the subject's traffic a named network actually carries.
+ *
+ * `null` when it cannot be computed, which callers must treat as a refusal: an unknown share is
+ * the same kind of thing as an unread reach, and both directions of "assume it is fine" end with
+ * a network denied on evidence nobody has.
+ */
+export function leverCoverage(
+  label: string | undefined,
+  breakdown: readonly [string, number][],
+  total: number,
+): number | null {
+  if (!label || !Number.isFinite(total) || total <= 0) return null;
+  const count = breakdown.find(([name]) => name === label)?.[1];
+  // An impossible pair refuses rather than resolves, and the pair CAN be impossible: `total` and
+  // this breakdown come from different queries, and `total` falls back to a route-derived figure
+  // when the status query degrades to []. Routes exclude denied requests while an ASN grouping
+  // counts them, so a heavily-denied identity yields a count far larger than its total. That
+  // produced a ratio above 1, which cleared the coverage bar exactly as a strong majority does
+  // and offered the network for denial — silently, because the note only prints on refusal.
+  if (
+    count === undefined ||
+    !Number.isFinite(count) ||
+    count < 0 ||
+    count > total
+  )
+    return null;
+  return count / total;
+}
+
+/**
+ * Whether traffic is sustained by DURATION rather than by rate.
+ *
+ * `volumeFloor` asks whether there is enough traffic to say anything about sustained volume, and a
+ * request count is only one way to answer that. A client present across most of the window is
+ * sustained however slowly it goes — and without this it is unjudgeable at every window the API
+ * will serve, because the floor rises at a fixed rate per day while a self-paced client's traffic
+ * does not. Widening the window RAISES the bar faster than the evidence grows to meet it, so the
+ * advisory's old remedy for a thin identity could never actually be followed.
+ *
+ * Three guards, all required:
+ * - enough buckets for "most of them" to mean anything — the same MIN_PACING_BUCKETS guard the
+ *   pacing axis uses, for the same reason: on a short window a duty cycle degenerates into "was
+ *   present at all", which is what an ordinary visit looks like;
+ * - presence across at least `duty` of them;
+ * - MIN_VOLUME_FLOOR requests, this file's existing bar for "enough to measure anything at all".
+ *   It is what keeps a client sending one request an hour from becoming judgeable on 24 of them.
+ *
+ * `duty` comes from the caller, out of `tuning.ts`, rather than living here. It is the cheapest
+ * threshold in the tool to evade: staying under a volume floor costs a scraper years of crawling,
+ * while bursting into fewer hours costs it nothing, so a published duty share is a free bypass in
+ * a way a published volume floor is not. Undefined refuses everything, which widens nothing.
+ *
+ * This only removes an objection. It adds no tell and no axis, so an identity cleared here still
+ * needs two independent axes and a reach carrying no browser evidence before a lever is offered.
+ *
+ * Callers deriving `activeBuckets` from an observability series: that API ZERO-FILLS every bucket
+ * of every group, so counting returned rows marks every identity permanently sustained. Count only
+ * the buckets carrying a non-zero measure.
+ */
+export function sustainedByDuration(
+  activeBuckets: number,
+  bucketMinutes: number,
+  windowMinutes: number,
+  total: number,
+  duty: number | undefined,
+): boolean {
+  if (
+    duty === undefined ||
+    !Number.isFinite(duty) ||
+    !Number.isFinite(activeBuckets) ||
+    !Number.isFinite(bucketMinutes) ||
+    !Number.isFinite(windowMinutes) ||
+    !Number.isFinite(total)
+  )
+    return false;
+  if (duty <= 0 || bucketMinutes <= 0 || total < MIN_VOLUME_FLOOR) return false;
+  const buckets = windowMinutes / bucketMinutes;
+  if (buckets < MIN_PACING_BUCKETS) return false;
+  return activeBuckets / buckets >= duty;
+}
+
+/**
+ * Which of `sustainedByDuration`'s guards refused, phrased to follow "under <floor>, ".
+ *
+ * Named separately because the guards want different next steps and only one of them is about
+ * the client. Reporting a client present in every bucket as "present in only 144 of 144" is the
+ * kind of line that makes an operator stop believing the pane.
+ */
+function notSustainedBecause(
+  input: Pick<
+    AdviceInput,
+    'total' | 'shape' | 'windowMinutes' | 'sustainedDuty'
+  >,
+): string {
+  const buckets = Math.round(
+    input.windowMinutes / Math.max(1, input.shape.bucketMinutes),
+  );
+  if (input.sustainedDuty === undefined)
+    return `and the duty threshold could not be read, so duration cannot stand in for volume`;
+  if (input.total < MIN_VOLUME_FLOOR)
+    return `and under ${MIN_VOLUME_FLOOR} in total, too few for how long it was present to mean anything`;
+  if (buckets < MIN_PACING_BUCKETS)
+    return `and this window holds only ${buckets} buckets, too few for presence to stand in for volume`;
+  return `and present in only ${input.shape.active} of its ${buckets} buckets, so it is neither busy enough nor sustained enough to judge`;
+}
 
 /** What an identity does across ALL of its traffic, not just the IP being profiled. */
 export type Reach = {
@@ -219,6 +328,16 @@ export type AdviceInput = {
    * ban candidate.
    */
   allowedBots?: string[];
+  /**
+   * Share of the window a slow client must be present across before duration substitutes for
+   * volume (FW_SUSTAINED_DUTY_PCT, via `tuning.ts`).
+   *
+   * Undefined means unread, and unlike `allowedBots` the safe direction here is the RESTRICTIVE
+   * one: the persistence gate simply does not fire and the volume floor governs alone, which is
+   * how this advisory behaved before the gate existed. A default would both widen what gets
+   * judged on a number nobody chose and put the number back in a public repo.
+   */
+  sustainedDuty?: number;
 };
 
 /**
@@ -375,9 +494,23 @@ function unjudgeableFor(input: AdviceInput): string[] {
     out.push(
       `${unusable} — the window's own volume could not be read, so nothing here is judgeable`,
     );
-  else if (input.total < floor)
+  // Volume OR duration. A client pacing itself under the floor used to be told to widen the
+  // window, which is advice it is impossible to take: the floor scales at a fixed rate per day,
+  // so every wider window raised the bar faster than the client's traffic rose to meet it, and
+  // the API caps the window at a week regardless. Presence across most of the window answers the
+  // same question — is this sustained — without asking it to go faster first.
+  else if (
+    input.total < floor &&
+    !sustainedByDuration(
+      input.shape.active,
+      input.shape.bucketMinutes,
+      input.windowMinutes,
+      input.total,
+      input.sustainedDuty,
+    )
+  )
     out.push(
-      `only ${input.total} requests in this window — under ${floor}, too little to judge sustained volume. Widen the window.`,
+      `only ${input.total} requests in this window — under ${floor}, ${notSustainedBecause(input)}`,
     );
   if (!input.ja4.length)
     out.push('no TLS fingerprint recorded — nothing to identify it by');
@@ -803,13 +936,24 @@ export function adviseBan(input: AdviceInput): Advice {
   // The network, when the fingerprint is shared. This is the velia.net test: an ASN that has
   // never served a sub-resource has never served a real browser.
   const asnOk = qualifyLever(input.asnReach, 'network', input.allowedBots);
+  const asn = input.asnReach?.label ?? input.asns[0]?.[0];
+  // Coverage, not just cleanliness. `qualifyLever` asks whether the NETWORK is browser-free and
+  // cannot ask whether denying it would achieve anything, because it never sees the subject. A
+  // client spread across a proxy pool has an arbitrary top ASN — hundreds of them, flat, in a
+  // long tail — so the biggest sliver clears the reach test honestly and is still the wrong
+  // thing to deny. That is the vacuous pass one layer above the volume floor: true, measured,
+  // and about nothing. It surfaced the moment a self-paced identity became judgeable at all,
+  // which is what made it worth closing here rather than parking.
+  const asnShare = leverCoverage(asn, input.asns, input.total);
+  const asnCovers = asnShare !== null && asnShare >= MIN_ASN_COVERAGE;
   leverNotes.push(
     input.alreadyDeniedAsn
       ? 'network is already in FW_BLOCKED_ASN'
-      : asnOk.note,
+      : asnOk.ok && !asnCovers
+        ? `network ${asn} carries ${asnShare === null ? 'an unknown share' : `only ${(asnShare * 100).toFixed(0)}%`} of this identity's requests — denying a whole network to stop a fraction of one client is the wrong trade, and the rest of it would keep running`
+        : asnOk.note,
   );
-  const asn = input.asnReach?.label ?? input.asns[0]?.[0];
-  if (asnOk.ok && !input.alreadyDeniedAsn && asn)
+  if (asnOk.ok && asnCovers && !input.alreadyDeniedAsn && asn)
     return {
       verdict: 'ban',
       digest,

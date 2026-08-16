@@ -40,6 +40,49 @@ export function screenFloor(windowMinutes = 1440): number {
   return Math.max(volumeFloor(windowMinutes), scaled);
 }
 
+/** A required share, given as a whole percentage from 1 to 100 and returned as a fraction. */
+function envShare(name: string, why: string): number {
+  const pct = envInt(name, why);
+  if (pct > 100)
+    throw new Error(
+      `${name} must be a percentage from 1 to 100 in .env.local — ${why}`,
+    );
+  return pct / 100;
+}
+
+/**
+ * How much of a window a slow client must be present across before duration substitutes for
+ * volume in `sustainedByDuration`.
+ *
+ * Out here rather than beside the other advisory constants because it is the cheapest one to
+ * evade. Beating the volume floor costs a scraper throughput — under the flat minimum against a
+ * corpus this size is years of crawling. Beating a duty test costs nothing: compress the same
+ * requests into fewer hours and burst. A published duty threshold is a free bypass, so it lives
+ * where the rest of the screening sensitivity does.
+ */
+export function sustainedDuty(): number {
+  return envShare(
+    'FW_SUSTAINED_DUTY_PCT',
+    'the share of a window a slow client must be present across before duration counts',
+  );
+}
+
+/**
+ * The duty threshold, or undefined when it cannot be read.
+ *
+ * Same shape and the same reason as `allowedBotsOrUnknown`, but the safe direction is the
+ * opposite one: undefined turns the persistence gate OFF, back to the volume floor alone. An
+ * unreadable threshold must not widen what gets profiled, and it must not invent a value to
+ * widen it by.
+ */
+export function sustainedDutyOrUnknown(): { duty?: number; error?: string } {
+  try {
+    return { duty: sustainedDuty() };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Hours of history a screen reads. */
 export function watchHours(): number {
   return envInt('FW_WATCH_HOURS', 'the screening window');

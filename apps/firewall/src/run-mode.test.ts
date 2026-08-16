@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { badgeFor, modeNote, runModeOf } from './run-mode';
+import { badgeFor, modeNote, runModeOf, appliedNote } from './run-mode';
 
 describe('runModeOf', () => {
   test.each([
@@ -57,5 +57,35 @@ describe('the caption', () => {
   test('does not call recorded traffic synthetic', () => {
     expect(modeNote('mock')).not.toContain('synthetic');
     expect(modeNote('mock')).toContain('recorded');
+  });
+});
+
+describe('the headless apply note', () => {
+  // A recording refuses every write, and this line sat directly under those refusals claiming
+  // live enforcement had been preserved.
+  test('a recording says nothing was applied', () => {
+    const note = appliedNote({ mock: false, recording: true });
+    expect(note).toContain('read-only');
+    expect(note).not.toContain('Live enforcement preserved');
+  });
+
+  test('a mock session says nothing reached production', () => {
+    const note = appliedNote({ mock: true, recording: false });
+    expect(note).toContain('Nothing reached production');
+    expect(note).not.toContain('Live enforcement preserved');
+  });
+
+  test('an ordinary run still reports the live apply', () => {
+    expect(appliedNote({ mock: false, recording: false })).toContain(
+      'Live enforcement preserved',
+    );
+  });
+
+  // --mock and --record are mutually exclusive at the entrypoint, but if that guard ever moves,
+  // the sandboxed answer is the safe one to fall back to.
+  test('mock wins if both are somehow set', () => {
+    expect(appliedNote({ mock: true, recording: true })).toContain(
+      'no credentials',
+    );
   });
 });

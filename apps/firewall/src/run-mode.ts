@@ -42,3 +42,21 @@ export function modeNote(mode: RunMode): string | undefined {
     ? 'recorded traffic · sandboxed state · no credentials'
     : undefined;
 }
+
+/**
+ * What to print after a headless apply.
+ *
+ * Three sessions, three different truths, and recording is not a RunMode — it is a live session
+ * that also writes a cassette. It got the live wording, which claims enforcement was preserved,
+ * directly under eighteen lines of "recording is read-only" refusals.
+ */
+export function appliedNote(session: {
+  mock: boolean;
+  recording: boolean;
+}): string {
+  if (session.mock)
+    return 'Applied to the in-memory WAF. Nothing reached production; this session has no credentials.';
+  if (session.recording)
+    return 'Nothing was applied: a recording is read-only. Re-run without --record to apply.';
+  return 'Applied. Live enforcement preserved; new rules inserted with code defaults. Tune actions in the TUI.';
+}

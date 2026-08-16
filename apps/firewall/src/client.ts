@@ -8,6 +8,7 @@ import { resolveVercelCredentials } from './credentials';
 import { isMock, isRecording } from './env';
 import { headerKeysByGroup } from './rule-integrity';
 import { type ActionChoice, type Rule, dryRun } from './rules';
+import { appliedNote } from './run-mode';
 import {
   type ApplyStatus,
   type Item,
@@ -145,11 +146,7 @@ export async function runHeadless() {
     }
   }
   if (anyError) process.exitCode = 1;
-  // "Live enforcement preserved" is a claim about production, and in a mock session it is false —
-  // the same thing the (LIVE) badge said before it learned about mock mode.
-  console.log(
-    isMock()
-      ? '\nApplied to the in-memory WAF. Nothing reached production; this session has no credentials.'
-      : '\nApplied. Live enforcement preserved; new rules inserted with code defaults. Tune actions in the TUI.',
-  );
+  // "Live enforcement preserved" is a claim about production, and it is false in a mock session and
+  // in a recording — the same thing the (LIVE) badge said before it learned about mock mode.
+  console.log(`\n${appliedNote({ mock: isMock(), recording: isRecording() })}`);
 }

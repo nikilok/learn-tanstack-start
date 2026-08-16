@@ -33,6 +33,7 @@ import { WatchStatus } from './components/watch-status';
 import { WindowPicker } from './components/window-picker';
 import { ASN_DENY } from './deny-list';
 import { promotes } from './deny-staging';
+import { isMock } from './env';
 import { useDenylist } from './hooks/useDenylist';
 import { useIdentityLists } from './hooks/useIdentityLists';
 import { tabWindow, useIpTabs } from './hooks/useIpTabs';
@@ -65,6 +66,7 @@ import { resolveSubject, subjectsToOpen, typeIdentity } from './pick-input';
 import { type ReportData, fetchReport } from './report-data';
 import { trustedRules } from './rule-integrity';
 import { dryRun, rules } from './rules';
+import { badgeFor, modeNote, runModeOf } from './run-mode';
 import { type ApplyStatus, type Item, seedItems } from './seed-items';
 import { type SitemapReport, fetchSitemapReport } from './sitemap-readers';
 import {
@@ -96,7 +98,12 @@ const PANE_KEY: Record<string, PaneKind> = {
   g: 'ignorelist',
 };
 // Where the watch list and the watch log live — the CLI runs from here too, so they share state.
+// In a mock session this is the sandbox, because the process chdir'd into it before App loaded.
 const ROOT = process.cwd();
+// Fixed for the life of the process, so it is read once rather than per render.
+const RUN_MODE = runModeOf({ dryRun, mock: isMock() });
+const MODE_BADGE = badgeFor(RUN_MODE);
+const MODE_CAPTION = modeNote(RUN_MODE);
 const IP_WINDOW_HOURS = 24;
 // One query per tick. Measured: 10 back-to-back calls to this endpoint all returned 200 at ~1s
 // each, so ~1/s is tolerated. This sits 15x under that, matching the cadence Vercel's own live
@@ -1317,11 +1324,16 @@ export function App() {
       >
         <Box>
           <Text bold>Vercel firewall rules </Text>
-          <Text color={dryRun ? 'yellow' : 'green'}>
-            {dryRun ? '(DRY-RUN)' : '(LIVE)'}
+          <Text color={MODE_BADGE.color} inverse={MODE_BADGE.inverse}>
+            {MODE_BADGE.text}
           </Text>
           <Text dimColor> · {projectId.slice(0, 12)}…</Text>
         </Box>
+        {MODE_CAPTION ? (
+          <Text color="magenta" dimColor>
+            {MODE_CAPTION}
+          </Text>
+        ) : null}
         <Box marginY={1} flexDirection="column">
           {items.map((it, i) => (
             <Row

@@ -682,10 +682,51 @@ describe('adviseBan — is acting worth it', () => {
     );
   });
 
-  test('distinguishes probing from harvesting when every response is 4xx', () => {
-    expect(adviseBan(prober()).leverNotes.join(' ')).toContain(
+  // 404 is the SITE's answer — the client asked for something that is not there.
+  test('404s read as probing rather than harvesting', () => {
+    const a = adviseBan({ ...prober(), statuses: [['404', 490]] });
+    expect(a.leverNotes.join(' ')).toContain('probing rather than harvesting');
+  });
+
+  // 429 is OUR answer, and the fixture above had it labelled as probing — a fully mitigated
+  // crawler read as a scanner, which is the opposite diagnosis. Measured on a real Googlebot
+  // impersonator: 502 of 502 were 429s against 497 valid company pages.
+  // 429 is OUR answer, and the fixture above had it labelled as probing — a fully mitigated
+  // crawler read as a scanner, the opposite diagnosis. Measured on a real Googlebot impersonator:
+  // 502 of 502 were 429s against 497 valid company pages.
+  test('429s are not called probing', () => {
+    expect(adviseBan(prober()).leverNotes.join(' ')).not.toContain(
       'probing rather than harvesting',
     );
+  });
+
+  test('403s are not either — a deny is also our answer, not the site saying "not here"', () => {
+    const a = adviseBan({ ...prober(), statuses: [['403', 490]] });
+    expect(a.leverNotes.join(' ')).not.toContain(
+      'probing rather than harvesting',
+    );
+  });
+
+  // Attribution comes from wafActions, which knows who answered. A status code does not: the
+  // origin can return 403 or 429 just as the WAF can.
+  test('the mitigation note comes from the waf action, not the status', () => {
+    const a = adviseBan({
+      ...prober(),
+      statuses: [['403', 490]],
+      wafActions: [['log', 490]],
+    });
+    expect(a.leverNotes.join(' ')).not.toContain('saves the challenge');
+  });
+
+  test('a mix still reports probing when the 404s dominate', () => {
+    const a = adviseBan({
+      ...prober(),
+      statuses: [
+        ['404', 460],
+        ['429', 30],
+      ],
+    });
+    expect(a.leverNotes.join(' ')).toContain('probing rather than harvesting');
   });
 
   test('a client that actually gets 200s is not called a prober', () => {

@@ -1,6 +1,7 @@
 // Client for Vercel's dashboard observability endpoint, shared by the report pane and the IP
 // profiler. Window is capped at ~7 days by the `observability_chart_free` reason.
 
+import { isMock, isRecording } from './env';
 import { type Window, rollingWindow } from './time-window';
 import { errMsg } from './util';
 
@@ -52,19 +53,23 @@ async function gated<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+export type MetricsOpts = {
+  event?: string;
+  filter?: string;
+  limit?: number;
+  granularity?: Record<string, number>;
+  startTime?: string;
+  endTime?: string;
+};
+
+export type MetricsResponse = { data?: Row[]; summary?: Row[] };
+
 /** POST the dashboard observability endpoint, retrying transient 5xx/429. Hourly buckets over the whole window unless overridden. */
-export async function metrics(
+async function liveMetrics(
   ctx: Ctx,
   groupBy: string[],
-  opts: {
-    event?: string;
-    filter?: string;
-    limit?: number;
-    granularity?: Record<string, number>;
-    startTime?: string;
-    endTime?: string;
-  } = {},
-): Promise<{ data?: Row[]; summary?: Row[] }> {
+  opts: MetricsOpts = {},
+): Promise<MetricsResponse> {
   const body = JSON.stringify({
     scope: {
       type: 'project',
@@ -177,7 +182,7 @@ export function safeIp(ip: string): boolean {
 }
 
 /** Map custom firewall rule ids to names via the active firewall config, so observability results grouped by `wafRuleId` can be labelled. Returns an empty map on failure — a label is never worth failing a report over. */
-export async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
+async function liveRuleNames(ctx: Ctx): Promise<Map<string, string>> {
   const res = await fetchWithTimeout(
     `https://api.vercel.com/v1/security/firewall/config/active?${ctx.qs}`,
     { headers: ctx.headers },
@@ -193,6 +198,47 @@ export async function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
   } catch {
     return new Map();
   }
+}
+
+/** Every read this tool makes of Vercel's traffic data, behind one replaceable object. */
+export type ObservabilityBackend = {
+  metrics: (
+    ctx: Ctx,
+    groupBy: string[],
+    opts: MetricsOpts,
+  ) => Promise<MetricsResponse>;
+  ruleNames: (ctx: Ctx) => Promise<Map<string, string>>;
+};
+
+/** The real thing, exported so a recording session can wrap it rather than reimplement it. */
+export const liveObservability: ObservabilityBackend = {
+  metrics: liveMetrics,
+  ruleNames: liveRuleNames,
+};
+
+let backend: ObservabilityBackend = liveObservability;
+
+/** Redirect every traffic read. Refuses outside a mock or recording session, so no ordinary run can have its data layer swapped from under it. */
+export function installObservabilityBackend(next: ObservabilityBackend): void {
+  if (!isMock() && !isRecording())
+    throw new Error(
+      'the observability backend is only replaceable under --mock or --record',
+    );
+  backend = next;
+}
+
+/** One traffic read, through whatever backend is installed — the live endpoint by default, a recording under --mock. Hourly buckets over the whole window unless overridden. */
+export function metrics(
+  ctx: Ctx,
+  groupBy: string[],
+  opts: MetricsOpts = {},
+): Promise<MetricsResponse> {
+  return backend.metrics(ctx, groupBy, opts);
+}
+
+/** Map custom firewall rule ids to names, so results grouped by `wafRuleId` can be labelled. */
+export function ruleNames(ctx: Ctx): Promise<Map<string, string>> {
+  return backend.ruleNames(ctx);
 }
 
 /** Build the request context for an explicit window. Callers pass a resolved Window, which has already been hour-aligned and clamped to what the API will serve. */

@@ -30,3 +30,5 @@ firewall-watch.log
 .firewall-watch-investigated
 .firewall-watchlist*
 .firewall-ignorelist*
+.firewall-cassette*
+.firewall-mock/

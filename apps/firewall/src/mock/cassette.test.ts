@@ -1,0 +1,470 @@
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import type { Ctx } from '../observability';
+import {
+  CASSETTE_VERSION,
+  UNVERSIONED,
+  appendCassette,
+  ensureOwnerOnly,
+  ensureOwnerOnlyFile,
+  headerVersionOf,
+  loadCassette,
+  resetCassette,
+  metricsKeys,
+} from './cassette';
+
+function ctxOver(startTime: string, endTime: string): Ctx {
+  return {
+    projectId: 'prj',
+    teamId: 'team',
+    headers: {},
+    qs: '',
+    startTime,
+    endTime,
+    granularity: { hours: 1 },
+  };
+}
+
+// Six hours, recorded at two different times of day.
+const MORNING = ctxOver('2026-08-15T04:00:00.000Z', '2026-08-15T10:00:00.000Z');
+const EVENING = ctxOver('2026-08-15T14:00:00.000Z', '2026-08-15T20:00:00.000Z');
+
+describe('metricsKeys', () => {
+  // The reason the key is derived rather than hashed off the request body: the body carries
+  // absolute timestamps, so a cassette would miss every query the minute after it was recorded.
+  test('the same query at a different time of day has the same key', () => {
+    expect(metricsKeys(MORNING, ['clientIp'], {}).exact).toBe(
+      metricsKeys(EVENING, ['clientIp'], {}).exact,
+    );
+  });
+
+  test('a different window LENGTH is a different query', () => {
+    const day = ctxOver('2026-08-14T10:00:00.000Z', '2026-08-15T10:00:00.000Z');
+    expect(metricsKeys(MORNING, ['clientIp'], {}).exact).not.toBe(
+      metricsKeys(day, ['clientIp'], {}).exact,
+    );
+  });
+
+  test('but both answer to the same loose key, which is what makes the fallback work', () => {
+    const day = ctxOver('2026-08-14T10:00:00.000Z', '2026-08-15T10:00:00.000Z');
+    expect(metricsKeys(MORNING, ['clientIp'], {}).loose).toBe(
+      metricsKeys(day, ['clientIp'], {}).loose,
+    );
+  });
+
+  test('the window an option overrides is the one that counts, not the context', () => {
+    const overridden = metricsKeys(MORNING, ['clientIp'], {
+      startTime: '2026-08-14T10:00:00.000Z',
+      endTime: '2026-08-15T10:00:00.000Z',
+    });
+    const day = ctxOver('2026-08-14T10:00:00.000Z', '2026-08-15T10:00:00.000Z');
+    expect(overridden.exact).toBe(metricsKeys(day, ['clientIp'], {}).exact);
+  });
+
+  // Declined in an earlier round as unreachable (every construction site builds a single-key
+  // object). The JSON key rework made canonicalising free, so the class is closed rather than
+  // argued about.
+  test('two equivalent granularities key the same however they were built', () => {
+    const a = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { hours: 1, minutes: 5 },
+    });
+    const b = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { minutes: 5, hours: 1 },
+    });
+    expect(a.exact).toBe(b.exact);
+  });
+
+  // Granularity is the BUCKET SIZE. A 10-minute-bucket query answered from an hourly recording
+  // gets a series whose points mean something else, and the session shape is computed off it.
+  test('the live window does not fall back to an hourly recording', () => {
+    const live = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { minutes: 10 },
+    });
+    const hourly = metricsKeys(MORNING, ['clientIp'], {
+      granularity: { hours: 1 },
+    });
+    expect(live.loose).not.toBe(hourly.loose);
+  });
+
+  // ...while the substitution the fallback exists for still works: every window from 1h up is
+  // hourly, so a 6h recording still answers a 24h query.
+  test('two hourly windows of different lengths still share a loose key', () => {
+    const six = metricsKeys(MORNING, ['clientIp'], {});
+    const day = metricsKeys(
+      ctxOver('2026-08-14T10:00:00.000Z', '2026-08-15T10:00:00.000Z'),
+      ['clientIp'],
+      {},
+    );
+    expect(six.loose).toBe(day.loose);
+    expect(six.exact).not.toBe(day.exact);
+  });
+
+  // The filter is the one free-form field and it carries request paths, which are client-supplied.
+  test('a filter cannot be confused with the field after it', () => {
+    const packed = metricsKeys(MORNING, ['clientIp'], {
+      filter: 'x|25',
+      limit: 500,
+    });
+    const split = metricsKeys(MORNING, ['clientIp'], {
+      filter: 'x',
+      limit: 25,
+    });
+    expect(packed.exact).not.toBe(split.exact);
+    expect(packed.loose).not.toBe(split.loose);
+  });
+
+  test('a filter cannot be confused with the group list before it', () => {
+    const a = metricsKeys(MORNING, ['clientIp'], { filter: 'wafAction' });
+    const b = metricsKeys(MORNING, ['clientIp', 'wafAction'], {});
+    expect(a.exact).not.toBe(b.exact);
+  });
+
+  test('granularity separates two queries over the same window', () => {
+    expect(
+      metricsKeys(MORNING, ['clientIp'], { granularity: { minutes: 5 } }).exact,
+    ).not.toBe(metricsKeys(MORNING, ['clientIp'], {}).exact);
+  });
+
+  test.each([
+    ['event', { event: 'firewallAction' }],
+    ['filter', { filter: "clientIp eq '1.2.3.4'" }],
+    ['limit', { limit: 25 }],
+  ])('%s separates two queries', (_label, opts) => {
+    expect(metricsKeys(MORNING, ['clientIp'], opts).exact).not.toBe(
+      metricsKeys(MORNING, ['clientIp'], {}).exact,
+    );
+  });
+
+  test('group order is part of the query, since the response columns follow it', () => {
+    expect(metricsKeys(MORNING, ['clientIp', 'wafAction'], {}).exact).not.toBe(
+      metricsKeys(MORNING, ['wafAction', 'clientIp'], {}).exact,
+    );
+  });
+
+  test('a filter carrying the key separator does not collide with another query', () => {
+    const piped = metricsKeys(MORNING, ['requestPath'], {
+      filter: "requestPath eq '/a|b|500'",
+    });
+    expect(piped.exact).not.toBe(
+      metricsKeys(MORNING, ['requestPath'], {}).exact,
+    );
+  });
+});
+
+describe('the cassette file', () => {
+  let dir: string;
+  let path: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-cassette-'));
+    path = join(dir, 'cassette.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('a missing file is an empty corpus, not a failure', () => {
+    const loaded = loadCassette(join(dir, 'absent.jsonl'));
+    expect(loaded.entries.size).toBe(0);
+    expect(loaded.skipped).toBe(0);
+  });
+
+  test('round-trips a response under both its keys', () => {
+    appendCassette(path, 'exact-key', { summary: [{ count: 3 }] }, 'loose-key');
+    const loaded = loadCassette(path);
+    expect(loaded.entries.get('exact-key')).toEqual({
+      summary: [{ count: 3 }],
+    });
+    expect(loaded.loose.get('loose-key')).toEqual({ summary: [{ count: 3 }] });
+  });
+
+  // Re-recording is how a stale corpus is refreshed, and the file is append-only.
+  test('a later recording of the same query wins', () => {
+    appendCassette(path, 'k', { summary: [{ count: 1 }] }, 'l');
+    appendCassette(path, 'k', { summary: [{ count: 2 }] }, 'l');
+    const loaded = loadCassette(path);
+    expect(loaded.entries.get('k')).toEqual({ summary: [{ count: 2 }] });
+    expect(loaded.loose.get('l')).toEqual({ summary: [{ count: 2 }] });
+  });
+
+  // What a crash mid-record leaves behind. The rest of the corpus is still good.
+  test('a truncated last line is counted, not thrown, and the rest still loads', () => {
+    appendCassette(path, 'good', { summary: [] }, 'loose');
+    writeFileSync(path, '{"k":"half', { flag: 'a' });
+    const loaded = loadCassette(path);
+    expect(loaded.entries.has('good')).toBe(true);
+    expect(loaded.skipped).toBe(1);
+  });
+
+  test('a line with no key is skipped rather than stored under undefined', () => {
+    writeFileSync(path, '{"v":{"summary":[]}}\n');
+    const loaded = loadCassette(path);
+    expect(loaded.entries.size).toBe(0);
+    expect(loaded.skipped).toBe(1);
+  });
+
+  // A key with nothing behind it used to be STORED, so has() said yes, the replay handed back
+  // undefined, and the first reader to touch .summary threw. A truncated line took out a pane.
+  test.each([
+    ['no value at all', '{"k":"orphan"}'],
+    ['a null value', '{"k":"orphan","v":null}'],
+    ['a value that is not packed', '{"k":"orphan","v":{"summary":[]}}'],
+    ['a value that is not valid gzip', '{"k":"orphan","v":"bm90Z3ppcA=="}'],
+  ])('a row with %s is skipped, not stored', (_label, line) => {
+    writeFileSync(path, `${line}\n`);
+    const loaded = loadCassette(path);
+    expect(loaded.entries.has('orphan')).toBe(false);
+    expect(loaded.skipped).toBe(1);
+  });
+
+  // A corpus copied in from the ops repo arrives with whatever mode it had, and copying one in is
+  // a documented workflow. appendCassette's create-mode does not cover a file it did not create.
+  test('tightens an existing world-readable cassette', () => {
+    writeFileSync(path, '{"k":"a","v":1}\n');
+    chmodSync(path, 0o644);
+    ensureOwnerOnly(path);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('creates the cassette when it is not there yet', () => {
+    ensureOwnerOnly(path);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(loadCassette(path).entries.size).toBe(0);
+  });
+
+  test('leaves what is already recorded alone', () => {
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).entries.has('k')).toBe(true);
+  });
+
+  // The corpus is real client IPs and TLS fingerprints; 0644 is every account on the machine.
+  test('creates the cassette readable only by its owner', () => {
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('an entry recorded without a loose key stays out of the fallback index', () => {
+    appendCassette(path, 'k', { summary: [] });
+    const loaded = loadCassette(path);
+    expect(loaded.entries.size).toBe(1);
+    expect(loaded.loose.size).toBe(0);
+  });
+});
+
+describe('the version header', () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-ver-'));
+    path = join(dir, 'c.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('a cassette this build creates declares its format', () => {
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).version).toBe(CASSETTE_VERSION);
+  });
+
+  test('the header survives the entries appended after it', () => {
+    ensureOwnerOnly(path);
+    appendCassette(path, 'k', { summary: [] }, 'l');
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.has('k')).toBe(true);
+    expect(loaded.skipped).toBe(0);
+  });
+
+  // Recorded before versioning existed. Its keys cannot be assumed to mean anything, which is
+  // exactly why boot refuses it rather than replaying it to silence.
+  test('a cassette with no header reads as unversioned', () => {
+    appendCassette(path, 'a', { summary: [] }, 'la');
+    expect(loadCassette(path).version).toBe(UNVERSIONED);
+  });
+
+  test('a future format is reported as itself, not clamped', () => {
+    writeFileSync(path, '{"cassette":99}\n');
+    expect(loadCassette(path).version).toBe(99);
+  });
+
+  // The header is not an entry, and an entry is not a header.
+  test('the header is not counted as a skipped line', () => {
+    ensureOwnerOnly(path);
+    expect(loadCassette(path).skipped).toBe(0);
+  });
+
+  test('a first line that is an entry is kept as one', () => {
+    appendCassette(path, 'first', { summary: [] }, 'l1');
+    appendCassette(path, 'second', { summary: [] }, 'l2');
+    expect(loadCassette(path).entries.size).toBe(2);
+  });
+});
+
+describe('a cassette must be a regular file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-link-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // chmod and append both act on the TARGET, so a link planted at the cassette path would have
+  // this tool rewrite the permissions of, and append JSON into, a file somewhere else.
+  test('refuses to write through a symlink', () => {
+    const target = join(dir, 'somebody-elses-file');
+    writeFileSync(target, 'important\n');
+    chmodSync(target, 0o644);
+    const link = join(dir, 'innocent.jsonl');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnly(link)).toThrow('symlink');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+    expect(readFileSync(target, 'utf8')).toBe('important\n');
+  });
+
+  test('a plain new cassette is still fine', () => {
+    const path = join(dir, 'fine.jsonl');
+    expect(() => ensureOwnerOnly(path)).not.toThrow();
+    expect(loadCassette(path).version).toBe(CASSETTE_VERSION);
+  });
+});
+
+describe('tightening a file that already exists', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-tighten-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('an existing world-readable file is tightened, not left alone', () => {
+    const path = join(dir, 'log');
+    writeFileSync(path, 'old\n');
+    chmodSync(path, 0o644);
+    ensureOwnerOnlyFile(path, '', 'miss log');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('old\n');
+  });
+
+  test('a missing one is created owner-only with the given initial content', () => {
+    const path = join(dir, 'fresh');
+    ensureOwnerOnlyFile(path, 'header\n', 'miss log');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('header\n');
+  });
+
+  // chmod follows a symlink, so the target's permissions would change instead.
+  test('a symlink is refused, and what it points at is untouched', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'important\n');
+    chmodSync(target, 0o644);
+    const link = join(dir, 'link');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnlyFile(link, '', 'miss log')).toThrow('symlink');
+    expect(statSync(target).mode & 0o777).toBe(0o644);
+  });
+});
+
+describe('resetting a cassette this build cannot read', () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-reset-'));
+    path = join(dir, 'c.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('reads the declared version without loading the rest', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"a","v":"x"}\n');
+    expect(headerVersionOf(path)).toBe(1);
+  });
+
+  test('a file with no header reads as unversioned', () => {
+    writeFileSync(path, '{"k":"a","v":"x"}\n');
+    expect(headerVersionOf(path)).toBe(UNVERSIONED);
+  });
+
+  test('an absent file has no version, which is not the same as zero', () => {
+    expect(headerVersionOf(join(dir, 'absent.jsonl'))).toBeUndefined();
+  });
+
+  // A recording APPENDS, so without this the old header survived and buried the fresh entries
+  // under it — the file stayed refused and the refusal's own advice led nowhere.
+  test('reset leaves a bare header of the current format', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"stale","v":"x"}\n');
+    resetCassette(path);
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.size).toBe(0);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  test('and what is appended after it loads', () => {
+    writeFileSync(path, '{"cassette":1}\n{"k":"stale","v":"x"}\n');
+    resetCassette(path);
+    appendCassette(path, 'fresh', { summary: [] }, 'loose');
+    const loaded = loadCassette(path);
+    expect(loaded.version).toBe(CASSETTE_VERSION);
+    expect(loaded.entries.has('fresh')).toBe(true);
+    expect(loaded.entries.has('stale')).toBe(false);
+  });
+});
+
+describe('a path that is not a regular file', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-notfile-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // A directory survives 'wx' as EEXIST just like a symlink does, and would be chmod'd and then
+  // appended to — failing later as EISDIR instead of here.
+  test('a directory at the cassette path is refused', () => {
+    const path = join(dir, 'c.jsonl');
+    mkdirSync(path);
+    expect(() => ensureOwnerOnlyFile(path, '', 'cassette')).toThrow(
+      'not a regular file',
+    );
+  });
+
+  test('and a symlink still says it is a symlink', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'x\n');
+    const link = join(dir, 'c.jsonl');
+    symlinkSync(target, link);
+    expect(() => ensureOwnerOnlyFile(link, '', 'cassette')).toThrow(
+      'a symlink',
+    );
+  });
+});
+
+describe('resetting through something that is not a cassette', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'fw-reset2-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  // resetCassette TRUNCATES and is exported, so a link here destroys the target.
+  test('refuses a symlink, leaving the target intact', () => {
+    const target = join(dir, 'victim');
+    writeFileSync(target, 'important\n');
+    symlinkSync(target, join(dir, 'c.jsonl'));
+    expect(() => resetCassette(join(dir, 'c.jsonl'))).toThrow('a symlink');
+    expect(readFileSync(target, 'utf8')).toBe('important\n');
+  });
+
+  test('refuses a directory', () => {
+    mkdirSync(join(dir, 'c.jsonl'));
+    expect(() => resetCassette(join(dir, 'c.jsonl'))).toThrow(
+      'not a regular file',
+    );
+  });
+});

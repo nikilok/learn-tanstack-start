@@ -55,3 +55,10 @@ afterEach(restoreTerminal);
 // test that clears the environment around that call would otherwise fix a different rule set —
 // or none at all — for every file that runs after it.
 await import('./rules');
+
+// `client.ts` is the same hazard: it resolves credentials and constructs its SDK client at import
+// time. Evaluated here, while the fixture credentials are in place, so its ONE evaluation always
+// succeeds. A test that triggered the first import with the environment cleared would poison the
+// module for the rest of the process — since Bun 1.4 even `mock.module` rethrows a failed
+// evaluation instead of shielding it. Tests that need the module to FAIL mock its calls instead.
+await import('./client');

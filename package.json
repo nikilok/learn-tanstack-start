@@ -44,7 +44,10 @@
     "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   },
-  "packageManager": "bun@1.3.13",
+  "overrides": {
+    "bun-types": "1.4.0"
+  },
+  "packageManager": "bun@1.4.0",
   "trustedDependencies": [
     "electron"
   ]

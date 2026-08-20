@@ -22,8 +22,10 @@ beforeAll(async () => {
   // The preload evaluated the real ./client with the fixture credentials, so the module is
   // healthy. It is replaced here — wholly synthetic — so nothing App renders can put a live
   // request on the wire, and restored in afterAll so later files see the real module.
-  const realClient = await import('./client');
-  restoreClient = () => mock.module('./client', () => realClient);
+  // Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+  // would capture — and later "restore" — the synthetic mock installed just below.
+  const realClient = { ...(await import('./client')) };
+  restoreClient = () => mock.module('./client', () => ({ ...realClient }));
   const { noLiveConfig } = await import('./seed-items');
   // Stubbed too: opening the report pane calls fetchReport, which would put a live observability
   // request on the wire from the suite. The tests below only need the pane to open.
@@ -305,7 +307,7 @@ describe('App', () => {
   // ~90s of retries leaving an empty pane and no message, which reads as a broken tool.
   test('a failed identity list says so, and says how to retry', async () => {
     const { mock } = await import('bun:test');
-    const real = await import('./ip-profile');
+    const real = { ...(await import('./ip-profile')) };
     mock.module('./ip-profile', () => ({
       ...real,
       topJa4: async () => ({
@@ -330,7 +332,7 @@ describe('App', () => {
       // In a finally: a failed assertion would otherwise leave the app mounted and ./ip-profile
       // mocked for every test after it.
       h.unmount();
-      mock.module('./ip-profile', () => real);
+      mock.module('./ip-profile', () => ({ ...real }));
     }
   });
 

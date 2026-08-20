@@ -40,7 +40,9 @@ async function mountPickers(
   } = {},
 ) {
   const calls: string[] = [];
-  const real = await import('../ip-profile');
+  // Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+  // would capture — and later "restore" — the stub installed just below.
+  const real = { ...(await import('../ip-profile')) };
   mock.module('../ip-profile', () => ({
     ...real,
     topIps: async () => {
@@ -75,7 +77,7 @@ async function mountPickers(
     h,
     get: () => api,
     calls,
-    restore: () => mock.module('../ip-profile', () => real),
+    restore: () => mock.module('../ip-profile', () => ({ ...real })),
   };
 }
 

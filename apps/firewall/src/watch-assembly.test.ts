@@ -27,14 +27,16 @@ import { IGNORELIST_FILE } from './watchlist';
 // and it must fail at the CALL, without a network round-trip. Making the IMPORT throw instead
 // (clearing the credentials first) poisons ./client for the whole process: Bun 1.4 rethrows a
 // failed evaluation forever, even through mock.module, which took app.test.tsx down with it.
-const realClient = await import('./client');
+// Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+// would capture — and later "restore" — whatever the mock wrote over it.
+const realClient = { ...(await import('./client')) };
 mock.module('./client', () => ({
   ...realClient,
   fetchLive: () =>
     Promise.reject(new Error('live firewall config unavailable in tests')),
 }));
 afterAll(() => {
-  mock.module('./client', () => realClient);
+  mock.module('./client', () => ({ ...realClient }));
 });
 
 const CREDS = { projectId: 'p', teamId: 't', token: 'x' };

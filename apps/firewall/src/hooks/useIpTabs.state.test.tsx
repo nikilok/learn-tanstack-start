@@ -34,7 +34,9 @@ afterEach(() => {
  * The module is re-imported after the mock so the hook binds to the stub.
  */
 async function mountTabs(fetch: (s: Subject) => Promise<IpProfile>) {
-  const real = await import('../ip-profile');
+  // Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+  // would capture — and later "restore" — the stub installed just below.
+  const real = { ...(await import('../ip-profile')) };
   mock.module('../ip-profile', () => ({
     ...real,
     fetchIpProfile: async (_c: unknown, s: Subject) => fetch(s),
@@ -60,7 +62,7 @@ async function mountTabs(fetch: (s: Subject) => Promise<IpProfile>) {
   return {
     h,
     get: () => api,
-    restore: () => mock.module('../ip-profile', () => real),
+    restore: () => mock.module('../ip-profile', () => ({ ...real })),
   };
 }
 

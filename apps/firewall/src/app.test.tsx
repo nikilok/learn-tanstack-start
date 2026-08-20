@@ -15,12 +15,17 @@ import { IGNORELIST_FILE, WATCHLIST_FILE } from './watchlist';
 const DIGEST = TEST_DENIED_JA4;
 
 let App: () => ReactNode;
+let restoreClient: (() => void) | undefined;
 
 beforeAll(async () => {
   const { mock } = await import('bun:test');
-  // Wholly synthetic, and it deliberately never imports the real ./client. That module resolves
-  // credentials at import time, and watch-assembly's offline test makes an import of it throw —
-  // which is permanent, so any later import gets a TDZ error instead of a fresh evaluation.
+  // The preload evaluated the real ./client with the fixture credentials, so the module is
+  // healthy. It is replaced here — wholly synthetic — so nothing App renders can put a live
+  // request on the wire, and restored in afterAll so later files see the real module.
+  // Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+  // would capture — and later "restore" — the synthetic mock installed just below.
+  const realClient = { ...(await import('./client')) };
+  restoreClient = () => mock.module('./client', () => ({ ...realClient }));
   const { noLiveConfig } = await import('./seed-items');
   // Stubbed too: opening the report pane calls fetchReport, which would put a live observability
   // request on the wire from the suite. The tests below only need the pane to open.
@@ -40,6 +45,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  restoreClient?.();
   // The fatal path sets this, and a leaked non-zero code fails the whole run.
   process.exitCode = 0;
 });
@@ -301,7 +307,7 @@ describe('App', () => {
   // ~90s of retries leaving an empty pane and no message, which reads as a broken tool.
   test('a failed identity list says so, and says how to retry', async () => {
     const { mock } = await import('bun:test');
-    const real = await import('./ip-profile');
+    const real = { ...(await import('./ip-profile')) };
     mock.module('./ip-profile', () => ({
       ...real,
       topJa4: async () => ({
@@ -326,7 +332,7 @@ describe('App', () => {
       // In a finally: a failed assertion would otherwise leave the app mounted and ./ip-profile
       // mocked for every test after it.
       h.unmount();
-      mock.module('./ip-profile', () => real);
+      mock.module('./ip-profile', () => ({ ...real }));
     }
   });
 

@@ -295,7 +295,9 @@ describe('useIdentityLists.move', () => {
     writeFileSync(join(root, WATCHLIST_FILE), line('on-disk-watch'));
     writeFileSync(join(root, IGNORELIST_FILE), line('still-on-ignore'));
 
-    const real = await import('../watchlist');
+    // Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+    // would capture — and later "restore" — the stub installed just below.
+    const real = { ...(await import('../watchlist')) };
     mock.module('../watchlist', () => ({
       ...real,
       recordExclusive: async () => ({
@@ -321,7 +323,7 @@ describe('useIdentityLists.move', () => {
       expect(h.frame()).toContain('ignore=still-on-ignore');
     } finally {
       h.unmount();
-      mock.module('../watchlist', () => real);
+      mock.module('../watchlist', () => ({ ...real }));
     }
   });
 });

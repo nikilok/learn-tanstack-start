@@ -2,3 +2,5 @@
 # Refuse to install package versions younger than 3 days. Mitigates supply-chain
 # attacks where compromised releases are typically caught and yanked within hours.
 minimumReleaseAge = 259200
+# Types-only mirrors of the bun runtime; they must move the day bun does.
+minimumReleaseAgeExcludes = ["@types/bun", "bun-types"]

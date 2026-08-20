@@ -10,7 +10,7 @@
 // than recording API payloads. Recorded rows go stale as dimensions change and would carry real
 // fingerprints; parameters carry neither.
 
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,22 @@ import type { Row } from './observability';
 import { rollingWindow } from './time-window';
 import { type ScreenDeps, findSuspects, screen, screenOnce } from './watch';
 import { IGNORELIST_FILE } from './watchlist';
+
+// The live-config gate must fail in every test here — the degraded state this file asserts on —
+// and it must fail at the CALL, without a network round-trip. Making the IMPORT throw instead
+// (clearing the credentials first) poisons ./client for the whole process: Bun 1.4 rethrows a
+// failed evaluation forever, even through mock.module, which took app.test.tsx down with it.
+// Detached snapshot: mock.module mutates the live namespace in place, so a bare reference
+// would capture — and later "restore" — whatever the mock wrote over it.
+const realClient = { ...(await import('./client')) };
+mock.module('./client', () => ({
+  ...realClient,
+  fetchLive: () =>
+    Promise.reject(new Error('live firewall config unavailable in tests')),
+}));
+afterAll(() => {
+  mock.module('./client', () => ({ ...realClient }));
+});
 
 const CREDS = { projectId: 'p', teamId: 't', token: 'x' };
 const WINDOW = rollingWindow(24, new Date('2026-08-08T12:00:00.000Z'));

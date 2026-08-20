@@ -55,7 +55,9 @@ async function mountWatch(
   const listed: WatchlistEntry[][] = [];
   let notifyFails = '';
 
-  const realWatch = await import('../watch');
+  // Detached snapshots: mock.module mutates each live namespace in place, so a bare reference
+  // would capture — and later "restore" — the stubs installed below.
+  const realWatch = { ...(await import('../watch')) };
   mock.module('../watch', () => ({
     ...realWatch,
     screenOnce: async () => {
@@ -72,7 +74,7 @@ async function mountWatch(
     adviceWhy: () => 'rendering',
   }));
 
-  const realLog = await import('../watch-log');
+  const realLog = { ...(await import('../watch-log')) };
   mock.module('../watch-log', () => ({
     ...realLog,
     logWatch: async (
@@ -84,7 +86,7 @@ async function mountWatch(
     },
   }));
 
-  const realTuning = await import('../tuning');
+  const realTuning = { ...(await import('../tuning')) };
   mock.module('../tuning', () => ({
     ...realTuning,
     watchTiming: () =>
@@ -93,7 +95,7 @@ async function mountWatch(
     watchIntervalMs: () => 300_000,
   }));
 
-  const realMode = await import('../watch-mode');
+  const realMode = { ...(await import('../watch-mode')) };
   mock.module('../watch-mode', () => ({
     ...realMode,
     // False, or arming the loop spawns caffeinate against the real machine.
@@ -110,7 +112,7 @@ async function mountWatch(
     verdictFrom: () => 'challenge',
   }));
 
-  const realNotify = await import('../watch-notify');
+  const realNotify = { ...(await import('../watch-notify')) };
   mock.module('../watch-notify', () => ({
     ...realNotify,
     readInvestigated: async () => new Map<string, number>(),
@@ -125,7 +127,7 @@ async function mountWatch(
     },
   }));
 
-  const realList = await import('../watchlist');
+  const realList = { ...(await import('../watchlist')) };
   mock.module('../watchlist', () => ({
     ...realList,
     recordAdditions: async () => ({ entries: [] as WatchlistEntry[] }),
@@ -154,12 +156,12 @@ async function mountWatch(
   await h.settle();
 
   const restore = () => {
-    mock.module('../watch', () => realWatch);
-    mock.module('../watch-log', () => realLog);
-    mock.module('../tuning', () => realTuning);
-    mock.module('../watch-mode', () => realMode);
-    mock.module('../watch-notify', () => realNotify);
-    mock.module('../watchlist', () => realList);
+    mock.module('../watch', () => ({ ...realWatch }));
+    mock.module('../watch-log', () => ({ ...realLog }));
+    mock.module('../tuning', () => ({ ...realTuning }));
+    mock.module('../watch-mode', () => ({ ...realMode }));
+    mock.module('../watch-notify', () => ({ ...realNotify }));
+    mock.module('../watchlist', () => ({ ...realList }));
   };
   return {
     h,

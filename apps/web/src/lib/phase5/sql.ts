@@ -16,7 +16,7 @@
  * reliability gap").
  */
 
-import type { NeonQueryFunction } from '@neondatabase/serverless';
+import type { NeonQueryFunction } from '@ss/db/client';
 
 import type { ResolveResult } from '../hmrc-ch/resolve-sponsor.ts';
 import type {

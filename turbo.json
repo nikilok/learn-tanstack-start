@@ -27,6 +27,7 @@
     "lint:fix": {
       "dependsOn": ["^build"]
     },
+    "typecheck": {},
     "test": {
       "dependsOn": ["^build"]
     },

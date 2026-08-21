@@ -9,7 +9,8 @@
       "@/*": ["./src/*"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    // vite/client comes via src/vite-env.d.ts — a types entry here breaks Vercel's TS7 middleware transpile
+    "types": [],
 
     /* Bundler mode */
     "moduleResolution": "bundler",

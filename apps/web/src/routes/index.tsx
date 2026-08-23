@@ -205,7 +205,7 @@ function Home() {
           UK
         </h1>
         <p className="island-kicker mb-3">
-          Search UK sponsors
+          Find UK companies that sponsor visas
           {!platformInfo.isMobile && (
             <span
               style={{

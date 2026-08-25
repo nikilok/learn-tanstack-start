@@ -41,7 +41,7 @@ function writePrompt(value: string): void {
  * speech bubble — on hover / keyboard focus, and unprompted when the footer scrolls into
  * view, which is the only way the invitation reaches a touch device.
  *
- * The unprompted play is budgeted: three full showings, or none at all once the reader has
+ * The unprompted play is budgeted: three showings, or none at all once the reader has
  * clicked through. Past that it is a distraction, and only hover and focus still open it.
  */
 export default function DiscordLink() {
@@ -85,12 +85,14 @@ export default function DiscordLink() {
     return () => observer.disconnect();
   }, []);
 
-  /** One prompt spent. Only a play that ran to the end counts — one the reader scrolled away from was cancelled, and they never read it. */
+  /** The bubble is on screen, so the prompt is spent. Counting at the end instead would never record a reader who scrolls away mid-play, and they would be prompted for eternity. */
   const countPrompt = () => {
-    setPlaying(false);
     promptRef.current = afterPrompt(promptRef.current);
     writePrompt(promptRef.current);
   };
+
+  /** The run reached its own end; drop the class so hover and focus own the bubble again. */
+  const endPlay = () => setPlaying(false);
 
   /** Clicking through is the answer the prompt was asking for, so stop asking. */
   const dismissPrompt = () => {
@@ -136,7 +138,8 @@ export default function DiscordLink() {
       <span
         aria-hidden="true"
         className={styles.bubble}
-        onAnimationEnd={countPrompt}
+        onAnimationStart={countPrompt}
+        onAnimationEnd={endPlay}
       >
         Come chat or give feedback on our Discord
       </span>

@@ -50,7 +50,7 @@ describe('canPrompt', () => {
 });
 
 describe('afterPrompt', () => {
-  test('counts one completed prompt at a time', () => {
+  test('counts one prompt at a time', () => {
     expect(afterPrompt(null)).toBe('1');
     expect(afterPrompt('1')).toBe('2');
     expect(afterPrompt('2')).toBe('3');

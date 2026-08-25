@@ -22,7 +22,7 @@ export function canPrompt(raw: string | null): boolean {
   return promptsShown(raw) < MAX_DISCORD_PROMPTS;
 }
 
-/** The value to store once a prompt has played all the way through — a run the reader scrolled away from is never one of the three. */
+/** The value to store once a prompt has appeared on screen — counted then rather than at the end of the run, so a reader who scrolls away still spends it. */
 export function afterPrompt(raw: string | null): string {
   if (raw === DISCORD_PROMPT_DISMISSED) return DISCORD_PROMPT_DISMISSED;
   return String(Math.min(promptsShown(raw) + 1, MAX_DISCORD_PROMPTS));

@@ -1,5 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
+import {
+  afterPrompt,
+  canPrompt,
+  DISCORD_PROMPT_DISMISSED,
+  DISCORD_PROMPT_KEY,
+} from '../lib/discord-prompt';
+
 import styles from './DiscordLink.module.css';
 
 /* The Discord mark split into three: the face is the mask's white ground and each eye is a
@@ -11,14 +18,36 @@ const EYE_LEFT =
 const EYE_RIGHT =
   'M10.663 10.214c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.63 1.612-1.438 1.612Z';
 
+/** Read the prompt budget; storage is unreadable in private mode, which reads as a fresh visitor. */
+function readPrompt(): string | null {
+  try {
+    return window.localStorage.getItem(DISCORD_PROMPT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the prompt budget, ignoring a storage that refuses to take it. */
+function writePrompt(value: string): void {
+  try {
+    window.localStorage.setItem(DISCORD_PROMPT_KEY, value);
+  } catch {
+    // storage may be unavailable (private mode); the reader is prompted again next visit
+  }
+}
+
 /**
  * Discord icon for the footer's social row. Winks its right eye and then pops a comic
- * speech bubble — on hover / keyboard focus, and once each time the footer scrolls into
+ * speech bubble — on hover / keyboard focus, and unprompted when the footer scrolls into
  * view, which is the only way the invitation reaches a touch device.
+ *
+ * The unprompted play is budgeted: three full showings, or none at all once the reader has
+ * clicked through. Past that it is a distraction, and only hover and focus still open it.
  */
 export default function DiscordLink() {
   const maskId = `discord-eyes-${useId()}`;
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const promptRef = useRef<string | null>(null);
   const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
@@ -27,12 +56,19 @@ export default function DiscordLink() {
     // Nothing to arm without motion: the CSS plays neither animation, so the run would
     // never end and .playing would stick.
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    promptRef.current = readPrompt();
+    // Spent readers never even pay for the observer.
+    if (!canPrompt(promptRef.current)) return;
 
     let armed = false;
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.intersectionRatio >= 1 && !armed) {
+          if (
+            entry.intersectionRatio >= 1 &&
+            !armed &&
+            canPrompt(promptRef.current)
+          ) {
             armed = true;
             setPlaying(true);
           } else if (entry.intersectionRatio <= 0) {
@@ -49,6 +85,19 @@ export default function DiscordLink() {
     return () => observer.disconnect();
   }, []);
 
+  /** One prompt spent. Only a play that ran to the end counts — one the reader scrolled away from was cancelled, and they never read it. */
+  const countPrompt = () => {
+    setPlaying(false);
+    promptRef.current = afterPrompt(promptRef.current);
+    writePrompt(promptRef.current);
+  };
+
+  /** Clicking through is the answer the prompt was asking for, so stop asking. */
+  const dismissPrompt = () => {
+    promptRef.current = DISCORD_PROMPT_DISMISSED;
+    writePrompt(DISCORD_PROMPT_DISMISSED);
+  };
+
   return (
     <span
       ref={wrapRef}
@@ -58,6 +107,7 @@ export default function DiscordLink() {
         href="https://discord.gg/nZrjp5sBQb"
         target="_blank"
         rel="noreferrer"
+        onClick={dismissPrompt}
         className="rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink)"
       >
         <span className="sr-only">Join the Discord</span>
@@ -86,7 +136,7 @@ export default function DiscordLink() {
       <span
         aria-hidden="true"
         className={styles.bubble}
-        onAnimationEnd={() => setPlaying(false)}
+        onAnimationEnd={countPrompt}
       >
         Come chat or give feedback on our Discord
       </span>

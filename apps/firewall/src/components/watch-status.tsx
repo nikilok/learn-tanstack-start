@@ -39,6 +39,9 @@ function ProfiledRow({ p }: { p: Profiled }) {
         {'  '}
         {p.verdict}
       </Text>
+      {/* One character: the panel is ~38 columns and a digest alone is 37. It says "rebuild of
+          something already denied or challenged"; the CLI report carries the line itself. */}
+      {p.onListedLine ? <Text color="yellow">{' ↺'}</Text> : null}
       <Text dimColor>
         {' · '}
         {shortDigest(p.digest)} · {p.total} req

@@ -42,6 +42,8 @@ export type Profiled = {
   verdict: string;
   /** The tells behind the verdict. Shown only where there is room; the log always has it. */
   why: string;
+  /** On a TLS build line that already carries a denied or challenged identity — i.e. a rebuild of something we acted on. One character here; the CLI report carries the line itself. */
+  onListedLine: boolean;
 };
 
 export type Watch = {
@@ -215,6 +217,7 @@ export function useWatch(opts: {
             total: f.total,
             verdict: f.advice.verdict,
             why: adviceWhy(f.advice),
+            onListedLine: Boolean(f.buildLine),
           })),
         );
         const bans = findings.filter((f) => f.advice.verdict === 'ban');

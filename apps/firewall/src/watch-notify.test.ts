@@ -48,6 +48,7 @@ const ban = (digest: string) => ({
     leverNotes: [],
   },
   autoBanRefusal: 'fixture: not evaluated',
+  profileEmpty: false,
 });
 
 describe('actionableKey', () => {

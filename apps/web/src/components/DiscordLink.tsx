@@ -37,6 +37,9 @@ export default function DiscordLink() {
             setPlaying(true);
           } else if (entry.intersectionRatio <= 0) {
             armed = false;
+            // Cancels a play the reader scrolled away from, so coming back starts a
+            // fresh one instead of resuming the tail of the old run.
+            setPlaying(false);
           }
         }
       },

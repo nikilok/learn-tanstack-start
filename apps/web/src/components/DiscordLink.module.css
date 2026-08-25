@@ -1,0 +1,187 @@
+/* Wink + comic bubble for the footer's Discord link. Hover and keyboard focus reveal the
+   bubble as a transition; .playing (set when the row scrolls into view) runs the same show
+   as a one-shot animation that clears itself on end. */
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The eye is a hole in the icon's mask, so the wink squashes the hole itself. The origin
+   sits below centre so the slit closes downward, the way a lid falls. */
+.eye {
+  transform-box: fill-box;
+  transform-origin: 50% 70%;
+}
+
+/* Hangs off the icon's right edge rather than centring on it — a centred bubble runs past
+   the viewport on a 320px screen. */
+.bubble {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 14px);
+  z-index: 1;
+  width: max-content;
+  max-width: 12.5rem;
+  padding: 7px 11px;
+  color: var(--db-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: balance;
+  background: var(--db-bg);
+  border: 1.5px solid var(--db-line);
+  border-radius: 12px;
+  box-shadow: var(--db-shadow);
+  opacity: 0;
+  visibility: hidden;
+  /* Grows out of the tail's tip, so it reads as coming from the icon. */
+  transform: scale(0.6) rotate(-5deg);
+  transform-origin: calc(100% - 18px) 100%;
+  transition:
+    opacity 160ms ease,
+    transform 200ms ease,
+    visibility 0s linear 200ms;
+  pointer-events: none;
+
+  --db-bg: var(--surface);
+  --db-fg: var(--sea-ink);
+  --db-line: color-mix(in srgb, var(--sea-ink) 78%, transparent);
+  --db-shadow: 3px 3px 0 color-mix(in srgb, var(--sea-ink) 10%, transparent);
+}
+:global(.dark) .bubble {
+  --db-line: color-mix(in srgb, var(--sea-ink) 55%, transparent);
+  --db-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* Only the two edges that form the point are drawn, and the diamond's inner half covers the
+   bubble's own border, so the outline runs on through with no seam. */
+.bubble::after {
+  content: '';
+  position: absolute;
+  right: 13px;
+  bottom: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--db-bg);
+  border-right: 1.5px solid var(--db-line);
+  border-bottom: 1.5px solid var(--db-line);
+  border-radius: 0 0 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Beside the icon once there's room for it — above the icons it would sit on the logo.
+   Centred with auto block margins, not a translate, so the pop animation owns `transform`. */
+@media (min-width: 48rem) {
+  .bubble {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: calc(100% + 14px);
+    height: max-content;
+    margin-block: auto;
+    transform-origin: 0 50%;
+  }
+  .bubble::after {
+    top: 0;
+    right: auto;
+    bottom: 0;
+    left: -6px;
+    margin-block: auto;
+    border: 1.5px solid var(--db-line);
+    border-top: 0;
+    border-right: 0;
+    border-radius: 0 0 0 2px;
+  }
+}
+
+/* Focus reveals it on any device — it's the only pointerless way in. The delay lets the
+   wink land first. */
+.wrap:has(:focus-visible) .bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 180ms ease 200ms,
+    transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1) 200ms,
+    visibility 0s;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wrap:hover .bubble {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition:
+      opacity 180ms ease 200ms,
+      transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1) 200ms,
+      visibility 0s;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wrap:has(:focus-visible) .eye {
+    animation: discord-wink 820ms ease;
+  }
+
+  /* Autoplay: the wink lands first, the bubble holds long enough to be read, then both
+     reset. */
+  .playing .eye {
+    animation: discord-wink 820ms ease 700ms;
+  }
+  .playing .bubble {
+    animation: discord-bubble 7000ms ease 1120ms both;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+  .wrap:hover .eye {
+    animation: discord-wink 820ms ease;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble {
+    transform: none;
+  }
+}
+
+@keyframes discord-wink {
+  0%,
+  12% {
+    transform: scaleY(1);
+  }
+  22%,
+  42% {
+    transform: scaleY(0.08);
+  }
+  55%,
+  100% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes discord-bubble {
+  0% {
+    opacity: 0;
+    visibility: visible;
+    transform: scale(0.6) rotate(-5deg);
+  }
+  3.2% {
+    opacity: 1;
+    transform: scale(1.06) rotate(2deg);
+  }
+  5.5% {
+    transform: scale(0.97) rotate(-1deg);
+  }
+  8.2%,
+  93.6% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.92) rotate(-2deg);
+  }
+}

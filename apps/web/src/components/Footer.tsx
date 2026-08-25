@@ -68,7 +68,7 @@ export default function Footer() {
             </svg>
           </a>
           <a
-            href="https://discord.gg/ettpkcSSv"
+            href="https://discord.gg/nZrjp5sBQb"
             target="_blank"
             rel="noreferrer"
             className="rounded-md p-2 text-(--sea-ink-soft) no-underline transition hover:text-(--sea-ink)"

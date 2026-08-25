@@ -69,6 +69,17 @@ describe('renderingFamilies', () => {
     expect([...(out ?? [])]).toEqual([familyOf(SIBLING)]);
   });
 
+  test('a response of ONLY malformed digests establishes nothing', () => {
+    // Not the '(none)'/'?' placeholders — anything that is not a real digest. Counting them left
+    // a defined-but-empty Set, which reads as the affirmative claim that nothing renders anywhere.
+    const out = renderingFamilies(
+      [row('nonsense', RPC, 900), row('a_b_c', RPC, 900)],
+      MAX_SHARE,
+    );
+    expect(out).toBeUndefined();
+    expect(kinOfListed([SIBLING], [LISTED], out).size).toBe(0);
+  });
+
   test('a family that only fetches pages is not', () => {
     expect(renderingFamilies([row(SIBLING, PAGE, 900)], MAX_SHARE)?.size).toBe(
       0,

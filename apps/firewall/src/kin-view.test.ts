@@ -24,6 +24,7 @@ const report = (over: Partial<KinReport> = {}): KinReport => ({
   window: W,
   listed: 1,
   complete: true,
+  unreadable: [],
   families: [
     {
       family: 't13dscrp00_aaaaaaaaaaaa',
@@ -94,6 +95,21 @@ describe('kinLines', () => {
       }),
     );
     expect(t).toContain('may be ours');
+  });
+
+  test('an unread list is never reported as "nothing is listed"', () => {
+    // The zero is there because we failed to read our own config, not because the WAF is empty.
+    const s = text(
+      report({ listed: 0, families: [], unreadable: ['FW_BLOCKED_JA4: boom'] }),
+    );
+    expect(s).toContain('could not read');
+    expect(s).not.toContain('nothing is denied or challenged');
+  });
+
+  test('a capped sample makes the candidate count a floor, not an answer', () => {
+    expect(text(report({ complete: false }))).toContain(
+      'treat that as a floor',
+    );
   });
 
   test('nothing listed says so rather than rendering an empty report', () => {

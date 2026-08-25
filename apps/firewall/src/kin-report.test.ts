@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 
-import { type Standing, buildKinReport } from './kin-report';
+import { type Standing, buildKinReport, fetchKinReport } from './kin-report';
 import { rollingWindow } from './time-window';
 
 const W = rollingWindow(144, new Date('2026-08-25T12:00:00.000Z'));
@@ -151,5 +151,43 @@ describe('buildKinReport', () => {
       true,
     );
     expect(r.families).toEqual([]);
+  });
+});
+
+// The CAP is per-response, and the two responses cap independently. A capped verification summary
+// can omit the row proving a member is a crawler, which promotes it to something worth profiling —
+// so `complete` has to answer for both, exactly as the watch screen does.
+describe('fetchKinReport', () => {
+  const CREDS = { projectId: 'p', teamId: 't', token: 'x' };
+  const CAP = 500;
+
+  /** A metrics stand-in whose verified response is `verified` rows long and route response short. */
+  const query =
+    (verifiedRows: number) => async (_ctx: unknown, groupBy: string[]) => ({
+      summary: groupBy.includes('botVerified')
+        ? Array.from({ length: verifiedRows }, (_, i) => ({
+            clientJa4Digest: `t13dscrp00_aaaaaaaaaaaa_${String(i).padStart(12, '0')}`,
+            botVerified: 'pass',
+            count_sum: 1,
+          }))
+        : [row(SIBLING, PAGE, 300)],
+    });
+
+  test('a capped VERIFIED response makes the report incomplete', async () => {
+    const r = await fetchKinReport(
+      CREDS,
+      W,
+      query(CAP) as unknown as Parameters<typeof fetchKinReport>[2],
+    );
+    expect(r.complete).toBe(false);
+  });
+
+  test('two short responses are complete', async () => {
+    const r = await fetchKinReport(
+      CREDS,
+      W,
+      query(3) as unknown as Parameters<typeof fetchKinReport>[2],
+    );
+    expect(r.complete).toBe(true);
   });
 });

@@ -30,9 +30,11 @@ export function renderSharesByDigest(
   // rendering share, and turning one browser session into two apparent harvesters.
   const byDigest = new Map<string, [string, number][]>();
   for (const r of routeRows) {
-    const raw = String(r.clientJa4Digest ?? '');
-    if (!raw || raw === '(none)' || raw === '?') continue;
-    const d = JA4_DENY.normalize(raw);
+    // Validated, not merely non-placeholder. Anything that is not a real digest cannot belong to
+    // a family, so counting it here inflates `shares` — and a response of nothing BUT malformed
+    // rows then yields a defined-but-empty Set, which reads as "nothing renders anywhere".
+    const d = normalizeDigest(String(r.clientJa4Digest ?? ''));
+    if (!JA4_DENY.valid(d)) continue;
     const paths = byDigest.get(d) ?? [];
     paths.push([String(r.route ?? ''), countOf(r)]);
     byDigest.set(d, paths);

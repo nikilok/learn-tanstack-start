@@ -47,12 +47,18 @@ export function kinLines(r: KinReport): Line[] {
       ),
     ),
   ];
+  // Before the zero is reported, because an unread list is why the zero might be there. Saying
+  // "nothing is denied" on the strength of a config we failed to read is a claim about the WAF.
+  for (const u of r.unreadable)
+    L.push(line(seg(`  could not read ${u}`, 'bad')));
   if (!r.listed) {
     L.push(
       blank(),
       line(
         seg(
-          'nothing is denied or challenged, so there is no build line to follow',
+          r.unreadable.length
+            ? 'no build line can be followed — the lists above could not be read, so this is not "nothing is listed"'
+            : 'nothing is denied or challenged, so there is no build line to follow',
           'warn',
         ),
       ),
@@ -63,7 +69,7 @@ export function kinLines(r: KinReport): Line[] {
     L.push(
       line(
         seg(
-          '  the traffic sample hit the group cap — a member, or a member’s rendering, may be missing',
+          '  a sample hit the group cap — a member, its rendering, or the proof that it is a verified crawler may be missing',
           'warn',
         ),
       ),
@@ -106,13 +112,17 @@ export function kinLines(r: KinReport): Line[] {
   }
   const unlisted = candidates(r);
   L.push(blank());
+  // Three states, not two. On a capped sample a count of zero would mean "nobody to look at" when
+  // it can equally mean the rows saying so never arrived.
   L.push(
     line(
       seg(
-        unlisted.length
-          ? `${unlisted.length} member(s) not yet acted on — profile with: bun run firewall:ip <digest>`
-          : 'every member of every line is already listed or verified',
-        unlisted.length ? 'warn' : 'good',
+        !r.complete
+          ? `${unlisted.length} member(s) not yet acted on — but the sample was capped, so treat that as a floor`
+          : unlisted.length
+            ? `${unlisted.length} member(s) not yet acted on — profile with: bun run firewall:ip <digest>`
+            : 'every member of every line is already listed or verified',
+        !r.complete || unlisted.length ? 'warn' : 'good',
       ),
     ),
   );

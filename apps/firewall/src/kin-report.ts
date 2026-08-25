@@ -8,6 +8,7 @@ import { JA4_DENY, envMatching } from './deny-list';
 import { familyOf, renderSharesByDigest } from './ja4-family';
 import { type Ctx, type Row, countOf, makeCtx, metrics } from './observability';
 import type { Window } from './time-window';
+import { errMsg } from './util';
 
 /** Above this share of rendering requests, a browser has run the app from the fingerprint. */
 export const BROWSER_SHARE = 0.05;
@@ -38,15 +39,29 @@ export type KinReport = {
   families: KinFamily[];
   listed: number;
   /**
-   * False when the route response hit the group cap, so a member — or a member's rendering —
-   * may be missing. Rendered as a warning rather than silently weakening every share below.
+   * False when EITHER summary hit the group cap. The route one can drop a member or its
+   * rendering; the verified one can drop the proof that a member is a crawler, which would
+   * otherwise promote it to something worth profiling. Rendered as a warning rather than
+   * silently weakening every reading below.
    */
   complete: boolean;
+  /** Lists that could not be read. Non-empty means `listed` is a floor and may be zero for the wrong reason. */
+  unreadable: string[];
 };
 
-/** Both denylists, each entry tagged with which list it came from. Unreadable lists are empty, and an empty report says so rather than reading as "nothing is listed". */
-export function listedStandings(): Map<string, Standing> {
+/**
+ * Both denylists, each entry tagged with which list it came from.
+ *
+ * An unreadable list is reported, never swallowed. Dropping the error left an empty map, and an
+ * empty map renders as "nothing is denied or challenged" — an affirmative claim about the WAF's
+ * state, made because we failed to read our own config.
+ */
+export function listedStandings(): {
+  standings: Map<string, Standing>;
+  unreadable: string[];
+} {
   const out = new Map<string, Standing>();
+  const unreadable: string[] = [];
   for (const [name, standing] of [
     ['FW_CHALLENGE_JA4', 'challenged'],
     // Denied second: a digest on both lists is denied in effect, since insertion order gives the
@@ -56,11 +71,11 @@ export function listedStandings(): Map<string, Standing> {
     try {
       for (const d of envMatching(name, JA4_DENY, false))
         out.set(JA4_DENY.normalize(d), standing);
-    } catch {
-      // An unreadable list contributes nothing. The caller reports `listed`, so a zero is visible.
+    } catch (e) {
+      unreadable.push(`${name}: ${errMsg(e)}`);
     }
   }
-  return out;
+  return { standings: out, unreadable };
 }
 
 /** Assemble the report from one digest×route summary and one verified summary. Pure, so the shape is testable without a network. */
@@ -70,6 +85,7 @@ export function buildKinReport(
   verifiedRows: Row[],
   standings: Map<string, Standing>,
   complete: boolean,
+  unreadable: string[] = [],
 ): KinReport {
   const shares = renderSharesByDigest(routeRows);
   const verified = new Set(
@@ -111,6 +127,7 @@ export function buildKinReport(
     window,
     listed: standings.size,
     complete,
+    unreadable,
     families: families.sort((a, b) => b.members.length - a.members.length),
   };
 }
@@ -133,12 +150,20 @@ export async function fetchKinReport(
     }),
   ]);
   const routeRows = (routeResp.summary ?? []).filter((r) => countOf(r) > 0);
+  const verifiedRows = (verifiedResp.summary ?? []).filter(
+    (r) => countOf(r) > 0,
+  );
+  const { standings, unreadable } = listedStandings();
   return buildKinReport(
     window,
     routeRows,
-    (verifiedResp.summary ?? []).filter((r) => countOf(r) > 0),
-    listedStandings(),
-    routeRows.length < GROUP_CAP,
+    verifiedRows,
+    standings,
+    // BOTH caps, matching the screen. A capped verification response can omit the row proving a
+    // member is a crawler, and it would then read as an unverified member worth profiling.
+    routeRows.length < GROUP_CAP &&
+      (verifiedResp.summary ?? []).length < GROUP_CAP,
+    unreadable,
   );
 }
 

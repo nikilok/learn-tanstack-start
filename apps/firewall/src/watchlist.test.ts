@@ -84,6 +84,19 @@ describe('parseWatchlist / formatWatchlist', () => {
     expect(parsed.error).toContain(`${IGNORELIST_FILE} line 2`);
   });
 
+  test('a padded field is trimmed, so a hand-edited entry still MATCHES', () => {
+    // The whole point of these files is suppression, and an id with a stray space passes every
+    // check here and then matches no digest off the API — so the entry silently fails to suppress
+    // what it was added for. Costlier on the ignore list, where the miss buys ~21 queries and,
+    // unattended, a paid investigation.
+    const raw = `ja4| ${DIG} |2026-08-06T00:00:00.000Z|2026-08-06T00:00:00.000Z| 3 | watch |n`;
+    const out = parseWatchlist(raw, '.firewall-watchlist');
+    expect(out.ok).toBe(true);
+    expect(out.entries[0]?.id).toBe(DIG);
+    expect(out.entries[0]?.seen).toBe(3);
+    expect(out.entries[0]?.source).toBe('watch');
+  });
+
   test('a JA4 id is normalised to lower case on the way in', () => {
     const raw = formatWatchlist([entry()]).replace(DIG, DIG.toUpperCase());
     expect(parseWatchlist(raw, WATCHLIST_FILE).entries[0]?.id).toBe(DIG);

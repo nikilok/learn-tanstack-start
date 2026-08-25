@@ -466,6 +466,7 @@ describe('watchLines', () => {
         why: [],
         advice: advice(),
         autoBanRefusal: 'fixture: not evaluated',
+        profileEmpty: false,
       },
     ],
     enforcement: [],
@@ -507,6 +508,7 @@ describe('watchLines', () => {
               },
             }),
             autoBanRefusal: 'fixture: not evaluated',
+            profileEmpty: false,
           },
         ],
       }),
@@ -525,6 +527,7 @@ describe('watchLines', () => {
             why: [],
             advice: advice({ verdict: 'watch', lever: undefined }),
             autoBanRefusal: 'fixture: not evaluated',
+            profileEmpty: false,
           },
         ],
       }),
@@ -542,6 +545,70 @@ describe('watchLines', () => {
     );
     expect(t).toContain('nothing wants a human');
     expect(t).not.toContain('BAN');
+  });
+
+  test('a finding whose profile returned nothing says the verdict is unjudged', () => {
+    // The screen saw traffic and the profile reported none: both cannot be true, so every axis
+    // was weighed on nothing. Rendering the verdict alone would present that as a reading.
+    const r = report({
+      findings: [
+        {
+          digest: DIG,
+          allowed: 9060,
+          total: 0,
+          why: [],
+          advice: advice(),
+          autoBanRefusal: 'fixture: not evaluated',
+          profileEmpty: true,
+        },
+      ],
+    });
+    expect(text(r)).toContain('UNJUDGED');
+    expect(text(r)).toContain('no evidence');
+  });
+
+  test('a finding with a real profile carries no such warning', () => {
+    expect(text(report())).not.toContain('UNJUDGED');
+  });
+
+  test('a finding on a listed build line shows the line under it', () => {
+    // Attribution at the moment the tier is chosen. Without it, a rebuild of something already
+    // challenged reads as a brand-new client and gets offered the tier that already failed.
+    const r = report({
+      findings: [
+        {
+          digest: DIG,
+          allowed: 9060,
+          total: 9060,
+          why: [],
+          advice: advice(),
+          autoBanRefusal: 'fixture: not evaluated',
+          profileEmpty: false,
+          buildLine: {
+            family: 't13dscrp00_aaaaaaaaaaaa',
+            standing: 'challenged',
+            members: [
+              {
+                digest: 't13dscrp00_aaaaaaaaaaaa_999999999999',
+                requests: 103,
+                renderShare: 0,
+                verified: false,
+                standing: 'challenged',
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const t = text(r);
+    expect(t).toContain('build line');
+    expect(t).toContain('t13dscrp00_aaaaaaaaaaaa_999999999999');
+    expect(t).toContain('CHALLENGED');
+    expect(t).toContain('renders nothing');
+  });
+
+  test('a finding on no listed build line says nothing about one', () => {
+    expect(text(report())).not.toContain('build line');
   });
 
   test('a broken deny rule is actionable on its own, with no candidates at all', () => {
@@ -602,6 +669,7 @@ describe('isActionable', () => {
           leverNotes: [],
         },
         autoBanRefusal: 'fixture: not evaluated',
+        profileEmpty: false,
       },
     ],
   });
@@ -670,6 +738,7 @@ describe('exitCodeFor', () => {
           leverNotes: [],
         },
         autoBanRefusal: 'fixture: not evaluated',
+        profileEmpty: false,
       },
     ],
   });
@@ -889,6 +958,7 @@ describe('adviceWhy / adviceSummary / watchlistAdditions', () => {
         why: ['0.0% rendering, not a verified crawler'],
         advice: advice(),
         autoBanRefusal: null,
+        profileEmpty: false,
       },
     ]);
     expect(adds).toEqual([

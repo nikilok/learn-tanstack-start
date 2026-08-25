@@ -24,6 +24,12 @@ import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
 import { useColour } from './env';
 import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
+import {
+  type KinFamily,
+  type KinReport,
+  type Standing,
+  buildKinReport,
+} from './kin-report';
 import { type Line, blank, line, seg, toAnsi } from './line-model';
 import { type Row, countOf, makeCtx, metrics } from './observability';
 import { bypassPaths, reachabilityFindings } from './reachability';
@@ -68,6 +74,9 @@ const MAX_HOURS = 24 * 6; // the free observability window
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
 // not that the site is under attack from fifty actors at once.
 const MAX_PROFILES = 6;
+// Members shown inline under a finding. The full line is one command away, and a finding that
+// scrolls its own verdict off the screen is worse than a short one.
+const MAX_BUILD_LINE = 4;
 
 const USAGE = `Usage:
   bun run firewall:watch [hours] [--investigate] [--notify]
@@ -193,6 +202,20 @@ export function mergeScreens(...lists: Screened[][]): Screened[] {
   return [...by.values()].sort((a, b) => b.allowed - a.allowed);
 }
 
+/** The build line a digest sits on, with the digest itself removed, or undefined when it is on none. */
+function lineFor(
+  report: KinReport | null,
+  digest: string,
+): KinFamily | undefined {
+  const d = JA4_DENY.normalize(digest);
+  const family = report?.families.find((f) =>
+    f.members.some((m) => m.digest === d),
+  );
+  if (!family) return undefined;
+  const members = family.members.filter((m) => m.digest !== d);
+  return members.length ? { ...family, members } : undefined;
+}
+
 /** One adjudicated candidate: what the screen saw, and what the advisory made of it. */
 export type Finding = Screened & {
   total: number;
@@ -204,6 +227,17 @@ export type Finding = Screened & {
    * produced a live `ban` and a rate nobody has measured is not a rate.
    */
   autoBanRefusal: string | null;
+  /**
+   * The TLS build line this identity sits on, when something on it is already denied or
+   * challenged — the other members, minus this one.
+   *
+   * Attribution, not detection: the screen found this identity on its own evidence. This only
+   * says whether it is a rebuild of something already acted on, which changes the TIER — the
+   * decision that actually went wrong the last time this actor rotated.
+   */
+  buildLine?: KinFamily;
+  /** The profile came back empty for an identity the screen saw traffic from — the advisory judged nothing, so its verdict says nothing. */
+  profileEmpty: boolean;
 };
 
 /**
@@ -406,6 +440,57 @@ export function watchLines(r: WatchReport): Line[] {
         seg(`  ${f.allowed} allowed of ${f.total} total`, 'dim'),
       ),
     );
+    if (f.profileEmpty)
+      L.push(
+        line(
+          seg(
+            '  UNJUDGED  the profile returned nothing for an identity the screen saw traffic from — the verdict above was reached on no evidence',
+            'bad',
+          ),
+        ),
+      );
+    if (f.buildLine) {
+      // Under the finding, because it is about THIS identity's tier. The evidence a member
+      // contributes is censored by whatever we already did to it, so the line says which.
+      L.push(
+        line(
+          seg('  build line', 'warn'),
+          seg(` ${f.buildLine.family}_*`, 'key'),
+          seg(
+            f.buildLine.standing === 'denied'
+              ? ' — a member is DENIED, so its traffic never reaches routing and the shares below cannot see it'
+              : ' — a member is CHALLENGED, so a browser meeting the interstitial renders nothing here',
+            'dim',
+          ),
+        ),
+      );
+      for (const m of f.buildLine.members.slice(0, MAX_BUILD_LINE))
+        L.push(
+          line(
+            seg(`      ${m.digest}`, 'dim'),
+            seg(`  ${String(m.requests).padStart(6)} req`, 'dim'),
+            seg(`  ${(m.renderShare * 100).toFixed(1).padStart(5)}%`, 'dim'),
+            seg(
+              m.verified
+                ? '  verified crawler'
+                : m.renderShare > 0.05
+                  ? '  renders — a browser'
+                  : '  renders nothing',
+              m.verified || m.renderShare > 0.05 ? 'good' : 'bad',
+            ),
+            m.standing ? seg(`  [${m.standing}]`, 'dim') : seg(''),
+          ),
+        );
+      if (f.buildLine.members.length > MAX_BUILD_LINE)
+        L.push(
+          line(
+            seg(
+              `      … +${f.buildLine.members.length - MAX_BUILD_LINE} more — bun run firewall:kin`,
+              'dim',
+            ),
+          ),
+        );
+    }
     if (f.advice.lever)
       L.push(
         line(
@@ -600,13 +685,26 @@ export async function findSuspects(
    * optional so the many test call sites that predate it keep the old behaviour by construction.
    */
   sustainedDuty?: number,
-): Promise<{ rows: Screened[]; findings: Finding[]; truncated: boolean }> {
-  const { rows, truncated, handled, presence } = await screen(
+): Promise<{
+  rows: Screened[];
+  findings: Finding[];
+  truncated: boolean;
+  /** Build lines of everything already denied or challenged, or null when the sample capped. Attached to findings; never a finding of its own. */
+  kinReport: KinReport | null;
+}> {
+  // Built from this function's OWN parameters, so the screen never reads the environment and a
+  // replay can drive the whole assembly. Denied last: a digest on both lists is denied in effect.
+  const standings = new Map<string, Standing>([
+    ...challengedJa4.map((x) => [JA4_DENY.normalize(x), 'challenged'] as const),
+    ...deniedJa4.map((x) => [JA4_DENY.normalize(x), 'denied'] as const),
+  ]);
+  const { rows, truncated, handled, presence, kinReport } = await screen(
     creds,
     window,
     allowedBots,
     deniedUa,
     deps,
+    standings,
   );
   // The screen measures presence; only a tuning reader knows what share counts as sustained.
   const persistence =
@@ -690,6 +788,13 @@ export async function findSuspects(
       ...c,
       total: p.total,
       advice,
+      // The screen SAW this identity's traffic; the profile then reported none of it. Those two
+      // cannot both be true, so the queries behind the profile did not answer — and every axis the
+      // advisory weighed was weighed on nothing. Its verdict is not a reading of this identity.
+      //
+      // Live, that is a failed query degrading to []. Under --mock it is a cassette that never
+      // recorded this identity, which is the common case: a recording holds only what was opened.
+      profileEmpty: p.total === 0 && c.allowed > 0,
       autoBanRefusal: autoBanRefusal(
         banCandidate({
           digest: c.digest,
@@ -699,9 +804,12 @@ export async function findSuspects(
           windowTotal,
         }),
       ),
+      // Free: assembled from summaries the screen already fetched. The digest itself is dropped —
+      // a line listing the identity it is attached to reads as if it were its own sibling.
+      buildLine: lineFor(kinReport, c.digest),
     });
   }
-  return { rows, findings, truncated };
+  return { rows, findings, truncated, kinReport };
 }
 
 /**
@@ -726,6 +834,8 @@ export async function screenOnce(
   rows: Screened[];
   findings: Finding[];
   truncated: boolean;
+  /** Build lines of everything already denied or challenged, or null when the sample capped. Attached to findings; never a finding of its own. */
+  kinReport: KinReport | null;
   configErrors: string[];
 }> {
   const configErrors: string[] = [];
@@ -929,11 +1039,15 @@ export async function screen(
   /** Denied user-agent tokens, so an identity already banned by name is not re-nominated. */
   deniedUa: readonly string[] = [],
   deps: ScreenDeps = LIVE_DEPS,
+  /** Everything already denied or challenged, tagged with which. Passed in rather than read from the environment, so the assembly is drivable from a recorded corpus. */
+  standings: Map<string, Standing> = new Map(),
 ): Promise<{
   rows: Screened[];
   truncated: boolean;
   handled: Set<string>;
   presence: Presence;
+  /** Build lines of everything already denied or challenged, or null when the sample capped. Attached to findings; never a finding of its own. */
+  kinReport: KinReport | null;
 }> {
   const { metrics } = deps;
   const { ctx } = makeCtx(creds, window);
@@ -976,7 +1090,14 @@ export async function screen(
   // then surface it as a candidate purely because we failed to learn it was legitimate. Better to
   // run only the category screen and say the window was truncated than to invent a suspect.
   const verifiedComplete = verifiedRows.length < GROUP_CAP;
+  // Free: both summaries are already in hand. Null when either capped — a count of zero would
+  // read as "nothing on any build line", which a truncated sample cannot support.
+  const kinReport =
+    routeRows.length < GROUP_CAP && verifiedComplete
+      ? buildKinReport(window, routeRows, verifiedRows, standings, true)
+      : null;
   return {
+    kinReport,
     // Free: these two responses already carry an hourly series per group, and the screen was
     // reading only their summaries. No extra query buys the persistence gate.
     presence: {

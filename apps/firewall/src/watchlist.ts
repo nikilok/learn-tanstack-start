@@ -76,8 +76,12 @@ export function parseWatchlist(raw: string, file: string): Watchlist {
   for (const [i, text] of raw.split('\n').entries()) {
     const trimmed = text.trim();
     if (!trimmed) continue;
-    const [kind, id, addedAt, lastSeen, seen, source, ...note] =
-      trimmed.split('|');
+    // Fields trimmed, not just the line. These files are hand-edited, and a padded id survives
+    // every check here and then silently fails to match a digest off the API — so the entry does
+    // not suppress what it was added to suppress, on the ignore list as well as the watch list.
+    const [kind, id, addedAt, lastSeen, seen, source, ...note] = trimmed
+      .split('|')
+      .map((f) => f.trim());
     const bad = (why: string): Watchlist => ({
       entries: [],
       ok: false,

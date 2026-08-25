@@ -73,6 +73,7 @@ describe('WatchStatus', () => {
         digest: `t13d1516h2_8daaf6152771_${String(i).padStart(12, 'a')}`,
         total: 900 - i * 100,
         verdict: i === 0 ? 'ban' : 'watch',
+        onListedLine: false,
         why: 'rendering, spread',
       }));
 
@@ -188,6 +189,7 @@ describe('panelRows', () => {
       digest: `t13d17${i}4h1_5b57614c22b0_7baf387fc6ff`,
       total: 900,
       verdict: 'watch',
+      onListedLine: false,
       why: 'rendering',
     }));
     // The loop's real note and a real verdict, both long enough to wrap at a narrow width.

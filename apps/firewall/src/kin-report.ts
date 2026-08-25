@@ -161,7 +161,9 @@ export async function fetchKinReport(
     standings,
     // BOTH caps, matching the screen. A capped verification response can omit the row proving a
     // member is a crawler, and it would then read as an unverified member worth profiling.
-    routeRows.length < GROUP_CAP &&
+    // Measured on what the SERVER returned, before zero-count rows are filtered out — the API
+    // zero-fills, so a capped response containing one is the norm rather than the edge.
+    (routeResp.summary ?? []).length < GROUP_CAP &&
       (verifiedResp.summary ?? []).length < GROUP_CAP,
     unreadable,
   );

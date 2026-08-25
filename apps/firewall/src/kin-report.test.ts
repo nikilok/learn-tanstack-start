@@ -173,6 +173,29 @@ describe('fetchKinReport', () => {
         : [row(SIBLING, PAGE, 300)],
     });
 
+  test('a capped ROUTE response is incomplete even with a zero-count row in it', async () => {
+    // The cap is on what the SERVER returned, so it must be measured before zero-count rows are
+    // filtered out — and the API zero-fills, so a capped response containing one is the norm.
+    const capped = async (_ctx: unknown, groupBy: string[]) => ({
+      summary: groupBy.includes('botVerified')
+        ? []
+        : [
+            ...Array.from({ length: CAP - 1 }, (_, i) => ({
+              clientJa4Digest: `t13dscrp00_aaaaaaaaaaaa_${String(i).padStart(12, '0')}`,
+              route: PAGE,
+              count_sum: 1,
+            })),
+            row(SIBLING, PAGE, 0),
+          ],
+    });
+    const r = await fetchKinReport(
+      CREDS,
+      W,
+      capped as unknown as Parameters<typeof fetchKinReport>[2],
+    );
+    expect(r.complete).toBe(false);
+  });
+
   test('a capped VERIFIED response makes the report incomplete', async () => {
     const r = await fetchKinReport(
       CREDS,

@@ -346,6 +346,10 @@ export function parseInvestigation(
         typeof r.result === 'string' && r.result
           ? r.result
           : `claude exited ${exitCode}`,
+      // Flagged on THIS path too. A child killed at the ceiling can still have printed valid JSON
+      // before it died, which lands here rather than in the parse failure above — and without the
+      // flag the caller releases the mark and re-buys the same dead run on the next pass.
+      ceiling: exitCode === TIMEOUT_EXIT,
     };
   if (typeof r.result !== 'string' || !r.result)
     return { ok: false, error: 'claude returned no result text' };

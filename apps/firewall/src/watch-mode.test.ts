@@ -258,6 +258,14 @@ describe('the investigation ceiling', () => {
     expect(r.ok === false && r.ceiling).toBe(true);
   });
 
+  test('a ceiling kill that DID print JSON is flagged too', () => {
+    // The kill can land after the child has written valid output, which takes the parsed branch
+    // rather than the parse-failure one. Flagging only the latter left the same re-buy loop open
+    // on the path that actually produces output.
+    const r = parseInvestigation(JSON.stringify({ result: 'partial' }), 137);
+    expect(r.ok === false && r.ceiling).toBe(true);
+  });
+
   test('an ordinary failure is NOT flagged, so it can still be retried', () => {
     for (const code of [1, 2, 127]) {
       const r = parseInvestigation('', code);
@@ -312,7 +320,8 @@ describe('parseInvestigation', () => {
       JSON.stringify({ is_error: true, result: 'rate limited' }),
       0,
     );
-    expect(r).toEqual({ ok: false, error: 'rate limited' });
+    // `ceiling: false` rides along: a clean CLI failure at exit 0 is retryable, unlike a kill.
+    expect(r).toEqual({ ok: false, error: 'rate limited', ceiling: false });
   });
 
   test('a non-zero exit is a failure even when is_error is false', () => {

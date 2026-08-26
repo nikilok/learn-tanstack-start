@@ -250,6 +250,21 @@ describe('the investigation ceiling', () => {
     );
   });
 
+  test('a ceiling kill is FLAGGED, so the caller keeps the mark', () => {
+    // Both entrypoints release the investigated mark on a failure so a transient one can retry.
+    // A ceiling kill is not transient: the same identity hits the same wall next pass, so
+    // releasing it re-buys an identical dead run for ever instead of once.
+    const r = parseInvestigation('', 137);
+    expect(r.ok === false && r.ceiling).toBe(true);
+  });
+
+  test('an ordinary failure is NOT flagged, so it can still be retried', () => {
+    for (const code of [1, 2, 127]) {
+      const r = parseInvestigation('', code);
+      expect(r.ok === false && r.ceiling).toBe(false);
+    }
+  });
+
   test('any other non-zero exit is still reported as itself', () => {
     // 137 is ours; nothing else is, and collapsing them would hide a real crash.
     const r = parseInvestigation('', 1);

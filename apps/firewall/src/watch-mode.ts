@@ -223,7 +223,8 @@ export function verdictFrom(text: string): Verdict {
 
 export type Investigation =
   | { ok: true; verdict: string; provenance: string }
-  | { ok: false; error: string };
+  /** `ceiling` — killed by our own timeout rather than failing on its own. Retrying buys the same wall again, so the caller keeps the investigated mark instead of releasing it. */
+  | { ok: false; error: string; ceiling?: boolean };
 
 /**
  * Which models actually ran and what it cost, read from the CLI's own accounting rather than
@@ -333,6 +334,7 @@ export function parseInvestigation(
             exitCode === TIMEOUT_EXIT
             ? `claude was killed by this tool's own ${INVESTIGATION_TIMEOUT_MS / 60_000}-minute ceiling before it answered — the spend happened, the verdict was lost`
             : `claude exited ${exitCode} with no JSON`,
+      ceiling: exitCode === TIMEOUT_EXIT,
     };
   }
   // Same guard as provenanceOf: `null` is valid JSON, and reading `is_error` off it throws.

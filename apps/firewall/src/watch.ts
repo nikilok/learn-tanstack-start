@@ -90,7 +90,9 @@ const USAGE = `Usage:
   bun run firewall:watch [hours] [--investigate] [--notify]
                                      max ${MAX_HOURS}h
 
-Read-only. Exits 0 quiet, 1 found something, 2 could not run properly.`;
+Reads, and WRITES when armed: expired auto-bans are lifted on every run, and with
+FW_AUTO_BAN=1 a ban verdict applies a deny. Exits 0 quiet, 1 found something, 2 could
+not run properly.`;
 
 /** Above this share of rendering requests, a browser has run the app from the fingerprint. */
 const MAX_RENDER_SHARE = 0.05;
@@ -1276,7 +1278,17 @@ async function main() {
   const errors: string[] = [];
 
   // Before the screen and on every run, so a ban expires on a quiet cron night too.
-  await liftExpiredAutoBans(process.cwd());
+  // Isolated like the TUI's. A throw here would reject before the screen runs, so a cron would
+  // screen nothing, notify nothing and exit broken — over a failure whose safe outcome is simply
+  // leaving the bans live for one more pass.
+  try {
+    await liftExpiredAutoBans(process.cwd());
+  } catch (e) {
+    await logWatch(process.cwd(), new Date(), {
+      kind: 'error',
+      error: `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next run`,
+    });
+  }
   const { rows, findings, truncated, configErrors } = await screenOnce(
     creds,
     window,
@@ -1351,7 +1363,10 @@ async function main() {
         });
       }
       const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
-      if (!out.ok) seen.delete(f.digest.toLowerCase());
+      // Released so a transient failure can be retried — but NOT when our own ceiling killed it.
+      // That identity will hit the same wall next run, and releasing the mark turns a one-off loss
+      // into the same spend on every pass, with no verdict and nothing raising an alarm.
+      if (!out.ok && !out.ceiling) seen.delete(f.digest.toLowerCase());
       // AFTER the tamper check above, deliberately: this writes .env.local, and running it first
       // would fingerprint our own write as the investigation having applied something.
       //
@@ -1361,7 +1376,20 @@ async function main() {
       // NOT after a tamper trip. The config changed during a run that was told to change nothing,
       // so we no longer know what the denylist holds — and stacking an autonomous deny on top of
       // an unexplained write is how one problem becomes two. Alarm, and leave it to a human.
-      if (out.ok && !tampered) await maybeAutoBan(process.cwd(), f, verdict);
+      // Guarded like the TUI's. persistEnvVar rethrows a real fs error, and an unwind here lands
+      // after the money is spent but before the verdict log, the investigated write and the
+      // notification — so the next run re-buys the same investigation and nobody is told why.
+      if (out.ok && !tampered)
+        try {
+          await maybeAutoBan(process.cwd(), f, verdict);
+        } catch (e) {
+          const alarm = `AUTO-BAN THREW for ${f.digest}: ${errMsg(e)} — the WAF may or may not have changed`;
+          report.errors.push(alarm);
+          await logWatch(process.cwd(), new Date(), {
+            kind: 'error',
+            error: alarm,
+          });
+        }
       else if (out.ok && tampered)
         await logWatch(process.cwd(), new Date(), {
           kind: 'shadow',

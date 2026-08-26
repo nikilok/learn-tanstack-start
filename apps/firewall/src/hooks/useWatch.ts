@@ -377,7 +377,11 @@ export function useWatch(opts: {
         //
         // Only on a returned failure. A crash of THIS process still leaves the mark, which is the
         // conservative direction — we would not know whether the child had finished.
-        if (!out.ok) {
+        //
+        // And NOT when our own ceiling did the killing: the same identity will hit the same wall
+        // on the next tick, so releasing it re-buys the identical loss on every pass instead of
+        // once. The lockout is the cheaper failure of the two.
+        if (!out.ok && !out.ceiling) {
           investigatedRef.current.delete(next.digest.toLowerCase());
           const after = await readInvestigated(root, Date.now());
           after.delete(next.digest.toLowerCase());

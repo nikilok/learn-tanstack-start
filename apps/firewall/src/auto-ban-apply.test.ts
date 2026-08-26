@@ -76,6 +76,16 @@ describe('autoBanDecision', () => {
     expect(tenth.apply === true && tenth.ttlMs).toBe(AUTO_BAN_MAX_MS);
   });
 
+  test('escalation counts THIS identity, not whoever else is on file', () => {
+    // The escalation is per-fingerprint. Matching loosely would carry a serial offender's history
+    // onto a first-time identity and hand it the long ban on sight.
+    const other: Strike[] = [
+      { digest: 't13dothr00_cccccccccccc_dddddddddddd', count: 9, at: NOW },
+    ];
+    const d = decide({ strikes: other });
+    expect(d.apply === true && d.ttlMs).toBe(AUTO_BAN_TTL_MS);
+  });
+
   test('it always sets an expiry — an auto-ban is never permanent', () => {
     // The property the whole mechanism rests on.
     const d = decide({ strikes: [{ digest: D, count: 40, at: NOW }] });

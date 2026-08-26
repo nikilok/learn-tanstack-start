@@ -64,7 +64,7 @@ export type Watch = {
   verdictHead: string;
   /** Lines of it not shown; the log has the rest verbatim. */
   verdictClipped: number;
-  /** Which identity the verdict belongs to. Without it the pane renders the PREVIOUS conclusion under a generic heading while a new investigation runs. */
+  /** Which identity the agentVerdict belongs to. Without it the pane renders the PREVIOUS conclusion under a generic heading while a new investigation runs. */
   verdictOf: string;
 };
 
@@ -88,11 +88,11 @@ export function useWatch(opts: {
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
-  // Which identity the verdict above belongs to. Without it the pane renders the PREVIOUS
+  // Which identity the agentVerdict above belongs to. Without it the pane renders the PREVIOUS
   // conclusion under a generic heading while a new investigation runs, and an operator acting
   // on it acts on the wrong fingerprint.
   const [watchVerdictOf, setWatchVerdictOf] = useState('');
-  // Kept even after the verdict is read: an invocation happened whether or not anyone was
+  // Kept even after the agentVerdict is read: an invocation happened whether or not anyone was
   // looking at this pane when it did.
   const [invokedAt, setInvokedAt] = useState('');
   const [invokedCount, setInvokedCount] = useState(0);
@@ -106,7 +106,7 @@ export function useWatch(opts: {
   // outlive the loop and every later screen would queue behind it.
   const investigationRef = useRef<{ kill: () => void } | null>(null);
 
-  // Enough to carry a verdict and its first reasons; the log has the rest verbatim.
+  // Enough to carry a agentVerdict and its first reasons; the log has the rest verbatim.
   const verdictLines = watchVerdict ? watchVerdict.trimEnd().split('\n') : [];
   const verdictHead = verdictLines.slice(0, VERDICT_LINES).join('\n');
   const verdictClipped = Math.max(0, verdictLines.length - VERDICT_LINES);
@@ -185,7 +185,16 @@ export function useWatch(opts: {
         // BEFORE the screen, and on every tick rather than only when something new is applied.
         // An expiry that runs only alongside a new ban leaves the last one live through a quiet
         // week — exactly the stretch nobody is watching, which is what expiry exists for.
-        await liftExpiredAutoBans(root);
+        // Isolated: a throw from the env read or write would otherwise abort the whole tick and
+        // skip screening entirely. Failing here leaves the ban LIVE, which is the safe direction.
+        try {
+          await liftExpiredAutoBans(root);
+        } catch (e) {
+          void logWatch(root, new Date(), {
+            kind: 'error',
+            error: `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next tick`,
+          });
+        }
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
         // which the CLI uses too. Assembling them here is what let this loop drift three times.
         const { rows, findings, truncated, configErrors } = await screenOnce(
@@ -294,7 +303,7 @@ export function useWatch(opts: {
         if (!next || stopped) return;
 
         // Persisted, not just in-process. investigatedRef alone meant a TUI restart re-bought an
-        // investigation whose verdict the SHARED notify state then suppressed as already sent —
+        // investigation whose agentVerdict the SHARED notify state then suppressed as already sent —
         // paying for an answer nobody would be told. The file is the same one the CLI uses.
         investigatedRef.current.add(next.digest.toLowerCase());
         const persisted = await readInvestigated(root, Date.now());
@@ -387,7 +396,7 @@ export function useWatch(opts: {
         // Skipped after a tamper trip: the config changed during a run told to change nothing.
         //
         // Wrapped, because everything below it is the record — a throw here would otherwise take
-        // the verdict log and the notification with it.
+        // the agentVerdict log and the notification with it.
         const agentVerdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
         if (out.ok && !tampered)
           try {
@@ -421,9 +430,8 @@ export function useWatch(opts: {
         // The pane above only helps while someone is looking at it. This is the path that reaches
         // you when nobody is, so it fires on what the investigation CONCLUDED, not on the screen's
         // suspicion. `unclear` counts: an answer nobody can read is not an answer of "fine".
-        const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
-        if (verdict !== 'leave') {
-          const conclusion = [`${verdict}:${next.digest.toLowerCase()}`];
+        if (agentVerdict !== 'leave') {
+          const conclusion = [`${agentVerdict}:${next.digest.toLowerCase()}`];
           const key = concludedKey(conclusion);
           // Shared with the CLI, on purpose: whichever path saw it first, the other stays quiet,
           // and quitting the TUI no longer re-notifies about the same fingerprint.

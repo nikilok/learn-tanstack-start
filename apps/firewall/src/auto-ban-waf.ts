@@ -17,7 +17,8 @@ import {
   serialiseStrikes,
 } from './auto-ban';
 import { autoBanDecision, revocationPlan, ttlLabel } from './auto-ban-apply';
-import { JA4_DENY, withValue, withoutValue } from './deny-list';
+import { JA4_DENY, valuesOf, withValue, withoutValue } from './deny-list';
+import { PERSIST_TARGETS } from './deny-persist';
 import { JA4_RULE } from './deny-staging';
 import { persistEnvVar, readFwVars } from './env-file';
 import { envPath } from './hooks/useDenylist';
@@ -26,8 +27,11 @@ import { logWatch } from './watch-log';
 import { notify } from './watch-notify';
 
 export type WafEdit =
-  | { ok: true; status: string }
+  | { ok: true; status: string; values: string[] }
   | { ok: false; error: string };
+
+/** Whichever env var the operator's own apply rebuilds the JA4 deny rule from. */
+const JA4_ENV = PERSIST_TARGETS.find((t) => t.rule === JA4_RULE)?.envKey ?? '';
 
 /**
  * Add or remove one digest on the live deny rule.
@@ -58,8 +62,11 @@ export async function editLiveJa4Deny(
     const item = seedItems(live).find((i) => i.rule.name === JA4_RULE);
     if (!item)
       return { ok: false, error: `${JA4_RULE} is not in the built rule set` };
-    // Refuses on a malformed digest rather than writing a rule that matches nothing — the failure
-    // that would read as "banned" while serving every request.
+    // Checked here for BOTH directions. `withValue` validates; `withoutValue` only filters, so a
+    // malformed value removes nothing and still returns a rule — reported as a successful lift
+    // while the deny stays live, which is a ban with no expiry record behind it.
+    if (!JA4_DENY.valid(JA4_DENY.normalize(digest.trim())))
+      return { ok: false, error: `not a JA4 digest: ${digest}` };
     const edited =
       direction === 'add'
         ? withValue(item.rule, JA4_DENY, digest)
@@ -77,7 +84,25 @@ export async function editLiveJa4Deny(
         ok: false,
         error: `${JA4_RULE} is DEACTIVATED live — the digest was written but the WAF will not evaluate it`,
       };
-    return { ok: true, status: `${status}: ${edited.values.length} digest(s)` };
+    // The OTHER half of an apply, and the half that makes it survive. `persistDenies` states the
+    // rule this obeys: a deny live in the WAF but absent from .env.local is lifted by the next
+    // apply, because that apply rebuilds this rule from env and writes it back. Applying without
+    // it buys enforcement that lasts until the next time anyone presses `a`.
+    // Written HERE rather than in the callers so both directions move together.
+    const values = valuesOf(edited.rule, JA4_DENY);
+    try {
+      persistEnvVar(envPath(), JA4_ENV, values.join(','));
+    } catch (e) {
+      return {
+        ok: false,
+        error: `${JA4_ENV} not saved (${e instanceof Error ? e.message : String(e)}) — the WAF was changed and the next apply will undo it`,
+      };
+    }
+    return {
+      ok: true,
+      status: `${status}: ${edited.values.length} digest(s)`,
+      values,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -93,7 +118,7 @@ export async function editLiveJa4Deny(
  */
 export async function liftExpiredAutoBans(root: string): Promise<void> {
   const path = envPath();
-  const { lift, keep } = revocationPlan(
+  const { lift } = revocationPlan(
     parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]),
     Date.now(),
   );
@@ -116,7 +141,21 @@ export async function liftExpiredAutoBans(root: string): Promise<void> {
       });
     }
   }
-  persistEnvVar(path, AUTO_BAN_UNTIL, serialiseExpiries([...keep, ...stuck]));
+  // RE-READ. The edits above are network calls, and both entrypoints can apply a ban — a record
+  // added in that window is absent from `keep`, and writing the stale snapshot would drop its
+  // expiry while its deny stays live. That is a permanent auto-ban, the one outcome this module
+  // exists to prevent. Only what we actually lifted is removed; everything else survives.
+  const stuckDigests = new Set(stuck.map((r) => r.digest));
+  const lifted = new Set(lift.filter((d) => !stuckDigests.has(d)));
+  persistEnvVar(
+    path,
+    AUTO_BAN_UNTIL,
+    serialiseExpiries(
+      parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]).filter(
+        (r) => !lifted.has(r.digest),
+      ),
+    ),
+  );
 }
 
 /**
@@ -150,29 +189,56 @@ export async function maybeAutoBan(
     });
     return;
   }
+  const digest = JA4_DENY.normalize(f.digest.trim());
+  // Already denied, so there is nothing to add — and more to the point, an expiry written now
+  // would later lift a ban this path never placed. Auto-bans only ever expire their OWN work.
+  const listed = (readFwVars(path)[JA4_ENV] ?? '')
+    .split(',')
+    .map((v) => JA4_DENY.normalize(v.trim()));
+  if (listed.includes(digest)) {
+    void logWatch(root, new Date(), {
+      kind: 'shadow',
+      digest: f.digest,
+      refusal: `already denied — leaving the existing ban alone`,
+    });
+    return;
+  }
+  // The expiry record goes down FIRST, before anything is enforced. Written after the apply, a
+  // failed write would leave a deny that survives a rebuild with no clock on it — permanent, and
+  // placed by nobody. This order can only ever leave a clock with no ban, which the next sweep
+  // clears harmlessly.
+  const prior = parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]);
+  persistEnvVar(
+    path,
+    AUTO_BAN_UNTIL,
+    serialiseExpiries([...prior, { digest, until: decision.until }]),
+  );
   const edit = await editLiveJa4Deny(f.digest, 'add');
   if (!edit.ok) {
+    // Re-read rather than restoring the snapshot: another record may have landed meanwhile, and
+    // dropping it here would strand ITS ban with no expiry.
+    persistEnvVar(
+      path,
+      AUTO_BAN_UNTIL,
+      serialiseExpiries(
+        parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]).filter(
+          (r) => r.digest !== digest,
+        ),
+      ),
+    );
     void logWatch(root, new Date(), {
       kind: 'error',
-      error: `AUTO-BAN FAILED for ${f.digest}: ${edit.error} — nothing was written`,
+      error: `AUTO-BAN FAILED for ${f.digest}: ${edit.error} — nothing is enforced`,
     });
     return;
   }
   const until = new Date(decision.until);
-  persistEnvVar(
-    path,
-    AUTO_BAN_UNTIL,
-    serialiseExpiries([
-      ...parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]),
-      { digest: f.digest.toLowerCase(), until: decision.until },
-    ]),
-  );
   persistEnvVar(path, AUTO_BAN_STRIKES, serialiseStrikes(decision.strikes));
   // Written for a lock screen: what happened, when it undoes itself, and how to undo it sooner.
   const note = [
     `AUTO-BAN applied: ${f.digest}`,
     `for ${ttlLabel(decision.ttlMs)} — lifts itself at ${until.toISOString()}`,
-    `undo now: drop it from FW_BLOCKED_JA4 and run bun run firewall:setup --apply`,
+    `undo now: press u on the bans pane, or drop it from ${JA4_ENV} and apply`,
   ].join('\n');
   void logWatch(root, new Date(), { kind: 'error', error: note });
   // AWAITED, and its failure logged. `notify` returns the reason rather than throwing, so a

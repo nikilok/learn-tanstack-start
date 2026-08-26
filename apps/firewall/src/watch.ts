@@ -1154,7 +1154,9 @@ export async function screen(
 }> {
   const { metrics } = deps;
   const { ctx } = makeCtx(creds, window);
-  const [routeResp, verifiedResp] = await Promise.all([
+  // All independent, so they go out together — a tick that awaits them in turn pays every
+  // round trip end to end, and the screen is what the unattended loop waits on.
+  const [routeResp, verifiedResp, uaResp, allResp, resp] = await Promise.all([
     metrics(ctx, ['clientJa4Digest', 'route'], {
       filter: PASSED,
       limit: GROUP_CAP,
@@ -1166,31 +1168,31 @@ export async function screen(
       filter: PASSED,
       limit: GROUP_CAP,
     }),
+    // Only when there is a name list to check against — otherwise it is a query that can only
+    // answer "nothing is handled".
+    deniedUa.length
+      ? metrics(ctx, ['clientJa4Digest', 'clientUserAgent'], {
+          filter: PASSED,
+          limit: GROUP_CAP,
+        })
+      : Promise.resolve(undefined),
+    // UNFILTERED, unlike every other query here. `botCategory` is Vercel's own classification of
+    // the client, not an inference of ours, so mitigating a request does not change it — where the
+    // rendering screen would read every challenged request as a raw-HTML fetcher and must stay on
+    // PASSED.
+    metrics(ctx, ['clientJa4Digest', 'botCategory'], {
+      limit: GROUP_CAP,
+    }),
+    metrics(ctx, ['clientJa4Digest', 'botCategory'], {
+      // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
+      // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
+      // rules matched, and a filter naming only one of those silently misses the rest — an
+      // observe-only ruleset serves everything as `log`, where `wafAction eq 'allow'` would have
+      // seen a fraction of a percent of the traffic and called the window quiet.
+      filter: PASSED,
+      limit: GROUP_CAP,
+    }),
   ]);
-  // Only when there is a name list to check against — otherwise it is a query that can only
-  // answer "nothing is handled".
-  const uaResp = deniedUa.length
-    ? await metrics(ctx, ['clientJa4Digest', 'clientUserAgent'], {
-        filter: PASSED,
-        limit: GROUP_CAP,
-      })
-    : undefined;
-  // UNFILTERED, unlike every other query here. `botCategory` is Vercel's own classification of the
-  // client, not an inference of ours, so mitigating a request does not change it — where the
-  // rendering screen would read every challenged request as a raw-HTML fetcher and must stay on
-  // PASSED. One extra call per tick.
-  const allResp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
-    limit: GROUP_CAP,
-  });
-  const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
-    // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
-    // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
-    // rules matched, and a filter naming only one of those silently misses the rest — an
-    // observe-only ruleset serves everything as `log`, where `wafAction eq 'allow'` would have
-    // seen a fraction of a percent of the traffic and called the window quiet.
-    filter: PASSED,
-    limit: GROUP_CAP,
-  });
   const uaRows = uaResp?.summary ?? [];
   const uaCapped = uaRows.length >= GROUP_CAP;
   const summary = resp.summary ?? [];

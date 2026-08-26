@@ -1287,7 +1287,7 @@ async function main() {
     // Into `errors` as well as the log. On a cron nobody is reading the log live, and a sweep
     // that keeps failing means bans are accumulating past their term — that belongs in the run's
     // own report and its notification, not only in a file.
-    const msg = `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next run`;
+    const msg = `auto-ban expiry sweep failed partway: ${errMsg(e)} — some bans may already be lifted and the records are unchanged, so the next run reconciles both`;
     errors.push(msg);
     await logWatch(process.cwd(), new Date(), { kind: 'error', error: msg });
   }

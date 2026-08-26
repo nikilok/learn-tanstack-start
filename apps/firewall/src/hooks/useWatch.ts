@@ -186,13 +186,16 @@ export function useWatch(opts: {
         // An expiry that runs only alongside a new ban leaves the last one live through a quiet
         // week — exactly the stretch nobody is watching, which is what expiry exists for.
         // Isolated: a throw from the env read or write would otherwise abort the whole tick and
-        // skip screening entirely. Failing here leaves the ban LIVE, which is the safe direction.
+        // skip screening entirely. The sweep lifts each ban as it goes and writes the records once
+        // at the end, so a failure can leave some lifted and some not — the records being unwritten
+        // is what makes the next tick redo both halves, and a removal that already happened is a
+        // no-op rather than an error.
         try {
           await liftExpiredAutoBans(root);
         } catch (e) {
           void logWatch(root, new Date(), {
             kind: 'error',
-            error: `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next tick`,
+            error: `auto-ban expiry sweep failed partway: ${errMsg(e)} — some bans may already be lifted and the records are unchanged, so the next tick reconciles both`,
           });
         }
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,

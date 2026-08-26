@@ -799,16 +799,23 @@ describe('adviseBan — the referrer tell', () => {
   });
 
   test('does NOT become a second axis', () => {
-    // The design decision, pinned. "Renders nothing" and "no referrer" co-occur in 75% of the
-    // deniable population, so counting them apart would let one fact clear the two-axes bar.
+    // The design decision, pinned. "Renders nothing" and "no referrer" co-occur often enough that
+    // counting them apart would let one fact clear the two-axes bar.
     const a = adviseBan(withRef(400, 0, { wafActions: [] }));
     expect(a.axes.filter((x) => x === 'rendering')).toHaveLength(1);
     expect(a.axes).not.toContain('referrer');
   });
 
+  test('a FAILED referrer query is not a measured zero', () => {
+    // group() returns [] when the query throws, so a dropped request would otherwise read as
+    // "nothing carried a referrer" and hand out the axis on evidence that was never gathered.
+    const a = adviseBan(withRef(400, 0, { wafActions: [], referrers: [] }));
+    expect(a.reasons.join(' ')).not.toContain('no referrer');
+  });
+
   test('a browsing share of referrers does not fire it', () => {
-    // Measured: every rendering digest sat between 65% and 99.7%. The bar is far below the floor
-    // of that population rather than between two overlapping ones.
+    // The bar sits below the floor of the browsing population rather than between two overlapping
+    // ones, so an ordinary browsing share is nowhere near it.
     expect(adviseBan(withRef(400, 260)).reasons.join(' ')).not.toContain(
       'no referrer',
     );

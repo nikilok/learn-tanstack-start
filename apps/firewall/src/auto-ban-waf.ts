@@ -17,9 +17,10 @@ import {
   serialiseStrikes,
 } from './auto-ban';
 import { autoBanDecision, revocationPlan, ttlLabel } from './auto-ban-apply';
-import { JA4_DENY, valuesOf, withValue, withoutValue } from './deny-list';
+import { JA4_DENY, denyListRule, listShapeOf } from './deny-list';
 import { PERSIST_TARGETS } from './deny-persist';
 import { JA4_RULE } from './deny-staging';
+import { isDryRun, isMock } from './env';
 import { persistEnvVar, readFwVars } from './env-file';
 import { envPath } from './hooks/useDenylist';
 import type { Finding } from './watch';
@@ -65,6 +66,15 @@ export async function editLiveJa4Deny(
       import('./client'),
       import('./seed-items'),
     ]);
+    // A dry run never reaches Vercel: `applyRule` returns a synthetic `overwrote` (client.ts).
+    // Believing it would persist the digest for real and announce a ban that was only previewed —
+    // and the next real apply would then enforce it, placed by a preview nobody meant to act on.
+    if (isDryRun() && !isMock())
+      return {
+        ok: false,
+        error: 'dry-run: the WAF was not reached, so nothing was written',
+        mutated: false,
+      };
     const live = await fetchLive();
     const item = seedItems(live).find((i) => i.rule.name === JA4_RULE);
     if (!item)
@@ -76,16 +86,45 @@ export async function editLiveJa4Deny(
     // Checked here for BOTH directions. `withValue` validates; `withoutValue` only filters, so a
     // malformed value removes nothing and still returns a rule — reported as a successful lift
     // while the deny stays live, which is a ban with no expiry record behind it.
-    if (!JA4_DENY.valid(JA4_DENY.normalize(digest.trim())))
+    const d = JA4_DENY.normalize(digest.trim());
+    if (!JA4_DENY.valid(d))
       return {
         ok: false,
         error: `not a JA4 digest: ${digest}`,
         mutated: false,
       };
-    const edited =
+    // Built from what is ON DISK, not from the seeded rule's own values. `rules.ts` reads the env
+    // ONCE, at module load, so the seeded rule is a snapshot frozen at import — and every call
+    // re-seeds from that same frozen list. Verified by execution: add A, then add B, and the
+    // second apply writes base+B, erasing A from the live rule AND the file while its expiry
+    // record survives. The sweep hit the same edge, resurrecting a digest it had just lifted.
+    // The FILE first, then the process env. They are different sources: the operator's apply
+    // writes the file, so it is the fresher of the two — but a key ABSENT from it (a shell-exported
+    // list, an --env-file pointing elsewhere) is not an empty list, and treating it as one would
+    // write the deny rule down to this single digest and erase every existing deny.
+    const raw = readFwVars(envPath())[JA4_ENV] ?? process.env[JA4_ENV] ?? '';
+    const current = raw
+      .split(',')
+      .map((v) => JA4_DENY.normalize(v.trim()))
+      .filter(Boolean);
+    const target =
       direction === 'add'
-        ? withValue(item.rule, JA4_DENY, digest)
-        : withoutValue(item.rule, JA4_DENY, digest);
+        ? current.includes(d)
+          ? current
+          : [...current, d]
+        : current.filter((v) => v !== d);
+    // The same construction `withValue`/`withoutValue` use, so the rule's shape, description and
+    // exemptions cannot drift from the operator's — only the list differs.
+    const edited = {
+      rule: denyListRule({
+        name: item.rule.name,
+        description: item.rule.description,
+        spec: JA4_DENY,
+        values: target,
+        ...listShapeOf(item.rule),
+      }),
+      values: target,
+    };
     attempted = true;
     const { status, detail } = await applyItem(
       { ...item, rule: edited.rule },
@@ -102,6 +141,15 @@ export async function editLiveJa4Deny(
       };
     // A rule can be present and switched off in the dashboard. "overwrote" alone would read as
     // enforcement, so the deactivated case is reported as a failure to enforce, not a success.
+    // BOTH halves, as `enforcing` in deny-staging has it. A rule cycled to log or challenge is
+    // re-applied with that action, so "overwrote" would report a deny that serves every request.
+    const liveAction = live.actionByName.get(JA4_RULE);
+    if (liveAction && liveAction !== 'deny')
+      return {
+        ok: false,
+        error: `${JA4_RULE} action is ${liveAction}, not deny — matching traffic is still served`,
+        mutated: true,
+      };
     if (live.activeByName.get(JA4_RULE) === false)
       return {
         ok: false,
@@ -114,7 +162,7 @@ export async function editLiveJa4Deny(
     // apply, because that apply rebuilds this rule from env and writes it back. Applying without
     // it buys enforcement that lasts until the next time anyone presses `a`.
     // Written HERE rather than in the callers so both directions move together.
-    const values = valuesOf(edited.rule, JA4_DENY);
+    const values = edited.values;
     try {
       persistEnvVar(envPath(), JA4_ENV, values.join(','));
     } catch (e) {
@@ -254,10 +302,24 @@ export async function maybeAutoBan(
       // The clock STAYS. The apply was reached, so the deny may be live and enforced this second —
       // and a live deny whose expiry we just deleted is a permanent ban placed by nobody. Keeping
       // it costs at worst a sweep that lifts a digest which was never there, which is a no-op.
-      void logWatch(root, new Date(), {
-        kind: 'error',
-        error: `AUTO-BAN PARTIAL for ${f.digest}: ${edit.error} — the deny MAY be live; its expiry is kept so it still lifts`,
-      });
+      // The strike is recorded too. It counts the DECISION, not the write — an identity that
+      // reached this point came back, and discarding that resets its next ban to the base term.
+      persistEnvVar(path, AUTO_BAN_STRIKES, serialiseStrikes(decision.strikes));
+      const partial = [
+        `AUTO-BAN PARTIAL: ${f.digest}`,
+        `${edit.error}`,
+        `the deny MAY be live; its expiry is kept, so it still lifts at ${new Date(decision.until).toISOString()}`,
+      ].join('\n');
+      void logWatch(root, new Date(), { kind: 'error', error: partial });
+      // Announced like a full ban. A deny that may be enforcing right now, applied with nobody
+      // told, is the outcome this file calls the worst available — and it does not become
+      // acceptable because the write only half succeeded.
+      const partialFailed = await notify(partial);
+      if (partialFailed)
+        void logWatch(root, new Date(), {
+          kind: 'error',
+          error: `AUTO-BAN NOTIFICATION FAILED for ${f.digest}: ${partialFailed} — the deny MAY be live and is unannounced`,
+        });
       return;
     }
     // Nothing reached the WAF, so the clock is removed with it — by exact instance, since another

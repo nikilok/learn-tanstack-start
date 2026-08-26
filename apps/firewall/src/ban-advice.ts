@@ -47,9 +47,9 @@ export function servedTotal(input: {
 /**
  * Share of requests carrying a referrer at all.
  *
- * Bimodal on live traffic, which is why it needs no tuning: measured over the deniable population,
- * every digest that renders sits far above this and automation sits at exactly zero. The bar is
- * set well under the lowest real browser rather than between two overlapping distributions.
+ * Bimodal on live traffic, which is why it needs no tuning: the two populations do not overlap,
+ * so the bar sits under the lower edge of one rather than between two. The measurements behind
+ * that are in the ops runbook, not here.
  */
 const MAX_REFERRED_SHARE = 0.01;
 
@@ -799,19 +799,18 @@ export function adviseBan(input: AdviceInput): Advice {
   // Tagged 'rendering', NOT an axis of its own — and that is the whole design.
   //
   // "Sends no referrer" and "renders nothing" are two expressions of ONE fact: this is not a
-  // browser. Measured 2026-08-26 over the deniable population, 75% of non-rendering digests were
-  // also at zero referrers, so counting them separately would let that single fact satisfy the
-  // two-independent-axes rule alone — the mistake already recorded for `crawl`.
+  // browser. They co-occur often enough that counting them separately would let that single fact
+  // satisfy the two-independent-axes rule alone — the mistake already recorded for `crawl`.
   //
   // What it buys instead is a way to make the claim when rendering CANNOT be measured. A referrer
-  // is logged before the WAF acts, so a challenged request still carries one; 89% of the
-  // rendering-censored population sits at zero. So a fully mitigated identity can still earn the
-  // rendering axis, on evidence our own mitigation did not manufacture.
-  //
-  // Evadable by sending any referrer, and it fails safe when evaded: the 2026-08-12 denied digest
-  // sent a synthetic bare-origin referrer on 99.2% of its requests and would not fire this.
+  // is logged before the WAF acts, so a challenged request still carries one, and a fully mitigated
+  // identity can therefore still earn the rendering axis on evidence our own mitigation did not
+  // manufacture. It fails safe: an identity that does not trip it simply does not gain the axis.
+  // `?.length`, not a bare truthy check: `group()` returns [] for a query that FAILED, and an
+  // empty array is not a measurement of zero. Reading it as one manufactures the tell out of a
+  // dropped HTTP request, on a path where it can supply one of the two gates on a live deny.
   if (
-    input.referrers &&
+    input.referrers?.length &&
     input.total >= MIN_VOLUME_FLOOR &&
     referredShare(input.referrers, input.total) <= MAX_REFERRED_SHARE
   )

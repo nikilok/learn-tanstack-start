@@ -3,7 +3,7 @@
 // time anyone presses `a`. These cover the half that makes it stick.
 
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -178,5 +178,94 @@ describe('liftExpiredAutoBans', () => {
     const left = parseExpiries(readFwVars(envPath())[AUTO_BAN_UNTIL]);
     expect(left.map((r) => r.until)).toContain(future);
     persistEnvVar(envPath(), AUTO_BAN_UNTIL, '');
+  });
+});
+
+describe('successive edits in one process', () => {
+  const live = (active = true) =>
+    ({
+      rules: [],
+      idByName: new Map([[JA4_RULE, 'rule-1']]),
+      activeByName: new Map([[JA4_RULE, active]]),
+      actionByName: new Map([[JA4_RULE, 'deny']]),
+      descriptionByName: new Map(),
+      valuesByName: new Map(),
+    }) as never;
+  const listed = () =>
+    (readFwVars(envPath()).FW_BLOCKED_JA4 ?? '').split(',').filter(Boolean);
+
+  test('a second ban does not erase the first', async () => {
+    // `rules.ts` reads the env once, at import, so the seeded rule is frozen at module load. An
+    // edit built from THAT list silently reverts every edit made since the process started —
+    // including denies the operator staged and applied by hand in the same session.
+    const A = 't13daaaa11_aaaaaaaaaaaa_111111111111';
+    const B = 't13dbbbb22_bbbbbbbbbbbb_222222222222';
+    const seen: string[][] = [];
+    persistEnvVar(envPath(), 'FW_BLOCKED_JA4', TEST_DENIED_JA4);
+    installWafBackend({
+      fetchLive: async () => live(),
+      applyItem: async (item) => {
+        seen.push(valuesOf(item.rule, JA4_DENY));
+        return { status: 'overwrote' as const };
+      },
+    });
+    await editLiveJa4Deny(A, 'add');
+    await editLiveJa4Deny(B, 'add');
+    expect(seen[1]).toContain(A);
+    expect(seen[1]).toContain(B);
+    expect(listed()).toEqual([TEST_DENIED_JA4, A, B]);
+  });
+
+  test('a sweep of several expired bans does not resurrect one', async () => {
+    // The sweep calls the edit once per expired record. Off a frozen list, the second call
+    // re-adds what the first removed — and both expiry records are retired regardless, leaving a
+    // live deny with no clock, which is the one outcome this module exists to prevent.
+    const A = 't13daaaa33_aaaaaaaaaaaa_333333333333';
+    const B = 't13dbbbb44_bbbbbbbbbbbb_444444444444';
+    persistEnvVar(
+      envPath(),
+      'FW_BLOCKED_JA4',
+      [TEST_DENIED_JA4, A, B].join(','),
+    );
+    persistEnvVar(
+      envPath(),
+      AUTO_BAN_UNTIL,
+      serialiseExpiries([
+        { digest: A, until: Date.now() - 60_000 },
+        { digest: B, until: Date.now() - 60_000 },
+      ]),
+    );
+    installWafBackend({
+      fetchLive: async () => live(),
+      applyItem: async () => ({ status: 'overwrote' as const }),
+    });
+    await liftExpiredAutoBans(process.cwd());
+    expect(listed()).toEqual([TEST_DENIED_JA4]);
+    expect(parseExpiries(readFwVars(envPath())[AUTO_BAN_UNTIL])).toEqual([]);
+  });
+});
+
+describe('when the env FILE has no deny list', () => {
+  test('an absent key is not an empty list', async () => {
+    // The list can live in the process env without being in the file — exported in a shell, or an
+    // --env-file pointing somewhere else. Reading that as "nothing is denied" writes the rule down
+    // to the one digest being banned and silently lifts every existing deny.
+    const D = 't13dfall00_999999999999_888888888888';
+    writeFileSync(envPath(), '');
+    installWafBackend({
+      fetchLive: async () =>
+        ({
+          rules: [],
+          idByName: new Map([[JA4_RULE, 'rule-1']]),
+          activeByName: new Map([[JA4_RULE, true]]),
+          actionByName: new Map([[JA4_RULE, 'deny']]),
+          descriptionByName: new Map(),
+          valuesByName: new Map(),
+        }) as never,
+      applyItem: async () => ({ status: 'overwrote' as const }),
+    });
+    const r = await editLiveJa4Deny(D, 'add');
+    expect(r.ok).toBe(true);
+    expect(readFwVars(envPath()).FW_BLOCKED_JA4).toContain(TEST_DENIED_JA4);
   });
 });

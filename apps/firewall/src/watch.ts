@@ -23,6 +23,7 @@ import {
 import { resolveVercelCredentials } from './credentials';
 import { ASN_DENY, JA4_DENY, UA_DENY, envMatching } from './deny-list';
 import { useColour } from './env';
+import { envPath as configEnvPath } from './hooks/useDenylist';
 import { fetchIpProfile } from './ip-profile';
 import { mixOf, renderingRequests } from './ip-signals';
 import {
@@ -1330,7 +1331,11 @@ async function main() {
       seen.set(f.digest.toLowerCase(), now);
       // Taken either side of the spawn. The investigation is instructed not to apply anything
       // and cannot be prevented from it, so the honest position is to check rather than trust.
-      const envPath = `${process.cwd()}/.env.local`;
+      // The REAL file, via the shared helper. Rebuilt from cwd this pointed at
+      // apps/firewall/.env.local under this package's own `watch` script — a path that does not
+      // exist, so both fingerprints came back null, the gate never tripped, and the auto-ban it
+      // guards ran unconditionally on the unattended entrypoint.
+      const envPath = configEnvPath();
       const before = await fingerprintConfig(envPath);
       const out = await runInvestigation(f, process.cwd(), hours);
       const tampered = investigationChangedConfig(

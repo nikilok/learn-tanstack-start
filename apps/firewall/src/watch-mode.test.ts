@@ -13,6 +13,7 @@ import {
   canKeepAwake,
   investigationArgs,
   investigationPrompt,
+  INVESTIGATION_TIMEOUT_MS,
   parseInvestigation,
   provenanceOf,
   recentSpawns,
@@ -232,6 +233,71 @@ describe('provenanceOf', () => {
   });
 });
 
+// Two paid investigations were lost to a ceiling set 45 seconds above the worst success, and both
+// reported as `claude exited 137`, which reads as a crash in the child rather than our own kill.
+describe('the investigation ceiling', () => {
+  test('clears the measured distribution with real margin', () => {
+    // Successes took 6m45, 8m41 and 9m15. A ceiling inside that range is a coin flip.
+    expect(INVESTIGATION_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
+  });
+
+  test('a SIGKILL is reported as our own ceiling, not as a crash', () => {
+    const r = parseInvestigation('', 137);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toContain('ceiling');
+    expect(r.ok === false && r.error).not.toBe(
+      'claude exited 137 with no JSON',
+    );
+  });
+
+  test('a ceiling kill is FLAGGED, so the caller keeps the mark', () => {
+    // Both entrypoints release the investigated mark on a failure so a transient one can retry.
+    // A ceiling kill is not transient: the same identity hits the same wall next pass, so
+    // releasing it re-buys an identical dead run for ever instead of once.
+    const r = parseInvestigation('', 137);
+    expect(r.ok === false && r.ceiling).toBe(true);
+  });
+
+  test('a ceiling kill that DID print JSON is flagged too', () => {
+    // The kill can land after the child has written valid output, which takes the parsed branch
+    // rather than the parse-failure one. Flagging only the latter left the same re-buy loop open
+    // on the path that actually produces output.
+    const r = parseInvestigation(JSON.stringify({ result: 'partial' }), 137);
+    expect(r.ok === false && r.ceiling).toBe(true);
+  });
+
+  test('an ordinary failure is NOT flagged, so it can still be retried', () => {
+    for (const code of [1, 2, 127]) {
+      const r = parseInvestigation('', code);
+      expect(r.ok === false && r.ceiling).toBe(false);
+    }
+  });
+
+  test('any other non-zero exit is still reported as itself', () => {
+    // 137 is ours; nothing else is, and collapsing them would hide a real crash.
+    const r = parseInvestigation('', 1);
+    expect(r.ok === false && r.error).toContain('exited 1');
+  });
+
+  test('a successful run records how long it took', () => {
+    // Recorded on SUCCESS, so a narrowing margin is visible BEFORE it starts failing.
+    const ok = JSON.stringify({
+      result: 'VERDICT: leave',
+      total_cost_usd: 1.5,
+    });
+    const r = parseInvestigation(ok, 0, 8 * 60_000 + 41_000);
+    expect(r.ok === true && r.provenance).toContain('8m41s');
+  });
+
+  test('and omits it when the caller did not measure', () => {
+    const ok = JSON.stringify({ result: 'VERDICT: leave' });
+    const r = parseInvestigation(ok, 0);
+    // Asserted against the LABEL's shape. `not.toContain('m0')` passed for any duration that did
+    // not happen to contain those two characters, which is nearly all of them.
+    expect(r.ok === true && r.provenance).not.toMatch(/\d+m\d\ds/);
+  });
+});
+
 describe('parseInvestigation', () => {
   const ok = JSON.stringify({
     is_error: false,
@@ -254,7 +320,8 @@ describe('parseInvestigation', () => {
       JSON.stringify({ is_error: true, result: 'rate limited' }),
       0,
     );
-    expect(r).toEqual({ ok: false, error: 'rate limited' });
+    // `ceiling: false` rides along: a clean CLI failure at exit 0 is retryable, unlike a kill.
+    expect(r).toEqual({ ok: false, error: 'rate limited', ceiling: false });
   });
 
   test('a non-zero exit is a failure even when is_error is false', () => {

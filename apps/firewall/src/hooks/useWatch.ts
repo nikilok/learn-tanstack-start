@@ -1,9 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
+
 // Watch mode: the unattended loop. Armed with `v`, it screens on its own timer whatever pane is
 // open, investigates anything that clears the bar, and notifies. Lifted out of the container
 // because it is the path nobody is looking at when it runs.
-
-import { useEffect, useRef, useState } from 'react';
-
+import { liftExpiredAutoBans, maybeAutoBan } from '../auto-ban-waf';
 import { rollingWindow } from '../time-window';
 import { watchHours, watchIntervalMs, watchTiming } from '../tuning';
 import { errMsg } from '../util';
@@ -64,7 +64,7 @@ export type Watch = {
   verdictHead: string;
   /** Lines of it not shown; the log has the rest verbatim. */
   verdictClipped: number;
-  /** Which identity the verdict belongs to. Without it the pane renders the PREVIOUS conclusion under a generic heading while a new investigation runs. */
+  /** Which identity the agentVerdict belongs to. Without it the pane renders the PREVIOUS conclusion under a generic heading while a new investigation runs. */
   verdictOf: string;
 };
 
@@ -88,11 +88,11 @@ export function useWatch(opts: {
   const [watchAt, setWatchAt] = useState('');
   const [watchBusy, setWatchBusy] = useState(false);
   const [watchVerdict, setWatchVerdict] = useState('');
-  // Which identity the verdict above belongs to. Without it the pane renders the PREVIOUS
+  // Which identity the agentVerdict above belongs to. Without it the pane renders the PREVIOUS
   // conclusion under a generic heading while a new investigation runs, and an operator acting
   // on it acts on the wrong fingerprint.
   const [watchVerdictOf, setWatchVerdictOf] = useState('');
-  // Kept even after the verdict is read: an invocation happened whether or not anyone was
+  // Kept even after the agentVerdict is read: an invocation happened whether or not anyone was
   // looking at this pane when it did.
   const [invokedAt, setInvokedAt] = useState('');
   const [invokedCount, setInvokedCount] = useState(0);
@@ -106,7 +106,7 @@ export function useWatch(opts: {
   // outlive the loop and every later screen would queue behind it.
   const investigationRef = useRef<{ kill: () => void } | null>(null);
 
-  // Enough to carry a verdict and its first reasons; the log has the rest verbatim.
+  // Enough to carry a agentVerdict and its first reasons; the log has the rest verbatim.
   const verdictLines = watchVerdict ? watchVerdict.trimEnd().split('\n') : [];
   const verdictHead = verdictLines.slice(0, VERDICT_LINES).join('\n');
   const verdictClipped = Math.max(0, verdictLines.length - VERDICT_LINES);
@@ -182,6 +182,22 @@ export function useWatch(opts: {
         // picks up anything the CLI investigated between ticks.
         for (const d of (await readInvestigated(root, Date.now())).keys())
           investigatedRef.current.add(d);
+        // BEFORE the screen, and on every tick rather than only when something new is applied.
+        // An expiry that runs only alongside a new ban leaves the last one live through a quiet
+        // week — exactly the stretch nobody is watching, which is what expiry exists for.
+        // Isolated: a throw from the env read or write would otherwise abort the whole tick and
+        // skip screening entirely. The sweep lifts each ban as it goes and writes the records once
+        // at the end, so a failure can leave some lifted and some not — the records being unwritten
+        // is what makes the next tick redo both halves, and a removal that already happened is a
+        // no-op rather than an error.
+        try {
+          await liftExpiredAutoBans(root);
+        } catch (e) {
+          void logWatch(root, new Date(), {
+            kind: 'error',
+            error: `auto-ban expiry sweep failed partway: ${errMsg(e)} — some bans may already be lifted and the records are unchanged, so the next tick reconciles both`,
+          });
+        }
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
         // which the CLI uses too. Assembling them here is what let this loop drift three times.
         const { rows, findings, truncated, configErrors } = await screenOnce(
@@ -290,7 +306,7 @@ export function useWatch(opts: {
         if (!next || stopped) return;
 
         // Persisted, not just in-process. investigatedRef alone meant a TUI restart re-bought an
-        // investigation whose verdict the SHARED notify state then suppressed as already sent —
+        // investigation whose agentVerdict the SHARED notify state then suppressed as already sent —
         // paying for an answer nobody would be told. The file is the same one the CLI uses.
         investigatedRef.current.add(next.digest.toLowerCase());
         const persisted = await readInvestigated(root, Date.now());
@@ -343,17 +359,36 @@ export function useWatch(opts: {
         // clearing unconditionally strands that child with nothing able to kill it.
         if (investigationRef.current === spawned.child)
           investigationRef.current = null;
-        if (
-          investigationChangedConfig(
-            beforeCfg,
-            await fingerprintConfig(configPath),
-          )
-        ) {
+        const tampered = investigationChangedConfig(
+          beforeCfg,
+          await fingerprintConfig(configPath),
+        );
+        if (tampered) {
           const alarm = `.env.local CHANGED during the investigation of ${next.digest} — the run was told not to apply anything.`;
           // Note guarded, log not — the same split the other writers use. A disarm mid-await must
           // not paint a status onto a loop that is off, but the change genuinely happened.
           if (!stopped) setWatchNote(alarm);
           void logWatch(root, new Date(), { kind: 'error', error: alarm });
+        }
+        // RELEASED on failure, so a run that produced nothing does not also cost the retry.
+        //
+        // The mark is written BEFORE the spawn on purpose (see above): a restart mid-run must not
+        // re-buy an investigation already in flight. But it decays on a 7-day clock, so a run that
+        // died left the digest paid for, unanswered, and locked out for a week — which is exactly
+        // what happened when the 10-minute ceiling killed one: the next tick reached `ban` on the
+        // same identity and could not look at it.
+        //
+        // Only on a returned failure. A crash of THIS process still leaves the mark, which is the
+        // conservative direction — we would not know whether the child had finished.
+        //
+        // And NOT when our own ceiling did the killing: the same identity will hit the same wall
+        // on the next tick, so releasing it re-buys the identical loss on every pass instead of
+        // once. The lockout is the cheaper failure of the two.
+        if (!out.ok && !out.ceiling) {
+          investigatedRef.current.delete(next.digest.toLowerCase());
+          const after = await readInvestigated(root, Date.now());
+          after.delete(next.digest.toLowerCase());
+          await writeInvestigated(root, after);
         }
         if (stopped) return;
         setWatchVerdict(
@@ -365,6 +400,27 @@ export function useWatch(opts: {
             ? `investigated ${next.digest} — read it below`
             : `investigation failed for ${next.digest}`,
         );
+        // Skipped after a tamper trip: the config changed during a run told to change nothing.
+        //
+        // Wrapped, because everything below it is the record — a throw here would otherwise take
+        // the agentVerdict log and the notification with it.
+        const agentVerdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+        if (out.ok && !tampered)
+          try {
+            await maybeAutoBan(root, next, agentVerdict);
+          } catch (e) {
+            void logWatch(root, new Date(), {
+              kind: 'error',
+              error: `AUTO-BAN THREW for ${next.digest}: ${errMsg(e)} — the WAF may or may not have changed; check it`,
+            });
+          }
+        else if (out.ok && tampered)
+          void logWatch(root, new Date(), {
+            kind: 'shadow',
+            digest: next.digest,
+            refusal:
+              'auto-ban skipped: .env.local changed during the investigation',
+          });
         void logWatch(
           root,
           new Date(),
@@ -381,9 +437,8 @@ export function useWatch(opts: {
         // The pane above only helps while someone is looking at it. This is the path that reaches
         // you when nobody is, so it fires on what the investigation CONCLUDED, not on the screen's
         // suspicion. `unclear` counts: an answer nobody can read is not an answer of "fine".
-        const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
-        if (verdict !== 'leave') {
-          const conclusion = [`${verdict}:${next.digest.toLowerCase()}`];
+        if (agentVerdict !== 'leave') {
+          const conclusion = [`${agentVerdict}:${next.digest.toLowerCase()}`];
           const key = concludedKey(conclusion);
           // Shared with the CLI, on purpose: whichever path saw it first, the other stays quiet,
           // and quitting the TUI no longer re-notifies about the same fingerprint.

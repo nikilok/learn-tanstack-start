@@ -8,6 +8,7 @@ import {
   type Shape,
   type Tell,
   mixOf,
+  pathsArePartial,
   shapeOf,
   tellsFor,
   withRpcs,
@@ -502,12 +503,24 @@ export async function fetchIpProfile(
   // returned 185 rows covering 859 of 168,752 requests. `distinctPaths` drawn from it is a
   // floor, and the path-diversity tell divides by it — which described a 177k-request harvester
   // as "repetition, so monitoring rather than harvesting". Feed it nothing rather than a floor.
-  const blocked = byWafAction
-    .filter(([a]) => a === 'deny' || a === 'challenge')
+  // DENIED only, not denied-plus-challenged. A denied request never reaches routing so it cannot
+  // appear here — but a CHALLENGED one DOES, carrying the raw path. Subtracting it understated the
+  // traffic these rows should cover and hid the truncation completely: measured 2026-08-26 on an
+  // identity challenged on 3164 of 3164 requests, expected coverage came out as 0, every sample
+  // passed, and the tell went on to report "133 distinct paths for 3164 requests (24x each) —
+  // monitoring rather than harvesting" about a scraper. The rows summed to 270. If challenged
+  // requests were really absent, that sum would have been zero.
+  const denied = byWafAction
+    .filter(([a]) => a === 'deny')
     .reduce((n, [, c]) => n + c, 0);
   const pathSample = byPath.reduce((n, [, c]) => n + c, 0);
-  const pathsPartial =
-    byPath.length >= GROUP_CAP || pathSample < Math.max(0, total - blocked);
+  const pathsPartial = pathsArePartial(
+    byPath.length,
+    pathSample,
+    total,
+    denied,
+    GROUP_CAP,
+  );
   // Vercel leaves botVerified blank for everything it has not verified; only `pass` counts.
   const byBotVerified = byBotVerifiedRaw.filter(
     ([v]) => v && v !== '(none)' && v !== 'undefined',

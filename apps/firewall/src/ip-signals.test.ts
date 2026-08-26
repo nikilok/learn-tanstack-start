@@ -11,6 +11,7 @@ import {
   dutyCycleOf,
   isComputeNetwork,
   mixOf,
+  pathsArePartial,
   pathKind,
   shapeOf,
   tellsFor,
@@ -173,6 +174,39 @@ function scraperInput(): SignalInput {
     windowMinutes: 1440,
   };
 }
+
+// The denominator behind the path-diversity tell. It divides a TRUE total by a count the API
+// sheds rows from, so getting "is this a floor?" wrong makes the tell argue the opposite of the
+// truth — and it argues hardest for the busiest identity.
+describe('pathsArePartial', () => {
+  const CAP = 500;
+
+  test('a fully CHALLENGED identity is partial when its rows do not cover it', () => {
+    // The live case: 3164 requests, all challenged, 0 denied, 125 rows summing 270. Counting
+    // challenges as absent made expected coverage 0, so this passed as complete.
+    expect(pathsArePartial(125, 270, 3164, 0, CAP)).toBe(true);
+  });
+
+  test('a DENIED request is genuinely absent, so it is not counted against coverage', () => {
+    // Denied traffic never reaches routing. Demanding the sample cover it would mark every
+    // partly-denied identity truncated for ever.
+    expect(pathsArePartial(10, 40, 1000, 960, CAP)).toBe(false);
+  });
+
+  test('challenged traffic is NOT excused the same way', () => {
+    // Same numbers, but the 960 were challenged rather than denied — they carry raw paths, so the
+    // sample should have covered them and does not.
+    expect(pathsArePartial(10, 40, 1000, 0, CAP)).toBe(true);
+  });
+
+  test('a sample that covers everything is complete', () => {
+    expect(pathsArePartial(10, 1000, 1000, 0, CAP)).toBe(false);
+  });
+
+  test('at the cap it is partial however well it covers', () => {
+    expect(pathsArePartial(CAP, 9999, 1000, 0, CAP)).toBe(true);
+  });
+});
 
 describe('tellsFor', () => {
   test('the real session reads browser on every strong tell', () => {

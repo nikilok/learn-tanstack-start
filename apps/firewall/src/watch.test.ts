@@ -18,6 +18,7 @@ import {
   deniedByUa,
   impersonators,
   mergeScreens,
+  fullyMitigated,
   nonRendering,
   watchlistAdditions,
   EXIT_BROKEN,
@@ -35,6 +36,51 @@ const A = 't13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb';
 const why = ['because'];
 const sc = (digest: string, allowed: number) => ({ digest, allowed, why });
 const B = 't13dbingh2_333333333333_444444444444';
+
+// Two thirds of what Vercel classifies as impersonation never reaches the app, so the behavioural
+// screen — which reads what passed — cannot see any of it. These pick that difference out.
+describe('fullyMitigated', () => {
+  const cat = (digest: string, count_sum: number, botCategory = IMP) => ({
+    clientJa4Digest: digest,
+    botCategory,
+    count_sum,
+  });
+  const IMP = 'browser_impersonation';
+
+  test('an impersonator with no served traffic is surfaced', () => {
+    const out = fullyMitigated([cat(A, 300)], [], true);
+    expect(out).toEqual([
+      {
+        digest: A,
+        requests: 300,
+        why: [expect.stringContaining('stopped all 300')],
+      },
+    ]);
+  });
+
+  test('one with ANY served traffic is left to the behavioural screen', () => {
+    // Surfacing it here too would profile the same identity twice in one tick.
+    expect(fullyMitigated([cat(A, 300)], [cat(A, 5)], true)).toEqual([]);
+  });
+
+  test('a non-impersonation category is not surfaced', () => {
+    expect(
+      fullyMitigated([cat(A, 300, 'search_engine_crawler')], [], true).length,
+    ).toBe(0);
+  });
+
+  test('a capped sample surfaces NOTHING, never a partial list', () => {
+    // This list is the DIFFERENCE between two summaries. Either capping makes the difference wrong
+    // in the direction that invents a fully-mitigated identity out of one we simply did not see.
+    expect(fullyMitigated([cat(A, 300)], [], false)).toEqual([]);
+  });
+
+  test('placeholder digests are dropped rather than grouped', () => {
+    expect(
+      fullyMitigated([cat('(none)', 300), cat('?', 300)], [], true),
+    ).toEqual([]);
+  });
+});
 
 describe('worthProfiling', () => {
   test('keeps a busy fingerprint that is not already denied', () => {
@@ -569,6 +615,31 @@ describe('watchLines', () => {
 
   test('a finding with a real profile carries no such warning', () => {
     expect(text(report())).not.toContain('UNJUDGED');
+  });
+
+  test('a fully mitigated finding never says its traffic was ALLOWED', () => {
+    // `allowed` carries the stopped total for this stream, because there is no served count to
+    // gate on. Rendering it with the usual wording states we served 214 requests we refused.
+    const r = report({
+      findings: [
+        {
+          digest: DIG,
+          allowed: 214,
+          total: 214,
+          why: [],
+          advice: advice(),
+          autoBanRefusal: 'fixture: not evaluated',
+          profileEmpty: false,
+          servedNone: true,
+        },
+      ],
+    });
+    expect(text(r)).toContain('214 requests, NONE served');
+    expect(text(r)).not.toContain('214 allowed');
+  });
+
+  test('an ordinary finding keeps the allowed/total wording', () => {
+    expect(text(report())).toContain('allowed of');
   });
 
   test('a finding on a listed build line shows the line under it', () => {

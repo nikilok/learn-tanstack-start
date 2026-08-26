@@ -267,6 +267,28 @@ export function alpnOf(ja4: string): string {
   return head.length >= 10 ? head.slice(8, 10) : '';
 }
 
+/**
+ * Whether a `requestPath` sample is a FLOOR rather than a count.
+ *
+ * Two ways it can be: the grouping hit the cap, or its rows do not cover the traffic that could
+ * have produced them. The second is the one that bites — the API sheds rows well below the cap.
+ *
+ * `denied`, NOT denied-plus-challenged. A denied request never reaches routing and cannot appear
+ * in the grouping; a CHALLENGED one does appear, carrying the raw path. Counting challenges as
+ * absent made the expected coverage zero for a fully-challenged identity, so every sample passed
+ * as complete — and the path-diversity tell then divided a true total by a truncated denominator
+ * and reported a scraper as "monitoring rather than harvesting".
+ */
+export function pathsArePartial(
+  rows: number,
+  sample: number,
+  total: number,
+  denied: number,
+  cap: number,
+): boolean {
+  return rows >= cap || sample < Math.max(0, total - denied);
+}
+
 export type Tell = {
   points: 'human' | 'bot' | 'neutral';
   label: string;

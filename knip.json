@@ -1,6 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "tags": ["-lintignore"],
+  "tags": [
+    "-lintignore"
+  ],
   "workspaces": {
     ".": {},
     "apps/web": {
@@ -15,19 +17,23 @@
         "src/routeTree.gen.ts",
         "src/scripts/*.ts"
       ],
-      "project": ["**/*.{ts,tsx}"]
+      "project": [
+        "**/*.{ts,tsx}"
+      ]
     },
     "apps/ch-stream": {
-      "entry": ["src/index.ts"],
-      "project": ["src/**/*.ts"]
-    },
-    "apps/firewall": {
-      "entry": ["src/setup.tsx"],
-      "project": ["src/**/*.{ts,tsx}"]
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     },
     "packages/*": {},
     "packages/gemma": {
-      "ignoreDependencies": ["@litert-lm/core"]
+      "ignoreDependencies": [
+        "@litert-lm/core"
+      ]
     }
   }
 }

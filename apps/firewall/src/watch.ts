@@ -11,6 +11,7 @@
 // than merely challenge needs to know what a real session on this site looks like.
 
 import { type BanCandidate, autoBanRefusal } from './auto-ban';
+import { liftExpiredAutoBans, maybeAutoBan } from './auto-ban-waf';
 import {
   type Advice,
   type Reach,
@@ -74,6 +75,12 @@ const MAX_HOURS = 24 * 6; // the free observability window
 // A profile is expensive; a screen that suddenly matches everything means the category changed,
 // not that the site is under attack from fifty actors at once.
 const MAX_PROFILES = 6;
+// A SEPARATE, smaller budget for identities Vercel is already stopping. Sharing MAX_PROFILES would
+// let a busy fully-mitigated fingerprint take a slot from one that is actually getting through —
+// measured 2026-08-26, the invisible population was LARGER than the visible one and its busiest
+// member was three times the size of anything served. Traffic that reaches the app is this loop's
+// first job; this is its second.
+const MAX_MITIGATED_PROFILES = 2;
 // Members shown inline under a finding. The full line is one command away, and a finding that
 // scrolls its own verdict off the screen is worse than a short one.
 const MAX_BUILD_LINE = 4;
@@ -87,9 +94,38 @@ Read-only. Exits 0 quiet, 1 found something, 2 could not run properly.`;
 /** Above this share of rendering requests, a browser has run the app from the fingerprint. */
 const MAX_RENDER_SHARE = 0.05;
 
+/**
+ * An impersonating fingerprint that reached the app ZERO times — Vercel challenged or denied all
+ * of it.
+ *
+ * Deliberately NOT a `Screened`. That type's `allowed` means "got through", `mergeScreens` takes
+ * the max across screens, and `worthProfiling` gates on it — so carrying a total in that field
+ * would silently mix two meanings for any digest both screens find, and read as traffic we served.
+ *
+ * These are invisible to the behavioural screen by construction: it reads what passed, and none of
+ * this did. Measured 2026-08-26: two thirds of the fingerprints Vercel classifies as impersonating
+ * a browser are fully mitigated, and the busiest of them was three times the size of the one that
+ * prompted this. A challenge is not terminal — the 08-25 rotation walked past one rather than
+ * solving it — so being stopped today is not being handled.
+ */
+export type Mitigated = {
+  digest: string;
+  /** Every request, all of them stopped. Never `allowed`. */
+  requests: number;
+  why: string[];
+};
+
 export type Screened = {
   digest: string;
   allowed: number;
+  /**
+   * True when NONE of it reached the app, so `allowed` carries the stopped total instead.
+   *
+   * Set only for the fully-mitigated stream, which has no served count to gate on. Without it the
+   * report says "214 allowed of 214 total" about an identity we served exactly nothing — the kind
+   * of confident false sentence this file exists to stop printing.
+   */
+  servedNone?: boolean;
   /** Which screen surfaced it, and why. Carried so a candidate can say what made it one. */
   why: string[];
 };
@@ -437,7 +473,12 @@ export function watchLines(r: WatchReport): Line[] {
       line(
         seg(f.advice.verdict.toUpperCase().padEnd(9), tone),
         seg(f.digest, acts ? 'key' : 'dim'),
-        seg(`  ${f.allowed} allowed of ${f.total} total`, 'dim'),
+        seg(
+          f.servedNone
+            ? `  ${f.allowed} requests, NONE served`
+            : `  ${f.allowed} allowed of ${f.total} total`,
+          'dim',
+        ),
       ),
     );
     if (f.profileEmpty)
@@ -698,14 +739,8 @@ export async function findSuspects(
     ...challengedJa4.map((x) => [JA4_DENY.normalize(x), 'challenged'] as const),
     ...deniedJa4.map((x) => [JA4_DENY.normalize(x), 'denied'] as const),
   ]);
-  const { rows, truncated, handled, presence, kinReport } = await screen(
-    creds,
-    window,
-    allowedBots,
-    deniedUa,
-    deps,
-    standings,
-  );
+  const { rows, truncated, handled, presence, kinReport, mitigated } =
+    await screen(creds, window, allowedBots, deniedUa, deps, standings);
   // The screen measures presence; only a tuning reader knows what share counts as sustained.
   const persistence =
     sustainedDuty === undefined
@@ -734,12 +769,35 @@ export async function findSuspects(
     screenFloor(window.minutes),
     persistence,
   );
+  // The impersonators the screen structurally cannot see: none of their traffic reached the app,
+  // so they have no row in any PASSED query and no `allowed` to clear a floor with. Same
+  // exclusions as above, then the same floor applied to TOTAL — because total is all there is.
+  //
+  // Last, and on its own budget, so it can never displace an identity the app actually answered.
+  const alreadyHandled = new Set(
+    [...deniedJa4, ...handled, ...ignoredJa4, ...challengedJa4].map(
+      JA4_DENY.normalize,
+    ),
+  );
+  const mitigatedCandidates: Screened[] = mitigated
+    .filter((m) => !alreadyHandled.has(m.digest))
+    .filter((m) => m.requests >= screenFloor(window.minutes))
+    .slice(0, MAX_MITIGATED_PROFILES)
+    // Becomes a Screened only here, past every reader of `allowed` that means "got through". The
+    // profile below re-queries the identity itself and never consults this number.
+    .map((m) => ({
+      digest: m.digest,
+      allowed: m.requests,
+      why: m.why,
+      servedNone: true,
+    }));
+  const profiling = [...candidates, ...mitigatedCandidates];
   // Fetched once, and only when there is something to size — an extra query per run buys nothing
   // on the quiet nights, which is nearly all of them.
-  const windowTotal = candidates.length
+  const windowTotal = profiling.length
     ? await windowTotalOf(creds, window, deps)
     : Number.NaN;
-  for (const c of candidates) {
+  for (const c of profiling) {
     const p = await deps.fetchIpProfile(
       creds,
       { kind: 'ja4', value: c.digest },
@@ -755,6 +813,7 @@ export async function findSuspects(
       wafActions: p.byWafAction,
       wafRules: p.byWafRule,
       statuses: p.byStatus,
+      referrers: p.byReferrer,
       digestReach: p.digestReach,
       asnReach: p.asnReach,
       alreadyDeniedJa4: false, // filtered out by worthProfiling
@@ -1024,6 +1083,48 @@ export function impersonators(summary: Row[]): Screened[] {
 }
 
 /**
+ * Impersonating fingerprints that reached the app ZERO times.
+ *
+ * The difference between the unfiltered classification and the passed one. A digest with ANY
+ * served traffic is left out entirely: it is already the behavioural screen's business, and
+ * surfacing it twice would profile it twice.
+ *
+ * Both summaries cap independently, so a capped PASSED response can omit the very rows proving an
+ * identity was served — which would promote it here as fully mitigated when it is not. `complete`
+ * false therefore yields nothing rather than a list built on the wrong half.
+ */
+export function fullyMitigated(
+  all: Row[],
+  passed: Row[],
+  complete: boolean,
+): Mitigated[] {
+  if (!complete) return [];
+  const served = new Set(
+    passed
+      .filter((r) => countOf(r) > 0)
+      .map((r) => JA4_DENY.normalize(String(r.clientJa4Digest ?? ''))),
+  );
+  const out = new Map<string, number>();
+  for (const r of all) {
+    if (String(r.botCategory ?? '') !== IMPERSONATION) continue;
+    const digest = JA4_DENY.normalize(String(r.clientJa4Digest ?? ''));
+    if (!digest || digest === '(none)' || digest === '?') continue;
+    if (served.has(digest)) continue;
+    const n = countOf(r);
+    if (n > 0) out.set(digest, (out.get(digest) ?? 0) + n);
+  }
+  return [...out]
+    .map(([digest, requests]) => ({
+      digest,
+      requests,
+      why: [
+        `Vercel classified it as impersonating a browser and stopped all ${requests} of its requests — nothing reached the app`,
+      ],
+    }))
+    .sort((a, b) => b.requests - a.requests);
+}
+
+/**
  * The digests Vercel classified as impersonating a browser and then allowed through.
  *
  * `botCategory` is a groupBy dimension, NOT a filter field: `botCategory eq '…'` returns zero
@@ -1048,6 +1149,8 @@ export async function screen(
   presence: Presence;
   /** Build lines of everything already denied or challenged, or null when the sample capped. Attached to findings; never a finding of its own. */
   kinReport: KinReport | null;
+  /** Impersonators the screen cannot see, because none of their traffic reached the app. */
+  mitigated: Mitigated[];
 }> {
   const { metrics } = deps;
   const { ctx } = makeCtx(creds, window);
@@ -1072,6 +1175,13 @@ export async function screen(
         limit: GROUP_CAP,
       })
     : undefined;
+  // UNFILTERED, unlike every other query here. `botCategory` is Vercel's own classification of the
+  // client, not an inference of ours, so mitigating a request does not change it — where the
+  // rendering screen would read every challenged request as a raw-HTML fetcher and must stay on
+  // PASSED. One extra call per tick.
+  const allResp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
+    limit: GROUP_CAP,
+  });
   const resp = await metrics(ctx, ['clientJa4Digest', 'botCategory'], {
     // What reached the app, expressed as what did NOT stop it. Measured 2026-08-06: requests
     // arrive as `log`, `allow` or `bypass` depending on how the ruleset is configured and which
@@ -1097,6 +1207,13 @@ export async function screen(
       ? buildKinReport(window, routeRows, verifiedRows, standings, true)
       : null;
   return {
+    // Gated on BOTH summaries: this list is the difference between them, so either capping makes
+    // the difference wrong in the direction that invents a fully-mitigated identity.
+    mitigated: fullyMitigated(
+      allResp.summary ?? [],
+      summary,
+      (allResp.summary ?? []).length < GROUP_CAP && summary.length < GROUP_CAP,
+    ),
     kinReport,
     // Free: these two responses already carry an hourly series per group, and the screen was
     // reading only their summaries. No extra query buys the persistence gate.
@@ -1121,6 +1238,10 @@ export async function screen(
     // same 500 slots — so a capped response can have dropped the very rows this screen exists to
     // find, and would then report a quiet window.
     truncated:
+      // The unfiltered classification caps on its own, and `fullyMitigated` is built from it. A
+      // capped one there sheds the very impersonators this screen exists to surface and would
+      // otherwise report a quiet window.
+      (allResp.summary ?? []).length >= GROUP_CAP ||
       summary.length >= GROUP_CAP ||
       routeRows.length >= GROUP_CAP ||
       uaCapped ||
@@ -1151,6 +1272,8 @@ async function main() {
   const window = rollingWindow(hours, new Date());
   const errors: string[] = [];
 
+  // Before the screen and on every run, so a ban expires on a quiet cron night too.
+  await liftExpiredAutoBans(process.cwd());
   const { rows, findings, truncated, configErrors } = await screenOnce(
     creds,
     window,
@@ -1208,9 +1331,11 @@ async function main() {
       const envPath = `${process.cwd()}/.env.local`;
       const before = await fingerprintConfig(envPath);
       const out = await runInvestigation(f, process.cwd(), hours);
-      if (
-        investigationChangedConfig(before, await fingerprintConfig(envPath))
-      ) {
+      const tampered = investigationChangedConfig(
+        before,
+        await fingerprintConfig(envPath),
+      );
+      if (tampered) {
         const alarm = `.env.local CHANGED during the investigation of ${f.digest} — the run was told not to apply anything. Check FW_BLOCKED_JA4 and the live WAF.`;
         report.errors.push(alarm);
         await logWatch(process.cwd(), new Date(), {
@@ -1220,6 +1345,23 @@ async function main() {
       }
       const verdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
       if (!out.ok) seen.delete(f.digest.toLowerCase());
+      // AFTER the tamper check above, deliberately: this writes .env.local, and running it first
+      // would fingerprint our own write as the investigation having applied something.
+      //
+      // The same call the TUI makes, from the same module. The two entrypoints had diverged three
+      // times before, and every time it was the unattended path that lost the behaviour — and a
+      // cron is more unattended than a TUI someone armed. The FLAG decides, not which one ran.
+      // NOT after a tamper trip. The config changed during a run that was told to change nothing,
+      // so we no longer know what the denylist holds — and stacking an autonomous deny on top of
+      // an unexplained write is how one problem becomes two. Alarm, and leave it to a human.
+      if (out.ok && !tampered) await maybeAutoBan(process.cwd(), f, verdict);
+      else if (out.ok && tampered)
+        await logWatch(process.cwd(), new Date(), {
+          kind: 'shadow',
+          digest: f.digest,
+          refusal:
+            'auto-ban skipped: .env.local changed during the investigation',
+        });
       await logWatch(
         process.cwd(),
         new Date(),

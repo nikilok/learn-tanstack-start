@@ -5,7 +5,7 @@
 import { readdirSync } from 'node:fs';
 
 import { JA4_DENY, envMatching } from './deny-list';
-import { type PathKind, pathKind } from './ip-signals';
+import { type PathKind, pathKind, pathsArePartial } from './ip-signals';
 import { type Ctx, countOf, makeCtx, metrics, pool } from './observability';
 import type { Window } from './time-window';
 import { errMsg } from './util';
@@ -200,16 +200,21 @@ export async function fetchSitemapReport(
       const pathSum = rows.reduce((s, [, n]) => s + n, 0);
       const wafSum = wafRows.reduce((s, [, n]) => s + n, 0);
       d.total = wafSum || pathSum;
-      // A denied or challenged request never reaches routing, so it carries no requestPath and
-      // cannot appear in `rows`. Comparing the sample against the RAW total therefore marks
-      // every partially-blocked digest as truncated forever — which is precisely the digests
-      // this pane exists to surface. Compare against what actually reached the app instead.
-      const blocked = wafRows
-        .filter(([[a]]) => a === 'deny' || a === 'challenge')
+      // A DENIED request never reaches routing, so it carries no requestPath and cannot appear
+      // in `rows`. A CHALLENGED one does appear, carrying the raw path — so counting it as
+      // absent understates what these rows should cover and hides real truncation. Same defect
+      // as ip-profile's `pathsPartial`, fixed with it 2026-08-26; the belief that both are absent
+      // is true of deny only, and was corrected by measurement on 2026-08-12.
+      // Named apart from the outer `denied`, which is a Set of DIGESTS. One identifier meaning a
+      // set on one line and a request count on the next is a misread waiting to happen.
+      const deniedCount = wafRows
+        .filter(([[a]]) => a === 'deny')
         .reduce((n, [, c]) => n + c, 0);
-      const reachedApp = Math.max(0, d.total - blocked);
+      // `!wafSum` stays: without a waf breakdown we cannot know what was denied, and unknown
+      // coverage is a floor rather than a pass.
       d.pathsPartial =
-        rows.length >= GROUP_CAP || !wafSum || pathSum < reachedApp;
+        !wafSum ||
+        pathsArePartial(rows.length, pathSum, d.total, deniedCount, GROUP_CAP);
       d.totalExact = wafSum > 0;
       d.distinctPaths = rows.length;
       d.companyPages = rows

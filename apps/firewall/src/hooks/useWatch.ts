@@ -1,9 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
+
 // Watch mode: the unattended loop. Armed with `v`, it screens on its own timer whatever pane is
 // open, investigates anything that clears the bar, and notifies. Lifted out of the container
 // because it is the path nobody is looking at when it runs.
-
-import { useEffect, useRef, useState } from 'react';
-
+import { liftExpiredAutoBans, maybeAutoBan } from '../auto-ban-waf';
 import { rollingWindow } from '../time-window';
 import { watchHours, watchIntervalMs, watchTiming } from '../tuning';
 import { errMsg } from '../util';
@@ -182,6 +182,10 @@ export function useWatch(opts: {
         // picks up anything the CLI investigated between ticks.
         for (const d of (await readInvestigated(root, Date.now())).keys())
           investigatedRef.current.add(d);
+        // BEFORE the screen, and on every tick rather than only when something new is applied.
+        // An expiry that runs only alongside a new ban leaves the last one live through a quiet
+        // week — exactly the stretch nobody is watching, which is what expiry exists for.
+        await liftExpiredAutoBans(root);
         // Every gate — denylist, first-party rules, bot allowlist — is assembled by screenOnce,
         // which the CLI uses too. Assembling them here is what let this loop drift three times.
         const { rows, findings, truncated, configErrors } = await screenOnce(
@@ -343,17 +347,32 @@ export function useWatch(opts: {
         // clearing unconditionally strands that child with nothing able to kill it.
         if (investigationRef.current === spawned.child)
           investigationRef.current = null;
-        if (
-          investigationChangedConfig(
-            beforeCfg,
-            await fingerprintConfig(configPath),
-          )
-        ) {
+        const tampered = investigationChangedConfig(
+          beforeCfg,
+          await fingerprintConfig(configPath),
+        );
+        if (tampered) {
           const alarm = `.env.local CHANGED during the investigation of ${next.digest} — the run was told not to apply anything.`;
           // Note guarded, log not — the same split the other writers use. A disarm mid-await must
           // not paint a status onto a loop that is off, but the change genuinely happened.
           if (!stopped) setWatchNote(alarm);
           void logWatch(root, new Date(), { kind: 'error', error: alarm });
+        }
+        // RELEASED on failure, so a run that produced nothing does not also cost the retry.
+        //
+        // The mark is written BEFORE the spawn on purpose (see above): a restart mid-run must not
+        // re-buy an investigation already in flight. But it decays on a 7-day clock, so a run that
+        // died left the digest paid for, unanswered, and locked out for a week — which is exactly
+        // what happened when the 10-minute ceiling killed one: the next tick reached `ban` on the
+        // same identity and could not look at it.
+        //
+        // Only on a returned failure. A crash of THIS process still leaves the mark, which is the
+        // conservative direction — we would not know whether the child had finished.
+        if (!out.ok) {
+          investigatedRef.current.delete(next.digest.toLowerCase());
+          const after = await readInvestigated(root, Date.now());
+          after.delete(next.digest.toLowerCase());
+          await writeInvestigated(root, after);
         }
         if (stopped) return;
         setWatchVerdict(
@@ -365,6 +384,27 @@ export function useWatch(opts: {
             ? `investigated ${next.digest} — read it below`
             : `investigation failed for ${next.digest}`,
         );
+        // Skipped after a tamper trip: the config changed during a run told to change nothing.
+        //
+        // Wrapped, because everything below it is the record — a throw here would otherwise take
+        // the verdict log and the notification with it.
+        const agentVerdict = out.ok ? verdictFrom(out.verdict) : 'unclear';
+        if (out.ok && !tampered)
+          try {
+            await maybeAutoBan(root, next, agentVerdict);
+          } catch (e) {
+            void logWatch(root, new Date(), {
+              kind: 'error',
+              error: `AUTO-BAN THREW for ${next.digest}: ${errMsg(e)} — the WAF may or may not have changed; check it`,
+            });
+          }
+        else if (out.ok && tampered)
+          void logWatch(root, new Date(), {
+            kind: 'shadow',
+            digest: next.digest,
+            refusal:
+              'auto-ban skipped: .env.local changed during the investigation',
+          });
         void logWatch(
           root,
           new Date(),

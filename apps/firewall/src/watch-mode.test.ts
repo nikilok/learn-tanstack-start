@@ -13,6 +13,7 @@ import {
   canKeepAwake,
   investigationArgs,
   investigationPrompt,
+  INVESTIGATION_TIMEOUT_MS,
   parseInvestigation,
   provenanceOf,
   recentSpawns,
@@ -229,6 +230,48 @@ describe('provenanceOf', () => {
   test('survives a malformed payload', () => {
     expect(provenanceOf(null)).toContain('model unreported');
     expect(provenanceOf({ total_cost_usd: 'lots' })).toBe('model unreported');
+  });
+});
+
+// Two paid investigations were lost to a ceiling set 45 seconds above the worst success, and both
+// reported as `claude exited 137`, which reads as a crash in the child rather than our own kill.
+describe('the investigation ceiling', () => {
+  test('clears the measured distribution with real margin', () => {
+    // Successes took 6m45, 8m41 and 9m15. A ceiling inside that range is a coin flip.
+    expect(INVESTIGATION_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
+  });
+
+  test('a SIGKILL is reported as our own ceiling, not as a crash', () => {
+    const r = parseInvestigation('', 137);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toContain('ceiling');
+    expect(r.ok === false && r.error).not.toBe(
+      'claude exited 137 with no JSON',
+    );
+  });
+
+  test('any other non-zero exit is still reported as itself', () => {
+    // 137 is ours; nothing else is, and collapsing them would hide a real crash.
+    const r = parseInvestigation('', 1);
+    expect(r.ok === false && r.error).toContain('exited 1');
+  });
+
+  test('a successful run records how long it took', () => {
+    // Recorded on SUCCESS, so a narrowing margin is visible BEFORE it starts failing.
+    const ok = JSON.stringify({
+      result: 'VERDICT: leave',
+      total_cost_usd: 1.5,
+    });
+    const r = parseInvestigation(ok, 0, 8 * 60_000 + 41_000);
+    expect(r.ok === true && r.provenance).toContain('8m41s');
+  });
+
+  test('and omits it when the caller did not measure', () => {
+    const ok = JSON.stringify({ result: 'VERDICT: leave' });
+    const r = parseInvestigation(ok, 0);
+    // Asserted against the LABEL's shape. `not.toContain('m0')` passed for any duration that did
+    // not happen to contain those two characters, which is nearly all of them.
+    expect(r.ok === true && r.provenance).not.toMatch(/\d+m\d\ds/);
   });
 });
 

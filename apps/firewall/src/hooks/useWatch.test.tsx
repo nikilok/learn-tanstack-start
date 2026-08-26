@@ -47,10 +47,16 @@ async function mountWatch(
   opts: {
     screen?: () => Promise<Screen> | Screen;
     investigate?: boolean;
+    /** Make the spawned run RETURN a failure, the way a ceiling kill does. */
+    investigationFails?: boolean;
+    /** Make the tamper check report that .env.local changed during the run. */
+    configChanged?: boolean;
     timing?: string | null;
   } = {},
 ) {
   const log: { kind: string; detail?: string }[] = [];
+  // The 7-day lock-out, observable. A run that returns nothing must not consume it.
+  const investigated = new Map<string, number>();
   const notified: string[] = [];
   const listed: WatchlistEntry[][] = [];
   let notifyFails = '';
@@ -80,9 +86,9 @@ async function mountWatch(
     logWatch: async (
       _d: string,
       _at: Date,
-      e: { kind: string; error?: string },
+      e: { kind: string; error?: string; refusal?: string | null },
     ) => {
-      log.push({ kind: e.kind, detail: e.error });
+      log.push({ kind: e.kind, detail: e.error ?? e.refusal ?? undefined });
     },
   }));
 
@@ -103,20 +109,26 @@ async function mountWatch(
     recentSpawns: () => [],
     shouldInvestigate: () => Boolean(opts.investigate),
     fingerprintConfig: async () => 'same',
-    investigationChangedConfig: () => false,
-    runInvestigation: async () => ({
-      ok: true,
-      verdict: 'VERDICT: challenge\nshared digest',
-      provenance: 'test',
-    }),
+    investigationChangedConfig: () => Boolean(opts.configChanged),
+    runInvestigation: async () =>
+      opts.investigationFails
+        ? { ok: false, error: "killed by this tool's own ceiling" }
+        : {
+            ok: true,
+            verdict: 'VERDICT: challenge\nshared digest',
+            provenance: 'test',
+          },
     verdictFrom: () => 'challenge',
   }));
 
   const realNotify = { ...(await import('../watch-notify')) };
   mock.module('../watch-notify', () => ({
     ...realNotify,
-    readInvestigated: async () => new Map<string, number>(),
-    writeInvestigated: async () => {},
+    readInvestigated: async () => new Map(investigated),
+    writeInvestigated: async (_d: string, m: Map<string, number>) => {
+      investigated.clear();
+      for (const [k, v] of m) investigated.set(k, v);
+    },
     shouldNotify: async () => true,
     rememberNotified: async () => {},
     concludedKey: (c: string[]) => c.join('|'),
@@ -166,6 +178,7 @@ async function mountWatch(
   return {
     h,
     get: () => api,
+    investigated,
     log,
     notified,
     listed,
@@ -339,6 +352,63 @@ describe('useWatch', () => {
       try {
         await arm(t);
         expect(t.notified.join(' ')).toContain('challenge');
+      } finally {
+        t.h.unmount();
+        t.restore();
+      }
+    });
+
+    // A killed run is paid for and answers nothing. Leaving the digest marked spent the 7-day
+    // lock-out as well, so the next tick reached `ban` on the same identity and could not look.
+    // The config changed during a run told to change nothing, so we no longer know what the
+    // denylist holds. Stacking an autonomous deny on an unexplained write turns one problem into
+    // two — alarm, and leave it to a human.
+    test('a tamper trip blocks the auto-ban, and says so', async () => {
+      const t = await mountWatch({
+        screen: () => ({ findings: [finding('ban')] }),
+        investigate: true,
+        configChanged: true,
+      });
+      try {
+        await arm(t);
+        // The REASON, not merely that a shadow line exists — maybeAutoBan writes those too, so
+        // counting them passed whether or not the tamper gate was there at all.
+        const reasons = t.log
+          .filter((l) => l.kind === 'shadow')
+          .map((l) => l.detail ?? '')
+          .join(' ');
+        expect(reasons).toContain(
+          '.env.local changed during the investigation',
+        );
+      } finally {
+        t.h.unmount();
+        t.restore();
+      }
+    });
+
+    test('a FAILED investigation releases the digest for a retry', async () => {
+      const t = await mountWatch({
+        screen: () => ({ findings: [finding('ban')] }),
+        investigate: true,
+        investigationFails: true,
+      });
+      try {
+        await arm(t);
+        expect(t.investigated.has(DIGEST.toLowerCase())).toBe(false);
+      } finally {
+        t.h.unmount();
+        t.restore();
+      }
+    });
+
+    test('a SUCCESSFUL one keeps it, so it is not re-bought', async () => {
+      const t = await mountWatch({
+        screen: () => ({ findings: [finding('ban')] }),
+        investigate: true,
+      });
+      try {
+        await arm(t);
+        expect(t.investigated.has(DIGEST.toLowerCase())).toBe(true);
       } finally {
         t.h.unmount();
         t.restore();

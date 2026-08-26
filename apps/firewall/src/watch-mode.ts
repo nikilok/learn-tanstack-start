@@ -154,12 +154,25 @@ export function investigationPrompt(f: Suspicious, hours: number): string {
 export const INVESTIGATION_MODEL = 'opus';
 export const INVESTIGATION_EFFORT = 'max';
 
+/** 128 + SIGKILL(9). The only SIGKILL here is the timeout below, so this exit code names it. */
+const TIMEOUT_EXIT = 137;
+
 /**
- * Hard ceiling on one investigation. Generous, because `max` effort over a dozen observability
- * queries is genuinely slow — but finite, because the alternative is a hung child that every
- * later screen queues behind.
+ * Hard ceiling on one investigation. Finite, because the alternative is a hung child that every
+ * later screen queues behind — but it must clear the real distribution, and at 10 minutes it did
+ * not.
+ *
+ * Measured over five real runs: successes took 6m45, 8m41 and 9m15, and the two that were killed
+ * both died at exactly 10m00 on identities that mattered. The ceiling sat 45 seconds above the
+ * worst success, so the outcome was close to a coin flip.
+ *
+ * A kill here does NOT save the spend — the tokens are already bought by minute ten, and SIGKILL
+ * simply discards what they produced ($1.66-$2.38 per run, and both losses were total). Cutting it
+ * short maximises waste rather than bounding it; the count is bounded by SPAWN_CEILING and
+ * INVESTIGATIONS_PER_RUN, which is where that job belongs. So: roughly double the worst observed
+ * success, and re-measure from the log before changing it again.
  */
-export const INVESTIGATION_TIMEOUT_MS = 10 * 60_000;
+export const INVESTIGATION_TIMEOUT_MS = 20 * 60_000;
 
 /** Argv for the investigation. Read-only work, JSON out so the pane can render the verdict. */
 export function investigationArgs(f: Suspicious, hours: number): string[] {
@@ -272,11 +285,15 @@ export async function runInvestigation(
     });
     // Hand the child up so disarm and unmount can stop it; the timeout only bounds the worst case.
     onStart?.(proc);
+    const startedAt = Date.now();
     const [stdout, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
       proc.exited,
     ]);
-    return parseInvestigation(stdout, exitCode);
+    // Carried on SUCCESS too, deliberately. Two runs were killed at the ceiling before anyone
+    // noticed the successful ones were finishing within a minute of it — a duration recorded only
+    // on failure tells you after it starts failing, which is the wrong time to learn it.
+    return parseInvestigation(stdout, exitCode, Date.now() - startedAt);
   } catch (e) {
     return {
       ok: false,
@@ -289,9 +306,17 @@ export async function runInvestigation(
  * What the CLI returned. `is_error` and a non-zero exit are different failures — a run can fail
  * cleanly and still exit 0 — so both are checked, and neither is allowed to read as a verdict.
  */
+/** `8m41s`, for a log line read at a glance beside a ceiling measured in minutes. */
+export function elapsedLabel(ms: number): string {
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, '0')}s`;
+}
+
 export function parseInvestigation(
   stdout: string,
   exitCode: number,
+  /** Wall time the child took. Optional so existing callers and tests keep their shape. */
+  elapsedMs?: number,
 ): Investigation {
   let parsed: unknown;
   try {
@@ -302,7 +327,12 @@ export function parseInvestigation(
       error:
         exitCode === 0
           ? 'claude returned output that was not JSON'
-          : `claude exited ${exitCode} with no JSON`,
+          : // 137 is SIGKILL, and the only thing here that sends one is our own timeout. Naming it
+            // matters: "exited 137" reads as a crash in the child and sent the last diagnosis
+            // hunting through Claude's logs, when the caller had killed it.
+            exitCode === TIMEOUT_EXIT
+            ? `claude was killed by this tool's own ${INVESTIGATION_TIMEOUT_MS / 60_000}-minute ceiling before it answered — the spend happened, the verdict was lost`
+            : `claude exited ${exitCode} with no JSON`,
     };
   }
   // Same guard as provenanceOf: `null` is valid JSON, and reading `is_error` off it throws.
@@ -320,7 +350,12 @@ export function parseInvestigation(
   return {
     ok: true,
     verdict: r.result,
-    provenance: provenanceOf(parsed),
+    // Elapsed rides the provenance line, which the log already prints beside the models and the
+    // cost. It is the only place the margin against the ceiling is visible before it runs out.
+    provenance:
+      elapsedMs === undefined
+        ? provenanceOf(parsed)
+        : `${provenanceOf(parsed)} · ${elapsedLabel(elapsedMs)}`,
   };
 }
 

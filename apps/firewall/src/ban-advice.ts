@@ -24,6 +24,47 @@ import { HEADER_GATED_RULES } from './rule-names';
 const MIN_VOLUME_PER_DAY = 200;
 const MIN_VOLUME_FLOOR = 50;
 
+/**
+ * Requests this identity was actually SERVED — the only ones that could have rendered anything.
+ *
+ * A challenged request gets a 429 and pulls no sub-resource; a denied one never reaches routing.
+ * So a rendering count measured across a mitigated identity is a zero WE caused, not one we found.
+ * `challengedJa4` already blocks that for our own list, but Vercel's managed bot protection
+ * produces the identical censorship and that flag cannot see it — measured 2026-08-26 on a
+ * fingerprint challenged 234 times out of 235, where the advisory reported "zero rendering
+ * requests across 235 requests — a raw-HTML fetcher" as though it were evidence.
+ */
+export function servedTotal(input: {
+  total: number;
+  wafActions: [string, number][];
+}): number {
+  const acted = input.wafActions
+    .filter(([a]) => a === 'challenge' || a === 'deny')
+    .reduce((n, [, c]) => n + c, 0);
+  return Math.max(0, input.total - acted);
+}
+
+/**
+ * Share of requests carrying a referrer at all.
+ *
+ * Bimodal on live traffic, which is why it needs no tuning: measured over the deniable population,
+ * every digest that renders sits far above this and automation sits at exactly zero. The bar is
+ * set well under the lowest real browser rather than between two overlapping distributions.
+ */
+const MAX_REFERRED_SHARE = 0.01;
+
+/** The share of an identity's requests that carried a referrer. Blank values are the API's way of saying there was none. */
+export function referredShare(
+  referrers: [string, number][],
+  total: number,
+): number {
+  if (total <= 0) return 0;
+  const withOne = referrers
+    .filter(([r]) => r && r !== '(none)' && r !== '?')
+    .reduce((n, [, c]) => n + c, 0);
+  return withOne / total;
+}
+
 /** Requests needed before a window says anything about sustained volume. */
 export function volumeFloor(windowMinutes: number): number {
   return Math.max(
@@ -289,6 +330,12 @@ export type AdviceInput = {
   wafActions: [string, number][];
   wafRules: [string, number][];
   statuses: [string, number][];
+  /**
+   * Referrers, counted. UNCENSORED where rendering is not: the header is recorded before the WAF
+   * acts, so a challenged request still carries one. Optional so the many call sites that predate
+   * it keep their behaviour — an absent list yields no tell rather than a zero share.
+   */
+  referrers?: [string, number][];
   digestReach?: Reach;
   asnReach?: Reach;
   alreadyDeniedJa4: boolean; // present in the LIVE rule and applied
@@ -725,12 +772,52 @@ export function adviseBan(input: AdviceInput): Advice {
   // stray RPC used to delete this axis entirely while the blocker two functions up correctly
   // held that one request proves nothing. The advisory cannot have it both ways.
   const renders = renderingRequests(mix);
-  if (!rendersIndicateBrowser(renders, input.total, input.mix.page))
+  // Suppressed, not merely annotated. An axis is evidence that a ban is COUNTED on, so one built
+  // from a mitigated identity's rendering would let our own interstitial argue for the harsher
+  // control. Below the flat floor there is not enough served traffic for "it renders nothing" to
+  // be a claim about the client rather than about us.
+  const served = servedTotal(input);
+  // Mitigation must actually have HAPPENED. Without this an identity with no wafActions at all
+  // scored `served === total`, and a quiet one printed "only 30 of 30 requests were served — the
+  // rest were challenged or denied": a sentence that contradicts itself and describes mitigation
+  // that never occurred.
+  const mitigated = input.total - served;
+  const censored = mitigated > 0 && served < MIN_VOLUME_FLOOR;
+  const censoredNote = censored
+    ? `rendering not counted: only ${served} of ${input.total} requests were served — the rest were challenged or denied, and a client that never reached the app cannot have rendered. That zero is ours, not a measurement.`
+    : '';
+  if (
+    !censored &&
+    !rendersIndicateBrowser(renders, input.total, input.mix.page)
+  )
     tell(
       'rendering',
       renders === 0
         ? `zero rendering requests across ${input.total} requests — a raw-HTML fetcher`
         : `only ${renders} rendering requests across ${input.total} — too few to be running the app`,
+    );
+  // Tagged 'rendering', NOT an axis of its own — and that is the whole design.
+  //
+  // "Sends no referrer" and "renders nothing" are two expressions of ONE fact: this is not a
+  // browser. Measured 2026-08-26 over the deniable population, 75% of non-rendering digests were
+  // also at zero referrers, so counting them separately would let that single fact satisfy the
+  // two-independent-axes rule alone — the mistake already recorded for `crawl`.
+  //
+  // What it buys instead is a way to make the claim when rendering CANNOT be measured. A referrer
+  // is logged before the WAF acts, so a challenged request still carries one; 89% of the
+  // rendering-censored population sits at zero. So a fully mitigated identity can still earn the
+  // rendering axis, on evidence our own mitigation did not manufacture.
+  //
+  // Evadable by sending any referrer, and it fails safe when evaded: the 2026-08-12 denied digest
+  // sent a synthetic bare-origin referrer on 99.2% of its requests and would not fire this.
+  if (
+    input.referrers &&
+    input.total >= MIN_VOLUME_FLOOR &&
+    referredShare(input.referrers, input.total) <= MAX_REFERRED_SHARE
+  )
+    tell(
+      'rendering',
+      `no referrer on ${input.total} requests — nothing arrived from a link or a search, which is what browsing produces`,
     );
   if (input.ja4.some(([d]) => alpnOf(d) === '00'))
     tell('tls', 'offers no ALPN — no mainstream browser does that');
@@ -787,9 +874,10 @@ export function adviseBan(input: AdviceInput): Advice {
 
   // Context on whether acting is worth it, separate from whether it is safe. A client already
   // challenged on every request, or one that only ever gets 404s, is not reading anything.
-  const acted = input.wafActions
-    .filter(([a]) => a === 'challenge' || a === 'deny')
-    .reduce((n, [, c]) => n + c, 0);
+  // The same number `servedTotal` already derived, not a second copy of the filter — two
+  // spellings of one threshold is how a pair drifts into disagreeing about what counts as
+  // mitigated.
+  const acted = mitigated;
   // 4xx is TWO different findings and they were counted as one.
   //
   // A 404 is the SITE's answer: the client asked for something that does not exist, which is
@@ -817,7 +905,12 @@ export function adviseBan(input: AdviceInput): Advice {
     );
 
   const digest = input.ja4[0]?.[0];
-  const leverNotes: string[] = [...context];
+  // Carried down rather than pushed at the axis, where `leverNotes` does not exist yet. The
+  // operator has to be told the axis was withheld, or a quiet absence reads as "it renders fine".
+  const leverNotes: string[] = [
+    ...(censoredNote ? [censoredNote] : []),
+    ...context,
+  ];
   // Legitimacy first: it is the only class that means "this client is fine".
   if (blockers.length)
     return {

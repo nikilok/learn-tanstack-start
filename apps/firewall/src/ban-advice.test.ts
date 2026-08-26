@@ -754,6 +754,132 @@ describe('adviseBan — the ASN lever', () => {
   });
 });
 
+// Vercel's managed bot protection censors rendering exactly as our own challenge does, and
+// `challengedJa4` cannot see it. Measured 2026-08-26 on a fingerprint challenged 234 of 235 times,
+// where the advisory offered "zero rendering requests across 235 requests — a raw-HTML fetcher" as
+// though the zero were a finding rather than something we caused.
+// A referrer is logged BEFORE the WAF acts, so it survives the mitigation that censors rendering.
+// Deliberately shares the `rendering` tag: "sends no referrer" and "renders nothing" are one fact —
+// this is not a browser — and counting them separately would satisfy the two-axes rule with it.
+describe('adviseBan — the referrer tell', () => {
+  const withRef = (
+    total: number,
+    referred: number,
+    over: Partial<AdviceInput> = {},
+  ): AdviceInput => ({
+    total,
+    mix: mixOf([['/company/x', total]]),
+    shape: shapeOf(series(Array(144).fill(1), 0, 144), 10),
+    ja4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', total]],
+    asns: [['Some ISP', total]],
+    botVerified: [],
+    wafActions: [['challenge', total]],
+    wafRules: [],
+    statuses: [],
+    referrers: [
+      ['', total - referred],
+      ...(referred
+        ? ([['https://example.test/', referred]] as [string, number][])
+        : []),
+    ],
+    alreadyDeniedJa4: false,
+    challengedJa4: false,
+    stagedJa4: false,
+    alreadyDeniedAsn: false,
+    windowMinutes: 1440,
+    ...over,
+  });
+
+  test('restores the rendering axis when rendering itself is censored', () => {
+    // The point of the whole thing: every request was mitigated, so rendering cannot be measured,
+    // but the referrer header still can — and it says the same thing.
+    const a = adviseBan(withRef(400, 0));
+    expect(a.axes).toContain('rendering');
+    expect(a.reasons.join(' ')).toContain('no referrer on 400 requests');
+  });
+
+  test('does NOT become a second axis', () => {
+    // The design decision, pinned. "Renders nothing" and "no referrer" co-occur in 75% of the
+    // deniable population, so counting them apart would let one fact clear the two-axes bar.
+    const a = adviseBan(withRef(400, 0, { wafActions: [] }));
+    expect(a.axes.filter((x) => x === 'rendering')).toHaveLength(1);
+    expect(a.axes).not.toContain('referrer');
+  });
+
+  test('a browsing share of referrers does not fire it', () => {
+    // Measured: every rendering digest sat between 65% and 99.7%. The bar is far below the floor
+    // of that population rather than between two overlapping ones.
+    expect(adviseBan(withRef(400, 260)).reasons.join(' ')).not.toContain(
+      'no referrer',
+    );
+  });
+
+  test('too little traffic for the claim, so it stays quiet', () => {
+    expect(adviseBan(withRef(20, 0)).reasons.join(' ')).not.toContain(
+      'no referrer',
+    );
+  });
+
+  test('an absent referrer list is not a zero share', () => {
+    // Unread is not measured-empty — the direction that would invent the tell on every caller
+    // that predates the field.
+    const a = adviseBan(withRef(400, 0, { referrers: undefined }));
+    expect(a.reasons.join(' ')).not.toContain('no referrer');
+  });
+});
+
+describe('adviseBan — rendering on a mitigated identity', () => {
+  const mitigated = (served: number, acted: number): AdviceInput => ({
+    total: served + acted,
+    mix: mixOf([['/company/x', served + acted]]),
+    shape: shapeOf(series(Array(144).fill(1), 0, 144), 10),
+    ja4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', served + acted]],
+    asns: [['Some ISP', served + acted]],
+    botVerified: [],
+    wafActions: acted ? [['challenge', acted]] : [],
+    wafRules: [],
+    statuses: [],
+    alreadyDeniedJa4: false,
+    challengedJa4: false,
+    stagedJa4: false,
+    alreadyDeniedAsn: false,
+    windowMinutes: 1440,
+  });
+
+  test('claims censorship only when mitigation actually happened', () => {
+    // With no wafActions at all, served === total, and the note read "only 30 of 30 requests were
+    // served — the rest were challenged or denied": a sentence contradicting itself about
+    // mitigation that never occurred.
+    const a = adviseBan(mitigated(30, 0));
+    expect(a.leverNotes.join(' ')).not.toContain('rendering not counted');
+  });
+
+  test('a fully mitigated identity gets NO rendering axis', () => {
+    // It never reached the app, so it cannot have rendered. Counting that as evidence lets our
+    // own interstitial argue for the harsher control.
+    const a = adviseBan(mitigated(0, 400));
+    expect(a.axes).not.toContain('rendering');
+    expect(a.reasons.join(' ')).not.toContain('raw-HTML fetcher');
+  });
+
+  test('and SAYS the axis was withheld, rather than going quiet', () => {
+    const a = adviseBan(mitigated(0, 400));
+    expect(a.leverNotes.join(' ')).toContain('rendering not counted');
+    expect(a.leverNotes.join(' ')).toContain('That zero is ours');
+  });
+
+  test('an identity that was actually SERVED keeps the axis', () => {
+    const a = adviseBan(mitigated(400, 0));
+    expect(a.axes).toContain('rendering');
+  });
+
+  test('a mostly-served identity keeps it — the censorship is partial, not total', () => {
+    // Suppressing whenever ANY request was mitigated would delete the axis for nearly everyone.
+    // The bar is whether enough traffic was served for the zero to mean something.
+    expect(adviseBan(mitigated(400, 200)).axes).toContain('rendering');
+  });
+});
+
 describe('adviseBan — is acting worth it', () => {
   // An Azure PHP-backdoor scanner: scraper-shaped, but already challenged on every request and
   // finding nothing. Still deniable, but the operator should know a deny buys very little.

@@ -28,7 +28,12 @@ import { notify } from './watch-notify';
 
 export type WafEdit =
   | { ok: true; status: string; values: string[] }
-  | { ok: false; error: string };
+  /**
+   * `mutated` — whether the apply was REACHED, so the live rule may already carry the change.
+   * A failure after that point is not "nothing happened": the deny can be live and enforced, and
+   * treating it as a no-op is how a temporary ban loses its clock and becomes permanent.
+   */
+  | { ok: false; error: string; mutated: boolean };
 
 /** Whichever env var the operator's own apply rebuilds the JA4 deny rule from. */
 const JA4_ENV = PERSIST_TARGETS.find((t) => t.rule === JA4_RULE)?.envKey ?? '';
@@ -46,6 +51,8 @@ export async function editLiveJa4Deny(
   digest: string,
   direction: 'add' | 'remove',
 ): Promise<WafEdit> {
+  // Flipped the instant the apply is reached, so a throw can be told apart from a no-op.
+  let attempted = false;
   try {
     // Imported HERE, not at module scope. `client.ts` resolves credentials and builds its SDK
     // client on evaluation, and since Bun 1.4 a failed evaluation is rethrown for ever — even
@@ -61,28 +68,46 @@ export async function editLiveJa4Deny(
     const live = await fetchLive();
     const item = seedItems(live).find((i) => i.rule.name === JA4_RULE);
     if (!item)
-      return { ok: false, error: `${JA4_RULE} is not in the built rule set` };
+      return {
+        ok: false,
+        error: `${JA4_RULE} is not in the built rule set`,
+        mutated: false,
+      };
     // Checked here for BOTH directions. `withValue` validates; `withoutValue` only filters, so a
     // malformed value removes nothing and still returns a rule — reported as a successful lift
     // while the deny stays live, which is a ban with no expiry record behind it.
     if (!JA4_DENY.valid(JA4_DENY.normalize(digest.trim())))
-      return { ok: false, error: `not a JA4 digest: ${digest}` };
+      return {
+        ok: false,
+        error: `not a JA4 digest: ${digest}`,
+        mutated: false,
+      };
     const edited =
       direction === 'add'
         ? withValue(item.rule, JA4_DENY, digest)
         : withoutValue(item.rule, JA4_DENY, digest);
+    attempted = true;
     const { status, detail } = await applyItem(
       { ...item, rule: edited.rule },
       live.idByName,
     );
     if (status === 'error')
-      return { ok: false, error: detail ?? 'apply returned an error' };
+      // `mutated` even on a reported error: whether the write landed is not knowable from here,
+      // and the two wrong answers are not equal. Claiming a mutation that did not happen costs a
+      // no-op sweep; missing one that did costs a permanent ban.
+      return {
+        ok: false,
+        error: detail ?? 'apply returned an error',
+        mutated: true,
+      };
     // A rule can be present and switched off in the dashboard. "overwrote" alone would read as
     // enforcement, so the deactivated case is reported as a failure to enforce, not a success.
     if (live.activeByName.get(JA4_RULE) === false)
       return {
         ok: false,
         error: `${JA4_RULE} is DEACTIVATED live — the digest was written but the WAF will not evaluate it`,
+        // Written, and enforced the moment someone activates the rule in the dashboard.
+        mutated: true,
       };
     // The OTHER half of an apply, and the half that makes it survive. `persistDenies` states the
     // rule this obeys: a deny live in the WAF but absent from .env.local is lifted by the next
@@ -96,6 +121,8 @@ export async function editLiveJa4Deny(
       return {
         ok: false,
         error: `${JA4_ENV} not saved (${e instanceof Error ? e.message : String(e)}) — the WAF was changed and the next apply will undo it`,
+        // The apply SUCCEEDED here; only the file write failed. The deny is live right now.
+        mutated: true,
       };
     }
     return {
@@ -104,7 +131,12 @@ export async function editLiveJa4Deny(
       values,
     };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    // A throw before the apply cannot have changed anything; one after it might have.
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      mutated: attempted,
+    };
   }
 }
 
@@ -123,21 +155,21 @@ export async function liftExpiredAutoBans(root: string): Promise<void> {
     Date.now(),
   );
   if (!lift.length) return;
-  const stuck: Expiry[] = [];
-  for (const digest of lift) {
-    const edit = await editLiveJa4Deny(digest, 'remove');
+  const lifted: Expiry[] = [];
+  for (const rec of lift) {
+    const edit = await editLiveJa4Deny(rec.digest, 'remove');
     if (edit.ok) {
+      lifted.push(rec);
       void logWatch(root, new Date(), {
         kind: 'error',
-        error: `auto-ban EXPIRED and lifted: ${digest} (${edit.status})`,
+        error: `auto-ban EXPIRED and lifted: ${rec.digest} (${edit.status})`,
       });
     } else {
       // Kept, not dropped. Forgetting a record we failed to lift is how an auto-ban silently
       // becomes permanent — the one outcome this whole mechanism exists to prevent.
-      stuck.push({ digest, until: Date.now() });
       void logWatch(root, new Date(), {
         kind: 'error',
-        error: `auto-ban expiry FAILED for ${digest}: ${edit.error} — still denied, will retry`,
+        error: `auto-ban expiry FAILED for ${rec.digest}: ${edit.error} — still denied, will retry`,
       });
     }
   }
@@ -145,14 +177,17 @@ export async function liftExpiredAutoBans(root: string): Promise<void> {
   // added in that window is absent from `keep`, and writing the stale snapshot would drop its
   // expiry while its deny stays live. That is a permanent auto-ban, the one outcome this module
   // exists to prevent. Only what we actually lifted is removed; everything else survives.
-  const stuckDigests = new Set(stuck.map((r) => r.digest));
-  const lifted = new Set(lift.filter((d) => !stuckDigests.has(d)));
+  // Matched on the digest AND its expiry. A re-ban during the awaits above writes a NEW record for
+  // the same fingerprint, and retiring by digest alone would delete that one too — leaving its deny
+  // live with no clock.
+  const key = (r: Expiry) => `${r.digest}@${r.until}`;
+  const retired = new Set(lifted.map(key));
   persistEnvVar(
     path,
     AUTO_BAN_UNTIL,
     serialiseExpiries(
       parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]).filter(
-        (r) => !lifted.has(r.digest),
+        (r) => !retired.has(key(r)),
       ),
     ),
   );
@@ -215,14 +250,24 @@ export async function maybeAutoBan(
   );
   const edit = await editLiveJa4Deny(f.digest, 'add');
   if (!edit.ok) {
-    // Re-read rather than restoring the snapshot: another record may have landed meanwhile, and
-    // dropping it here would strand ITS ban with no expiry.
+    if (edit.mutated) {
+      // The clock STAYS. The apply was reached, so the deny may be live and enforced this second —
+      // and a live deny whose expiry we just deleted is a permanent ban placed by nobody. Keeping
+      // it costs at worst a sweep that lifts a digest which was never there, which is a no-op.
+      void logWatch(root, new Date(), {
+        kind: 'error',
+        error: `AUTO-BAN PARTIAL for ${f.digest}: ${edit.error} — the deny MAY be live; its expiry is kept so it still lifts`,
+      });
+      return;
+    }
+    // Nothing reached the WAF, so the clock is removed with it — by exact instance, since another
+    // process may have written a newer expiry for this same digest meanwhile.
     persistEnvVar(
       path,
       AUTO_BAN_UNTIL,
       serialiseExpiries(
         parseExpiries(readFwVars(path)[AUTO_BAN_UNTIL]).filter(
-          (r) => r.digest !== digest,
+          (r) => !(r.digest === digest && r.until === decision.until),
         ),
       ),
     );

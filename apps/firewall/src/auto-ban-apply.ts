@@ -62,8 +62,8 @@ export function ttlLabel(ms: number): string {
 }
 
 export type Revocation = {
-  /** Digests whose ban has expired and must come off the live rule. */
-  lift: string[];
+  /** RECORDS, not bare digests: a lift has to name the exact expiry instance it is retiring, or a newer one written for the same fingerprint is deleted along with it. */
+  lift: Expiry[];
   /** The records still running, to be written back. */
   keep: Expiry[];
 };
@@ -71,5 +71,5 @@ export type Revocation = {
 /** Which auto-bans have served their time. Called every tick, before anything new is applied. */
 export function revocationPlan(records: Expiry[], now: number): Revocation {
   const { expired, live } = dueForRevocation(records, now);
-  return { lift: expired.map((e) => e.digest), keep: live };
+  return { lift: expired, keep: live };
 }

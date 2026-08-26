@@ -105,14 +105,23 @@ describe('revocationPlan', () => {
       ],
       NOW,
     );
-    expect(plan.lift).toEqual(['a']);
+    expect(plan.lift.map((l) => l.digest)).toEqual(['a']);
     expect(plan.keep.map((k) => k.digest)).toEqual(['b']);
   });
 
   test('a ban expiring exactly now is lifted, not held another tick', () => {
-    expect(revocationPlan([{ digest: 'a', until: NOW }], NOW).lift).toEqual([
-      'a',
-    ]);
+    expect(
+      revocationPlan([{ digest: 'a', until: NOW }], NOW).lift.map(
+        (l) => l.digest,
+      ),
+    ).toEqual(['a']);
+  });
+
+  test('it names the exact expiry it is retiring, not just the fingerprint', () => {
+    // A re-ban writes a NEW record for the same digest. Retiring by digest alone deletes that one
+    // too, and its deny is then live with nothing scheduled to lift it.
+    const plan = revocationPlan([{ digest: 'a', until: NOW - 1 }], NOW);
+    expect(plan.lift[0]?.until).toBe(NOW - 1);
   });
 
   test('nothing recorded lifts nothing', () => {

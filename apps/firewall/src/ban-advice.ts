@@ -782,10 +782,19 @@ export function adviseBan(input: AdviceInput): Advice {
   // rest were challenged or denied": a sentence that contradicts itself and describes mitigation
   // that never occurred.
   const mitigated = input.total - served;
-  const censored = mitigated > 0 && served < MIN_VOLUME_FLOOR;
-  const censoredNote = censored
-    ? `rendering not counted: only ${served} of ${input.total} requests were served — the rest were challenged or denied, and a client that never reached the app cannot have rendered. That zero is ours, not a measurement.`
-    : '';
+  // Requests with no WAF action recorded against them do not exist — every one is allowed, logged,
+  // bypassed, challenged or denied. So an EMPTY list beside a non-zero total is a query that
+  // failed, not an identity that was fully served, and `servedTotal` reads it as the latter. Left
+  // alone it silently switches this guard off exactly when we cannot see what was mitigated, and
+  // the rendering axis is then granted from a zero that may well be ours.
+  const actionsUnknown = input.total > 0 && input.wafActions.length === 0;
+  const censored =
+    actionsUnknown || (mitigated > 0 && served < MIN_VOLUME_FLOOR);
+  const censoredNote = actionsUnknown
+    ? `rendering not counted: the WAF-action breakdown for these ${input.total} requests could not be read, so how much of this traffic we mitigated ourselves is unknown.`
+    : censored
+      ? `rendering not counted: only ${served} of ${input.total} requests were served — the rest were challenged or denied, and a client that never reached the app cannot have rendered. That zero is ours, not a measurement.`
+      : '';
   if (
     !censored &&
     !rendersIndicateBrowser(renders, input.total, input.mix.page)

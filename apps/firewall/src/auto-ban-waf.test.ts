@@ -25,7 +25,8 @@ mock.module('./watch-notify', () => ({
 }));
 
 const { envPath } = await import('./hooks/useDenylist');
-const { installWafBackend } = await import('./client');
+const { installWafBackend, liveWaf } = await import('./client');
+const priorAutoBan = process.env.FW_AUTO_BAN;
 const { editLiveJa4Deny } = await import('./auto-ban-waf');
 const { JA4_RULE } = await import('./deny-staging');
 const { JA4_DENY, valuesOf } = await import('./deny-list');
@@ -59,8 +60,17 @@ beforeAll(() => {
 
 afterAll(() => {
   mock.module('./watch-notify', () => ({ ...realNotify }));
+  // The backend BEFORE the argv line, and both before anything else runs. `installWafBackend`
+  // refuses outside a mock session, so restoring it after `--mock` is gone would silently fail and
+  // leave this file's stub installed for the rest of the process — with `envPath()` back to the
+  // REPO's .env.local, which is the operator's real denylist.
+  installWafBackend(liveWaf);
   const i = process.argv.indexOf('--mock');
   if (i !== -1) process.argv.splice(i, 1);
+  // Restored, not just unset: it is read from the ambient environment, and leaving it armed would
+  // hand the next file in this process a gate these tests opened.
+  if (priorAutoBan === undefined) delete process.env.FW_AUTO_BAN;
+  else process.env.FW_AUTO_BAN = priorAutoBan;
 });
 
 describe('editLiveJa4Deny', () => {

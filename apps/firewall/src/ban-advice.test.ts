@@ -843,7 +843,10 @@ describe('adviseBan — rendering on a mitigated identity', () => {
     ja4: [['t13dscrp00_aaaaaaaaaaaa_bbbbbbbbbbbb', served + acted]],
     asns: [['Some ISP', served + acted]],
     botVerified: [],
-    wafActions: acted ? [['challenge', acted]] : [],
+    wafActions: [
+      ...(served ? ([['allow', served]] as [string, number][]) : []),
+      ...(acted ? ([['challenge', acted]] as [string, number][]) : []),
+    ],
     wafRules: [],
     statuses: [],
     alreadyDeniedJa4: false,
@@ -854,11 +857,19 @@ describe('adviseBan — rendering on a mitigated identity', () => {
   });
 
   test('claims censorship only when mitigation actually happened', () => {
-    // With no wafActions at all, served === total, and the note read "only 30 of 30 requests were
-    // served — the rest were challenged or denied": a sentence contradicting itself about
-    // mitigation that never occurred.
+    // Served, and the breakdown says so, so there is no censorship to claim — the note used to
+    // read "only 30 of 30 requests were served — the rest were challenged or denied".
     const a = adviseBan(mitigated(30, 0));
     expect(a.leverNotes.join(' ')).not.toContain('rendering not counted');
+  });
+
+  test('an EMPTY breakdown is a failed query, not a fully served identity', () => {
+    // Every request carries a WAF action, so no rows beside a non-zero total means the query
+    // failed. Read as "nothing was mitigated" it turns this guard off precisely when we cannot
+    // see what we mitigated, and the rendering zero may be one we caused.
+    const a = adviseBan({ ...mitigated(400, 0), wafActions: [] });
+    expect(a.axes).not.toContain('rendering');
+    expect(a.leverNotes.join(' ')).toContain('could not be read');
   });
 
   test('a fully mitigated identity gets NO rendering axis', () => {

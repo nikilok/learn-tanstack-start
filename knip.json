@@ -21,10 +21,6 @@
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
     },
-    "apps/firewall": {
-      "entry": ["src/setup.tsx"],
-      "project": ["src/**/*.{ts,tsx}"]
-    },
     "packages/*": {},
     "packages/gemma": {
       "ignoreDependencies": ["@litert-lm/core"]

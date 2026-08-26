@@ -18,14 +18,6 @@
     "dev:desktop:offline": "DESKTOP_SIMULATE_OFFLINE=1 turbo run dev --filter @ss/desktop",
     "dev:desktop:ratelimit": "DESKTOP_SIMULATE_RATE_LIMIT=1 turbo run dev --filter @ss/desktop",
     "dev:desktop:unreachable": "DESKTOP_SIMULATE_UNREACHABLE=1 turbo run dev --filter @ss/desktop",
-    "firewall:ip": "bun --env-file=.env.local apps/firewall/src/profile.ts",
-    "firewall:setup": "bun --env-file=.env.local apps/firewall/src/setup.tsx",
-    "firewall:mock": "bun --no-env-file apps/firewall/src/setup.tsx --mock",
-    "firewall:record": "bun --env-file=.env.local apps/firewall/src/setup.tsx --record",
-    "firewall:synth": "bun --no-env-file apps/firewall/src/synth.ts",
-    "firewall:sitemap": "bun --env-file=.env.local apps/firewall/src/sitemap.ts",
-    "firewall:kin": "bun --env-file=.env.local apps/firewall/src/kin.ts",
-    "firewall:watch": "bun --env-file=.env.local apps/firewall/src/watch.ts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "knip": "knip",
@@ -33,8 +25,7 @@
     "lint:fix": "turbo run lint:fix",
     "profiles:work": "bun apps/web/scripts/profile-company.ts --work",
     "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
-    "firewall:verify": "bun --env-file=.env.local apps/firewall/src/verify.ts"
+    "typecheck": "turbo run typecheck"
   },
   "dependencies": {},
   "devDependencies": {

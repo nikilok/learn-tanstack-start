@@ -1284,10 +1284,12 @@ async function main() {
   try {
     await liftExpiredAutoBans(process.cwd());
   } catch (e) {
-    await logWatch(process.cwd(), new Date(), {
-      kind: 'error',
-      error: `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next run`,
-    });
+    // Into `errors` as well as the log. On a cron nobody is reading the log live, and a sweep
+    // that keeps failing means bans are accumulating past their term — that belongs in the run's
+    // own report and its notification, not only in a file.
+    const msg = `auto-ban expiry sweep failed: ${errMsg(e)} — bans stay live, retried next run`;
+    errors.push(msg);
+    await logWatch(process.cwd(), new Date(), { kind: 'error', error: msg });
   }
   const { rows, findings, truncated, configErrors } = await screenOnce(
     creds,

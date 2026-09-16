@@ -106,11 +106,12 @@ describe('ENGAGEMENT_INIT_SCRIPT', () => {
     fire(trusted('pointermove', 100, 100));
     fire(trusted('pointermove', 100, 100));
     expect(beacons).toEqual([]);
-    // Sensor jitter under a resting hand.
+    // Sensor jitter under a resting hand — up to and including the threshold itself.
     fire(trusted('pointermove', 100 + ENGAGED_DRIFT_PX - 1, 100));
-    expect(beacons).toEqual([]);
-    // Real travel.
     fire(trusted('pointermove', 100 + ENGAGED_DRIFT_PX, 100));
+    expect(beacons).toEqual([]);
+    // Real travel: past the threshold, not at it.
+    fire(trusted('pointermove', 100 + ENGAGED_DRIFT_PX + 1, 100));
     expect(beacons).toEqual([ENGAGED_PATH]);
   });
 

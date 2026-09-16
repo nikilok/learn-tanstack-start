@@ -99,6 +99,16 @@ describe('edge middleware: routing is preserved', () => {
     expect(overriddenAccept(res)).toBeNull();
   });
 
+  test('a look-alike of the engagement path still takes the edge 404', () => {
+    // The endpoint has no sub-paths, so it is matched exactly: a prefix match would send
+    // `/api/engaged-anything` to the origin, where Nitro 404s it after spending an invocation.
+    for (const path of ['/api/engaged-any', '/api/engagedx', '/api/engaged/']) {
+      const res = run(path, '*/*');
+      expect(res.status).toBe(404);
+      expect(isNext(res)).toBe(false);
+    }
+  });
+
   test('/download (page) is a document, but /downloads/* (installer/updater) passes through', () => {
     // The download page gets the agent Link header...
     expect(run('/download', 'text/html').headers.get('link')).toBe(

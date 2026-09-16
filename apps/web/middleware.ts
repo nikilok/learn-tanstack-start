@@ -14,13 +14,18 @@ const DOCUMENT_PREFIXES = [
 // the binary '/downloads/*' route isn't swallowed by the '/download' document prefix.
 const API_PREFIXES = [
   '/_server', // TanStack server functions
-  '/api/engaged', // Nitro engagement ping (sendBeacon sends a wildcard Accept — the document fallback below would 404 it)
   '/api/releases', // Nitro desktop-release write endpoint
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy
   '/downloads/', // Nitro installer redirects + electron-updater feed (302/binary)
   '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint
 ];
+
+// Routes with no sub-paths are matched exactly, so a look-alike such as `/api/engaged-x`
+// still takes the edge 404 below instead of spending a function invocation on Nitro's own 404.
+const API_EXACT = new Set([
+  '/api/engaged', // Nitro engagement ping (sendBeacon sends a wildcard Accept — the document fallback below would 404 it)
+]);
 
 const STATIC_EXTENSIONS = new Set([
   'svg',
@@ -73,6 +78,7 @@ export default function middleware(request: Request) {
 
   // Server-function / API / discovery routes — pass through untouched. Checked before
   // DOCUMENT_PREFIXES so '/downloads/*' isn't caught by the '/download' prefix.
+  if (API_EXACT.has(pathname)) return next();
   if (API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 
   if (DOCUMENT_PREFIXES.some((prefix) => pathname.startsWith(prefix)))

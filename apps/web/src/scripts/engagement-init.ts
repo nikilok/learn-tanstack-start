@@ -55,7 +55,7 @@ export const ENGAGEMENT_INIT_SCRIPT = `(() => {
         if (anchor === null) { anchor = [e.clientX, e.clientY]; return; }
         var dx = e.clientX - anchor[0];
         var dy = e.clientY - anchor[1];
-        if (dx * dx + dy * dy < ${ENGAGED_DRIFT_PX * ENGAGED_DRIFT_PX}) return;
+        if (dx * dx + dy * dy <= ${ENGAGED_DRIFT_PX * ENGAGED_DRIFT_PX}) return;
       }
       sent = true;
       off();

@@ -17,15 +17,19 @@ dotenv.config({ path: '../../.env.local' });
 const days = Math.max(1, Number(process.argv[2] ?? 7) || 7);
 const db = createClient(process.env.POSTGRES_URL as string);
 
+// Over an empty window the aggregates are NULL, not 0 — only `groups` is always a number.
 type Row = {
   scope: string;
   groups: number;
-  p50: number;
-  p90: number;
-  p95: number;
-  p99: number;
-  max: number;
+  p50: number | null;
+  p90: number | null;
+  p95: number | null;
+  p99: number | null;
+  max: number | null;
 };
+
+const num = (v: number | null, digits = 1) =>
+  (v == null ? 'n/a' : v.toFixed(digits)).padStart(6);
 
 const percentiles = (inner: string, scope: string) =>
   sql.raw(`
@@ -39,7 +43,10 @@ const percentiles = (inner: string, scope: string) =>
   FROM (${inner}) t
 `);
 
-const since = `now() - interval '${days} days'`;
+// `hour` is a naive UTC timestamp, like every timestamp column in the schema (drizzle reads and
+// writes them as UTC). The bound is made naive UTC too, so the comparison never casts through
+// the session's time zone.
+const since = `(now() AT TIME ZONE 'UTC') - interval '${days} days'`;
 const perHour = `SELECT count(DISTINCT slug) AS n FROM session_visits WHERE hour >= ${since} GROUP BY session_id, hour`;
 const perSession = `SELECT count(DISTINCT slug) AS n FROM session_visits WHERE hour >= ${since} GROUP BY session_id`;
 
@@ -56,5 +63,5 @@ console.log(`session_visits — last ${days} day(s)\n`);
 console.log('scope            groups     p50    p90    p95    p99    max');
 for (const r of rows)
   console.log(
-    `${r.scope.padEnd(16)} ${String(r.groups).padStart(6)}  ${r.p50.toFixed(1).padStart(6)} ${r.p90.toFixed(1).padStart(6)} ${r.p95.toFixed(1).padStart(6)} ${r.p99.toFixed(1).padStart(6)} ${String(r.max).padStart(6)}`,
+    `${r.scope.padEnd(16)} ${String(r.groups).padStart(6)}  ${num(r.p50)} ${num(r.p90)} ${num(r.p95)} ${num(r.p99)} ${num(r.max, 0)}`,
   );

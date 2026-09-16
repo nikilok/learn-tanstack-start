@@ -325,7 +325,11 @@ export const sessionVisits = pgTable(
     sessionId: varchar('session_id', { length: 64 }).notNull(),
     slug: varchar('slug', { length: 255 }).notNull(),
     hour: timestamp('hour').notNull(),
-    firstSeen: timestamp('first_seen').defaultNow().notNull(),
+    // Naive UTC like `hour`, and made so explicitly: a bare now() would be cast through the
+    // session's time zone on its way into a naive column.
+    firstSeen: timestamp('first_seen')
+      .default(sql`(now() AT TIME ZONE 'UTC')`)
+      .notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.sessionId, table.slug, table.hour] }),

@@ -14,6 +14,7 @@ const DOCUMENT_PREFIXES = [
 // the binary '/downloads/*' route isn't swallowed by the '/download' document prefix.
 const API_PREFIXES = [
   '/_server', // TanStack server functions
+  '/api/engaged', // Nitro engagement ping (sendBeacon sends a wildcard Accept — the document fallback below would 404 it)
   '/api/releases', // Nitro desktop-release write endpoint
   '/api/revalidate', // Nitro cache revalidation endpoint
   '/api/tiles/', // Nitro Stadia Maps tile proxy

@@ -79,6 +79,7 @@ describe('edge middleware: routing is preserved', () => {
       '/_server/x',
       '/api/tiles/dark/1/2/3',
       '/api/revalidate',
+      '/api/engaged',
       '/.well-known/vercel/flags',
     ]) {
       const res = run(path, 'application/json');
@@ -86,6 +87,16 @@ describe('edge middleware: routing is preserved', () => {
       expect(overriddenAccept(res)).toBeNull();
       expect(res.headers.get('link')).toBeNull();
     }
+  });
+
+  test('the engagement ping reaches the function with the wildcard Accept sendBeacon sends', () => {
+    // `navigator.sendBeacon` sends `Accept: */*`, which has no `text/html` in it — so without
+    // its API prefix the document fallback would answer every ping with an edge 404, and
+    // nothing in the app would ever notice: the beacon is fire-and-forget by design.
+    const res = run('/api/engaged', '*/*');
+    expect(res.status).not.toBe(404);
+    expect(isNext(res)).toBe(true);
+    expect(overriddenAccept(res)).toBeNull();
   });
 
   test('/download (page) is a document, but /downloads/* (installer/updater) passes through', () => {

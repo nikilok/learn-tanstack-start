@@ -22,6 +22,7 @@ import {
   companyWebsiteQueryOptions,
 } from '../api/companyWebsite';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
+import { noteCompanyVisit } from '../api/session';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
 import { CompanyIndustry } from '../components/CompanyIndustry';
@@ -51,7 +52,9 @@ import {
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
+import { isDesktopPreview } from '../utils/desktop-preview';
 import { buildCompanyJsonLd } from '../utils/jsonld';
+import { isRenderingBot } from '../utils/rendering-bot';
 import { buildSeoHead } from '../utils/seo';
 
 // Grammatical "A, B and C" joiner for the routes and former-names sentences.
@@ -287,6 +290,16 @@ function CompanyDetail() {
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
+
+  // Count this page view against the visitor's session — on hydration and on every client
+  // navigation, never on a hover preload (nothing mounts on hover). Skipped in the /download
+  // preview iframes, which drive the app by script and stay out of every telemetry channel,
+  // and for rendering crawlers, whose fetches are not sessions. Fire-and-forget: the page never
+  // depends on it, so a failure is nobody's problem here.
+  useEffect(() => {
+    if (isDesktopPreview() || isRenderingBot(navigator.userAgent)) return;
+    noteCompanyVisit({ data: { slug: sponsor.nameSlug } }).catch(() => {});
+  }, [sponsor.nameSlug]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

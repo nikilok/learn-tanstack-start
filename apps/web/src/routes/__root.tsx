@@ -31,6 +31,7 @@ import WebHeaderBlur from '../components/WebHeaderBlur';
 import { markHydrationDone } from '../lib/hydration';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
+import { ENGAGEMENT_INIT_SCRIPT } from '../scripts/engagement-init';
 import { INSTALL_PROMPT_INIT_SCRIPT } from '../scripts/install-prompt-init';
 import { SEARCH_INIT_SCRIPT } from '../scripts/search-input-init';
 import { STANDALONE_INIT_SCRIPT } from '../scripts/standalone-init';
@@ -167,6 +168,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <script
           dangerouslySetInnerHTML={{ __html: INSTALL_PROMPT_INIT_SCRIPT }}
         />
+        {/* oxlint-disable-next-line react/no-danger -- static engagement ping, no user input */}
+        <script dangerouslySetInnerHTML={{ __html: ENGAGEMENT_INIT_SCRIPT }} />
         <HeadContent />
       </head>
       <body className="flex flex-col font-sans wrap-anywhere antialiased">

@@ -315,6 +315,29 @@ export const chStreamState = pgTable('ch_stream_state', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Company-page visits per visitor session — one row per (session, slug, UTC hour), written
+// by the noteCompanyVisit server fn, so "distinct company pages per session per hour" is a
+// count. The session id is an opaque random token from the ss-session cookie; no address,
+// user agent or person-identifying value is stored. Read by scripts/session-visits-report.ts.
+export const sessionVisits = pgTable(
+  'session_visits',
+  {
+    sessionId: varchar('session_id', { length: 64 }).notNull(),
+    slug: varchar('slug', { length: 255 }).notNull(),
+    hour: timestamp('hour').notNull(),
+    // Naive UTC like `hour`, and made so explicitly: a bare now() would be cast through the
+    // session's time zone on its way into a naive column.
+    firstSeen: timestamp('first_seen')
+      .default(sql`(now() AT TIME ZONE 'UTC')`)
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.slug, table.hour] }),
+    // Retention sweeps and the report both range over the hour.
+    index('idx_session_visits_hour').on(table.hour),
+  ],
+);
+
 // Desktop app release registry — one row per published version. Written by the
 // release workflow via POST /api/releases; read by the /download page.
 export const desktopReleases = pgTable('desktop_releases', {

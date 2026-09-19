@@ -337,6 +337,13 @@
       "when": 1786415658016,
       "tag": "0047_snapshot_last_attempt",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1789846517372,
+      "tag": "0048_drop_session_visits",
+      "breakpoints": true
     }
   ]
 }

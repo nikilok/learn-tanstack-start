@@ -22,7 +22,9 @@ src/data/sic-codes.json
 apps/web/.precision-samples
 
 # Local operator notes — deliberately not published (the repo is public).
-.claude/skills/
+# No trailing slash: this path may be a symlink, and a trailing slash matches
+# directories only, which would leave it committable here.
+.claude/skills
 
 # Watch-mode local operator state. All of it names live client fingerprints.
 firewall-watch.log

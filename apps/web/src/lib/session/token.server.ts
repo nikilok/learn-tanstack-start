@@ -2,9 +2,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // The visitor session token: an opaque random id, an issue time, and an HMAC over both, signed
 // with SESSION_SECRET. It identifies a browser session and nothing else — no account, no
-// person-identifying value — so that per-session request accounting (session_visits) has a
-// stable handle that survives the visitor's address changing. Kept pure (no cookie or request
-// access) so every rule here is testable without a server; session.server.ts does the IO.
+// person-identifying value. Kept pure (no cookie or request access) so every rule here is
+// testable without a server; session.server.ts does the IO.
 
 export const SESSION_TOKEN_VERSION = 'v1';
 

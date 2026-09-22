@@ -27,6 +27,10 @@ const API_EXACT = new Set([
   '/api/engaged', // Nitro engagement ping (sendBeacon sends a wildcard Accept — the document fallback below would 404 it)
 ]);
 
+// Device-keyed pings (Nitro /api/p|v|e/:hash): exactly one 32-hex segment, so a
+// malformed key takes the edge 404 without spending a function invocation.
+const DEVICE_PING_RE = /^\/api\/[pve]\/[0-9a-f]{32}$/;
+
 const STATIC_EXTENSIONS = new Set([
   'svg',
   'png',
@@ -79,6 +83,7 @@ export default function middleware(request: Request) {
   // Server-function / API / discovery routes — pass through untouched. Checked before
   // DOCUMENT_PREFIXES so '/downloads/*' isn't caught by the '/download' prefix.
   if (API_EXACT.has(pathname)) return next();
+  if (DEVICE_PING_RE.test(pathname)) return next();
   if (API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 
   if (DOCUMENT_PREFIXES.some((prefix) => pathname.startsWith(prefix)))

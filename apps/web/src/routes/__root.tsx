@@ -28,6 +28,7 @@ import RouteError from '../components/RouteError';
 import ScreenSaver from '../components/ScreenSaver';
 import UnionJackCursor from '../components/UnionJackCursor';
 import WebHeaderBlur from '../components/WebHeaderBlur';
+import { initDeviceBeacons } from '../lib/device/beacons';
 import { markHydrationDone } from '../lib/hydration';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
@@ -147,6 +148,11 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   // regardless of which route rendered first.
   useEffect(() => {
     markHydrationDone();
+  }, []);
+  // Device-keyed pings boot after hydration; the module defers the heavy part
+  // to idle time and the preview iframes stay out, as with Analytics below.
+  useEffect(() => {
+    initDeviceBeacons();
   }, []);
   return (
     <html lang="en-GB" suppressHydrationWarning>

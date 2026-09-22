@@ -41,6 +41,7 @@ import {
 import { companyDocumentDegraded } from '../lib/company/document-cache';
 import type { RouteLicence } from '../lib/company/licences';
 import { displayDomain } from '../lib/company/website';
+import { noteCompanyView } from '../lib/device/beacons';
 import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
@@ -284,9 +285,19 @@ export const Route = createFileRoute('/company/$slug')({
 function CompanyDetail() {
   const { sponsor, profile, timeline, website } = Route.useLoaderData();
   const { search } = Route.useSearch();
+  const { slug } = Route.useParams();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
+
+  // One view per company visited, SPA navigations included — hence the slug key.
+  // The ref makes the effect idempotent under a double-invoked mount.
+  const viewNotedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (viewNotedFor.current === slug) return;
+    viewNotedFor.current = slug;
+    noteCompanyView();
+  }, [slug]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

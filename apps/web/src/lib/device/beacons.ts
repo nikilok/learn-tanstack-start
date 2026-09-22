@@ -1,7 +1,4 @@
-import {
-  ENGAGED_FLAG,
-  ENGAGED_HOOK,
-} from '../../scripts/engagement-init';
+import { ENGAGED_FLAG, ENGAGED_HOOK } from '../../scripts/engagement-init';
 import { isDesktopPreview } from '../../utils/desktop-preview';
 import { createPinger } from './key';
 

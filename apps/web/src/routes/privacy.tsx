@@ -54,13 +54,13 @@ function PrivacyPolicy() {
           browser type. They set no cookies and do not track you across sites.
         </li>
         <li>
-          <strong>Site protection.</strong> To detect and limit automated
-          abuse of the service, your browser sends a technical identifier
-          derived from its general characteristics while you use the site. It
-          is used only for keeping the service secure and available, not for
-          product analytics or advertising. We keep aggregate daily counts for
-          up to six months, and the identifier is never linked to your name or
-          any account.
+          <strong>Site protection.</strong> To detect and limit automated abuse
+          of the service, your browser sends a technical identifier derived from
+          its general characteristics while you use the site. It is used only
+          for keeping the service secure and available, not for product
+          analytics or advertising. We keep aggregate daily counts for up to six
+          months, and the identifier is never linked to your name or any
+          account.
         </li>
         <li>
           <strong>Theme preference.</strong> Your light/dark mode choice is

@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import middleware from './middleware.ts';
 import {
   engagedPingPath,
   presentPingPath,
   viewPingPath,
 } from '#/lib/device/key';
+
+import middleware from './middleware.ts';
 
 const DEVICE_KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 

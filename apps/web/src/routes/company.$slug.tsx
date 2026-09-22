@@ -39,9 +39,9 @@ import {
   deriveCompanyDisplay,
 } from '../lib/company/display';
 import { companyDocumentDegraded } from '../lib/company/document-cache';
-import { noteCompanyView } from '../lib/device/beacons';
 import type { RouteLicence } from '../lib/company/licences';
 import { displayDomain } from '../lib/company/website';
+import { noteCompanyView } from '../lib/device/beacons';
 import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,

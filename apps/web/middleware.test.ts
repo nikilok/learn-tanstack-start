@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import middleware from './middleware.ts';
+import {
+  engagedPingPath,
+  presentPingPath,
+  viewPingPath,
+} from '#/lib/device/key';
+
+const DEVICE_KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 
 // The edge middleware only runs on Vercel (not in local dev), so it can't be
 // curl-verified against web.local. These tests lock its agent-facing behaviour by
@@ -103,6 +110,38 @@ describe('edge middleware: routing is preserved', () => {
     // The endpoint has no sub-paths, so it is matched exactly: a prefix match would send
     // `/api/engaged-anything` to the origin, where Nitro 404s it after spending an invocation.
     for (const path of ['/api/engaged-any', '/api/engagedx', '/api/engaged/']) {
+      const res = run(path, '*/*');
+      expect(res.status).toBe(404);
+      expect(isNext(res)).toBe(false);
+    }
+  });
+
+  test('device-keyed pings reach the function with the wildcard Accept sendBeacon sends', () => {
+    // Built with the client's own path builders, so the middleware is exercised against
+    // exactly what the app emits.
+    for (const path of [
+      presentPingPath(DEVICE_KEY),
+      viewPingPath(DEVICE_KEY),
+      engagedPingPath(DEVICE_KEY),
+    ]) {
+      const res = run(path, '*/*');
+      expect(res.status).not.toBe(404);
+      expect(isNext(res)).toBe(true);
+      expect(overriddenAccept(res)).toBeNull();
+      expect(res.headers.get('link')).toBeNull();
+    }
+  });
+
+  test('a malformed device-ping key takes the edge 404', () => {
+    for (const path of [
+      '/api/v/',
+      '/api/v/abc',
+      '/api/p/abc',
+      `/api/v/${DEVICE_KEY.toUpperCase()}`,
+      `/api/e/${DEVICE_KEY}0`,
+      `/api/v/${DEVICE_KEY}/x`,
+      `/api/x/${DEVICE_KEY}`,
+    ]) {
       const res = run(path, '*/*');
       expect(res.status).toBe(404);
       expect(isNext(res)).toBe(false);

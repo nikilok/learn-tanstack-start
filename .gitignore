@@ -26,6 +26,9 @@ apps/web/.precision-samples
 # directories only, which would leave it committable here.
 .claude/skills
 
+# Per-machine dev-server launch config for the desktop app's browser pane.
+.claude/launch.json
+
 # Watch-mode local operator state. All of it names live client fingerprints.
 firewall-watch.log
 .firewall-watch-state

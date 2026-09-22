@@ -3,12 +3,7 @@ import { DESKTOP_PREVIEW_WINDOW_NAME } from '../utils/desktop-preview';
 /** Where the ping goes. Paired with the Nitro route file `server/api/engaged.post.ts` — the test locks the two spellings together. */
 export const ENGAGED_PATH = '/api/engaged';
 
-/**
- * Pointer travel before movement counts as input. The browser dispatches a `pointermove` at
- * UNCHANGED coordinates to recompute hover state when something appears under a resting
- * cursor (the screensaver hit exactly this — see hooks/useIdle.ts), so a bare move event is
- * not a person moving. Six pixels is the same threshold the screensaver settled on.
- */
+/** Pointer travel below this many pixels does not count as movement (see the tests). */
 export const ENGAGED_DRIFT_PX = 6;
 
 /** The events that count. Pointer events cover mouse, pen and touch. */
@@ -19,25 +14,18 @@ export const ENGAGED_EVENTS = [
   'pointermove',
 ] as const;
 
+/** Page-global flag set once the ping has fired. */
+export const ENGAGED_FLAG = '__ssEngaged';
+
+/** Page-global callback slot for a module that loads later (lib/device/beacons.ts). */
+export const ENGAGED_HOOK = '__ssOnEngaged';
+
 /**
- * Pre-hydration inline script that reports a page view as ENGAGED, once, on the visitor's
- * first genuine input — a click or tap, a key, a wheel notch, or pointer travel past
- * `ENGAGED_DRIFT_PX`. It sends a single fire-and-forget, body-less POST to `ENGAGED_PATH`
- * and removes its listeners; the platform's request analytics do the counting, so nothing
- * is read, stored or logged anywhere in the app.
- *
- * An inline script rather than a hook because engagement should count from the first byte:
- * a visitor who moves or scrolls before hydration finishes is the most impatient kind, and a
- * hook would miss them.
- *
- * What deliberately does NOT count:
- * - `scroll` — the back-nav scroll restore fires it programmatically, so it says nothing
- *   about a person (the screensaver's activity list excludes it for the same reason);
- * - anything a script dispatches — only `isTrusted` events register;
- * - the /download live-preview iframes — they are driven by script and stay out of every
- *   telemetry channel, as Analytics and SpeedInsights do via `dropPreviewEvents`. The check
- *   is the same framed-only one as desktop-init.ts: a forged top-level `window.name` is not
- *   a preview.
+ * Pre-hydration inline script: one fire-and-forget, body-less POST to `ENGAGED_PATH` per
+ * document on the visitor's first input, after which it removes its listeners, stamps
+ * `ENGAGED_FLAG` and calls `ENGAGED_HOOK` if one is registered. Inline so it counts from the
+ * first byte; nothing is read, stored or logged in the app. The /download preview iframes
+ * stay out, as with every telemetry channel. The tests are the definition of what counts.
  */
 export const ENGAGEMENT_INIT_SCRIPT = `(() => {
   try {
@@ -60,6 +48,9 @@ export const ENGAGEMENT_INIT_SCRIPT = `(() => {
       sent = true;
       off();
       navigator.sendBeacon('${ENGAGED_PATH}');
+      window.${ENGAGED_FLAG} = 1;
+      var h = window.${ENGAGED_HOOK};
+      if (typeof h === 'function') h();
     };
     for (var i = 0; i < types.length; i++) window.addEventListener(types[i], on, { capture: true, passive: true });
   } catch (_e) {}

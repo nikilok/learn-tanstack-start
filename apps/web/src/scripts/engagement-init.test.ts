@@ -4,6 +4,8 @@ import { DESKTOP_PREVIEW_WINDOW_NAME } from '../utils/desktop-preview';
 import {
   ENGAGED_DRIFT_PX,
   ENGAGED_EVENTS,
+  ENGAGED_FLAG,
+  ENGAGED_HOOK,
   ENGAGED_PATH,
   ENGAGEMENT_INIT_SCRIPT,
 } from './engagement-init';
@@ -22,13 +24,20 @@ type FakeEvent = {
 };
 
 function boot(
-  opts: { preview?: boolean; forgedName?: boolean; beacon?: boolean } = {},
+  opts: {
+    preview?: boolean;
+    forgedName?: boolean;
+    beacon?: boolean;
+    hook?: () => void;
+  } = {},
 ) {
   const listeners = new Map<string, { fn: Listener; options: unknown }>();
   const removed: string[] = [];
   const beacons: string[] = [];
   const self = {};
-  const win = {
+  const win: Record<string, unknown> & {
+    addEventListener(type: string, fn: Listener, options: unknown): void;
+  } = {
     name: opts.preview || opts.forgedName ? DESKTOP_PREVIEW_WINDOW_NAME : '',
     self,
     // A preview iframe is framed; a forged name on a top-level tab is not.
@@ -41,6 +50,7 @@ function boot(
       listeners.delete(type);
     },
   };
+  if (opts.hook) win[ENGAGED_HOOK] = opts.hook;
   const nav: { sendBeacon?: (url: string) => boolean } =
     opts.beacon === false
       ? {}
@@ -56,7 +66,7 @@ function boot(
   ) => void;
   run(win, nav);
   const fire = (e: FakeEvent) => listeners.get(e.type)?.fn(e);
-  return { listeners, removed, beacons, fire };
+  return { listeners, removed, beacons, fire, win };
 }
 
 const trusted = (type: string, x = 0, y = 0): FakeEvent => ({
@@ -121,6 +131,29 @@ describe('ENGAGEMENT_INIT_SCRIPT', () => {
     fire(trusted('pointerdown'));
     fire(trusted('keydown'));
     expect(beacons).toEqual([ENGAGED_PATH]);
+  });
+
+  test('the ping stamps the engaged flag for modules that load later', () => {
+    const { fire, win } = boot();
+    expect(win[ENGAGED_FLAG]).toBeUndefined();
+    fire(trusted('pointerdown'));
+    expect(win[ENGAGED_FLAG]).toBe(1);
+  });
+
+  test('a registered hook hears about the input, once', () => {
+    let calls = 0;
+    const { fire } = boot({ hook: () => calls++ });
+    fire(trusted('pointerdown'));
+    fire(trusted('keydown'));
+    expect(calls).toBe(1);
+  });
+
+  test('a non-function hook slot is left alone', () => {
+    const { beacons, fire, win } = boot();
+    win[ENGAGED_HOOK] = 'not-a-function';
+    fire(trusted('pointerdown'));
+    expect(beacons).toEqual([ENGAGED_PATH]);
+    expect(win[ENGAGED_HOOK]).toBe('not-a-function');
   });
 
   test('the /download preview iframe registers nothing — it is driven by script, not a visitor', () => {

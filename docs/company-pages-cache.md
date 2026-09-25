@@ -7,8 +7,8 @@ preserved as the escalation path, not the plan.
 
 Every long-cached company-scoped response — the SSR document (population tag
 alone when the sponsor has no CH mapping) and the company RPCs
-(companiesHouse, companyWebsite, companyTimeline, hmrcCompanyBySlug,
-slugForHash) — carries the edge-cache tag `company-pages`, alongside its own
+(companiesHouse, companyTimeline, hmrcCompanyBySlug, slugForHash) —
+carries the edge-cache tag `company-pages`, alongside its own
 `company-{number}` where the number is known. One header write via
 `setCompanyCacheTag` in `src/api/cache-headers.ts` (the pure
 `src/api/cache-tags.ts` owns both tag spellings), because

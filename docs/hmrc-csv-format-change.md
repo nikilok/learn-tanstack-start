@@ -5,7 +5,8 @@
 > and Sponsor Status columns below lasted two days. What changed in response:
 >
 > - **Licence data preserved:** migration 0030 snapshotted the org→licence mapping into
->   `hmrc_sponsor_licences` (distinct org/licence/rating/route/status rows, unused for now)
+>   `hmrc_sponsor_licences` (distinct org/licence/rating/route/status rows; the company page
+>   reads its licence numbers from it)
 >   *before* the first post-revert ingest swap destroyed the source columns, then dropped
 >   `sponsor_licence_number`/`sponsor_status` from `hmrc_skilled_workers` and restored
 >   `town_city`/`county`. The migration must run before that ingest — ordering is load-bearing.

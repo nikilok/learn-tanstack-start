@@ -10,7 +10,14 @@ import { createServerFn } from '@tanstack/react-start';
 import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
+import { companyPagePayload, type ExtrasOutline } from '../lib/company/extras';
 import { poolForPrimary } from '../lib/company/licences';
+import {
+  type CompanyLicence,
+  type CompanyPageRow,
+  companyPageRowsSql,
+  SLUG_RE,
+} from '../lib/company/page-rows';
 import { buildPrevNameMatch, composeNameScores } from '../lib/search/prev-name';
 import { slugify } from '../utils';
 import {
@@ -99,9 +106,10 @@ export const searchHmrc = createServerFn()
                -- company's case/punctuation-variant register rows (314 slugs
                -- today, all variants of ONE company) into a single result
                -- instead of near-identical cards that all open the same page.
-               -- The display name is elected exactly as getHmrcCompanyBySlug
-               -- elects the page's primary — mapped first, then LOWEST COMPANY
-               -- NUMBER, then name. Keep these two orderings identical: drop
+               -- The display name is elected exactly as companyPageRowsSql
+               -- (lib/company/page-rows.ts) elects the page's primary — mapped
+               -- first, then LOWEST COMPANY NUMBER, then name. Keep these
+               -- orderings identical (filterSearch has a third copy): drop
                -- the company_number key here and a slug pooling two mapped
                -- companies shows one entity's name on the card and the other's
                -- data on the page it opens.
@@ -170,26 +178,16 @@ export const searchHmrc = createServerFn()
     };
   });
 
-// One licence row of a company page: a (rating, route) pair plus the
-// snapshot licence number when the triple maps to exactly one.
-// `companyNumber` is retained (not stripped) so consumers can tell a mapped
-// entity's pooled rows from an unmapped namesake's — the page suppresses
-// identity-bearing fields when it can't, and the MCP tool needs it to trust
-// the pool over a weaker name match.
-export type CompanyLicence = {
-  slugId: string;
-  organisationName: string;
-  companyNumber: string | null;
-  typeRating: string;
-  route: string;
-  sponsorLicenceNumber: string | null;
-};
-
 // `licences` is the single source of truth: the primary org is
 // licences[0].organisationName (rows arrive primary-first) and aliases derive
 // from the distinct org names — no separate scalar fields to drift.
 export type CompanyBySlug =
-  | { kind: 'found'; nameSlug: string; licences: CompanyLicence[] }
+  | {
+      kind: 'found';
+      nameSlug: string;
+      licences: CompanyLicence[];
+      extras: ExtrasOutline;
+    }
   | { kind: 'moved'; nameSlug: string };
 
 // SQL analogue of utils.ts slugify, built from the @ss/db shared text so the
@@ -202,8 +200,8 @@ const slugifySql = (expr: string) => sql.raw(slugifiedSqlText(expr));
 /**
  * Server fn returning the full company page group for a `name_slug`: every
  * licence row sharing the slug (multi-route companies merge into one page),
- * ordered so the primary org (mapped to a CH company first, then
- * alphabetically) leads. When the slug matches nothing current, falls back to
+ * ordered so the primary org (mapped to a CH company first, then the lowest
+ * company number) leads. When the slug matches nothing current, falls back to
  * rename resolution — the slugified form of stale mapping org names and CH
  * previous names — and returns `moved` with the current slug for a 301.
  * Returns `null` for a genuinely unknown slug.
@@ -216,43 +214,21 @@ export const getHmrcCompanyBySlug = createServerFn()
     // normalise URL-ish input (case variants, encoded spaces) to slug form;
     // the loader 301s when the request differs from the canonical slug.
     const slug = typeof data?.slug === 'string' ? slugify(data.slug) : '';
-    if (!/^[a-z0-9-]{1,255}$/.test(slug)) return null;
-    const found = await db.execute(sql`
-      SELECT h.hash AS "slugId",
-             h.organisation_name AS "organisationName",
-             h.type_rating AS "typeRating",
-             h.route AS "route",
-             m.company_number AS "companyNumber",
-             (SELECT CASE WHEN count(DISTINCT l.sponsor_licence_number) = 1
-                          THEN min(l.sponsor_licence_number) END
-              FROM hmrc_sponsor_licences l
-              WHERE l.organisation_name = h.organisation_name
-                AND l.type_rating = h.type_rating
-                AND l.route = h.route) AS "sponsorLicenceNumber"
-      FROM ${hmrcSkilledWorkers} h
-      LEFT JOIN ${hmrcCompanyMapping} m ON m.organisation_name = h.organisation_name
-      WHERE h.name_slug = ${slug}
-      -- Primary election: mapped first, then LOWEST COMPANY NUMBER — never the
-      -- alphabetically-first name. Company numbers are immutable, so the same
-      -- entity keeps the page across renames and across a namesake gaining a
-      -- mapping mid-cycle; ordering by name would hand a months-indexed URL to
-      -- a different legal entity the moment the sweep maps a namesake (the
-      -- page is edge-cached 30 days and mapping changes trigger no purge).
-      -- Matches the ingest's min(company_number) tie-break for new collisions.
-      ORDER BY (m.company_number IS NULL) ASC, m.company_number ASC,
-               h.organisation_name ASC, h.hash ASC
-    `);
-    const rows = found.rows as unknown as CompanyLicence[];
+    if (!SLUG_RE.test(slug)) return null;
+    const found = await db.execute(companyPageRowsSql(slug));
+    const rows = found.rows as unknown as CompanyPageRow[];
     if (rows.length > 0) {
-      // Long edge cache: slug pages only change via ingest, and the
-      // post-ingest sitemap deploy purges the edge.
+      // Long edge cache: slug pages change via ingest and the website sweep
+      // (the extras outline), and both purge the edge afterwards.
       setRpcCacheControl(LONG_EDGE_CACHE);
       // Tagged so the nightly and per-company purges reach this RPC too;
       // the primary (first row) owns the page, so its number is the tag.
       setCompanyCacheTag(rows[0]?.companyNumber ?? undefined);
       // Namesake guard (unit-tested in lib/company/licences): pool only the
       // primary company's rows, never a different mapped entity's.
-      return { kind: 'found', nameSlug: slug, licences: poolForPrimary(rows) };
+      const pool = poolForPrimary(rows);
+      // The extras themselves come from getCompanyExtras; this carries their outline.
+      return { kind: 'found', nameSlug: slug, ...companyPagePayload(pool) };
     }
 
     // Rename/alias fallback: an unknown slug resolves through the company
@@ -328,7 +304,7 @@ export const getHmrcCompanyBySlug = createServerFn()
 
 /**
  * React Query options for `getHmrcCompanyBySlug`. Found pages pin for the
- * session (licence data only changes via ingest); moved/null results stay
+ * session (they change only via ingest and the website sweep); moved/null results stay
  * stale so a rename revert or reinstated sponsor is re-resolved on the next
  * navigation instead of a cached miss 404ing/redirecting all session.
  */

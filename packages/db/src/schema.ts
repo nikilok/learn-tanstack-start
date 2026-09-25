@@ -45,7 +45,7 @@ export const hmrcSkilledWorkers = pgTable(
 
 // Snapshot of the org→licence mapping from the 2026-06-09 feed era, taken by
 // migration 0030 before the post-revert ingest swap destroyed the source
-// columns. Not read by the app yet — preserved for later use.
+// columns. The company page reads its sponsor licence numbers from it.
 export const hmrcSponsorLicences = pgTable(
   'hmrc_sponsor_licences',
   {

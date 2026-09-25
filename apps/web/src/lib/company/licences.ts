@@ -4,33 +4,39 @@ import { ratingPriorityFirst, TYPE_RATING_ROWS } from '../search/params';
 /** A real (route, rating) pair from ONE licence row — never reassembled from separately-sorted route and rating lists. */
 export type LicencePair = { route: string; rating: string };
 
-/** A licence row as the company page loads it: the pair plus the identity and licence-number fields the page needs. */
+/** A licence row as the company page loads it: the pair plus the identity fields the page needs. */
 export type LicenceRow = {
   organisationName: string;
   companyNumber: string | null;
   typeRating: string;
   route: string;
-  sponsorLicenceNumber: string | null;
 };
 
 /** One visa route with the rating(s) held on THAT route. */
 export type RouteLicence = { route: string; ratings: string[] };
 
 /**
- * Namesake guard: keep only rows belonging to the slug's primary company —
- * the same company number, or unmapped rows which are name-keyed and so
- * indistinguishable. A DIFFERENT mapped company sharing the slug is a distinct
- * legal entity whose licences must never surface as this one's.
- * Rows arrive primary-first from the query.
+ * Namesake guard: keep only rows belonging to `company` — the same company
+ * number, or unmapped rows which are name-keyed and so indistinguishable. A
+ * DIFFERENT mapped company sharing the slug is a distinct legal entity whose
+ * licences must never surface as this one's. A null `company` keeps only the
+ * unmapped rows.
  */
+export function poolFor<T extends { companyNumber: string | null }>(
+  rows: T[],
+  company: string | null,
+): T[] {
+  return rows.filter(
+    (row) => row.companyNumber === company || row.companyNumber === null,
+  );
+}
+
+/** poolFor the slug's primary company, which leads: rows arrive primary-first from the query. */
 export function poolForPrimary<T extends { companyNumber: string | null }>(
   rows: T[],
 ): T[] {
   if (rows.length === 0) return rows;
-  const primary = rows[0].companyNumber;
-  return rows.filter(
-    (row) => row.companyNumber === primary || row.companyNumber === null,
-  );
+  return poolFor(rows, rows[0].companyNumber);
 }
 
 // NOTE — there is deliberately no name-based "is this the same entity?" filter
@@ -41,7 +47,7 @@ export function poolForPrimary<T extends { companyNumber: string | null }>(
 // ("SK & Associates Ltd" vs "SK Associates Ltd"). A guard keyed on
 // normalizeName was tried and silently deleted 3 of the university's 4 real
 // visa routes in production. Distinct MAPPED entities are separated properly:
-// poolForPrimary splits them by company number here, and the ingest gives them
+// poolFor splits them by company number here, and the ingest gives them
 // their own suffixed slugs. Unmapped pools stay whole — under-splitting shows
 // a real sponsor's real licences, over-splitting hides them.
 

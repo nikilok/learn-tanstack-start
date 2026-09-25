@@ -4,6 +4,7 @@ import {
   cardLicence,
   type LicenceRow,
   licencesVary,
+  poolFor,
   poolForPrimary,
   ratingPhrase,
   ratingTiersDiffer,
@@ -40,7 +41,6 @@ const row = (over: Partial<LicenceRow>): LicenceRow => ({
   companyNumber: '01111111',
   typeRating: 'Worker (A rating)',
   route: 'Skilled Worker',
-  sponsorLicenceNumber: null,
   ...over,
 });
 
@@ -179,6 +179,45 @@ describe('poolForPrimary — a namesake slug never leaks another entity', () => 
 
   test('handles an empty pool', () => {
     expect(poolForPrimary([])).toEqual([]);
+  });
+});
+
+describe('poolFor — the page’s company, not whichever leads the rows now', () => {
+  // A page is built from one snapshot of the rows and edge-cached; the rows can
+  // change under it. Here the page was built for 05000000 with an unmapped
+  // namesake pooled in, and a sweep later mapped the namesake to a LOWER
+  // number, so it now leads the rows. Pooling by the leading row would swap
+  // the page's licences for the namesake's.
+  const now = [
+    row({ organisationName: 'ACME & CO LTD', companyNumber: '04000000' }),
+    row({
+      organisationName: 'ACME CO LTD',
+      companyNumber: '05000000',
+      route: 'Creative Worker',
+    }),
+    row({ organisationName: 'ACME CO', companyNumber: null }),
+  ];
+
+  test('keeps the named company’s rows and the unmapped ones, never another mapped company’s', () => {
+    const pooled = poolFor(now, '05000000');
+    expect(pooled.map((r) => r.companyNumber)).toEqual(['05000000', null]);
+  });
+
+  test('is what poolForPrimary would get wrong once the rows reorder', () => {
+    expect(poolForPrimary(now).map((r) => r.companyNumber)).toEqual([
+      '04000000',
+      null,
+    ]);
+  });
+
+  test('a company no longer on the slug keeps only the unmapped rows', () => {
+    expect(poolFor(now, '09999999').map((r) => r.companyNumber)).toEqual([
+      null,
+    ]);
+  });
+
+  test('a null company keeps only the unmapped rows', () => {
+    expect(poolFor(now, null).map((r) => r.companyNumber)).toEqual([null]);
   });
 });
 

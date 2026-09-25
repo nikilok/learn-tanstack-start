@@ -102,9 +102,6 @@ export function deriveCompanyDisplay({
   return {
     primaryOrg,
     rawName,
-    // Identity-safe licence rows — licence numbers must be read from these,
-    // never from the raw pool.
-    licences,
     formerNames: formerCompanyNames(profile?.previousNames, rawName),
     name: titleCase(rawName),
     registeredNames,

@@ -3,7 +3,7 @@
  *
  * The rendered section is the domain and nothing else: how a URL was confirmed
  * is not page copy, since a caption explaining the check would spell it out for
- * every visitor. The gate itself lives in api/companyWebsite.ts.
+ * every visitor. The gate itself lives in lib/websites/publishable.ts.
  */
 
 /** Strips exactly one leading `www.`, leaving lookalikes like `wwww.` alone. */

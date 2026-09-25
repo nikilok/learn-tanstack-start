@@ -434,7 +434,7 @@ for (const finding of findings) {
   if (decision.action === 'conflict') {
     conflicts++;
     console.log(
-      `  conflict ${finding.companyNumber}: kept ${prior?.url} over ${finding.source}'s ${finding.url}`,
+      `  conflict ${finding.companyNumber}: kept ${prior?.source ?? prior?.evidence} over ${finding.source}`,
     );
     continue;
   }

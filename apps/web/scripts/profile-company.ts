@@ -313,6 +313,13 @@ function tally(totals: Totals, result: CrawlResult): void {
   totals.sitemapFetches = (totals.sitemapFetches ?? 0) + result.sitemapFetches;
 }
 
+/** An error's code, else its name, for a run's log: never the message, which can quote the site. */
+function failureKind(err: unknown): string {
+  if (!(err instanceof Error)) return 'unknown';
+  const { code } = err as { code?: unknown };
+  return typeof code === 'string' ? code : err.name;
+}
+
 /** The question set for this run: the live table, or one ad-hoc override. */
 async function loadQuestions(): Promise<ProfileQuestion[]> {
   if (questionArg) {
@@ -672,10 +679,7 @@ if (noExtract) {
       await crawlGroup(group);
       crawlStreak = 0;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.log(
-        `  ${group.origin}: crawl failed, left in rotation — ${message}`,
-      );
+      console.log(`  crawl failed, left in rotation — ${failureKind(err)}`);
       crawlStreak++;
       totals.crawlFailures = (totals.crawlFailures ?? 0) + 1;
       if (crawlStreak >= SYSTEMIC_FAILURE_STREAK) {
@@ -812,8 +816,7 @@ if (noExtract) {
         // A wedged engine or a flaky night must not crash the sweep. Leave
         // the origin unfinished — immediately retryable, an infra blip rather
         // than a verdict — and escalate if it keeps happening.
-        const message = err instanceof Error ? err.message : String(err);
-        console.log(`  ${group.origin}: failed, left due — ${message}`);
+        console.log(`  extraction failed, left due — ${failureKind(err)}`);
         failureStreak++;
         totals.extractionFailures = (totals.extractionFailures ?? 0) + 1;
         if (failureStreak >= SYSTEMIC_FAILURE_STREAK) {

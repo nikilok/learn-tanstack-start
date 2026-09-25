@@ -17,10 +17,6 @@ import {
 } from '../api/cache-headers';
 import { companyProfileQueryOptions } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
-import {
-  type CompanyWebsite,
-  companyWebsiteQueryOptions,
-} from '../api/companyWebsite';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
 import BingLogo from '../components/BingLogo';
@@ -34,11 +30,18 @@ import LinkedInLogo from '../components/LinkedInLogo';
 import RatingIcon from '../components/RatingIcon';
 import { SeeMoreLink } from '../components/SeeMoreLink';
 import { StatusBadge } from '../components/StatusBadge';
+import { useCompanyExtras } from '../hooks/useCompanyExtras';
 import {
   type CompanyDisplayInput,
   deriveCompanyDisplay,
 } from '../lib/company/display';
 import { companyDocumentDegraded } from '../lib/company/document-cache';
+import { extrasWanted, pageCompanyNumber } from '../lib/company/extras';
+import {
+  licenceNumbersLabel,
+  licenceNumbersView,
+  websiteView,
+} from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
 import { displayDomain } from '../lib/company/website';
 import { noteCompanyView } from '../lib/device/beacons';
@@ -88,6 +91,22 @@ function LicenceStack({ items }: { items: RouteLicence[] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** Holds the height of `count` lines of text-sm while their values load, so nothing below moves when they land. */
+function PendingLines({ count, width }: { count: number; width: string }) {
+  return (
+    <span aria-hidden className="flex flex-col gap-0.5">
+      {Array.from({ length: count }, (_, i) => (
+        // oxlint-disable-next-line react/no-array-index-key -- static placeholders never reorder
+        <span key={i} className="flex h-5 items-center">
+          <span
+            className={`h-3.5 ${width} rounded bg-(--sea-ink-soft)/15 motion-safe:animate-pulse`}
+          />
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -155,57 +174,37 @@ export const Route = createFileRoute('/company/$slug')({
       companyProfileQueryOptions(company.licences[0].organisationName),
     );
 
-    // Both are auxiliary — a transient failure must not take down the page —
-    // and both key off the same company number, so they run together rather
-    // than stacking another round trip onto the load.
-    // A failed website lookup has to stay distinguishable from a successful
-    // "no website": both render the same page, but only the first must not be
-    // cached for 30 days. See companyDocumentDegraded.
-    const [timeline, websiteLoad] = profile?.company_number
-      ? await Promise.all([
-          queryClient
-            .ensureQueryData({
-              ...companyTimelineQueryOptions(profile.company_number),
-              revalidateIfStale: true,
-            })
-            .catch((error) => {
-              console.error('[Timeline] load failed:', error);
-              return null;
-            }),
-          queryClient
-            .ensureQueryData(companyWebsiteQueryOptions(profile.company_number))
-            .then((website) => ({ website, failed: false }))
-            .catch((error) => {
-              console.error('[Website] load failed:', error);
-              return { website: null, failed: true };
-            }),
-        ])
-      : [null, { website: null, failed: false }];
-    const website = websiteLoad.website;
+    // Auxiliary — a transient failure must not take down the page.
+    const timeline = profile?.company_number
+      ? await queryClient
+          .ensureQueryData({
+            ...companyTimelineQueryOptions(profile.company_number),
+            revalidateIfStale: true,
+          })
+          .catch((error) => {
+            console.error('[Timeline] load failed:', error);
+            return null;
+          })
+      : null;
 
     // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
     // Short-cache a document built from incomplete data (a timeline RPC error,
-    // a first visit racing getCompanyProfile's background upsert, or a website
-    // lookup that threw) so the degraded rendering isn't baked in for 30 days.
+    // or a first visit racing getCompanyProfile's background upsert) so the
+    // degraded rendering isn't baked in for 30 days.
     const degraded = companyDocumentDegraded({
       hasCompanyNumber: Boolean(profile?.company_number),
       timelineLoaded: Boolean(timeline),
-      websiteLookupFailed: websiteLoad.failed,
     });
     setSsrCacheControl(degraded ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
     // Same tags as the RPCs, so both purge pipelines cover HTML and data alike.
     // Unmapped sponsors get the population tag alone — still nightly-purgeable.
     setCompanyCacheTag(profile?.company_number);
 
-    return { sponsor: company, profile, timeline, website };
+    return { sponsor: company, profile, timeline };
   },
   head: ({ match }) => {
-    // Same shape the loader returns; CompanyDisplayInput is the one written
-    // copy. The website is not part of the display derivation, so it rides
-    // alongside rather than widening that type.
-    const loaderData = match.loaderData as
-      | (CompanyDisplayInput & { website?: CompanyWebsite | null })
-      | undefined;
+    // Same shape the loader returns; CompanyDisplayInput is the one written copy.
+    const loaderData = match.loaderData as CompanyDisplayInput | undefined;
 
     // Lead with the Companies House current name; HMRC may hold a stale former name.
     const display = loaderData ? deriveCompanyDisplay(loaderData) : null;
@@ -262,7 +261,6 @@ export const Route = createFileRoute('/company/$slug')({
             address: loaderData.profile?.registered_office_address,
             canonicalUrl,
             homeUrl: buildCanonical('/'),
-            websiteUrl: loaderData.website?.url,
           })
         : [];
 
@@ -283,12 +281,27 @@ export const Route = createFileRoute('/company/$slug')({
  * Preserves the `search` param so the back-link returns to the same query.
  */
 function CompanyDetail() {
-  const { sponsor, profile, timeline, website } = Route.useLoaderData();
+  const { sponsor, profile, timeline } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const { slug } = Route.useParams();
   const navigate = useNavigate();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(true);
+  const primaryRowCompany = sponsor.licences[0]?.companyNumber ?? null;
+  const pageCompany = pageCompanyNumber(
+    profile?.company_number,
+    primaryRowCompany,
+  );
+  const extras = useCompanyExtras(
+    {
+      slug: sponsor.nameSlug,
+      slugIds: sponsor.licences.map((l) => l.slugId),
+      companyNumber: pageCompany,
+    },
+    extrasWanted(sponsor.extras, pageCompany, primaryRowCompany),
+  );
+  const licenceNumbers = licenceNumbersView(sponsor.extras, extras);
+  const website = websiteView(sponsor.extras, extras);
 
   // One view per company visited, SPA navigations included — hence the slug key.
   // The ref makes the effect idempotent under a double-invoked mount.
@@ -338,16 +351,6 @@ function CompanyDetail() {
   const searchQuery = encodeURIComponent(companySearchName(displayName));
   const alsoRegisteredAs = display.registeredAs || null;
   const ratingsText = ratings.map(titleCase).join(', ');
-  // Every distinct licence number — a company can hold one per licence row
-  // (105 slugs do); all render, stacked when several. Sourced from the
-  // identity-safe set so an unmapped namesake's number is never shown here.
-  const licenceNumbers = [
-    ...new Set(
-      display.licences
-        .map((l) => l.sponsorLicenceNumber)
-        .filter((n): n is string => Boolean(n)),
-    ),
-  ];
   const displayLocation = display.location;
   const industry = display.industry;
   const sicEntries = display.sicEntries;
@@ -360,24 +363,23 @@ function CompanyDetail() {
   const rating = display.licencesVary
     ? listFormatter.format(display.licencePhrases)
     : display.ratingText;
-  // Shared by both card slots (no-profile card and the CH profile card).
-  const licenceNumberField = licenceNumbers.length > 0 && (
+  // Shared by both card slots (no-profile card and the CH profile card). A
+  // company can hold one number per licence row; several render stacked.
+  const licenceNumberField = licenceNumbers.kind !== 'hidden' && (
     <DetailField
-      label={
-        licenceNumbers.length > 1
-          ? 'Sponsor Licence Nos.'
-          : 'Sponsor Licence No.'
-      }
+      label={licenceNumbersLabel(licenceNumbers)}
       literal
       value={
-        licenceNumbers.length > 1 ? (
+        licenceNumbers.kind === 'pending' ? (
+          <PendingLines count={licenceNumbers.count} width="w-20" />
+        ) : licenceNumbers.numbers.length > 1 ? (
           <span className="flex flex-col gap-0.5">
-            {licenceNumbers.map((n) => (
+            {licenceNumbers.numbers.map((n) => (
               <span key={n}>{n}</span>
             ))}
           </span>
         ) : (
-          licenceNumbers[0]
+          licenceNumbers.numbers[0]
         )
       }
     />
@@ -552,24 +554,38 @@ function CompanyDetail() {
           </p>
         </section>
 
-        {website && (
-          <section className="mt-6" aria-labelledby="company-website-heading">
+        {website.kind !== 'hidden' && (
+          <section
+            className="mt-6"
+            aria-labelledby="company-website-heading"
+            aria-busy={website.kind === 'pending'}
+          >
             <h2 id="company-website-heading" className={LABEL_CLASS}>
               Website
             </h2>
             {/* The domain, not the word "Website", so the reader can see where
                 the link goes before taking it. How we confirmed it is
                 deliberately not stated: that method is ours to keep. */}
-            <a
-              href={website.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-(--link-blue) no-underline hover:underline"
-            >
-              <Globe size={14} className="shrink-0" aria-hidden="true" />
-              <span className="break-all">{displayDomain(website.url)}</span>
-              <ExternalLink size={12} className="shrink-0" aria-hidden="true" />
-            </a>
+            {website.kind === 'pending' ? (
+              <span className="mt-1 inline-flex">
+                <PendingLines count={1} width="w-44" />
+              </span>
+            ) : (
+              <a
+                href={website.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-(--link-blue) no-underline hover:underline"
+              >
+                <Globe size={14} className="shrink-0" aria-hidden="true" />
+                <span className="break-all">{displayDomain(website.url)}</span>
+                <ExternalLink
+                  size={12}
+                  className="shrink-0"
+                  aria-hidden="true"
+                />
+              </a>
+            )}
           </section>
         )}
 

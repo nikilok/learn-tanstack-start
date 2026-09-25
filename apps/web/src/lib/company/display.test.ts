@@ -17,7 +17,6 @@ const licence = (over: Partial<LicenceRow>): LicenceRow => ({
   companyNumber: '01111111',
   typeRating: 'Worker (A rating)',
   route: 'Skilled Worker',
-  sponsorLicenceNumber: null,
   ...over,
 });
 
@@ -150,7 +149,6 @@ describe('deriveCompanyDisplay — unmapped pools stay whole', () => {
             companyNumber: null,
             route: 'Skilled Worker',
             typeRating: 'Worker (A rating)',
-            sponsorLicenceNumber: '4DGMEKTY8',
           }),
           ...[
             'Creative Worker',
@@ -162,7 +160,6 @@ describe('deriveCompanyDisplay — unmapped pools stay whole', () => {
               companyNumber: null,
               route,
               typeRating: 'Temporary Worker (A rating)',
-              sponsorLicenceNumber: '20UVVU0W8',
             }),
           ),
         ],
@@ -171,7 +168,7 @@ describe('deriveCompanyDisplay — unmapped pools stay whole', () => {
     expect(d.routes).toHaveLength(4);
     expect(d.routes).toContain('Government Authorised Exchange');
     expect(d.ratings).toContain('Temporary Worker (A rating)');
-    expect(d.licences).toHaveLength(4);
+    expect(d.routeLicences).toHaveLength(4);
   });
 
   test('a DIFFERENT mapped company is separated upstream, not here', () => {
@@ -187,7 +184,7 @@ describe('deriveCompanyDisplay — unmapped pools stay whole', () => {
         ],
       },
     });
-    expect(d.licences).toHaveLength(1);
+    expect(d.routeLicences).toHaveLength(1);
   });
 });
 

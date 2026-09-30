@@ -1,5 +1,7 @@
 import { checkBotId } from 'botid/server';
 
+import { BROWSER_CHECK_LEVEL } from './browser-check-config';
+
 /** Asks whether the current request came from an automated client (Vercel BotID). */
 export type BrowserCheck = typeof checkBotId;
 
@@ -45,9 +47,12 @@ export async function fromBrowser(
 ): Promise<boolean> {
   let result: Awaited<ReturnType<BrowserCheck>>;
   try {
-    result = await check(
-      verdict ? { developmentOptions: { bypass: verdict } } : undefined,
-    );
+    // At the level the client's protected calls name: BotID fails a check whose two sides
+    // disagree, and names every visitor automated.
+    result = await check({
+      advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+      ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
+    });
   } catch (error) {
     console.error(
       '[extras] browser check failed:',

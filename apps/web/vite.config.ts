@@ -8,7 +8,7 @@ import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-path';
+import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-config';
 
 dotenv.config({ path: '../../.env.local' });
 

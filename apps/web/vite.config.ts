@@ -8,6 +8,8 @@ import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
+import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-path';
+
 dotenv.config({ path: '../../.env.local' });
 
 const config = defineConfig({
@@ -19,6 +21,17 @@ const config = defineConfig({
     nitro({
       serverDir: 'server',
       routeRules: {
+        // Vercel BotID's challenge, served first-party: the script and its
+        // calls are proxied to Vercel, as the `botid/nuxt` module sets up for
+        // Nitro. The edge middleware must pass the same path through.
+        // Production only; locally the check always answers human.
+        [`${BROWSER_CHECK_PATH}/a-4-a/c.js`]: {
+          proxy: 'https://api.vercel.com/bot-protection/v1/challenge',
+        },
+        [`${BROWSER_CHECK_PATH}/**`]: {
+          proxy: 'https://api.vercel.com/bot-protection/v1/proxy/**',
+          headers: { 'X-Frame-Options': 'SAMEORIGIN' },
+        },
         '/**': {
           headers: {
             // Force HTTPS for 2 years across all subdomains (no preload — reversible).

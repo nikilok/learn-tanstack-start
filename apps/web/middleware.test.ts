@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { BROWSER_CHECK_PATH } from '#/lib/device/browser-check-path';
 import {
   engagedPingPath,
   presentPingPath,
@@ -131,6 +132,30 @@ describe('edge middleware: routing is preserved', () => {
       expect(overriddenAccept(res)).toBeNull();
       expect(res.headers.get('link')).toBeNull();
     }
+  });
+
+  test("the browser check's challenge and every call it makes pass through to the proxy", () => {
+    // The challenge's own calls carry no file extension and no HTML Accept: answered by the
+    // edge 404, they never reached Vercel, the challenge never completed, and every visitor
+    // was judged automated.
+    for (const [path, accept] of [
+      [`${BROWSER_CHECK_PATH}/a-4-a/c.js?v=3&h=sponsorsearch.co.uk`, '*/*'],
+      [`${BROWSER_CHECK_PATH}/tl`, '*/*'],
+      [`${BROWSER_CHECK_PATH}/fp?x-kpsdk-v=j-1.0.0`, 'application/json'],
+      [`${BROWSER_CHECK_PATH}/mfc`, undefined],
+    ] as const) {
+      const res = run(path, accept);
+      expect(res.status).not.toBe(404);
+      expect(isNext(res)).toBe(true);
+      expect(overriddenAccept(res)).toBeNull();
+      expect(res.headers.get('link')).toBeNull();
+    }
+  });
+
+  test('a path that only begins like the browser check still takes the edge 404', () => {
+    const res = run(`${BROWSER_CHECK_PATH}-x/tl`, '*/*');
+    expect(res.status).toBe(404);
+    expect(isNext(res)).toBe(false);
   });
 
   test('a malformed device-ping key takes the edge 404', () => {

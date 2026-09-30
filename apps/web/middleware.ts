@@ -1,5 +1,7 @@
 import { next } from '@vercel/edge';
 
+import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-path';
+
 // SSR document routes (TanStack Start). Accept-repaired in serveDocument and where
 // we advertise llms.txt to agents. The exact root '/' is handled inline below.
 const DOCUMENT_PREFIXES = [
@@ -19,6 +21,10 @@ const API_PREFIXES = [
   '/api/tiles/', // Nitro Stadia Maps tile proxy
   '/downloads/', // Nitro installer redirects + electron-updater feed (302/binary)
   '/.well-known/vercel/', // Vercel Flags Explorer discovery endpoint
+  // Vercel BotID's challenge script and every call it makes, proxied to Vercel by the
+  // Nitro route rules. Its calls carry no file extension and no HTML Accept, so the edge
+  // 404 below would answer them, and the challenge could never complete.
+  `${BROWSER_CHECK_PATH}/`,
 ];
 
 // Routes with no sub-paths are matched exactly, so a look-alike such as `/api/engaged-x`

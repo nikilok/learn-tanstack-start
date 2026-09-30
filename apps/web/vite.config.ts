@@ -10,6 +10,10 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 
 dotenv.config({ path: '../../.env.local' });
 
+// The fixed path BotID's client loads its challenge from (see `botid/nuxt`).
+const BOTID_PREFIX =
+  '/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3';
+
 const config = defineConfig({
   plugins: [
     devtools(),
@@ -19,6 +23,16 @@ const config = defineConfig({
     nitro({
       serverDir: 'server',
       routeRules: {
+        // Vercel BotID's challenge, served first-party: the script and its
+        // calls are proxied to Vercel, as the `botid/nuxt` module sets up for
+        // Nitro. Production only; locally the check always answers human.
+        [`${BOTID_PREFIX}/a-4-a/c.js`]: {
+          proxy: 'https://api.vercel.com/bot-protection/v1/challenge',
+        },
+        [`${BOTID_PREFIX}/**`]: {
+          proxy: 'https://api.vercel.com/bot-protection/v1/proxy/**',
+          headers: { 'X-Frame-Options': 'SAMEORIGIN' },
+        },
         '/**': {
           headers: {
             // Force HTTPS for 2 years across all subdomains (no preload — reversible).

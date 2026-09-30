@@ -15,6 +15,7 @@ import {
   companyPageRowsSql,
   SLUG_RE,
 } from '../lib/company/page-rows';
+import { fromBrowser } from '../lib/device/browser-check.server';
 import { DEVICE_KEY_RE } from '../lib/device/key';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
@@ -44,14 +45,16 @@ function deviceKey(input: unknown): string {
 
 /**
  * Server fn issuing a token for a device key; the page calls it before its
- * first extras load. `null` when no token can be issued, or the key is
- * suspended — the page then loads no extras. POST and never cached.
+ * first extras load. `null` when no token can be issued, the key is
+ * suspended, or the request did not come from a browser a person is using —
+ * the page then loads no extras. POST and never cached.
  */
 const issueExtrasToken = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ({ key: deviceKey(input) }))
   .handler(async ({ data: { key } }) => {
     setRpcCacheControl('private, no-store');
     if (await isSuspended(key)) return { token: null };
+    if (!(await fromBrowser())) return { token: null };
     const token = issueToken(key);
     if (token === null) console.error('[extras] ENGAGE_TOKEN_SECRET not set');
     return { token };
@@ -64,8 +67,9 @@ const issueExtrasToken = createServerFn({ method: 'POST' })
  * answers for exactly those: the page is a cached snapshot, and a mapping
  * change since must not put another company's extras on it. A refused token is
  * `denied`, never an error, and so is a suspended key, whose token may predate
- * its suspension. POST and never cached: the answer depends on the token
- * presented.
+ * its suspension, and a request that did not come from a browser a person is
+ * using — a token is the key's, not the browser's, so it is checked on every
+ * call. POST and never cached: the answer depends on the token presented.
  */
 const getCompanyExtras = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => {
@@ -97,6 +101,7 @@ const getCompanyExtras = createServerFn({ method: 'POST' })
     setRpcCacheControl('private, no-store');
     if (!tokenMatches(data.token, data.key)) return { status: 'denied' };
     if (await isSuspended(data.key)) return { status: 'denied' };
+    if (!(await fromBrowser())) return { status: 'denied' };
     const [found, websites] = await Promise.all([
       db.execute(companyPageRowsSql(data.slug)),
       data.companyNumber === null

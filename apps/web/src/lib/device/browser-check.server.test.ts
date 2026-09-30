@@ -1,10 +1,23 @@
-import { describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 
 import {
   type BrowserCheck,
   fromBrowser,
   localVerdict,
 } from './browser-check.server';
+
+// Passing `undefined` for the verdict takes the default, which reads this
+// variable: cleared for every test, so a verdict set for a local run cannot
+// change what they see, and restored after.
+const VERDICT_ENV = 'BROWSER_CHECK_LOCAL_VERDICT';
+const saved = process.env[VERDICT_ENV];
+beforeEach(() => {
+  delete process.env[VERDICT_ENV];
+});
+afterEach(() => {
+  if (saved === undefined) delete process.env[VERDICT_ENV];
+  else process.env[VERDICT_ENV] = saved;
+});
 
 /** A check answering with a fixed verdict, recording what it was asked. */
 function answering(isBot: boolean, isVerifiedBot = false) {
@@ -62,5 +75,15 @@ describe('localVerdict', () => {
     expect(localVerdict('GOOD-BOT')).toBe('GOOD-BOT');
     for (const value of [undefined, '', 'bad-bot', 'yes'])
       expect(localVerdict(value)).toBeUndefined();
+  });
+
+  test('by default the verdict is read from the environment, and handed to the check', async () => {
+    process.env[VERDICT_ENV] = 'BAD-BOT';
+    expect(localVerdict()).toBe('BAD-BOT');
+    const asked = answering(true);
+    expect(await fromBrowser(asked.check)).toBe(false);
+    expect(asked.asked).toEqual([
+      { developmentOptions: { bypass: 'BAD-BOT' } },
+    ]);
   });
 });

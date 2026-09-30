@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { BROWSER_CHECK_PATH } from '#/lib/device/browser-check-path';
+import { BROWSER_CHECK_PATH } from '#/lib/device/browser-check-config';
 import {
   engagedPingPath,
   presentPingPath,

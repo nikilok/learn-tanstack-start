@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 
+import { CHECKED_CALLS } from './browser-check';
+import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 import {
   type BrowserCheck,
   enforcing,
@@ -72,14 +74,26 @@ describe('fromBrowser', () => {
     ]);
   });
 
-  test('a local verdict is handed to the check as its development override, and nothing else is', async () => {
+  test('every check is asked at the shared level; a local verdict rides it as the development override', async () => {
     const asked = answering(false);
     await fromBrowser(asked.check, 'BAD-BOT', true);
     await fromBrowser(asked.check, undefined, true);
     expect(asked.asked).toEqual([
-      { developmentOptions: { bypass: 'BAD-BOT' } },
-      undefined,
+      {
+        advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+        developmentOptions: { bypass: 'BAD-BOT' },
+      },
+      { advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL } },
     ]);
+  });
+
+  test("the level the server asks for is the one the client's protected calls name", () => {
+    expect(BROWSER_CHECK_LEVEL).toBe('deepAnalysis');
+    expect(
+      CHECKED_CALLS.every(
+        (c) => c.advancedOptions.checkLevel === BROWSER_CHECK_LEVEL,
+      ),
+    ).toBe(true);
   });
 
   test('a check that fails lets the request through, and says so', async () => {
@@ -104,7 +118,10 @@ describe('fromBrowser', () => {
     const asked = answering(true);
     expect(await fromBrowser(asked.check)).toBe(false);
     expect(asked.asked).toEqual([
-      { developmentOptions: { bypass: 'BAD-BOT' } },
+      {
+        advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+        developmentOptions: { bypass: 'BAD-BOT' },
+      },
     ]);
     // Unset, nothing is enforced.
     delete process.env[ENFORCE_ENV];

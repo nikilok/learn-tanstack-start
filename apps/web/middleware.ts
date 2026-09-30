@@ -1,6 +1,6 @@
 import { next } from '@vercel/edge';
 
-import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-path';
+import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-config';
 
 // SSR document routes (TanStack Start). Accept-repaired in serveDocument and where
 // we advertise llms.txt to agents. The exact root '/' is handled inline below.

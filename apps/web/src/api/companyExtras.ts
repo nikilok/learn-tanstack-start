@@ -16,6 +16,7 @@ import {
   SLUG_RE,
 } from '../lib/company/page-rows';
 import { DEVICE_KEY_RE } from '../lib/device/key';
+import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
 import { publishableWebsiteGate } from '../lib/websites/publishable';
 import { setRpcCacheControl } from './cache-headers';
@@ -43,13 +44,14 @@ function deviceKey(input: unknown): string {
 
 /**
  * Server fn issuing a token for a device key; the page calls it before its
- * first extras load. `null` when no token can be issued. POST and never
- * cached.
+ * first extras load. `null` when no token can be issued, or the key is
+ * suspended — the page then loads no extras. POST and never cached.
  */
 const issueExtrasToken = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => ({ key: deviceKey(input) }))
-  .handler(({ data: { key } }) => {
+  .handler(async ({ data: { key } }) => {
     setRpcCacheControl('private, no-store');
+    if (await isSuspended(key)) return { token: null };
     const token = issueToken(key);
     if (token === null) console.error('[extras] ENGAGE_TOKEN_SECRET not set');
     return { token };
@@ -61,8 +63,9 @@ const issueExtrasToken = createServerFn({ method: 'POST' })
  * names the licence rows it rendered and the company it shows, and pageExtras
  * answers for exactly those: the page is a cached snapshot, and a mapping
  * change since must not put another company's extras on it. A refused token is
- * `denied`, never an error. POST and never cached: the answer depends on the
- * token presented.
+ * `denied`, never an error, and so is a suspended key, whose token may predate
+ * its suspension. POST and never cached: the answer depends on the token
+ * presented.
  */
 const getCompanyExtras = createServerFn({ method: 'POST' })
   .inputValidator((input: unknown) => {
@@ -93,6 +96,7 @@ const getCompanyExtras = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<ExtrasResponse> => {
     setRpcCacheControl('private, no-store');
     if (!tokenMatches(data.token, data.key)) return { status: 'denied' };
+    if (await isSuspended(data.key)) return { status: 'denied' };
     const [found, websites] = await Promise.all([
       db.execute(companyPageRowsSql(data.slug)),
       data.companyNumber === null

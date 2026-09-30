@@ -65,6 +65,7 @@
         "@vercel/edge": "^1.3.1",
         "@vercel/flags-core": "1.4.0",
         "@vercel/functions": "^3.6.0",
+        "@vercel/global-config": "^1.5.1",
         "@vercel/sdk": "^1.21.5",
         "@vercel/speed-insights": "^2.0.0",
         "@vercel/toolbar": "0.2.6",
@@ -821,6 +822,10 @@
     "@vercel/flags-core": ["@vercel/flags-core@1.4.0", "", { "dependencies": { "@vercel/functions": "^3.4.3", "jose": "5.2.1", "js-xxhash": "4.0.0" }, "peerDependencies": { "@openfeature/server-sdk": "1.18.0", "next": "*" }, "optionalPeers": ["@openfeature/server-sdk", "next"] }, "sha512-VeWaNAMZoBmOC5B0POjYXkuP+Llt9MtMDg0DFJObBRLKQ/zTtc9lY4hVVcOIx1JjJmO3JKMZDv43WtX/1jDbmg=="],
 
     "@vercel/functions": ["@vercel/functions@3.6.0", "", { "dependencies": { "@vercel/oidc": "3.4.1" }, "peerDependencies": { "@aws-sdk/credential-provider-web-identity": "*" }, "optionalPeers": ["@aws-sdk/credential-provider-web-identity"] }, "sha512-Xj68JYqqJwtqFWJN7EWmFN7MOiUjv5whjw48UEKqQbg8r7hRkhuJhncTU0ba3jJCh/wxEuLWckrtsKcrHQraxw=="],
+
+    "@vercel/global-config": ["@vercel/global-config@1.5.1", "", { "dependencies": { "@vercel/global-config-fs": "0.1.0" }, "peerDependencies": { "@opentelemetry/api": "^1.7.0", "next": ">=1" }, "optionalPeers": ["@opentelemetry/api", "next"] }, "sha512-PUJaoyMGuSLdKnBgYIqeH1i6U3G+5noLvvJLqI8IPP5+P0b2Q5EcBBraFRh6ctNY/yTpb40klyLYyE3X0OPmKQ=="],
+
+    "@vercel/global-config-fs": ["@vercel/global-config-fs@0.1.0", "", {}, "sha512-xxMUwf96H/qKTA4Az+uh3xlVWkwnN3z400P5gex0uUsU8pe99njopYVyKVoUTfu8gN9xbHqaigWaIBr1+lufMg=="],
 
     "@vercel/microfrontends": ["@vercel/microfrontends@2.3.2", "", { "dependencies": { "@next/env": "16.0.10", "@types/md5": "^2.3.5", "ajv": "^8.17.1", "commander": "^12.1.0", "cookie": "1.0.2", "fast-glob": "^3.3.2", "http-proxy": "^1.18.1", "jsonc-parser": "^3.3.1", "md5": "^2.3.0", "nanoid": "^3.3.9", "path-to-regexp": "6.3.0", "semver": "^7.7.2" }, "peerDependencies": { "@sveltejs/kit": ">=1", "@vercel/analytics": ">=1.5.0", "@vercel/speed-insights": ">=1.2.0", "next": ">=13", "react": ">=17.0.0", "react-dom": ">=17.0.0", "vite": ">=5" }, "optionalPeers": ["@sveltejs/kit", "@vercel/analytics", "@vercel/speed-insights", "next", "react", "react-dom", "vite"], "bin": { "microfrontends": "cli/index.cjs" } }, "sha512-XwG9KrPmRXVIe2MzH+sPJscskk12m7qVPUVM7ehdod5c1HbTtwnuncK4B6KNitBpSL+2C5uRQP0/rUaBq/HLPQ=="],
 

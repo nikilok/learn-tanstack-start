@@ -21,10 +21,13 @@ const config = defineConfig({
     nitro({
       serverDir: 'server',
       routeRules: {
-        // Vercel BotID's challenge, served first-party: the script and its
-        // calls are proxied to Vercel, as the `botid/nuxt` module sets up for
-        // Nitro. The edge middleware must pass the same path through.
-        // Production only; locally the check always answers human.
+        // Vercel BotID's challenge and its calls, for local development. In
+        // production the rewrites in vercel.json answer these paths at
+        // Vercel's edge, as BotID's setup asks: the edge rewrites Nitro makes
+        // of these rules sit behind the site-wide headers rule, which ends
+        // the match, and a challenge the function proxies reaches Vercel from
+        // the function's address instead of the visitor's. The edge
+        // middleware must pass the same path through.
         [`${BROWSER_CHECK_PATH}/a-4-a/c.js`]: {
           proxy: 'https://api.vercel.com/bot-protection/v1/challenge',
         },

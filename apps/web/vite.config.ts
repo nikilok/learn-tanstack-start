@@ -8,11 +8,9 @@ import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-dotenv.config({ path: '../../.env.local' });
+import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-path';
 
-// The fixed path BotID's client loads its challenge from (see `botid/nuxt`).
-const BOTID_PREFIX =
-  '/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3';
+dotenv.config({ path: '../../.env.local' });
 
 const config = defineConfig({
   plugins: [
@@ -25,11 +23,12 @@ const config = defineConfig({
       routeRules: {
         // Vercel BotID's challenge, served first-party: the script and its
         // calls are proxied to Vercel, as the `botid/nuxt` module sets up for
-        // Nitro. Production only; locally the check always answers human.
-        [`${BOTID_PREFIX}/a-4-a/c.js`]: {
+        // Nitro. The edge middleware must pass the same path through.
+        // Production only; locally the check always answers human.
+        [`${BROWSER_CHECK_PATH}/a-4-a/c.js`]: {
           proxy: 'https://api.vercel.com/bot-protection/v1/challenge',
         },
-        [`${BOTID_PREFIX}/**`]: {
+        [`${BROWSER_CHECK_PATH}/**`]: {
           proxy: 'https://api.vercel.com/bot-protection/v1/proxy/**',
           headers: { 'X-Frame-Options': 'SAMEORIGIN' },
         },

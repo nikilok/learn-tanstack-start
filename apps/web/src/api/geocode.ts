@@ -36,7 +36,7 @@ function logLabel(query: string): string {
  * crawl-rate renders don't fit inside the upstream's request budget.
  */
 const getGeocode = createServerFn()
-  .inputValidator((input: unknown) => {
+  .validator((input: unknown) => {
     const q = (input as { q?: unknown } | null | undefined)?.q;
     return { q: typeof q === 'string' ? q : '' };
   })

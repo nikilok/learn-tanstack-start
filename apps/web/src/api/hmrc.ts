@@ -67,9 +67,7 @@ type SearchHit = {
  * paired with threshold rechecks. See both docs before touching either half.
  */
 export const searchHmrc = createServerFn()
-  .inputValidator(
-    (input: unknown) => input as { query: string; offset: number },
-  )
+  .validator((input: unknown) => input as { query: string; offset: number })
   .handler(async ({ data: { query, offset } }) => {
     if (query.length < 3) return { rows: [], hasMore: false };
     console.log(`[HMRC Search] query="${query}" offset=${offset}`);
@@ -207,7 +205,7 @@ const slugifySql = (expr: string) => sql.raw(slugifiedSqlText(expr));
  * Returns `null` for a genuinely unknown slug.
  */
 export const getHmrcCompanyBySlug = createServerFn()
-  .inputValidator((input: unknown) => input as { slug: string })
+  .validator((input: unknown) => input as { slug: string })
   .handler(async ({ data }): Promise<CompanyBySlug | null> => {
     // Type-guard BEFORE slugify: the RPC payload is caller-controlled and a
     // non-string must be a null miss, not a .toLowerCase() 500. Then
@@ -321,7 +319,7 @@ export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
  * the /company/$id/$slug 301 shim. Null when the hash left the register.
  */
 export const getSlugForHash = createServerFn()
-  .inputValidator((input: unknown) => input as { hash: string })
+  .validator((input: unknown) => input as { hash: string })
   .handler(async ({ data }) => {
     // Caller-controlled payload: a malformed shape is a null miss, not a 500.
     const hash = typeof data?.hash === 'string' ? data.hash : '';

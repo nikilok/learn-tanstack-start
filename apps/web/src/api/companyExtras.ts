@@ -50,7 +50,7 @@ function deviceKey(input: unknown): string {
  * the page then loads no extras. POST and never cached.
  */
 const issueExtrasToken = createServerFn({ method: 'POST' })
-  .inputValidator((input: unknown) => ({ key: deviceKey(input) }))
+  .validator((input: unknown) => ({ key: deviceKey(input) }))
   .handler(async ({ data: { key } }) => {
     setRpcCacheControl('private, no-store');
     if (await isSuspended(key)) return { token: null };
@@ -72,7 +72,7 @@ const issueExtrasToken = createServerFn({ method: 'POST' })
  * call. POST and never cached: the answer depends on the token presented.
  */
 const getCompanyExtras = createServerFn({ method: 'POST' })
-  .inputValidator((input: unknown) => {
+  .validator((input: unknown) => {
     const key = deviceKey(input);
     const { slug, slugIds, companyNumber, token } = input as Record<
       string,

@@ -183,7 +183,7 @@ async function upsertProfile(profile: CompanyProfile) {
  * `null` when no match is found or any upstream call fails.
  */
 const getCompanyProfile = createServerFn()
-  .inputValidator((input: unknown) => input as { companyName: string })
+  .validator((input: unknown) => input as { companyName: string })
   .handler(async ({ data: { companyName } }) => {
     // Look up company number via mapping table
     const [mapping] = await db

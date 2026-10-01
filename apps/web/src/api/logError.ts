@@ -5,9 +5,7 @@ import { createServerFn } from '@tanstack/react-start';
  * by route `errorComponent`s to surface browser crashes in Vercel logs.
  */
 export const logError = createServerFn()
-  .inputValidator(
-    (input: unknown) => input as { message: string; stack?: string },
-  )
+  .validator((input: unknown) => input as { message: string; stack?: string })
   .handler(async ({ data: { message, stack } }) => {
     console.error('[RouteError]', message);
     if (stack) console.error(stack);

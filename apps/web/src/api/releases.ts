@@ -175,20 +175,18 @@ export const getOwnerDesktopReleases = createServerFn().handler(async () => {
  * navs until the next successful purge (fresh document loads are unaffected).
  */
 export const setReleaseVisibility = createServerFn({ method: 'POST' })
-  .inputValidator(
-    (input: { version: string; visibility: 'private' | 'public' }) => {
-      // Real runtime checks — the type annotation alone validates nothing.
-      if (
-        typeof input?.version !== 'string' ||
-        input.version.length === 0 ||
-        input.version.length > 32 || // varchar(32) column
-        (input.visibility !== 'private' && input.visibility !== 'public')
-      ) {
-        throw new Error('invalid payload');
-      }
-      return { version: input.version, visibility: input.visibility };
-    },
-  )
+  .validator((input: { version: string; visibility: 'private' | 'public' }) => {
+    // Real runtime checks — the type annotation alone validates nothing.
+    if (
+      typeof input?.version !== 'string' ||
+      input.version.length === 0 ||
+      input.version.length > 32 || // varchar(32) column
+      (input.visibility !== 'private' && input.visibility !== 'public')
+    ) {
+      throw new Error('invalid payload');
+    }
+    return { version: input.version, visibility: input.visibility };
+  })
   .handler(async ({ data }) => {
     if (!(await isOwnerRequest())) return { ok: false as const };
     const updated = await db

@@ -28,7 +28,7 @@ const TRAIL_ROW_LIMIT = 500;
  * anchors. Returns `null` for unknown company numbers.
  */
 const getCompanyTimeline = createServerFn()
-  .inputValidator((input: unknown) => {
+  .validator((input: unknown) => {
     const companyNumber = (input as { companyNumber?: unknown } | null)
       ?.companyNumber;
     if (

@@ -41,9 +41,7 @@ export type FilterSearchRow = {
  * Response depends only on input, so it edge-caches for 5 minutes.
  */
 export const searchFiltered = createServerFn()
-  .inputValidator(
-    (input: unknown) => input as { params: unknown; offset?: number },
-  )
+  .validator((input: unknown) => input as { params: unknown; offset?: number })
   .handler(async ({ data: { params, offset } }) => {
     const { filters, issues } = parseSearchFilters(params);
     const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));

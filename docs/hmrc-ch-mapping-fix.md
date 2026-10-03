@@ -1088,11 +1088,14 @@ provenance so the row never hits the resolver again on the next visit:
 
 ### Locality plumbing
 
-`getCompanyProfile` queries `hmrc_skilled_workers` for the sponsor's
-`town_city` / `county` inside the resolver branch (one extra DB read on
-the cold path only — never fires once a mapping is cached). Querying
-inside the handler keeps the server-fn input surface unchanged and avoids
-trusting client-supplied locality.
+`getCompanyProfile` reads the sponsor's first `hmrc_skilled_workers` row
+(`town_city` / `county`) before any Companies House call: on the resolver
+path, and for a mapped company whose profile is not cached. It never fires
+once the profile is cached. The same read is the register check: with no
+row, the lookup answers null without calling Companies House, so keep it
+even if the locality columns go. Querying inside the handler keeps the
+server-fn input surface unchanged and avoids trusting client-supplied
+locality.
 
 ### Latency
 

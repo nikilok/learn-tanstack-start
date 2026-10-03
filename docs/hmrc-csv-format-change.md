@@ -138,9 +138,10 @@ the town/county *DB reads* break:
 
 - **`apps/web/src/lib/phase5/sql.ts` `makeLookupSponsor` (122-147)** — SELECT drops
   `town_city, county`, keeps `route`; return `{ townCity: null, county: null, route }`.
-- **`apps/web/src/api/companiesHouse.ts` on-demand resolver (222-244)** — remove the
-  `hmrcRow` SELECT of `townCity`/`county`; pass `{ townCity: null, county: null }` to
-  `resolveOneSponsor`.
+- **`apps/web/src/api/companiesHouse.ts` on-demand resolver (`profileReads.registerRow`)** —
+  drop `townCity`/`county` from the register read but keep the read: it is also the register
+  check that decides whether Companies House is called. Return `{ townCity: null, county:
+  null }` for a row that exists and `undefined` for none.
 - Leave the resolver/scorer **types and logic intact** (`pipeline.ts pickByLocality`,
   `score-candidate.ts`, `compare-candidates.ts`, `resolve-sponsor.ts`, `sweep.ts`) — they
   now operate on null locality, so the geographic tiebreak is inert. Existing phase5 tests

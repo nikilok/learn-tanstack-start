@@ -5,24 +5,20 @@ import {
   fetchChApi,
   fetchMappedProfile,
   isTransientChFailure,
-  resolveWithoutGaps,
 } from './ch-lookup';
-import { resolveOneSponsor } from './resolve-sponsor';
 
 const ok = (data: unknown): ChResponse => ({ ok: true, data });
 const failed = (status: number): ChResponse => ({ ok: false, status });
 
 /** Ordered route table: first prefix match wins; unmatched paths answer 404. */
 function makeChFetch(routes: [string, ChResponse][]) {
-  const calls: string[] = [];
   const fetchCh = async (path: string): Promise<ChResponse> => {
-    calls.push(path);
     for (const [prefix, response] of routes) {
       if (path.startsWith(prefix)) return response;
     }
     return failed(404);
   };
-  return { fetchCh, calls };
+  return { fetchCh };
 }
 
 const json = (body: string, status = 200) =>
@@ -30,8 +26,6 @@ const json = (body: string, status = 200) =>
     status,
     headers: { 'Content-Type': 'application/json' },
   });
-
-const noLocation = { townCity: null, county: null };
 
 describe('isTransientChFailure', () => {
   test('a 404 is Companies House saying the company does not exist', () => {
@@ -44,7 +38,7 @@ describe('isTransientChFailure', () => {
     expect(isTransientChFailure(429)).toBe(true);
   });
 
-  test.each([500, 502, 503, 504, 401])('a %i says nothing either', (s) => {
+  test.each([500, 502, 503, 504, 401, 410])('a %i says nothing either', (s) => {
     expect(isTransientChFailure(s)).toBe(true);
   });
 
@@ -78,16 +72,16 @@ describe('fetchChApi', () => {
     expect(await fetchChApi('/company/00000871', 'k', { fetchImpl })).toEqual({
       ok: false,
       status: 0,
+      cause: 'fetch failed',
     });
   });
 
   test('an unreadable 2xx body is a transport failure', async () => {
     const fetchImpl = (async () =>
       json('<html>gateway</html>')) as unknown as typeof fetch;
-    expect(await fetchChApi('/company/00000871', 'k', { fetchImpl })).toEqual({
-      ok: false,
-      status: 0,
-    });
+    const res = await fetchChApi('/company/00000871', 'k', { fetchImpl });
+    expect(res).toMatchObject({ ok: false, status: 0 });
+    expect(res.ok ? '' : res.cause).toContain('JSON');
   });
 
   test('a call that never answers times out as a transport failure', async () => {
@@ -97,9 +91,12 @@ describe('fetchChApi', () => {
           reject(init.signal?.reason),
         );
       })) as unknown as typeof fetch;
-    expect(
-      await fetchChApi('/company/00000871', 'k', { fetchImpl, timeoutMs: 10 }),
-    ).toEqual({ ok: false, status: 0 });
+    const res = await fetchChApi('/company/00000871', 'k', {
+      fetchImpl,
+      timeoutMs: 10,
+    });
+    expect(res).toMatchObject({ ok: false, status: 0 });
+    expect(res.ok ? '' : res.cause).toContain('timed out');
   });
 
   test('authenticates with the key as the Basic username', async () => {
@@ -142,96 +139,5 @@ describe('fetchMappedProfile', () => {
       verdict: 'found',
       profile,
     });
-  });
-});
-
-describe('resolveWithoutGaps', () => {
-  // resolve-sponsor's own example: HMRC lists 3DC LTD; search returns the
-  // dissolved exact namesake and the active company renamed from 3DC LTD.
-  const items = [
-    {
-      company_number: '00000003',
-      title: '3DC LIMITED',
-      company_status: 'dissolved',
-    },
-    {
-      company_number: '00000004',
-      title: 'SHOP3D LTD',
-      company_status: 'active',
-    },
-  ];
-  const dissolved = {
-    company_number: '00000003',
-    company_name: '3DC LIMITED',
-    company_status: 'dissolved',
-  };
-  const renamed = {
-    company_number: '00000004',
-    company_name: 'SHOP3D LTD',
-    company_status: 'active',
-    previous_company_names: [{ name: '3DC LTD' }],
-  };
-
-  test('a 429 on the renamed company never lets the dissolved namesake verify', async () => {
-    const { fetchCh } = makeChFetch([
-      ['/search/companies', ok({ items })],
-      ['/company/00000003', ok(dissolved)],
-      ['/company/00000004', failed(429)],
-    ]);
-    // Reading the lost probe as "not found", the bare resolver falls back to
-    // the dissolved match and calls it verified: a mapping kept for good.
-    const bare = await resolveOneSponsor('3DC LTD', noLocation, async (p) => {
-      const res = await fetchCh(p);
-      return res.ok ? res.data : null;
-    });
-    expect(bare).toMatchObject({
-      verdict: 'verified',
-      companyNumber: '00000003',
-    });
-
-    expect(await resolveWithoutGaps('3DC LTD', noLocation, fetchCh)).toEqual({
-      verdict: 'unavailable',
-    });
-  });
-
-  test('with every answer in, the renamed company verifies by its previous name', async () => {
-    const { fetchCh } = makeChFetch([
-      ['/search/companies', ok({ items })],
-      ['/company/00000003', ok(dissolved)],
-      ['/company/00000004', ok(renamed)],
-    ]);
-    expect(
-      await resolveWithoutGaps('3DC LTD', noLocation, fetchCh),
-    ).toMatchObject({
-      verdict: 'verified',
-      companyNumber: '00000004',
-      matchMethod: 'previous_name',
-    });
-  });
-
-  test('stops at the first transient failure', async () => {
-    const { fetchCh, calls } = makeChFetch([
-      ['/search/companies', failed(503)],
-    ]);
-    expect(
-      await resolveWithoutGaps('ACME TRADING LTD', noLocation, fetchCh),
-    ).toEqual({ verdict: 'unavailable' });
-    expect(calls).toHaveLength(1);
-  });
-
-  test('an empty search is still a definitive no_match', async () => {
-    const { fetchCh } = makeChFetch([['/search/companies', ok({ items: [] })]]);
-    expect(
-      await resolveWithoutGaps('ACME TRADING LTD', noLocation, fetchCh),
-    ).toMatchObject({ verdict: 'no_match' });
-  });
-
-  test('a 404 on a probe is evidence, not a gap', async () => {
-    const { fetchCh } = makeChFetch([
-      ['/search/companies', ok({ items: [items[1]] })],
-    ]);
-    expect(
-      await resolveWithoutGaps('3DC LTD', noLocation, fetchCh),
-    ).toMatchObject({ verdict: 'no_match' });
   });
 });

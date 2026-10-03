@@ -18,9 +18,9 @@ import {
   type ChResponse,
   fetchChApi,
   fetchMappedProfile,
-  resolveWithoutGaps,
 } from '../lib/hmrc-ch/ch-lookup';
 import { profileSource } from '../lib/hmrc-ch/profile-source';
+import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
 import {
   LONG_EDGE_CACHE,
   setCompanyCacheTag,
@@ -260,7 +260,7 @@ const getCompanyProfile = createServerFn()
       console.log(
         `[Profile] no mapping, resolving via CH for: "${companyName}"`,
       );
-      const result = await resolveWithoutGaps(
+      const result = await resolveOneSponsor(
         companyName,
         source.location,
         fetchFromApi,

@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
+import type { ChResponse } from '../hmrc-ch/ch-lookup.ts';
 import type { CommitPromotionInput } from './apply-promotion.ts';
 import type { ExistingMapping } from './decide.ts';
 import {
   makeBumpVerifiedAt,
   makeCommitPromotion,
+  makeResolveSponsor,
   makeSelectRows,
 } from './sql.ts';
 
@@ -180,5 +182,31 @@ describe('makeSelectRows — tier predicates', () => {
     await makeSelectRows(sql)('no_match', 10);
 
     expect(calls[0].text).toContain('ORDER BY verified_at ASC NULLS FIRST');
+  });
+});
+
+describe('makeResolveSponsor — Companies House gaps', () => {
+  const sponsor = { townCity: null, county: null, route: 'Skilled Worker' };
+
+  /** A Companies House fetch that answers every path with `res`. */
+  const answering = (res: ChResponse) => async () => res;
+
+  test('a failed Companies House call errors the row instead of proposing a verdict', async () => {
+    // The sweep used to reject only negative verdicts reached this way, so a
+    // failed probe could verify a dissolved namesake that the ladder then kept.
+    const resolve = makeResolveSponsor(answering({ ok: false, status: 429 }));
+    await expect(resolve('3DC LTD', sponsor)).rejects.toThrow(
+      'CH transport failure during resolve',
+    );
+  });
+
+  test('a definitive answer is still proposed', async () => {
+    const resolve = makeResolveSponsor(
+      answering({ ok: true, data: { items: [] } }),
+    );
+    expect(await resolve('3DC LTD', sponsor)).toMatchObject({
+      verdict: 'no_match',
+      companyNumber: null,
+    });
   });
 });

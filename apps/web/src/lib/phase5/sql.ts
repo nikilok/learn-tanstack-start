@@ -5,9 +5,9 @@
  * helpers) and returns a function shaped for direct injection into
  * `SweepDeps` / `ApplyPromotionDeps`.
  *
- * Not yet wired into a CLI — the thin entrypoint at
- * `apps/web/scripts/phase5-sweep.ts` will assemble these into a complete
- * deps object alongside `resolveOneSponsor` + `upsertProfile`.
+ * The thin entrypoint at `apps/web/scripts/phase5-sweep.ts` assembles these
+ * into a complete deps object alongside its Companies House fetch and
+ * `upsertProfile`.
  *
  * Atomicity: `commitPromotion` runs the doc-mandated atomic CTE (UPDATE +
  * RETURNING feeding INSERT INTO audit) so the mapping write and audit
@@ -18,7 +18,11 @@
 
 import type { NeonQueryFunction } from '@ss/db/client';
 
-import type { ResolveResult } from '../hmrc-ch/resolve-sponsor.ts';
+import type { ChFetch } from '../hmrc-ch/ch-lookup.ts';
+import {
+  type ResolveResult,
+  resolveOneSponsor,
+} from '../hmrc-ch/resolve-sponsor.ts';
 import type {
   ApplyPromotionDeps,
   CommitPromotionInput,
@@ -233,26 +237,23 @@ export function makeSleep(): SweepDeps['sleep'] {
 // Resolver wiring (calls into the existing hmrc-ch shared lib)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Resolver function shape — the CLI passes a closure around `resolveOneSponsor`
- *  with `fetchApi` already curried in. */
-type ResolverFn = (
-  organisationName: string,
-  locality: { townCity: string | null; county: string | null },
-) => Promise<ResolveResult>;
-
-/** Build a `resolveSponsor` matching `SweepDeps['resolveSponsor']`. Wraps
- *  the existing `resolveOneSponsor` helper from the shared HMRC↔CH
- *  pipeline and maps its `ResolveResult` shape to `ProposedResolution`.
- *  The resolver only consumes `townCity` / `county`; `route` is sweep-scope
- *  and projected out before the call. */
+/** Build a `resolveSponsor` matching `SweepDeps['resolveSponsor']`: runs
+ *  the shared HMRC↔CH resolver over `fetchCh` and maps its `ResolveResult`
+ *  to `ProposedResolution`. The resolver only consumes `townCity` /
+ *  `county`; `route` is sweep-scope and projected out before the call. */
 export function makeResolveSponsor(
-  resolver: ResolverFn,
+  fetchCh: ChFetch,
 ): SweepDeps['resolveSponsor'] {
   return async (organisationName, sponsor) => {
-    const result = await resolver(organisationName, {
-      townCity: sponsor.townCity,
-      county: sponsor.county,
-    });
+    const result = await resolveOneSponsor(
+      organisationName,
+      { townCity: sponsor.townCity, county: sponsor.county },
+      fetchCh,
+    );
+    // A failed CH call leaves no evidence: error the row so a later run retries it.
+    if (result.verdict === 'unavailable') {
+      throw new Error('CH transport failure during resolve');
+    }
     return toProposedResolution(result);
   };
 }

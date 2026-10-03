@@ -1,11 +1,13 @@
 /**
  * resolveOneSponsor — runs the full HMRC↔CH verification pipeline for a
  * single sponsor name and returns the resolved CH entity (or a fail-closed
- * verdict). The caller injects `fetchApi`, so they own auth, rate-limiting,
- * caching, and retry policy.
+ * verdict). The caller injects a status-aware `ChFetch`, so they own auth,
+ * rate-limiting, caching, and retry policy; only a 404 reads as "no such
+ * company", and any other failure stops the pipeline with `unavailable`.
  *
  * Used by:
  *   - apps/web/src/api/companiesHouse.ts (on-demand resolver, Phase 3)
+ *   - apps/web/src/lib/phase5/sql.ts makeResolveSponsor (Phase 5 sweep)
  *   - apps/web/scripts/seed-companies-house.ts (one-time bootstrap)
  *   - phase0b can be refactored to use this once its current run completes
  *
@@ -27,6 +29,11 @@
  *  10. Fail closed if no verified match
  */
 
+import {
+  type ChFetch,
+  isTransientChFailure,
+  type Unavailable,
+} from './ch-lookup';
 import {
   type CHCandidate,
   matchesHmrcLocality,
@@ -83,7 +90,8 @@ type CHFullProfile = {
   confirmation_statement?: { last_made_up_to?: string };
 };
 
-export type FetchApi = (path: string) => Promise<unknown | null>;
+/** A Companies House read inside the pipeline: the payload, or null for a 404. Gaps never reach it. */
+type Read = (path: string) => Promise<unknown | null>;
 
 export type HmrcLocation = {
   townCity?: string | null;
@@ -159,10 +167,21 @@ function isActive(s: string | null | undefined): boolean {
 // Main entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
+type ResolveOptions = {
+  searchPageSize?: number;
+  tierBTopN?: number;
+};
+
+/** Thrown out of a pipeline read to stop it at the first Companies House call that failed without saying anything about the company. */
+class ChUnavailable extends Error {}
+
 /**
  * Resolves a single HMRC organisation name to a verified CH company. Returns
  * a verdict object — never an exception for "no match" cases. Caller decides
  * what to do with each verdict (insert / skip / queue for review / etc.).
+ * Any call that fails other than with a 404 stops the pipeline and returns
+ * `unavailable`: a verdict reached without that answer, verified or
+ * negative, rests on incomplete data and must not be stored.
  *
  * The function may fetch up to 1 embedded-number profile + 1 search + 3
  * profile lookups during scoring, then 1 additional profile fetch only if
@@ -171,11 +190,33 @@ function isActive(s: string | null | undefined): boolean {
 export async function resolveOneSponsor(
   orgName: string,
   hmrcLocation: HmrcLocation,
-  fetchApi: FetchApi,
-  options?: {
-    searchPageSize?: number;
-    tierBTopN?: number;
-  },
+  fetchCh: ChFetch,
+  options?: ResolveOptions,
+): Promise<ResolveResult | Unavailable> {
+  try {
+    return await resolveFrom(
+      orgName,
+      hmrcLocation,
+      async (path) => {
+        const res = await fetchCh(path);
+        if (res.ok) return res.data;
+        if (isTransientChFailure(res.status)) throw new ChUnavailable();
+        return null;
+      },
+      options,
+    );
+  } catch (error) {
+    if (error instanceof ChUnavailable) return { verdict: 'unavailable' };
+    throw error;
+  }
+}
+
+/** The pipeline itself, over reads that only ever answer with data or a 404. */
+async function resolveFrom(
+  orgName: string,
+  hmrcLocation: HmrcLocation,
+  read: Read,
+  options?: ResolveOptions,
 ): Promise<ResolveResult> {
   const searchPageSize = options?.searchPageSize ?? DEFAULT_SEARCH_PAGE_SIZE;
   const tierBTopN = options?.tierBTopN ?? DEFAULT_TIER_B_TOP_N;
@@ -191,7 +232,7 @@ export async function resolveOneSponsor(
   // nothing at all — "Leaf.fm, ltd", "Landis+Gyr").
   const searchQuery = normaliseSearchQuery(legal) || legal;
 
-  const search = (await fetchApi(
+  const search = (await read(
     `/search/companies?q=${encodeURIComponent(searchQuery)}&items_per_page=${searchPageSize}`,
   )) as CHSearchResponse;
   const items = search?.items ?? [];
@@ -204,7 +245,7 @@ export async function resolveOneSponsor(
   // competes through the normal tiers, so a bogus embedded number just loses.
   const candidates: CHCandidate[] = items.map(searchItemToCandidate);
   if (parsed.companyNumberHint) {
-    const hinted = (await fetchApi(
+    const hinted = (await read(
       `/company/${encodeURIComponent(parsed.companyNumberHint)}`,
     )) as CHFullProfile | null;
     if (hinted) {
@@ -269,7 +310,7 @@ export async function resolveOneSponsor(
     for (const shallow of candidates.slice(0, tierBProbeCount)) {
       const profile =
         profilesByNumber.get(shallow.company_number) ??
-        ((await fetchApi(
+        ((await read(
           `/company/${encodeURIComponent(shallow.company_number)}`,
         )) as CHFullProfile | null);
       if (!profile) continue;
@@ -355,7 +396,7 @@ export async function resolveOneSponsor(
   const verifiedNumber = picked.candidate.company_number;
   let verifiedProfile = profilesByNumber.get(verifiedNumber);
   if (!verifiedProfile) {
-    const fetched = (await fetchApi(
+    const fetched = (await read(
       `/company/${encodeURIComponent(verifiedNumber)}`,
     )) as CHFullProfile | null;
     if (!fetched) {

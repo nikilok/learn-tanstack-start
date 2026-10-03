@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import type { ChResponse } from './ch-lookup';
 import { resolveOneSponsor } from './resolve-sponsor';
 
 type SearchItem = {
@@ -9,15 +10,26 @@ type SearchItem = {
   address?: { locality?: string; region?: string };
 };
 
-/** Ordered route table: first prefix match wins; unmatched paths return null. */
+/** A route that answers with a failed call instead of a payload. */
+class Failed {
+  readonly status: number;
+  constructor(status: number) {
+    this.status = status;
+  }
+}
+
+/** Ordered route table: first prefix match wins; unmatched paths answer 404. */
 function makeFetch(routes: [string, unknown][]) {
   const calls: string[] = [];
-  const fetchApi = async (path: string): Promise<unknown | null> => {
+  const fetchApi = async (path: string): Promise<ChResponse> => {
     calls.push(path);
-    for (const [prefix, payload] of routes) {
-      if (path.startsWith(prefix)) return payload;
+    for (const [prefix, answer] of routes) {
+      if (!path.startsWith(prefix)) continue;
+      return answer instanceof Failed
+        ? { ok: false, status: answer.status }
+        : { ok: true, data: answer };
     }
-    return null;
+    return { ok: false, status: 404 };
   };
   return { fetchApi, calls };
 }
@@ -266,5 +278,132 @@ describe('resolveOneSponsor — query normalisation', () => {
     // "LEAF.FM," vs "LEAF.FM" fails byte-exact Tier A; squash recovers it.
     expect(result.matchMethod).toBe('exact_squash');
     expect(result.queryUsed).toBe('Leaf fm ltd');
+  });
+});
+
+describe('resolveOneSponsor — Companies House gaps', () => {
+  // The active-status preference's own example: HMRC lists 3DC LTD; search
+  // returns the dissolved exact namesake and the active company renamed from
+  // 3DC LTD.
+  const items: SearchItem[] = [
+    {
+      company_number: '00000003',
+      title: '3DC LIMITED',
+      company_status: 'dissolved',
+    },
+    {
+      company_number: '00000004',
+      title: 'SHOP3D LTD',
+      company_status: 'active',
+    },
+  ];
+  const dissolved = {
+    company_number: '00000003',
+    company_name: '3DC LIMITED',
+    company_status: 'dissolved',
+  };
+  const renamed = {
+    company_number: '00000004',
+    company_name: 'SHOP3D LTD',
+    company_status: 'active',
+    previous_company_names: [{ name: '3DC LTD' }],
+  };
+
+  test('a 429 on the renamed company never lets the dissolved namesake verify', async () => {
+    const { fetchApi } = makeFetch([
+      ['/search/companies', { items }],
+      ['/company/00000003', dissolved],
+      ['/company/00000004', new Failed(429)],
+    ]);
+    expect(await resolveOneSponsor('3DC LTD', noLocation, fetchApi)).toEqual({
+      verdict: 'unavailable',
+    });
+  });
+
+  test('a 404 on the renamed company is evidence, so the dissolved namesake verifies', async () => {
+    // What the lost probe above used to be read as: a mapping kept for good.
+    const { fetchApi } = makeFetch([
+      ['/search/companies', { items }],
+      ['/company/00000003', dissolved],
+    ]);
+    expect(
+      await resolveOneSponsor('3DC LTD', noLocation, fetchApi),
+    ).toMatchObject({ verdict: 'verified', companyNumber: '00000003' });
+  });
+
+  test('with every answer in, the renamed company verifies by its previous name', async () => {
+    const { fetchApi } = makeFetch([
+      ['/search/companies', { items }],
+      ['/company/00000003', dissolved],
+      ['/company/00000004', renamed],
+    ]);
+    expect(
+      await resolveOneSponsor('3DC LTD', noLocation, fetchApi),
+    ).toMatchObject({
+      verdict: 'verified',
+      companyNumber: '00000004',
+      matchMethod: 'previous_name',
+    });
+  });
+
+  test('stops at the first failed call', async () => {
+    const { fetchApi, calls } = makeFetch([
+      ['/search/companies', new Failed(503)],
+    ]);
+    expect(
+      await resolveOneSponsor('ACME TRADING LTD', noLocation, fetchApi),
+    ).toEqual({ verdict: 'unavailable' });
+    expect(calls).toHaveLength(1);
+  });
+
+  test('an empty search is still a definitive no_match', async () => {
+    const { fetchApi } = makeFetch([['/search/companies', { items: [] }]]);
+    expect(
+      await resolveOneSponsor('ACME TRADING LTD', noLocation, fetchApi),
+    ).toMatchObject({ verdict: 'no_match' });
+  });
+
+  test('a 404 on a probe is evidence, not a gap', async () => {
+    const { fetchApi } = makeFetch([
+      ['/search/companies', { items: [items[1]] }],
+    ]);
+    expect(
+      await resolveOneSponsor('3DC LTD', noLocation, fetchApi),
+    ).toMatchObject({ verdict: 'no_match' });
+  });
+
+  test('a failed fetch of the embedded company number is unavailable, not a lost hint', async () => {
+    const { fetchApi } = makeFetch([
+      ['/search/companies', { items: [] }],
+      ['/company/10843126', new Failed(503)],
+    ]);
+    expect(
+      await resolveOneSponsor(
+        'JIREH HOMECARE LIMITED (Co Reg: 10843126)',
+        noLocation,
+        fetchApi,
+      ),
+    ).toEqual({ verdict: 'unavailable' });
+  });
+
+  test("a failed fetch of the winner's profile is unavailable, not no_match", async () => {
+    const { fetchApi } = makeFetch([
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: '08065565',
+              title: 'J S B HAULAGE LIMITED',
+              company_status: 'active',
+            },
+          ],
+        },
+      ],
+      ['/company/08065565', new Failed(500)],
+    ]);
+    expect(
+      await resolveOneSponsor('JSB Haulage LTD', noLocation, fetchApi),
+    ).toEqual({ verdict: 'unavailable' });
   });
 });

@@ -73,8 +73,12 @@ sweep(tier):
 ```pseudo
 process(row, changed_by):
   loc       = lookupLocality(row.organisation_name)
-  proposed  = resolveOneSponsor(row.organisation_name, loc, fetchApi)
+  proposed  = resolveOneSponsor(row.organisation_name, loc, fetchCh)
   # proposed.verdict ∈ {verified, public_body, no_match, human_review}
+  # A CH call that still fails after its retries (anything but a 404) stops
+  # the resolver: the row counts as errored and is retried next run, whatever
+  # verdict the gap would have produced (a skipped probe can verify the wrong
+  # company). The same rule as the on-demand lookup.
 
   action = decide(existing = row, proposed)
 
@@ -675,7 +679,7 @@ apps/web/src/lib/phase5/
 
 apps/web/scripts/
   phase5-sweep.ts                       thin CLI: parses --tier flag,
-                                        wires real db / fetchApi /
+                                        wires real db / fetchCh /
                                         upsertProfile into sweep.ts
 
   hydrate-queue-proposed-profiles.ts    one-shot (Step A of the drain):

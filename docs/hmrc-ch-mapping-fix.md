@@ -1077,7 +1077,9 @@ The fix replaces the buggy `else` branch with `resolveOneSponsor` from
 [`src/lib/hmrc-ch/resolve-sponsor.ts`](../apps/web/src/lib/hmrc-ch/resolve-sponsor.ts),
 the same orchestration helper used by the seed and Phase 0b. The
 resolver returns one of four verdicts; each is now persisted with full
-provenance so the row never hits the resolver again on the next visit:
+provenance so the row never hits the resolver again on the next visit.
+A lookup where a Companies House call failed returns `unavailable`
+instead, writes nothing, and resolves again on the next visit:
 
 | Verdict | Mapping row written |
 |---|---|
@@ -1770,10 +1772,11 @@ apps/web/src/lib/hmrc-ch/
                                        STOPWORDS, CORPORATE_SUFFIXES
                             types: CHCandidate, ScoredCandidate, MatchMethod
 
-  resolve-sponsor.ts      Orchestration helper (caller-injected fetchApi):
-                            resolveOneSponsor(orgName, hmrcLocation, fetchApi)
+  resolve-sponsor.ts      Orchestration helper (caller-injected fetchCh):
+                            resolveOneSponsor(orgName, hmrcLocation, fetchCh)
                               → ResolveResult { verdict: verified | public_body
                                               | no_match | human_review }
+                                | { verdict: unavailable }
                             handles search → tier scoring → top-N profile
                             fetch for Tier B → locality tiebreak → fail closed
 ```
@@ -1792,11 +1795,14 @@ Callers:
 | `seed-companies-house.ts` | `resolveOneSponsor` directly |
 | `getCompanyProfile` ([api/companiesHouse.ts](../apps/web/src/api/companiesHouse.ts)) | `resolveOneSponsor` (Phase 3 hardening) |
 | Future: `phase1-apply.ts` | reads staging table, no pipeline calls needed |
-| Future: `phase5-reverify.ts` | `resolveOneSponsor` |
+| `phase5-sweep.ts` (via `lib/phase5/sql.ts` `makeResolveSponsor`) | `resolveOneSponsor` |
 
-The injected-`fetchApi` shape lets each caller bring its own auth,
+The injected `ChFetch` lets each caller bring its own auth,
 rate-limiting, caching, and retry behaviour without the pipeline lib
-needing to know.
+needing to know. It reports each call's status, and only a 404 reads as
+"no such company": any other failure stops the pipeline with
+`unavailable`, because a verdict reached without that answer can be wrong
+(a lost Tier-B probe can verify a dissolved namesake).
 
 ---
 

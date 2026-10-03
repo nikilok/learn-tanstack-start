@@ -20,46 +20,28 @@ import {
 import dotenv from 'dotenv';
 import { asc, eq, isNull, sql } from 'drizzle-orm';
 
+import type { ChFetch } from '../src/lib/hmrc-ch/ch-lookup';
 import { resolveOneSponsor } from '../src/lib/hmrc-ch/resolve-sponsor';
+import { delay, fetchCh } from './lib/ch-client';
 
 dotenv.config({ path: '.env.local' });
 
 const db = createClient(process.env.POSTGRES_URL as string);
 
-const BASE_URL = 'https://api.company-information.service.gov.uk';
 const API_KEY = process.env.COMPANIES_HOUSE_SEED_API_KEY as string;
 if (!API_KEY)
   throw new Error(
     'Set COMPANIES_HOUSE_SEED_API_KEY in .env.local (use a separate key from production)',
   );
 
-const AUTH_HEADER = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
-
 // ~2 requests per second to stay within 600/5min
 const DELAY_MS = 550;
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function fetchApi(path: string): Promise<unknown | null> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { Authorization: AUTH_HEADER },
-  });
-
-  if (res.status === 429) {
-    // Rate limited — back off for 60 seconds then retry
-    console.log('  Rate limited, backing off for 60s...');
-    await sleep(60_000);
-    return fetchApi(path);
-  }
-
-  if (!res.ok) {
-    return null;
-  }
-
-  return res.json();
-}
+/** fetchCh behind the throttle. The resolver calls this 1-4 times per row. */
+const throttledFetchCh: ChFetch = async (path) => {
+  await delay(DELAY_MS);
+  return fetchCh(path);
+};
 
 // Get only org names that aren't already cached, with town/county for the
 // resolver's locality tiebreak. selectDistinctOn(orgName) collapses
@@ -87,6 +69,7 @@ let skipped = 0;
 let publicBody = 0;
 let humanReview = 0;
 let noMatch = 0;
+let unavailable = 0;
 const startTime = Date.now();
 const total = uncached.length;
 
@@ -99,22 +82,16 @@ function formatEta(ms: number) {
 
 function logProgress() {
   const elapsed = Date.now() - startTime;
-  const completed = inserted + noMatch + publicBody + humanReview;
+  const completed = inserted + noMatch + publicBody + humanReview + unavailable;
   const rate = completed > 0 ? elapsed / completed : DELAY_MS * 2;
   const left = total - processed;
   const eta = formatEta(left * rate);
   console.log(
     `[${processed}/${total}] inserted=${inserted} skipped=${skipped} ` +
-      `no_match=${noMatch} public_body=${publicBody} review=${humanReview} | ETA: ${eta}`,
+      `no_match=${noMatch} public_body=${publicBody} review=${humanReview} ` +
+      `unavailable=${unavailable} | ETA: ${eta}`,
   );
 }
-
-// Throttled fetch — sleeps before every call to keep us under CH's 600/5min
-// limit. resolveOneSponsor calls this 1-4 times per row internally.
-const throttledFetchApi = async (path: string) => {
-  await sleep(DELAY_MS);
-  return fetchApi(path);
-};
 
 for (const row of uncached) {
   const orgName = row.organisationName;
@@ -140,8 +117,17 @@ for (const row of uncached) {
   const result = await resolveOneSponsor(
     orgName,
     { townCity: row.townCity, county: row.county },
-    throttledFetchApi,
+    throttledFetchCh,
   );
+
+  // A failed CH call leaves the verdict without evidence: map nothing, so a
+  // later run resolves this organisation.
+  if (result.verdict === 'unavailable') {
+    unavailable++;
+    console.log(`  unavailable: "${orgName}", left for a later run`);
+    if (processed % 100 === 0) logProgress();
+    continue;
+  }
 
   if (result.verdict === 'public_body') {
     publicBody++;
@@ -246,5 +232,6 @@ for (const row of uncached) {
 
 console.log(
   `\nDone! Processed=${processed} Inserted=${inserted} Skipped=${skipped} ` +
-    `NoMatch=${noMatch} PublicBody=${publicBody} HumanReview=${humanReview}`,
+    `NoMatch=${noMatch} PublicBody=${publicBody} HumanReview=${humanReview} ` +
+    `Unavailable=${unavailable}`,
 );

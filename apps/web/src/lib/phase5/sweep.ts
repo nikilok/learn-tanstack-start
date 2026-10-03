@@ -10,7 +10,7 @@
  *
  * All side-effecting dependencies are injected so the orchestration is unit
  * testable. The thin CLI in `apps/web/scripts/phase5-sweep.ts` wires the
- * real db / fetchApi / upsertProfile into these slots.
+ * real db / Companies House fetch / upsertProfile into these slots.
  */
 
 import type { CompareCandidate } from './compare-candidates.ts';

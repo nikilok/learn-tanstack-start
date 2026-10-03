@@ -84,8 +84,8 @@ const limit = limitArg
   : undefined;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CH API client (rate-limit aware) — mirrors phase5-sweep.ts's fetchApi.
-// Kept inline so the script stays self-contained and deletable.
+// CH API client (rate-limit aware). Kept inline so the script stays
+// self-contained and deletable.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';

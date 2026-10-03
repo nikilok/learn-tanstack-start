@@ -358,7 +358,6 @@ const getCompanyProfile = createServerFn()
 
     setCompanyCacheTag(profile.company_number);
 
-    // RPC calls don't inherit the Nitro route rule's s-maxage, so set it explicitly
     setRpcCacheControl(LONG_EDGE_CACHE);
 
     return {

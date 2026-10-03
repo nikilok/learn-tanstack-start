@@ -5,7 +5,7 @@
 /**
  * The fixed path BotID's client loads its challenge from, and under which the challenge makes
  * every call of its own. The rewrites in vercel.json send it to Vercel from Vercel's edge, as
- * BotID's setup asks (locally, the Nitro route rules in vite.config.ts proxy it instead), and the
+ * BotID's setup asks (locally, the Nitro route rules in route-rules.ts proxy it instead), and the
  * edge middleware passes it through untouched (middleware.ts): a call the middleware answers
  * never reaches Vercel, and the challenge then cannot complete.
  */

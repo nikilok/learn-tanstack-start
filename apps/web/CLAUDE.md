@@ -424,7 +424,7 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   deleting it empties the registry and silently breaks new-owner bootstrap (and
   makes the `FLAGS_SECRET` kill-switch irreversible). It is the sole registry
   entry since the `downloads` flag was removed.
-- **`/download` must NEVER get a cache routeRule** (vite.config.ts): the loader
+- **`/download` must NEVER get a cache routeRule** (route-rules.ts): the loader
   SSR-renders owner-specific content (private releases + Publish buttons from
   `getOwnerDesktopReleases`), which is only safe because documents render
   per-request. Caching the document would serve an owner's HTML to everyone.
@@ -453,6 +453,33 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
 
+## Company documents set their own Cache-Control
+
+- **Only `/api/tiles/**` and `/sw.js` may set caching in a route rule**
+  (route-rules.ts, locked by route-rules.test.ts: no `*Cache-Control` header
+  and no `cache`/`swr`/`isr`/`prerender` anywhere else). Nitro writes
+  route-rule headers onto the H3 event before the handler runs and merges them
+  OVER any 2xx `Response` the handler returns (h3 `prepareResponse`), on Vercel
+  too: the function applies route rules itself, and Vercel's edge adds its
+  config copy to responses that set none. A 30-day `/company/**` rule silently
+  replaced the loader's per-request value, so degraded documents were cached
+  30 days instead of 5 minutes; a `/download` rule would replace the owner
+  document's `private, no-store`.
+- **Every edge-cached `/company/**` response sets its own**: 200 documents via
+  `setSsrCacheControl` in the loader, thrown redirects via
+  `redirect({ headers })` (event headers reach 2xx responses only), and a
+  long-cached redirect names the `company-pages` tag there too. 404s are
+  deliberately not edge-cached: only the boundary route's `headers` option
+  (the root's, keyed on `match._notFound`) could reach one. router-core's own
+  canonicalisation 307s (trailing slash, empty `?search=`) carry no header and
+  are not edge-cached either.
+- Check header changes against a production build, not the dev server:
+  `bunx turbo run build --filter=./apps/web`, then
+  `PORT=3101 bun apps/web/.output/server/index.mjs` from the repo root. That
+  shows the function only: for 3xx/4xx also read the first `routes` entry
+  matching the path in `apps/web/.vercel/output/config.json` from a
+  `NITRO_PRESET=vercel` build.
+
 ## /download live Preview — the app iframing itself
 
 `<Preview company platform wallpaper?>` (components/Preview.tsx) renders the real
@@ -477,7 +504,7 @@ user (usePreviewScenario: hydrate → type → real search → click → details
   shared `tsr-scroll-restoration` blob on unload). The shim also means
   DESKTOP_INIT_SCRIPT must stay ordered BEFORE SEARCH_INIT_SCRIPT in
   __root.tsx's head — search-input-init reads sessionStorage.
-- **Framing headers must stay same-origin, not DENY** (vite.config.ts `/**`
+- **Framing headers must stay same-origin, not DENY** (route-rules.ts `/**`
   routeRule): `X-Frame-Options: SAMEORIGIN` + `frame-ancestors 'self'`. Reverting
   to DENY/'none' blanks the preview; cross-site embedding is still blocked.
 - **Focus-stealing needs BOTH guards**: the iframe is `inert` AND SearchBar gates

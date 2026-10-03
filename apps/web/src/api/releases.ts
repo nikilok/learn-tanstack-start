@@ -162,7 +162,8 @@ export const getOwnerDesktopReleases = createServerFn().handler(async () => {
     return { owner: false, releases: [] as DesktopRelease[] };
   }
   // Belt-and-braces for the never-cache invariant: stamp the owner-variant
-  // document too, so a future routeRule or heuristic proxy can't store it.
+  // document too, so a heuristic proxy can't store it. A route rule would
+  // override this stamp, which is why /download must never get one.
   setSsrCacheControl('private, no-store');
   return { owner: true, releases: await loadReleases() };
 });

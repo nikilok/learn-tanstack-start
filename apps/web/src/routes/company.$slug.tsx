@@ -130,21 +130,13 @@ export const Route = createFileRoute('/company/$slug')({
       ? await queryClient.ensureQueryData(options)
       : await queryClient.fetchQuery(options);
 
-    if (!company) {
-      // Best effort: keep the 404 document short-lived at the edge (a
-      // reinstated sponsor can revive the URL). The static /company/**
-      // routeRule header may still win at the edge — the post-ingest deploy
-      // purge bounds the damage either way.
-      setSsrCacheControl(SHORT_EDGE_CACHE);
-      throw notFound();
-    }
+    if (!company) throw notFound();
 
     // One canonical 301 for rename-moved slugs and slug variants alike.
-    // SHORT-cached via the redirect's own headers (setSsrCacheControl does
-    // not survive onto thrown redirects): slug→slug redirects can invert on
-    // a rename flip-flop, and the /company/** routeRule's 30-day s-maxage
-    // would otherwise pin one side of the loop at the edge. Static search
-    // value — SSR redirects must not use a functional `search`.
+    // SHORT-cached via the redirect's own headers, never long: slug→slug
+    // redirects can invert on a rename flip-flop, and a long-cached one would
+    // pin one side of the loop at the edge. Static search value — SSR
+    // redirects must not use a functional `search`.
     const redirectToCanonical = (slug: string) =>
       redirect({
         to: '/company/$slug',
@@ -187,7 +179,6 @@ export const Route = createFileRoute('/company/$slug')({
           })
       : null;
 
-    // Edge-cache the SSR document — the /company/** routeRule loses to TanStack's private,no-store default, so set it explicitly (same reason the RPC does at companiesHouse.ts).
     // Short-cache a document built from incomplete data (a timeline RPC error,
     // or a first visit racing getCompanyProfile's background upsert) so the
     // degraded rendering isn't baked in for 30 days.

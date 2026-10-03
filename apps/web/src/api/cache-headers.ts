@@ -4,9 +4,9 @@ import { getRequestUrl, setResponseHeader } from '@tanstack/react-start/server';
 import { ALL_COMPANY_PAGES_TAG, companyCacheTagHeader } from './cache-tags';
 
 /**
- * Shared `Cache-Control` value for server-fn RPC responses — 30-day edge
- * TTL with 7-day stale-while-revalidate. Used by the long-lived, near-
- * immutable data responses (HMRC rows, Companies House profiles).
+ * 30-day edge TTL with 7-day stale-while-revalidate, for long-lived,
+ * near-immutable responses: data RPCs, company documents and the legacy
+ * hash-URL 301.
  */
 export const LONG_EDGE_CACHE =
   's-maxage=2592000, stale-while-revalidate=604800';
@@ -42,9 +42,10 @@ export const setRpcCacheControl = createIsomorphicFn()
   .client(() => {});
 
 /**
- * Attach a `Cache-Control` header to the current SSR document response.
- * Complement of `setRpcCacheControl` for route loaders that need to override
- * a routeRule default on specific outcomes (e.g. short-cache a 404 document).
+ * Set `Cache-Control` on the current response, document or RPC (not gated on
+ * `/_serverFn/` like `setRpcCacheControl`). It reaches 2xx responses only: a
+ * redirect needs its own `headers`, 404/500 documents get none, and a Nitro
+ * route rule setting the same header overrides it.
  */
 export const setSsrCacheControl = createIsomorphicFn()
   .server((value: string) => {
@@ -52,16 +53,18 @@ export const setSsrCacheControl = createIsomorphicFn()
   })
   .client(() => {});
 
+/** The response header carrying cache tags. A thrown redirect, which no setter reaches, names it in its own `headers`. */
+export const CACHE_TAG_HEADER = 'x-vercel-cache-tag';
+
 /**
  * Attach a cache tag to the current response — SSR document or RPC alike — so
  * the purge pipelines (`server/api/revalidate`, release publishing) invalidate
  * every response carrying the tag with a single `invalidateByTags` call.
- * Server-only; no-op on the client. The sole spelling of the
- * `x-vercel-cache-tag` header.
+ * Server-only; no-op on the client. Reaches 2xx responses only.
  */
 export const setCacheTag = createIsomorphicFn()
   .server((tag: string) => {
-    setResponseHeader('x-vercel-cache-tag', tag);
+    setResponseHeader(CACHE_TAG_HEADER, tag);
   })
   .client(() => {});
 
@@ -71,7 +74,7 @@ export const setCacheTag = createIsomorphicFn()
  * write: setResponseHeader overwrites, so two setCacheTag calls would silently
  * drop the first tag. Every long-cached company SSR document and RPC must use
  * this, never a bare setCacheTag, or the nightly post-sweep purge cannot reach
- * that response.
+ * that response; a long-cached redirect sets the tag in its own headers.
  */
 export function setCompanyCacheTag(companyNumber?: string): void {
   setCacheTag(

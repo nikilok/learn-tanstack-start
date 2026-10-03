@@ -20,6 +20,7 @@ import {
   fetchMappedProfile,
   resolveWithoutGaps,
 } from '../lib/hmrc-ch/ch-lookup';
+import { profileSource } from '../lib/hmrc-ch/profile-source';
 import {
   LONG_EDGE_CACHE,
   setCompanyCacheTag,
@@ -171,85 +172,30 @@ async function upsertProfile(profile: CompanyProfile) {
   });
 }
 
-/**
- * Server fn resolving a company profile for a given HMRC organisation name.
- * Looks up the company number via `hmrc_company_mapping`, returns the cached
- * profile if present, otherwise calls the Companies House API (search →
- * profile) and persists the mapping + profile via `waitUntil`. Returns
- * `null` when Companies House has no such company (verified no-match, public
- * body, 404) and `PROFILE_UNAVAILABLE` when a CH call failed transiently, in
- * which case nothing is persisted.
- */
-const getCompanyProfile = createServerFn()
-  .validator((input: unknown) => input as { companyName: string })
-  .handler(async ({ data: { companyName } }) => {
-    // Look up company number via mapping table
-    const [mapping] = await db
-      .select()
-      .from(hmrcCompanyMapping)
-      .where(eq(hmrcCompanyMapping.organisationName, companyName))
-      .limit(1);
-
-    let profile: CompanyProfile;
-
-    // Never-verified ingestion stubs (companyNumber NULL, verifiedAt NULL —
-    // seeded by ingest-hmrc-csv.ts Step 8 for orgs new to the register) fall
-    // through to the on-demand resolver below, so a first visit still
-    // resolves immediately; the nightly sweep covers the unvisited rest.
-    const isUnresolvedStub =
-      mapping != null && !mapping.companyNumber && mapping.verifiedAt === null;
-
-    if (mapping && !isUnresolvedStub) {
-      // Mapping deliberately points at no CH entity (public body or no_match
-      // outcome from the Phase 1 backfill or a completed sweep). Return null
-      // so the UI suppresses the CH panel and renders base sponsor data only.
-      if (!mapping.companyNumber) return null;
-
-      // Found mapping — fetch profile from cache
+/** The database reads that route getCompanyProfile's lookup for an organisation. */
+function profileReads(companyName: string) {
+  return {
+    mapping: async () => {
+      const [mapping] = await db
+        .select()
+        .from(hmrcCompanyMapping)
+        .where(eq(hmrcCompanyMapping.organisationName, companyName))
+        .limit(1);
+      return mapping;
+    },
+    cachedProfile: async (companyNumber: string) => {
       const [cached] = await db
         .select()
         .from(companiesHouseProfiles)
-        .where(eq(companiesHouseProfiles.companyNumber, mapping.companyNumber))
+        .where(eq(companiesHouseProfiles.companyNumber, companyNumber))
         .limit(1);
-
-      if (cached) {
-        console.log(`[Profile] cache hit: "${cached.companyName}"`);
-        profile = dbRowToProfile(cached);
-      } else {
-        // Mapping exists but profile missing — fetch from API
-        console.log(
-          `[Profile] mapping found but no profile, calling API for: ${mapping.companyNumber}`,
-        );
-        const fetched = await fetchMappedProfile(
-          mapping.companyNumber,
-          fetchFromApi,
-        );
-
-        if (fetched.verdict === 'absent') return null;
-        if (fetched.verdict === 'unavailable') {
-          console.log(
-            `[Profile] CH failure for ${mapping.companyNumber} — reporting unavailable`,
-          );
-          return profileUnavailable();
-        }
-
-        profile = fetched.profile as CompanyProfile;
-        waitUntil(upsertProfile(profile));
-      }
-    } else {
-      // No mapping — run the verified resolution pipeline (parse → search →
-      // tier scoring → locality tiebreak → fail closed). Same code path the
-      // bootstrap seed uses; replaces the legacy items_per_page=1 take-the-
-      // top-hit logic that was silently mapping new sponsors to wrong CH
-      // entities. See docs/hmrc-ch-mapping-fix.md "Phase 3 — on-demand
-      // resolver hardening".
-      console.log(
-        `[Profile] no mapping, resolving via CH for: "${companyName}"`,
-      );
-      // Town/county feed the locality tiebreak; `asc(id)` mirrors
-      // makeLookupSponsor's deterministic first-row pick (one arbitrary
-      // site for multi-site orgs).
-      const [hmrcRow] = await db
+      return cached;
+    },
+    // No row: not on the register, so no CH call. Town/county feed the
+    // locality tiebreak; `asc(id)` mirrors makeLookupSponsor's deterministic
+    // first-row pick (one arbitrary site for multi-site orgs).
+    registerRow: async () => {
+      const [row] = await db
         .select({
           townCity: hmrcSkilledWorkers.townCity,
           county: hmrcSkilledWorkers.county,
@@ -258,12 +204,65 @@ const getCompanyProfile = createServerFn()
         .where(eq(hmrcSkilledWorkers.organisationName, companyName))
         .orderBy(asc(hmrcSkilledWorkers.id))
         .limit(1);
+      return row;
+    },
+  };
+}
+
+/**
+ * Server fn resolving a company profile for a given HMRC organisation name.
+ * Looks up the company number via `hmrc_company_mapping` and returns the
+ * cached profile if present. Otherwise, for an organisation on the register,
+ * calls the Companies House API (search → profile) and persists the mapping +
+ * profile via `waitUntil`. Returns `null` when Companies House has no such
+ * company (verified no-match, public body, 404) or an uncached organisation
+ * is not on the register, and `PROFILE_UNAVAILABLE` when a CH call failed
+ * transiently, in which case nothing is persisted.
+ */
+const getCompanyProfile = createServerFn()
+  .validator((input: unknown) => input as { companyName: string })
+  .handler(async ({ data: { companyName } }) => {
+    const source = await profileSource(profileReads(companyName));
+    // Null suppresses the CH panel; the UI renders base sponsor data only.
+    if (source.kind === 'none') return null;
+
+    let profile: CompanyProfile;
+
+    if (source.kind === 'cached') {
+      console.log(`[Profile] cache hit: "${source.row.companyName}"`);
+      profile = dbRowToProfile(source.row);
+    } else if (source.kind === 'fetch') {
+      console.log(
+        `[Profile] mapping found but no profile, calling API for: ${source.companyNumber}`,
+      );
+      const fetched = await fetchMappedProfile(
+        source.companyNumber,
+        fetchFromApi,
+      );
+
+      if (fetched.verdict === 'absent') return null;
+      if (fetched.verdict === 'unavailable') {
+        console.log(
+          `[Profile] CH failure for ${source.companyNumber} — reporting unavailable`,
+        );
+        return profileUnavailable();
+      }
+
+      profile = fetched.profile as CompanyProfile;
+      waitUntil(upsertProfile(profile));
+    } else {
+      // Unresolved — run the verified resolution pipeline (parse → search →
+      // tier scoring → locality tiebreak → fail closed). Same code path the
+      // bootstrap seed uses; replaces the legacy items_per_page=1 take-the-
+      // top-hit logic that was silently mapping new sponsors to wrong CH
+      // entities. See docs/hmrc-ch-mapping-fix.md "Phase 3 — on-demand
+      // resolver hardening".
+      console.log(
+        `[Profile] no mapping, resolving via CH for: "${companyName}"`,
+      );
       const result = await resolveWithoutGaps(
         companyName,
-        {
-          townCity: hmrcRow?.townCity ?? null,
-          county: hmrcRow?.county ?? null,
-        },
+        source.location,
         fetchFromApi,
       );
 

@@ -90,17 +90,6 @@ describe('startInstance function middleware', () => {
     );
   });
 
-  test('an error next() resolves with, instead of throwing, is replaced too', async () => {
-    // The framework rethrows only truthy errors, so a falsy throw resolves.
-    await expect(run(async () => ({ error: '' }))).rejects.toThrow(
-      SERVER_FN_ERROR_MESSAGE,
-    );
-    await expect(
-      run(async () => ({ error: new Error('Failed query: select 1') })),
-    ).rejects.toThrow(SERVER_FN_ERROR_MESSAGE);
-    expect(errorLog).toHaveBeenCalledTimes(2);
-  });
-
   test('a redirect passes through unlogged', async () => {
     const thrown = redirect({ to: '/privacy' });
     await expect(

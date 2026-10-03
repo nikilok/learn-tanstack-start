@@ -10,11 +10,7 @@ import { clientSafeError, failureLogLine } from './lib/server-fn-errors';
 const serverFnErrors = createMiddleware({ type: 'function' }).server(
   async ({ next, serverFnMeta }) => {
     try {
-      const result = await next();
-      // The framework rethrows only truthy errors; a falsy throw resolves.
-      const resolvedError = (result as { error?: unknown }).error;
-      if (resolvedError !== undefined) throw resolvedError;
-      return result;
+      return await next();
     } catch (error) {
       const safe = clientSafeError(error);
       if (safe !== error) {

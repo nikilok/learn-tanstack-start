@@ -4,9 +4,10 @@ import {
   createStart,
 } from '@tanstack/react-start';
 
+import { setRpcCacheControl } from './api/cache-headers';
 import { clientSafeError, failureLogLine } from './lib/server-fn-errors';
 
-/** Logs a failed server function in one line and hands the caller `clientSafeError`'s replacement. */
+/** Logs a failed server function in one line, marks its RPC response `private, no-store`, and hands the caller `clientSafeError`'s replacement. */
 const serverFnErrors = createMiddleware({ type: 'function' }).server(
   async ({ next, serverFnMeta }) => {
     try {
@@ -15,6 +16,8 @@ const serverFnErrors = createMiddleware({ type: 'function' }).server(
       const safe = clientSafeError(error);
       if (safe !== error) {
         console.error(failureLogLine(serverFnMeta.name, error));
+        // A failed RPC still answers 200, so a Cache-Control set before the throw would stand.
+        setRpcCacheControl('private, no-store');
       }
       throw safe;
     }

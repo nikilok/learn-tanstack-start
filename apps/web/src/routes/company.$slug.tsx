@@ -15,7 +15,7 @@ import {
   setSsrCacheControl,
   setCompanyCacheTag,
 } from '../api/cache-headers';
-import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { fetchCompanyProfile } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
@@ -43,6 +43,7 @@ import {
   websiteView,
 } from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
+import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
 import { displayDomain } from '../lib/company/website';
 import { noteCompanyView } from '../lib/device/beacons';
 import { searchTermInput } from '../lib/search/params';
@@ -162,9 +163,15 @@ export const Route = createFileRoute('/company/$slug')({
       throw redirectToCanonical(company.nameSlug);
     }
 
-    const profile = await queryClient.ensureQueryData(
-      companyProfileQueryOptions(company.licences[0].organisationName),
-    );
+    // A failed lookup degrades the page like a Companies House outage does.
+    const profileResult = await fetchCompanyProfile(
+      queryClient,
+      company.licences[0].organisationName,
+    ).catch((error: unknown) => {
+      console.error('[Profile] load failed:', error);
+      return PROFILE_UNAVAILABLE;
+    });
+    const profile = profileResult?.kind === 'found' ? profileResult : null;
 
     // Auxiliary — a transient failure must not take down the page.
     const timeline = profile?.company_number
@@ -179,10 +186,11 @@ export const Route = createFileRoute('/company/$slug')({
           })
       : null;
 
-    // Short-cache a document built from incomplete data (a timeline RPC error,
-    // or a first visit racing getCompanyProfile's background upsert) so the
-    // degraded rendering isn't baked in for 30 days.
+    // Short-cache a document built from incomplete data (a Companies House
+    // outage, a timeline RPC error, or a first visit racing getCompanyProfile's
+    // background upsert) so the degraded rendering isn't baked in for 30 days.
     const degraded = companyDocumentDegraded({
+      profileUnavailable: profileResult?.kind === 'unavailable',
       hasCompanyNumber: Boolean(profile?.company_number),
       timelineLoaded: Boolean(timeline),
     });

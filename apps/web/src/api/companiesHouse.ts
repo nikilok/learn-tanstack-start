@@ -4,21 +4,29 @@ import {
   hmrcSkilledWorkers,
   toDatedPreviousNames,
 } from '@ss/db';
-import { queryOptions } from '@tanstack/react-query';
+import { type QueryClient, queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { waitUntil } from '@vercel/functions';
 import { asc, eq, isNull } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
+import {
+  PROFILE_UNAVAILABLE,
+  profileStaleTime,
+} from '../lib/company/profile-lookup';
+import {
+  type ChResponse,
+  fetchChApi,
+  fetchMappedProfile,
+  resolveWithoutGaps,
+} from '../lib/hmrc-ch/ch-lookup';
 import {
   LONG_EDGE_CACHE,
   setCompanyCacheTag,
   setRpcCacheControl,
+  TRANSIENT_EDGE_CACHE,
 } from './cache-headers';
 import { loadSicDescriptions } from './sic';
-
-const BASE_URL = 'https://api.company-information.service.gov.uk';
 
 type CompanyProfile = {
   company_name: string;
@@ -135,32 +143,20 @@ function profileToDbRow(profile: CompanyProfile) {
 }
 
 /**
- * Call the Companies House REST API with Basic auth. Returns a discriminated
- * result — `{ ok: true, data }` on success, `{ ok: false, status }` for any
- * non-2xx (including 429 rate-limits). Throws only when the API key env var
- * is missing.
+ * Call the Companies House REST API with the server's key. Never throws for
+ * a failed call (see `fetchChApi`); throws only when the API key env var is
+ * missing.
  */
-async function fetchFromApi(
-  path: string,
-): Promise<{ ok: true; data: unknown } | { ok: false; status: number }> {
+async function fetchFromApi(path: string): Promise<ChResponse> {
   const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
   if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY is not set');
+  return fetchChApi(path, apiKey);
+}
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`,
-    },
-  });
-
-  if (res.status === 429) {
-    return { ok: false, status: 429 };
-  }
-
-  if (!res.ok) {
-    return { ok: false, status: res.status };
-  }
-
-  return { ok: true, data: await res.json() };
+/** getCompanyProfile's result for a transient Companies House failure, edge-cached only long enough to absorb a retry burst. */
+function profileUnavailable() {
+  setRpcCacheControl(TRANSIENT_EDGE_CACHE);
+  return PROFILE_UNAVAILABLE;
 }
 
 /**
@@ -180,7 +176,9 @@ async function upsertProfile(profile: CompanyProfile) {
  * Looks up the company number via `hmrc_company_mapping`, returns the cached
  * profile if present, otherwise calls the Companies House API (search →
  * profile) and persists the mapping + profile via `waitUntil`. Returns
- * `null` when no match is found or any upstream call fails.
+ * `null` when Companies House has no such company (verified no-match, public
+ * body, 404) and `PROFILE_UNAVAILABLE` when a CH call failed transiently, in
+ * which case nothing is persisted.
  */
 const getCompanyProfile = createServerFn()
   .validator((input: unknown) => input as { companyName: string })
@@ -222,13 +220,20 @@ const getCompanyProfile = createServerFn()
         console.log(
           `[Profile] mapping found but no profile, calling API for: ${mapping.companyNumber}`,
         );
-        const profileResult = await fetchFromApi(
-          `/company/${mapping.companyNumber}`,
+        const fetched = await fetchMappedProfile(
+          mapping.companyNumber,
+          fetchFromApi,
         );
 
-        if (!profileResult.ok) return null;
+        if (fetched.verdict === 'absent') return null;
+        if (fetched.verdict === 'unavailable') {
+          console.log(
+            `[Profile] CH failure for ${mapping.companyNumber} — reporting unavailable`,
+          );
+          return profileUnavailable();
+        }
 
-        profile = profileResult.data as CompanyProfile;
+        profile = fetched.profile as CompanyProfile;
         waitUntil(upsertProfile(profile));
       }
     } else {
@@ -253,22 +258,24 @@ const getCompanyProfile = createServerFn()
         .where(eq(hmrcSkilledWorkers.organisationName, companyName))
         .orderBy(asc(hmrcSkilledWorkers.id))
         .limit(1);
-      // resolveOneSponsor has no error verdict — a null from the fetch
-      // callback reads as "not found". Track non-404 failures (429/5xx) so a
-      // CH outage isn't cached as a permanent no_match below.
-      let chFetchFailed = false;
-      const result = await resolveOneSponsor(
+      const result = await resolveWithoutGaps(
         companyName,
         {
           townCity: hmrcRow?.townCity ?? null,
           county: hmrcRow?.county ?? null,
         },
-        async (path) => {
-          const r = await fetchFromApi(path);
-          if (!r.ok && r.status !== 404) chFetchFailed = true;
-          return r.ok ? r.data : null;
-        },
+        fetchFromApi,
       );
+
+      // Any verdict reached without a CH answer is an artifact of the outage,
+      // not evidence — report unavailable and cache nothing, so the next
+      // visit retries instead of inheriting a poisoned mapping.
+      if (result.verdict === 'unavailable') {
+        console.log(
+          `[Profile] CH failure while resolving "${companyName}" — not caching a verdict`,
+        );
+        return profileUnavailable();
+      }
 
       if (result.verdict === 'public_body') {
         // Claim a never-verified ingestion stub if one exists; the verified_at
@@ -294,15 +301,6 @@ const getCompanyProfile = createServerFn()
       }
 
       if (result.verdict === 'no_match' || result.verdict === 'human_review') {
-        // Negative verdicts reached through a failed CH call are artifacts of
-        // the outage, not evidence — serve this request null without caching,
-        // so the next visit retries instead of inheriting a poisoned no_match.
-        if (chFetchFailed) {
-          console.log(
-            `[Profile] CH transport failure while resolving "${companyName}" — not caching ${result.verdict}`,
-          );
-          return null;
-        }
         // human_review (multiple tied candidates) is cached as no_match for the
         // on-demand path: re-running the 5-call pipeline on every visit would
         // be expensive and the verdict won't change without ch-stream data
@@ -361,6 +359,7 @@ const getCompanyProfile = createServerFn()
     setRpcCacheControl(LONG_EDGE_CACHE);
 
     return {
+      kind: 'found' as const,
       company_number: profile.company_number,
       company_status: profile.company_status,
       type: profile.type,
@@ -384,11 +383,21 @@ const getCompanyProfile = createServerFn()
 /**
  * React Query options for `getCompanyProfile`. Keyed by `companyName` to
  * match the server fn's input and dedupe across HMRC rows that share an
- * organisation name but differ by visa route / type-rating. Uses the
- * router-level default `staleTime` (5 min).
+ * organisation name but differ by visa route / type-rating. Private: read
+ * through `fetchCompanyProfile`, never ensureQueryData, which ignores
+ * staleTime and would keep a transient failure until it is garbage-collected.
  */
-export const companyProfileQueryOptions = (companyName: string) =>
+const companyProfileQueryOptions = (companyName: string) =>
   queryOptions({
     queryKey: ['company-profile', companyName],
     queryFn: () => getCompanyProfile({ data: { companyName } }),
+    staleTime: (query) => profileStaleTime(query.state.data),
   });
+
+/** Reads a company's profile through the client cache, honouring staleTime so a cached transient failure is retried once it goes stale. */
+export function fetchCompanyProfile(
+  queryClient: QueryClient,
+  companyName: string,
+) {
+  return queryClient.query(companyProfileQueryOptions(companyName));
+}

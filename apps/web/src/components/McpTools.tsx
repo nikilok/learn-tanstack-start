@@ -2,11 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import '@mcp-b/global';
 
-import { companyProfileQueryOptions } from '../api/companiesHouse';
+import { fetchCompanyProfile } from '../api/companiesHouse';
 import {
   hmrcCompanyBySlugQueryOptions,
   searchHmrcQueryOptions,
 } from '../api/hmrc';
+import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
 import { formatLocation, titleCase } from '../utils';
 
 /**
@@ -129,7 +130,7 @@ export function McpTools() {
     ctx.registerTool({
       name: 'get_uk_visa_sponsor_details',
       description:
-        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). Use the exact name returned by search_uk_visa_sponsors for best results.',
+        'Get detailed information about a specific UK visa sponsor by company name, combining HMRC sponsorship data (location, visa routes, sponsor ratings) with Companies House registration data (company number, status, incorporation date, registered address, industry/SIC descriptions). companiesHouse is null when the sponsor has no Companies House record, or when Companies House could not be reached, in which case companiesHouseError says so. Use the exact name returned by search_uk_visa_sponsors for best results.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -203,16 +204,18 @@ export function McpTools() {
           }
 
           const top = exactRow ?? hmrcResult.rows[0];
-          // The slug fetch settles independently: its failure must not sink
-          // the profile — the fallback below covers exactly that case.
-          const [profile, company] = await Promise.all([
-            queryClient.ensureQueryData(
-              companyProfileQueryOptions(top.organisationName),
+          // Each fetch settles independently: a failed profile reads as
+          // unavailable, and the fallback below covers a failed slug fetch.
+          const [profileResult, company] = await Promise.all([
+            fetchCompanyProfile(queryClient, top.organisationName).catch(
+              () => PROFILE_UNAVAILABLE,
             ),
             queryClient
               .ensureQueryData(hmrcCompanyBySlugQueryOptions(top.nameSlug))
               .catch(() => null),
           ]);
+          const profile =
+            profileResult?.kind === 'found' ? profileResult : null;
 
           // The slug fetch keeps the per-licence route↔rating pairing the
           // search aggregate loses. When every pooled row carries one non-null
@@ -278,6 +281,13 @@ export function McpTools() {
                   industries: profile.sicDescriptions,
                 }
               : null,
+            // An outage must not read as "no Companies House record".
+            ...(profileResult?.kind === 'unavailable'
+              ? {
+                  companiesHouseError:
+                    'Companies House did not respond. This is not a missing record; try again shortly.',
+                }
+              : {}),
           };
 
           return {

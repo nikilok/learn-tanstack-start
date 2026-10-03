@@ -114,7 +114,8 @@ const MAX_VERIFICATIONS = argValue('max-verifications')
 const SNAPSHOT_FILE = argValue('snapshot-file');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CH API client (verify step) — same retry shape as lib/ch-client.ts
+// CH API client (verify step). Retry counts and pauses match lib/ch-client.ts,
+// but this timeout stops at the headers, so a stalled body is not bounded.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BASE_URL = 'https://api.company-information.service.gov.uk';

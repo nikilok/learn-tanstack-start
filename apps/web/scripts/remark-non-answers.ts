@@ -58,12 +58,15 @@ if (!APPLY) {
     '\nDry run: nothing changed. Re-run with --apply to re-mark them.',
   );
 } else if (stale.length) {
+  // Keyed by id AND answer: an extraction can land a fresh answer on a row
+  // between the read above and this write, and that one must stay.
   const updated = (await sql.query(
-    `UPDATE company_answers
+    `UPDATE company_answers AS a
      SET status = 'insufficient_content', answer = NULL, source_urls = '[]'::jsonb
-     WHERE id = ANY($1::int[]) AND status = 'ok'
-     RETURNING id`,
-    [stale.map((row) => row.id)],
+     FROM unnest($1::int[], $2::text[]) AS selected(id, answer)
+     WHERE a.id = selected.id AND a.answer = selected.answer AND a.status = 'ok'
+     RETURNING a.id`,
+    [stale.map((row) => row.id), stale.map((row) => row.answer)],
   )) as { id: number }[];
   console.log(`\nRe-marked ${updated.length} rows.`);
 }

@@ -14,6 +14,7 @@ import {
   type ProfileQuestion,
   shrinkBudgetForOverflow,
   SYSTEM_PROMPT,
+  isNonAnswer,
 } from './extract';
 
 const QUESTIONS: ProfileQuestion[] = [
@@ -120,6 +121,95 @@ describe('parsePageAnswers', () => {
       QUESTIONS,
     );
     expect(blank.ok && blank.answers.what_does).toBe(null);
+  });
+
+  test('a reply about the page instead of the company is "the page does not say"', () => {
+    // Replies the corpus held under status ok before the rule (2026-10-10).
+    for (const reply of [
+      'The provided text does not state what the company does.',
+      'The page does not state what the company does.',
+      'The text does not state what the company does in a single, concise paragraph defining its identity.',
+      'The text provided does not contain a single paragraph describing what the company does.',
+      "The provided text is largely placeholder text ('Lorem ipsum dolor sit amet') and does not contain a clear, one-paragraph identity of the business.",
+      'The provided text is a navigation menu and links for a school website and does not contain a paragraph describing what the company does.',
+      'The page does not provide a one-paragraph identity of the business.',
+      'The provided text is a blog post about home truths about teeth cleaning and does not state the one-paragraph identity of the business.',
+      'The provided text does not state what Care UK does.',
+      'This page contains no description of the company.',
+      'The content provided is insufficient to describe the company.',
+      'The provided text is a blog post about planting the Albert roundabout.',
+      'The provided text is a list of projects or publications associated with Kellenberger–White, including identity and strategy work.',
+      'The provided text is a listing for a record, not a general description of the company’s business.',
+      'The page that you are looking for either does not exist, has been removed, had the name changed or is temporarily unavailable.',
+      'The page you are looking for cannot be found.',
+      'The page is missing.',
+      'The page was not found.',
+      'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+      'There is no information about what the company does.',
+      'The provided text only lists navigation links.',
+      'The provided text is a privacy policy.',
+      'The website appears to be under construction.',
+      'The provided text consists only of a cookie banner.',
+      'The page is a contact form only.',
+      'Not stated.',
+      'Unfortunately, the provided text does not describe what the company does.',
+      'The provided text for Acme Ltd. does not state what the company does.',
+      'The provided text doesn’t state what the company does.',
+      'The provided text is a cookie policy. It does not describe the company.',
+      // Shapes the gap sweep of 2026-10-10 found unread.
+      'The webpage does not describe the company.',
+      'The web page is a 404 error page.',
+      'The text does not identify the company.',
+      'The page does not name the organisation.',
+      'The page is a login screen.',
+      'The page is mostly boilerplate.',
+      'The page is a blog about gardening.',
+    ]) {
+      expect(isNonAnswer(reply)).toBe(true);
+      const parsed = parsePageAnswers(
+        JSON.stringify({ what_does: reply, offerings: [] }),
+        QUESTIONS,
+      );
+      expect(parsed.ok && parsed.answers.what_does).toBe(null);
+    }
+  });
+
+  test("a company's own account is never read as a non-answer, even when it mentions its site or says no", () => {
+    for (const answer of [
+      'Provides domiciliary care across Sussex.',
+      'The website is the online home of Acme Ltd, a family-run bakery in Leeds.',
+      'The company does not sell to the public; it supplies trade customers only.',
+      'This text-processing firm builds document pipelines for publishers.',
+      'The Page Agency is a recruitment consultancy for the legal sector.',
+      'The Website People don’t just build websites, we build brands.',
+      'The Information Lab is a data consultancy that does not outsource delivery.',
+      'The site offers no-nonsense plumbing services across Kent.',
+      'This website provides no-obligation quotes for boiler installations across Leeds.',
+      'The website provides no-win no-fee personal injury representation.',
+      'The content marketing agency has no in-house printing but partners with local presses.',
+      'The site has no shortage of options for garden lovers, from bedding plants to tools.',
+      'The information technology consultancy does not outsource its support desk.',
+      'The content studio cannot be beaten on turnaround; it produces video for brands.',
+      'This content marketing agency does not work with tobacco brands.',
+      // Trades that share a word with a kind of page, or deny something
+      // about their customers (gap sweep, 2026-10-10).
+      'The website is a newsagent and convenience store in Hull.',
+      'The site is a formwork contractor for the construction industry.',
+      'This website is a news and media company covering Yorkshire.',
+      'The website is a listed building consultancy.',
+      'The site is a privacy consultancy helping firms with GDPR.',
+      'The site is a cookie bakery in Leeds.',
+      'The website is a form building tool for small businesses.',
+      'The website is a link building agency.',
+      'The site is a blog marketing agency for retailers.',
+      'The website does not sell to businesses, only to the public.',
+      'The site does not charge companies for listing their vacancies.',
+      'The information technology firm does not tell clients what to buy.',
+      // Live corpus, 2026-10-10: a charity's own account opening on a denial.
+      'There is no known cure for MS - research is ongoing in this field however in the meantime symptom management is key.',
+    ]) {
+      expect(isNonAnswer(answer), answer).toBe(false);
+    }
   });
 
   test('a missing key or wrong shape fails the whole response', () => {

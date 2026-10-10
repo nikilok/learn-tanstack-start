@@ -201,6 +201,39 @@ export type ParsedAnswers =
   | { ok: true; answers: PageAnswers }
   | { ok: false; error: string };
 
+// A reply about the page rather than the company ("The provided text does
+// not state what the company does."): the model was asked for null and said
+// so in words instead. It opens on the text as its subject, then denies
+// something about the company, calls the text something else, or says the
+// page is gone; or it opens on a bare denial. A company's own account that
+// opens on its name (The Website People) is capitalised, which the opener
+// is not, and one that says "no" says it about its trade, not about the
+// company's description.
+const OPENER = String.raw`(?:(?:unfortunately|however),?\s+)?(?:the|this)\s+(?:provided\s+|given\s+|supplied\s+)?(?:text|page|web\s*page|content|website|site|snippet|excerpt|document|information(?!\s+(?:technology|security|systems?|management|services?|governance)\b)|material)(?:\s+provided)?\b`;
+const ABOUT = String.raw`(?:what|who|descri\w*|state\w*|identi\w*|names?\b|paragraph|information|overview|summar\w*|detail\w*|mention\w*|say\w*|specif\w*|explain\w*|determin\w*|tell\w*|reveal\w*|indicat\w*|clarif\w*|disclos\w*)`;
+const DENY = String.raw`(?:(?:does|do|did)\s+not|doesn['’]t|don['’]t|didn['’]t|cannot|can['’]t|lacks?|(?:contains?|provides?|offers?|gives?|has|have|includes?)\s+no(?!-)\b)\b[\s\S]{0,120}?\b${ABOUT}`;
+const GONE = String.raw`(?:cannot\s+be\s+found|could\s+not\s+be\s+found|was\s+not\s+found|is\s+missing|does\s+not\s+exist|has\s+been\s+removed|temporarily\s+unavailable|(?:is|are)\s+(?:not\s+|un)available)`;
+// What a page is called when it is not an account of the company. A noun that
+// is also a trade (news, form, cookie, privacy, list) needs its page sense
+// spelled out, and every noun must end the clause or lead into a page-shaped
+// one: "a cookie bakery" and "a news and media company" are companies.
+const PAGE_KIND = String.raw`(?:placeholder|lorem\s+ipsum|boilerplate|navigation(?:\s+(?:menu|bar|links?|items?|elements?))?|(?:site|dropdown)\s+menu|menu|list(?:ing)?(?:\s+of\s+\w+)?|blog(?:\s+(?:post|article|entry))?|news\s+(?:article|post|item|story|page|feed|section)|privacy\s+(?:policy|notice|statement)|cookie\s+(?:policy|notice|banner|consent)|terms\s+(?:and\s+conditions|of\s+(?:use|service|business))|(?:contact|login|sign[- ]?up|enquiry|booking|registration|web)\s+form|form|404(?:\s+error)?(?:\s+page)?|error(?:\s+(?:page|message|screen))?|login(?:\s+(?:page|screen))?|sign[- ]?in(?:\s+(?:page|screen))?|search\s+results?(?:\s+page)?|links?|headings?|table\s+of\s+contents|under\s+construction|coming\s+soon)`;
+const KIND_END = String.raw`\b(?=\s*(?:[.,;:!?)]|$)|\s+(?:page|only|with|and|or|that|which|for|of|on|in|by|at|to|from|without|showing|listing|containing|discussing|describing|covering|explaining|titled|entitled|headed|dated|written|published|rather|instead|but|so|text|content|copy|material|about)\b)`;
+const KIND = String.raw`(?:is|are|appears\s+to\s+be|seems\s+to\s+be|consists\s+(?:only\s+)?of|contains?\s+only|only\s+(?:lists?|contains?|shows?|includes?))\s+(?:a\s+|an\s+|the\s+|largely\s+|mostly\s+|only\s+|just\s+)*${PAGE_KIND}${KIND_END}`;
+const SHORT = String.raw`(?:is|are)\s+(?:not\s+|in)sufficient|too\s+(?:short|little)`;
+const NON_ANSWER_RE = new RegExp(
+  String.raw`^(?:${OPENER}[\s\S]{0,160}?\b(?:${DENY}|${GONE}|${KIND}|${SHORT})|there\s+is\s+no\s+(?:(?:clear|explicit|specific|single|one-paragraph)\s+)?(?:description|information|mention|statement|paragraph|text|content|identity)\b|no\s+(?:description|information)\b|not\s+(?:stated|specified|provided|available)\b|lorem\s+ipsum\b|insufficient\s+(?:content|information|text)\b)`,
+  'i',
+);
+/** A name as the opener, not the page: The Website People, The Information Lab. */
+const PROPER_OPENER = /^(?:The|This)\s+(?:[A-Z][a-z]*\s+)?[A-Z]/;
+
+/** Whether a prose reply reports on the page instead of answering: "the page does not say", in words. */
+export function isNonAnswer(answer: string): boolean {
+  const text = answer.trim();
+  return NON_ANSWER_RE.test(text) && !PROPER_OPENER.test(text);
+}
+
 /** Validate one candidate object against the question schema. Strict: every
  *  declared key present with its declared shape, or a failure. */
 function validateAnswers(
@@ -234,7 +267,9 @@ function validateAnswers(
         return { ok: false, error: `"${question.slug}" must be string | null` };
       }
       const trimmed = value.trim();
-      answers[question.slug] = trimmed ? trimmed : null;
+      // Said in words, "the page does not say" is still null, never prose.
+      answers[question.slug] =
+        trimmed && !isNonAnswer(trimmed) ? trimmed : null;
       continue;
     }
     if (!Array.isArray(value)) {

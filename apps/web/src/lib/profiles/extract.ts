@@ -225,8 +225,9 @@ const NON_ANSWER_RE = new RegExp(
   String.raw`^(?:${OPENER}[\s\S]{0,160}?\b(?:${DENY}|${GONE}|${KIND}|${SHORT})|there\s+is\s+no\s+(?:(?:clear|explicit|specific|single|one-paragraph)\s+)?(?:description|information|mention|statement|paragraph|text|content|identity)\b|no\s+(?:description|information)\b|not\s+(?:stated|specified|provided|available)\b|lorem\s+ipsum\b|insufficient\s+(?:content|information|text)\b)`,
   'i',
 );
-/** A name as the opener, not the page: The Website People, The Information Lab. */
-const PROPER_OPENER = /^(?:The|This)\s+(?:[A-Z][a-z]*\s+)?[A-Z]/;
+/** A name as the opener, not the page: The Website People, The Information Lab. A page noun before a lowercase word is the page however it is cased. */
+const PROPER_OPENER =
+  /^(?:The|This)\s+(?!(?:(?:Provided|Given|Supplied)\s+)?(?:Text|Page|Web\s?page|Content|Website|Site|Snippet|Excerpt|Document|Information|Material)\s+[a-z])(?:[A-Z][a-z]*\s+)?[A-Z]/;
 
 /** Whether a prose reply reports on the page instead of answering: "the page does not say", in words. */
 export function isNonAnswer(answer: string): boolean {

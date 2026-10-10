@@ -164,6 +164,10 @@ describe('parsePageAnswers', () => {
       'The page is a login screen.',
       'The page is mostly boilerplate.',
       'The page is a blog about gardening.',
+      // A capitalised page subject is still the page.
+      'The Website does not state what Acme does.',
+      'The Provided Text does not describe the company.',
+      'This Website is a placeholder page.',
     ]) {
       expect(isNonAnswer(reply)).toBe(true);
       const parsed = parsePageAnswers(
@@ -183,6 +187,7 @@ describe('parsePageAnswers', () => {
       'The Page Agency is a recruitment consultancy for the legal sector.',
       'The Website People don’t just build websites, we build brands.',
       'The Information Lab is a data consultancy that does not outsource delivery.',
+      'The Text Group does not disclose what it does.',
       'The site offers no-nonsense plumbing services across Kent.',
       'This website provides no-obligation quotes for boiler installations across Leeds.',
       'The website provides no-win no-fee personal injury representation.',

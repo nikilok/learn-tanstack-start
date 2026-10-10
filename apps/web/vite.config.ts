@@ -30,12 +30,6 @@ const config = defineConfig({
   optimizeDeps: {
     exclude: ['@tanstack/start-server-core'],
   },
-  ssr: {
-    // The engine is plain ESM that imports the filter registry, a workspace
-    // package of TypeScript sources Node cannot load on its own. Bundled with
-    // the server build, the registry comes from the same place the app's does.
-    noExternal: ['@nikilok/thoth-engine'],
-  },
 });
 
 export default config;

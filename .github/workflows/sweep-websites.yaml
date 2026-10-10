@@ -55,6 +55,7 @@ concurrency:
 # Least privilege by default; jobs that push declare their own elevation.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   sweep:
@@ -80,7 +81,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Playwright Chromium
         # Optional here: the sweep runs without a browser, as it does when one will not start.

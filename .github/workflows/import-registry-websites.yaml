@@ -36,6 +36,7 @@ concurrency:
 # Least privilege by default; jobs that push declare their own elevation.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   import:
@@ -62,7 +63,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Import registry websites
         shell: bash

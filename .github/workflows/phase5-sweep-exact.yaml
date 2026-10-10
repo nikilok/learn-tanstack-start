@@ -27,6 +27,7 @@ concurrency:
 # Least privilege by default; jobs that push declare their own elevation.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   sweep:
@@ -45,7 +46,7 @@ jobs:
       - name: Run sweep
         uses: ./.github/actions/run-phase5-sweep
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tier: exact
           max-rows: ${{ github.event.inputs.max-rows }}

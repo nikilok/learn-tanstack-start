@@ -12,6 +12,7 @@ concurrency:
 # Least privilege by default; jobs that push declare their own elevation.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   check:
@@ -31,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Typecheck (tsc)
         run: bun run typecheck

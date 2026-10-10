@@ -74,6 +74,7 @@ on:
 # authority than it needs.
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: discover-websites-search
@@ -140,7 +141,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Playwright Chromium
         run: bun x playwright install --with-deps chromium

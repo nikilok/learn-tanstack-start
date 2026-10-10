@@ -75,6 +75,7 @@ concurrency:
 # Least privilege by default; only the version job opts up to contents: write.
 permissions:
   contents: read
+  packages: read
 
 jobs:
   smoke:
@@ -92,7 +93,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build
@@ -444,7 +445,7 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build

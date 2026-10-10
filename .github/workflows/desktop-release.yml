@@ -91,6 +91,8 @@ jobs:
           # only the installer, which otherwise downloads latest Bun.
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build
@@ -441,6 +443,8 @@ jobs:
           # only the installer, which otherwise downloads latest Bun.
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.AI_PACKAGES_TOKEN }}
       - name: Compile main/preload
         working-directory: apps/desktop
         run: bunx electron-vite build

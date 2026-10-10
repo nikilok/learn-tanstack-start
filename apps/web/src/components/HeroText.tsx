@@ -1,6 +1,6 @@
+import { FILTER_DIMENSION_COUNT } from '@ss/search-filters';
 import { Link } from '@tanstack/react-router';
 
-import { FILTER_DIMENSION_COUNT } from '../lib/search/params';
 import { FILTER_SECTIONS } from '../lib/search/sections';
 import Odometer from './Odometer';
 

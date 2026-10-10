@@ -1,9 +1,9 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
+import { parseSearchFilters, type SortKey } from '@ss/search-filters';
 import { createServerFn } from '@tanstack/react-start';
 import { sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import { parseSearchFilters, type SortKey } from '../lib/search/params';
 import { buildNameTermSql } from '../lib/search/prev-name';
 import { buildFilterConditions } from '../lib/search/sql';
 import { SHORT_EDGE_CACHE, setRpcCacheControl } from './cache-headers';

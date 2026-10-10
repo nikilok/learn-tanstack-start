@@ -1,14 +1,14 @@
 import { ADDRESS_COLUMNS } from '@ss/db/constants';
 import { companyWebsites } from '@ss/db/schema';
-import { type SQL, sql } from 'drizzle-orm';
-
-import { publishableWebsiteGate } from '../websites/publishable';
 import {
   industryWords,
   type SearchFilters,
   SIC_SECTIONS,
   typeRatingsFor,
-} from './params';
+} from '@ss/search-filters';
+import { type SQL, sql } from 'drizzle-orm';
+
+import { publishableWebsiteGate } from '../websites/publishable';
 
 // Fragments target the canonical filter-query aliases, which the /search
 // server fn's FROM clause must use:

@@ -1,3 +1,4 @@
+import type { SearchUrlParams } from '@ss/search-filters';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
 
@@ -6,7 +7,6 @@ import {
   setCustomCursorEnabled,
   useCustomCursorEnabled,
 } from '../hooks/useCustomCursorEnabled';
-import type { SearchUrlParams } from '../lib/search/params';
 import { loadStoredFilters } from '../lib/search/persist';
 import { buildCanonical } from '../utils/canonical';
 import { countActiveFilters } from './FiltersButton';

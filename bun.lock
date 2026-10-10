@@ -50,6 +50,7 @@
         "@flags-sdk/vercel": "1.3.0",
         "@mcp-b/global": "^2.3.2",
         "@ss/db": "workspace:*",
+        "@ss/search-filters": "workspace:*",
         "@ss/skyline": "workspace:*",
         "@tailwindcss/vite": "4.3.0",
         "@tanstack/react-devtools": "0.10.5",
@@ -112,6 +113,9 @@
       "dependencies": {
         "@litert-lm/core": "0.14.0",
       },
+    },
+    "packages/search-filters": {
+      "name": "@ss/search-filters",
     },
     "packages/skyline": {
       "name": "@ss/skyline",
@@ -613,6 +617,8 @@
     "@ss/desktop": ["@ss/desktop@workspace:apps/desktop"],
 
     "@ss/gemma": ["@ss/gemma@workspace:packages/gemma"],
+
+    "@ss/search-filters": ["@ss/search-filters@workspace:packages/search-filters"],
 
     "@ss/skyline": ["@ss/skyline@workspace:packages/skyline"],
 

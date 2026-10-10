@@ -15,7 +15,7 @@
  * scorer".
  */
 
-import { routeTypeCompatible } from './route-type-compat.ts';
+import { routeTypeCompatible } from '@ss/search-filters';
 
 /** Structural subset of `CHFullProfile` carrying only the fields the scorer
  *  reads. Loose so it stays compatible with the resolver's profile shape

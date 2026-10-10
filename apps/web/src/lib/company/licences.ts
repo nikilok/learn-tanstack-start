@@ -1,5 +1,6 @@
+import { ratingPriorityFirst, TYPE_RATING_ROWS } from '@ss/search-filters';
+
 import { skilledWorkerFirst, titleCase } from '../../utils';
-import { ratingPriorityFirst, TYPE_RATING_ROWS } from '../search/params';
 
 /** A real (route, rating) pair from ONE licence row — never reassembled from separately-sorted route and rating lists. */
 export type LicencePair = { route: string; rating: string };

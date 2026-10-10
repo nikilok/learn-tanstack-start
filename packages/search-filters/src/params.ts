@@ -4,7 +4,7 @@
 // Enum values verified against prod 2026-07-22 — refresh after ingestion
 // introduces new ones.
 
-import { type HmrcRoute, ROUTE_TYPE_COMPAT } from '../phase5/route-type-compat';
+import { type HmrcRoute, ROUTE_TYPE_COMPAT } from './route-type-compat';
 
 // Route vocabulary derives from the phase5 compat registry so /search and the
 // mapping pipeline can't drift apart.
@@ -722,4 +722,16 @@ export function parseSearchFilters(input: unknown): ParsedSearchFilters {
   }
 
   return { filters, issues };
+}
+
+/** Any raw filter input as the URL carries it once validated: parsed leniently, then serialised. The one form every store, key and comparison uses. */
+export function canonicalSearchParams(input: unknown): SearchUrlParams {
+  return filtersToSearchParams(parseSearchFilters(input).filters);
+}
+
+/** A filter set as a comparable string, whatever order its keys arrived in: the filter query's cache key. */
+export function filterSearchKey(
+  filters: SearchFilters | SearchUrlParams,
+): string {
+  return JSON.stringify(filters, Object.keys(filters).sort());
 }

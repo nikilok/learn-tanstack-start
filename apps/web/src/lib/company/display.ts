@@ -1,10 +1,11 @@
+import { ratingPriorityFirst } from '@ss/search-filters';
+
 import {
   formatLocation,
   normalizeName,
   skilledWorkerFirst,
   titleCase,
 } from '../../utils';
-import { ratingPriorityFirst } from '../search/params';
 import {
   type LicenceRow,
   licencesVary,

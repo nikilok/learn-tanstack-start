@@ -2,7 +2,7 @@ import {
   filtersToSearchParams,
   parseSearchFilters,
   type SearchUrlParams,
-} from './params';
+} from '@ss/search-filters';
 
 const STORAGE_KEY = 'ss-filters';
 

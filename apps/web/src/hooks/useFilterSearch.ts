@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 
 import { searchFiltered } from '../api/filterSearch';
-import { parseSearchFilters, type SearchFilters } from '../lib/search/params';
+import { parseSearchFilters, type SearchFilters } from '@ss/search-filters';
 import { retrySessionCall } from '../lib/session/client';
 import { listingState } from './listing-state';
 

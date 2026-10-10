@@ -12,7 +12,7 @@ import {
 } from '../api/cache-headers';
 import { ALL_COMPANY_PAGES_TAG } from '../api/cache-tags';
 import { getSlugForHash, resolveCompanySlug } from '../api/hmrc';
-import { searchTermInput } from '../lib/search/params';
+import { searchTermInput } from '@ss/search-filters';
 
 /**
  * Legacy hash-URL shim: /company/$id/$slug 301s to the slug-only page. The

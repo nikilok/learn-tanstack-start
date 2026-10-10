@@ -25,7 +25,7 @@ import {
   filtersToSearchParams,
   parseSearchFilters,
   searchTermInput,
-} from '../lib/search/params';
+} from '@ss/search-filters';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import { listingRenderedHere } from '../lib/session/listing';
 import { buildCanonical } from '../utils/canonical';

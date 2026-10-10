@@ -1,5 +1,5 @@
 import { titleCase } from '../../utils';
-import { searchTermInput } from '../search/params';
+import { searchTermInput } from '@ss/search-filters';
 import { CLIENT_RENDER } from '../session/calls';
 
 /**

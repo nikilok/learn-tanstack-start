@@ -125,7 +125,7 @@ export function routeTypeCompatible(
   companyType: string | null | undefined,
 ): boolean {
   if (!companyType) return true;
-  if (!route || !(route in ROUTE_TYPE_COMPAT)) return true;
+  if (!route || !Object.hasOwn(ROUTE_TYPE_COMPAT, route)) return true;
   return ROUTE_TYPE_COMPAT[route as HmrcRoute].has(
     companyType as CHCompanyType,
   );

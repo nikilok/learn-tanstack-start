@@ -3,6 +3,7 @@ import { createServerOnlyFn } from '@tanstack/react-start';
 import { desc, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
+import { COMPANY_NUMBER_RE } from '../lib/company/ids';
 import { collectSicCodes, curateTimeline } from '../lib/timeline/curate';
 import type { TimelineEvent, TrailRow } from '../lib/timeline/types';
 import { loadSicDescriptions } from './sic';
@@ -25,7 +26,7 @@ export const companyTimeline = createServerOnlyFn(
   async (companyNumber: string): Promise<CompanyTimeline | null> => {
     if (
       typeof companyNumber !== 'string' ||
-      !/^[A-Za-z0-9]{1,20}$/.test(companyNumber)
+      !COMPANY_NUMBER_RE.test(companyNumber)
     ) {
       throw new Error('Invalid company number');
     }

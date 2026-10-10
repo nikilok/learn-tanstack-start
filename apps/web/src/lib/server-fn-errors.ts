@@ -17,7 +17,10 @@ export function clientSafeError(error: unknown): unknown {
 }
 
 /** An error's name and message, or the thrown value as text: one line, control characters blanked, cut to `limit` characters. */
-function describe(error: unknown, limit: number): string {
+export function describeError(
+  error: unknown,
+  limit: number = MESSAGE_LIMIT,
+): string {
   const text = (
     error instanceof Error ? `${error.name}: ${error.message}` : String(error)
   ).replace(/[\s\p{Cc}]+/gu, ' ');
@@ -29,9 +32,9 @@ export function failureLogLine(fnName: string, error: unknown): string {
   try {
     const cause =
       error instanceof Error && error.cause !== undefined
-        ? ` (cause: ${describe(error.cause, CAUSE_LIMIT)})`
+        ? ` (cause: ${describeError(error.cause, CAUSE_LIMIT)})`
         : '';
-    return `[ServerFn] ${fnName} failed: ${describe(error, MESSAGE_LIMIT)}${cause}`;
+    return `[ServerFn] ${fnName} failed: ${describeError(error, MESSAGE_LIMIT)}${cause}`;
   } catch {
     return `[ServerFn] ${fnName} failed: [unprintable error]`;
   }

@@ -1,6 +1,5 @@
 import {
-  filtersToSearchParams,
-  parseSearchFilters,
+  canonicalSearchParams,
   type SearchUrlParams,
 } from '@ss/search-filters';
 
@@ -15,9 +14,7 @@ export function loadStoredFilters(): SearchUrlParams | null {
     // neither.
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const params = filtersToSearchParams(
-      parseSearchFilters(JSON.parse(raw)).filters,
-    );
+    const params = canonicalSearchParams(JSON.parse(raw));
     return Object.keys(params).length ? params : null;
   } catch {
     return null;
@@ -27,7 +24,7 @@ export function loadStoredFilters(): SearchUrlParams | null {
 /** Persist an applied filter set; an empty set clears the store. */
 export function storeFilters(params: Record<string, unknown>): void {
   try {
-    const clean = filtersToSearchParams(parseSearchFilters(params).filters);
+    const clean = canonicalSearchParams(params);
     if (Object.keys(clean).length) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
     } else {

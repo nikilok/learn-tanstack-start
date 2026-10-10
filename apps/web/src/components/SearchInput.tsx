@@ -10,7 +10,8 @@ import styles from './SearchInput.module.css';
  * plus imperative DOM sync so parent-driven re-renders don't disrupt in-flight
  * typing; `defaultValue` only re-syncs when the input isn't focused so external
  * search-param updates apply without clobbering the user. `autoFocus` fires
- * once, while `focus` re-focuses on every truthy transition.
+ * once, while `focus` re-focuses on every truthy transition. While `askEnabled`,
+ * ⌘/Ctrl+Enter and an arrow beside the clear button hand the text to `onAsk`.
  */
 export default memo(function SearchInput({
   inputRef,
@@ -20,6 +21,8 @@ export default memo(function SearchInput({
   placeholder,
   autoFocus,
   focus,
+  askEnabled = false,
+  onAsk,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   defaultValue: string;
@@ -28,11 +31,15 @@ export default memo(function SearchInput({
   placeholder?: string;
   autoFocus?: boolean;
   focus?: boolean;
+  askEnabled?: boolean;
+  onAsk?: () => void;
 }) {
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onAskRef = useRef(onAsk);
+  onAskRef.current = askEnabled ? onAsk : undefined;
   const hasAutoFocused = useRef(false);
 
   const syncClearButton = () => {
@@ -100,11 +107,40 @@ export default memo(function SearchInput({
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') inputRef.current?.blur();
+          else if (
+            e.key === 'Enter' &&
+            (e.metaKey || e.ctrlKey) &&
+            onAskRef.current
+          ) {
+            // Plain Enter keeps opening the highlighted result; the modifier
+            // is what /filters applies on too.
+            e.preventDefault();
+            onAskRef.current();
+          }
         }}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 ${askEnabled ? 'pr-[4.5rem]' : 'pr-10'} text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
       />
+      {/* Ask button — beside the clear button while the text can be asked */}
+      {askEnabled && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onAskRef.current?.()}
+          aria-label="Ask this as a question"
+          className="absolute top-1/2 right-10 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+        >
+          <svg
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+            className="h-5 w-5"
+          >
+            <path d="M10 16a.75.75 0 01-.75-.75V6.56L5.03 10.78a.75.75 0 01-1.06-1.06l5.5-5.5a.75.75 0 011.06 0l5.5 5.5a.75.75 0 11-1.06 1.06L10.75 6.56v8.69A.75.75 0 0110 16z" />
+          </svg>
+        </button>
+      )}
       {/* Clear button — visible when text exists */}
       <button
         ref={clearRef}

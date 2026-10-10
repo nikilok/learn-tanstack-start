@@ -17,15 +17,19 @@ const UPPERCASE_WORDS = new Set([
  */
 export function titleCase(str: string | null) {
   if (!str) return '';
-  return str
-    .toLowerCase()
-    .replace(
-      /\b(\d*)([a-z])/g,
-      (_, digits, letter) => digits + letter.toUpperCase(),
-    )
-    .replace(/\b\w+\b/g, (word) =>
-      UPPERCASE_WORDS.has(word.toLowerCase()) ? word.toUpperCase() : word,
-    );
+  return (
+    str
+      .toLowerCase()
+      // A possessive 's after an apostrophe is not a word start: Bishop's,
+      // not Bishop'S. O'Neill still capitalises, since what follows is not s.
+      .replace(
+        /(?<!['’](?=s\b))\b(\d*)([a-z])/g,
+        (_, digits, letter) => digits + letter.toUpperCase(),
+      )
+      .replace(/\b\w+\b/g, (word) =>
+        UPPERCASE_WORDS.has(word.toLowerCase()) ? word.toUpperCase() : word,
+      )
+  );
 }
 
 /** Strips the SEO site-name suffix so the desktop preview's title bar shows just the page name. Mirror of the shell's cleanTitle (apps/desktop/src/main/site.ts) — keep the regexes identical (both copies are covered by matching tests). */

@@ -12,6 +12,49 @@ import dotenv from 'dotenv';
 /** Abort a bulk run once this fraction of processed rows have errored. */
 export const ERROR_RATE_THRESHOLD = 0.1;
 
+/** The value of `--name=value` among the args; undefined when absent. */
+export function flag(
+  args: readonly string[],
+  name: string,
+): string | undefined {
+  return args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=');
+}
+
+/** `--concurrency=N` as a whole number from one to `max`, or `fallback`; anything else ends the run, since zero workers would run nothing and report an empty, all-passing eval. */
+export function parseConcurrency(
+  args: readonly string[],
+  { fallback, max }: { fallback: number; max: number },
+): number {
+  const n = parseStrictInt(
+    flag(args, 'concurrency') ?? String(fallback),
+    'concurrency',
+  );
+  if (n < 1 || n > max) {
+    console.error(`  --concurrency must be from 1 to ${max}`);
+    process.exit(1);
+  }
+  return n;
+}
+
+/** The named env var, or end the run with the hint. */
+export function requireEnv(name: string, hint: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`  ${name} is not set — ${hint}`);
+    process.exit(1);
+  }
+  return value;
+}
+
+/** A share as a whole percentage for a report line; n/a without a denominator. */
+export function pct(n: number, d: number): string {
+  return d ? `${((100 * n) / d).toFixed(0)}%` : 'n/a';
+}
+
 /** Parse a whole non-negative integer; rejects '', '1e3', '10.5', '100abc', and
  *  digit strings above MAX_SAFE_INTEGER (which parseInt would silently round). */
 export function parseStrictInt(raw: string, label: string): number {

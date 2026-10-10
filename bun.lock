@@ -49,6 +49,7 @@
         "@fingerprintjs/fingerprintjs": "5.2.0",
         "@flags-sdk/vercel": "1.3.0",
         "@mcp-b/global": "^2.3.2",
+        "@nikilok/thoth-engine": "file:../../../thoth/packages/engine",
         "@ss/db": "workspace:*",
         "@ss/search-filters": "workspace:*",
         "@ss/skyline": "workspace:*",
@@ -1845,6 +1846,8 @@
     "@solid-primitives/refs/@solid-primitives/utils": ["@solid-primitives/utils@6.4.1", "", { "peerDependencies": { "solid-js": "^1.6.12" } }, "sha512-ISSB5QX1qP2ynrheIpYwc4oKR5Ny4siNuUyf1qZniy+Il+p/PtDB0QK1Dnle8noiHpwRD3gpPdubOC3qI/Zamg=="],
 
     "@solid-primitives/trigger/@solid-primitives/utils": ["@solid-primitives/utils@6.4.1", "", { "peerDependencies": { "solid-js": "^1.6.12" } }, "sha512-ISSB5QX1qP2ynrheIpYwc4oKR5Ny4siNuUyf1qZniy+Il+p/PtDB0QK1Dnle8noiHpwRD3gpPdubOC3qI/Zamg=="],
+
+    "@ss/web/@nikilok/thoth-engine": ["@nikilok/thoth-engine@file:../thoth/packages/engine", { "dependencies": { "@ss/search-filters": "workspace:*" }, "devDependencies": { "drizzle-orm": "^0.45.2" }, "peerDependencies": { "drizzle-orm": "^0.45.2" } }],
 
     "@ss/web/@tailwindcss/vite": ["@tailwindcss/vite@4.3.0", "", { "dependencies": { "@tailwindcss/node": "4.3.0", "@tailwindcss/oxide": "4.3.0", "tailwindcss": "4.3.0" }, "peerDependencies": { "vite": "^5.2.0 || ^6 || ^7 || ^8" } }, "sha512-t6J3OrB5Fc0ExuhohouH0fWUGMYL6PTLhW+E7zIk/pdbnJARZDCwjBznFnkh5ynRnIRSI4YjtTH0t6USjJISrw=="],
 

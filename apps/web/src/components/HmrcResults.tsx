@@ -1,12 +1,20 @@
 import { useRouter } from '@tanstack/react-router';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import type { HmrcRow } from '../api/hmrc';
 import { restoresScroll, wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
+import type { AskHint } from '../lib/ask/session';
+import { nextSceneLast, sceneShown } from '../lib/search/empty-state';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
   formatLocation,
@@ -57,10 +65,13 @@ export default function HmrcResults({
   search,
   filtersActive = false,
   data,
+  ask = null,
 }: {
   search: string;
   filtersActive?: boolean;
   data: SponsorResultsData;
+  /** What the no-results message says about asking the text (lib/ask/session), when the parent has something to say. */
+  ask?: AskHint | null;
 }) {
   const {
     results,
@@ -303,22 +314,39 @@ export default function HmrcResults({
   // The full-bleed black-hole "no organisations found" scene. It must persist across
   // the brief isLoading flips that happen while refining a search that stays empty —
   // otherwise the fullscreen hole would unmount → remount (replaying its zoom + GPU
-  // setup) on every committed term. `wasEmptyRef` remembers that the prior settled
-  // state was empty, so a refine FROM empty keeps the scene up instead of flashing
+  // setup) on every committed term. `sceneLastRef` remembers that the prior settled
+  // state was the scene, so a refine FROM it keeps the scene up instead of flashing
   // skeletons; it resets once results arrive or the query drops below 3 chars.
   const confirmedEmpty =
     !isLoading && !failed && queryActive && results.length === 0;
-  const wasEmptyRef = useRef(false);
+  // The text can be asked instead (lib/ask): nothing is claimed not found
+  // while the offer stands or the ask runs, and the parent keeps the offer up
+  // through the load of a text that only adds to the one it stood on. The
+  // scene is for the ask's own empty answer, or a text that cannot be asked,
+  // which is every text today's flow saw.
+  const quiet =
+    ask !== null &&
+    (ask.status === 'eligible' || ask.status === 'pending') &&
+    (confirmedEmpty || isLoading);
+  // Whether the scene was the last settled empty view, so a refine-load from
+  // it keeps the WebGPU hole mounted (no zoom replay) while one from the
+  // quiet offer does not pretend there was a hole (lib/search/empty-state).
+  const sceneLastRef = useRef(false);
   useEffect(() => {
-    if (confirmedEmpty) wasEmptyRef.current = true;
-    else if (results.length > 0 || !queryActive) wasEmptyRef.current = false;
-  }, [confirmedEmpty, results.length, queryActive]);
-  // The loading disjunct keeps the WebGPU hole mounted across refine-loads (no zoom
-  // replay). It's gated on hasWebGpu() because without a hole there's nothing to preserve
-  // — keeping the (message-gated-off) scene up would just show a blank layer, so a
-  // no-WebGPU client falls through to skeletons instead. (search>=3 holds at the use site.)
-  const showScene =
-    confirmedEmpty || (isLoading && wasEmptyRef.current && hasWebGpu());
+    sceneLastRef.current = nextSceneLast(sceneLastRef.current, {
+      confirmedEmpty,
+      quiet,
+      hasRows: results.length > 0,
+      queryActive,
+    });
+  }, [confirmedEmpty, quiet, results.length, queryActive]);
+  const showScene = sceneShown({
+    quiet,
+    confirmedEmpty,
+    loading: isLoading,
+    sceneLast: sceneLastRef.current,
+    webGpu: hasWebGpu,
+  });
 
   if (!filtersActive && search.length === 0) return null;
 
@@ -379,36 +407,69 @@ export default function HmrcResults({
                   ? `No organisations found matching “${search}” with your filters`
                   : 'No organisations match these filters'}
             </p>
-            {/* Users forget filters are on — offer the exit right where the dead end happens.
-                Same semantics AND styling as /filters' Reset, minus its `R` keycap: this
-                surface is type-to-search, so a bare letter belongs to the input. */}
-            {filtersActive && (
-              <button
-                type="button"
-                onClick={() => {
-                  storeFilters({});
-                  void router
-                    .navigate({ to: '/', search: { search } })
-                    .then(() => {
-                      // Land in the normal starting state (see /filters' apply).
-                      window.scrollTo(0, 0);
-                      requestAnimationFrame(() => window.scrollTo(0, 0));
-                    });
-                }}
-                className="cursor-pointer rounded-full border-none bg-(--logo-red) px-4 py-2 text-sm font-medium text-(--bg-base) shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)] transition hover:opacity-90"
-              >
-                Reset filters
-              </button>
-            )}
+            {/* The ask itself had nothing to offer for this text (lib/ask). */}
+            {ask &&
+              (ask.status === 'empty' || ask.status === 'unavailable') && (
+                <p
+                  className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink-soft) shadow-md backdrop-blur-md"
+                  style={{
+                    backgroundColor:
+                      'color-mix(in srgb, var(--surface) 85%, transparent)',
+                  }}
+                  aria-live="polite"
+                >
+                  {ask.status !== 'empty'
+                    ? 'Ask isn’t available right now.'
+                    : ask.reason === 'name'
+                      ? 'That reads as one organisation’s name, and it isn’t on the register.'
+                      : ask.reason === 'beyond'
+                        ? 'That asks for something the register doesn’t hold.'
+                        : ask.reason === 'unmatched'
+                          ? 'Nothing we’ve read on a sponsor’s website describes that.'
+                          : 'Couldn’t turn that into filters.'}
+                </p>
+              )}
+            {/* Users forget filters are on — offer the exit right where the dead end happens. */}
+            {filtersActive && <ResetFilters search={search} />}
           </div>
         )}
-        {/* Hidden width-measurement div (same px-4 as the list) so `ready` is set during
-            the scene — else a later cached refine flashes skeletons just to measure width. */}
-        <div
-          ref={listRef}
-          className="px-4"
-          style={{ height: 0, overflow: 'hidden' }}
-        />
+        {/* Width measurement during the scene (WidthProbe carries the list's gutter) so
+            `ready` is set — else a later cached refine flashes skeletons just to measure it. */}
+        <WidthProbe listRef={listRef} />
+      </>
+    );
+  }
+
+  // Nothing by name, but the text can be asked: the page stays as it is, with
+  // only the offer where the rows would be. In filter mode the dead end still
+  // needs its exit: the filters are on, and the ask would overlay them.
+  if (quiet) {
+    return (
+      <>
+        {ask?.status === 'pending' ? (
+          // The ask is loading a listing: skeletons, as any listing load.
+          <SkeletonCards />
+        ) : (
+          <div className="mt-6 flex flex-col items-center gap-3">
+            <p
+              className="text-center text-sm text-(--sea-ink-soft)"
+              aria-live="polite"
+            >
+              {ask?.shortcut ? (
+                <>
+                  Press <kbd>{ask.shortcut}</kbd> <kbd>↵</kbd> to ask this as a
+                  question
+                </>
+              ) : (
+                'Tap the arrow to ask this as a question'
+              )}
+              {filtersActive && ', or search without your filters'}
+            </p>
+            {filtersActive && <ResetFilters search={search} />}
+          </div>
+        )}
+        {/* Width measurement, as on the scene, so a later refine never flashes skeletons for it. */}
+        <WidthProbe listRef={listRef} />
       </>
     );
   }
@@ -417,18 +478,14 @@ export default function HmrcResults({
     return (
       <>
         <SkeletonCards />
-        {/* Hidden element for width measurement — same px-4 as the real container */}
-        <div
-          ref={listRef}
-          className="px-4"
-          style={{ height: 0, overflow: 'hidden' }}
-        />
+        {/* Width measurement while no list is rendered (WidthProbe carries its gutter). */}
+        <WidthProbe listRef={listRef} />
       </>
     );
   }
 
   return (
-    <div ref={listRef} className="mt-6 px-4 py-2">
+    <div ref={listRef} className={`mt-6 ${LIST_GUTTER} py-2`}>
       <div
         style={{
           height: virtualizer.getTotalSize(),
@@ -519,5 +576,50 @@ export default function HmrcResults({
         )
       )}
     </div>
+  );
+}
+
+// The results container's horizontal padding. The width probes below carry
+// the same class so `ready`'s width measurement matches the real list in
+// every branch that renders no list (CLAUDE.md "Virtual list sizing").
+const LIST_GUTTER = 'px-4';
+
+/** The hidden element the content-box width is measured on while no list is rendered. */
+function WidthProbe({
+  listRef,
+}: {
+  listRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      ref={listRef}
+      className={LIST_GUTTER}
+      style={{ height: 0, overflow: 'hidden' }}
+    />
+  );
+}
+
+/**
+ * The exit from filter mode where a dead end happens. Same semantics AND
+ * styling as /filters' Reset, minus its `R` keycap: this surface is
+ * type-to-search, so a bare letter belongs to the input.
+ */
+function ResetFilters({ search }: { search: string }) {
+  const router = useRouter();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        storeFilters({});
+        void router.navigate({ to: '/', search: { search } }).then(() => {
+          // Land in the normal starting state (see /filters' apply).
+          window.scrollTo(0, 0);
+          requestAnimationFrame(() => window.scrollTo(0, 0));
+        });
+      }}
+      className="cursor-pointer rounded-full border-none bg-(--logo-red) px-4 py-2 text-sm font-medium text-(--bg-base) shadow-[0_0_10px_1px_color-mix(in_srgb,var(--logo-red)_50%,transparent)] transition hover:opacity-90"
+    >
+      Reset filters
+    </button>
   );
 }

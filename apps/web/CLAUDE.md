@@ -193,8 +193,9 @@ AND present** (inline ≥sm costs nothing); rating and chip are always present a
      items truncate, never wrap). If you ever let the name or a metadata field wrap, you
      must convert it back into a measured `fields[]` entry (real text, real font) AND
      remove its fixed contribution from `fixedHeight` — the two move together.
-2. **`HmrcResults.tsx`** — the hidden measurement div's `className="px-4"` (loading
-   branch) must match the real results container's horizontal padding class.
+2. **`HmrcResults.tsx`** — `LIST_GUTTER` is the results container's horizontal padding
+   class, and the `WidthProbe` every list-less branch renders carries it, so the width
+   measurement always matches the real list. Change the class there only.
 
 ### How the readiness gating works
 
@@ -205,7 +206,12 @@ Items only render when three conditions are met:
 3. **Width** — container content-box width measured via `useLayoutEffect` on a hidden div
 
 Until all three are ready, `<SkeletonCards />` stays visible. This prevents layout shifts
-from fallback font measurements or missing width data.
+from fallback font measurements or missing width data. Two exceptions, by design (both in
+lib/search/empty-state): while the ask's offer holds (`quiet` in HmrcResults), the load of a
+text that only adds to the one the offer stood on renders the offer, not skeletons, so a word
+added to an empty text never flickers through them; and a refine-load from the no-results
+scene keeps the WebGPU hole mounted rather than replaying its zoom. Every other load, the
+ask's own included, is skeletons.
 
 ### Scroll restoration depends on `ready`
 
@@ -423,6 +429,13 @@ built-ins), whose names `owner.server.ts` and `flags.server.ts` import rather th
 spell. It reads `FLAGS_SECRET` as Node's Buffer does under the `flags` package,
 skipping stray characters, or a secret re-entered with quotes would still open
 /download and nothing else.
+`isOwnerRequest` also leaves a readable, non-httpOnly `ss-owner-hint=1` beside it
+(lib/ask/access-hint.ts): not a credential, it only lets the home page know at mount that
+asking is open, so an owner's offer never waits on a mint and nobody else mints to find out.
+The home document's `beforeLoad` sets it the same way (lib/ask/access-hint.server), and a
+request that may not ask has it expired there and by the ask's mint, so a rotated secret
+closes the offer on the next document. A forged or stale hint shows an offer the mint then
+refuses; the server decides every request.
 
 - **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
   (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie

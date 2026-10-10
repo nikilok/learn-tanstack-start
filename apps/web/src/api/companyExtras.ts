@@ -10,39 +10,25 @@ import {
   type ExtrasPage,
   type ExtrasResponse,
 } from '../lib/company/extras-loader';
+import { COMPANY_NUMBER_RE } from '../lib/company/ids';
 import {
   type CompanyPageRow,
   companyPageRowsSql,
   SLUG_RE,
 } from '../lib/company/page-rows';
 import { ownerOrBrowser } from '../lib/device/browser-check.server';
-import { DEVICE_KEY_RE } from '../lib/device/key';
+import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
 import { websiteLinkSql } from '../lib/websites/link-url';
 import { publishableWebsiteGate } from '../lib/websites/publishable';
 import { setRpcCacheControl } from './cache-headers';
 
-// Tokens are a fixed 54 characters; anything much longer is not one.
-const TOKEN_MAX_LENGTH = 128;
-
-// Same shape the company_websites and mapping columns hold.
-const COMPANY_NUMBER_RE = /^[A-Za-z0-9]{1,20}$/;
-
 // A licence row's slugId: an 11-character base64url hash.
 const SLUG_ID_RE = /^[\w-]{11}$/;
 
 // A slug holds a handful of licence rows; this only bounds the payload.
 const MAX_SLUG_IDS = 50;
-
-/** The device key from an RPC payload, or a throw: a well-formed key is required by both fns. */
-function deviceKey(input: unknown): string {
-  const key = (input as { key?: unknown } | null)?.key;
-  if (typeof key !== 'string' || !DEVICE_KEY_RE.test(key)) {
-    throw new Error('Invalid input');
-  }
-  return key;
-}
 
 /**
  * Server fn issuing a token for a device key; the page calls it before its

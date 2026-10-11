@@ -15,11 +15,7 @@ import {
   sessionSecret,
 } from './token';
 
-/**
- * What the browser is told: `ok` when it holds a session, `refused` when the browser check named
- * it automated under `enforce`, and `off` when no session is issued at all (DOCUMENT_MODE unset,
- * no secret, or no address to bind one to).
- */
+/** What the browser is told: `ok` (it holds a session), `refused`, or `off` (none are issued). */
 export type SessionAnswer = 'ok' | 'refused' | 'off';
 
 function cookie(
@@ -49,14 +45,9 @@ export type IssueDeps = {
 };
 
 /**
- * The answer to `POST /api/session`: issue the browser a session bound to its address, or confirm
- * the one it holds. A session held for this address with time to run is confirmed without asking
- * the browser check, so a page load costs a check only when a session is issued.
- *
- * The check decides who gets one: a person, or a browser the check could not judge (it failed —
- * as an unreadable suspended list suspends nobody). A browser it names automated, verified
- * crawlers included, is refused under `enforce`; under `observe` it is issued an `unverified`
- * session, which the edge treats as none. Never throws.
+ * The answer to `POST /api/session`: confirms a session held for this address with time to run,
+ * or issues one if the browser check passes (or cannot run). Under `observe` a failed check is
+ * issued an `unverified` session, which the edge treats as none. Never throws.
  */
 export async function sessionResponse(
   headers: Headers,

@@ -19,11 +19,7 @@ function shownAt(i: number, phone: number, wide: number): string {
   return i < phone ? 'flex sm:hidden' : 'hidden sm:flex';
 }
 
-/**
- * Lines of text that has not loaded: `phone` lines below the `sm` breakpoint and `wide` from it,
- * each the height of a line of the surrounding text (`1lh`) and held by a bar. The last is `last`
- * wide, as a paragraph's last line is short.
- */
+/** Placeholder lines, each one line of the surrounding text high (`1lh`): `phone` below `sm`, `wide` from it. */
 function Lines({
   phone,
   wide = phone,
@@ -65,10 +61,7 @@ function StatusPending() {
   );
 }
 
-/**
- * One `CompanyTimeline` row before its event loads: the rail's dot, the date (an inline line of
- * the row's own height, as the date is), the title and, on all but the last, one more line.
- */
+/** A `CompanyTimeline` row before its event loads: dot, date, title and, but for the last, a detail line. */
 function TimelineRowPending({ last }: { last: boolean }) {
   return (
     <li className="flex gap-2.5">
@@ -93,11 +86,9 @@ function TimelineRowPending({ last }: { last: boolean }) {
 }
 
 /**
- * The company page before its company has loaded: the page's own frame, with its cards, field and
- * section titles, map frame and links, and every value held by a placeholder of that value's
- * height, so the page does not move when the values land. It is drawn to the most common company
- * page: a Companies House record, one licence, one industry code and three timeline rows. Pages
- * shaped otherwise move only where they differ. `back` is the way back to the search.
+ * The company page's frame while its data loads: its cards, titles, map frame and links, with each
+ * value a placeholder of its height. Drawn to the most common page (a Companies House record, one
+ * licence, one SIC code, three timeline rows). `back` is the way back to the search.
  */
 export function CompanyScaffold({ back }: { back?: ReactNode }) {
   return (

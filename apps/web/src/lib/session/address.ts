@@ -62,10 +62,7 @@ export function clientAddress(headers: Headers): string | null {
   return null;
 }
 
-/**
- * The part of an address a session is bound to: an IPv4 address whole, and an IPv6 address by its
- * /64 network, inside which a device's own addresses rotate. Null for anything else.
- */
+/** The part of an address a session is bound to: IPv4 whole, IPv6 by its /64. Null otherwise. */
 export function addressScope(address: string): string | null {
   if (isIPv4(address)) return address;
   const groups = ipv6Groups(address);

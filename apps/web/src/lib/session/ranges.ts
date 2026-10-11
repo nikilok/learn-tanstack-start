@@ -92,9 +92,8 @@ const readStored: ReadRanges = async () => {
 const REREAD_MS = 60_000;
 
 /**
- * A reader of the list that reads it at most once a minute. A read that fails keeps the last list
- * read whole; with none, it answers null, and so does a list that is missing or unreadable — which
- * every caller treats as "serve everyone the full document". Never throws.
+ * Reads the list at most once a minute, keeping the last good list when a read fails. Null (no
+ * usable list) means everyone is served the full document. Never throws.
  */
 export function createRangesReader(
   read: ReadRanges = readStored,

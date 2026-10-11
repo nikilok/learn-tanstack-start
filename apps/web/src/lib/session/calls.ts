@@ -7,9 +7,8 @@ export const SESSION_PATH = '/api/session';
 export const SESSION_COOKIE = 'ss-session';
 
 /**
- * A readable cookie beside it holding only the session's expiry, in epoch seconds. Not a
- * credential: it lets the page know at load whether a session is likely held, so its calls need
- * not wait for one to be issued. The edge decides every request.
+ * A readable cookie beside it holding only the session's expiry (epoch seconds), so a /download
+ * preview frame can tell its page holds one. Not a credential.
  */
 export const SESSION_HINT_COOKIE = 'ss-session-hint';
 

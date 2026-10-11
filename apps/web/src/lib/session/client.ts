@@ -38,9 +38,8 @@ export type SessionDeps = {
 };
 
 /**
- * This document's session: asked for once per load, and again when a call comes back refused for
- * want of one. Calls never wait for it up front, so a page whose calls need no session — the
- * switch off, or a session already held — pays nothing for it.
+ * This document's session: asked for once per load, and again when a call is refused for want of
+ * one. Calls never wait for it up front.
  */
 export function createSession(deps: SessionDeps) {
   let first: Promise<boolean> | null = null;

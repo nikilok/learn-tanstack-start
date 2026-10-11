@@ -4,10 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { CompanyScaffold } from './CompanyScaffold.tsx';
 
-// The frame is everything a company page shows that is not the company: its titles, and the
-// links' names. Every value is a placeholder. Read off the real markup: block ends become line
-// breaks, every other tag a space; the logos are images, and the no-JavaScript note is dropped, as
-// a browser running the page never shows it.
+// The frame's visible text: the page's titles and link names, never a value. Logos are images, and
+// the no-JavaScript note never shows in a browser running the page.
 const visibleText = () =>
   renderToStaticMarkup(<CompanyScaffold />)
     .replace(/<svg.*?<\/svg>/gs, ' ')

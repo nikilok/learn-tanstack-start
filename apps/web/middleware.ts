@@ -115,11 +115,9 @@ function shellUrl(url: URL): URL {
 }
 
 /**
- * A company page under DOCUMENT_MODE. A crawler, and a browser holding a session for its address,
- * get the full server-rendered document; anyone else gets the app shell, which loads the page's
- * data in the browser. The shell is rendered from its own URL, so the two never share a cache
- * entry, and a shell URL asked for directly is served as the decision says. `observe` logs the
- * decision and serves the document.
+ * A company page under DOCUMENT_MODE: the full document for a crawler or a session holder, the app
+ * shell otherwise. The shell has its own URL, so the two never share a cache entry. `observe` only
+ * logs.
  */
 async function companyDocument(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -137,10 +135,9 @@ async function companyDocument(request: Request): Promise<Response> {
 }
 
 /**
- * A call for a company page's data, which only a crawler or a session may make. Under `enforce`
- * anyone else is refused here, ahead of the cache, so a refused call never reaches an answer
- * cached for an allowed one. The refusal is never cached, and names itself so the browser can
- * renew its session and call again. `observe` logs the refusal it would make.
+ * A company data call: under `enforce`, refused here without a session, ahead of the cache. The
+ * refusal is never cached and names itself, so the browser renews its session and calls again.
+ * `observe` only logs.
  */
 async function sessionCall(request: Request): Promise<Response> {
   const mode = documentMode();

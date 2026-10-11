@@ -16,12 +16,8 @@ export function documentMode(
 }
 
 /**
- * How a request is served, and why. `server` is the full server-rendered document and a session
- * call answered; `client` is the app shell, which loads its data in the browser, and a session
- * call refused.
- *
- * Every reason the decision cannot be made — no list of crawler ranges, no address, no secret —
- * is `server`: a request this cannot place is served as it would be without it.
+ * How a request is served, and why: `server` is the full document (a data call answered), `client`
+ * the app shell (a data call refused). Anything that cannot be decided is `server`.
  */
 export type Decision =
   | {

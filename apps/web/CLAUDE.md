@@ -482,54 +482,34 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
 
 ## Company pages by session — cross-file invariants
 
-`DOCUMENT_MODE` (Vercel env) switches it: unset is off, `observe` decides and
-logs every company page and data call while changing nothing, `enforce` acts.
-The edge middleware decides each request (`src/lib/session/decide.ts`): an
-address in the crawler ranges (Global Config item `crawlerRanges`, CIDRs), or a
-browser holding a session for its address, gets the full server-rendered
-document; anyone else gets the app shell, and the page loads its data in the
-browser. A session is the httpOnly `ss-session` cookie, signed with a key
-derived from `ENGAGE_TOKEN_SECRET` and bound to the address it was issued to
-(IPv4 whole, IPv6 by /64). `POST /api/session` issues it once the browser check
-passes (`CHECKED_CALLS`), and confirms a held one without a check.
+`DOCUMENT_MODE` (Vercel env): unset is off, `observe` logs every decision and
+changes nothing, `enforce` acts. The edge middleware (`src/lib/session/`) gives
+a crawler address (Global Config `crawlerRanges`) or a browser with a session
+the full document, and anyone else the app shell. A session is the httpOnly
+`ss-session` cookie, bound to the visitor's address and issued by
+`POST /api/session`.
 
-- **The decision runs at the edge because it must run before the cache.** Company
-  documents and data calls are edge-cached for 30 days; a decision in the
-  function would never see a cache hit.
-- **The shell and the full document are never one cache entry.** The edge
-  rewrites a shell request to the same path plus `?render=client`
-  (`RENDER_PARAM`), its own cache key; the plain URL only ever holds the full
-  document, and a shell URL asked for directly is served as the decision says.
-- **The company route must keep declaring `render`** in `validateSearch`.
-  router-core redirects any URL to its canonical form (the validated search):
-  undeclared, the shell URL 307s to the plain one, which the edge rewrites back.
-  The route's `ssr` option renders `render=client` client-only and caches it
-  like the full page; `head` then names the page from its slug, and keeps that
-  name in the browser while the data loads (`shownWithoutData`: the browser's
-  address never carries the mark).
-- **The shell carries no company data**: not in markup, not in the dehydrated
-  router state, not in structured data. Nothing may be added to its `head` or
-  `pendingComponent` that reads the database.
-- **The shell's frame mirrors the page** (`CompanyScaffold.tsx`, the route's
-  `pendingComponent`). It has the page's cards, field and section titles, map
-  frame and links, with each value held by a placeholder of the value's height,
-  drawn to the most common page: a Companies House record, one licence, one SIC
-  code, three timeline rows. A layout change to the page (a field, a section,
-  a spacing) is made in the frame too, or the page jumps when its data lands.
-  The two share `BackToSearch`, `DetailField`, `MAP_FRAME_CLASS` and the
-  industry block's classes.
-- **Data calls are refused at the edge, not in the function.** Their responses
-  are cached, so a refusal behind the cache could be answered by an entry an
-  allowed call filled. The functions in `SESSION_CALLS` get ids starting `s-`
-  (`call-ids.ts`, `vite.config.ts`) so the edge can tell them apart;
-  `calls.test.ts` fails if one is renamed or moved. A refusal is a 403 with
-  `x-session: required` and `private, no-store`; the browser's server-function
-  fetch (`start.ts`) renews the session and calls once more. Calls never wait
-  for the session up front, so with the switch off nothing is slower.
-- **Whatever cannot be decided is served in full**: no crawler ranges (an
-  unreadable or empty list), no address, no secret.
+- **The decision runs at the edge** because company documents and data calls
+  are edge-cached; a decision in the function would never see a cache hit.
+- **The shell has its own cache key**: the edge rewrites it to the same path
+  plus `?render=client` (`RENDER_PARAM`), so the plain URL only holds the full
+  document.
+- **The company route must keep declaring `render`** in `validateSearch`, or
+  router-core redirects the shell URL to the plain one. `head` titles the shell
+  from its slug (`shownWithoutData`).
+- **The shell carries no company data**: not in markup, dehydrated state or
+  structured data. Nothing that reads the database may be added to its `head`
+  or `pendingComponent`.
+- **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
+  change to the company page is made there too, or the page jumps when its
+  data lands.
+- **Data calls are refused at the edge**, ahead of the cache. `SESSION_CALLS`
+  get `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves. The
+  browser's fetch (`start.ts`) renews the session on a refusal and retries once.
+- **Whatever cannot be decided is served in full** (no crawler ranges, no
+  address, no secret).
 - **/download preview frames never ask for a session**: they share the page's
-  cookie, and on a refusal wait for its `ss-session-hint` to appear.
+  cookie and wait for its `ss-session-hint`.
 
 ## /download live Preview — the app iframing itself
 

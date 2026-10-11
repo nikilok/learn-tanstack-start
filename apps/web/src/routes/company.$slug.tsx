@@ -127,9 +127,8 @@ export const Route = createFileRoute('/company/$slug')({
   search: {
     middlewares: [stripSearchParams({ search: '' })],
   },
-  // The app shell: the edge marks a company page it serves this way
-  // (middleware.ts), and the page then loads and renders in the browser, so no
-  // company data is sent with the document. It is cached like the full page.
+  // The app shell (marked by the edge, middleware.ts) renders in the browser,
+  // so its document carries no company data. Cached like the full page.
   ssr: ({ search }) => {
     if (search.status !== 'success' || !isShell(search.value)) return undefined;
     setSsrCacheControl(LONG_EDGE_CACHE);
@@ -222,9 +221,7 @@ export const Route = createFileRoute('/company/$slug')({
     // Same shape the loader returns; CompanyDisplayInput is the one written copy.
     const loaderData = match.loaderData as CompanyDisplayInput | undefined;
 
-    // A page without its data (the app shell, or one the browser is still
-    // loading or failed to load) is titled by the name its URL spells, and has
-    // no structured data.
+    // Without its data, a page is titled from its slug and has no structured data.
     if (
       shownWithoutData({
         loaderData,

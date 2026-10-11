@@ -9,10 +9,8 @@ import { CLIENT_RENDER } from '../session/calls';
 export type CompanySearch = { search: string; render?: typeof CLIENT_RENDER };
 
 /**
- * The company route's `validateSearch`. The router redirects a URL to the one its validated search
- * spells, so the shell mark must be kept here, or the shell's URL would redirect to the plain one,
- * which the edge rewrites back to the shell. Anything but the mark itself is dropped, so no other
- * URL gains it.
+ * The company route's `validateSearch`. It keeps the shell mark, or the router would redirect the
+ * shell's URL to the plain one; anything else under that key is dropped.
  */
 export function companySearch(search: Record<string, unknown>): CompanySearch {
   return {
@@ -29,10 +27,8 @@ export function isShell(search: Partial<CompanySearch> | undefined): boolean {
 }
 
 /**
- * Whether a company page is shown without its data, and so titled by the name its URL spells: the
- * app shell, or a page whose data the browser is still loading or failed to load. Only the server
- * sees the shell's mark: the edge adds it to the request, so the address the browser shows never
- * carries it, and there the shell is a page still loading.
+ * Whether a company page is shown without its data, and so titled from its URL: the shell, or a
+ * page still loading or failed in the browser (whose address never carries the shell mark).
  */
 export function shownWithoutData(match: {
   loaderData?: unknown;

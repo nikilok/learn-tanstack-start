@@ -21,7 +21,7 @@ function PrivacyPolicy() {
   return (
     <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_a]:text-(--link-blue) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:mt-2 [&_li]:leading-relaxed [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6">
       <h1>Privacy Policy</h1>
-      <p className="text-(--sea-ink-soft)">Last updated: 22 September 2026</p>
+      <p className="text-(--sea-ink-soft)">Last updated: 11 October 2026</p>
 
       <h2>Who we are</h2>
       <p>
@@ -56,16 +56,26 @@ function PrivacyPolicy() {
         <li>
           <strong>Site protection.</strong> To detect and limit automated abuse
           of the service, your browser sends a technical identifier derived from
-          its general characteristics while you use the site. It is used only
-          for keeping the service secure and available, not for product
-          analytics or advertising. We keep aggregate daily counts for up to six
-          months, and the identifier is never linked to your name or any
-          account.
+          its general characteristics while you use the site, and a check from
+          our hosting provider (Vercel BotID) runs in your browser to tell
+          people from automated traffic. These are used only for keeping the
+          service secure and available, not for product analytics or
+          advertising. We keep aggregate daily counts for up to six months, and
+          the identifier is never linked to your name or any account.
         </li>
         <li>
-          <strong>Theme preference.</strong> Your light/dark mode choice is
-          stored in your browser&apos;s local storage. This never leaves your
-          device.
+          <strong>Session cookies.</strong> As part of that protection, the site
+          sets two first-party cookies: <code>ss-session</code>, a signed token
+          tied to your network address that lets company pages load in full, and{' '}
+          <code>ss-session-hint</code>, which holds only that token&apos;s
+          expiry time. Both last up to 30 days. They are strictly necessary for
+          the service, are not used for analytics, advertising or tracking, and
+          we keep no record of them on our servers.
+        </li>
+        <li>
+          <strong>Preferences.</strong> Your light/dark mode choice, and whether
+          you have seen the Discord prompt, are stored in your browser&apos;s
+          local storage. This never leaves your device.
         </li>
       </ul>
 

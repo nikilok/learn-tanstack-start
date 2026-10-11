@@ -5,6 +5,7 @@ import {
 import { addressScope, clientAddress } from './address';
 import { SESSION_COOKIE, SESSION_HINT_COOKIE } from './calls';
 import { type DocumentMode, documentMode } from './decide';
+import { crawlerRanges, inRanges, type Ranges } from './ranges';
 import {
   cookieValue,
   issueSession,
@@ -42,12 +43,14 @@ export type IssueDeps = {
   secret?: string;
   now?: number;
   verdict?: () => Promise<BrowserVerdict | 'unchecked'>;
+  ranges?: () => Promise<Ranges | null>;
 };
 
 /**
  * The answer to `POST /api/session`: confirms a session held for this address with time to run,
  * or issues one if the browser check passes (or cannot run). Under `observe` a failed check is
- * issued an `unverified` session, which the edge treats as none. Never throws.
+ * issued an `unverified` session, which the edge treats as none. A crawler address is answered
+ * `off` without a check: it is served in full by address. Never throws.
  */
 export async function sessionResponse(
   headers: Headers,
@@ -58,7 +61,14 @@ export async function sessionResponse(
   const now = deps.now ?? Date.now();
   const address = clientAddress(headers);
   const scope = address === null ? null : addressScope(address);
-  if (!mode || !secret || scope === null) return answer('off');
+  if (!mode || !secret || address === null || scope === null)
+    return answer('off');
+
+  const ranges = await (deps.ranges ?? crawlerRanges)();
+  if (ranges && inRanges(ranges, address)) {
+    console.info('[session] crawler address: none issued');
+    return answer('off');
+  }
 
   const held = await readSession(cookieValue(headers, SESSION_COOKIE), {
     scope,

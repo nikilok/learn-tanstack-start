@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 
 import type { BrowserVerdict } from '../device/browser-check.server';
 import { type IssueDeps, sessionResponse } from './issue.server';
+import { parseRanges } from './ranges';
 import {
   issueSession,
   readSession,
@@ -39,7 +40,12 @@ function headers(cookie?: string, ip: string | null = visitor): Headers {
 }
 
 async function ask(h: Headers, deps: IssueDeps) {
-  const response = await sessionResponse(h, { secret, now, ...deps });
+  const response = await sessionResponse(h, {
+    secret,
+    now,
+    ranges: async () => null,
+    ...deps,
+  });
   const body = (await response.json()) as { session: string };
   const cookies = response.headers.getSetCookie();
   const session = cookies
@@ -50,6 +56,19 @@ async function ask(h: Headers, deps: IssueDeps) {
 }
 
 describe('sessionResponse', () => {
+  test('a crawler address is answered off: no check is spent, nothing is issued', async () => {
+    const check = checked('verified crawler');
+    const crawlers = parseRanges(['66.249.64.0/27']);
+    const { body, cookies } = await ask(headers(undefined, '66.249.64.10'), {
+      mode: 'enforce',
+      verdict: check.verdict,
+      ranges: async () => crawlers,
+    });
+    expect(body.session).toBe('off');
+    expect(cookies).toHaveLength(0);
+    expect(check.asked.count).toBe(0);
+  });
+
   test('a person is issued a session bound to their address, and a hint beside it', async () => {
     const check = checked('person');
     const { response, body, cookies, session } = await ask(headers(), {

@@ -8,8 +8,10 @@ import {
   SessionRequiredError,
 } from './client';
 
+/** The edge's refusal for want of a session. */
 const refused = () =>
   new Response(null, { status: 403, headers: { 'x-session': 'required' } });
+/** A call answered. */
 const answered = () => new Response('{}', { status: 200 });
 const NOW = 1_800_000_000_000;
 
@@ -23,6 +25,8 @@ function harness(options: {
   onWait?: (ms: number) => void;
   /** Asks never answer, and the ask deadline passes. */
   stall?: boolean;
+  /** Each ask answers only once this settles, logged as `answer:<outcome>`. */
+  gate?: Promise<void>;
 }) {
   const asks = [...(options.asks ?? [])];
   const responses = [...(options.responses ?? [])];
@@ -35,6 +39,10 @@ function harness(options: {
       }
       const outcome = asks.shift() ?? 'failed';
       log.push(`ask:${outcome}`);
+      if (options.gate) {
+        await options.gate;
+        log.push(`answer:${outcome}`);
+      }
       return outcome;
     },
     wait: async (ms) => {
@@ -59,7 +67,20 @@ function harness(options: {
   return { session: createSession(deps), log };
 }
 
+/** The asks a session made, in order. */
 const asksIn = (log: string[]) => log.filter((l) => l.startsWith('ask'));
+
+/** A promise and the function that settles it. */
+function deferred() {
+  let open = () => {};
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+/** Lets every pending promise callback run. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('createSession', () => {
   test('a call goes out at once, and starts the session behind it', async () => {
@@ -69,13 +90,72 @@ describe('createSession', () => {
     expect(log).toContain('fetch');
   });
 
-  test('a call refused for want of a session waits for the first ask, then goes again', async () => {
+  test('a company data call made with no session waits for the first ask, and goes once', async () => {
+    const gate = deferred();
     const { session, log } = harness({
       asks: ['ok'],
+      responses: [answered],
+      gate: gate.promise,
+    });
+    const call = session.fetch('/_serverFn/s-abc');
+    await settle();
+    expect(log).not.toContain('fetch');
+    gate.open();
+    expect((await call).status).toBe(200);
+    expect(log).toEqual(['check', 'ask:ok', 'answer:ok', 'fetch']);
+  });
+
+  test('a company data call given as a URL waits too', async () => {
+    const gate = deferred();
+    const { session, log } = harness({
+      asks: ['ok'],
+      responses: [answered],
+      gate: gate.promise,
+    });
+    const call = session.fetch(new URL('https://example.test/_serverFn/s-abc'));
+    await settle();
+    expect(log).not.toContain('fetch');
+    gate.open();
+    expect((await call).status).toBe(200);
+  });
+
+  test('any other call goes out while the first ask is still out', async () => {
+    const gate = deferred();
+    const { session, log } = harness({
+      asks: ['ok'],
+      responses: [answered],
+      gate: gate.promise,
+    });
+    const call = session.fetch('/_serverFn/abc');
+    await settle();
+    expect(log).toContain('fetch');
+    gate.open();
+    expect((await call).status).toBe(200);
+  });
+
+  test('with a session that has not run out, a company data call does not wait for its renewal', async () => {
+    const gate = deferred();
+    const ending = NOW / 1000 + SESSION_RENEW_SECONDS - 3600;
+    const { session, log } = harness({
+      asks: ['ok'],
+      responses: [answered],
+      hint: () => ending,
+      gate: gate.promise,
+    });
+    const call = session.fetch('/_serverFn/s-abc');
+    await settle();
+    expect(log).toEqual(['check', 'ask:ok', 'fetch']);
+    gate.open();
+    expect((await call).status).toBe(200);
+  });
+
+  test('a call refused after the first ask got a session renews once, then goes again', async () => {
+    const { session, log } = harness({
+      asks: ['ok', 'ok'],
       responses: [refused, answered],
     });
     expect((await session.fetch('/_serverFn/s-abc')).status).toBe(200);
-    expect(asksIn(log)).toEqual(['ask:ok']);
+    expect(asksIn(log)).toEqual(['ask:ok', 'ask:ok']);
     expect(log.filter((l) => l === 'fetch')).toHaveLength(2);
   });
 
@@ -89,7 +169,7 @@ describe('createSession', () => {
     expect(asksIn(log)).toEqual(['ask:ok', 'ask:ok']);
   });
 
-  test('a refused ask is tried three times, pausing longer each time, then the call fails by name', async () => {
+  test('a refused ask is tried three times, pausing longer each time, then the call fails by name without a second round', async () => {
     const { session, log } = harness({
       asks: ['refused', 'refused', 'refused'],
       responses: [refused],
@@ -106,11 +186,12 @@ describe('createSession', () => {
       'wait:2000',
       'ask:refused',
     ]);
+    expect(log.filter((l) => l === 'fetch')).toHaveLength(1);
   });
 
   test('a call refused again after renewing fails by name, not with the bare response', async () => {
     const { session } = harness({
-      asks: ['ok'],
+      asks: ['ok', 'ok'],
       responses: [refused, refused],
     });
     await expect(session.fetch('/_serverFn/s-abc')).rejects.toThrow(

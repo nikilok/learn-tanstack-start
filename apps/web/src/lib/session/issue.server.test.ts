@@ -33,6 +33,7 @@ function checked(verdict: BrowserVerdict | 'unchecked') {
   };
 }
 
+/** A request's headers from `ip`, holding the session `cookie` if one is given. */
 function headers(cookie?: string, ip: string | null = visitor): Headers {
   const h = new Headers();
   if (ip) h.set('x-real-ip', ip);
@@ -40,6 +41,7 @@ function headers(cookie?: string, ip: string | null = visitor): Headers {
   return h;
 }
 
+/** One ask of the session endpoint, enforcing, read back as its answer and cookies. */
 async function ask(h: Headers, deps: IssueDeps) {
   const response = await sessionResponse(h, {
     secret,

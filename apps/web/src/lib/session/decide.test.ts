@@ -8,6 +8,7 @@ const secret = 'test-secret-not-a-real-one';
 const ranges = parseRanges(['66.249.64.0/27']);
 const visitor = '81.2.69.160';
 
+/** A request's headers from `ip`, holding the session `cookie` if one is given. */
 function request(ip: string | null, cookie?: string): Headers {
   const headers = new Headers();
   if (ip) headers.set('x-real-ip', ip);
@@ -15,6 +16,7 @@ function request(ip: string | null, cookie?: string): Headers {
   return headers;
 }
 
+/** A valid session value of the given standing for `scope`. */
 async function session(standing: 'person' | 'unverified', scope = visitor) {
   return (await issueSession({ scope, standing, secret })).value;
 }

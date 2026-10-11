@@ -519,8 +519,10 @@ visitor's address and issued by `POST /api/session`.
 - **Data calls are refused at the edge**, ahead of the cache. `SESSION_CALLS`
   get `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves, or if a
   server function is placed in neither list. The browser's fetch (`start.ts`)
-  renews the session on a refusal and retries once, then throws
-  `SessionRequiredError`. After a TanStack Start upgrade, check the build still
+  holds an `s-` call made with no session until the page's first ask lands, so
+  a first visit sends no refused call. It renews the session on a refusal and
+  retries once, then throws `SessionRequiredError`; a refusal after a first ask
+  that got none stands. After a TanStack Start upgrade, check the build still
   carries `s-` ids.
 - **Whatever cannot be decided is served in full** (no crawler ranges, no
   address, no secret).

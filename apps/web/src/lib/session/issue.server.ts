@@ -21,6 +21,7 @@ import {
 /** What the browser is told: `ok` (it holds a session), `refused`, or `off` (none are issued). */
 export type SessionAnswer = 'ok' | 'refused' | 'off';
 
+/** A `Set-Cookie` value for one of the session's cookies, sent site-wide over https only. */
 function cookie(
   name: string,
   value: string,
@@ -30,6 +31,7 @@ function cookie(
   return `${name}=${value}; Path=/; Max-Age=${maxAge}; Secure; SameSite=Lax${httpOnly ? '; HttpOnly' : ''}`;
 }
 
+/** The endpoint's JSON answer, never cached, setting any cookies given. */
 function answer(session: SessionAnswer, cookies: readonly string[] = []) {
   const headers = new Headers({
     'content-type': 'application/json',

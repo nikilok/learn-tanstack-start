@@ -9,6 +9,7 @@ import { cookieValue, readSession } from './token';
  */
 export type DocumentMode = 'observe' | 'enforce';
 
+/** The switch as set: `observe` or `enforce`, or null for off. */
 export function documentMode(
   value = process.env.DOCUMENT_MODE,
 ): DocumentMode | null {

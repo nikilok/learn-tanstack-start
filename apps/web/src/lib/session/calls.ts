@@ -6,6 +6,9 @@ export const SESSION_PATH = '/api/session';
 /** The httpOnly cookie holding a session (`token.ts`). */
 export const SESSION_COOKIE = 'ss-session';
 
+/** A session with less than this left is issued again when next asked for. */
+export const SESSION_RENEW_SECONDS = 7 * 24 * 60 * 60;
+
 /**
  * A readable cookie beside it holding only the session's expiry (epoch seconds), so a /download
  * preview frame can tell its page holds one. Not a credential.

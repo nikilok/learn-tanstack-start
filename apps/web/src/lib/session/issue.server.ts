@@ -1,6 +1,7 @@
 import {
   type BrowserVerdict,
   browserVerdict,
+  enforcing,
 } from '../device/browser-check.server';
 import { addressScope, clientAddress } from './address';
 import { SESSION_COOKIE, SESSION_HINT_COOKIE } from './calls';
@@ -12,6 +13,7 @@ import {
   readSession,
   SESSION_RENEW_SECONDS,
   SESSION_TTL_SECONDS,
+  SESSION_UNCHECKED_TTL_SECONDS,
   type SessionStanding,
   sessionSecret,
 } from './token';
@@ -44,13 +46,18 @@ export type IssueDeps = {
   now?: number;
   verdict?: () => Promise<BrowserVerdict | 'unchecked'>;
   ranges?: () => Promise<Ranges | null>;
+  /** Whether the check's verdict is acted on (`BROWSER_CHECK_ENFORCE`). */
+  enforce?: boolean;
 };
 
 /**
  * The answer to `POST /api/session`: confirms a session held for this address with time to run,
- * or issues one if the browser check passes (or cannot run). Under `observe` a failed check is
- * issued an `unverified` session, which the edge treats as none. A crawler address is answered
- * `off` without a check: it is served in full by address. Never throws.
+ * or issues one if the browser check passes. A check that cannot run issues a short session, and
+ * a crawler address is answered `off` without one.
+ *
+ * A failed check refuses only under `enforce` with `BROWSER_CHECK_ENFORCE` on; a session still
+ * held is then left to run out, not taken away. Under `observe` a failed check is issued an
+ * `unverified` session, which the edge treats as none. Never throws.
  */
 export async function sessionResponse(
   headers: Headers,
@@ -84,24 +91,33 @@ export async function sessionResponse(
 
   const said = await (deps.verdict ?? (() => browserVerdict('session')))();
   const automated = said === 'automated' || said === 'verified crawler';
+  const refuse =
+    automated && mode === 'enforce' && (deps.enforce ?? enforcing());
   console.info(
-    `[session] browser check: ${said}${automated && mode === 'observe' ? ' (not enforced)' : ''}`,
+    `[session] verdict: ${said}${automated && !refuse ? ' (not enforced)' : ''}`,
   );
-  if (automated && mode === 'enforce')
+  if (refuse) {
+    if (held.status === 'valid' && held.standing === 'person')
+      return answer('ok');
     return answer('refused', [
       cookie(SESSION_COOKIE, '', 0, true),
       cookie(SESSION_HINT_COOKIE, '', 0, false),
     ]);
+  }
 
-  const standing: SessionStanding = automated ? 'unverified' : 'person';
+  const standing: SessionStanding =
+    automated && mode === 'observe' ? 'unverified' : 'person';
+  const ttl =
+    said === 'unchecked' ? SESSION_UNCHECKED_TTL_SECONDS : SESSION_TTL_SECONDS;
   const { value, expires } = await issueSession({
     scope,
     standing,
     secret,
     now,
+    ttlSeconds: ttl,
   });
   return answer('ok', [
-    cookie(SESSION_COOKIE, value, SESSION_TTL_SECONDS, true),
-    cookie(SESSION_HINT_COOKIE, String(expires), SESSION_TTL_SECONDS, false),
+    cookie(SESSION_COOKIE, value, ttl, true),
+    cookie(SESSION_HINT_COOKIE, String(expires), ttl, false),
   ]);
 }

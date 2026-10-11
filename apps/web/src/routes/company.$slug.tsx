@@ -15,7 +15,8 @@ import {
 } from '../api/cache-headers';
 import { fetchCompanyProfile } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
-import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
+import { hmrcCompanyBySlugQueryOptions, isLiveCompanySlug } from '../api/hmrc';
+import { requestPathname } from '../api/request-path';
 import { AddressMap } from '../components/AddressMap';
 import { BackToSearch } from '../components/BackToSearch';
 import BingLogo from '../components/BingLogo';
@@ -129,13 +130,29 @@ export const Route = createFileRoute('/company/$slug')({
   },
   // The app shell (marked by the edge, middleware.ts) renders in the browser,
   // so its document carries no company data. Cached like the full page.
-  ssr: ({ search }) => {
-    if (search.status !== 'success' || !isShell(search.value)) return undefined;
+  ssr: async ({ params, search }) => {
+    if (params.status !== 'success') return undefined;
+    const { slug } = params.value;
+    if (search.status !== 'success' || !isShell(search.value)) {
+      // A company's data renders only at its page's own path, which the edge
+      // decides, redirecting other spellings there. A path that still differs
+      // here (escapes arrive decoded, so in case) gets the shell.
+      const path = requestPathname();
+      if (path === null || path === `/company/${slug}`) return undefined;
+      setSsrCacheControl(SHORT_EDGE_CACHE);
+      return false;
+    }
+    // The shell stands in only for a live company's own slug. Anything else
+    // renders in full, so the loader can 404 it or 301 a renamed one.
+    if (!(await isLiveCompanySlug(slug))) return undefined;
     setSsrCacheControl(LONG_EDGE_CACHE);
     setCompanyCacheTag();
     return false;
   },
   pendingComponent: CompanyPending,
+  // A navigation that outlasts pendingMs shows the frame, and the page
+  // replaces it the moment its data lands.
+  pendingMinMs: 0,
   loader: async ({ params, location, context: { queryClient } }) => {
     const options = hmrcCompanyBySlugQueryOptions(params.slug);
     // SSR: per-request cache → ensure. Client: fetchQuery ALONE — via the

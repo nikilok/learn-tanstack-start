@@ -8,6 +8,7 @@ import {
   readSession,
   SESSION_RENEW_SECONDS,
   SESSION_TTL_SECONDS,
+  SESSION_UNCHECKED_TTL_SECONDS,
 } from './token';
 
 const secret = 'test-secret-not-a-real-one';
@@ -44,6 +45,7 @@ async function ask(h: Headers, deps: IssueDeps) {
     secret,
     now,
     ranges: async () => null,
+    enforce: true,
     ...deps,
   });
   const body = (await response.json()) as { session: string };
@@ -132,15 +134,49 @@ describe('sessionResponse', () => {
     }
   });
 
-  test('enforced: an automated browser, verified crawlers included, is refused and its cookies cleared', async () => {
+  test('enforced: an automated browser, verified crawlers included, is refused and both cookies cleared', async () => {
     for (const verdict of ['automated', 'verified crawler'] as const) {
       const { body, cookies } = await ask(headers(), {
         mode: 'enforce',
         verdict: checked(verdict).verdict,
       });
       expect(body.session).toBe('refused');
+      expect(cookies.map((c) => c.split('=')[0]).sort()).toEqual([
+        'ss-session',
+        'ss-session-hint',
+      ]);
       expect(cookies.every((c) => c.includes('Max-Age=0'))).toBe(true);
     }
+  });
+
+  test('enforced: a refused renewal leaves a session still held to run out', async () => {
+    const ageing = await issueSession({
+      scope: visitor,
+      standing: 'person',
+      secret,
+      now: now - (SESSION_TTL_SECONDS - SESSION_RENEW_SECONDS + 60) * 1000,
+    });
+    const { body, cookies } = await ask(headers(ageing.value), {
+      mode: 'enforce',
+      verdict: checked('automated').verdict,
+    });
+    expect(body.session).toBe('ok');
+    expect(cookies).toHaveLength(0);
+  });
+
+  test('enforced with the check only watched (BROWSER_CHECK_ENFORCE off): an automated browser is issued a session', async () => {
+    const { body, session } = await ask(headers(), {
+      mode: 'enforce',
+      enforce: false,
+      verdict: checked('automated').verdict,
+    });
+    expect(body.session).toBe('ok');
+    expect(
+      await readSession(session, { scope: visitor, secret, now }),
+    ).toMatchObject({ status: 'valid', standing: 'person' });
+    expect(String(logged.mock.calls.at(-1)?.[0])).toBe(
+      '[session] verdict: automated (not enforced)',
+    );
   });
 
   test('observed: an automated browser is issued an unverified session, and the verdict is said', async () => {
@@ -155,21 +191,30 @@ describe('sessionResponse', () => {
       standing: 'unverified',
     });
     expect(String(logged.mock.calls.at(-1)?.[0])).toBe(
-      '[session] browser check: automated (not enforced)',
+      '[session] verdict: automated (not enforced)',
     );
   });
 
-  test('a check that cannot run issues a session all the same', async () => {
-    const { body, session } = await ask(headers(), {
+  test('a check that cannot run issues a short session, checked again soon', async () => {
+    const { body, cookies, session } = await ask(headers(), {
       mode: 'enforce',
       verdict: checked('unchecked').verdict,
     });
     expect(body.session).toBe('ok');
+    expect(cookies[0]).toContain(`Max-Age=${SESSION_UNCHECKED_TTL_SECONDS}`);
+    expect(cookies[1]).toContain(`Max-Age=${SESSION_UNCHECKED_TTL_SECONDS}`);
+    const read = await readSession(session, { scope: visitor, secret, now });
+    expect(read).toMatchObject({ status: 'valid', standing: 'person' });
+    expect(read.status === 'valid' && read.expires).toBe(
+      Math.floor(now / 1000) + SESSION_UNCHECKED_TTL_SECONDS,
+    );
     expect(
-      await readSession(session, { scope: visitor, secret, now }),
-    ).toMatchObject({
-      standing: 'person',
-    });
+      await readSession(session, {
+        scope: visitor,
+        secret,
+        now: now + (SESSION_UNCHECKED_TTL_SECONDS + 1) * 1000,
+      }),
+    ).toMatchObject({ status: 'expired' });
   });
 
   test('off, with no secret, or with no address: nothing is issued and nothing is checked', async () => {

@@ -421,12 +421,18 @@ describe('edge middleware: company pages by session', () => {
     expect(isNext(fromCrawler)).toBe(true);
   });
 
-  test('observe: a company data call is logged, never refused', async () => {
-    const res = await visit(`${SESSION_CALL_PATH}abc`, { mode: 'observe' });
-    expect(isNext(res)).toBe(true);
-    expect(String(logged.mock.calls[0]?.[0])).toBe(
-      '[call] would refuse (no session)',
-    );
+  test('observe: every company data call decision is logged, and none is refused', async () => {
+    const without = await visit(`${SESSION_CALL_PATH}abc`, { mode: 'observe' });
+    const withSession = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'observe',
+      session: await session(),
+    });
+    expect(isNext(without)).toBe(true);
+    expect(isNext(withSession)).toBe(true);
+    expect(logged.mock.calls.map((c: unknown[]) => String(c[0]))).toEqual([
+      '[call] client (no session)',
+      '[call] server (session)',
+    ]);
   });
 
   test('every other server function, and the session endpoint, pass through untouched', async () => {
@@ -437,5 +443,50 @@ describe('edge middleware: company pages by session', () => {
       });
       expect(isNext(res)).toBe(true);
     }
+  });
+
+  test('any other spelling the router resolves to a company page is redirected to its own', async () => {
+    for (const [path, to] of [
+      ['/COMPANY/acme-ltd', '/company/acme-ltd'],
+      ['/Company/Acme-Ltd?search=acme', '/company/acme-ltd?search=acme'],
+      ['/%63ompany/acme-ltd', '/company/acme-ltd'],
+      ['/company/acme%2Dltd', '/company/acme-ltd'],
+      ['/company/Acme%20Ltd', '/company/acme%20ltd'],
+    ] as const) {
+      const res = await visit(path, { mode: 'enforce' });
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toBe(
+        `https://sponsorsearch.co.uk${to}`,
+      );
+    }
+  });
+
+  test('the redirect is the same with the switch off, and its target is decided', async () => {
+    const off = await visit('/COMPANY/acme-ltd');
+    expect(off.status).toBe(301);
+    const target = await visit('/company/acme%20ltd', { mode: 'enforce' });
+    expect(rewrittenTo(target)).toContain('render=client');
+  });
+
+  test('enforce: a data call is refused however its path is spelled', async () => {
+    for (const path of [
+      `${SESSION_CALL_PATH}abc`,
+      '/_serverFn/%73-abc',
+      '/_serverFn/s%2Dabc',
+      '/_server%46n/s-abc',
+      '/_SERVERFN/S-abc',
+    ]) {
+      const res = await visit(path, {
+        mode: 'enforce',
+        accept: 'application/json',
+      });
+      expect(res.status).toBe(403);
+      expect(res.headers.get('x-session')).toBe('required');
+    }
+  });
+
+  test('a path that does not decode is refused at the edge', async () => {
+    const res = await visit('/company/%E0%A4%A', { mode: 'enforce' });
+    expect(res.status).toBe(400);
   });
 });

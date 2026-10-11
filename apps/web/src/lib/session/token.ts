@@ -4,8 +4,10 @@
 /** How long a session lasts after it is issued. */
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
-/** A session with less than this left is issued again on the next page load. */
-export const SESSION_RENEW_SECONDS = 7 * 24 * 60 * 60;
+export { SESSION_RENEW_SECONDS } from './calls';
+
+/** How long a session lasts when the browser check could not run: it is checked again soon. */
+export const SESSION_UNCHECKED_TTL_SECONDS = 60 * 60;
 
 /**
  * How a session was issued: `person` when the browser check passed (or could not run), and
@@ -86,9 +88,16 @@ export async function issueSession(options: {
   standing: SessionStanding;
   secret: string;
   now?: number;
+  ttlSeconds?: number;
 }): Promise<{ value: string; expires: number }> {
-  const { scope, standing, secret, now = Date.now() } = options;
-  const expires = Math.floor(now / 1000) + SESSION_TTL_SECONDS;
+  const {
+    scope,
+    standing,
+    secret,
+    now = Date.now(),
+    ttlSeconds = SESSION_TTL_SECONDS,
+  } = options;
+  const expires = Math.floor(now / 1000) + ttlSeconds;
   const code = STANDING_CODE[standing];
   const signature = await crypto.subtle.sign(
     'HMAC',

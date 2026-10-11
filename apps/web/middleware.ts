@@ -45,9 +45,23 @@ const API_EXACT = new Set([
   SESSION_PATH, // Nitro session endpoint (a JSON POST — the document fallback below would 404 it)
 ]);
 
-// A company page by its slug, one segment: the documents served by session (companyDocument).
-// The legacy two-segment URL only ever redirects, and a trailing slash is the router's own 307.
-const COMPANY_DOCUMENT_RE = /^\/company\/[^/]+$/;
+// A company page by its slug, one segment, matched on the routed path: the documents served by
+// session (companyDocument). The legacy two-segment URL only ever redirects, and a trailing slash
+// is the router's own 307.
+const COMPANY_DOCUMENT_RE = /^\/company\/([^/]+)$/;
+
+/**
+ * A path as the app's router resolves it: percent-decoded as the framework decodes it
+ * (`decodeURI`) and lower-cased, as route segments match in any case. The session gate matches
+ * on this, never on the spelling a client sent. Null when the path does not decode.
+ */
+function routedPath(pathname: string): string | null {
+  try {
+    return decodeURI(pathname).toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 // Device-keyed pings (Nitro /api/p|v|e/:hash): exactly one 32-hex segment, so a
 // malformed key takes the edge 404 without spending a function invocation.
@@ -137,17 +151,18 @@ async function companyDocument(request: Request): Promise<Response> {
 /**
  * A company data call: under `enforce`, refused here without a session, ahead of the cache. The
  * refusal is never cached and names itself, so the browser renews its session and calls again.
- * `observe` only logs.
+ * `observe` logs every decision and refuses nothing.
  */
 async function sessionCall(request: Request): Promise<Response> {
   const mode = documentMode();
   if (!mode) return next();
   const decided = await decision(request);
+  if (mode === 'observe') {
+    console.info(`[call] ${decided.render} (${decided.why})`);
+    return next();
+  }
   if (decided.render === 'server') return next();
-  console.info(
-    `[call] ${mode === 'enforce' ? 'refused' : 'would refuse'} (${decided.why})`,
-  );
-  if (mode === 'observe') return next();
+  console.info(`[call] refused (${decided.why})`);
   return new Response(null, {
     status: 403,
     headers: {
@@ -160,13 +175,28 @@ async function sessionCall(request: Request): Promise<Response> {
 export default function middleware(
   request: Request,
 ): Response | Promise<Response> {
-  const { pathname } = new URL(request.url);
+  const url = new URL(request.url);
+  const { pathname } = url;
 
   // Home + SSR document routes advertise llms.txt and get the Accept repair.
   if (pathname === '/') return serveDocument(request);
 
+  const routed = routedPath(pathname);
+  if (routed === null) return new Response('', { status: 400 });
+
   // A company page's data calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
-  if (pathname.startsWith(SESSION_CALL_PATH)) return sessionCall(request);
+  if (routed.startsWith(SESSION_CALL_PATH.toLowerCase()))
+    return sessionCall(request);
+
+  // A company page by session, at its one spelling: any other spelling the router would resolve
+  // to it (case, escapes) is redirected there first, so every page is decided.
+  const company = COMPANY_DOCUMENT_RE.exec(routed);
+  if (company) {
+    const canonical = `/company/${encodeURIComponent(company[1] ?? '')}`;
+    if (pathname !== canonical)
+      return Response.redirect(new URL(`${canonical}${url.search}`, url), 301);
+    return companyDocument(request);
+  }
 
   // Server-function / API / discovery routes — pass through untouched. Checked before
   // DOCUMENT_PREFIXES so '/downloads/*' isn't caught by the '/download' prefix.
@@ -174,7 +204,6 @@ export default function middleware(
   if (DEVICE_PING_RE.test(pathname)) return next();
   if (API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return next();
 
-  if (COMPANY_DOCUMENT_RE.test(pathname)) return companyDocument(request);
   if (DOCUMENT_PREFIXES.some((prefix) => pathname.startsWith(prefix)))
     return serveDocument(request);
 

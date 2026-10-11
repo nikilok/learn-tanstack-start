@@ -64,13 +64,14 @@ function PrivacyPolicy() {
           the identifier is never linked to your name or any account.
         </li>
         <li>
-          <strong>Session cookies.</strong> As part of that protection, the site
-          sets two first-party cookies: <code>ss-session</code>, a signed token
-          tied to your network address that lets company pages load in full, and{' '}
-          <code>ss-session-hint</code>, which holds only that token&apos;s
-          expiry time. Both last up to 30 days. They are strictly necessary for
-          the service, are not used for analytics, advertising or tracking, and
-          we keep no record of them on our servers.
+          <strong>Security cookies.</strong> As part of that protection, the
+          site and our hosting provider&apos;s browser check set strictly
+          necessary security cookies. Ours are <code>ss-session</code>, a signed
+          token tied to your network address that lets company pages load in
+          full, and <code>ss-session-hint</code>, which holds only that
+          token&apos;s expiry time; both last up to 30 days, and we keep no
+          record of them on our servers. None of these cookies is used for
+          analytics, advertising or tracking.
         </li>
         <li>
           <strong>Preferences.</strong> Your light/dark mode choice, and whether

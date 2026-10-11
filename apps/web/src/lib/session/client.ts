@@ -4,15 +4,27 @@ import {
   SESSION_HEADER,
   SESSION_HINT_COOKIE,
   SESSION_PATH,
+  SESSION_RENEW_SECONDS,
   SESSION_REQUIRED,
 } from './calls';
 
 /** What one ask for a session came back with; `failed` is no answer at all. */
 export type SessionOutcome = 'ok' | 'refused' | 'off' | 'failed';
 
+/** A call refused for want of a session that could not be had: the page cannot load its data. */
+export class SessionRequiredError extends Error {
+  constructor() {
+    super('Session required');
+    this.name = 'SessionRequiredError';
+  }
+}
+
 /** Asks before giving up; the pause before the next ask grows by RETRY_MS each time. */
 const ATTEMPTS = 3;
 const RETRY_MS = 1000;
+
+/** How long one ask may take. One that outlasts it ends the asking: the check is stuck. */
+const ASK_TIMEOUT_MS = 8000;
 
 /** A hint expiring within this is no sign of a session. */
 const HINT_MARGIN_MS = 60_000;
@@ -24,6 +36,8 @@ const PREVIEW_POLL_MS = 250;
 export type SessionDeps = {
   ask: () => Promise<SessionOutcome>;
   wait: (ms: number) => Promise<void>;
+  /** Resolves after `ms`: the deadline an ask races. */
+  timeout: (ms: number) => Promise<void>;
   /** The session's expiry from the readable hint cookie, in epoch seconds, or null. */
   hintExpiry: () => number | null;
   /** A /download preview frame: it shares its page's cookies and never asks itself. */
@@ -38,28 +52,34 @@ export type SessionDeps = {
 };
 
 /**
- * This document's session: asked for once per load, and again when a call is refused for want of
- * one. Calls never wait for it up front.
+ * This document's session: asked for on load unless one with time to run is held, and again when
+ * a call is refused for want of one. Calls never wait for it up front.
  */
 export function createSession(deps: SessionDeps) {
   let first: Promise<boolean> | null = null;
   let firstPending = false;
   let renewing: Promise<boolean> | null = null;
 
-  /** Asks until a session is held, none is being issued, or the attempts run out. */
+  /** Asks until a session is held, none is being issued, the attempts run out, or an ask stalls. */
   const obtain = async (): Promise<boolean> => {
+    deps.startCheck();
     for (let attempt = 1; ; attempt++) {
-      const outcome = await deps.ask();
+      const outcome = await Promise.race([
+        deps.ask(),
+        deps.timeout(ASK_TIMEOUT_MS).then(() => 'stalled' as const),
+      ]);
       if (outcome === 'ok') return true;
-      if (outcome === 'off' || attempt >= ATTEMPTS) return false;
+      if (outcome === 'off' || outcome === 'stalled' || attempt >= ATTEMPTS)
+        return false;
       await deps.wait(RETRY_MS * attempt);
     }
   };
 
-  const hintHeld = () => {
+  const hintLeft = (marginMs: number) => {
     const expiry = deps.hintExpiry();
-    return expiry !== null && expiry * 1000 > deps.now() + HINT_MARGIN_MS;
+    return expiry !== null && expiry * 1000 > deps.now() + marginMs;
   };
+  const hintHeld = () => hintLeft(HINT_MARGIN_MS);
 
   /** A preview frame's session is its page's: it waits for the page's hint to appear. */
   const pageSession = async (): Promise<boolean> => {
@@ -73,11 +93,12 @@ export function createSession(deps: SessionDeps) {
   /** Starts this document's ask, once; later calls return the same promise. */
   const start = (): Promise<boolean> => {
     if (first) return first;
-    if (deps.preview()) {
+    // A preview frame shares its page's session, and a session with time to run needs no ask: a
+    // call refused anyway (the address moved) renews it then.
+    if (deps.preview() || hintLeft(SESSION_RENEW_SECONDS * 1000)) {
       first = Promise.resolve(true);
       return first;
     }
-    deps.startCheck();
     firstPending = true;
     first = obtain().finally(() => {
       firstPending = false;
@@ -95,20 +116,30 @@ export function createSession(deps: SessionDeps) {
     return renewing;
   };
 
-  /** The fetch every server function call makes from the browser (`start.ts`). */
+  /**
+   * The fetch every server function call makes from the browser (`start.ts`). A refusal that
+   * stands after renewing throws `SessionRequiredError`, a named failure the page can report.
+   */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     void start();
     const response = await deps.fetch(input, init);
-    if (
-      response.status !== 403 ||
-      response.headers.get(SESSION_HEADER) !== SESSION_REQUIRED
-    )
-      return response;
-    if (!(await renew())) return response;
-    return deps.fetch(input, init);
+    if (!refused(response)) return response;
+    if (await renew()) {
+      const again = await deps.fetch(input, init);
+      if (!refused(again)) return again;
+    }
+    throw new SessionRequiredError();
   };
 
   return { start, renew, fetch: sessionFetch };
+}
+
+/** A refusal for want of a session (`middleware.ts`). */
+function refused(response: Response): boolean {
+  return (
+    response.status === 403 &&
+    response.headers.get(SESSION_HEADER) === SESSION_REQUIRED
+  );
 }
 
 /** One ask of the session endpoint. */
@@ -137,9 +168,13 @@ function readHintExpiry(): number | null {
   return null;
 }
 
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 const session = createSession({
   ask: askForSession,
-  wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  wait: delay,
+  timeout: delay,
   hintExpiry: readHintExpiry,
   preview: () => typeof window !== 'undefined' && isDesktopPreview(),
   now: () => Date.now(),

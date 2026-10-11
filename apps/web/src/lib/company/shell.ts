@@ -28,6 +28,25 @@ export function isShell(search: Partial<CompanySearch> | undefined): boolean {
   return search?.render === CLIENT_RENDER;
 }
 
+/**
+ * Whether a company page is shown without its data, and so titled by the name its URL spells: the
+ * app shell, or a page whose data the browser is still loading or failed to load. Only the server
+ * sees the shell's mark: the edge adds it to the request, so the address the browser shows never
+ * carries it, and there the shell is a page still loading.
+ */
+export function shownWithoutData(match: {
+  loaderData?: unknown;
+  search: Partial<CompanySearch> | undefined;
+  status: string;
+}): boolean {
+  if (match.loaderData) return false;
+  return (
+    isShell(match.search) ||
+    match.status === 'pending' ||
+    match.status === 'error'
+  );
+}
+
 /** The shell's name for a company, which it has no data to look up: the one its slug spells. */
 export function shellName(slug: string): string {
   return titleCase(slug.replace(/-/g, ' '));

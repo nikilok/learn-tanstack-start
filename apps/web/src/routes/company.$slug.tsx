@@ -1,13 +1,11 @@
 import {
   createFileRoute,
-  Link,
   notFound,
   redirect,
   stripSearchParams,
-  useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, Globe, MapPin } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import {
   LONG_EDGE_CACHE,
@@ -19,8 +17,10 @@ import { fetchCompanyProfile } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
 import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
 import { AddressMap } from '../components/AddressMap';
+import { BackToSearch } from '../components/BackToSearch';
 import BingLogo from '../components/BingLogo';
 import { CompanyIndustry } from '../components/CompanyIndustry';
+import { CompanyScaffold } from '../components/CompanyScaffold';
 import { CompanyTimeline } from '../components/CompanyTimeline';
 import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
@@ -44,7 +44,12 @@ import {
 } from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
 import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
-import { companySearch, isShell, shellName } from '../lib/company/shell';
+import {
+  companySearch,
+  isShell,
+  shellName,
+  shownWithoutData,
+} from '../lib/company/shell';
 import { displayDomain } from '../lib/company/website';
 import { noteCompanyView } from '../lib/device/beacons';
 import {
@@ -52,7 +57,6 @@ import {
   formatAddress,
   formatDate,
   humanizeEnum,
-  stampPageFlip,
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -111,28 +115,10 @@ function PendingLines({ count, width }: { count: number; width: string }) {
   );
 }
 
-/** The page while its company loads in the browser: the card's frame, its lines held. */
+/** The page while its company loads: the page's frame, with the way back to the search. */
 function CompanyPending() {
-  return (
-    <main className="page-wrap min-h-[50vh] px-4 py-16">
-      <section className="mx-auto max-w-2xl">
-        <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
-          <PendingLines count={1} width="w-2/3" />
-          <div className="mt-1">
-            <PendingLines count={1} width="w-1/2" />
-          </div>
-          <div className="mt-4">
-            <PendingLines count={3} width="w-full" />
-          </div>
-        </div>
-        <noscript>
-          <p className="mt-4 text-sm text-(--sea-ink-soft)">
-            Turn on JavaScript to see this company&apos;s details.
-          </p>
-        </noscript>
-      </section>
-    </main>
-  );
+  const { search } = Route.useSearch();
+  return <CompanyScaffold back={<BackToSearch search={search} />} />;
 }
 
 export const Route = createFileRoute('/company/$slug')({
@@ -236,9 +222,16 @@ export const Route = createFileRoute('/company/$slug')({
     // Same shape the loader returns; CompanyDisplayInput is the one written copy.
     const loaderData = match.loaderData as CompanyDisplayInput | undefined;
 
-    // The app shell carries no data: its title is the name its URL spells,
-    // and it has no structured data.
-    if (!loaderData && isShell(match.search)) {
+    // A page without its data (the app shell, or one the browser is still
+    // loading or failed to load) is titled by the name its URL spells, and has
+    // no structured data.
+    if (
+      shownWithoutData({
+        loaderData,
+        search: match.search,
+        status: match.status,
+      })
+    ) {
       const name = shellName(match.params.slug);
       return buildSeoHead({
         title: `${name} - UK Visa Sponsor | SponsorSearch`,
@@ -326,9 +319,6 @@ function CompanyDetail() {
   const { sponsor, profile, timeline } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const { slug } = Route.useParams();
-  const navigate = useNavigate();
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const [stuck, setStuck] = useState(true);
   const primaryRowCompany = sponsor.licences[0]?.companyNumber ?? null;
   const pageCompany = pageCompanyNumber(
     profile?.company_number,
@@ -353,32 +343,6 @@ function CompanyDetail() {
     viewNotedFor.current = slug;
     noteCompanyView();
   }, [slug]);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return;
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      e.preventDefault();
-      stampPageFlip('back');
-      navigate({
-        to: '/',
-        search: { search },
-        viewTransition: { types: ['back'] },
-      });
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate, search]);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(([entry]) =>
-      setStuck(!entry.isIntersecting),
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, []);
 
   // Shared derivations — the same values head() feeds the meta/JSON-LD from.
   const display = deriveCompanyDisplay({ sponsor, profile });
@@ -679,26 +643,7 @@ function CompanyDetail() {
           </div>
         </section>
 
-        <Link
-          to="/"
-          search={{ search }}
-          viewTransition={{ types: ['back'] }}
-          onClick={() => stampPageFlip('back')}
-          style={{ transition: 'none' }}
-          className={`sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) no-underline hover:text-(--sea-ink) ${
-            stuck
-              ? 'glass mx-auto flex w-fit items-center rounded-full px-5 py-2.5 backdrop-blur-md!'
-              : 'block w-full px-4 py-3 text-center'
-          }`}
-        >
-          <span className={stuck ? 'shimmer-text' : undefined}>
-            &larr; Back to search
-          </span>
-          <kbd className="ml-2 hidden font-sans text-xs pointer-fine:inline">
-            Esc
-          </kbd>
-        </Link>
-        <div ref={sentinelRef} aria-hidden className="h-px w-px" />
+        <BackToSearch search={search} />
       </section>
     </main>
   );

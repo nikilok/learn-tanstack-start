@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { RENDER_PARAM } from '../session/calls';
-import { companySearch, isShell, shellName } from './shell';
+import { companySearch, isShell, shellName, shownWithoutData } from './shell';
 
 describe('companySearch', () => {
   test("keeps the edge's shell mark, or the router would redirect the shell's URL", () => {
@@ -39,6 +39,31 @@ describe('isShell', () => {
     expect(isShell({ render: 'client' })).toBe(true);
     expect(isShell({ search: 'acme' })).toBe(false);
     expect(isShell(undefined)).toBe(false);
+  });
+});
+
+describe('shownWithoutData', () => {
+  const shell = { search: '', render: 'client' as const };
+  const plain = { search: '' };
+
+  test('the shell on the server, which sees the mark', () => {
+    expect(shownWithoutData({ search: shell, status: 'success' })).toBe(true);
+  });
+
+  test('the shell in the browser, whose address has no mark: a page still loading, or failed', () => {
+    expect(shownWithoutData({ search: plain, status: 'pending' })).toBe(true);
+    expect(shownWithoutData({ search: plain, status: 'error' })).toBe(true);
+  });
+
+  test('a page with its data, or one for no company, is not', () => {
+    expect(
+      shownWithoutData({ loaderData: {}, search: plain, status: 'pending' }),
+    ).toBe(false);
+    expect(
+      shownWithoutData({ loaderData: {}, search: shell, status: 'success' }),
+    ).toBe(false);
+    expect(shownWithoutData({ search: plain, status: 'notFound' })).toBe(false);
+    expect(shownWithoutData({ search: plain, status: 'success' })).toBe(false);
   });
 });
 

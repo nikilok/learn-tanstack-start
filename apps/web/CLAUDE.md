@@ -504,10 +504,20 @@ passes (`CHECKED_CALLS`), and confirms a held one without a check.
   router-core redirects any URL to its canonical form (the validated search):
   undeclared, the shell URL 307s to the plain one, which the edge rewrites back.
   The route's `ssr` option renders `render=client` client-only and caches it
-  like the full page; `head` then names the page from its slug.
+  like the full page; `head` then names the page from its slug, and keeps that
+  name in the browser while the data loads (`shownWithoutData`: the browser's
+  address never carries the mark).
 - **The shell carries no company data**: not in markup, not in the dehydrated
   router state, not in structured data. Nothing may be added to its `head` or
   `pendingComponent` that reads the database.
+- **The shell's frame mirrors the page** (`CompanyScaffold.tsx`, the route's
+  `pendingComponent`). It has the page's cards, field and section titles, map
+  frame and links, with each value held by a placeholder of the value's height,
+  drawn to the most common page: a Companies House record, one licence, one SIC
+  code, three timeline rows. A layout change to the page (a field, a section,
+  a spacing) is made in the frame too, or the page jumps when its data lands.
+  The two share `BackToSearch`, `DetailField`, `MAP_FRAME_CLASS` and the
+  industry block's classes.
 - **Data calls are refused at the edge, not in the function.** Their responses
   are cached, so a refusal behind the cache could be answered by an entry an
   allowed call filled. The functions in `SESSION_CALLS` get ids starting `s-`

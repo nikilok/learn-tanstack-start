@@ -8,9 +8,10 @@ import { MapErrorBoundary } from './MapErrorBoundary';
 
 const LeafletMap = lazy(() => import('./LeafletMap'));
 
-const placeholder = (
-  <div className="relative h-64 w-full bg-(--sea-ink-soft)/10" />
-);
+/** The map's frame: the height it holds before the map loads, while it loads, and once it has. */
+export const MAP_FRAME_CLASS = 'relative h-64 w-full bg-(--sea-ink-soft)/10';
+
+const placeholder = <div className={MAP_FRAME_CLASS} />;
 
 /** Geocodes `address` client-side and renders a Leaflet map. Suspends on the geocode query so the route loader doesn't block on Nominatim (~600ms). Returns nothing if geocoding fails so the placeholder collapses. */
 function GeocodedMap({
@@ -23,7 +24,7 @@ function GeocodedMap({
   const { data: geo } = useSuspenseQuery(geocodeQueryOptions(address));
   if (!geo) return null;
   return (
-    <div className="relative h-64 w-full bg-(--sea-ink-soft)/10">
+    <div className={MAP_FRAME_CLASS}>
       <LeafletMap geo={geo} companyName={companyName} />
     </div>
   );

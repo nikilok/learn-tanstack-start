@@ -31,6 +31,7 @@ import WebHeaderBlur from '../components/WebHeaderBlur';
 import { initDeviceBeacons } from '../lib/device/beacons';
 import { initBrowserCheck } from '../lib/device/browser-check';
 import { markHydrationDone } from '../lib/hydration';
+import { startSession } from '../lib/session/client';
 import { BROWSER_INIT_SCRIPT } from '../scripts/browser-init';
 import { DESKTOP_INIT_SCRIPT } from '../scripts/desktop-init';
 import { ENGAGEMENT_INIT_SCRIPT } from '../scripts/engagement-init';
@@ -152,10 +153,11 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   }, []);
   // Device-keyed pings boot after hydration; the module defers the heavy part
   // to idle time and the preview iframes stay out, as with Analytics below.
-  // The browser check starts first, so it is ready for the extras calls the
-  // device key leads to.
+  // The browser check starts first, so it is ready for the session the page
+  // asks for and the extras calls the device key leads to.
   useEffect(() => {
     initBrowserCheck();
+    startSession();
     initDeviceBeacons();
   }, []);
   return (

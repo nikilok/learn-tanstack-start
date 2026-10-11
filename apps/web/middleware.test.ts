@@ -1,4 +1,13 @@
-import { describe, expect, test } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from 'bun:test';
 
 import { BROWSER_CHECK_PATH } from '#/lib/device/browser-check-config';
 import {
@@ -6,6 +15,8 @@ import {
   presentPingPath,
   viewPingPath,
 } from '#/lib/device/key';
+import { SESSION_CALL_PATH } from '#/lib/session/calls';
+import { issueSession } from '#/lib/session/token';
 
 import middleware from './middleware.ts';
 
@@ -17,13 +28,16 @@ const DEVICE_KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 // request-header rewrite is encoded as `x-middleware-override-headers` +
 // `x-middleware-request-<name>`, and response headers (Link) ride the returned Response.
 
-/** Build a Request for `path` (with optional Accept) and run the middleware. */
+/** Build a Request for `path` (with optional Accept) and run the middleware, which answers these paths at once. */
 function run(path: string, accept?: string): Response {
   const headers = new Headers();
   if (accept !== undefined) headers.set('accept', accept);
-  return middleware(
+  const res = middleware(
     new Request(`https://sponsorsearch.co.uk${path}`, { headers }),
   );
+  if (res instanceof Promise)
+    throw new Error(`${path} was not answered at once`);
+  return res;
 }
 
 const isNext = (res: Response) => res.headers.get('x-middleware-next') === '1';
@@ -208,5 +222,271 @@ describe('edge middleware: routing is preserved', () => {
     const res = run('/does-not-exist', 'text/markdown');
     expect(res.status).toBe(404);
     expect(isNext(res)).toBe(false);
+  });
+});
+
+describe('edge middleware: company pages by session', () => {
+  const SECRET = 'test-secret-not-a-real-one';
+  const VISITOR = '81.2.69.160';
+  const CRAWLER = '66.249.64.10';
+  const ENV = [
+    'DOCUMENT_MODE',
+    'ENGAGE_TOKEN_SECRET',
+    'CRAWLER_RANGES_LOCAL',
+    'GLOBAL_CONFIG',
+    'EDGE_CONFIG',
+  ] as const;
+  const saved = Object.fromEntries(
+    ENV.map((name) => [name, process.env[name]]),
+  );
+  let logged: ReturnType<typeof spyOn>;
+
+  beforeAll(() => {
+    // No store is connected in a test, so the edge reads the local list.
+    delete process.env.GLOBAL_CONFIG;
+    delete process.env.EDGE_CONFIG;
+    process.env.ENGAGE_TOKEN_SECRET = SECRET;
+    process.env.CRAWLER_RANGES_LOCAL = '66.249.64.0/27';
+  });
+  afterAll(() => {
+    for (const name of ENV)
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+  });
+  beforeEach(() => {
+    logged = spyOn(console, 'info').mockImplementation(() => {});
+  });
+  afterEach(() => logged.mockRestore());
+
+  async function visit(
+    path: string,
+    options: {
+      mode?: 'observe' | 'enforce';
+      ip?: string;
+      session?: string;
+      accept?: string;
+      method?: 'GET' | 'POST';
+    } = {},
+  ): Promise<Response> {
+    if (options.mode) process.env.DOCUMENT_MODE = options.mode;
+    else delete process.env.DOCUMENT_MODE;
+    const headers = new Headers({
+      accept: options.accept ?? 'text/html',
+      'x-real-ip': options.ip ?? VISITOR,
+    });
+    if (options.session) headers.set('cookie', `ss-session=${options.session}`);
+    const method = options.method ?? 'GET';
+    return middleware(
+      new Request(`https://sponsorsearch.co.uk${path}`, {
+        method,
+        headers,
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      }),
+    );
+  }
+
+  const session = async (scope = VISITOR) =>
+    (await issueSession({ scope, standing: 'person', secret: SECRET })).value;
+  const rewrittenTo = (res: Response) =>
+    res.headers.get('x-middleware-rewrite');
+  const shell = (query: string) =>
+    `https://sponsorsearch.co.uk/company/acme-ltd?${query}`;
+
+  test('off: a company page is served as it always was', async () => {
+    const res = await visit('/company/acme-ltd');
+    expect(isNext(res)).toBe(true);
+    expect(rewrittenTo(res)).toBeNull();
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  test('off: a shell mark asked for directly is dropped', async () => {
+    const res = await visit('/company/acme-ltd?render=client&search=acme');
+    expect(rewrittenTo(res)).toBe(
+      'https://sponsorsearch.co.uk/company/acme-ltd?search=acme',
+    );
+  });
+
+  test('enforce: without a session the page is the shell, rendered from its own URL', async () => {
+    const res = await visit('/company/acme-ltd', { mode: 'enforce' });
+    expect(rewrittenTo(res)).toBe(shell('render=client'));
+    expect(res.headers.get('link')).toBe('</llms.txt>; rel="describedby"');
+    expect(String(logged.mock.calls[0]?.[0])).toBe(
+      '[document] client (no session)',
+    );
+  });
+
+  test('enforce: the shell keeps the search term and leaves every other parameter off', async () => {
+    const res = await visit('/company/acme-ltd?utm_source=x&search=acme', {
+      mode: 'enforce',
+    });
+    expect(rewrittenTo(res)).toBe(shell('search=acme&render=client'));
+  });
+
+  test('enforce: a non-HTML Accept is still repaired on the shell', async () => {
+    const res = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      accept: 'text/markdown',
+    });
+    expect(rewrittenTo(res)).toBe(shell('render=client'));
+    expect(overriddenAccept(res)).toBe('text/markdown, text/html');
+  });
+
+  test('enforce: a session held for this address gets the full document', async () => {
+    const res = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      session: await session(),
+    });
+    expect(isNext(res)).toBe(true);
+    expect(rewrittenTo(res)).toBeNull();
+  });
+
+  test('enforce: a session holder asking for the shell URL gets the full document', async () => {
+    const res = await visit('/company/acme-ltd?render=client', {
+      mode: 'enforce',
+      session: await session(),
+    });
+    expect(rewrittenTo(res)).toBe(
+      'https://sponsorsearch.co.uk/company/acme-ltd',
+    );
+  });
+
+  test('enforce: a session from another address gets the shell', async () => {
+    const res = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      session: await session('81.2.69.161'),
+    });
+    expect(rewrittenTo(res)).toBe(shell('render=client'));
+  });
+
+  test('enforce: a crawler address gets the full document without a session', async () => {
+    const res = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      ip: CRAWLER,
+    });
+    expect(isNext(res)).toBe(true);
+  });
+
+  test('observe: the decision is logged and everyone gets the full document', async () => {
+    const res = await visit('/company/acme-ltd', { mode: 'observe' });
+    expect(isNext(res)).toBe(true);
+    expect(String(logged.mock.calls[0]?.[0])).toBe(
+      '[document] client (no session)',
+    );
+  });
+
+  test('the legacy two-segment page and the trailing-slash form are not decided', async () => {
+    for (const path of ['/company/abc/acme-ltd', '/company/acme-ltd/']) {
+      const res = await visit(path, { mode: 'enforce' });
+      expect(isNext(res)).toBe(true);
+      expect(rewrittenTo(res)).toBeNull();
+    }
+  });
+
+  test('enforce: a company data call without a session is refused, and never cached', async () => {
+    const res = await visit(`${SESSION_CALL_PATH}abc?payload=x`, {
+      mode: 'enforce',
+      accept: 'application/json',
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers.get('x-session')).toBe('required');
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  test('enforce: a POST data call without a session is refused too, and with one passes', async () => {
+    const refused = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      accept: 'application/json',
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get('x-session')).toBe('required');
+    const passed = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      session: await session(),
+    });
+    expect(isNext(passed)).toBe(true);
+  });
+
+  test('enforce: a company data call with a session, or from a crawler, passes', async () => {
+    const withSession = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      session: await session(),
+    });
+    const fromCrawler = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      ip: CRAWLER,
+    });
+    expect(isNext(withSession)).toBe(true);
+    expect(isNext(fromCrawler)).toBe(true);
+  });
+
+  test('observe: every company data call decision is logged, and none is refused', async () => {
+    const without = await visit(`${SESSION_CALL_PATH}abc`, { mode: 'observe' });
+    const withSession = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'observe',
+      session: await session(),
+    });
+    expect(isNext(without)).toBe(true);
+    expect(isNext(withSession)).toBe(true);
+    expect(logged.mock.calls.map((c: unknown[]) => String(c[0]))).toEqual([
+      '[call] client (no session)',
+      '[call] server (session)',
+    ]);
+  });
+
+  test('every other server function, and the session endpoint, pass through untouched', async () => {
+    for (const path of ['/_serverFn/0123abcd', '/api/session']) {
+      const res = await visit(path, {
+        mode: 'enforce',
+        accept: 'application/json',
+      });
+      expect(isNext(res)).toBe(true);
+    }
+  });
+
+  test('any other spelling the router resolves to a company page is redirected to its own', async () => {
+    for (const [path, to] of [
+      ['/COMPANY/acme-ltd', '/company/acme-ltd'],
+      ['/Company/Acme-Ltd?search=acme', '/company/acme-ltd?search=acme'],
+      ['/%63ompany/acme-ltd', '/company/acme-ltd'],
+      ['/company/acme%2Dltd', '/company/acme-ltd'],
+      ['/company/Acme%20Ltd', '/company/acme%20ltd'],
+    ] as const) {
+      const res = await visit(path, { mode: 'enforce' });
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toBe(
+        `https://sponsorsearch.co.uk${to}`,
+      );
+    }
+  });
+
+  test('the redirect is the same with the switch off, and its target is decided', async () => {
+    const off = await visit('/COMPANY/acme-ltd');
+    expect(off.status).toBe(301);
+    const target = await visit('/company/acme%20ltd', { mode: 'enforce' });
+    expect(rewrittenTo(target)).toContain('render=client');
+  });
+
+  test('enforce: a data call is refused however its path is spelled', async () => {
+    for (const path of [
+      `${SESSION_CALL_PATH}abc`,
+      '/_serverFn/%73-abc',
+      '/_serverFn/s%2Dabc',
+      '/_server%46n/s-abc',
+      '/_SERVERFN/S-abc',
+    ]) {
+      const res = await visit(path, {
+        mode: 'enforce',
+        accept: 'application/json',
+      });
+      expect(res.status).toBe(403);
+      expect(res.headers.get('x-session')).toBe('required');
+    }
+  });
+
+  test('a path that does not decode is refused at the edge', async () => {
+    const res = await visit('/company/%E0%A4%A', { mode: 'enforce' });
+    expect(res.status).toBe(400);
   });
 });

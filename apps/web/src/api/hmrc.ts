@@ -6,7 +6,7 @@ import {
 } from '@ss/db';
 import { slugifiedSqlText } from '@ss/db/constants';
 import { queryOptions } from '@tanstack/react-query';
-import { createServerFn } from '@tanstack/react-start';
+import { createIsomorphicFn, createServerFn } from '@tanstack/react-start';
 import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
@@ -299,6 +299,28 @@ export const getHmrcCompanyBySlug = createServerFn()
       ? { kind: 'moved', nameSlug: target.nameSlug }
       : null;
   });
+
+/**
+ * Whether `slug` is exactly a live company's current slug: the only pages the app shell stands in
+ * for. An unknown, renamed or variant slug is rendered in full instead, so the loader can 404 or
+ * 301 it. A lookup that fails answers true, which serves the shell (no data). Server only.
+ */
+export const isLiveCompanySlug = createIsomorphicFn()
+  .server(async (slug: string): Promise<boolean> => {
+    if (!SLUG_RE.test(slug)) return false;
+    try {
+      const rows = await db
+        .select({ nameSlug: hmrcSkilledWorkers.nameSlug })
+        .from(hmrcSkilledWorkers)
+        .where(eq(hmrcSkilledWorkers.nameSlug, slug))
+        .limit(1);
+      return rows.length > 0;
+    } catch (error) {
+      console.error('[shell] slug lookup failed:', error);
+      return true;
+    }
+  })
+  .client(async (_slug: string): Promise<boolean> => true);
 
 /**
  * React Query options for `getHmrcCompanyBySlug`. Found pages pin for the

@@ -1,13 +1,11 @@
 import {
   createFileRoute,
-  Link,
   notFound,
   redirect,
   stripSearchParams,
-  useNavigate,
 } from '@tanstack/react-router';
 import { ExternalLink, Globe, MapPin } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
 import {
   LONG_EDGE_CACHE,
@@ -17,10 +15,13 @@ import {
 } from '../api/cache-headers';
 import { fetchCompanyProfile } from '../api/companiesHouse';
 import { companyTimelineQueryOptions } from '../api/companyTimeline';
-import { hmrcCompanyBySlugQueryOptions } from '../api/hmrc';
+import { hmrcCompanyBySlugQueryOptions, isLiveCompanySlug } from '../api/hmrc';
+import { requestPathname } from '../api/request-path';
 import { AddressMap } from '../components/AddressMap';
+import { BackToSearch } from '../components/BackToSearch';
 import BingLogo from '../components/BingLogo';
 import { CompanyIndustry } from '../components/CompanyIndustry';
+import { CompanyScaffold } from '../components/CompanyScaffold';
 import { CompanyTimeline } from '../components/CompanyTimeline';
 import { DetailField, LABEL_CLASS } from '../components/DetailField';
 import DuckDuckGoLogo from '../components/DuckDuckGoLogo';
@@ -44,15 +45,19 @@ import {
 } from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
 import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
+import {
+  companySearch,
+  isShell,
+  shellName,
+  shownWithoutData,
+} from '../lib/company/shell';
 import { displayDomain } from '../lib/company/website';
 import { noteCompanyView } from '../lib/device/beacons';
-import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
   formatDate,
   humanizeEnum,
-  stampPageFlip,
   titleCase,
 } from '../utils';
 import { buildCanonical } from '../utils/canonical';
@@ -111,15 +116,43 @@ function PendingLines({ count, width }: { count: number; width: string }) {
   );
 }
 
+/** The page while its company loads: the page's frame, with the way back to the search. */
+function CompanyPending() {
+  const { search } = Route.useSearch();
+  return <CompanyScaffold back={<BackToSearch search={search} />} />;
+}
+
 export const Route = createFileRoute('/company/$slug')({
-  // searchTermInput: the router JSON-parses ?search=365 into a NUMBER — a raw
-  // string cast + .trim() throws on URLs the app itself mints.
-  validateSearch: (search: Record<string, unknown>) => ({
-    search: searchTermInput(search.search),
-  }),
+  // Keeps the edge's shell mark, or the router would redirect the shell's URL.
+  validateSearch: companySearch,
   search: {
     middlewares: [stripSearchParams({ search: '' })],
   },
+  // The app shell (marked by the edge, middleware.ts) renders in the browser,
+  // so its document carries no company data. Cached like the full page.
+  ssr: async ({ params, search }) => {
+    if (params.status !== 'success') return undefined;
+    const { slug } = params.value;
+    if (search.status !== 'success' || !isShell(search.value)) {
+      // A company's data renders only at its page's own path, which the edge
+      // decides, redirecting other spellings there. A path that still differs
+      // here (escapes arrive decoded, so in case) gets the shell.
+      const path = requestPathname();
+      if (path === null || path === `/company/${slug}`) return undefined;
+      setSsrCacheControl(SHORT_EDGE_CACHE);
+      return false;
+    }
+    // The shell stands in only for a live company's own slug. Anything else
+    // renders in full, so the loader can 404 it or 301 a renamed one.
+    if (!(await isLiveCompanySlug(slug))) return undefined;
+    setSsrCacheControl(LONG_EDGE_CACHE);
+    setCompanyCacheTag();
+    return false;
+  },
+  pendingComponent: CompanyPending,
+  // A navigation that outlasts pendingMs shows the frame, and the page
+  // replaces it the moment its data lands.
+  pendingMinMs: 0,
   loader: async ({ params, location, context: { queryClient } }) => {
     const options = hmrcCompanyBySlugQueryOptions(params.slug);
     // SSR: per-request cache → ensure. Client: fetchQuery ALONE — via the
@@ -205,6 +238,23 @@ export const Route = createFileRoute('/company/$slug')({
     // Same shape the loader returns; CompanyDisplayInput is the one written copy.
     const loaderData = match.loaderData as CompanyDisplayInput | undefined;
 
+    // Without its data, a page is titled from its slug and has no structured data.
+    if (
+      shownWithoutData({
+        loaderData,
+        search: match.search,
+        status: match.status,
+      })
+    ) {
+      const name = shellName(match.params.slug);
+      return buildSeoHead({
+        title: `${name} - UK Visa Sponsor | SponsorSearch`,
+        description: `${name}. Licensed UK visa sponsor.`,
+        canonicalUrl: buildCanonical(match.pathname),
+        jsonLd: [],
+      });
+    }
+
     // Lead with the Companies House current name; HMRC may hold a stale former name.
     const display = loaderData ? deriveCompanyDisplay(loaderData) : null;
     const name = display?.name ?? 'Company Details';
@@ -283,9 +333,6 @@ function CompanyDetail() {
   const { sponsor, profile, timeline } = Route.useLoaderData();
   const { search } = Route.useSearch();
   const { slug } = Route.useParams();
-  const navigate = useNavigate();
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const [stuck, setStuck] = useState(true);
   const primaryRowCompany = sponsor.licences[0]?.companyNumber ?? null;
   const pageCompany = pageCompanyNumber(
     profile?.company_number,
@@ -310,32 +357,6 @@ function CompanyDetail() {
     viewNotedFor.current = slug;
     noteCompanyView();
   }, [slug]);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return;
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      e.preventDefault();
-      stampPageFlip('back');
-      navigate({
-        to: '/',
-        search: { search },
-        viewTransition: { types: ['back'] },
-      });
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigate, search]);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const observer = new IntersectionObserver(([entry]) =>
-      setStuck(!entry.isIntersecting),
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, []);
 
   // Shared derivations — the same values head() feeds the meta/JSON-LD from.
   const display = deriveCompanyDisplay({ sponsor, profile });
@@ -636,26 +657,7 @@ function CompanyDetail() {
           </div>
         </section>
 
-        <Link
-          to="/"
-          search={{ search }}
-          viewTransition={{ types: ['back'] }}
-          onClick={() => stampPageFlip('back')}
-          style={{ transition: 'none' }}
-          className={`sticky bottom-6 z-10 mt-6 text-sm font-medium text-(--sea-ink-soft) no-underline hover:text-(--sea-ink) ${
-            stuck
-              ? 'glass mx-auto flex w-fit items-center rounded-full px-5 py-2.5 backdrop-blur-md!'
-              : 'block w-full px-4 py-3 text-center'
-          }`}
-        >
-          <span className={stuck ? 'shimmer-text' : undefined}>
-            &larr; Back to search
-          </span>
-          <kbd className="ml-2 hidden font-sans text-xs pointer-fine:inline">
-            Esc
-          </kbd>
-        </Link>
-        <div ref={sentinelRef} aria-hidden className="h-px w-px" />
+        <BackToSearch search={search} />
       </section>
     </main>
   );

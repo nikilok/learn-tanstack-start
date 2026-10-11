@@ -1,6 +1,17 @@
-import { next } from '@vercel/edge';
+import { next, rewrite } from '@vercel/edge';
 
 import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-config';
+import {
+  CLIENT_RENDER,
+  RENDER_PARAM,
+  SESSION_CALL_PATH,
+  SESSION_HEADER,
+  SESSION_PATH,
+  SESSION_REQUIRED,
+} from './src/lib/session/calls';
+import { decide, documentMode } from './src/lib/session/decide';
+import { crawlerRanges } from './src/lib/session/ranges';
+import { sessionSecret } from './src/lib/session/token';
 
 // SSR document routes (TanStack Start). Accept-repaired in serveDocument and where
 // we advertise llms.txt to agents. The exact root '/' is handled inline below.
@@ -31,7 +42,26 @@ const API_PREFIXES = [
 // still takes the edge 404 below instead of spending a function invocation on Nitro's own 404.
 const API_EXACT = new Set([
   '/api/engaged', // Nitro engagement ping (sendBeacon sends a wildcard Accept — the document fallback below would 404 it)
+  SESSION_PATH, // Nitro session endpoint (a JSON POST — the document fallback below would 404 it)
 ]);
+
+// A company page by its slug, one segment, matched on the routed path: the documents served by
+// session (companyDocument). The legacy two-segment URL only ever redirects, and a trailing slash
+// is the router's own 307.
+const COMPANY_DOCUMENT_RE = /^\/company\/([^/]+)$/;
+
+/**
+ * A path as the app's router resolves it: percent-decoded as the framework decodes it
+ * (`decodeURI`) and lower-cased, as route segments match in any case. The session gate matches
+ * on this, never on the spelling a client sent. Null when the path does not decode.
+ */
+function routedPath(pathname: string): string | null {
+  try {
+    return decodeURI(pathname).toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 // Device-keyed pings (Nitro /api/p|v|e/:hash): exactly one 32-hex segment, so a
 // malformed key takes the edge 404 without spending a function invocation.
@@ -64,8 +94,8 @@ function acceptsHtml(accept: string): boolean {
   });
 }
 
-/** Serve an SSR document route: advertise llms.txt via a Link header and repair an Accept the render path would reject (it 500s unless Accept carries text/html or the wildcard range). */
-function serveDocument(request: Request): Response {
+/** Serve an SSR document route: advertise llms.txt via a Link header and repair an Accept the render path would reject (it 500s unless Accept carries text/html or the wildcard range). With a `destination`, the document is rendered from that URL instead of the one asked for. */
+function serveDocument(request: Request, destination?: URL): Response {
   const init: {
     headers: Record<string, string>;
     request?: { headers: Headers };
@@ -77,14 +107,96 @@ function serveDocument(request: Request): Response {
     headers.set('accept', `${accept}, text/html`);
     init.request = { headers };
   }
-  return next(init);
+  return destination ? rewrite(destination, init) : next(init);
 }
 
-export default function middleware(request: Request) {
-  const { pathname } = new URL(request.url);
+/** How the request is served by session (`src/lib/session/decide.ts`). */
+async function decision(request: Request) {
+  return decide({
+    headers: request.headers,
+    ranges: await crawlerRanges(),
+    secret: sessionSecret(),
+  });
+}
+
+/** The URL a company page is rendered from as the app shell: its path and search term, marked. Other parameters are left off, so the router has none to redirect away. */
+function shellUrl(url: URL): URL {
+  const shell = new URL(url.pathname, url.origin);
+  const search = url.searchParams.get('search');
+  if (search) shell.searchParams.set('search', search);
+  shell.searchParams.set(RENDER_PARAM, CLIENT_RENDER);
+  return shell;
+}
+
+/**
+ * A company page under DOCUMENT_MODE: the full document for a crawler or a session holder, the app
+ * shell otherwise. The shell has its own URL, so the two never share a cache entry. `observe` only
+ * logs.
+ */
+async function companyDocument(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const mode = documentMode();
+  if (mode) {
+    const decided = await decision(request);
+    console.info(`[document] ${decided.render} (${decided.why})`);
+    if (mode === 'enforce' && decided.render === 'client')
+      return serveDocument(request, shellUrl(url));
+  }
+  if (url.searchParams.get(RENDER_PARAM) !== CLIENT_RENDER)
+    return serveDocument(request);
+  url.searchParams.delete(RENDER_PARAM);
+  return serveDocument(request, url);
+}
+
+/**
+ * A company data call: under `enforce`, refused here without a session, ahead of the cache. The
+ * refusal is never cached and names itself, so the browser renews its session and calls again.
+ * `observe` logs every decision and refuses nothing.
+ */
+async function sessionCall(request: Request): Promise<Response> {
+  const mode = documentMode();
+  if (!mode) return next();
+  const decided = await decision(request);
+  if (mode === 'observe') {
+    console.info(`[call] ${decided.render} (${decided.why})`);
+    return next();
+  }
+  if (decided.render === 'server') return next();
+  console.info(`[call] refused (${decided.why})`);
+  return new Response(null, {
+    status: 403,
+    headers: {
+      [SESSION_HEADER]: SESSION_REQUIRED,
+      'cache-control': 'private, no-store',
+    },
+  });
+}
+
+export default function middleware(
+  request: Request,
+): Response | Promise<Response> {
+  const url = new URL(request.url);
+  const { pathname } = url;
 
   // Home + SSR document routes advertise llms.txt and get the Accept repair.
   if (pathname === '/') return serveDocument(request);
+
+  const routed = routedPath(pathname);
+  if (routed === null) return new Response('', { status: 400 });
+
+  // A company page's data calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
+  if (routed.startsWith(SESSION_CALL_PATH.toLowerCase()))
+    return sessionCall(request);
+
+  // A company page by session, at its one spelling: any other spelling the router would resolve
+  // to it (case, escapes) is redirected there first, so every page is decided.
+  const company = COMPANY_DOCUMENT_RE.exec(routed);
+  if (company) {
+    const canonical = `/company/${encodeURIComponent(company[1] ?? '')}`;
+    if (pathname !== canonical)
+      return Response.redirect(new URL(`${canonical}${url.search}`, url), 301);
+    return companyDocument(request);
+  }
 
   // Server-function / API / discovery routes — pass through untouched. Checked before
   // DOCUMENT_PREFIXES so '/downloads/*' isn't caught by the '/download' prefix.

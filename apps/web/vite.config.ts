@@ -9,6 +9,7 @@ import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
 import { ROUTE_RULES } from './route-rules';
+import { sessionCallId } from './src/lib/session/call-ids';
 
 dotenv.config({ path: '../../.env.local' });
 
@@ -17,7 +18,8 @@ const config = defineConfig({
     devtools(),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
     tailwindcss(),
-    tanstackStart(),
+    // A company page's data calls get ids the edge middleware can recognise (src/lib/session).
+    tanstackStart({ serverFns: { generateFunctionId: sessionCallId } }),
     nitro({
       serverDir: 'server',
       routeRules: ROUTE_RULES,

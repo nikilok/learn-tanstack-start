@@ -480,6 +480,53 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   matching the path in `apps/web/.vercel/output/config.json` from a
   `NITRO_PRESET=vercel` build.
 
+## Company pages by session — cross-file invariants
+
+`DOCUMENT_MODE` (Vercel env): unset is off, `observe` logs every decision and
+changes nothing, `enforce` acts (logging documents and refusals). The edge
+middleware (`src/lib/session/`) gives a crawler address (Global Config
+`crawlerRanges`) or a browser with a session the full document, and anyone else
+the app shell. A session is the httpOnly `ss-session` cookie, bound to the
+visitor's address and issued by `POST /api/session`.
+
+- **The decision runs at the edge** because company documents and data calls
+  are edge-cached; a decision in the function would never see a cache hit.
+- **The edge matches on the routed path** (decoded, lower-cased), as the router
+  matches in any case and decodes escapes. Any other spelling of a company page
+  301s to `/company/<slug>`; a data call is decided however it is spelled.
+- **Company data renders only at its page's own path.** The edge's redirect is
+  the guard; the route's `ssr` backs it up by serving the shell to a path that
+  differs in case (h3 decodes escapes before the app reads the path, so it
+  cannot see those). It serves the shell only for a live company's exact slug
+  (`isLiveCompanySlug`): an unknown or renamed slug renders in full, so the
+  loader 404s or 301s it.
+- **The shell has its own cache key**: the edge rewrites it to the same path
+  plus `?render=client` (`RENDER_PARAM`), so the plain URL only holds the full
+  document.
+- **The company route must keep declaring `render`** in `validateSearch`, or
+  router-core redirects the shell URL to the plain one. `head` titles the shell
+  from its slug (`shownWithoutData`).
+- **The shell carries no company data**: not in markup, dehydrated state or
+  structured data. Nothing that reads the database may be added to its `head`
+  or `pendingComponent`, and the `ssr` slug check returns only a boolean.
+- **Sessions:** a check that cannot run issues a one-hour session; a refused
+  renewal leaves a held session to run out; `BROWSER_CHECK_ENFORCE` off issues
+  sessions whatever the check says. The browser asks on load only without a
+  session with time to run, and an ask that stalls ends at its deadline.
+- **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
+  change to the company page is made there too, or the page jumps when its
+  data lands.
+- **Data calls are refused at the edge**, ahead of the cache. `SESSION_CALLS`
+  get `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves, or if a
+  server function is placed in neither list. The browser's fetch (`start.ts`)
+  renews the session on a refusal and retries once, then throws
+  `SessionRequiredError`. After a TanStack Start upgrade, check the build still
+  carries `s-` ids.
+- **Whatever cannot be decided is served in full** (no crawler ranges, no
+  address, no secret).
+- **/download preview frames never ask for a session**: they share the page's
+  cookie and wait for its `ss-session-hint`.
+
 ## /download live Preview — the app iframing itself
 
 `<Preview company platform wallpaper?>` (components/Preview.tsx) renders the real

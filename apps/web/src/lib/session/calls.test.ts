@@ -7,7 +7,38 @@ import { SESSION_CALL_PATH, SESSION_CALL_PREFIX, SESSION_CALLS } from './calls';
 
 const APP_ROOT = join(import.meta.dir, '../../..');
 
+/** Server functions any visitor may call: none answers with a company page's data. */
+const OPEN_CALLS = [
+  'src/api/companyExtras.ts#issueExtrasToken',
+  'src/api/filterSearch.ts#searchFiltered',
+  'src/api/geocode.ts#getGeocode',
+  'src/api/hmrc.ts#getSlugForHash',
+  'src/api/hmrc.ts#getSponsorCount',
+  'src/api/hmrc.ts#searchHmrc',
+  'src/api/ingestion.ts#getLastIngestion',
+  'src/api/logError.ts#logError',
+  'src/api/releases.ts#getDesktopReleases',
+  'src/api/releases.ts#getOwnerDesktopReleases',
+  'src/api/releases.ts#setReleaseVisibility',
+];
+
+/** Every server function the app declares, as `file#variable`. */
+function serverFunctions(): string[] {
+  const found: string[] = [];
+  for (const file of new Bun.Glob('src/**/*.{ts,tsx}').scanSync(APP_ROOT)) {
+    if (/\.test\.tsx?$/.test(file)) continue;
+    const source = readFileSync(join(APP_ROOT, file), 'utf8');
+    for (const m of source.matchAll(/const (\w+) = createServerFn\(/g))
+      found.push(`${file}#${m[1]}`);
+  }
+  return found.sort();
+}
+
 describe('SESSION_CALLS', () => {
+  test('every server function is placed: a session call, or open', () => {
+    expect(serverFunctions()).toEqual([...SESSION_CALLS, ...OPEN_CALLS].sort());
+  });
+
   test.each(SESSION_CALLS.map((call) => [call]))(
     '%s is still a server function where the list says',
     (call) => {
@@ -49,7 +80,7 @@ describe('sessionCallId', () => {
   test('every other function keeps the default id', () => {
     for (const [filename, name] of [
       ['src/api/hmrc.ts', 'searchHmrc'],
-      ['src/api/companyExtras.ts', 'getCompanyExtras'],
+      ['src/api/companyExtras.ts', 'issueExtrasToken'],
       ['src/api/other.ts', 'getHmrcCompanyBySlug'],
     ] as const)
       expect(

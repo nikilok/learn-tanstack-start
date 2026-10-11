@@ -265,6 +265,7 @@ describe('edge middleware: company pages by session', () => {
       ip?: string;
       session?: string;
       accept?: string;
+      method?: 'GET' | 'POST';
     } = {},
   ): Promise<Response> {
     if (options.mode) process.env.DOCUMENT_MODE = options.mode;
@@ -274,8 +275,13 @@ describe('edge middleware: company pages by session', () => {
       'x-real-ip': options.ip ?? VISITOR,
     });
     if (options.session) headers.set('cookie', `ss-session=${options.session}`);
+    const method = options.method ?? 'GET';
     return middleware(
-      new Request(`https://sponsorsearch.co.uk${path}`, { headers }),
+      new Request(`https://sponsorsearch.co.uk${path}`, {
+        method,
+        headers,
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      }),
     );
   }
 
@@ -384,6 +390,22 @@ describe('edge middleware: company pages by session', () => {
     expect(res.status).toBe(403);
     expect(res.headers.get('x-session')).toBe('required');
     expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  test('enforce: a POST data call without a session is refused too, and with one passes', async () => {
+    const refused = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      accept: 'application/json',
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.headers.get('x-session')).toBe('required');
+    const passed = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      session: await session(),
+    });
+    expect(isNext(passed)).toBe(true);
   });
 
   test('enforce: a company data call with a session, or from a crawler, passes', async () => {

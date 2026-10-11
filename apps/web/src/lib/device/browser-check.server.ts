@@ -29,44 +29,60 @@ export function enforcing(value = process.env.BROWSER_CHECK_ENFORCE): boolean {
   return value === '1';
 }
 
+/** What the check said about a request. */
+export type BrowserVerdict = 'person' | 'verified crawler' | 'automated';
+
 /**
- * Whether the current request may have the extras: it came from a browser a person is using,
- * by Vercel's check of the challenge its script attached to the request. Any client the check
- * names as automated is refused while `enforce` holds, verified crawlers included; otherwise it
- * is let through. Every verdict is logged either way.
- *
- * A check that fails — the service unreachable, the project not set up for it — lets the
- * request through, as an unreadable suspended list suspends nobody, and says so in the log. A
- * request that arrives without the challenge is not a failure: the check names it automated.
- * Never throws.
+ * The check's verdict on the current request, asked at the level the client's protected calls
+ * name (BotID fails a check whose two sides disagree, and names every visitor automated), or
+ * `unchecked` when the check itself failed — the service unreachable, the project not set up for
+ * it — which is logged under `tag`. A request that arrives without the challenge is not a
+ * failure: the check names it automated. Never throws.
  */
-export async function fromBrowser(
+export async function browserVerdict(
+  tag: string,
   check: BrowserCheck = checkBotId,
   verdict: LocalVerdict | undefined = localVerdict(),
-  enforce: boolean = enforcing(),
-): Promise<boolean> {
+): Promise<BrowserVerdict | 'unchecked'> {
   let result: Awaited<ReturnType<BrowserCheck>>;
   try {
-    // At the level the client's protected calls name: BotID fails a check whose two sides
-    // disagree, and names every visitor automated.
     result = await check({
       advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
       ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
     });
   } catch (error) {
     console.error(
-      '[extras] browser check failed:',
+      `[${tag}] browser check failed:`,
       error instanceof Error ? error.message : error,
     );
-    return true;
+    return 'unchecked';
   }
-  const said = !result.isBot
+  return !result.isBot
     ? 'person'
     : result.isVerifiedBot
       ? 'verified crawler'
       : 'automated';
+}
+
+/**
+ * Whether the current request may have the extras: it came from a browser a person is using,
+ * by Vercel's check of the challenge its script attached to the request. Any client the check
+ * names as automated is refused while `enforce` holds, verified crawlers included; otherwise it
+ * is let through. Every verdict is logged either way.
+ *
+ * A check that fails lets the request through, as an unreadable suspended list suspends nobody,
+ * and says so in the log. Never throws.
+ */
+export async function fromBrowser(
+  check: BrowserCheck = checkBotId,
+  verdict: LocalVerdict | undefined = localVerdict(),
+  enforce: boolean = enforcing(),
+): Promise<boolean> {
+  const said = await browserVerdict('extras', check, verdict);
+  if (said === 'unchecked') return true;
+  const isBot = said !== 'person';
   console.info(
-    `[extras] browser check: ${said}${result.isBot && !enforce ? ' (not enforced)' : ''}`,
+    `[extras] browser check: ${said}${isBot && !enforce ? ' (not enforced)' : ''}`,
   );
-  return !result.isBot || !enforce;
+  return !isBot || !enforce;
 }

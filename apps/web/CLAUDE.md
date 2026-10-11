@@ -480,6 +480,47 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   matching the path in `apps/web/.vercel/output/config.json` from a
   `NITRO_PRESET=vercel` build.
 
+## Company pages by session — cross-file invariants
+
+`DOCUMENT_MODE` (Vercel env) switches it: unset is off, `observe` decides and
+logs every company page and data call while changing nothing, `enforce` acts.
+The edge middleware decides each request (`src/lib/session/decide.ts`): an
+address in the crawler ranges (Global Config item `crawlerRanges`, CIDRs), or a
+browser holding a session for its address, gets the full server-rendered
+document; anyone else gets the app shell, and the page loads its data in the
+browser. A session is the httpOnly `ss-session` cookie, signed with a key
+derived from `ENGAGE_TOKEN_SECRET` and bound to the address it was issued to
+(IPv4 whole, IPv6 by /64). `POST /api/session` issues it once the browser check
+passes (`CHECKED_CALLS`), and confirms a held one without a check.
+
+- **The decision runs at the edge because it must run before the cache.** Company
+  documents and data calls are edge-cached for 30 days; a decision in the
+  function would never see a cache hit.
+- **The shell and the full document are never one cache entry.** The edge
+  rewrites a shell request to the same path plus `?render=client`
+  (`RENDER_PARAM`), its own cache key; the plain URL only ever holds the full
+  document, and a shell URL asked for directly is served as the decision says.
+- **The company route must keep declaring `render`** in `validateSearch`.
+  router-core redirects any URL to its canonical form (the validated search):
+  undeclared, the shell URL 307s to the plain one, which the edge rewrites back.
+  The route's `ssr` option renders `render=client` client-only and caches it
+  like the full page; `head` then names the page from its slug.
+- **The shell carries no company data**: not in markup, not in the dehydrated
+  router state, not in structured data. Nothing may be added to its `head` or
+  `pendingComponent` that reads the database.
+- **Data calls are refused at the edge, not in the function.** Their responses
+  are cached, so a refusal behind the cache could be answered by an entry an
+  allowed call filled. The functions in `SESSION_CALLS` get ids starting `s-`
+  (`call-ids.ts`, `vite.config.ts`) so the edge can tell them apart;
+  `calls.test.ts` fails if one is renamed or moved. A refusal is a 403 with
+  `x-session: required` and `private, no-store`; the browser's server-function
+  fetch (`start.ts`) renews the session and calls once more. Calls never wait
+  for the session up front, so with the switch off nothing is slower.
+- **Whatever cannot be decided is served in full**: no crawler ranges (an
+  unreadable or empty list), no address, no secret.
+- **/download preview frames never ask for a session**: they share the page's
+  cookie, and on a refusal wait for its `ss-session-hint` to appear.
+
 ## /download live Preview — the app iframing itself
 
 `<Preview company platform wallpaper?>` (components/Preview.tsx) renders the real

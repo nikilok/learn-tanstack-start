@@ -44,9 +44,9 @@ import {
 } from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
 import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
+import { companySearch, isShell, shellName } from '../lib/company/shell';
 import { displayDomain } from '../lib/company/website';
 import { noteCompanyView } from '../lib/device/beacons';
-import { searchTermInput } from '../lib/search/params';
 import {
   companySearchName,
   formatAddress,
@@ -111,15 +111,46 @@ function PendingLines({ count, width }: { count: number; width: string }) {
   );
 }
 
+/** The page while its company loads in the browser: the card's frame, its lines held. */
+function CompanyPending() {
+  return (
+    <main className="page-wrap min-h-[50vh] px-4 py-16">
+      <section className="mx-auto max-w-2xl">
+        <div className="rounded-lg bg-(--sponsor-card-bg) p-6 shadow-(--shadow-card)">
+          <PendingLines count={1} width="w-2/3" />
+          <div className="mt-1">
+            <PendingLines count={1} width="w-1/2" />
+          </div>
+          <div className="mt-4">
+            <PendingLines count={3} width="w-full" />
+          </div>
+        </div>
+        <noscript>
+          <p className="mt-4 text-sm text-(--sea-ink-soft)">
+            Turn on JavaScript to see this company&apos;s details.
+          </p>
+        </noscript>
+      </section>
+    </main>
+  );
+}
+
 export const Route = createFileRoute('/company/$slug')({
-  // searchTermInput: the router JSON-parses ?search=365 into a NUMBER — a raw
-  // string cast + .trim() throws on URLs the app itself mints.
-  validateSearch: (search: Record<string, unknown>) => ({
-    search: searchTermInput(search.search),
-  }),
+  // Keeps the edge's shell mark, or the router would redirect the shell's URL.
+  validateSearch: companySearch,
   search: {
     middlewares: [stripSearchParams({ search: '' })],
   },
+  // The app shell: the edge marks a company page it serves this way
+  // (middleware.ts), and the page then loads and renders in the browser, so no
+  // company data is sent with the document. It is cached like the full page.
+  ssr: ({ search }) => {
+    if (search.status !== 'success' || !isShell(search.value)) return undefined;
+    setSsrCacheControl(LONG_EDGE_CACHE);
+    setCompanyCacheTag();
+    return false;
+  },
+  pendingComponent: CompanyPending,
   loader: async ({ params, location, context: { queryClient } }) => {
     const options = hmrcCompanyBySlugQueryOptions(params.slug);
     // SSR: per-request cache → ensure. Client: fetchQuery ALONE — via the
@@ -204,6 +235,18 @@ export const Route = createFileRoute('/company/$slug')({
   head: ({ match }) => {
     // Same shape the loader returns; CompanyDisplayInput is the one written copy.
     const loaderData = match.loaderData as CompanyDisplayInput | undefined;
+
+    // The app shell carries no data: its title is the name its URL spells,
+    // and it has no structured data.
+    if (!loaderData && isShell(match.search)) {
+      const name = shellName(match.params.slug);
+      return buildSeoHead({
+        title: `${name} - UK Visa Sponsor | SponsorSearch`,
+        description: `${name}. Licensed UK visa sponsor.`,
+        canonicalUrl: buildCanonical(match.pathname),
+        jsonLd: [],
+      });
+    }
 
     // Lead with the Companies House current name; HMRC may hold a stale former name.
     const display = loaderData ? deriveCompanyDisplay(loaderData) : null;

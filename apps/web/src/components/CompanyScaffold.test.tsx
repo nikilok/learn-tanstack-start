@@ -4,8 +4,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { CompanyScaffold } from './CompanyScaffold.tsx';
 
-// The frame's visible text: the page's titles and link names, never a value. Logos are images, and
-// the no-JavaScript note never shows in a browser running the page.
+/**
+ * The frame's visible text: the page's titles and link names, never a value. Logos are images, and
+ * the no-JavaScript note never shows in a browser running the page.
+ */
 const visibleText = () =>
   renderToStaticMarkup(<CompanyScaffold />)
     .replace(/<svg.*?<\/svg>/gs, ' ')

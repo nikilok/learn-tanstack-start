@@ -258,6 +258,7 @@ describe('edge middleware: company pages by session', () => {
   });
   afterEach(() => logged.mockRestore());
 
+  /** One request through the middleware, under the given mode, from the given address and session. */
   async function visit(
     path: string,
     options: {
@@ -285,10 +286,13 @@ describe('edge middleware: company pages by session', () => {
     );
   }
 
+  /** A valid session value for `scope`. */
   const session = async (scope = VISITOR) =>
     (await issueSession({ scope, standing: 'person', secret: SECRET })).value;
+  /** Where the middleware rewrote a request to, or null. */
   const rewrittenTo = (res: Response) =>
     res.headers.get('x-middleware-rewrite');
+  /** The test company's page URL with `query`. */
   const shell = (query: string) =>
     `https://sponsorsearch.co.uk/company/acme-ltd?${query}`;
 

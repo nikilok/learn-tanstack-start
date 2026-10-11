@@ -14,6 +14,7 @@ export function BackToSearch({ search }: { search: string }) {
   const [stuck, setStuck] = useState(true);
 
   useEffect(() => {
+    /** Esc, with no modifier held, goes back to the search. */
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;

@@ -1,6 +1,7 @@
 import { isDesktopPreview } from '../../utils/desktop-preview';
 import { initBrowserCheck } from '../device/browser-check';
 import {
+  SESSION_CALL_PATH,
   SESSION_HEADER,
   SESSION_HINT_COOKIE,
   SESSION_PATH,
@@ -53,7 +54,8 @@ export type SessionDeps = {
 
 /**
  * This document's session: asked for on load unless one with time to run is held, and again when
- * a call is refused for want of one. Calls never wait for it up front.
+ * a call is refused for want of one. Only a company data call made with no session held waits for
+ * the first ask; every other call goes out at once.
  */
 export function createSession(deps: SessionDeps) {
   let first: Promise<boolean> | null = null;
@@ -75,10 +77,12 @@ export function createSession(deps: SessionDeps) {
     }
   };
 
+  /** Whether the hint shows a session with more than `marginMs` left. */
   const hintLeft = (marginMs: number) => {
     const expiry = deps.hintExpiry();
     return expiry !== null && expiry * 1000 > deps.now() + marginMs;
   };
+  /** Whether the hint shows a session that has not run out. */
   const hintHeld = () => hintLeft(HINT_MARGIN_MS);
 
   /** A preview frame's session is its page's: it waits for the page's hint to appear. */
@@ -117,14 +121,18 @@ export function createSession(deps: SessionDeps) {
   };
 
   /**
-   * The fetch every server function call makes from the browser (`start.ts`). A refusal that
+   * The fetch every server function call makes from the browser (`start.ts`). A company data call
+   * made while the first ask is out, with no session held, waits for it instead of being refused
+   * and sent again; if that ask got none, a refusal stands without asking again. A refusal that
    * stands after renewing throws `SessionRequiredError`, a named failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
-    void start();
+    const asked = start();
+    const waited =
+      firstPending && !hintHeld() && isSessionCall(input) ? await asked : null;
     const response = await deps.fetch(input, init);
     if (!refused(response)) return response;
-    if (await renew()) {
+    if (waited !== false && (await renew())) {
       const again = await deps.fetch(input, init);
       if (!refused(again)) return again;
     }
@@ -132,6 +140,14 @@ export function createSession(deps: SessionDeps) {
   };
 
   return { start, renew, fetch: sessionFetch };
+}
+
+/** Whether a call is a company data call (`SESSION_CALLS`), the only kind refused without a session. */
+function isSessionCall(input: Parameters<typeof fetch>[0]): boolean {
+  const url = input instanceof Request ? input.url : String(input);
+  return new URL(url, 'http://localhost').pathname.startsWith(
+    SESSION_CALL_PATH,
+  );
 }
 
 /** A refusal for want of a session (`middleware.ts`). */
@@ -156,6 +172,7 @@ async function askForSession(): Promise<SessionOutcome> {
   }
 }
 
+/** The session's expiry from the readable hint cookie, in epoch seconds, or null. */
 function readHintExpiry(): number | null {
   if (typeof document === 'undefined') return null;
   for (const part of document.cookie.split(';')) {
@@ -168,6 +185,7 @@ function readHintExpiry(): number | null {
   return null;
 }
 
+/** Resolves after `ms`. */
 const delay = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 

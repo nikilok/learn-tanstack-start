@@ -57,10 +57,12 @@ function signingKey(secret: string): Promise<CryptoKey> {
   return key;
 }
 
+/** The bytes a session's signature covers: its standing, its expiry and the address scope. */
 function message(code: string, expires: string, scope: string) {
   return encoder.encode(`${code}.${expires}.${scope}`);
 }
 
+/** Bytes as unpadded base64url, safe in a cookie value. */
 function toBase64Url(bytes: ArrayBuffer): string {
   let binary = '';
   for (const b of new Uint8Array(bytes)) binary += String.fromCharCode(b);
@@ -70,6 +72,7 @@ function toBase64Url(bytes: ArrayBuffer): string {
     .replace(/=+$/, '');
 }
 
+/** The bytes an unpadded base64url string holds. */
 function fromBase64Url(text: string) {
   const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));

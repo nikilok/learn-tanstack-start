@@ -172,6 +172,11 @@ async function sessionCall(request: Request): Promise<Response> {
   });
 }
 
+/**
+ * The edge's answer to every request, ahead of the cache: company pages and their data calls by
+ * session, the other documents with the Accept repair, known API and static routes passed through,
+ * and an edge 404 for anything else.
+ */
 export default function middleware(
   request: Request,
 ): Response | Promise<Response> {

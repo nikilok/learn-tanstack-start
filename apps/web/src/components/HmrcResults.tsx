@@ -31,6 +31,8 @@ const RAIL_X = -16;
 export type SponsorResultsData = {
   results: HmrcRow[];
   isLoading: boolean;
+  /** No page could be loaded: there is nothing to show, and nothing was found to be missing. */
+  failed: boolean;
   hasMore: boolean;
   loadingMore: boolean;
   fetchMore: () => void;
@@ -55,7 +57,7 @@ export default function HmrcResults({
   filtersActive?: boolean;
   data: SponsorResultsData;
 }) {
-  const { results, isLoading, hasMore, loadingMore, fetchMore } = data;
+  const { results, isLoading, failed, hasMore, loadingMore, fetchMore } = data;
   // A query is "active" when it can produce rows: a 3+ char term, or any
   // filter set (which may browse namelessly).
   const queryActive = filtersActive || search.length >= 3;
@@ -274,7 +276,8 @@ export default function HmrcResults({
   // setup) on every committed term. `wasEmptyRef` remembers that the prior settled
   // state was empty, so a refine FROM empty keeps the scene up instead of flashing
   // skeletons; it resets once results arrive or the query drops below 3 chars.
-  const confirmedEmpty = !isLoading && queryActive && results.length === 0;
+  const confirmedEmpty =
+    !isLoading && !failed && queryActive && results.length === 0;
   const wasEmptyRef = useRef(false);
   useEffect(() => {
     if (confirmedEmpty) wasEmptyRef.current = true;
@@ -294,6 +297,22 @@ export default function HmrcResults({
       <p className="mt-4 text-sm text-(--sea-ink-soft)">
         Type at least 3 characters to search...
       </p>
+    );
+  }
+
+  // A search that could not load says so: it found nothing to be missing.
+  if (failed) {
+    return (
+      <>
+        <p className="mt-4 text-sm text-(--sea-ink-soft)">
+          Results couldn’t load. Please reload the page to try again.
+        </p>
+        <div
+          ref={listRef}
+          className="px-4"
+          style={{ height: 0, overflow: 'hidden' }}
+        />
+      </>
     );
   }
 

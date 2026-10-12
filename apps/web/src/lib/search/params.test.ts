@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  filterParamsOf,
   filtersToSearchParams,
   parseSearchFilters,
   RATINGS,
@@ -261,6 +262,27 @@ describe('filtersToSearchParams', () => {
     expect(reparsed.filters).toEqual(filters);
     expect(reparsed.issues).toEqual([]);
     expect(filtersToSearchParams(reparsed.filters)).toEqual(urlForm);
+  });
+});
+
+describe('filterParamsOf', () => {
+  test('a param that filters nothing is not a filter, nor is the name term', () => {
+    expect(
+      filterParamsOf({
+        route: 'Skilled Worker',
+        utm_source: 'newsletter',
+        render: 'client',
+        q: 'acme',
+      }),
+    ).toEqual({ route: 'Skilled Worker' });
+    expect(filterParamsOf({ render: 'client', utm_source: 'x' })).toEqual({});
+  });
+
+  test('a filter set in URL form comes back as it went in', () => {
+    const urlForm = filtersToSearchParams(
+      parseSearchFilters({ route: 'skilled-worker', hasMoved: true }).filters,
+    );
+    expect(filterParamsOf(urlForm)).toEqual(urlForm);
   });
 });
 

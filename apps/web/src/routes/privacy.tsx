@@ -67,9 +67,9 @@ function PrivacyPolicy() {
           <strong>Security cookies.</strong> As part of that protection, the
           site and our hosting provider&apos;s browser check set strictly
           necessary security cookies. Ours are <code>ss-session</code>, a signed
-          token tied to your network address that lets company pages load their
-          details, and <code>ss-session-hint</code>, which holds only that
-          token&apos;s expiry time; both last up to 30 days, and we keep no
+          token tied to your network address that lets search results and
+          company pages load, and <code>ss-session-hint</code>, which holds only
+          that token&apos;s expiry time; both last up to 30 days, and we keep no
           record of them on our servers. None of these cookies is used for
           analytics, advertising or tracking.
         </li>

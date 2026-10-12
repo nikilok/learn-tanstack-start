@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { SESSION_RENEW_SECONDS } from './calls';
 import {
   createSession,
+  retrySessionCall,
   type SessionDeps,
   type SessionOutcome,
   SessionRequiredError,
@@ -13,6 +16,8 @@ const refused = () =>
   new Response(null, { status: 403, headers: { 'x-session': 'required' } });
 /** A call answered. */
 const answered = () => new Response('{}', { status: 200 });
+/** A company data call is a POST, which the browser check stands in front of; a search listing's is a GET. */
+const PAGE_CALL = { method: 'POST' } as const;
 const NOW = 1_800_000_000_000;
 
 /** Lets every pending promise callback run. */
@@ -90,6 +95,7 @@ function harness(options: {
   let landed = false;
   /** The calls waiting for the check to let them go, oldest first. */
   const waiting: Array<() => void> = [];
+  let sentThroughCheck = 0;
   /** The next scripted answer to a call that reached the server. */
   const answer = () => {
     const next = options.edge
@@ -132,10 +138,11 @@ function harness(options: {
     hintExpiry: options.hint ?? (() => null),
     preview: () => options.preview ?? false,
     now: () => NOW,
-    fetch: async (input) => {
+    fetch: async (input, init) => {
       const url = input instanceof Request ? input.url : String(input);
       if (
-        new URL(url, 'http://localhost').pathname.startsWith('/_serverFn/s-')
+        new URL(url, 'http://localhost').pathname.startsWith('/_serverFn/s-') &&
+        init?.method === 'POST'
       ) {
         const treatment = checked.shift() ?? {};
         if (treatment.holdMs) await clock.sleep(treatment.holdMs);
@@ -151,6 +158,7 @@ function harness(options: {
       return response;
     },
     released: () => {
+      sentThroughCheck++;
       let release = () => {};
       const released = new Promise<void>((resolve) => {
         release = resolve;
@@ -174,7 +182,13 @@ function harness(options: {
       if (!log.includes('check')) log.push('check');
     },
   };
-  return { session: createSession(deps), log, clock };
+  return {
+    session: createSession(deps),
+    log,
+    clock,
+    /** The calls sent through the browser check. */
+    throughCheck: () => sentThroughCheck,
+  };
 }
 
 /** Runs a call to its end on virtual time: its status or its error's name, and when it settled. */
@@ -224,7 +238,7 @@ describe('createSession', () => {
         asks: [{ outcome: 'ok', holdMs: 5000 }],
         responses: [answered],
       });
-      const call = h.session.fetch(input);
+      const call = h.session.fetch(input, PAGE_CALL);
       await h.clock.run(4999);
       expect(h.log).not.toContain('fetch:200');
       expect(await settle(h, call)).toEqual({ result: '200', at: 5000 });
@@ -256,7 +270,9 @@ describe('createSession', () => {
       responses: [answered],
       hint: () => ending,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 0,
     });
@@ -265,9 +281,9 @@ describe('createSession', () => {
 
   test('a call refused after the first ask got a session renews once, then goes again', async () => {
     const h = harness({ asks: ['ok', 'ok'], responses: [refused, answered] });
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      '200',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('200');
     expect(asksIn(h.log)).toEqual(['ask:ok', 'ask:ok']);
     expect(h.log.filter((l) => l.startsWith('fetch:'))).toHaveLength(2);
   });
@@ -276,9 +292,9 @@ describe('createSession', () => {
     const h = harness({ asks: ['ok', 'ok'], responses: [refused, answered] });
     void h.session.start();
     await h.clock.run();
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      '200',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('200');
     expect(asksIn(h.log)).toEqual(['ask:ok', 'ask:ok']);
   });
 
@@ -287,9 +303,9 @@ describe('createSession', () => {
       asks: ['refused', 'refused', 'refused'],
       responses: [refused],
     });
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      'SessionRequiredError',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('SessionRequiredError');
     expect(
       h.log.filter((l) => l.startsWith('ask:') || l.startsWith('wait:')),
     ).toEqual([
@@ -305,15 +321,18 @@ describe('createSession', () => {
   test('a call refused again after renewing fails by name, not with the bare response', async () => {
     const h = harness({ asks: ['ok', 'ok'], responses: [refused, refused] });
     await expect(
-      Promise.all([h.session.fetch('/_serverFn/s-abc'), h.clock.run()]),
+      Promise.all([
+        h.session.fetch('/_serverFn/s-abc', PAGE_CALL),
+        h.clock.run(),
+      ]),
     ).rejects.toBeInstanceOf(SessionRequiredError);
   });
 
   test('off is final: no retries, and the call is not made again', async () => {
     const h = harness({ asks: ['off'], responses: [refused] });
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      'SessionRequiredError',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('SessionRequiredError');
     expect(asksIn(h.log)).toEqual(['ask:off']);
     expect(h.log.filter((l) => l.startsWith('fetch:'))).toHaveLength(1);
   });
@@ -351,9 +370,9 @@ describe('createSession', () => {
   test('with a held session, a company data call starts the browser check before it goes', async () => {
     const fresh = NOW / 1000 + SESSION_RENEW_SECONDS + 3600;
     const h = harness({ responses: [answered], hint: () => fresh });
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      '200',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('200');
     expect(h.log).toEqual(['check', 'fetch:200']);
   });
 
@@ -370,10 +389,110 @@ describe('createSession', () => {
       hint: () => fresh,
     });
     expect(
-      (await settle(moved, moved.session.fetch('/_serverFn/s-abc'))).result,
+      (await settle(moved, moved.session.fetch('/_serverFn/s-abc', PAGE_CALL)))
+        .result,
     ).toBe('200');
     expect(asksIn(moved.log)).toEqual(['ask:ok']);
   });
+});
+
+// A search listing's call is a GET: the edge wants a session for it, and the browser check stands in
+// front of none.
+describe('createSession — a search listing call', () => {
+  test('made with no session, it waits for the first ask and goes once, past no check of its own', async () => {
+    const h = harness({
+      asks: [{ outcome: 'ok', holdMs: 5000 }],
+      responses: [answered],
+    });
+    const call = h.session.fetch('/_serverFn/s-abc');
+    await h.clock.run(4999);
+    expect(h.log).not.toContain('fetch:200');
+    expect(await settle(h, call)).toEqual({ result: '200', at: 5000 });
+    expect(h.log).toEqual([
+      'check',
+      'ask:ok',
+      'left',
+      'answer:ok',
+      'fetch:200',
+    ]);
+    expect(h.throughCheck()).toBe(0);
+  });
+
+  test('with a session held, it goes at once and starts no check', async () => {
+    const fresh = NOW / 1000 + SESSION_RENEW_SECONDS + 3600;
+    const h = harness({ responses: [answered], hint: () => fresh });
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', { method: 'GET' })),
+    ).toEqual({ result: '200', at: 0 });
+    expect(h.log).toEqual(['fetch:200']);
+    expect(h.throughCheck()).toBe(0);
+  });
+
+  test('refused after the first ask got a session, it renews once and goes again', async () => {
+    const h = harness({ asks: ['ok', 'ok'], responses: [refused, answered] });
+    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
+      '200',
+    );
+    expect(asksIn(h.log)).toEqual(['ask:ok', 'ask:ok']);
+    expect(refusalsIn(h.log)).toHaveLength(1);
+  });
+
+  test('where no session can be had, it fails by name', async () => {
+    const h = harness({
+      asks: ['refused', 'refused', 'refused'],
+      responses: [refused],
+    });
+    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
+      'SessionRequiredError',
+    );
+  });
+
+  test('once the check is dead, it still goes as it is, not past the check', async () => {
+    const h = harness({
+      asks: ['ok'],
+      responses: [answered, answered],
+      checked: [{ failsHeld: true }],
+    });
+    await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL));
+    expect((await settle(h, h.session.fetch('/_serverFn/s-def'))).result).toBe(
+      '200',
+    );
+    expect(h.log.filter((l) => /^(unchecked|fetch)/.test(l))).toEqual([
+      'unchecked:200',
+      'fetch:200',
+    ]);
+  });
+});
+
+describe('retrySessionCall', () => {
+  test('a refusal is never retried: the call has already asked for a session again', () => {
+    for (const failures of [0, 1, 2])
+      expect(retrySessionCall(failures, new SessionRequiredError())).toBe(
+        false,
+      );
+  });
+
+  test('any other failure is retried three times', () => {
+    expect(
+      [0, 1, 2, 3].map((failures) =>
+        retrySessionCall(failures, new Error('Network error')),
+      ),
+    ).toEqual([true, true, true, false]);
+  });
+
+  test.each(['useHmrcSearch.ts', 'useFilterSearch.ts'])(
+    '%s retries by it, and says when no page could load',
+    (file) => {
+      const source = readFileSync(
+        join(import.meta.dir, '../../hooks', file),
+        'utf8',
+      );
+      expect(source).toContain('retry: retrySessionCall,');
+      expect(source).toContain(
+        'failed: enabled && isError && results.length === 0,',
+      );
+    },
+  );
 });
 
 // The browser check holds the session ask until its challenge has run, and a slow device takes far
@@ -383,7 +502,9 @@ describe('createSession — a slow or stuck browser check', () => {
     'a check that holds the first ask %i ms still gets the waiting company call its session: one ask, no refusal',
     async (holdMs) => {
       const h = harness({ asks: [{ outcome: 'ok', holdMs }], edge: true });
-      expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+      expect(
+        await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+      ).toEqual({
         result: '200',
         at: holdMs,
       });
@@ -397,7 +518,9 @@ describe('createSession — a slow or stuck browser check', () => {
       asks: [{ outcome: 'ok', holdMs: 59_000, serverMs: 2000 }],
       edge: true,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 61_000,
     });
@@ -411,7 +534,9 @@ describe('createSession — a slow or stuck browser check', () => {
       ],
       edge: true,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 25_000,
     });
@@ -424,7 +549,9 @@ describe('createSession — a slow or stuck browser check', () => {
       asks: [{ outcome: 'failed', failsHeld: true }],
       edge: true,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: 'SessionRequiredError',
       at: 0,
     });
@@ -434,9 +561,9 @@ describe('createSession — a slow or stuck browser check', () => {
 
   test('a failure after the check let the ask go is tried again', async () => {
     const h = harness({ asks: ['failed', 'ok'], edge: true });
-    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
-      '200',
-    );
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('200');
     expect(asksIn(h.log)).toEqual(['ask:failed', 'ask:ok']);
     expect(h.log).toContain('wait:1000');
   });
@@ -446,7 +573,9 @@ describe('createSession — a slow or stuck browser check', () => {
       asks: [{ outcome: 'ok', holdMs: Number.POSITIVE_INFINITY }],
       edge: true,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: 'SessionRequiredError',
       at: 60_000,
     });
@@ -466,7 +595,9 @@ describe('createSession — a company data call the check holds', () => {
       responses: [answered],
       checked: [{ holdMs: Number.POSITIVE_INFINITY }],
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 60_000,
     });
@@ -479,7 +610,9 @@ describe('createSession — a company data call the check holds', () => {
       responses: [answered],
       checked: [{ holdMs: 59_000, serverMs: 2000 }],
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 61_000,
     });
@@ -492,13 +625,17 @@ describe('createSession — a company data call the check holds', () => {
       responses: [answered, answered],
       checked: [{ failsHeld: true }, {}],
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: 0,
     });
     // The first call's unspent bound has run the clock on; the later call adds no wait of its own.
     const later = h.clock.now;
-    expect(await settle(h, h.session.fetch('/_serverFn/s-def'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-def', PAGE_CALL)),
+    ).toEqual({
       result: '200',
       at: later,
     });
@@ -514,7 +651,9 @@ describe('createSession — a company data call the check holds', () => {
       asks: [{ outcome: 'failed', failsHeld: true }],
       edge: true,
     });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: 'SessionRequiredError',
       at: 0,
     });
@@ -523,7 +662,9 @@ describe('createSession — a company data call the check holds', () => {
 
   test('a call the check fails with an error is that error, not a dead check', async () => {
     const h = harness({ hint: () => fresh, responses: [] });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: 'Error',
       at: 0,
     });
@@ -548,7 +689,8 @@ describe('createSession — a /download preview frame', () => {
         },
       });
       expect(
-        (await settle(h, h.session.fetch('/_serverFn/s-abc'))).result,
+        (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)))
+          .result,
       ).toBe('200');
       expect(h.log.filter((l) => l === 'wait:250')).toHaveLength(polls);
       expect(asksIn(h.log)).toEqual([]);
@@ -558,7 +700,9 @@ describe('createSession — a /download preview frame', () => {
 
   test('a frame whose page never holds a session gives up after its wait', async () => {
     const h = harness({ preview: true, responses: [refused] });
-    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
       result: 'SessionRequiredError',
       at: 70_000,
     });

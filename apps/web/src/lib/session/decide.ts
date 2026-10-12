@@ -48,7 +48,7 @@ export function decideDocument(input: {
 }
 
 /**
- * Whether a company data call goes through, and why: `server` answers it, `client` refuses it.
+ * Whether a session call goes through, and why: `server` answers it, `client` refuses it.
  * Anything that cannot be decided is `server`.
  */
 export type Decision =
@@ -68,8 +68,8 @@ export type Decision =
     };
 
 /**
- * Decides whether one company data call goes through: whatever would be served the full document
- * goes through (`decideDocument`), and anyone else by the session cookie held for their address.
+ * Decides whether one session call goes through: whatever would be served the full document goes
+ * through (`decideDocument`), and anyone else by the session cookie held for their address.
  * Never throws.
  */
 export async function decide(input: {

@@ -7,16 +7,14 @@ import { SESSION_CALL_PATH, SESSION_CALL_PREFIX, SESSION_CALLS } from './calls';
 
 const APP_ROOT = join(import.meta.dir, '../../..');
 
-/** Server functions any visitor may call: none answers with a company page's data. */
+/** Server functions any visitor may call: none answers with a company page's data or a listing. */
 const OPEN_CALLS = [
   'src/api/companyExtras.ts#issueExtrasToken',
-  'src/api/filterSearch.ts#searchFiltered',
   'src/api/geocode.ts#getGeocode',
   'src/api/hmrc.ts#getSlugForHash',
   'src/api/hmrc.ts#getSponsorCount',
   // Answers with a company's current slug alone, for the legacy URL's 301.
   'src/api/hmrc.ts#resolveCompanySlug',
-  'src/api/hmrc.ts#searchHmrc',
   'src/api/ingestion.ts#getLastIngestion',
   'src/api/logError.ts#logError',
   'src/api/releases.ts#getDesktopReleases',
@@ -79,9 +77,22 @@ describe('sessionCallId', () => {
     ).toStartWith(SESSION_CALL_PREFIX);
   });
 
-  test('every other function keeps the default id', () => {
+  test('the search listings are session calls', () => {
     for (const [filename, name] of [
       ['src/api/hmrc.ts', 'searchHmrc'],
+      ['src/api/filterSearch.ts', 'searchFiltered'],
+    ] as const)
+      expect(
+        sessionCallId({
+          filename,
+          functionName: `${name}_createServerFn_handler`,
+        }),
+      ).toStartWith(SESSION_CALL_PREFIX);
+  });
+
+  test('every other function keeps the default id', () => {
+    for (const [filename, name] of [
+      ['src/api/hmrc.ts', 'getSponsorCount'],
       ['src/api/hmrc.ts', 'resolveCompanySlug'],
       ['src/api/companyExtras.ts', 'issueExtrasToken'],
       ['src/api/other.ts', 'getCompanyPage'],

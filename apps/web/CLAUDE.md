@@ -517,9 +517,23 @@ crawler ranges, no address, no secret), when it passes.
   `createServerOnlyFn`, never server functions, so no other call can answer
   with them; `resolveCompanySlug` answers the legacy URL's 301 with the slug
   alone. The loader reads a page through `companyPageQueryOptions`: directly on
-  the server, by the data call in the browser. The search listings
-  (`searchHmrc`, `searchFiltered`) are open calls, and answer with listing
-  fields only.
+  the server, by the data call in the browser. The search listings answer with
+  listing fields only, by session too (below).
+- **The search listings are session calls** (`searchHmrc`, `searchFiltered`):
+  GET and edge-cached, the edge checking the session ahead of the cache. They
+  carry no browser check of their own, as the check stands in front of POST
+  calls only; the session's fetch sends a GET `s-` call as it is. The home
+  loader streams a search's first page with the document only where a company
+  page is served in full (the owner, a crawler), or for everyone while
+  `DOCUMENT_MODE` is not `enforce` (`rendersListing`,
+  `lib/session/listing.server.ts`); anyone else's results load through their
+  session. Its isomorphic wrapper (`listing.ts`) must not define what its
+  server half calls: an exported function stays in the browser's bundle with
+  everything it imports. `?render=client` on the home page shows a visitor's
+  page anywhere, locally too. The search hooks
+  never retry a refused session (`retrySessionCall`: the call has already
+  renewed), and the list says when results could not load rather than finding
+  no organisations.
 - **Only a company's own slug reads past the slug lookup** (`loadPage`):
   another spelling, a rename or a miss only redirects or 404s, so its profile
   and timeline (and any Companies House call) are never read for it.
@@ -571,8 +585,9 @@ crawler ranges, no address, no secret), when it passes.
   change to the company page is made there too, or the page jumps when its
   data lands.
 - **Data calls without a session are refused at the edge**, before any
-  function runs. `SESSION_CALLS` (`getCompanyPage`, `getCompanyExtras`) get
-  `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves, or if a
+  function runs. `SESSION_CALLS` (`getCompanyPage`, `getCompanyExtras`,
+  `searchHmrc`, `searchFiltered`) get `s-` ids (`call-ids.ts`);
+  `calls.test.ts` fails if one moves, or if a
   server function is placed in neither list. The browser's fetch (`start.ts`)
   holds an `s-` call made with no session until the page's first ask lands, so
   a first visit sends no refused call. It renews the session on a refusal and

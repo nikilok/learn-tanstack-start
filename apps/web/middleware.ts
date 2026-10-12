@@ -111,7 +111,7 @@ function serveDocument(request: Request, destination?: URL): Response {
   return destination ? rewrite(destination, init) : next(init);
 }
 
-/** Whether a company data call goes through: the owner's, or by session (`src/lib/session/decide.ts`). */
+/** Whether a session call goes through: the owner's, or by session (`src/lib/session/decide.ts`). */
 async function decision(request: Request) {
   return decide({
     headers: request.headers,
@@ -155,9 +155,9 @@ async function companyDocument(request: Request): Promise<Response> {
 }
 
 /**
- * A company data call: under `enforce`, refused here without a session, ahead of the cache. The
- * refusal is never cached and names itself, so the browser renews its session and calls again.
- * `observe` logs every decision and refuses nothing.
+ * A session call (a company page's data, a search listing): under `enforce`, refused here without
+ * a session, ahead of the cache. The refusal is never cached and names itself, so the browser
+ * renews its session and calls again. `observe` logs every decision and refuses nothing.
  */
 async function sessionCall(request: Request): Promise<Response> {
   const mode = documentMode();
@@ -180,7 +180,7 @@ async function sessionCall(request: Request): Promise<Response> {
 
 /**
  * The edge's answer to every request, ahead of the cache: company pages decided by who asks and
- * their data calls by session, the other documents with the Accept repair, known API and static
+ * the session calls by session, the other documents with the Accept repair, known API and static
  * routes passed through, and an edge 404 for anything else.
  */
 export default function middleware(
@@ -195,7 +195,7 @@ export default function middleware(
   const routed = routedPath(pathname);
   if (routed === null) return new Response('', { status: 400 });
 
-  // A company page's data calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
+  // The session calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
   if (routed.startsWith(SESSION_CALL_PATH.toLowerCase()))
     return sessionCall(request);
 

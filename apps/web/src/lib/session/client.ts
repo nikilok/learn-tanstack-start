@@ -37,6 +37,22 @@ export class SessionRequiredError extends Error {
   }
 }
 
+/** Retries a query behind a session call takes, as React Query's default does. */
+const QUERY_RETRIES = 3;
+
+/**
+ * A query's `retry` for a session call: a refusal is final, as the call has already asked for a
+ * session again before giving up, so only another failure is retried.
+ */
+export function retrySessionCall(
+  failureCount: number,
+  error: unknown,
+): boolean {
+  return (
+    !(error instanceof SessionRequiredError) && failureCount < QUERY_RETRIES
+  );
+}
+
 /** Asks before giving up; the pause before the next ask grows by RETRY_MS each time. */
 const ATTEMPTS = 3;
 const RETRY_MS = 1000;
@@ -91,8 +107,8 @@ export type SessionDeps = {
 
 /**
  * This document's session: asked for on load unless one with time to run is held, and again when
- * a call is refused for want of one. Only a company data call made with no session held waits for
- * the first ask; every other call goes out at once.
+ * a call is refused for want of one. Only a session call made with no session held waits for the
+ * first ask; every other call goes out at once.
  */
 export function createSession(deps: SessionDeps) {
   let first: Promise<Got> | null = null;
@@ -217,19 +233,21 @@ export function createSession(deps: SessionDeps) {
   /**
    * The fetch every server function call makes from the browser (`start.ts`). A company data call
    * starts the browser check first, as it carries the check's challenge, and a page can make one
-   * before the root effect that starts the check has run (`sendChecked`). One made while the first
-   * ask is out, with no session held, waits for it instead of being refused and sent again. A
-   * first ask whose answer stalled may still land, so the call asks again before it goes; only a
-   * definite no makes its refusal final. A refusal that stands after renewing throws
-   * `SessionRequiredError`, a named failure the page can report.
+   * before the root effect that starts the check has run (`sendChecked`); a search listing's call
+   * carries none, and goes as it is. A session call made while the first ask is out, with no
+   * session held, waits for it instead of being refused and sent again. A first ask whose answer
+   * stalled may still land, so the call asks again before it goes; only a definite no makes its
+   * refusal final. A refusal that stands after renewing throws `SessionRequiredError`, a named
+   * failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     const asked = start();
-    const companyData = isSessionCall(input);
+    const sessionCall = isSessionCall(input);
+    const companyData = sessionCall && isPost(input, init);
     if (companyData) deps.startCheck();
     const send = companyData ? sendChecked : deps.fetch;
     let waited =
-      firstPending && !hintHeld() && companyData ? await asked : null;
+      firstPending && !hintHeld() && sessionCall ? await asked : null;
     if (waited === 'stalled' && !hintHeld()) waited = await renew();
     const response = await send(input, init);
     if (!refused(response)) return response;
@@ -243,12 +261,22 @@ export function createSession(deps: SessionDeps) {
   return { start, renew, fetch: sessionFetch };
 }
 
-/** Whether a call is a company data call (`SESSION_CALLS`), the only kind refused without a session. */
+/** Whether a call is a session call (`SESSION_CALLS`), the only kind refused without a session. */
 function isSessionCall(input: Parameters<typeof fetch>[0]): boolean {
   const url = input instanceof Request ? input.url : String(input);
   return new URL(url, 'http://localhost').pathname.startsWith(
     SESSION_CALL_PATH,
   );
+}
+
+/** Whether a call is a POST: a session call sent so is a company page's, which the browser check stands in front of (`CHECKED_CALLS`). */
+function isPost(
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): boolean {
+  const method =
+    init?.method ?? (input instanceof Request ? input.method : 'GET');
+  return method.toUpperCase() === 'POST';
 }
 
 /** A refusal for want of a session (`middleware.ts`). */

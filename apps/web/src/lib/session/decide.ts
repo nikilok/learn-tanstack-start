@@ -17,8 +17,34 @@ export function documentMode(
 }
 
 /**
- * How a request is served, and why: `server` is the full document (a data call answered), `client`
- * the app shell (a data call refused). Anything that cannot be decided is `server`.
+ * How a company document is served, and why: `server` is the full document, `client` the app
+ * shell, whose data reaches the browser through its own data call. Anything that cannot be
+ * decided is `server`.
+ */
+export type DocumentDecision =
+  | { render: 'server'; why: 'crawler' | 'no crawler ranges' | 'no address' }
+  | { render: 'client'; why: 'visitor' };
+
+/**
+ * Decides how one company document is served, from its address alone: in full to a crawler
+ * address, and as the app shell to anyone else, whatever cookie they hold. Never throws.
+ */
+export function decideDocument(input: {
+  headers: Headers;
+  ranges: Ranges | null;
+}): DocumentDecision {
+  const { headers, ranges } = input;
+  if (!ranges) return { render: 'server', why: 'no crawler ranges' };
+  const address = clientAddress(headers);
+  if (address === null || addressScope(address) === null)
+    return { render: 'server', why: 'no address' };
+  if (inRanges(ranges, address)) return { render: 'server', why: 'crawler' };
+  return { render: 'client', why: 'visitor' };
+}
+
+/**
+ * Whether a company data call goes through, and why: `server` answers it, `client` refuses it.
+ * Anything that cannot be decided is `server`.
  */
 export type Decision =
   | {
@@ -35,7 +61,7 @@ export type Decision =
       why: 'no session' | 'expired' | 'elsewhere' | 'malformed' | 'unverified';
     };
 
-/** Decides how one request is served, from its address and its session cookie. Never throws. */
+/** Decides whether one company data call goes through, from its address and its session cookie. Never throws. */
 export async function decide(input: {
   headers: Headers;
   ranges: Ranges | null;

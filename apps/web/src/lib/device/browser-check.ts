@@ -1,6 +1,5 @@
 import { initBotId } from 'botid/client/core';
 
-import { isDesktopPreview } from '../../utils/desktop-preview';
 import { SESSION_PATH } from '../session/calls';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 
@@ -55,9 +54,10 @@ function isSessionAsk(
 }
 
 /**
- * Starts the browser check once per document, from a root effect, ahead of the page's first
- * checked call — the company extras wait on the device key, which waits for idle time. The
- * /download preview iframes stay out, as with the device pings: they never load the extras.
+ * Starts the browser check once per document, ahead of the page's first checked call: from a root
+ * effect, and from the session's fetch before a company data call, which a page can make before
+ * its effects run. /download preview iframes run it too: their company pages load their data
+ * through the same checked call.
  *
  * The check keeps the fetch it finds when it starts and sends each call it held through it, so a
  * wrapper put in first sees a session ask the moment it leaves (`sessionAskReleased`).
@@ -65,7 +65,7 @@ function isSessionAsk(
 export function initBrowserCheck(): void {
   if (started) return;
   started = true;
-  if (typeof window === 'undefined' || isDesktopPreview()) return;
+  if (typeof window === 'undefined') return;
   const send = window.fetch.bind(window);
   window.fetch = ((input, init) => {
     if (isSessionAsk(input, init)) awaitingRelease.shift()?.();

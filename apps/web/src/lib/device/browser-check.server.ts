@@ -65,10 +65,11 @@ export async function browserVerdict(
 }
 
 /**
- * Whether the current request may have the extras: it came from a browser a person is using,
- * by Vercel's check of the challenge its script attached to the request. Any client the check
- * names as automated is refused while `enforce` holds, verified crawlers included; otherwise it
- * is let through. Every verdict is logged either way.
+ * Whether the current request may have what it asks for (the extras, or a company page's data
+ * under `tag`): it came from a browser a person is using, by Vercel's check of the challenge its
+ * script attached to the request. Any client the check names as automated is refused while
+ * `enforce` holds, verified crawlers included; otherwise it is let through. Every verdict is
+ * logged either way, under `tag`.
  *
  * A check that fails lets the request through, as an unreadable suspended list suspends nobody,
  * and says so in the log. Never throws.
@@ -77,12 +78,18 @@ export async function fromBrowser(
   check: BrowserCheck = checkBotId,
   verdict: LocalVerdict | undefined = localVerdict(),
   enforce: boolean = enforcing(),
+  tag = 'extras',
 ): Promise<boolean> {
-  const said = await browserVerdict('extras', check, verdict);
+  const said = await browserVerdict(tag, check, verdict);
   if (said === 'unchecked') return true;
   const isBot = said !== 'person';
   console.info(
-    `[extras] browser check: ${said}${isBot && !enforce ? ' (not enforced)' : ''}`,
+    `[${tag}] browser check: ${said}${isBot && !enforce ? ' (not enforced)' : ''}`,
   );
   return !isBot || !enforce;
+}
+
+/** `fromBrowser` for a company page's data call, logged under `page`. */
+export function pageFromBrowser(): Promise<boolean> {
+  return fromBrowser(checkBotId, localVerdict(), enforcing(), 'page');
 }

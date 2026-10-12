@@ -225,7 +225,7 @@ describe('edge middleware: routing is preserved', () => {
   });
 });
 
-describe('edge middleware: company pages by session', () => {
+describe('edge middleware: company pages, and their data calls by session', () => {
   const SECRET = 'test-secret-not-a-real-one';
   const VISITOR = '81.2.69.160';
   const CRAWLER = '66.249.64.10';
@@ -310,12 +310,12 @@ describe('edge middleware: company pages by session', () => {
     );
   });
 
-  test('enforce: without a session the page is the shell, rendered from its own URL', async () => {
+  test('enforce: a visitor gets the shell, rendered from its own URL', async () => {
     const res = await visit('/company/acme-ltd', { mode: 'enforce' });
     expect(rewrittenTo(res)).toBe(shell('render=client'));
     expect(res.headers.get('link')).toBe('</llms.txt>; rel="describedby"');
     expect(String(logged.mock.calls[0]?.[0])).toBe(
-      '[document] client (no session)',
+      '[document] client (visitor)',
     );
   });
 
@@ -335,31 +335,19 @@ describe('edge middleware: company pages by session', () => {
     expect(overriddenAccept(res)).toBe('text/markdown, text/html');
   });
 
-  test('enforce: a session held for this address gets the full document', async () => {
-    const res = await visit('/company/acme-ltd', {
+  test('enforce: a session, held for this address or another, still gets the shell', async () => {
+    for (const scope of [VISITOR, '81.2.69.161']) {
+      const res = await visit('/company/acme-ltd', {
+        mode: 'enforce',
+        session: await session(scope),
+      });
+      expect(rewrittenTo(res)).toBe(shell('render=client'));
+    }
+    const asked = await visit('/company/acme-ltd?render=client', {
       mode: 'enforce',
       session: await session(),
     });
-    expect(isNext(res)).toBe(true);
-    expect(rewrittenTo(res)).toBeNull();
-  });
-
-  test('enforce: a session holder asking for the shell URL gets the full document', async () => {
-    const res = await visit('/company/acme-ltd?render=client', {
-      mode: 'enforce',
-      session: await session(),
-    });
-    expect(rewrittenTo(res)).toBe(
-      'https://sponsorsearch.co.uk/company/acme-ltd',
-    );
-  });
-
-  test('enforce: a session from another address gets the shell', async () => {
-    const res = await visit('/company/acme-ltd', {
-      mode: 'enforce',
-      session: await session('81.2.69.161'),
-    });
-    expect(rewrittenTo(res)).toBe(shell('render=client'));
+    expect(rewrittenTo(asked)).toBe(shell('render=client'));
   });
 
   test('enforce: a crawler address gets the full document without a session', async () => {
@@ -368,13 +356,27 @@ describe('edge middleware: company pages by session', () => {
       ip: CRAWLER,
     });
     expect(isNext(res)).toBe(true);
+    expect(rewrittenTo(res)).toBeNull();
+    expect(String(logged.mock.calls[0]?.[0])).toBe(
+      '[document] server (crawler)',
+    );
+  });
+
+  test('enforce: a crawler asking for the shell URL gets the full document', async () => {
+    const res = await visit('/company/acme-ltd?render=client', {
+      mode: 'enforce',
+      ip: CRAWLER,
+    });
+    expect(rewrittenTo(res)).toBe(
+      'https://sponsorsearch.co.uk/company/acme-ltd',
+    );
   });
 
   test('observe: the decision is logged and everyone gets the full document', async () => {
     const res = await visit('/company/acme-ltd', { mode: 'observe' });
     expect(isNext(res)).toBe(true);
     expect(String(logged.mock.calls[0]?.[0])).toBe(
-      '[document] client (no session)',
+      '[document] client (visitor)',
     );
   });
 

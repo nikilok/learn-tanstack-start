@@ -118,7 +118,10 @@ function harness(options: {
       log.push(`fetch:${response.status}`);
       return response;
     },
-    startCheck: () => log.push('check'),
+    // Once per document, as `initBrowserCheck` starts it.
+    startCheck: () => {
+      if (!log.includes('check')) log.push('check');
+    },
   };
   return { session: createSession(deps), log, clock };
 }
@@ -294,6 +297,15 @@ describe('createSession', () => {
     expect(h.log).not.toContain('check');
   });
 
+  test('with a held session, a company data call starts the browser check before it goes', async () => {
+    const fresh = NOW / 1000 + SESSION_RENEW_SECONDS + 3600;
+    const h = harness({ responses: [answered], hint: () => fresh });
+    expect((await settle(h, h.session.fetch('/_serverFn/s-abc'))).result).toBe(
+      '200',
+    );
+    expect(h.log).toEqual(['check', 'fetch:200']);
+  });
+
   test('a held session near its end is asked for on load, and a refused call still renews', async () => {
     const ending = NOW / 1000 + SESSION_RENEW_SECONDS - 3600;
     const fresh = NOW / 1000 + SESSION_RENEW_SECONDS + 3600;
@@ -395,7 +407,7 @@ describe('createSession — a /download preview frame', () => {
   // A frame never asks: it waits, polling, for its page's session, as long as the page's ask may
   // take — a page whose check is slow lends its session late.
   test.each([2, 200])(
-    'a refused call waits until its page holds a session (%i polls), and never asks',
+    'a refused call waits until its page holds a session (%i polls), and never asks: it only starts the browser check',
     async (polls) => {
       let hint: number | null = null;
       let seen = 0;
@@ -411,9 +423,8 @@ describe('createSession — a /download preview frame', () => {
         (await settle(h, h.session.fetch('/_serverFn/s-abc'))).result,
       ).toBe('200');
       expect(h.log.filter((l) => l === 'wait:250')).toHaveLength(polls);
-      expect(h.log.some((l) => l.startsWith('ask:') || l === 'check')).toBe(
-        false,
-      );
+      expect(asksIn(h.log)).toEqual([]);
+      expect(h.log[0]).toBe('check');
     },
   );
 

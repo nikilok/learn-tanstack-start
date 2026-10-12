@@ -36,7 +36,7 @@ export type CompanyPageRow = CompanyLicence & {
 
 /**
  * Every licence row sharing a `name_slug`, primary org first. The one query
- * behind both getHmrcCompanyBySlug and getCompanyExtras, so both see the same
+ * behind both companyBySlug and getCompanyExtras, so both see the same
  * rows in the same order; each then pools for its own company. The website
  * column, used only for the outline, passes the same render gate as the "Has
  * website" filter.

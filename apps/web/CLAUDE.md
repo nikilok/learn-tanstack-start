@@ -480,17 +480,31 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
   matching the path in `apps/web/.vercel/output/config.json` from a
   `NITRO_PRESET=vercel` build.
 
-## Company pages by session — cross-file invariants
+## Company pages: in full for crawlers, by data call for everyone else — cross-file invariants
 
-`DOCUMENT_MODE` (Vercel env): unset is off, `observe` logs every decision and
-changes nothing, `enforce` acts (logging documents and refusals). The edge
-middleware (`src/lib/session/`) gives a crawler address (Global Config
-`crawlerRanges`) or a browser with a session the full document, and anyone else
-the app shell. A session is the httpOnly `ss-session` cookie, bound to the
-visitor's address and issued by `POST /api/session`.
+`DOCUMENT_MODE` (Vercel env): unset is off (every company page is served in
+full), `observe` logs every decision and changes nothing, `enforce` acts
+(logging documents and refusals). The edge middleware (`src/lib/session/`)
+gives a crawler address (Global Config `crawlerRanges`) the full document, and
+anyone else the app shell, whatever cookie they hold. The shell's data comes
+from one POST server function, `getCompanyPage` (`api/companyPage.ts`), which
+asks the browser check on every call, as the extras do, and answers `denied`
+when the check names the caller automated while `BROWSER_CHECK_ENFORCE` holds.
+A data call gets past the edge only with a session: the httpOnly `ss-session`
+cookie, bound to the visitor's address and issued by `POST /api/session`.
 
-- **The decision runs at the edge** because company documents and data calls
-  are edge-cached; a decision in the function would never see a cache hit.
+- **The document decision runs at the edge** because company documents are
+  edge-cached; a decision in the function would never see a cache hit. The
+  data call is never cached: its answer depends on the check.
+- **Company data leaves the server two ways only**: a crawler's full document,
+  and `getCompanyPage`. Its reads (`companyBySlug`, `companyProfile`,
+  `companyTimeline`) are `createServerOnlyFn`, never server functions, so no
+  other call can answer with them; `resolveCompanySlug` answers the legacy
+  URL's 301 with the slug alone. The loader reads a page through
+  `companyPageQueryOptions`: directly on the server, by the data call in the
+  browser.
+- **The company route is never preloaded** (`preload: false`): a hover or a
+  touch loads its code alone, as every data call asks the check.
 - **The edge matches on the routed path** (decoded, lower-cased), as the router
   matches in any case and decodes escapes. Any other spelling of a company page
   301s to `/company/<slug>`; a data call is decided however it is spelled.
@@ -519,11 +533,16 @@ visitor's address and issued by `POST /api/session`.
   the check starts sees the release), and the hold has a longer bound of its
   own. An ask that fails before the check lets it go means the check cannot
   run, and is not asked again.
+- **The browser check starts before any company data call**: the session's
+  fetch starts it, as a page can make the call before the root effect that
+  starts it has run, and a call that leaves before the check wraps the fetch
+  carries no challenge.
 - **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
   change to the company page is made there too, or the page jumps when its
   data lands.
-- **Data calls are refused at the edge**, ahead of the cache. `SESSION_CALLS`
-  get `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves, or if a
+- **Data calls without a session are refused at the edge**, before any
+  function runs. `SESSION_CALLS` (`getCompanyPage`, `getCompanyExtras`) get
+  `s-` ids (`call-ids.ts`); `calls.test.ts` fails if one moves, or if a
   server function is placed in neither list. The browser's fetch (`start.ts`)
   holds an `s-` call made with no session until the page's first ask lands, so
   a first visit sends no refused call. It renews the session on a refusal and
@@ -531,9 +550,10 @@ visitor's address and issued by `POST /api/session`.
   that got a definite no stands, and one whose answer stalled asks again first.
   After a TanStack Start upgrade, check the build still carries `s-` ids.
 - **Whatever cannot be decided is served in full** (no crawler ranges, no
-  address, no secret).
+  address), and a data call passes the edge without a secret.
 - **/download preview frames never ask for a session**: they share the page's
   cookie and wait for its `ss-session-hint`, as long as the page's ask may take.
+  They do run the browser check, which their data call carries.
 
 ## /download live Preview — the app iframing itself
 

@@ -163,15 +163,19 @@ export function createSession(deps: SessionDeps) {
 
   /**
    * The fetch every server function call makes from the browser (`start.ts`). A company data call
-   * made while the first ask is out, with no session held, waits for it instead of being refused
-   * and sent again. A first ask whose answer stalled may still land, so the call asks again before
-   * it goes; only a definite no makes its refusal final. A refusal that stands after renewing throws
-   * `SessionRequiredError`, a named failure the page can report.
+   * starts the browser check first, as it carries the check's challenge, and a page can make one
+   * before the root effect that starts the check has run. One made while the first ask is out,
+   * with no session held, waits for it instead of being refused and sent again. A first ask whose
+   * answer stalled may still land, so the call asks again before it goes; only a definite no makes
+   * its refusal final. A refusal that stands after renewing throws `SessionRequiredError`, a named
+   * failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     const asked = start();
+    const companyData = isSessionCall(input);
+    if (companyData) deps.startCheck();
     let waited =
-      firstPending && !hintHeld() && isSessionCall(input) ? await asked : null;
+      firstPending && !hintHeld() && companyData ? await asked : null;
     if (waited === 'stalled' && !hintHeld()) waited = await renew();
     const response = await deps.fetch(input, init);
     if (!refused(response)) return response;

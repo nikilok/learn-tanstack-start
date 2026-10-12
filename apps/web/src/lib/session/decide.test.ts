@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { decide, documentMode } from './decide';
+import { decide, decideDocument, documentMode } from './decide';
 import { parseRanges } from './ranges';
 import { issueSession } from './token';
 
@@ -27,6 +27,37 @@ describe('documentMode', () => {
     expect(documentMode('enforce')).toBe('enforce');
     for (const off of [undefined, '', 'on', '1', 'ENFORCE'])
       expect(documentMode(off)).toBeNull();
+  });
+});
+
+describe('decideDocument', () => {
+  test('a crawler address gets the full document', () => {
+    expect(
+      decideDocument({ headers: request('66.249.64.10'), ranges }),
+    ).toEqual({ render: 'server', why: 'crawler' });
+  });
+
+  test('anyone else gets the shell, a session held for their address included', async () => {
+    expect(decideDocument({ headers: request(visitor), ranges })).toEqual({
+      render: 'client',
+      why: 'visitor',
+    });
+    expect(
+      decideDocument({
+        headers: request(visitor, await session('person')),
+        ranges,
+      }),
+    ).toEqual({ render: 'client', why: 'visitor' });
+  });
+
+  test('whatever it cannot place gets the full document', () => {
+    expect(decideDocument({ headers: request(visitor), ranges: null })).toEqual(
+      { render: 'server', why: 'no crawler ranges' },
+    );
+    expect(decideDocument({ headers: request(null), ranges })).toEqual({
+      render: 'server',
+      why: 'no address',
+    });
   });
 });
 

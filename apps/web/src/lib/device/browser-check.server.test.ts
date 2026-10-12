@@ -58,6 +58,13 @@ describe('fromBrowser', () => {
     ]);
   });
 
+  test("a company page's data call says its verdicts under its own tag", async () => {
+    expect(
+      await fromBrowser(answering(true).check, undefined, true, 'page'),
+    ).toBe(false);
+    expect(said()).toEqual(['[page] browser check: automated']);
+  });
+
   test('enforced: a verified crawler is refused like any automated client', async () => {
     expect(
       await fromBrowser(answering(true, true).check, undefined, true),

@@ -1,4 +1,4 @@
-/** getCompanyProfile's result when a Companies House call failed transiently. Unlike `null`, it says nothing about whether the company exists. */
+/** companyProfile's result when a Companies House call failed transiently. Unlike `null`, it says nothing about whether the company exists. */
 export const PROFILE_UNAVAILABLE = { kind: 'unavailable' } as const;
 
 /** How long a client reuses a transient failure: long enough to absorb preload bursts, short enough that recovery shows on the next visit. */

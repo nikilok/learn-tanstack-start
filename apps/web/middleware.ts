@@ -9,7 +9,7 @@ import {
   SESSION_PATH,
   SESSION_REQUIRED,
 } from './src/lib/session/calls';
-import { decide, documentMode } from './src/lib/session/decide';
+import { decide, decideDocument, documentMode } from './src/lib/session/decide';
 import { crawlerRanges } from './src/lib/session/ranges';
 import { sessionSecret } from './src/lib/session/token';
 
@@ -110,7 +110,7 @@ function serveDocument(request: Request, destination?: URL): Response {
   return destination ? rewrite(destination, init) : next(init);
 }
 
-/** How the request is served by session (`src/lib/session/decide.ts`). */
+/** Whether a company data call goes through by session (`src/lib/session/decide.ts`). */
 async function decision(request: Request) {
   return decide({
     headers: request.headers,
@@ -129,15 +129,18 @@ function shellUrl(url: URL): URL {
 }
 
 /**
- * A company page under DOCUMENT_MODE: the full document for a crawler or a session holder, the app
- * shell otherwise. The shell has its own URL, so the two never share a cache entry. `observe` only
- * logs.
+ * A company page under DOCUMENT_MODE: the full document for a crawler, the app shell for anyone
+ * else, session or not, whose data comes through its own data call. The shell has its own URL, so
+ * the two never share a cache entry. `observe` only logs.
  */
 async function companyDocument(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const mode = documentMode();
   if (mode) {
-    const decided = await decision(request);
+    const decided = decideDocument({
+      headers: request.headers,
+      ranges: await crawlerRanges(),
+    });
     console.info(`[document] ${decided.render} (${decided.why})`);
     if (mode === 'enforce' && decided.render === 'client')
       return serveDocument(request, shellUrl(url));

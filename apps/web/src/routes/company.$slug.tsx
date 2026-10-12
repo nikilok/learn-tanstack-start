@@ -13,9 +13,8 @@ import {
   setSsrCacheControl,
   setCompanyCacheTag,
 } from '../api/cache-headers';
-import { fetchCompanyProfile } from '../api/companiesHouse';
-import { companyTimelineQueryOptions } from '../api/companyTimeline';
-import { hmrcCompanyBySlugQueryOptions, isLiveCompanySlug } from '../api/hmrc';
+import { companyPageQueryOptions } from '../api/companyPage';
+import { isLiveCompanySlug } from '../api/hmrc';
 import { requestPathname } from '../api/request-path';
 import { AddressMap } from '../components/AddressMap';
 import { BackToSearch } from '../components/BackToSearch';
@@ -44,7 +43,6 @@ import {
   websiteView,
 } from '../lib/company/extras-view';
 import type { RouteLicence } from '../lib/company/licences';
-import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
 import {
   companySearch,
   isShell,
@@ -153,16 +151,20 @@ export const Route = createFileRoute('/company/$slug')({
   // A navigation that outlasts pendingMs shows the frame, and the page
   // replaces it the moment its data lands.
   pendingMinMs: 0,
+  // A hover or a touch on a link loads the page's code alone: its data call
+  // asks the browser check every time, so it is made for a visit only.
+  preload: false,
   loader: async ({ params, location, context: { queryClient } }) => {
-    const options = hmrcCompanyBySlugQueryOptions(params.slug);
+    const options = companyPageQueryOptions(params.slug);
     // SSR: per-request cache → ensure. Client: fetchQuery ALONE — via the
-    // staleTime fn a cached 'found' returns with no fetch, while a cached
+    // staleTime fn a complete page returns with no fetch, while a cached
     // miss (null/'moved') is always stale and re-resolves in exactly one
     // fetch (ensureQueryData would return the cached miss without ever
     // refetching; ensure-then-fetch would double-fetch uncached misses).
-    const company = import.meta.env.SSR
+    const page = import.meta.env.SSR
       ? await queryClient.ensureQueryData(options)
       : await queryClient.fetchQuery(options);
+    const { company } = page;
 
     if (!company) throw notFound();
 
@@ -196,31 +198,12 @@ export const Route = createFileRoute('/company/$slug')({
       throw redirectToCanonical(company.nameSlug);
     }
 
-    // A failed lookup degrades the page like a Companies House outage does.
-    const profileResult = await fetchCompanyProfile(
-      queryClient,
-      company.licences[0].organisationName,
-    ).catch((error: unknown) => {
-      console.error('[Profile] load failed:', error);
-      return PROFILE_UNAVAILABLE;
-    });
+    const profileResult = page.profile;
     const profile = profileResult?.kind === 'found' ? profileResult : null;
-
-    // Auxiliary — a transient failure must not take down the page.
-    const timeline = profile?.company_number
-      ? await queryClient
-          .ensureQueryData({
-            ...companyTimelineQueryOptions(profile.company_number),
-            revalidateIfStale: true,
-          })
-          .catch((error) => {
-            console.error('[Timeline] load failed:', error);
-            return null;
-          })
-      : null;
+    const { timeline } = page;
 
     // Short-cache a document built from incomplete data (a Companies House
-    // outage, a timeline RPC error, or a first visit racing getCompanyProfile's
+    // outage, a timeline error, or a first visit racing the profile's
     // background upsert) so the degraded rendering isn't baked in for 30 days.
     const degraded = companyDocumentDegraded({
       profileUnavailable: profileResult?.kind === 'unavailable',
@@ -228,8 +211,8 @@ export const Route = createFileRoute('/company/$slug')({
       timelineLoaded: Boolean(timeline),
     });
     setSsrCacheControl(degraded ? SHORT_EDGE_CACHE : LONG_EDGE_CACHE);
-    // Same tags as the RPCs, so both purge pipelines cover HTML and data alike.
-    // Unmapped sponsors get the population tag alone — still nightly-purgeable.
+    // Tagged so both purge pipelines reach the document. Unmapped sponsors get
+    // the population tag alone — still nightly-purgeable.
     setCompanyCacheTag(profile?.company_number);
 
     return { sponsor: company, profile, timeline };

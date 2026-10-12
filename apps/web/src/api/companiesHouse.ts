@@ -4,16 +4,12 @@ import {
   hmrcSkilledWorkers,
   toDatedPreviousNames,
 } from '@ss/db';
-import { type QueryClient, queryOptions } from '@tanstack/react-query';
-import { createServerFn } from '@tanstack/react-start';
+import { createServerOnlyFn } from '@tanstack/react-start';
 import { waitUntil } from '@vercel/functions';
 import { asc, eq, isNull } from 'drizzle-orm';
 
 import { db } from '../db.server';
-import {
-  PROFILE_UNAVAILABLE,
-  profileStaleTime,
-} from '../lib/company/profile-lookup';
+import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
 import {
   type ChResponse,
   fetchChApi,
@@ -21,12 +17,6 @@ import {
 } from '../lib/hmrc-ch/ch-lookup';
 import { profileSource } from '../lib/hmrc-ch/profile-source';
 import { resolveOneSponsor } from '../lib/hmrc-ch/resolve-sponsor';
-import {
-  LONG_EDGE_CACHE,
-  setCompanyCacheTag,
-  setRpcCacheControl,
-  TRANSIENT_EDGE_CACHE,
-} from './cache-headers';
 import { loadSicDescriptions } from './sic';
 
 type CompanyProfile = {
@@ -154,12 +144,6 @@ async function fetchFromApi(path: string): Promise<ChResponse> {
   return fetchChApi(path, apiKey);
 }
 
-/** getCompanyProfile's result for a transient Companies House failure, edge-cached only long enough to absorb a retry burst. */
-function profileUnavailable() {
-  setRpcCacheControl(TRANSIENT_EDGE_CACHE);
-  return PROFILE_UNAVAILABLE;
-}
-
 /**
  * Upsert a `CompanyProfile` into `companies_house_profiles` keyed on
  * `companyNumber`, overwriting all tracked fields on conflict.
@@ -172,7 +156,7 @@ async function upsertProfile(profile: CompanyProfile) {
   });
 }
 
-/** The database reads that route getCompanyProfile's lookup for an organisation. */
+/** The database reads that route companyProfile's lookup for an organisation. */
 function profileReads(companyName: string) {
   return {
     mapping: async () => {
@@ -210,18 +194,18 @@ function profileReads(companyName: string) {
 }
 
 /**
- * Server fn resolving a company profile for a given HMRC organisation name.
- * Looks up the company number via `hmrc_company_mapping` and returns the
- * cached profile if present. Otherwise, for an organisation on the register,
- * calls the Companies House API (search → profile) and persists the mapping +
+ * Resolves a company profile for a given HMRC organisation name. Looks up
+ * the company number via `hmrc_company_mapping` and returns the cached
+ * profile if present. Otherwise, for an organisation on the register, calls
+ * the Companies House API (search → profile) and persists the mapping +
  * profile via `waitUntil`. Returns `null` when Companies House has no such
  * company (verified no-match, public body, 404) or an uncached organisation
  * is not on the register, and `PROFILE_UNAVAILABLE` when a CH call failed
- * transiently, in which case nothing is persisted.
+ * transiently, in which case nothing is persisted. Server only: read by the
+ * page's data call (`companyPage.ts`).
  */
-const getCompanyProfile = createServerFn()
-  .validator((input: unknown) => input as { companyName: string })
-  .handler(async ({ data: { companyName } }) => {
+export const companyProfile = createServerOnlyFn(
+  async (companyName: string) => {
     const source = await profileSource(profileReads(companyName));
     // Null suppresses the CH panel; the UI renders base sponsor data only.
     if (source.kind === 'none') return null;
@@ -245,7 +229,7 @@ const getCompanyProfile = createServerFn()
         console.log(
           `[Profile] CH failure for ${source.companyNumber} — reporting unavailable`,
         );
-        return profileUnavailable();
+        return PROFILE_UNAVAILABLE;
       }
 
       profile = fetched.profile as CompanyProfile;
@@ -273,7 +257,7 @@ const getCompanyProfile = createServerFn()
         console.log(
           `[Profile] CH failure while resolving "${companyName}" — not caching a verdict`,
         );
-        return profileUnavailable();
+        return PROFILE_UNAVAILABLE;
       }
 
       if (result.verdict === 'public_body') {
@@ -353,10 +337,6 @@ const getCompanyProfile = createServerFn()
     // Look up SIC code descriptions from our database
     const sicDescriptions = await loadSicDescriptions(profile.sic_codes ?? []);
 
-    setCompanyCacheTag(profile.company_number);
-
-    setRpcCacheControl(LONG_EDGE_CACHE);
-
     return {
       kind: 'found' as const,
       company_number: profile.company_number,
@@ -377,26 +357,8 @@ const getCompanyProfile = createServerFn()
         [],
       sicDescriptions,
     };
-  });
+  },
+);
 
-/**
- * React Query options for `getCompanyProfile`. Keyed by `companyName` to
- * match the server fn's input and dedupe across HMRC rows that share an
- * organisation name but differ by visa route / type-rating. Private: read
- * through `fetchCompanyProfile`, never ensureQueryData, which ignores
- * staleTime and would keep a transient failure until it is garbage-collected.
- */
-const companyProfileQueryOptions = (companyName: string) =>
-  queryOptions({
-    queryKey: ['company-profile', companyName],
-    queryFn: () => getCompanyProfile({ data: { companyName } }),
-    staleTime: (query) => profileStaleTime(query.state.data),
-  });
-
-/** Reads a company's profile through the client cache, honouring staleTime so a cached transient failure is retried once it goes stale. */
-export function fetchCompanyProfile(
-  queryClient: QueryClient,
-  companyName: string,
-) {
-  return queryClient.query(companyProfileQueryOptions(companyName));
-}
+/** What `companyProfile` answers: a profile, `PROFILE_UNAVAILABLE`, or null when there is none. */
+export type CompanyProfileResult = Awaited<ReturnType<typeof companyProfile>>;

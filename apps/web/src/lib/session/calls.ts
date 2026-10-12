@@ -29,9 +29,7 @@ export const CLIENT_RENDER = 'client';
  * edge can recognise, and `calls.test.ts` checks each still exists.
  */
 export const SESSION_CALLS = [
-  'src/api/hmrc.ts#getHmrcCompanyBySlug',
-  'src/api/companiesHouse.ts#getCompanyProfile',
-  'src/api/companyTimeline.ts#getCompanyTimeline',
+  'src/api/companyPage.ts#getCompanyPage',
   'src/api/companyExtras.ts#getCompanyExtras',
 ] as const;
 

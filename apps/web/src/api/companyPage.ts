@@ -20,8 +20,6 @@ import { companyProfile } from './companiesHouse';
 import { companyTimeline } from './companyTimeline';
 import { companyBySlug } from './hmrc';
 
-export type { CompanyPage } from '../lib/company/page-data';
-
 /** A company page's data, read on the server: by a full document directly, and by the browser through `getCompanyPage`. */
 export const loadCompanyPage = createServerOnlyFn(
   (slug: string): Promise<CompanyPage> =>

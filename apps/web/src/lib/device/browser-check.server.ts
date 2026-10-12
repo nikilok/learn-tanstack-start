@@ -36,29 +36,47 @@ export function enforcing(value = process.env.BROWSER_CHECK_ENFORCE): boolean {
 export type BrowserVerdict = 'person' | 'verified crawler' | 'automated';
 
 /**
+ * How long the check has to answer before it is taken to have failed. Every company page waits on
+ * it, and the service's own call is not bounded.
+ */
+const CHECK_TIMEOUT_MS = 5000;
+
+/**
  * The check's verdict on the current request, asked at the level the client's protected calls
  * name (BotID fails a check whose two sides disagree, and names every visitor automated), or
- * `unchecked` when the check itself failed — the service unreachable, the project not set up for
- * it — which is logged under `tag`. A request that arrives without the challenge is not a
- * failure: the check names it automated. Never throws.
+ * `unchecked` when the check itself failed — the service unreachable or too slow to answer, the
+ * project not set up for it — which is logged under `tag`. A request that arrives without the
+ * challenge is not a failure: the check names it automated. Never throws.
  */
 export async function browserVerdict(
   tag: string,
   check: BrowserCheck = checkBotId,
   verdict: LocalVerdict | undefined = localVerdict(),
+  timeoutMs = CHECK_TIMEOUT_MS,
 ): Promise<BrowserVerdict | 'unchecked'> {
   let result: Awaited<ReturnType<BrowserCheck>>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    result = await check({
-      advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
-      ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
-    });
+    result = await Promise.race([
+      check({
+        advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+        ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no answer in ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
   } catch (error) {
     console.error(
       `[${tag}] browser check failed:`,
       error instanceof Error ? error.message : error,
     );
     return 'unchecked';
+  } finally {
+    clearTimeout(timer);
   }
   return !result.isBot
     ? 'person'
@@ -118,9 +136,10 @@ export async function ownerOrBrowser(
 /**
  * Whether a company page's data call may be answered: `ownerOrBrowser` under `page`, refused only
  * while company pages are enforced (`DOCUMENT_MODE`) as well as the check, so the switch's
- * rollback reaches the data call too.
+ * rollback reaches the data call too. Off, the check is not asked at all, so the call neither waits
+ * on it nor pays for it.
  */
-export function pageAllowed(
+export async function pageAllowed(
   deps: {
     owner?: () => Promise<boolean>;
     check?: BrowserCheck;
@@ -129,6 +148,7 @@ export function pageAllowed(
   } = {},
 ): Promise<boolean> {
   const mode = 'mode' in deps ? deps.mode : documentMode();
+  if (!mode) return true;
   return ownerOrBrowser('page', {
     owner: deps.owner,
     check: deps.check,

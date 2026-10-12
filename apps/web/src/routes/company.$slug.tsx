@@ -190,19 +190,16 @@ export const Route = createFileRoute('/company/$slug')({
         headers: { 'Cache-Control': SHORT_EDGE_CACHE },
       });
 
-    if (company.kind === 'moved') {
-      // SSR only: client navs read RQ/edge caches that can be stale after a
-      // rename revert — redirecting on them can ping-pong two slugs. A full
-      // load resolves the 301 server-side; the rare client hit just 404s.
-      if (import.meta.env.SSR) throw redirectToCanonical(company.nameSlug);
-      throw notFound();
-    }
+    // In the browser too: most first loads are the app shell, rendered there.
+    // What a redirect follows is never stale: the data call is never cached,
+    // and a moved or variant slug's page is always refetched
+    // (`companyPageStaleTime`), so two slugs cannot redirect to each other.
+    if (company.kind === 'moved') throw redirectToCanonical(company.nameSlug);
 
-    // Canonicalise slug variants (SSR only): the fn slug-normalises its input,
-    // so /company/Acme-Ltd resolves — but must 301, never serve 200 there.
-    if (import.meta.env.SSR && company.nameSlug !== params.slug) {
+    // Canonicalise slug variants: the fn slug-normalises its input, so
+    // /company/Acme-Ltd resolves — but must 301, never serve 200 there.
+    if (company.nameSlug !== params.slug)
       throw redirectToCanonical(company.nameSlug);
-    }
 
     const profileResult = page.profile;
     const profile = profileResult?.kind === 'found' ? profileResult : null;

@@ -114,7 +114,7 @@ export function McpTools() {
             content: [
               {
                 type: 'text',
-                text: 'Failed to fetch UK visa sponsor search results due to a network error. Please try again in a moment.',
+                text: 'Could not fetch UK visa sponsor search results. Please try again in a moment.',
               },
             ],
             isError: true,
@@ -303,7 +303,7 @@ export function McpTools() {
             content: [
               {
                 type: 'text',
-                text: `Failed to fetch details for "${companyName}" due to a network error. Please try again in a moment.`,
+                text: `Could not fetch details for "${companyName}". Please try again in a moment.`,
               },
             ],
             isError: true,

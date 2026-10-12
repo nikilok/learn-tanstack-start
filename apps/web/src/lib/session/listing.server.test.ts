@@ -67,16 +67,20 @@ describe('rendersListing', () => {
       ).toBe(false);
   });
 
-  test('the home loader asks it before it starts either search', () => {
+  // Which search starts, and that none does unless asked, is `startListing`'s, tested on its own
+  // (`lib/search/listing-prefetch.test.ts`): the loader must hand it this gate, and start nothing
+  // but through it.
+  test('the home loader starts its searches through startListing, gated by it', () => {
     const loader = readFileSync(
       join(import.meta.dir, '../../routes/index.tsx'),
       'utf8',
     );
-    const gate = loader.indexOf('if (!(await listingRenderedHere())) return;');
-    expect(gate).toBeGreaterThan(-1);
+    expect(loader).toContain('rendered: listingRenderedHere,');
+    const start = loader.indexOf('start: (listing) =>');
+    expect(start).toBeGreaterThan(-1);
     const prefetches = [...loader.matchAll(/prefetchInfiniteQuery\(/g)];
     expect(prefetches).toHaveLength(2);
     for (const prefetch of prefetches)
-      expect(prefetch.index).toBeGreaterThan(gate);
+      expect(prefetch.index).toBeGreaterThan(start);
   });
 });

@@ -39,8 +39,11 @@ export function sessionAskReleased(): Promise<void> {
   });
 }
 
-/** Other calls waiting for the check to let them go, oldest first, by path. */
-const awaitingCall = new Map<string, Array<() => void>>();
+/**
+ * Other calls waiting for the check to let them go, each by the abort signal it was sent with: the
+ * check passes a call's signal through with it, and lets calls to one path go in any order.
+ */
+const awaitingCall = new WeakMap<AbortSignal, () => void>();
 
 /** The fetch the check found when it started: one that sends a call past it. */
 let unchecked: typeof fetch | null = null;
@@ -52,27 +55,35 @@ function pathOf(input: Parameters<typeof fetch>[0]): string {
 }
 
 /**
- * When the browser check lets the next call to `path` go to the server, and a way to stop waiting
- * for it. The session times the check's hold on a company data call from here, as it does an ask's.
- * Never resolves where the check does not run.
+ * Resolves when the browser check lets the call sent with `signal` go to the server, even one the
+ * caller has stopped waiting for. The session times the check's hold on a checked call from here,
+ * as it does an ask's. Never resolves where the check does not run.
  */
-export function callReleased(path: string): {
-  released: Promise<void>;
-  forget: () => void;
-} {
-  let release = () => {};
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
+export function callReleased(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    awaitingCall.set(signal, resolve);
   });
-  const waiting = awaitingCall.get(path) ?? [];
-  waiting.push(release);
-  awaitingCall.set(path, waiting);
-  const forget = () => {
-    const left = awaitingCall.get(path)?.filter((r) => r !== release);
-    if (left?.length) awaitingCall.set(path, left);
-    else awaitingCall.delete(path);
+}
+
+/** Lets go the call sent with `signal`, if one is waiting. */
+function releaseCall(signal: AbortSignal | null | undefined): void {
+  const release = signal ? awaitingCall.get(signal) : undefined;
+  if (!signal || !release) return;
+  awaitingCall.delete(signal);
+  release();
+}
+
+/**
+ * Calls `listener` whenever the check starts its challenge afresh: it does so when the browser comes
+ * back online and when the page is shown again, so a check that failed may run from then on.
+ */
+export function onCheckReset(listener: () => void): void {
+  if (typeof window === 'undefined') return;
+  const reset = () => {
+    if (!document.hidden) listener();
   };
-  return { released, forget };
+  window.addEventListener('online', reset);
+  window.addEventListener('visibilitychange', reset);
 }
 
 /** Sends a call past the browser check, for one the check cannot let go: the server then decides it without a challenge. */
@@ -111,7 +122,10 @@ export function initBrowserCheck(): void {
   unchecked = send;
   window.fetch = ((input, init) => {
     if (isSessionAsk(input, init)) awaitingRelease.shift()?.();
-    else awaitingCall.get(pathOf(input))?.shift()?.();
+    else
+      releaseCall(
+        init?.signal ?? (input instanceof Request ? input.signal : null),
+      );
     return send(input, init);
   }) as typeof window.fetch;
   initBotId({ protect: CHECKED_CALLS });

@@ -3,6 +3,7 @@ import {
   callReleased,
   fetchUnchecked,
   initBrowserCheck,
+  onCheckReset,
   sessionAskReleased,
 } from '../device/browser-check';
 import {
@@ -91,11 +92,8 @@ export type SessionDeps = {
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
   ) => Promise<Response>;
-  /** When the browser check lets a call go, and a way to stop waiting for it (`callReleased`). */
-  released: (input: Parameters<typeof fetch>[0]) => {
-    released: Promise<void>;
-    forget: () => void;
-  };
+  /** When the browser check lets the call sent with this signal go, however late (`callReleased`). */
+  released: (signal: AbortSignal) => Promise<void>;
   /** Sends a call past the browser check, which the server then decides without a challenge. */
   fetchUnchecked: (
     input: Parameters<typeof fetch>[0],
@@ -103,6 +101,8 @@ export type SessionDeps = {
   ) => Promise<Response>;
   /** Starts the browser check, which must stand in front of the first ask. */
   startCheck: () => void;
+  /** Calls the listener whenever the check starts its challenge afresh (`onCheckReset`). */
+  onCheckReset: (listener: () => void) => void;
 };
 
 /**
@@ -114,21 +114,31 @@ export function createSession(deps: SessionDeps) {
   let first: Promise<Got> | null = null;
   let firstPending = false;
   let renewing: Promise<Got> | null = null;
-  /** The browser check cannot run in this document: it failed a call, or held one past its bound. */
-  let checkDead = false;
+  /**
+   * Whether the browser check can run: not once it has failed a call or held one past its bound,
+   * and again once it shows it can — it lets an ask or a given-up call go, or starts its challenge
+   * afresh (`onCheckReset`).
+   */
+  let checkRuns = true;
+  deps.onCheckReset(() => {
+    checkRuns = true;
+  });
 
   /**
    * Asks until a session is held or none can be had. The server's answer is timed from when the
    * check lets the ask go; the check's own hold has a longer bound of its own. An ask that failed
-   * before the check let it go means the check itself cannot run, and asking again only waits on it.
+   * before the check let it go means the check itself cannot run, and none is asked while it cannot:
+   * the ask would only wait on it.
    */
   const obtain = async (): Promise<Got> => {
+    if (!checkRuns) return 'none';
     deps.startCheck();
     for (let attempt = 1; ; attempt++) {
       const ask = deps.ask();
       let released = false;
       const leaves = ask.released.then(() => {
         released = true;
+        checkRuns = true;
       });
       const outcome = await Promise.race([
         ask.answer,
@@ -145,7 +155,7 @@ export function createSession(deps: SessionDeps) {
       if (outcome === 'ok') return 'ok';
       if (outcome === 'stalled') return 'stalled';
       if (outcome === 'held' || (outcome === 'failed' && !released)) {
-        checkDead = true;
+        checkRuns = false;
         return 'none';
       }
       if (outcome === 'off' || attempt >= ATTEMPTS) return 'none';
@@ -197,55 +207,67 @@ export function createSession(deps: SessionDeps) {
   };
 
   /**
-   * A company data call, sent through the browser check, whose hold on it is bounded as an ask's
+   * A call the browser check stands in front of, sent through it with a hold bounded as an ask's
    * is. A call the check cannot let go (its script failed, which it reports with an event rather
    * than an error, or it held the call past the bound) goes out past the check instead, for the
-   * server to decide without a challenge; once that happens, every later call in this document
-   * does so at once.
+   * server to decide without a challenge, and so does every later one until the check shows it
+   * runs again. A held call is withdrawn from the check, which would otherwise send it a second time
+   * once its challenge ran; the check letting it go even so is the sign it runs. The caller's own
+   * abort ends the wait as it is.
    */
   const sendChecked: SessionDeps['fetch'] = async (input, init) => {
-    if (checkDead) return deps.fetchUnchecked(input, init);
-    const { released, forget } = deps.released(input);
+    if (!checkRuns) return deps.fetchUnchecked(input, init);
+    const own = new AbortController();
+    const caller = init?.signal;
+    let gaveUp = false;
     let left = false;
-    void released.then(() => {
+    void deps.released(own.signal).then(() => {
       left = true;
+      if (gaveUp) checkRuns = true;
     });
-    try {
-      const outcome = await Promise.race([
-        deps.fetch(input, init).catch((error: unknown) => {
+    const cancelled = new Promise<never>((_, reject) => {
+      const abort = () => {
+        own.abort(caller?.reason);
+        reject(caller?.reason);
+      };
+      if (caller?.aborted) abort();
+      else caller?.addEventListener('abort', abort, { once: true });
+    });
+    const outcome = await Promise.race([
+      deps
+        .fetch(input, { ...init, signal: own.signal })
+        .catch((error: unknown) => {
           if (error instanceof Error) throw error;
           return 'failed' as const;
         }),
-        deps
-          .timeout(HOLD_LIMIT_MS)
-          .then(() =>
-            left ? new Promise<never>(() => {}) : ('held' as const),
-          ),
-      ]);
-      if (outcome instanceof Response) return outcome;
-      checkDead = true;
-      return deps.fetchUnchecked(input, init);
-    } finally {
-      forget();
-    }
+      deps
+        .timeout(HOLD_LIMIT_MS)
+        .then(() => (left ? new Promise<never>(() => {}) : ('held' as const))),
+      cancelled,
+    ]);
+    if (outcome instanceof Response) return outcome;
+    gaveUp = true;
+    checkRuns = false;
+    own.abort();
+    return deps.fetchUnchecked(input, init);
   };
 
   /**
-   * The fetch every server function call makes from the browser (`start.ts`). A company data call
-   * starts the browser check first, as it carries the check's challenge, and a page can make one
-   * before the root effect that starts the check has run (`sendChecked`); a search listing's call
-   * carries none, and goes as it is. A session call made while the first ask is out, with no
-   * session held, waits for it instead of being refused and sent again. A first ask whose answer
-   * stalled may still land, so the call asks again before it goes; only a definite no makes its
-   * refusal final. A refusal that stands after renewing throws `SessionRequiredError`, a named
-   * failure the page can report.
+   * The fetch every server function call makes from the browser (`start.ts`). A POST call (a
+   * company page's data among them) starts the browser check first, as the check stands in front of
+   * every one and its challenge rides it, and a page can make one before the root effect that starts
+   * the check has run (`sendChecked`); a GET call (a search listing's) carries none, and goes as it
+   * is. A session call made while the first ask is out, with no session held, waits for it instead
+   * of being refused and sent again. A first ask whose answer stalled may still land, so the call
+   * asks again before it goes; only a definite no makes its refusal final. A refusal that stands
+   * after renewing throws `SessionRequiredError`, a named failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     const asked = start();
     const sessionCall = isSessionCall(input);
-    const companyData = sessionCall && isPost(input, init);
-    if (companyData) deps.startCheck();
-    const send = companyData ? sendChecked : deps.fetch;
+    const checked = isPost(input, init);
+    if (checked) deps.startCheck();
+    const send = checked ? sendChecked : deps.fetch;
     let waited =
       firstPending && !hintHeld() && sessionCall ? await asked : null;
     if (waited === 'stalled' && !hintHeld()) waited = await renew();
@@ -269,7 +291,7 @@ function isSessionCall(input: Parameters<typeof fetch>[0]): boolean {
   );
 }
 
-/** Whether a call is a POST: a session call sent so is a company page's, which the browser check stands in front of (`CHECKED_CALLS`). */
+/** Whether a call is a POST, which the browser check stands in front of (`CHECKED_CALLS`): a company page's data among them. */
 function isPost(
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
@@ -331,15 +353,10 @@ const session = createSession({
   now: () => Date.now(),
   // Read at call time: the browser check wraps the global fetch once it starts.
   fetch: (input, init) => globalThis.fetch(input, init),
-  released: (input) =>
-    callReleased(
-      new URL(
-        input instanceof Request ? input.url : String(input),
-        'http://localhost',
-      ).pathname,
-    ),
+  released: callReleased,
   fetchUnchecked,
   startCheck: initBrowserCheck,
+  onCheckReset,
 });
 
 /** Starts this document's session, from a root effect. Safe to call more than once, and a no-op on the server. */

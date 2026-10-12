@@ -19,6 +19,7 @@ import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { hydrationDone } from '../lib/hydration';
+import { startListing } from '../lib/search/listing-prefetch';
 import {
   filterParamsOf,
   filtersToSearchParams,
@@ -46,6 +47,8 @@ const PENDING_FILTER_DATA = {
   results: [],
   isLoading: true,
   failed: false,
+  moreFailed: false,
+  retry: () => {},
   hasMore: false,
   loadingMore: false,
   fetchMore: () => {},
@@ -74,36 +77,35 @@ export const Route = createFileRoute('/')({
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
+    if (typeof window !== 'undefined') return;
     const { search: term, ...params } = (
       deps as { search: { search: string } & Record<string, unknown> }
     ).search;
-    if (typeof window !== 'undefined') return;
-    const urlFilters = filterParamsOf(params);
-    const filterMode = Object.keys(urlFilters).length > 0;
-    if (!filterMode && term.length < 3) return;
     // Streamed with the document for the owner and a crawler only: anyone
     // else's results load in the browser through their session.
-    if (!(await listingRenderedHere())) return;
-    if (filterMode) {
-      // Filter mode: with or without a name term, the filter endpoint serves
-      // the listing. Key/params must mirror useFilterSearch exactly.
-      const { filters } = parseSearchFilters({
-        ...urlFilters,
-        q: term.length >= 3 ? term : undefined,
-      });
-      queryClient.prefetchInfiniteQuery({
-        queryKey: ['filter-search', filterSearchKey(filters)],
-        queryFn: () => searchFiltered({ data: { params: filters, offset: 0 } }),
-        initialPageParam: 0,
-      });
-    } else {
-      // Don't await — let the query stream in while the shell renders
-      queryClient.prefetchInfiniteQuery({
-        queryKey: ['hmrc-search', term],
-        queryFn: () => searchHmrc({ data: { query: term, offset: 0 } }),
-        initialPageParam: 0,
-      });
-    }
+    await startListing({
+      term,
+      params,
+      rendered: listingRenderedHere,
+      // Don't await — let the query stream in while the shell renders. Keys
+      // and params must mirror useFilterSearch and useHmrcSearch exactly.
+      start: (listing) =>
+        listing.kind === 'filter'
+          ? queryClient.prefetchInfiniteQuery({
+              queryKey: ['filter-search', filterSearchKey(listing.filters)],
+              queryFn: () =>
+                searchFiltered({
+                  data: { params: listing.filters, offset: 0 },
+                }),
+              initialPageParam: 0,
+            })
+          : queryClient.prefetchInfiniteQuery({
+              queryKey: ['hmrc-search', listing.term],
+              queryFn: () =>
+                searchHmrc({ data: { query: listing.term, offset: 0 } }),
+              initialPageParam: 0,
+            }),
+    });
   },
   component: Home,
 });

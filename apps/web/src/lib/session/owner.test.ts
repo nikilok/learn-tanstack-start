@@ -161,4 +161,20 @@ describe('ownerRequest', () => {
       ).toBe(true);
     }
   });
+
+  // On Vercel the flags package decodes the secret with Node's Buffer, which skips characters
+  // outside the alphabet; under Bun it takes jose's stricter browser build, so it is not asked here.
+  test('a secret re-entered with stray characters is read as Node reads it, skipping them', async () => {
+    const minted = await ownerCookie();
+    for (const form of [
+      `"${SECRET}"`,
+      `'${SECRET}'`,
+      `${SECRET}.`,
+      `${SECRET}!`,
+      `${SECRET}==`,
+    ])
+      expect(
+        await ownerRequest(request({ [OWNER_COOKIE]: minted }), form),
+      ).toBe(true);
+  });
 });

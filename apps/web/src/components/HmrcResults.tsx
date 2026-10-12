@@ -5,6 +5,7 @@ import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import type { HmrcRow } from '../api/hmrc';
+import { wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
@@ -33,6 +34,10 @@ export type SponsorResultsData = {
   isLoading: boolean;
   /** No page could be loaded: there is nothing to show, and nothing was found to be missing. */
   failed: boolean;
+  /** The next page could not be loaded: it is not asked for again until the visitor says so. */
+  moreFailed: boolean;
+  /** Asks for the first page again, after it `failed`. */
+  retry: () => void;
   hasMore: boolean;
   loadingMore: boolean;
   fetchMore: () => void;
@@ -57,7 +62,17 @@ export default function HmrcResults({
   filtersActive?: boolean;
   data: SponsorResultsData;
 }) {
-  const { results, isLoading, failed, hasMore, loadingMore, fetchMore } = data;
+  const {
+    results,
+    isLoading,
+    failed,
+    moreFailed,
+    retry,
+    hasMore,
+    loadingMore,
+    fetchMore,
+  } = data;
+  const hasRows = results.length > 0;
   // A query is "active" when it can produce rows: a 3+ char term, or any
   // filter set (which may browse namelessly).
   const queryActive = filtersActive || search.length >= 3;
@@ -214,8 +229,10 @@ export default function HmrcResults({
         NAME_LINE_CENTER
       : null;
 
+  // Waits for rows as well as layout: a page whose results load in the browser
+  // is ready (fonts, width) over its skeletons, which a restore would clamp to.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !hasRows) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
       // Scroll first, then clear the key — in that order, atomically inside
@@ -229,14 +246,13 @@ export default function HmrcResults({
         sessionStorage.removeItem('hmrc-scroll-y');
       });
     }
-  }, [ready]);
+  }, [ready, hasRows]);
 
   // Discard a stranded scroll key on any mount that cannot restore (empty/short
   // query or zero rows) so the next full load's pre-hydration script can't hide
   // the input with no consumer left to clear it. The guard keeps the key alive
   // through a genuine pending restore (search>=3 while loading or with rows), so
   // the restore effect above stays its sole consumer and the back-nav race holds.
-  const hasRows = results.length > 0;
   useEffect(() => {
     const canRestore = queryActive && (isLoading || hasRows);
     // A stored filter set means a bare full-load mount is about to rehydrate
@@ -249,10 +265,25 @@ export default function HmrcResults({
   useEffect(() => {
     const lastItem = virtualItems[virtualItems.length - 1];
     if (!lastItem) return;
-    if (lastItem.index >= results.length - 10 && hasMore && !loadingMore) {
+    if (
+      wantsMore({
+        lastShown: lastItem.index,
+        rows: results.length,
+        hasMore,
+        loadingMore,
+        moreFailed,
+      })
+    ) {
       fetchMore();
     }
-  }, [virtualItems, results.length, hasMore, loadingMore, fetchMore]);
+  }, [
+    virtualItems,
+    results.length,
+    hasMore,
+    loadingMore,
+    moreFailed,
+    fetchMore,
+  ]);
 
   // Save scroll position on pagehide so the pre-hydration script in <head> can
   // hide the input on the next load. Only registered when there are results to
@@ -305,7 +336,14 @@ export default function HmrcResults({
     return (
       <>
         <p className="mt-4 text-sm text-(--sea-ink-soft)">
-          Results couldn’t load. Please reload the page to try again.
+          Results couldn’t load.{' '}
+          <button
+            type="button"
+            onClick={() => retry()}
+            className="cursor-pointer text-(--link-blue) hover:underline"
+          >
+            Try again
+          </button>
         </p>
         <div
           ref={listRef}
@@ -465,7 +503,22 @@ export default function HmrcResults({
           </div>
         ))}
       </div>
-      {loadingMore && <SkeletonCards count={3} bare />}
+      {loadingMore ? (
+        <SkeletonCards count={3} bare />
+      ) : (
+        moreFailed && (
+          <p className="mt-2 text-sm text-(--sea-ink-soft)">
+            More results couldn’t load.{' '}
+            <button
+              type="button"
+              onClick={() => fetchMore()}
+              className="cursor-pointer text-(--link-blue) hover:underline"
+            >
+              Try again
+            </button>
+          </p>
+        )
+      )}
     </div>
   );
 }

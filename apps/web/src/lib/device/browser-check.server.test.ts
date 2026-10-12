@@ -6,6 +6,7 @@ import { CHECKED_CALLS } from './browser-check';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 import {
   type BrowserCheck,
+  browserVerdict,
   enforcing,
   fromBrowser,
   localVerdict,
@@ -140,6 +141,30 @@ describe('fromBrowser', () => {
   });
 });
 
+describe('browserVerdict', () => {
+  test('a check that does not answer in time has failed: the request is not held on it', async () => {
+    const failed = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const silent = (() => new Promise(() => {})) as BrowserCheck;
+      expect(await browserVerdict('page', silent, undefined, 20)).toBe(
+        'unchecked',
+      );
+      expect(String(failed.mock.calls[0]?.[0])).toBe(
+        '[page] browser check failed:',
+      );
+    } finally {
+      failed.mockRestore();
+    }
+  });
+
+  test('a check that answers in time is its verdict', async () => {
+    expect(await browserVerdict('page', answering(true).check)).toBe(
+      'automated',
+    );
+    expect(await browserVerdict('page', answering(false).check)).toBe('person');
+  });
+});
+
 describe('ownerOrBrowser', () => {
   const owner = async () => true;
   const anyone = async () => false;
@@ -213,6 +238,24 @@ describe('pageAllowed', () => {
     expect(
       await pageAllowed({ owner: anyone, check: automated(), mode: 'enforce' }),
     ).toBe(true);
+  });
+
+  test('off, the check is not asked at all; in observe it is, and refuses nobody', async () => {
+    process.env[ENFORCE_ENV] = '1';
+    const off = answering(true);
+    expect(
+      await pageAllowed({ owner: anyone, check: off.check, mode: null }),
+    ).toBe(true);
+    expect(off.asked).toEqual([]);
+    const observed = answering(true);
+    expect(
+      await pageAllowed({
+        owner: anyone,
+        check: observed.check,
+        mode: 'observe',
+      }),
+    ).toBe(true);
+    expect(observed.asked).toHaveLength(1);
   });
 
   test("the owner's call skips the check in every mode", async () => {

@@ -62,7 +62,7 @@ type Ask = {
   failsHeld?: boolean;
 };
 
-/** How the browser check treats the company data calls sent through it, oldest first. */
+/** How the browser check treats the POST calls sent through it, oldest first. */
 type Checked = {
   /** Before the check lets the call go; `Infinity`, never. */
   holdMs?: number;
@@ -82,7 +82,7 @@ function harness(options: {
   hint?: () => number | null;
   /** Called on every pause, before it runs. */
   onWait?: (ms: number) => void;
-  /** The check's treatment of each company data call sent through it; let go at once otherwise. */
+  /** The check's treatment of each POST call sent through it; let go at once otherwise. */
   checked?: Checked[];
 }) {
   const clock = new Clock();
@@ -93,9 +93,11 @@ function harness(options: {
   const checked = [...(options.checked ?? [])];
   const log: string[] = [];
   let landed = false;
-  /** The calls waiting for the check to let them go, oldest first. */
-  const waiting: Array<() => void> = [];
+  /** The calls waiting for the check to let them go, by the signal each was sent with. */
+  const waiting = new Map<AbortSignal, () => void>();
   let sentThroughCheck = 0;
+  /** What the session asked to hear when the check starts afresh. */
+  const resets: Array<() => void> = [];
   /** The next scripted answer to a call that reached the server. */
   const answer = () => {
     const next = options.edge
@@ -138,39 +140,36 @@ function harness(options: {
     hintExpiry: options.hint ?? (() => null),
     preview: () => options.preview ?? false,
     now: () => NOW,
-    fetch: async (input, init) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (
-        new URL(url, 'http://localhost').pathname.startsWith('/_serverFn/s-') &&
-        init?.method === 'POST'
-      ) {
+    // The check stands in front of every POST: it lets each go by the signal it carries, and a
+    // call withdrawn while held never reaches the server, as `fetch` refuses an aborted signal.
+    fetch: async (_input, init) => {
+      if (init?.method === 'POST') {
         const treatment = checked.shift() ?? {};
         if (treatment.holdMs) await clock.sleep(treatment.holdMs);
         if (treatment.failsHeld) {
           log.push('check:failed');
           throw new Event('error');
         }
-        waiting.shift()?.();
+        const signal = init.signal;
+        if (signal) {
+          waiting.get(signal)?.();
+          waiting.delete(signal);
+        }
+        if (signal?.aborted) {
+          log.push('check:withdrawn');
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        }
         if (treatment.serverMs) await clock.sleep(treatment.serverMs);
       }
       const response = answer();
       log.push(`fetch:${response.status}`);
       return response;
     },
-    released: () => {
+    released: (signal) => {
       sentThroughCheck++;
-      let release = () => {};
-      const released = new Promise<void>((resolve) => {
-        release = resolve;
+      return new Promise<void>((resolve) => {
+        waiting.set(signal, resolve);
       });
-      waiting.push(release);
-      return {
-        released,
-        forget: () => {
-          const at = waiting.indexOf(release);
-          if (at !== -1) waiting.splice(at, 1);
-        },
-      };
     },
     fetchUnchecked: async () => {
       const response = answer();
@@ -181,6 +180,9 @@ function harness(options: {
     startCheck: () => {
       if (!log.includes('check')) log.push('check');
     },
+    onCheckReset: (listener) => {
+      resets.push(listener);
+    },
   };
   return {
     session: createSession(deps),
@@ -188,6 +190,10 @@ function harness(options: {
     clock,
     /** The calls sent through the browser check. */
     throughCheck: () => sentThroughCheck,
+    /** The check starts its challenge afresh: the browser came back online, or the page was shown. */
+    reset: () => {
+      for (const listener of resets) listener();
+    },
   };
 }
 
@@ -481,16 +487,14 @@ describe('retrySessionCall', () => {
   });
 
   test.each(['useHmrcSearch.ts', 'useFilterSearch.ts'])(
-    '%s retries by it, and says when no page could load',
+    '%s retries by it, and reads its state through listingState',
     (file) => {
       const source = readFileSync(
         join(import.meta.dir, '../../hooks', file),
         'utf8',
       );
       expect(source).toContain('retry: retrySessionCall,');
-      expect(source).toContain(
-        'failed: enabled && isError && results.length === 0,',
-      );
+      expect(source).toContain('...listingState({');
     },
   );
 });
@@ -583,10 +587,10 @@ describe('createSession — a slow or stuck browser check', () => {
   });
 });
 
-// The check holds a company data call until its challenge has run, as it does an ask. Its hold is
-// bounded the same way, and a check that cannot run sends the call past itself, for the server to
-// decide, rather than leaving the page waiting with nothing sent.
-describe('createSession — a company data call the check holds', () => {
+// The check holds every POST call (a company page's data among them) until its challenge has run,
+// as it does an ask. Its hold is bounded the same way, and a check that cannot run sends the call
+// past itself, for the server to decide, rather than leaving the page waiting with nothing sent.
+describe('createSession — a call the check holds', () => {
   const fresh = NOW / 1000 + SESSION_RENEW_SECONDS + 3600;
 
   test('a call held past the bound goes out past the check, and is answered', async () => {
@@ -619,7 +623,7 @@ describe('createSession — a company data call the check holds', () => {
     expect(h.log.filter((l) => l.startsWith('unchecked'))).toEqual([]);
   });
 
-  test('a call the check fails (its script failed) goes out past it at once, and so does every later one', async () => {
+  test('a call the check fails (its script failed) goes out past it at once, and so does every later one while it cannot run', async () => {
     const h = harness({
       hint: () => fresh,
       responses: [answered, answered],
@@ -660,15 +664,114 @@ describe('createSession — a company data call the check holds', () => {
     expect(h.log).toContain('unchecked:403');
   });
 
-  test('a call the check fails with an error is that error, not a dead check', async () => {
-    const h = harness({ hint: () => fresh, responses: [] });
+  test('a call the check fails with an error is that error, not a dead check: the next goes through it', async () => {
+    const offline = () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const h = harness({ hint: () => fresh, responses: [offline, answered] });
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL))).result,
+    ).toBe('TypeError');
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-def', PAGE_CALL))).result,
+    ).toBe('200');
+    expect(h.log.filter((l) => /^(unchecked|fetch)/.test(l))).toEqual([
+      'fetch:200',
+    ]);
+    expect(h.throughCheck()).toBe(2);
+  });
+
+  test('a call held past the bound is withdrawn from the check: let go late, it is not sent again, and later calls go through the check', async () => {
+    const h = harness({
+      hint: () => fresh,
+      responses: [answered, answered],
+      checked: [{ holdMs: 65_000 }, {}],
+    });
     expect(
       await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
-    ).toEqual({
-      result: 'Error',
+    ).toEqual({ result: '200', at: 60_000 });
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-def', PAGE_CALL))).result,
+    ).toBe('200');
+    expect(h.log.filter((l) => /^(check:|unchecked|fetch)/.test(l))).toEqual([
+      'unchecked:200',
+      'check:withdrawn',
+      'fetch:200',
+    ]);
+  });
+
+  test('after the check fails, a call goes through it again once it starts afresh', async () => {
+    const h = harness({
+      hint: () => fresh,
+      responses: [answered, answered, answered],
+      checked: [{ failsHeld: true }, {}],
+    });
+    await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL));
+    await settle(h, h.session.fetch('/_serverFn/s-def', PAGE_CALL));
+    h.reset();
+    expect(
+      (await settle(h, h.session.fetch('/_serverFn/s-ghi', PAGE_CALL))).result,
+    ).toBe('200');
+    expect(h.log.filter((l) => /^(check:|unchecked|fetch)/.test(l))).toEqual([
+      'check:failed',
+      'unchecked:200',
+      'unchecked:200',
+      'fetch:200',
+    ]);
+  });
+
+  test('a POST call that is no session call is bounded the same way', async () => {
+    const h = harness({
+      hint: () => fresh,
+      responses: [answered],
+      checked: [{ holdMs: Number.POSITIVE_INFINITY }],
+    });
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/abc', PAGE_CALL)),
+    ).toEqual({ result: '200', at: 60_000 });
+    expect(h.log).toContain('unchecked:200');
+  });
+
+  test('two calls to one path are each let go by their own release', async () => {
+    const h = harness({
+      hint: () => fresh,
+      responses: [answered, answered],
+      checked: [{ holdMs: Number.POSITIVE_INFINITY }, { holdMs: 1000 }],
+    });
+    const stuck = settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL));
+    const quick = settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL));
+    expect(await quick).toEqual({ result: '200', at: 1000 });
+    expect(await stuck).toEqual({ result: '200', at: 60_000 });
+    expect(h.log.filter((l) => /^(unchecked|fetch)/.test(l))).toEqual([
+      'fetch:200',
+      'unchecked:200',
+    ]);
+  });
+});
+
+// A check that cannot run holds every ask until its bound: no ask is made while it cannot, so a
+// refused call fails at once rather than waiting on one, until the check starts afresh.
+describe('createSession — a check that cannot run', () => {
+  test('a refused call asks for no session while the check cannot run, and does again once it starts afresh', async () => {
+    const h = harness({
+      asks: [{ outcome: 'failed', failsHeld: true }, 'ok'],
+      edge: true,
+    });
+    expect(await settle(h, h.session.fetch('/_serverFn/s-abc'))).toEqual({
+      result: 'SessionRequiredError',
       at: 0,
     });
-    expect(h.log.filter((l) => l.startsWith('unchecked'))).toEqual([]);
+    const later = h.clock.now;
+    expect(await settle(h, h.session.fetch('/_serverFn/s-def'))).toEqual({
+      result: 'SessionRequiredError',
+      at: later,
+    });
+    expect(asksIn(h.log)).toEqual(['ask:failed']);
+    h.reset();
+    expect((await settle(h, h.session.fetch('/_serverFn/s-ghi'))).result).toBe(
+      '200',
+    );
+    expect(asksIn(h.log)).toEqual(['ask:failed', 'ask:ok']);
   });
 });
 

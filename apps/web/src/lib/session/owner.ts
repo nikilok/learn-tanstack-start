@@ -32,10 +32,18 @@ function fromBase64Url(text: string): Uint8Array<ArrayBuffer> | null {
   return bytesOf(text.replace(/-/g, '+').replace(/_/g, '/'));
 }
 
-/** The bytes FLAGS_SECRET holds, read as the flags package reads it: whitespace dropped, either alphabet, padding or none. */
+/**
+ * The bytes FLAGS_SECRET holds, read as the flags package reads it on Vercel, through Node's
+ * Buffer: any character outside the alphabet skipped (whitespace, quotes, padding, a stray mark),
+ * either alphabet. Read more strictly, a secret re-entered with quotes would still open the cookie
+ * for /download and no longer for anything here.
+ */
 function secretBytes(secret: string): Uint8Array<ArrayBuffer> | null {
   return bytesOf(
-    secret.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/'),
+    secret
+      .replace(/[^\w+/-]/g, '')
+      .replace(/-/g, '+')
+      .replace(/_/g, '/'),
   );
 }
 

@@ -22,7 +22,7 @@ import { mayAsk } from '../lib/ask/access.server';
 import { type AskPlanResponse, createAskLoader } from '../lib/ask/ask-loader';
 import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
 import { applyOverlay } from '../lib/ask/overlay';
-import { fromBrowser } from '../lib/device/browser-check.server';
+import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
@@ -65,7 +65,7 @@ const issueAskToken = createServerFn({ method: 'POST' })
       return { token: null };
     }
     if (await isSuspended(key)) return { token: null };
-    if (!(await fromBrowser())) return { token: null };
+    if (!(await ownerOrBrowser('ask'))) return { token: null };
     const token = issueToken(key);
     if (token === null) console.error('[ask] ENGAGE_TOKEN_SECRET not set');
     // The roster's first load is the slow part of a cold instance's first
@@ -78,8 +78,9 @@ const issueAskToken = createServerFn({ method: 'POST' })
 /**
  * Server fn planning one typed search for a device key carrying a live
  * token. A request without the credential that may ask is `denied` before
- * anything else is read; so is a refused token, a suspended key, or a request
- * not from a browser a person is using, and none of those is an error. Jev
+ * anything else is read; so is a refused token, a suspended key, or, unless
+ * it is the owner's own, a request not from a browser a person is using, and
+ * none of those is an error. Jev
  * failing, or no key to reach it with, is `unavailable`: the box falls back
  * to the name search it already ran. When the text says what the
  * organisations do, pathway B ranks the companies whose accounts say it,
@@ -114,7 +115,7 @@ const planSearch = createServerFn({ method: 'POST' })
     const rosterReady = towns();
     rosterReady.catch(() => {});
     if (await isSuspended(data.key)) return { status: 'denied' };
-    if (!(await fromBrowser())) return { status: 'denied' };
+    if (!(await ownerOrBrowser('ask'))) return { status: 'denied' };
     const apiKey = process.env.TYPESAFE_API_KEY;
     if (!apiKey) {
       console.error('[ask] TYPESAFE_API_KEY not set');

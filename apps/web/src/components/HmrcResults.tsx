@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom';
 import { useVirtualTextLayout } from 'virtual-text-layout';
 
 import type { HmrcRow } from '../api/hmrc';
-import { wantsMore } from '../hooks/listing-state';
+import { restoresScroll, wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
@@ -229,10 +229,9 @@ export default function HmrcResults({
         NAME_LINE_CENTER
       : null;
 
-  // Waits for rows as well as layout: a page whose results load in the browser
-  // is ready (fonts, width) over its skeletons, which a restore would clamp to.
+  // Waits while rows are loading as well as for layout (`restoresScroll`).
   useEffect(() => {
-    if (!ready || !hasRows) return;
+    if (!restoresScroll({ ready, hasRows, isLoading })) return;
     const savedY = sessionStorage.getItem('hmrc-scroll-y');
     if (savedY) {
       // Scroll first, then clear the key — in that order, atomically inside
@@ -246,7 +245,7 @@ export default function HmrcResults({
         sessionStorage.removeItem('hmrc-scroll-y');
       });
     }
-  }, [ready, hasRows]);
+  }, [ready, hasRows, isLoading]);
 
   // Discard a stranded scroll key on any mount that cannot restore (empty/short
   // query or zero rows) so the next full load's pre-hydration script can't hide

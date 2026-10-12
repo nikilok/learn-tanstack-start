@@ -47,3 +47,18 @@ export function wantsMore(list: {
     !list.moreFailed
   );
 }
+
+/**
+ * Whether the list restores its saved scroll position now, consuming the key: once laid out
+ * (`ready`), and not while rows are still loading, since a page whose results load in the browser
+ * is laid out over its skeletons, which a restore would clamp to. A listing that finished with no
+ * rows consumes the key too: a filter-mode zero-result listing is the key's only consumer, and a
+ * key left behind hides the search input on the next full load.
+ */
+export function restoresScroll(list: {
+  ready: boolean;
+  hasRows: boolean;
+  isLoading: boolean;
+}): boolean {
+  return list.ready && (list.hasRows || !list.isLoading);
+}

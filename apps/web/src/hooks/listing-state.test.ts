@@ -1,6 +1,38 @@
 import { describe, expect, test } from 'bun:test';
 
-import { type ListingQuery, listingState, wantsMore } from './listing-state';
+import {
+  type ListingQuery,
+  listingState,
+  restoresScroll,
+  wantsMore,
+} from './listing-state';
+
+describe('restoresScroll', () => {
+  test('waits while rows load: a restore over the skeletons would clamp short', () => {
+    expect(
+      restoresScroll({ ready: true, hasRows: false, isLoading: true }),
+    ).toBe(false);
+  });
+
+  test('restores once the rows are there', () => {
+    expect(
+      restoresScroll({ ready: true, hasRows: true, isLoading: false }),
+    ).toBe(true);
+  });
+
+  test('a listing that finished with no rows consumes the key, or it would hide the input on the next load', () => {
+    expect(
+      restoresScroll({ ready: true, hasRows: false, isLoading: false }),
+    ).toBe(true);
+  });
+
+  test('never before layout', () => {
+    for (const hasRows of [true, false])
+      expect(restoresScroll({ ready: false, hasRows, isLoading: false })).toBe(
+        false,
+      );
+  });
+});
 
 describe('wantsMore', () => {
   const nearEnd = {

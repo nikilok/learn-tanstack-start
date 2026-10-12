@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 
+import { encryptFlagValues } from 'flags';
+
 import type { BrowserVerdict } from '../device/browser-check.server';
 import { type IssueDeps, sessionResponse } from './issue.server';
 import { parseRanges } from './ranges';
@@ -91,6 +93,42 @@ describe('sessionResponse', () => {
       },
     );
     expect(String(logged.mock.calls[0]?.[0])).toBe('[session] owner');
+  });
+
+  test("by default the owner is read from the request's own cookies", async () => {
+    const flagsSecret = Buffer.from(
+      crypto.getRandomValues(new Uint8Array(32)),
+    ).toString('base64url');
+    const saved = process.env.FLAGS_SECRET;
+    process.env.FLAGS_SECRET = flagsSecret;
+    try {
+      const owner = await encryptFlagValues({ 'ss-owner': true }, flagsSecret);
+      const request = (cookie?: string) => {
+        const h = headers();
+        if (cookie) h.set('cookie', `ss-owner=${cookie}`);
+        return h;
+      };
+      for (const [cookie, answered, asked] of [
+        [owner, 'ok', 0],
+        [undefined, 'refused', 1],
+      ] as const) {
+        const check = checked('automated');
+        const response = await sessionResponse(request(cookie), {
+          secret,
+          now,
+          ranges: async () => null,
+          enforce: true,
+          mode: 'enforce',
+          verdict: check.verdict,
+        });
+        const body = (await response.json()) as { session: string };
+        expect(body.session).toBe(answered);
+        expect(check.asked.count).toBe(asked);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.FLAGS_SECRET;
+      else process.env.FLAGS_SECRET = saved;
+    }
   });
 
   test('a person is issued a session bound to their address, and a hint beside it', async () => {

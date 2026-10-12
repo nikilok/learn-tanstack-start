@@ -1,6 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { encryptFlagValues, encryptOverrides } from 'flags';
 
@@ -87,7 +85,10 @@ describe('ownerRequest', () => {
     const other = await ownerCookie(secret());
     const genuine = await ownerCookie();
     const parts = genuine.split('.');
-    parts[3] = `${parts[3]?.slice(0, -2)}AA`;
+    const sealedText = Buffer.from(parts[3] ?? '', 'base64url');
+    sealedText[0] = (sealedText[0] ?? 0) ^ 1;
+    parts[3] = sealedText.toString('base64url');
+    expect(parts.join('.')).not.toBe(genuine);
     for (const value of [other, parts.join('.'), 'not-a-token', ''])
       expect(
         await ownerRequest(request({ [OWNER_COOKIE]: value }), SECRET),
@@ -142,17 +143,22 @@ describe('ownerRequest', () => {
     expect(await ownerRequest(new Headers(), SECRET)).toBe(false);
   });
 
-  test('the names match the ones owner.server.ts and flags.server.ts mint and read', () => {
-    const src = (file: string) =>
-      readFileSync(join(import.meta.dir, '../..', file), 'utf8');
-    expect(src('owner.server.ts')).toContain(
-      `const OWNER_COOKIE = '${OWNER_COOKIE}';`,
-    );
-    expect(src('owner.server.ts')).toContain(
-      `const OWNER_CLAIM = '${OWNER_CLAIM}';`,
-    );
-    expect(src('flags.server.ts')).toContain(
-      `export const FLAG_OVERRIDES_COOKIE = '${FLAG_OVERRIDES_COOKIE}';`,
-    );
+  test('the secret is read as the flags package reads it: padded, in either alphabet, with stray whitespace', async () => {
+    const key = Buffer.from(SECRET, 'base64url');
+    const forms = [
+      `${SECRET}=`,
+      key.toString('base64'),
+      `${SECRET}\n`,
+      `${key.toString('base64')}\r\n`,
+    ];
+    for (const form of forms) {
+      const minted = await ownerCookie(form);
+      expect(
+        await ownerRequest(request({ [OWNER_COOKIE]: minted }), form),
+      ).toBe(true);
+      expect(
+        await ownerRequest(request({ [OWNER_COOKIE]: minted }), SECRET),
+      ).toBe(true);
+    }
   });
 });

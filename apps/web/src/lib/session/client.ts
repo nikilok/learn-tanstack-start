@@ -1,5 +1,10 @@
 import { isDesktopPreview } from '../../utils/desktop-preview';
-import { initBrowserCheck, sessionAskReleased } from '../device/browser-check';
+import {
+  callReleased,
+  fetchUnchecked,
+  initBrowserCheck,
+  sessionAskReleased,
+} from '../device/browser-check';
 import {
   SESSION_CALL_PATH,
   SESSION_HEADER,
@@ -70,6 +75,16 @@ export type SessionDeps = {
     input: Parameters<typeof fetch>[0],
     init?: Parameters<typeof fetch>[1],
   ) => Promise<Response>;
+  /** When the browser check lets a call go, and a way to stop waiting for it (`callReleased`). */
+  released: (input: Parameters<typeof fetch>[0]) => {
+    released: Promise<void>;
+    forget: () => void;
+  };
+  /** Sends a call past the browser check, which the server then decides without a challenge. */
+  fetchUnchecked: (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => Promise<Response>;
   /** Starts the browser check, which must stand in front of the first ask. */
   startCheck: () => void;
 };
@@ -83,6 +98,8 @@ export function createSession(deps: SessionDeps) {
   let first: Promise<Got> | null = null;
   let firstPending = false;
   let renewing: Promise<Got> | null = null;
+  /** The browser check cannot run in this document: it failed a call, or held one past its bound. */
+  let checkDead = false;
 
   /**
    * Asks until a session is held or none can be had. The server's answer is timed from when the
@@ -111,8 +128,10 @@ export function createSession(deps: SessionDeps) {
       ]);
       if (outcome === 'ok') return 'ok';
       if (outcome === 'stalled') return 'stalled';
-      if (outcome === 'held' || (outcome === 'failed' && !released))
+      if (outcome === 'held' || (outcome === 'failed' && !released)) {
+        checkDead = true;
         return 'none';
+      }
       if (outcome === 'off' || attempt >= ATTEMPTS) return 'none';
       await deps.wait(RETRY_MS * attempt);
     }
@@ -162,25 +181,60 @@ export function createSession(deps: SessionDeps) {
   };
 
   /**
+   * A company data call, sent through the browser check, whose hold on it is bounded as an ask's
+   * is. A call the check cannot let go (its script failed, which it reports with an event rather
+   * than an error, or it held the call past the bound) goes out past the check instead, for the
+   * server to decide without a challenge; once that happens, every later call in this document
+   * does so at once.
+   */
+  const sendChecked: SessionDeps['fetch'] = async (input, init) => {
+    if (checkDead) return deps.fetchUnchecked(input, init);
+    const { released, forget } = deps.released(input);
+    let left = false;
+    void released.then(() => {
+      left = true;
+    });
+    try {
+      const outcome = await Promise.race([
+        deps.fetch(input, init).catch((error: unknown) => {
+          if (error instanceof Error) throw error;
+          return 'failed' as const;
+        }),
+        deps
+          .timeout(HOLD_LIMIT_MS)
+          .then(() =>
+            left ? new Promise<never>(() => {}) : ('held' as const),
+          ),
+      ]);
+      if (outcome instanceof Response) return outcome;
+      checkDead = true;
+      return deps.fetchUnchecked(input, init);
+    } finally {
+      forget();
+    }
+  };
+
+  /**
    * The fetch every server function call makes from the browser (`start.ts`). A company data call
    * starts the browser check first, as it carries the check's challenge, and a page can make one
-   * before the root effect that starts the check has run. One made while the first ask is out,
-   * with no session held, waits for it instead of being refused and sent again. A first ask whose
-   * answer stalled may still land, so the call asks again before it goes; only a definite no makes
-   * its refusal final. A refusal that stands after renewing throws `SessionRequiredError`, a named
-   * failure the page can report.
+   * before the root effect that starts the check has run (`sendChecked`). One made while the first
+   * ask is out, with no session held, waits for it instead of being refused and sent again. A
+   * first ask whose answer stalled may still land, so the call asks again before it goes; only a
+   * definite no makes its refusal final. A refusal that stands after renewing throws
+   * `SessionRequiredError`, a named failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     const asked = start();
     const companyData = isSessionCall(input);
     if (companyData) deps.startCheck();
+    const send = companyData ? sendChecked : deps.fetch;
     let waited =
       firstPending && !hintHeld() && companyData ? await asked : null;
     if (waited === 'stalled' && !hintHeld()) waited = await renew();
-    const response = await deps.fetch(input, init);
+    const response = await send(input, init);
     if (!refused(response)) return response;
     if (waited !== 'none' && (await renew()) === 'ok') {
-      const again = await deps.fetch(input, init);
+      const again = await send(input, init);
       if (!refused(again)) return again;
     }
     throw new SessionRequiredError();
@@ -249,6 +303,14 @@ const session = createSession({
   now: () => Date.now(),
   // Read at call time: the browser check wraps the global fetch once it starts.
   fetch: (input, init) => globalThis.fetch(input, init),
+  released: (input) =>
+    callReleased(
+      new URL(
+        input instanceof Request ? input.url : String(input),
+        'http://localhost',
+      ).pathname,
+    ),
+  fetchUnchecked,
   startCheck: initBrowserCheck,
 });
 

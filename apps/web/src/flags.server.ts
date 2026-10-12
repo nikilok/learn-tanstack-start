@@ -2,6 +2,9 @@ import { createVercelAdapter } from '@flags-sdk/vercel';
 import { createClient } from '@vercel/flags-core';
 import { decryptOverrides } from 'flags';
 
+/** Cookie the Vercel toolbar's Flags Explorer writes signed overrides into (one definition, read at the edge too). */
+export { FLAG_OVERRIDES_COOKIE } from './lib/session/owner';
+
 /** Minimal flag spec — kept framework-agnostic so the same declaration is consumed by the discovery endpoint metadata and the server-side evaluator. */
 export type FlagSpec<T> = {
   key: string;
@@ -12,9 +15,6 @@ export type FlagSpec<T> = {
 
 /** Serializable value a flag resolves to — limited to JSON primitives because the discovery endpoint exposes flag definitions as JSON (and any future client-side flag bridge must serialize them too). */
 export type FlagValue = boolean | string | number;
-
-/** Cookie the Vercel toolbar's Flags Explorer writes signed overrides into. */
-export const FLAG_OVERRIDES_COOKIE = 'vercel-flag-overrides';
 
 /** Decrypts the signed Flags Explorer override cookie; null when absent, tampered, or expired. */
 export async function decryptFlagOverrides(

@@ -1,6 +1,7 @@
 import { getRequest } from '@tanstack/react-start/server';
 import { checkBotId } from 'botid/server';
 
+import { type DocumentMode, documentMode } from '../session/decide';
 import { ownerRequest } from '../session/owner';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 
@@ -93,13 +94,44 @@ export async function fromBrowser(
 
 /**
  * Whether the current request may have the extras or a company page's data (`tag`): the owner's
- * browser without asking the check (`../session/owner.ts`), anyone else's by `fromBrowser`.
+ * browser without asking the check (`../session/owner.ts`), anyone else's by `fromBrowser`, refused
+ * only while `enforce` holds (`BROWSER_CHECK_ENFORCE` unless a caller narrows it).
  */
 export async function ownerOrBrowser(
   tag: 'extras' | 'page',
-  owner: () => Promise<boolean> = () => ownerRequest(getRequest().headers),
-  check: BrowserCheck = checkBotId,
+  deps: {
+    owner?: () => Promise<boolean>;
+    check?: BrowserCheck;
+    enforce?: boolean;
+  } = {},
 ): Promise<boolean> {
+  const owner = deps.owner ?? (() => ownerRequest(getRequest().headers));
   if (await owner()) return true;
-  return fromBrowser(check, localVerdict(), enforcing(), tag);
+  return fromBrowser(
+    deps.check ?? checkBotId,
+    localVerdict(),
+    deps.enforce ?? enforcing(),
+    tag,
+  );
+}
+
+/**
+ * Whether a company page's data call may be answered: `ownerOrBrowser` under `page`, refused only
+ * while company pages are enforced (`DOCUMENT_MODE`) as well as the check, so the switch's
+ * rollback reaches the data call too.
+ */
+export function pageAllowed(
+  deps: {
+    owner?: () => Promise<boolean>;
+    check?: BrowserCheck;
+    mode?: DocumentMode | null;
+    enforce?: boolean;
+  } = {},
+): Promise<boolean> {
+  const mode = 'mode' in deps ? deps.mode : documentMode();
+  return ownerOrBrowser('page', {
+    owner: deps.owner,
+    check: deps.check,
+    enforce: mode === 'enforce' && (deps.enforce ?? enforcing()),
+  });
 }

@@ -332,10 +332,11 @@ export const resolveCompanySlug = createServerFn()
       typeof data?.slug === 'string' ? data.slug : '',
     );
     if (company?.kind === 'found') {
-      // Long edge cache, tagged so the nightly and per-company purges reach
-      // it; the primary (first licence) owns the page, so its number is the tag.
+      // Long edge cache, tagged so the nightly purge reaches it. The
+      // population tag alone, like getSlugForHash's: a per-company tag would
+      // name the company number this call does not answer with.
       setRpcCacheControl(LONG_EDGE_CACHE);
-      setCompanyCacheTag(company.licences[0]?.companyNumber ?? undefined);
+      setCompanyCacheTag();
     } else {
       // Renames and misses cache short: a later ingest can flip or revive either.
       setRpcCacheControl(SHORT_EDGE_CACHE);

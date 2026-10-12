@@ -78,13 +78,13 @@ describe('decide', () => {
     ).toEqual({ render: 'server', why: 'owner' });
   });
 
-  test('a crawler address gets the full document, with or without a session', async () => {
+  test("a crawler address's call goes through, with or without a session", async () => {
     expect(
       await decide({ headers: request('66.249.64.10'), ranges, secret }),
     ).toEqual({ render: 'server', why: 'crawler' });
   });
 
-  test('a session held for this address gets the full document', async () => {
+  test('a session held for this address lets the call through', async () => {
     expect(
       await decide({
         headers: request(visitor, await session('person')),
@@ -94,7 +94,7 @@ describe('decide', () => {
     ).toEqual({ render: 'server', why: 'session' });
   });
 
-  test('no session, or one from another address, gets the shell', async () => {
+  test('a call with no session, or one from another address, is refused', async () => {
     expect(await decide({ headers: request(visitor), ranges, secret })).toEqual(
       {
         render: 'client',
@@ -110,7 +110,7 @@ describe('decide', () => {
     ).toEqual({ render: 'client', why: 'elsewhere' });
   });
 
-  test('an unverified session gets the shell', async () => {
+  test('a call with an unverified session is refused', async () => {
     expect(
       await decide({
         headers: request(visitor, await session('unverified')),
@@ -120,7 +120,7 @@ describe('decide', () => {
     ).toEqual({ render: 'client', why: 'unverified' });
   });
 
-  test('whatever it cannot place gets the full document', async () => {
+  test('a call it cannot place goes through', async () => {
     expect(
       await decide({ headers: request(visitor), ranges: null, secret }),
     ).toEqual({ render: 'server', why: 'no crawler ranges' });

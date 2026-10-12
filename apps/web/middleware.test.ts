@@ -227,7 +227,7 @@ describe('edge middleware: routing is preserved', () => {
   });
 });
 
-describe('edge middleware: company pages, and their data calls by session', () => {
+describe('edge middleware: company pages by who asks, and their data calls by session', () => {
   const SECRET = 'test-secret-not-a-real-one';
   /** A 32-byte key, base64url, as FLAGS_SECRET holds one. */
   const flagsSecret = () =>

@@ -67,7 +67,11 @@ export type Decision =
       why: 'no session' | 'expired' | 'elsewhere' | 'malformed' | 'unverified';
     };
 
-/** Decides whether one company data call goes through: the owner's always, anyone else's by its address and session cookie. Never throws. */
+/**
+ * Decides whether one company data call goes through: whatever would be served the full document
+ * goes through (`decideDocument`), and anyone else by the session cookie held for their address.
+ * Never throws.
+ */
 export async function decide(input: {
   headers: Headers;
   ranges: Ranges | null;
@@ -75,14 +79,13 @@ export async function decide(input: {
   owner?: boolean;
   now?: number;
 }): Promise<Decision> {
-  const { headers, ranges, secret, owner, now } = input;
-  if (owner) return { render: 'server', why: 'owner' };
-  if (!ranges) return { render: 'server', why: 'no crawler ranges' };
+  const { headers, ranges, secret, owner = false, now } = input;
+  const document = decideDocument({ headers, ranges, owner });
+  if (document.render === 'server') return document;
+  // A visitor: `decideDocument` has placed their address, and so given it a scope.
   const address = clientAddress(headers);
   const scope = address === null ? null : addressScope(address);
-  if (address === null || scope === null)
-    return { render: 'server', why: 'no address' };
-  if (inRanges(ranges, address)) return { render: 'server', why: 'crawler' };
+  if (scope === null) return { render: 'server', why: 'no address' };
   if (!secret) return { render: 'server', why: 'no secret' };
   const session = await readSession(cookieValue(headers, SESSION_COOKIE), {
     scope,

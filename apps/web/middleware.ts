@@ -179,9 +179,9 @@ async function sessionCall(request: Request): Promise<Response> {
 }
 
 /**
- * The edge's answer to every request, ahead of the cache: company pages and their data calls by
- * session, the other documents with the Accept repair, known API and static routes passed through,
- * and an edge 404 for anything else.
+ * The edge's answer to every request, ahead of the cache: company pages decided by who asks and
+ * their data calls by session, the other documents with the Accept repair, known API and static
+ * routes passed through, and an edge 404 for anything else.
  */
 export default function middleware(
   request: Request,
@@ -199,8 +199,8 @@ export default function middleware(
   if (routed.startsWith(SESSION_CALL_PATH.toLowerCase()))
     return sessionCall(request);
 
-  // A company page by session, at its one spelling: any other spelling the router would resolve
-  // to it (case, escapes) is redirected there first, so every page is decided.
+  // A company page, at its one spelling: any other spelling the router would resolve to it
+  // (case, escapes) is redirected there first, so every page is decided.
   const company = COMPANY_DOCUMENT_RE.exec(routed);
   if (company) {
     const canonical = `/company/${encodeURIComponent(company[1] ?? '')}`;

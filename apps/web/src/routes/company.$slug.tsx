@@ -161,9 +161,15 @@ export const Route = createFileRoute('/company/$slug')({
     // miss (null/'moved') is always stale and re-resolves in exactly one
     // fetch (ensureQueryData would return the cached miss without ever
     // refetching; ensure-then-fetch would double-fetch uncached misses).
+    // A cached page refetched for what it lacked (a Companies House outage,
+    // a missing timeline) stays as it was when the refetch fails.
     const page = import.meta.env.SSR
       ? await queryClient.ensureQueryData(options)
-      : await queryClient.fetchQuery(options);
+      : await queryClient.fetchQuery(options).catch((error: unknown) => {
+          const cached = queryClient.getQueryData(options.queryKey);
+          if (cached?.company?.kind === 'found') return cached;
+          throw error;
+        });
     const { company } = page;
 
     if (!company) throw notFound();

@@ -1,26 +1,84 @@
-import { profileStaleTime } from './profile-lookup';
+import type { CompanyProfileResult } from '../../api/companiesHouse';
+import type { CompanyTimeline } from '../../api/companyTimeline';
+import type { CompanyBySlug } from '../../api/hmrc';
+import { companyDocumentDegraded } from './document-cache';
+import { PROFILE_UNAVAILABLE, profileStaleTime } from './profile-lookup';
+
+/** What a company page shows apart from its extras: its licences, its Companies House profile and its timeline. */
+export type CompanyPage = {
+  company: CompanyBySlug | null;
+  /** Null for a company not found, or with no Companies House record. */
+  profile: CompanyProfileResult;
+  timeline: CompanyTimeline | null;
+};
+
+/** The server-side reads a company page is built from. */
+export type PageReads = {
+  company: (slug: string) => Promise<CompanyBySlug | null>;
+  profile: (organisationName: string) => Promise<CompanyProfileResult>;
+  timeline: (companyNumber: string) => Promise<CompanyTimeline | null>;
+};
+
+/**
+ * A company page's data for `slug`. Only a company's own slug reads past the slug lookup: a miss, a
+ * rename or another spelling only 404s or redirects, so its profile and timeline are never read. A
+ * failed profile lookup degrades the page like a Companies House outage does, and a failed timeline
+ * leaves it out: neither takes the page down.
+ */
+export async function loadPage(
+  slug: string,
+  reads: PageReads,
+): Promise<CompanyPage> {
+  const company = await reads.company(slug);
+  if (company?.kind !== 'found' || company.nameSlug !== slug)
+    return { company, profile: null, timeline: null };
+  const profile = await reads
+    .profile(company.licences[0].organisationName)
+    .catch((error: unknown) => {
+      console.error('[Profile] load failed:', error);
+      return PROFILE_UNAVAILABLE;
+    });
+  const timeline =
+    profile?.kind === 'found' && profile.company_number
+      ? await reads.timeline(profile.company_number).catch((error: unknown) => {
+          console.error('[Timeline] load failed:', error);
+          return null;
+        })
+      : null;
+  return { company, profile, timeline };
+}
 
 /** The parts of a company page's data its freshness turns on. */
 export type PageFreshness = {
-  company: { kind: 'found' | 'moved' } | null;
+  company: { kind: 'found' | 'moved'; nameSlug: string } | null;
   profile: { kind: 'found' | 'unavailable'; company_number?: string } | null;
   timeline: object | null;
 };
 
 /**
- * How long the browser reuses a company page's data. A complete page holds while it stays cached:
- * it changes only via ingest and the website sweep. A miss or a rename is stale at once, so a
- * revert or a reinstated sponsor is resolved again on the next visit instead of 404ing or
- * redirecting all session. A Companies House outage is retried after a minute, and a timeline
- * missing for a mapped company (a first visit racing the profile's save) on the next visit.
+ * How long the browser reuses the data of the page at `slug`. A complete page holds while it stays
+ * cached: it changes only via ingest and the website sweep. A miss, a rename or another spelling
+ * is stale at once, so a revert or a reinstated sponsor is resolved again on the next visit instead
+ * of 404ing or redirecting all session. A page built from incomplete data (`companyDocumentDegraded`)
+ * is read again: after a minute for a Companies House outage, and on the next visit for a timeline
+ * missing on a mapped company (a first visit racing the profile's save).
  */
-export function companyPageStaleTime(page: PageFreshness | undefined): number {
-  if (page?.company?.kind !== 'found') return 0;
-  const { profile } = page;
-  if (profile?.kind === 'unavailable') return profileStaleTime(profile);
-  if (profile?.kind === 'found' && profile.company_number && !page.timeline)
+export function companyPageStaleTime(
+  page: PageFreshness | undefined,
+  slug: string,
+): number {
+  if (page?.company?.kind !== 'found' || page.company.nameSlug !== slug)
     return 0;
-  return Number.POSITIVE_INFINITY;
+  const { profile } = page;
+  const degraded = companyDocumentDegraded({
+    profileUnavailable: profile?.kind === 'unavailable',
+    hasCompanyNumber: Boolean(
+      profile?.kind === 'found' && profile.company_number,
+    ),
+    timelineLoaded: Boolean(page.timeline),
+  });
+  if (!degraded) return Number.POSITIVE_INFINITY;
+  return profile?.kind === 'unavailable' ? profileStaleTime(profile) : 0;
 }
 
 /** A company page's data call the browser check refused: the page cannot show its data. */

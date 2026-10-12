@@ -5,7 +5,7 @@
 
 import { cookieValue } from './token';
 
-/** The durable owner cookie and the claim it carries, as `src/owner.server.ts` mints them. */
+/** The durable owner cookie and the claim it carries, minted by `src/owner.server.ts`. */
 export const OWNER_COOKIE = 'ss-owner';
 export const OWNER_CLAIM = 'ss-owner';
 
@@ -16,22 +16,34 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const keys = new Map<string, Promise<CryptoKey | null>>();
 
-/** The bytes an unpadded base64url string holds, or null when it is not one. */
-function fromBase64Url(text: string): Uint8Array<ArrayBuffer> | null {
-  if (!/^[\w-]*$/.test(text)) return null;
+/** The bytes a base64 string holds, or null when it holds none. */
+function bytesOf(base64: string): Uint8Array<ArrayBuffer> | null {
   try {
-    const binary = atob(text.replace(/-/g, '+').replace(/_/g, '/'));
+    const binary = atob(base64);
     return Uint8Array.from(binary, (c) => c.charCodeAt(0));
   } catch {
     return null;
   }
 }
 
-/** The AES-GCM key a secret names (32 bytes, base64url), or null when it names none. */
+/** The bytes an unpadded base64url string holds, as a sealed cookie's parts are written; null otherwise. */
+function fromBase64Url(text: string): Uint8Array<ArrayBuffer> | null {
+  if (!/^[\w-]*$/.test(text)) return null;
+  return bytesOf(text.replace(/-/g, '+').replace(/_/g, '/'));
+}
+
+/** The bytes FLAGS_SECRET holds, read as the flags package reads it: whitespace dropped, either alphabet, padding or none. */
+function secretBytes(secret: string): Uint8Array<ArrayBuffer> | null {
+  return bytesOf(
+    secret.replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/'),
+  );
+}
+
+/** The AES-GCM key a secret names (32 bytes), or null when it names none. */
 function keyFor(secret: string): Promise<CryptoKey | null> {
   let key = keys.get(secret);
   if (!key) {
-    const raw = fromBase64Url(secret);
+    const raw = secretBytes(secret);
     key =
       raw?.length === 32
         ? crypto.subtle

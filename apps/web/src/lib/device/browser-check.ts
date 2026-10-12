@@ -39,18 +39,58 @@ export function sessionAskReleased(): Promise<void> {
   });
 }
 
+/** Other calls waiting for the check to let them go, oldest first, by path. */
+const awaitingCall = new Map<string, Array<() => void>>();
+
+/** The fetch the check found when it started: one that sends a call past it. */
+let unchecked: typeof fetch | null = null;
+
+/** A call's path. */
+function pathOf(input: Parameters<typeof fetch>[0]): string {
+  const url = input instanceof Request ? input.url : String(input);
+  return new URL(url, 'http://localhost').pathname;
+}
+
+/**
+ * When the browser check lets the next call to `path` go to the server, and a way to stop waiting
+ * for it. The session times the check's hold on a company data call from here, as it does an ask's.
+ * Never resolves where the check does not run.
+ */
+export function callReleased(path: string): {
+  released: Promise<void>;
+  forget: () => void;
+} {
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const waiting = awaitingCall.get(path) ?? [];
+  waiting.push(release);
+  awaitingCall.set(path, waiting);
+  const forget = () => {
+    const left = awaitingCall.get(path)?.filter((r) => r !== release);
+    if (left?.length) awaitingCall.set(path, left);
+    else awaitingCall.delete(path);
+  };
+  return { released, forget };
+}
+
+/** Sends a call past the browser check, for one the check cannot let go: the server then decides it without a challenge. */
+export function fetchUnchecked(
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): Promise<Response> {
+  return (unchecked ?? globalThis.fetch)(input, init);
+}
+
 /** Whether a fetch is the session ask. */
 function isSessionAsk(
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ): boolean {
   const request = input instanceof Request ? input : null;
-  const url = request ? request.url : String(input);
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
-  return (
-    method === 'POST' &&
-    new URL(url, 'http://localhost').pathname === SESSION_PATH
-  );
+  return method === 'POST' && pathOf(input) === SESSION_PATH;
 }
 
 /**
@@ -60,15 +100,18 @@ function isSessionAsk(
  * through the same checked call.
  *
  * The check keeps the fetch it finds when it starts and sends each call it held through it, so a
- * wrapper put in first sees a session ask the moment it leaves (`sessionAskReleased`).
+ * wrapper put in first sees a session ask (`sessionAskReleased`), or any other call
+ * (`callReleased`), the moment it leaves.
  */
 export function initBrowserCheck(): void {
   if (started) return;
   started = true;
   if (typeof window === 'undefined') return;
   const send = window.fetch.bind(window);
+  unchecked = send;
   window.fetch = ((input, init) => {
     if (isSessionAsk(input, init)) awaitingRelease.shift()?.();
+    else awaitingCall.get(pathOf(input))?.shift()?.();
     return send(input, init);
   }) as typeof window.fetch;
   initBotId({ protect: CHECKED_CALLS });

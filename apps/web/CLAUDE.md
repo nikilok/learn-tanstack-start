@@ -494,7 +494,8 @@ stands in only for a live company's exact slug, so an unknown or renamed slug
 renders in full and the loader can 404 or 301 it. The shell's data comes
 from one POST server function, `getCompanyPage` (`api/companyPage.ts`), which
 asks the browser check on every call, as the extras do, and answers `denied`
-when the check names the caller automated while `BROWSER_CHECK_ENFORCE` holds.
+when the check names the caller automated while company pages and the check
+are both enforced (`pageAllowed`), so the switch's rollback reaches it too.
 At the edge a data call needs a session (the httpOnly `ss-session` cookie, bound
 to the visitor's address and issued by `POST /api/session`), unless it comes
 from a crawler address or the owner's browser, or the edge cannot decide (no
@@ -507,15 +508,25 @@ crawler ranges, no address, no secret), when it passes.
   "/download owner gating"): the owner's browser gets the full document, its
   data calls pass the edge without a session, `POST /api/session` issues it one
   without asking the check, and its data and extras calls skip the check
-  (`ownerOrBrowser`). All four, or a page the owner opens in full stops working
-  on its next client-side navigation.
-- **Company data leaves the server two ways only**: a full document (a crawler's
-  or the owner's), and `getCompanyPage`. Its reads (`companyBySlug`, `companyProfile`,
-  `companyTimeline`) are `createServerOnlyFn`, never server functions, so no
-  other call can answer with them; `resolveCompanySlug` answers the legacy
-  URL's 301 with the slug alone. The loader reads a page through
-  `companyPageQueryOptions`: directly on the server, by the data call in the
-  browser.
+  (`ownerOrBrowser`). Without the edge's pass or the data call's skip, a page
+  the owner opens in full fails on its next client-side navigation; the other
+  two spare the owner's browser a refused ask and refused extras.
+- **A company page's own data leaves the server two ways only**: a full
+  document (a crawler's or the owner's), and `getCompanyPage`. Its reads
+  (`companyBySlug`, `companyProfile`, `companyTimeline`) are
+  `createServerOnlyFn`, never server functions, so no other call can answer
+  with them; `resolveCompanySlug` answers the legacy URL's 301 with the slug
+  alone. The loader reads a page through `companyPageQueryOptions`: directly on
+  the server, by the data call in the browser. The search listings
+  (`searchHmrc`, `searchFiltered`) are open calls, and answer with listing
+  fields only.
+- **Only a company's own slug reads past the slug lookup** (`loadPage`):
+  another spelling, a rename or a miss only redirects or 404s, so its profile
+  and timeline (and any Companies House call) are never read for it.
+- **A server-side read's failure is logged once and reaches the page as the
+  generic error** (`fetchCompanyPage`), as the server-function middleware
+  (`start.ts`) does for a call. In the browser, a cached page refetched for what
+  it lacked stays as it was when the refetch fails.
 - **The company route is never preloaded** (`preload: false`): a hover or a
   touch loads its code alone, as every data call asks the check.
 - **The edge matches on the routed path** (decoded, lower-cased), as the router
@@ -550,6 +561,12 @@ crawler ranges, no address, no secret), when it passes.
   fetch starts it, as a page can make the call before the root effect that
   starts it has run, and a call that leaves before the check wraps the fetch
   carries no challenge.
+- **The check's hold on a company data call is bounded as an ask's is**
+  (`sendChecked` in `client.ts`, timed from `callReleased`). A call the check
+  fails (its script failed, which it reports with an event, not an error) or
+  holds past the bound goes out past it (`fetchUnchecked`), for the server to
+  decide without a challenge, and so does every later call in that document.
+  Unbounded, a page whose check script failed waits forever with nothing sent.
 - **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
   change to the company page is made there too, or the page jumps when its
   data lands.

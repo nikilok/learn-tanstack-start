@@ -512,10 +512,13 @@ visitor's address and issued by `POST /api/session`.
 - **Sessions:** a check that cannot run issues a one-hour session; a refused
   renewal leaves a held session to run out; `BROWSER_CHECK_ENFORCE` off issues
   sessions whatever the check says. The browser asks on load only without a
-  session with time to run, and an ask that stalls ends at its deadline. The
-  deadline leaves room for a slow check: the browser check holds the ask until
-  its challenge has run (15 s on one visit), and a /download preview frame
-  waits as long for its page's session.
+  session with time to run.
+- **The browser check holds the session ask until its challenge has run**, and
+  a slow device can take a long while. So the ask's answer is timed from when
+  the check lets it go (`sessionAskReleased`: a fetch wrapper installed before
+  the check starts sees the release), and the hold has a longer bound of its
+  own. An ask that fails before the check lets it go means the check cannot
+  run, and is not asked again.
 - **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
   change to the company page is made there too, or the page jumps when its
   data lands.
@@ -525,12 +528,12 @@ visitor's address and issued by `POST /api/session`.
   holds an `s-` call made with no session until the page's first ask lands, so
   a first visit sends no refused call. It renews the session on a refusal and
   retries once, then throws `SessionRequiredError`; a refusal after a first ask
-  that got none stands. After a TanStack Start upgrade, check the build still
-  carries `s-` ids.
+  that got a definite no stands, and one whose answer stalled asks again first.
+  After a TanStack Start upgrade, check the build still carries `s-` ids.
 - **Whatever cannot be decided is served in full** (no crawler ranges, no
   address, no secret).
 - **/download preview frames never ask for a session**: they share the page's
-  cookie and wait for its `ss-session-hint`.
+  cookie and wait for its `ss-session-hint`, as long as the page's ask may take.
 
 ## /download live Preview — the app iframing itself
 

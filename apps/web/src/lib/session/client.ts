@@ -1,5 +1,5 @@
 import { isDesktopPreview } from '../../utils/desktop-preview';
-import { initBrowserCheck } from '../device/browser-check';
+import { initBrowserCheck, sessionAskReleased } from '../device/browser-check';
 import {
   SESSION_CALL_PATH,
   SESSION_HEADER,
@@ -11,6 +11,18 @@ import {
 
 /** What one ask for a session came back with; `failed` is no answer at all. */
 export type SessionOutcome = 'ok' | 'refused' | 'off' | 'failed';
+
+/** One ask: its answer, and the moment the browser check lets it go to the server. */
+export type SessionAsk = {
+  answer: Promise<SessionOutcome>;
+  released: Promise<void>;
+};
+
+/**
+ * What asking came to: a session (`ok`), a definite no (`none`), or no answer yet (`stalled`) — the
+ * check let the ask go and the server has not answered, so it may still land.
+ */
+type Got = 'ok' | 'none' | 'stalled';
 
 /** A call refused for want of a session that could not be had: the page cannot load its data. */
 export class SessionRequiredError extends Error {
@@ -24,27 +36,30 @@ export class SessionRequiredError extends Error {
 const ATTEMPTS = 3;
 const RETRY_MS = 1000;
 
+/** How long the server has to answer an ask, from when the browser check lets it go. */
+const ANSWER_TIMEOUT_MS = 10_000;
+
 /**
- * How long one ask may take. One that outlasts it ends the asking: the check is stuck. The browser
- * check holds the ask until its challenge has run, which took 15 s on one visit, so the deadline
- * leaves room for a slow one.
+ * How long the browser check may hold an ask before it is taken to be stuck. The check holds each
+ * ask until its challenge has run, which takes far longer on a slow device than on most; past this
+ * it is not coming.
  */
-const ASK_TIMEOUT_MS = 30_000;
+const HOLD_LIMIT_MS = 60_000;
 
 /** A hint expiring within this is no sign of a session. */
 const HINT_MARGIN_MS = 60_000;
 
 /**
- * How long a /download preview frame waits for its page's session, and how often it looks. As long
- * as the page's ask may take, since the frame's session is the one that ask gets.
+ * How long a /download preview frame waits for its page's session, and how often it looks: as
+ * long as the page's ask may take, since the frame's session is the one that ask gets.
  */
-const PREVIEW_WAIT_MS = ASK_TIMEOUT_MS;
+const PREVIEW_WAIT_MS = HOLD_LIMIT_MS + ANSWER_TIMEOUT_MS;
 const PREVIEW_POLL_MS = 250;
 
 export type SessionDeps = {
-  ask: () => Promise<SessionOutcome>;
+  ask: () => SessionAsk;
   wait: (ms: number) => Promise<void>;
-  /** Resolves after `ms`: the deadline an ask races. */
+  /** Resolves after `ms`: the deadlines an ask races. */
   timeout: (ms: number) => Promise<void>;
   /** The session's expiry from the readable hint cookie, in epoch seconds, or null. */
   hintExpiry: () => number | null;
@@ -65,21 +80,40 @@ export type SessionDeps = {
  * the first ask; every other call goes out at once.
  */
 export function createSession(deps: SessionDeps) {
-  let first: Promise<boolean> | null = null;
+  let first: Promise<Got> | null = null;
   let firstPending = false;
-  let renewing: Promise<boolean> | null = null;
+  let renewing: Promise<Got> | null = null;
 
-  /** Asks until a session is held, none is being issued, the attempts run out, or an ask stalls. */
-  const obtain = async (): Promise<boolean> => {
+  /**
+   * Asks until a session is held or none can be had. The server's answer is timed from when the
+   * check lets the ask go; the check's own hold has a longer bound of its own. An ask that failed
+   * before the check let it go means the check itself cannot run, and asking again only waits on it.
+   */
+  const obtain = async (): Promise<Got> => {
     deps.startCheck();
     for (let attempt = 1; ; attempt++) {
+      const ask = deps.ask();
+      let released = false;
+      const leaves = ask.released.then(() => {
+        released = true;
+      });
       const outcome = await Promise.race([
-        deps.ask(),
-        deps.timeout(ASK_TIMEOUT_MS).then(() => 'stalled' as const),
+        ask.answer,
+        leaves
+          .then(() => deps.timeout(ANSWER_TIMEOUT_MS))
+          .then(() => 'stalled' as const),
+        // The hold's bound stands only while the check still holds the ask.
+        deps
+          .timeout(HOLD_LIMIT_MS)
+          .then(() =>
+            released ? new Promise<never>(() => {}) : ('held' as const),
+          ),
       ]);
-      if (outcome === 'ok') return true;
-      if (outcome === 'off' || outcome === 'stalled' || attempt >= ATTEMPTS)
-        return false;
+      if (outcome === 'ok') return 'ok';
+      if (outcome === 'stalled') return 'stalled';
+      if (outcome === 'held' || (outcome === 'failed' && !released))
+        return 'none';
+      if (outcome === 'off' || attempt >= ATTEMPTS) return 'none';
       await deps.wait(RETRY_MS * attempt);
     }
   };
@@ -93,21 +127,21 @@ export function createSession(deps: SessionDeps) {
   const hintHeld = () => hintLeft(HINT_MARGIN_MS);
 
   /** A preview frame's session is its page's: it waits for the page's hint to appear. */
-  const pageSession = async (): Promise<boolean> => {
+  const pageSession = async (): Promise<Got> => {
     for (let waited = 0; waited < PREVIEW_WAIT_MS; waited += PREVIEW_POLL_MS) {
-      if (hintHeld()) return true;
+      if (hintHeld()) return 'ok';
       await deps.wait(PREVIEW_POLL_MS);
     }
-    return hintHeld();
+    return hintHeld() ? 'ok' : 'none';
   };
 
   /** Starts this document's ask, once; later calls return the same promise. */
-  const start = (): Promise<boolean> => {
+  const start = (): Promise<Got> => {
     if (first) return first;
     // A preview frame shares its page's session, and a session with time to run needs no ask: a
     // call refused anyway (the address moved) renews it then.
     if (deps.preview() || hintLeft(SESSION_RENEW_SECONDS * 1000)) {
-      first = Promise.resolve(true);
+      first = Promise.resolve<Got>('ok');
       return first;
     }
     firstPending = true;
@@ -118,7 +152,7 @@ export function createSession(deps: SessionDeps) {
   };
 
   /** Asks again after a refusal, joining an ask already in flight. */
-  const renew = (): Promise<boolean> => {
+  const renew = (): Promise<Got> => {
     if (deps.preview()) return pageSession();
     if (firstPending && first) return first;
     renewing ??= obtain().finally(() => {
@@ -130,16 +164,18 @@ export function createSession(deps: SessionDeps) {
   /**
    * The fetch every server function call makes from the browser (`start.ts`). A company data call
    * made while the first ask is out, with no session held, waits for it instead of being refused
-   * and sent again; if that ask got none, a refusal stands without asking again. A refusal that
-   * stands after renewing throws `SessionRequiredError`, a named failure the page can report.
+   * and sent again. A first ask whose answer stalled may still land, so the call asks again before
+   * it goes; only a definite no makes its refusal final. A refusal that stands after renewing throws
+   * `SessionRequiredError`, a named failure the page can report.
    */
   const sessionFetch: SessionDeps['fetch'] = async (input, init) => {
     const asked = start();
-    const waited =
+    let waited =
       firstPending && !hintHeld() && isSessionCall(input) ? await asked : null;
+    if (waited === 'stalled' && !hintHeld()) waited = await renew();
     const response = await deps.fetch(input, init);
     if (!refused(response)) return response;
-    if (waited !== false && (await renew())) {
+    if (waited !== 'none' && (await renew()) === 'ok') {
       const again = await deps.fetch(input, init);
       if (!refused(again)) return again;
     }
@@ -166,17 +202,21 @@ function refused(response: Response): boolean {
 }
 
 /** One ask of the session endpoint. */
-async function askForSession(): Promise<SessionOutcome> {
-  try {
-    const response = await fetch(SESSION_PATH, { method: 'POST' });
-    if (!response.ok) return 'failed';
-    const { session } = (await response.json()) as { session?: unknown };
-    return session === 'ok' || session === 'refused' || session === 'off'
-      ? session
-      : 'failed';
-  } catch {
-    return 'failed';
-  }
+function askForSession(): SessionAsk {
+  const released = sessionAskReleased();
+  const answer = (async (): Promise<SessionOutcome> => {
+    try {
+      const response = await fetch(SESSION_PATH, { method: 'POST' });
+      if (!response.ok) return 'failed';
+      const { session } = (await response.json()) as { session?: unknown };
+      return session === 'ok' || session === 'refused' || session === 'off'
+        ? session
+        : 'failed';
+    } catch {
+      return 'failed';
+    }
+  })();
+  return { answer, released };
 }
 
 /** The session's expiry from the readable hint cookie, in epoch seconds, or null. */

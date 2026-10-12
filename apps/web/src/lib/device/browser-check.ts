@@ -25,14 +25,51 @@ export const CHECKED_CALLS = [
 
 let started = false;
 
+/** Session asks waiting for the check to let them go, oldest first. */
+let awaitingRelease: Array<() => void> = [];
+
+/**
+ * Resolves when the browser check lets the next session ask go to the server. The check holds an
+ * ask until its challenge has run, which can take a long while on a slow device, so the session
+ * times the server's answer from here rather than from the ask. Each new ask replaces any earlier
+ * one still waiting: those have been given up on. Never resolves where the check does not run.
+ */
+export function sessionAskReleased(): Promise<void> {
+  return new Promise((resolve) => {
+    awaitingRelease = [resolve];
+  });
+}
+
+/** Whether a fetch is the session ask. */
+function isSessionAsk(
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): boolean {
+  const request = input instanceof Request ? input : null;
+  const url = request ? request.url : String(input);
+  const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
+  return (
+    method === 'POST' &&
+    new URL(url, 'http://localhost').pathname === SESSION_PATH
+  );
+}
+
 /**
  * Starts the browser check once per document, from a root effect, ahead of the page's first
  * checked call — the company extras wait on the device key, which waits for idle time. The
  * /download preview iframes stay out, as with the device pings: they never load the extras.
+ *
+ * The check keeps the fetch it finds when it starts and sends each call it held through it, so a
+ * wrapper put in first sees a session ask the moment it leaves (`sessionAskReleased`).
  */
 export function initBrowserCheck(): void {
   if (started) return;
   started = true;
   if (typeof window === 'undefined' || isDesktopPreview()) return;
+  const send = window.fetch.bind(window);
+  window.fetch = ((input, init) => {
+    if (isSessionAsk(input, init)) awaitingRelease.shift()?.();
+    return send(input, init);
+  }) as typeof window.fetch;
   initBotId({ protect: CHECKED_CALLS });
 }

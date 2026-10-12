@@ -9,6 +9,8 @@ import {
   test,
 } from 'bun:test';
 
+import { encryptFlagValues } from 'flags';
+
 import { BROWSER_CHECK_PATH } from '#/lib/device/browser-check-config';
 import {
   engagedPingPath,
@@ -227,11 +229,18 @@ describe('edge middleware: routing is preserved', () => {
 
 describe('edge middleware: company pages, and their data calls by session', () => {
   const SECRET = 'test-secret-not-a-real-one';
+  /** A 32-byte key, base64url, as FLAGS_SECRET holds one. */
+  const flagsSecret = () =>
+    Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
+      'base64url',
+    );
+  const FLAGS_SECRET = flagsSecret();
   const VISITOR = '81.2.69.160';
   const CRAWLER = '66.249.64.10';
   const ENV = [
     'DOCUMENT_MODE',
     'ENGAGE_TOKEN_SECRET',
+    'FLAGS_SECRET',
     'CRAWLER_RANGES_LOCAL',
     'GLOBAL_CONFIG',
     'EDGE_CONFIG',
@@ -246,6 +255,7 @@ describe('edge middleware: company pages, and their data calls by session', () =
     delete process.env.GLOBAL_CONFIG;
     delete process.env.EDGE_CONFIG;
     process.env.ENGAGE_TOKEN_SECRET = SECRET;
+    process.env.FLAGS_SECRET = FLAGS_SECRET;
     process.env.CRAWLER_RANGES_LOCAL = '66.249.64.0/27';
   });
   afterAll(() => {
@@ -265,6 +275,7 @@ describe('edge middleware: company pages, and their data calls by session', () =
       mode?: 'observe' | 'enforce';
       ip?: string;
       session?: string;
+      owner?: string;
       accept?: string;
       method?: 'GET' | 'POST';
     } = {},
@@ -275,7 +286,11 @@ describe('edge middleware: company pages, and their data calls by session', () =
       accept: options.accept ?? 'text/html',
       'x-real-ip': options.ip ?? VISITOR,
     });
-    if (options.session) headers.set('cookie', `ss-session=${options.session}`);
+    const cookies = [
+      options.session && `ss-session=${options.session}`,
+      options.owner && `ss-owner=${options.owner}`,
+    ].filter(Boolean);
+    if (cookies.length) headers.set('cookie', cookies.join('; '));
     const method = options.method ?? 'GET';
     return middleware(
       new Request(`https://sponsorsearch.co.uk${path}`, {
@@ -289,6 +304,9 @@ describe('edge middleware: company pages, and their data calls by session', () =
   /** A valid session value for `scope`. */
   const session = async (scope = VISITOR) =>
     (await issueSession({ scope, standing: 'person', secret: SECRET })).value;
+  /** The owner cookie, sealed as `owner.server.ts` seals it, with `key`. */
+  const owner = (key = FLAGS_SECRET) =>
+    encryptFlagValues({ 'ss-owner': true }, key);
   /** Where the middleware rewrote a request to, or null. */
   const rewrittenTo = (res: Response) =>
     res.headers.get('x-middleware-rewrite');
@@ -360,6 +378,39 @@ describe('edge middleware: company pages, and their data calls by session', () =
     expect(String(logged.mock.calls[0]?.[0])).toBe(
       '[document] server (crawler)',
     );
+  });
+
+  test('enforce: the owner gets the full document, and its data calls need no session', async () => {
+    const page = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      owner: await owner(),
+    });
+    expect(isNext(page)).toBe(true);
+    expect(rewrittenTo(page)).toBeNull();
+    const call = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      owner: await owner(),
+    });
+    expect(isNext(call)).toBe(true);
+    expect(logged.mock.calls.map((c: unknown[]) => String(c[0]))).toEqual([
+      '[document] server (owner)',
+    ]);
+  });
+
+  test('enforce: an owner cookie sealed with another key gets the shell, and its call is refused', async () => {
+    const forged = await owner(flagsSecret());
+    const page = await visit('/company/acme-ltd', {
+      mode: 'enforce',
+      owner: forged,
+    });
+    expect(rewrittenTo(page)).toBe(shell('render=client'));
+    const call = await visit(`${SESSION_CALL_PATH}abc`, {
+      mode: 'enforce',
+      method: 'POST',
+      owner: forged,
+    });
+    expect(call.status).toBe(403);
   });
 
   test('enforce: a crawler asking for the shell URL gets the full document', async () => {

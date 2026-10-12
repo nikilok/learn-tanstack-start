@@ -12,7 +12,7 @@ import {
   pageOf,
 } from '../lib/company/page-data';
 import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
-import { pageFromBrowser } from '../lib/device/browser-check.server';
+import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { setRpcCacheControl } from './cache-headers';
 import { type CompanyProfileResult, companyProfile } from './companiesHouse';
 import { type CompanyTimeline, companyTimeline } from './companyTimeline';
@@ -69,7 +69,7 @@ const getCompanyPage = createServerFn({ method: 'POST' })
   .handler(async ({ data: { slug } }): Promise<PageAnswer<CompanyPage>> => {
     setRpcCacheControl('private, no-store');
     return answerPage({
-      allowed: pageFromBrowser,
+      allowed: () => ownerOrBrowser('page'),
       load: () => loadCompanyPage(slug),
     });
   });

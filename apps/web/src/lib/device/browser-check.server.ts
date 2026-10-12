@@ -1,5 +1,7 @@
+import { getRequest } from '@tanstack/react-start/server';
 import { checkBotId } from 'botid/server';
 
+import { ownerRequest } from '../session/owner';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 
 /** Asks whether the current request came from an automated client (Vercel BotID). */
@@ -89,7 +91,15 @@ export async function fromBrowser(
   return !isBot || !enforce;
 }
 
-/** `fromBrowser` for a company page's data call, logged under `page`. */
-export function pageFromBrowser(): Promise<boolean> {
-  return fromBrowser(checkBotId, localVerdict(), enforcing(), 'page');
+/**
+ * Whether the current request may have the extras or a company page's data (`tag`): the owner's
+ * browser without asking the check (`../session/owner.ts`), anyone else's by `fromBrowser`.
+ */
+export async function ownerOrBrowser(
+  tag: 'extras' | 'page',
+  owner: () => Promise<boolean> = () => ownerRequest(getRequest().headers),
+  check: BrowserCheck = checkBotId,
+): Promise<boolean> {
+  if (await owner()) return true;
+  return fromBrowser(check, localVerdict(), enforcing(), tag);
 }

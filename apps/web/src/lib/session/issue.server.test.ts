@@ -48,6 +48,7 @@ async function ask(h: Headers, deps: IssueDeps) {
     now,
     ranges: async () => null,
     enforce: true,
+    owner: async () => false,
     ...deps,
   });
   const body = (await response.json()) as { session: string };
@@ -71,6 +72,25 @@ describe('sessionResponse', () => {
     expect(body.session).toBe('off');
     expect(cookies).toHaveLength(0);
     expect(check.asked.count).toBe(0);
+  });
+
+  test("the owner's browser is issued a session without asking the check", async () => {
+    const check = checked('automated');
+    const { body, session } = await ask(headers(), {
+      mode: 'enforce',
+      verdict: check.verdict,
+      owner: async () => true,
+    });
+    expect(body.session).toBe('ok');
+    expect(check.asked.count).toBe(0);
+    expect(await readSession(session, { scope: visitor, secret, now })).toEqual(
+      {
+        status: 'valid',
+        standing: 'person',
+        expires: now / 1000 + SESSION_TTL_SECONDS,
+      },
+    );
+    expect(String(logged.mock.calls[0]?.[0])).toBe('[session] owner');
   });
 
   test('a person is issued a session bound to their address, and a hint beside it', async () => {

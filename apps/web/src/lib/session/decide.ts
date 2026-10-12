@@ -22,18 +22,23 @@ export function documentMode(
  * decided is `server`.
  */
 export type DocumentDecision =
-  | { render: 'server'; why: 'crawler' | 'no crawler ranges' | 'no address' }
+  | {
+      render: 'server';
+      why: 'owner' | 'crawler' | 'no crawler ranges' | 'no address';
+    }
   | { render: 'client'; why: 'visitor' };
 
 /**
- * Decides how one company document is served, from its address alone: in full to a crawler
- * address, and as the app shell to anyone else, whatever cookie they hold. Never throws.
+ * Decides how one company document is served: in full to the owner (`owner.ts`) and to a crawler
+ * address, and as the app shell to anyone else, whatever session they hold. Never throws.
  */
 export function decideDocument(input: {
   headers: Headers;
   ranges: Ranges | null;
+  owner: boolean;
 }): DocumentDecision {
-  const { headers, ranges } = input;
+  const { headers, ranges, owner } = input;
+  if (owner) return { render: 'server', why: 'owner' };
   if (!ranges) return { render: 'server', why: 'no crawler ranges' };
   const address = clientAddress(headers);
   if (address === null || addressScope(address) === null)
@@ -50,6 +55,7 @@ export type Decision =
   | {
       render: 'server';
       why:
+        | 'owner'
         | 'crawler'
         | 'session'
         | 'no crawler ranges'
@@ -61,14 +67,16 @@ export type Decision =
       why: 'no session' | 'expired' | 'elsewhere' | 'malformed' | 'unverified';
     };
 
-/** Decides whether one company data call goes through, from its address and its session cookie. Never throws. */
+/** Decides whether one company data call goes through: the owner's always, anyone else's by its address and session cookie. Never throws. */
 export async function decide(input: {
   headers: Headers;
   ranges: Ranges | null;
   secret: string | undefined;
+  owner?: boolean;
   now?: number;
 }): Promise<Decision> {
-  const { headers, ranges, secret, now } = input;
+  const { headers, ranges, secret, owner, now } = input;
+  if (owner) return { render: 'server', why: 'owner' };
   if (!ranges) return { render: 'server', why: 'no crawler ranges' };
   const address = clientAddress(headers);
   const scope = address === null ? null : addressScope(address);

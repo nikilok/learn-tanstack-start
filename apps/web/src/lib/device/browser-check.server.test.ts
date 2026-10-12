@@ -7,6 +7,7 @@ import {
   enforcing,
   fromBrowser,
   localVerdict,
+  ownerOrBrowser,
 } from './browser-check.server';
 
 // Passing `undefined` for the verdict or the enforcement takes the default, which reads
@@ -133,6 +134,32 @@ describe('fromBrowser', () => {
     // Unset, nothing is enforced.
     delete process.env[ENFORCE_ENV];
     expect(await fromBrowser(answering(true).check)).toBe(true);
+  });
+});
+
+describe('ownerOrBrowser', () => {
+  test("the owner's request is let through without asking the check", async () => {
+    const asked = answering(true);
+    process.env[ENFORCE_ENV] = '1';
+    expect(await ownerOrBrowser('page', async () => true, asked.check)).toBe(
+      true,
+    );
+    expect(asked.asked).toEqual([]);
+    expect(said()).toEqual([]);
+  });
+
+  test("anyone else's is the check's to answer, under its tag", async () => {
+    process.env[ENFORCE_ENV] = '1';
+    expect(
+      await ownerOrBrowser('page', async () => false, answering(true).check),
+    ).toBe(false);
+    expect(
+      await ownerOrBrowser('extras', async () => false, answering(false).check),
+    ).toBe(true);
+    expect(said()).toEqual([
+      '[page] browser check: automated',
+      '[extras] browser check: person',
+    ]);
   });
 });
 

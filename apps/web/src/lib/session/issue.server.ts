@@ -6,6 +6,7 @@ import {
 import { addressScope, clientAddress } from './address';
 import { SESSION_COOKIE, SESSION_HINT_COOKIE } from './calls';
 import { type DocumentMode, documentMode } from './decide';
+import { ownerRequest } from './owner';
 import { crawlerRanges, inRanges, type Ranges } from './ranges';
 import {
   cookieValue,
@@ -50,6 +51,8 @@ export type IssueDeps = {
   ranges?: () => Promise<Ranges | null>;
   /** Whether the check's verdict is acted on (`BROWSER_CHECK_ENFORCE`). */
   enforce?: boolean;
+  /** Whether the request comes from the owner's browser (`owner.ts`). */
+  owner?: () => Promise<boolean>;
 };
 
 /**
@@ -59,7 +62,8 @@ export type IssueDeps = {
  *
  * A failed check refuses only under `enforce` with `BROWSER_CHECK_ENFORCE` on; a session still
  * held is then left to run out, not taken away. Under `observe` a failed check is issued an
- * `unverified` session, which the edge treats as none. Never throws.
+ * `unverified` session, which the edge treats as none. The owner's browser is issued one without
+ * asking the check. Never throws.
  */
 export async function sessionResponse(
   headers: Headers,
@@ -91,6 +95,26 @@ export async function sessionResponse(
   )
     return answer('ok');
 
+  /** A session of `standing` for this address, set beside its readable hint. */
+  const issue = async (standing: SessionStanding, ttl: number) => {
+    const { value, expires } = await issueSession({
+      scope,
+      standing,
+      secret,
+      now,
+      ttlSeconds: ttl,
+    });
+    return answer('ok', [
+      cookie(SESSION_COOKIE, value, ttl, true),
+      cookie(SESSION_HINT_COOKIE, String(expires), ttl, false),
+    ]);
+  };
+
+  if (await (deps.owner ?? (() => ownerRequest(headers)))()) {
+    console.info('[session] owner');
+    return issue('person', SESSION_TTL_SECONDS);
+  }
+
   const said = await (deps.verdict ?? (() => browserVerdict('session')))();
   const automated = said === 'automated' || said === 'verified crawler';
   const refuse =
@@ -107,19 +131,8 @@ export async function sessionResponse(
     ]);
   }
 
-  const standing: SessionStanding =
-    automated && mode === 'observe' ? 'unverified' : 'person';
-  const ttl =
-    said === 'unchecked' ? SESSION_UNCHECKED_TTL_SECONDS : SESSION_TTL_SECONDS;
-  const { value, expires } = await issueSession({
-    scope,
-    standing,
-    secret,
-    now,
-    ttlSeconds: ttl,
-  });
-  return answer('ok', [
-    cookie(SESSION_COOKIE, value, ttl, true),
-    cookie(SESSION_HINT_COOKIE, String(expires), ttl, false),
-  ]);
+  return issue(
+    automated && mode === 'observe' ? 'unverified' : 'person',
+    said === 'unchecked' ? SESSION_UNCHECKED_TTL_SECONDS : SESSION_TTL_SECONDS,
+  );
 }

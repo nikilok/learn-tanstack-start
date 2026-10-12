@@ -417,6 +417,9 @@ is owner-gated via `src/owner.server.ts`: a valid `vercel-flag-overrides` cookie
 (sealed by Vercel with `FLAGS_SECRET`, team members only) bootstraps a durable
 httpOnly `ss-owner` cookie. Rotating `FLAGS_SECRET` revokes ALL owner credentials —
 that is the kill-switch (also for ex-team-members, whose cookies outlive membership).
+The edge and the company data calls read the same two cookies with
+`src/lib/session/owner.ts` (Web Crypto alone, as the `flags` package pulls in Node
+built-ins); `owner.test.ts` fails if their names drift from the ones minted here.
 
 - **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
   (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie
@@ -485,19 +488,29 @@ that is the kill-switch (also for ex-team-members, whose cookies outlive members
 `DOCUMENT_MODE` (Vercel env): unset is off (every company page is served in
 full), `observe` logs every decision and changes nothing, `enforce` acts
 (logging documents and refusals). The edge middleware (`src/lib/session/`)
-gives a crawler address (Global Config `crawlerRanges`) the full document, and
-anyone else the app shell, whatever cookie they hold. The shell's data comes
+gives a crawler address (Global Config `crawlerRanges`) and the owner the full
+document, and anyone else the app shell, whatever session they hold; the shell
+stands in only for a live company's exact slug, so an unknown or renamed slug
+renders in full and the loader can 404 or 301 it. The shell's data comes
 from one POST server function, `getCompanyPage` (`api/companyPage.ts`), which
 asks the browser check on every call, as the extras do, and answers `denied`
 when the check names the caller automated while `BROWSER_CHECK_ENFORCE` holds.
-A data call gets past the edge only with a session: the httpOnly `ss-session`
-cookie, bound to the visitor's address and issued by `POST /api/session`.
+At the edge a data call needs a session (the httpOnly `ss-session` cookie, bound
+to the visitor's address and issued by `POST /api/session`), unless it comes
+from a crawler address or the owner's browser, or the edge cannot decide (no
+crawler ranges, no address, no secret), when it passes.
 
 - **The document decision runs at the edge** because company documents are
   edge-cached; a decision in the function would never see a cache hit. The
   data call is never cached: its answer depends on the check.
-- **Company data leaves the server two ways only**: a crawler's full document,
-  and `getCompanyPage`. Its reads (`companyBySlug`, `companyProfile`,
+- **The owner is trusted throughout** (`src/lib/session/owner.ts`, see
+  "/download owner gating"): the owner's browser gets the full document, its
+  data calls pass the edge without a session, `POST /api/session` issues it one
+  without asking the check, and its data and extras calls skip the check
+  (`ownerOrBrowser`). All four, or a page the owner opens in full stops working
+  on its next client-side navigation.
+- **Company data leaves the server two ways only**: a full document (a crawler's
+  or the owner's), and `getCompanyPage`. Its reads (`companyBySlug`, `companyProfile`,
   `companyTimeline`) are `createServerOnlyFn`, never server functions, so no
   other call can answer with them; `resolveCompanySlug` answers the legacy
   URL's 301 with the slug alone. The loader reads a page through

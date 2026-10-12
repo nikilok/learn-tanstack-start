@@ -9,6 +9,9 @@ const APP_ROOT = join(import.meta.dir, '../../..');
 
 /** Server functions any visitor may call: none answers with a company page's data or a listing. */
 const OPEN_CALLS = [
+  // The ask's mint and plan answer with filters and ids; its listing is a session call.
+  'src/api/ask.ts#issueAskToken',
+  'src/api/ask.ts#planSearch',
   'src/api/companyExtras.ts#issueExtrasToken',
   'src/api/geocode.ts#getGeocode',
   'src/api/hmrc.ts#getSlugForHash',

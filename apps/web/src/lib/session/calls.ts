@@ -39,6 +39,7 @@ export const SESSION_CALLS = [
   'src/api/companyExtras.ts#getCompanyExtras',
   'src/api/hmrc.ts#searchHmrc',
   'src/api/filterSearch.ts#searchFiltered',
+  'src/api/filterSearch.ts#searchRanked',
 ] as const;
 
 /** Their ids start with this. Every other id is plain hex, so none can. */

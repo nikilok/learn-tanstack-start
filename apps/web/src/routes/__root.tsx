@@ -154,7 +154,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   // Device-keyed pings boot after hydration; the module defers the heavy part
   // to idle time and the preview iframes stay out, as with Analytics below.
   // The browser check starts first, so it is ready for the session the page
-  // asks for and the extras calls the device key leads to.
+  // asks for, its data call and the extras calls the device key leads to.
   useEffect(() => {
     initBrowserCheck();
     startSession();

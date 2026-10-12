@@ -516,6 +516,20 @@ export function filtersToSearchParams(filters: SearchFilters): SearchUrlParams {
 }
 
 /**
+ * The filter params alone of the home page's search, which the router hands
+ * every query param: one that filters nothing (`utm_source`, or `render`, which
+ * shows a visitor's page) must not put the page into filter mode. `q` is left
+ * out, as there the name term only comes from `search`.
+ */
+export function filterParamsOf(
+  params: Record<string, unknown>,
+): SearchUrlParams {
+  return filtersToSearchParams(
+    parseSearchFilters({ ...params, q: undefined }).filters,
+  );
+}
+
+/**
  * Validate raw filter params (URL search params, server fn input, or model
  * output) into SearchFilters. Lenient by design: invalid entries are dropped
  * and reported in `issues` rather than rejecting the whole request, so a

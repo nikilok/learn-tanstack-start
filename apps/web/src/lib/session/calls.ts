@@ -24,15 +24,16 @@ export const RENDER_PARAM = 'render';
 export const CLIENT_RENDER = 'client';
 
 /**
- * The server functions that answer with a company page's data, which only a session may call:
- * keyed `file#variable`, the file relative to the app root. `call-ids.ts` gives each an id the
+ * The server functions that answer with the register's data, which only a session may call: a
+ * company page's (POST, each asking the browser check as well) and the search listings' (GET).
+ * Keyed `file#variable`, the file relative to the app root. `call-ids.ts` gives each an id the
  * edge can recognise, and `calls.test.ts` checks each still exists.
  */
 export const SESSION_CALLS = [
-  'src/api/hmrc.ts#getHmrcCompanyBySlug',
-  'src/api/companiesHouse.ts#getCompanyProfile',
-  'src/api/companyTimeline.ts#getCompanyTimeline',
+  'src/api/companyPage.ts#getCompanyPage',
   'src/api/companyExtras.ts#getCompanyExtras',
+  'src/api/hmrc.ts#searchHmrc',
+  'src/api/filterSearch.ts#searchFiltered',
 ] as const;
 
 /** Their ids start with this. Every other id is plain hex, so none can. */

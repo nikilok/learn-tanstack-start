@@ -15,7 +15,7 @@ import {
   companyPageRowsSql,
   SLUG_RE,
 } from '../lib/company/page-rows';
-import { fromBrowser } from '../lib/device/browser-check.server';
+import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { DEVICE_KEY_RE } from '../lib/device/key';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
@@ -54,7 +54,7 @@ const issueExtrasToken = createServerFn({ method: 'POST' })
   .handler(async ({ data: { key } }) => {
     setRpcCacheControl('private, no-store');
     if (await isSuspended(key)) return { token: null };
-    if (!(await fromBrowser())) return { token: null };
+    if (!(await ownerOrBrowser('extras'))) return { token: null };
     const token = issueToken(key);
     if (token === null) console.error('[extras] ENGAGE_TOKEN_SECRET not set');
     return { token };
@@ -101,7 +101,7 @@ const getCompanyExtras = createServerFn({ method: 'POST' })
     setRpcCacheControl('private, no-store');
     if (!tokenMatches(data.token, data.key)) return { status: 'denied' };
     if (await isSuspended(data.key)) return { status: 'denied' };
-    if (!(await fromBrowser())) return { status: 'denied' };
+    if (!(await ownerOrBrowser('extras'))) return { status: 'denied' };
     const [found, websites] = await Promise.all([
       db.execute(companyPageRowsSql(data.slug)),
       data.companyNumber === null

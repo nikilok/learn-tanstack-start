@@ -1,4 +1,4 @@
-import type { ErrorComponentProps } from '@tanstack/react-router';
+import { type ErrorComponentProps, useRouter } from '@tanstack/react-router';
 import { useEffect } from 'react';
 
 import { logError } from '../api/logError';
@@ -6,10 +6,13 @@ import { logError } from '../api/logError';
 /**
  * Router-level error boundary UI. Ships the error message and stack to the
  * `logError` server fn on mount for server-side observability, then renders a
- * generic "Something went wrong" card with `Try again` (calls `reset`) and
- * `Go back` (history pop) affordances.
+ * generic "Something went wrong" card with `Try again` and `Go back` (history
+ * pop) affordances. `Try again` reloads the route (`router.invalidate`), which
+ * resets the boundary once the match changes: `reset` alone re-renders a
+ * failed loader's stored error.
  */
-export default function RouteError({ error, reset }: ErrorComponentProps) {
+export default function RouteError({ error }: ErrorComponentProps) {
+  const router = useRouter();
   useEffect(() => {
     logError({
       data: {
@@ -32,7 +35,7 @@ export default function RouteError({ error, reset }: ErrorComponentProps) {
           <div className="mt-6 flex justify-center gap-3">
             <button
               type="button"
-              onClick={reset}
+              onClick={() => void router.invalidate()}
               className="rounded-md bg-(--sea-ink) px-4 py-2 text-sm font-medium text-(--surface) transition hover:opacity-85"
             >
               Try again

@@ -1,12 +1,17 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { CHECKED_CALLS } from './browser-check';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 import {
   type BrowserCheck,
+  browserVerdict,
   enforcing,
   fromBrowser,
   localVerdict,
+  ownerOrBrowser,
+  pageAllowed,
 } from './browser-check.server';
 
 // Passing `undefined` for the verdict or the enforcement takes the default, which reads
@@ -56,6 +61,13 @@ describe('fromBrowser', () => {
       '[extras] browser check: person',
       '[extras] browser check: automated',
     ]);
+  });
+
+  test("a company page's data call says its verdicts under its own tag", async () => {
+    expect(
+      await fromBrowser(answering(true).check, undefined, true, 'page'),
+    ).toBe(false);
+    expect(said()).toEqual(['[page] browser check: automated']);
   });
 
   test('enforced: a verified crawler is refused like any automated client', async () => {
@@ -126,6 +138,148 @@ describe('fromBrowser', () => {
     // Unset, nothing is enforced.
     delete process.env[ENFORCE_ENV];
     expect(await fromBrowser(answering(true).check)).toBe(true);
+  });
+});
+
+describe('browserVerdict', () => {
+  test('a check that does not answer in time has failed: the request is not held on it', async () => {
+    const failed = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const silent = (() => new Promise(() => {})) as BrowserCheck;
+      expect(await browserVerdict('page', silent, undefined, 20)).toBe(
+        'unchecked',
+      );
+      expect(String(failed.mock.calls[0]?.[0])).toBe(
+        '[page] browser check failed:',
+      );
+    } finally {
+      failed.mockRestore();
+    }
+  });
+
+  test('a check that answers in time is its verdict', async () => {
+    expect(await browserVerdict('page', answering(true).check)).toBe(
+      'automated',
+    );
+    expect(await browserVerdict('page', answering(false).check)).toBe('person');
+  });
+});
+
+describe('ownerOrBrowser', () => {
+  const owner = async () => true;
+  const anyone = async () => false;
+
+  test("the owner's request is let through without asking the check", async () => {
+    const asked = answering(true);
+    expect(
+      await ownerOrBrowser('page', {
+        owner,
+        check: asked.check,
+        enforce: true,
+      }),
+    ).toBe(true);
+    expect(asked.asked).toEqual([]);
+    expect(said()).toEqual([]);
+  });
+
+  test("anyone else's is the check's to answer, under its tag", async () => {
+    expect(
+      await ownerOrBrowser('page', {
+        owner: anyone,
+        check: answering(true).check,
+        enforce: true,
+      }),
+    ).toBe(false);
+    expect(
+      await ownerOrBrowser('extras', {
+        owner: anyone,
+        check: answering(false).check,
+        enforce: true,
+      }),
+    ).toBe(true);
+    expect(said()).toEqual([
+      '[page] browser check: automated',
+      '[extras] browser check: person',
+    ]);
+  });
+
+  test('by default, refusal follows BROWSER_CHECK_ENFORCE', async () => {
+    process.env[ENFORCE_ENV] = '1';
+    expect(
+      await ownerOrBrowser('extras', {
+        owner: anyone,
+        check: answering(true).check,
+      }),
+    ).toBe(false);
+    delete process.env[ENFORCE_ENV];
+    expect(
+      await ownerOrBrowser('extras', {
+        owner: anyone,
+        check: answering(true).check,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('pageAllowed', () => {
+  const anyone = async () => false;
+  const automated = () => answering(true).check;
+
+  test('a call the check names automated is refused only while company pages and the check are both enforced', async () => {
+    process.env[ENFORCE_ENV] = '1';
+    expect(
+      await pageAllowed({ owner: anyone, check: automated(), mode: 'enforce' }),
+    ).toBe(false);
+    for (const mode of ['observe', null] as const)
+      expect(
+        await pageAllowed({ owner: anyone, check: automated(), mode }),
+      ).toBe(true);
+    delete process.env[ENFORCE_ENV];
+    expect(
+      await pageAllowed({ owner: anyone, check: automated(), mode: 'enforce' }),
+    ).toBe(true);
+  });
+
+  test('off, the check is not asked at all; in observe it is, and refuses nobody', async () => {
+    process.env[ENFORCE_ENV] = '1';
+    const off = answering(true);
+    expect(
+      await pageAllowed({ owner: anyone, check: off.check, mode: null }),
+    ).toBe(true);
+    expect(off.asked).toEqual([]);
+    const observed = answering(true);
+    expect(
+      await pageAllowed({
+        owner: anyone,
+        check: observed.check,
+        mode: 'observe',
+      }),
+    ).toBe(true);
+    expect(observed.asked).toHaveLength(1);
+  });
+
+  test("the owner's call skips the check in every mode", async () => {
+    const asked = answering(true);
+    process.env[ENFORCE_ENV] = '1';
+    expect(
+      await pageAllowed({
+        owner: async () => true,
+        check: asked.check,
+        mode: 'enforce',
+      }),
+    ).toBe(true);
+    expect(asked.asked).toEqual([]);
+  });
+
+  test("the data call's handler is gated by it, and reads nothing first", () => {
+    const handler = readFileSync(
+      join(import.meta.dir, '../../api/companyPage.ts'),
+      'utf8',
+    );
+    expect(handler).toContain(
+      'allowed: () => pageAllowed(),\n      load: () => loadCompanyPage(slug),',
+    );
+    expect(handler.match(/loadCompanyPage\(slug\)/g)).toHaveLength(2);
   });
 });
 

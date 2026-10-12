@@ -17,13 +17,45 @@ export function documentMode(
 }
 
 /**
- * How a request is served, and why: `server` is the full document (a data call answered), `client`
- * the app shell (a data call refused). Anything that cannot be decided is `server`.
+ * How a company document is served, and why: `server` is the full document, `client` the app
+ * shell, whose data reaches the browser through its own data call. Anything that cannot be
+ * decided is `server`.
+ */
+export type DocumentDecision =
+  | {
+      render: 'server';
+      why: 'owner' | 'crawler' | 'no crawler ranges' | 'no address';
+    }
+  | { render: 'client'; why: 'visitor' };
+
+/**
+ * Decides how one company document is served: in full to the owner (`owner.ts`) and to a crawler
+ * address, and as the app shell to anyone else, whatever session they hold. Never throws.
+ */
+export function decideDocument(input: {
+  headers: Headers;
+  ranges: Ranges | null;
+  owner: boolean;
+}): DocumentDecision {
+  const { headers, ranges, owner } = input;
+  if (owner) return { render: 'server', why: 'owner' };
+  if (!ranges) return { render: 'server', why: 'no crawler ranges' };
+  const address = clientAddress(headers);
+  if (address === null || addressScope(address) === null)
+    return { render: 'server', why: 'no address' };
+  if (inRanges(ranges, address)) return { render: 'server', why: 'crawler' };
+  return { render: 'client', why: 'visitor' };
+}
+
+/**
+ * Whether a session call goes through, and why: `server` answers it, `client` refuses it.
+ * Anything that cannot be decided is `server`.
  */
 export type Decision =
   | {
       render: 'server';
       why:
+        | 'owner'
         | 'crawler'
         | 'session'
         | 'no crawler ranges'
@@ -35,20 +67,25 @@ export type Decision =
       why: 'no session' | 'expired' | 'elsewhere' | 'malformed' | 'unverified';
     };
 
-/** Decides how one request is served, from its address and its session cookie. Never throws. */
+/**
+ * Decides whether one session call goes through: whatever would be served the full document goes
+ * through (`decideDocument`), and anyone else by the session cookie held for their address.
+ * Never throws.
+ */
 export async function decide(input: {
   headers: Headers;
   ranges: Ranges | null;
   secret: string | undefined;
+  owner?: boolean;
   now?: number;
 }): Promise<Decision> {
-  const { headers, ranges, secret, now } = input;
-  if (!ranges) return { render: 'server', why: 'no crawler ranges' };
+  const { headers, ranges, secret, owner = false, now } = input;
+  const document = decideDocument({ headers, ranges, owner });
+  if (document.render === 'server') return document;
+  // A visitor: `decideDocument` has placed their address, and so given it a scope.
   const address = clientAddress(headers);
   const scope = address === null ? null : addressScope(address);
-  if (address === null || scope === null)
-    return { render: 'server', why: 'no address' };
-  if (inRanges(ranges, address)) return { render: 'server', why: 'crawler' };
+  if (scope === null) return { render: 'server', why: 'no address' };
   if (!secret) return { render: 'server', why: 'no secret' };
   const session = await readSession(cookieValue(headers, SESSION_COOKIE), {
     scope,

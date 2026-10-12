@@ -3,7 +3,7 @@ import type { HmrcLocation } from './resolve-sponsor';
 /** The `hmrc_company_mapping` fields that route a profile lookup. */
 export type Mapping = { companyNumber: string | null; verifiedAt: Date | null };
 
-/** Where getCompanyProfile finds a profile: nowhere (`none` answers null), the profile cache, a Companies House fetch of the mapped company, or the resolver. */
+/** Where companyProfile finds a profile: nowhere (`none` answers null), the profile cache, a Companies House fetch of the mapped company, or the resolver. */
 export type ProfileSource<Row> =
   | { kind: 'none' }
   | { kind: 'cached'; row: Row }

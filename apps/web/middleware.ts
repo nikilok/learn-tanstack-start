@@ -9,7 +9,8 @@ import {
   SESSION_PATH,
   SESSION_REQUIRED,
 } from './src/lib/session/calls';
-import { decide, documentMode } from './src/lib/session/decide';
+import { decide, decideDocument, documentMode } from './src/lib/session/decide';
+import { ownerRequest } from './src/lib/session/owner';
 import { crawlerRanges } from './src/lib/session/ranges';
 import { sessionSecret } from './src/lib/session/token';
 
@@ -110,12 +111,13 @@ function serveDocument(request: Request, destination?: URL): Response {
   return destination ? rewrite(destination, init) : next(init);
 }
 
-/** How the request is served by session (`src/lib/session/decide.ts`). */
+/** Whether a session call goes through: the owner's, or by session (`src/lib/session/decide.ts`). */
 async function decision(request: Request) {
   return decide({
     headers: request.headers,
     ranges: await crawlerRanges(),
     secret: sessionSecret(),
+    owner: await ownerRequest(request.headers),
   });
 }
 
@@ -129,15 +131,19 @@ function shellUrl(url: URL): URL {
 }
 
 /**
- * A company page under DOCUMENT_MODE: the full document for a crawler or a session holder, the app
- * shell otherwise. The shell has its own URL, so the two never share a cache entry. `observe` only
- * logs.
+ * A company page under DOCUMENT_MODE: the full document for the owner and a crawler, the app shell
+ * for anyone else, session or not, whose data comes through its own data call. The shell has its
+ * own URL, so the two never share a cache entry. `observe` only logs.
  */
 async function companyDocument(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const mode = documentMode();
   if (mode) {
-    const decided = await decision(request);
+    const decided = decideDocument({
+      headers: request.headers,
+      ranges: await crawlerRanges(),
+      owner: await ownerRequest(request.headers),
+    });
     console.info(`[document] ${decided.render} (${decided.why})`);
     if (mode === 'enforce' && decided.render === 'client')
       return serveDocument(request, shellUrl(url));
@@ -149,9 +155,9 @@ async function companyDocument(request: Request): Promise<Response> {
 }
 
 /**
- * A company data call: under `enforce`, refused here without a session, ahead of the cache. The
- * refusal is never cached and names itself, so the browser renews its session and calls again.
- * `observe` logs every decision and refuses nothing.
+ * A session call (a company page's data, a search listing): under `enforce`, refused here without
+ * a session, ahead of the cache. The refusal is never cached and names itself, so the browser
+ * renews its session and calls again. `observe` logs every decision and refuses nothing.
  */
 async function sessionCall(request: Request): Promise<Response> {
   const mode = documentMode();
@@ -173,9 +179,9 @@ async function sessionCall(request: Request): Promise<Response> {
 }
 
 /**
- * The edge's answer to every request, ahead of the cache: company pages and their data calls by
- * session, the other documents with the Accept repair, known API and static routes passed through,
- * and an edge 404 for anything else.
+ * The edge's answer to every request, ahead of the cache: company pages decided by who asks and
+ * the session calls by session, the other documents with the Accept repair, known API and static
+ * routes passed through, and an edge 404 for anything else.
  */
 export default function middleware(
   request: Request,
@@ -189,12 +195,12 @@ export default function middleware(
   const routed = routedPath(pathname);
   if (routed === null) return new Response('', { status: 400 });
 
-  // A company page's data calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
+  // The session calls, by session. Ahead of API_PREFIXES, which '/_serverFn' is under.
   if (routed.startsWith(SESSION_CALL_PATH.toLowerCase()))
     return sessionCall(request);
 
-  // A company page by session, at its one spelling: any other spelling the router would resolve
-  // to it (case, escapes) is redirected there first, so every page is decided.
+  // A company page, at its one spelling: any other spelling the router would resolve to it
+  // (case, escapes) is redirected there first, so every page is decided.
   const company = COMPANY_DOCUMENT_RE.exec(routed);
   if (company) {
     const canonical = `/company/${encodeURIComponent(company[1] ?? '')}`;

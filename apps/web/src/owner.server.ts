@@ -2,12 +2,11 @@ import { getCookie, setCookie } from '@tanstack/react-start/server';
 import { decryptFlagValues, encryptFlagValues } from 'flags';
 
 import { decryptFlagOverrides, FLAG_OVERRIDES_COOKIE } from './flags.server';
+import { OWNER_CLAIM, OWNER_COOKIE } from './lib/session/owner';
 
 // Bootstrap-and-upgrade owner identity — trust chain, kill-switch (rotate
 // FLAGS_SECRET), and cache invariants documented in CLAUDE.md "/download owner gating".
 
-const OWNER_COOKIE = 'ss-owner';
-const OWNER_CLAIM = 'ss-owner';
 const OWNER_TTL_SECONDS = 365 * 24 * 60 * 60;
 
 /** True when the request carries our durable owner cookie and it decrypts to the owner claim. */

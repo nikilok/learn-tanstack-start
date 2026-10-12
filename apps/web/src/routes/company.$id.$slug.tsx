@@ -11,7 +11,7 @@ import {
   SHORT_EDGE_CACHE,
 } from '../api/cache-headers';
 import { ALL_COMPANY_PAGES_TAG } from '../api/cache-tags';
-import { getHmrcCompanyBySlug, getSlugForHash } from '../api/hmrc';
+import { getSlugForHash, resolveCompanySlug } from '../api/hmrc';
 import { searchTermInput } from '../lib/search/params';
 
 /**
@@ -75,7 +75,7 @@ export const Route = createFileRoute('/company/$id/$slug')({
     // either side.
     let echoed: { nameSlug: string } | null = null;
     try {
-      echoed = await getHmrcCompanyBySlug({ data: { slug: params.slug } });
+      echoed = await resolveCompanySlug({ data: { slug: params.slug } });
     } catch {
       throw redirectToUrlSlug();
     }

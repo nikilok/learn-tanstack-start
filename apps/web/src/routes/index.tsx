@@ -19,13 +19,15 @@ import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { hydrationDone } from '../lib/hydration';
+import { startListing } from '../lib/search/listing-prefetch';
 import {
+  filterParamsOf,
   filtersToSearchParams,
   parseSearchFilters,
   searchTermInput,
-  type SearchUrlParams,
 } from '../lib/search/params';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+import { listingRenderedHere } from '../lib/session/listing';
 import { buildCanonical } from '../utils/canonical';
 import { buildWebsiteJsonLd } from '../utils/jsonld';
 import { jsonLdMeta } from '../utils/seo';
@@ -44,6 +46,9 @@ const WEBSITE_JSONLD_META = jsonLdMeta(buildWebsiteJsonLd(HOME_CANONICAL));
 const PENDING_FILTER_DATA = {
   results: [],
   isLoading: true,
+  failed: false,
+  moreFailed: false,
+  retry: () => {},
   hasMore: false,
   loadingMore: false,
   fetchMore: () => {},
@@ -72,30 +77,35 @@ export const Route = createFileRoute('/')({
   beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
   loaderDeps: ({ search }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
-    const { search: term, ...urlFilters } = (
-      deps as { search: { search: string } & SearchUrlParams }
-    ).search;
     if (typeof window !== 'undefined') return;
-    if (Object.keys(urlFilters).length > 0) {
-      // Filter mode: with or without a name term, the filter endpoint serves
-      // the listing. Key/params must mirror useFilterSearch exactly.
-      const { filters } = parseSearchFilters({
-        ...urlFilters,
-        q: term.length >= 3 ? term : undefined,
-      });
-      queryClient.prefetchInfiniteQuery({
-        queryKey: ['filter-search', filterSearchKey(filters)],
-        queryFn: () => searchFiltered({ data: { params: filters, offset: 0 } }),
-        initialPageParam: 0,
-      });
-    } else if (term.length >= 3) {
-      // Don't await — let the query stream in while the shell renders
-      queryClient.prefetchInfiniteQuery({
-        queryKey: ['hmrc-search', term],
-        queryFn: () => searchHmrc({ data: { query: term, offset: 0 } }),
-        initialPageParam: 0,
-      });
-    }
+    const { search: term, ...params } = (
+      deps as { search: { search: string } & Record<string, unknown> }
+    ).search;
+    // Streamed with the document for the owner and a crawler only: anyone
+    // else's results load in the browser through their session.
+    await startListing({
+      term,
+      params,
+      rendered: listingRenderedHere,
+      // Don't await — let the query stream in while the shell renders. Keys
+      // and params must mirror useFilterSearch and useHmrcSearch exactly.
+      start: (listing) =>
+        listing.kind === 'filter'
+          ? queryClient.prefetchInfiniteQuery({
+              queryKey: ['filter-search', filterSearchKey(listing.filters)],
+              queryFn: () =>
+                searchFiltered({
+                  data: { params: listing.filters, offset: 0 },
+                }),
+              initialPageParam: 0,
+            })
+          : queryClient.prefetchInfiniteQuery({
+              queryKey: ['hmrc-search', listing.term],
+              queryFn: () =>
+                searchHmrc({ data: { query: listing.term, offset: 0 } }),
+              initialPageParam: 0,
+            }),
+    });
   },
   component: Home,
 });
@@ -107,7 +117,8 @@ export const Route = createFileRoute('/')({
  * `navigate({ replace: true })` so history isn't spammed on each keystroke.
  */
 function Home() {
-  const { search, ...urlFilters } = Route.useSearch();
+  const { search, ...params } = Route.useSearch();
+  const urlFilters = filterParamsOf(params);
   const hasFilters = Object.values(urlFilters).some(
     (value) => value !== undefined,
   );

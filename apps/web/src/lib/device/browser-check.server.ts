@@ -1,5 +1,8 @@
+import { getRequest } from '@tanstack/react-start/server';
 import { checkBotId } from 'botid/server';
 
+import { type DocumentMode, documentMode } from '../session/decide';
+import { ownerRequest } from '../session/owner';
 import { BROWSER_CHECK_LEVEL } from './browser-check-config';
 
 /** Asks whether the current request came from an automated client (Vercel BotID). */
@@ -33,29 +36,47 @@ export function enforcing(value = process.env.BROWSER_CHECK_ENFORCE): boolean {
 export type BrowserVerdict = 'person' | 'verified crawler' | 'automated';
 
 /**
+ * How long the check has to answer before it is taken to have failed. Every company page waits on
+ * it, and the service's own call is not bounded.
+ */
+const CHECK_TIMEOUT_MS = 5000;
+
+/**
  * The check's verdict on the current request, asked at the level the client's protected calls
  * name (BotID fails a check whose two sides disagree, and names every visitor automated), or
- * `unchecked` when the check itself failed — the service unreachable, the project not set up for
- * it — which is logged under `tag`. A request that arrives without the challenge is not a
- * failure: the check names it automated. Never throws.
+ * `unchecked` when the check itself failed — the service unreachable or too slow to answer, the
+ * project not set up for it — which is logged under `tag`. A request that arrives without the
+ * challenge is not a failure: the check names it automated. Never throws.
  */
 export async function browserVerdict(
   tag: string,
   check: BrowserCheck = checkBotId,
   verdict: LocalVerdict | undefined = localVerdict(),
+  timeoutMs = CHECK_TIMEOUT_MS,
 ): Promise<BrowserVerdict | 'unchecked'> {
   let result: Awaited<ReturnType<BrowserCheck>>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    result = await check({
-      advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
-      ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
-    });
+    result = await Promise.race([
+      check({
+        advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+        ...(verdict ? { developmentOptions: { bypass: verdict } } : {}),
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`no answer in ${timeoutMs} ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
   } catch (error) {
     console.error(
       `[${tag}] browser check failed:`,
       error instanceof Error ? error.message : error,
     );
     return 'unchecked';
+  } finally {
+    clearTimeout(timer);
   }
   return !result.isBot
     ? 'person'
@@ -65,10 +86,11 @@ export async function browserVerdict(
 }
 
 /**
- * Whether the current request may have the extras: it came from a browser a person is using,
- * by Vercel's check of the challenge its script attached to the request. Any client the check
- * names as automated is refused while `enforce` holds, verified crawlers included; otherwise it
- * is let through. Every verdict is logged either way.
+ * Whether the current request may have what it asks for (the extras, or a company page's data
+ * under `tag`): it came from a browser a person is using, by Vercel's check of the challenge its
+ * script attached to the request. Any client the check names as automated is refused while
+ * `enforce` holds, verified crawlers included; otherwise it is let through. Every verdict is
+ * logged either way, under `tag`.
  *
  * A check that fails lets the request through, as an unreadable suspended list suspends nobody,
  * and says so in the log. Never throws.
@@ -77,12 +99,59 @@ export async function fromBrowser(
   check: BrowserCheck = checkBotId,
   verdict: LocalVerdict | undefined = localVerdict(),
   enforce: boolean = enforcing(),
+  tag = 'extras',
 ): Promise<boolean> {
-  const said = await browserVerdict('extras', check, verdict);
+  const said = await browserVerdict(tag, check, verdict);
   if (said === 'unchecked') return true;
   const isBot = said !== 'person';
   console.info(
-    `[extras] browser check: ${said}${isBot && !enforce ? ' (not enforced)' : ''}`,
+    `[${tag}] browser check: ${said}${isBot && !enforce ? ' (not enforced)' : ''}`,
   );
   return !isBot || !enforce;
+}
+
+/**
+ * Whether the current request may have the extras or a company page's data (`tag`): the owner's
+ * browser without asking the check (`../session/owner.ts`), anyone else's by `fromBrowser`, refused
+ * only while `enforce` holds (`BROWSER_CHECK_ENFORCE` unless a caller narrows it).
+ */
+export async function ownerOrBrowser(
+  tag: 'extras' | 'page',
+  deps: {
+    owner?: () => Promise<boolean>;
+    check?: BrowserCheck;
+    enforce?: boolean;
+  } = {},
+): Promise<boolean> {
+  const owner = deps.owner ?? (() => ownerRequest(getRequest().headers));
+  if (await owner()) return true;
+  return fromBrowser(
+    deps.check ?? checkBotId,
+    localVerdict(),
+    deps.enforce ?? enforcing(),
+    tag,
+  );
+}
+
+/**
+ * Whether a company page's data call may be answered: `ownerOrBrowser` under `page`, refused only
+ * while company pages are enforced (`DOCUMENT_MODE`) as well as the check, so the switch's
+ * rollback reaches the data call too. Off, the check is not asked at all, so the call neither waits
+ * on it nor pays for it.
+ */
+export async function pageAllowed(
+  deps: {
+    owner?: () => Promise<boolean>;
+    check?: BrowserCheck;
+    mode?: DocumentMode | null;
+    enforce?: boolean;
+  } = {},
+): Promise<boolean> {
+  const mode = 'mode' in deps ? deps.mode : documentMode();
+  if (!mode) return true;
+  return ownerOrBrowser('page', {
+    owner: deps.owner,
+    check: deps.check,
+    enforce: mode === 'enforce' && (deps.enforce ?? enforcing()),
+  });
 }

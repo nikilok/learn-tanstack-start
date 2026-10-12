@@ -143,8 +143,8 @@ describe('pageCompanyNumber', () => {
   });
 });
 
-// companyPagePayload is what getHmrcCompanyBySlug returns for a found page, and
-// that payload is edge-cached and dehydrated into the HTML.
+// companyPagePayload is what companyBySlug returns for a found page, and that
+// payload is answered by the page's data call and dehydrated into a crawler's HTML.
 describe('companyPagePayload — the outline, never the values', () => {
   const pool = [
     row({

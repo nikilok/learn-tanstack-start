@@ -6,7 +6,11 @@ import {
 } from '@ss/db';
 import { slugifiedSqlText } from '@ss/db/constants';
 import { queryOptions } from '@tanstack/react-query';
-import { createIsomorphicFn, createServerFn } from '@tanstack/react-start';
+import {
+  createIsomorphicFn,
+  createServerFn,
+  createServerOnlyFn,
+} from '@tanstack/react-start';
 import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
@@ -196,32 +200,27 @@ export type CompanyBySlug =
 const slugifySql = (expr: string) => sql.raw(slugifiedSqlText(expr));
 
 /**
- * Server fn returning the full company page group for a `name_slug`: every
- * licence row sharing the slug (multi-route companies merge into one page),
- * ordered so the primary org (mapped to a CH company first, then the lowest
- * company number) leads. When the slug matches nothing current, falls back to
- * rename resolution — the slugified form of stale mapping org names and CH
- * previous names — and returns `moved` with the current slug for a 301.
- * Returns `null` for a genuinely unknown slug.
+ * The full company page group for a `name_slug`: every licence row sharing
+ * the slug (multi-route companies merge into one page), ordered so the
+ * primary org (mapped to a CH company first, then the lowest company number)
+ * leads. When the slug matches nothing current, falls back to rename
+ * resolution — the slugified form of stale mapping org names and CH previous
+ * names — and returns `moved` with the current slug for a 301. Returns `null`
+ * for a genuinely unknown slug. Server only: read by the page's data call
+ * (`companyPage.ts`) and the slug resolver below.
  */
-export const getHmrcCompanyBySlug = createServerFn()
-  .validator((input: unknown) => input as { slug: string })
-  .handler(async ({ data }): Promise<CompanyBySlug | null> => {
-    // Type-guard BEFORE slugify: the RPC payload is caller-controlled and a
-    // non-string must be a null miss, not a .toLowerCase() 500. Then
-    // normalise URL-ish input (case variants, encoded spaces) to slug form;
-    // the loader 301s when the request differs from the canonical slug.
-    const slug = typeof data?.slug === 'string' ? slugify(data.slug) : '';
+export const companyBySlug = createServerOnlyFn(
+  async (input: string): Promise<CompanyBySlug | null> => {
+    // Type-guard BEFORE slugify: the slug comes from a caller-controlled
+    // payload, and a non-string must be a null miss, not a .toLowerCase()
+    // 500. Then normalise URL-ish input (case variants, encoded spaces) to
+    // slug form; the loader 301s when the request differs from the
+    // canonical slug.
+    const slug = typeof input === 'string' ? slugify(input) : '';
     if (!SLUG_RE.test(slug)) return null;
     const found = await db.execute(companyPageRowsSql(slug));
     const rows = found.rows as unknown as CompanyPageRow[];
     if (rows.length > 0) {
-      // Long edge cache: slug pages change via ingest and the website sweep
-      // (the extras outline), and both purge the edge afterwards.
-      setRpcCacheControl(LONG_EDGE_CACHE);
-      // Tagged so the nightly and per-company purges reach this RPC too;
-      // the primary (first row) owns the page, so its number is the tag.
-      setCompanyCacheTag(rows[0]?.companyNumber ?? undefined);
       // Namesake guard (unit-tested in lib/company/licences): pool only the
       // primary company's rows, never a different mapped entity's.
       const pool = poolForPrimary(rows);
@@ -235,8 +234,7 @@ export const getHmrcCompanyBySlug = createServerFn()
     // so hand-built links use its form: "…-limited" vs HMRC's "…-ltd"), or a
     // company-number tail (disambiguated `-{number}` slugs, which no slugified
     // NAME can ever equal after that company renames) — to any current org on
-    // the same company. Misses and hits both cache short: unknown slugs can
-    // be revived by later ingests.
+    // the same company.
     // MATERIALIZED fences candidate resolution (index probes on the 0038
     // slugified expression indexes; the tail branch probes
     // idx_mapping_company_number) from the h2 join, and the aggregate replaces
@@ -293,12 +291,12 @@ export const getHmrcCompanyBySlug = createServerFn()
       FROM cand
       JOIN ${hmrcSkilledWorkers} h2 ON h2.organisation_name = cand.organisation_name
     `);
-    setRpcCacheControl(SHORT_EDGE_CACHE);
     const target = (moved.rows as { nameSlug: string | null }[])[0];
     return target?.nameSlug
       ? { kind: 'moved', nameSlug: target.nameSlug }
       : null;
-  });
+  },
+);
 
 /**
  * Whether `slug` is exactly a live company's current slug: the only pages the app shell stands in
@@ -323,17 +321,27 @@ export const isLiveCompanySlug = createIsomorphicFn()
   .client(async (_slug: string): Promise<boolean> => true);
 
 /**
- * React Query options for `getHmrcCompanyBySlug`. Found pages pin for the
- * session (they change only via ingest and the website sweep); moved/null results stay
- * stale so a rename revert or reinstated sponsor is re-resolved on the next
- * navigation instead of a cached miss 404ing/redirecting all session.
+ * Server fn resolving a slug to its company's current slug, for the
+ * /company/$id/$slug 301 shim: `null` when it resolves to no company. It
+ * answers with the slug alone, never the page's data.
  */
-export const hmrcCompanyBySlugQueryOptions = (slug: string) =>
-  queryOptions({
-    queryKey: ['hmrc-company-by-slug', slug],
-    queryFn: () => getHmrcCompanyBySlug({ data: { slug } }),
-    staleTime: (query) =>
-      query.state.data?.kind === 'found' ? Number.POSITIVE_INFINITY : 0,
+export const resolveCompanySlug = createServerFn()
+  .validator((input: unknown) => input as { slug: string })
+  .handler(async ({ data }): Promise<{ nameSlug: string } | null> => {
+    const company = await companyBySlug(
+      typeof data?.slug === 'string' ? data.slug : '',
+    );
+    if (company?.kind === 'found') {
+      // Long edge cache, tagged so the nightly purge reaches it. The
+      // population tag alone, like getSlugForHash's: a per-company tag would
+      // name the company number this call does not answer with.
+      setRpcCacheControl(LONG_EDGE_CACHE);
+      setCompanyCacheTag();
+    } else {
+      // Renames and misses cache short: a later ingest can flip or revive either.
+      setRpcCacheControl(SHORT_EDGE_CACHE);
+    }
+    return company ? { nameSlug: company.nameSlug } : null;
   });
 
 /**

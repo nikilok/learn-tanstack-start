@@ -2,12 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import '@mcp-b/global';
 
-import { fetchCompanyProfile } from '../api/companiesHouse';
-import {
-  hmrcCompanyBySlugQueryOptions,
-  searchHmrcQueryOptions,
-} from '../api/hmrc';
-import { PROFILE_UNAVAILABLE } from '../lib/company/profile-lookup';
+import { companyPageQueryOptions } from '../api/companyPage';
+import { searchHmrcQueryOptions } from '../api/hmrc';
 import { formatLocation, titleCase } from '../utils';
 
 /**
@@ -118,7 +114,7 @@ export function McpTools() {
             content: [
               {
                 type: 'text',
-                text: 'Failed to fetch UK visa sponsor search results due to a network error. Please try again in a moment.',
+                text: 'Could not fetch UK visa sponsor search results. Please try again in a moment.',
               },
             ],
             isError: true,
@@ -204,20 +200,18 @@ export function McpTools() {
           }
 
           const top = exactRow ?? hmrcResult.rows[0];
-          // Each fetch settles independently: a failed profile reads as
-          // unavailable, and the fallback below covers a failed slug fetch.
-          const [profileResult, company] = await Promise.all([
-            fetchCompanyProfile(queryClient, top.organisationName).catch(
-              () => PROFILE_UNAVAILABLE,
-            ),
-            queryClient
-              .ensureQueryData(hmrcCompanyBySlugQueryOptions(top.nameSlug))
-              .catch(() => null),
-          ]);
+          // One fetch carries the licences and the profile. A failed one
+          // leaves both out: the fallback below covers the licences, and the
+          // details say they could not be loaded.
+          const page = await queryClient
+            .fetchQuery(companyPageQueryOptions(top.nameSlug))
+            .catch(() => null);
+          const company = page?.company ?? null;
+          const profileResult = page?.profile ?? null;
           const profile =
             profileResult?.kind === 'found' ? profileResult : null;
 
-          // The slug fetch keeps the per-licence route↔rating pairing the
+          // The page fetch keeps the per-licence route↔rating pairing the
           // search aggregate loses. When every pooled row carries one non-null
           // company number the server already vouched they are ONE entity, so
           // take them all — that pools the company's case/punctuation-variant
@@ -248,7 +242,7 @@ export function McpTools() {
                     ]),
                   ).values(),
                 ]
-              : // No pooled rows (slug fetch failed): fall back to the search
+              : // No pooled rows (page fetch failed): fall back to the search
                 // row's own paired licences before the unpaired lists.
                 (top.licences ?? []).length > 0
                 ? (top.licences ?? []).map((licence) => ({
@@ -281,13 +275,18 @@ export function McpTools() {
                   industries: profile.sicDescriptions,
                 }
               : null,
-            // An outage must not read as "no Companies House record".
-            ...(profileResult?.kind === 'unavailable'
+            // A failure must not read as "no Companies House record".
+            ...(page === null
               ? {
                   companiesHouseError:
-                    'Companies House did not respond. This is not a missing record; try again shortly.',
+                    'Company details could not be loaded. This is not a missing record; try again shortly.',
                 }
-              : {}),
+              : profileResult?.kind === 'unavailable'
+                ? {
+                    companiesHouseError:
+                      'Companies House did not respond. This is not a missing record; try again shortly.',
+                  }
+                : {}),
           };
 
           return {
@@ -304,7 +303,7 @@ export function McpTools() {
             content: [
               {
                 type: 'text',
-                text: `Failed to fetch details for "${companyName}" due to a network error. Please try again in a moment.`,
+                text: `Could not fetch details for "${companyName}". Please try again in a moment.`,
               },
             ],
             isError: true,

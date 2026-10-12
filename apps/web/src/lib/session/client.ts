@@ -24,14 +24,21 @@ export class SessionRequiredError extends Error {
 const ATTEMPTS = 3;
 const RETRY_MS = 1000;
 
-/** How long one ask may take. One that outlasts it ends the asking: the check is stuck. */
-const ASK_TIMEOUT_MS = 8000;
+/**
+ * How long one ask may take. One that outlasts it ends the asking: the check is stuck. The browser
+ * check holds the ask until its challenge has run, which took 15 s on one visit, so the deadline
+ * leaves room for a slow one.
+ */
+const ASK_TIMEOUT_MS = 30_000;
 
 /** A hint expiring within this is no sign of a session. */
 const HINT_MARGIN_MS = 60_000;
 
-/** How long a /download preview frame waits for its page's session, and how often it looks. */
-const PREVIEW_WAIT_MS = 3000;
+/**
+ * How long a /download preview frame waits for its page's session, and how often it looks. As long
+ * as the page's ask may take, since the frame's session is the one that ask gets.
+ */
+const PREVIEW_WAIT_MS = ASK_TIMEOUT_MS;
 const PREVIEW_POLL_MS = 250;
 
 export type SessionDeps = {

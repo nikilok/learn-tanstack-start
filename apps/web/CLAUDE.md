@@ -512,7 +512,10 @@ visitor's address and issued by `POST /api/session`.
 - **Sessions:** a check that cannot run issues a one-hour session; a refused
   renewal leaves a held session to run out; `BROWSER_CHECK_ENFORCE` off issues
   sessions whatever the check says. The browser asks on load only without a
-  session with time to run, and an ask that stalls ends at its deadline.
+  session with time to run, and an ask that stalls ends at its deadline. The
+  deadline leaves room for a slow check: the browser check holds the ask until
+  its challenge has run (15 s on one visit), and a /download preview frame
+  waits as long for its page's session.
 - **The shell's frame mirrors the page** (`CompanyScaffold.tsx`). A layout
   change to the company page is made there too, or the page jumps when its
   data lands.

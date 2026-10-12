@@ -27,6 +27,11 @@ function harness(options: {
   stall?: boolean;
   /** Each ask answers only once this settles, logged as `answer:<outcome>`. */
   gate?: Promise<void>;
+  /**
+   * The browser check holds each ask this long before it answers, logged as `answer:<outcome>`.
+   * The ask deadline runs on the same clock, a thousand times faster than real time.
+   */
+  heldMs?: number;
 }) {
   const asks = [...(options.asks ?? [])];
   const responses = [...(options.responses ?? [])];
@@ -43,6 +48,10 @@ function harness(options: {
         await options.gate;
         log.push(`answer:${outcome}`);
       }
+      if (options.heldMs !== undefined) {
+        await scaled(options.heldMs);
+        log.push(`answer:${outcome}`);
+      }
       return outcome;
     },
     wait: async (ms) => {
@@ -52,7 +61,9 @@ function harness(options: {
     timeout: (ms) =>
       options.stall
         ? Promise.resolve().then(() => void log.push(`timeout:${ms}`))
-        : new Promise<void>(() => {}),
+        : options.heldMs !== undefined
+          ? scaled(ms).then(() => void log.push(`timeout:${ms}`))
+          : new Promise<void>(() => {}),
     hintExpiry: options.hint ?? (() => null),
     preview: () => options.preview ?? false,
     now: () => NOW,
@@ -81,6 +92,10 @@ function deferred() {
 
 /** Lets every pending promise callback run. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Resolves after `ms` of harness time, which runs a thousand times faster than real time. */
+const scaled = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms / 1000));
 
 describe('createSession', () => {
   test('a call goes out at once, and starts the session behind it', async () => {
@@ -214,8 +229,21 @@ describe('createSession', () => {
       SessionRequiredError,
     );
     expect(asksIn(log)).toEqual(['ask:stalled']);
-    expect(log).toContain('timeout:8000');
+    expect(log).toContain('timeout:30000');
     expect(log.some((l) => l.startsWith('wait'))).toBe(false);
+  });
+
+  test('a check that holds the first ask for 15 s, as one did on a live visit, still gets the waiting data call its session', async () => {
+    let log: string[] = [];
+    // The edge refuses a data call until the session has landed.
+    const page = harness({
+      asks: ['ok'],
+      responses: [() => (log.includes('answer:ok') ? answered() : refused())],
+      heldMs: 15_000,
+    });
+    log = page.log;
+    expect((await page.session.fetch('/_serverFn/s-abc')).status).toBe(200);
+    expect(log.slice(0, 4)).toEqual(['check', 'ask:ok', 'answer:ok', 'fetch']);
   });
 
   test('a response that is not a session refusal is returned as it came', async () => {
@@ -282,6 +310,21 @@ describe('createSession', () => {
     expect(log.some((l) => l.startsWith('ask') || l === 'check')).toBe(false);
   });
 
+  test('a preview frame waits as long as an ask may take: a page whose check held its ask 15 s still lends its session', async () => {
+    let hint: number | null = null;
+    let polls = 0;
+    const { session, log } = harness({
+      preview: true,
+      responses: [refused, answered],
+      hint: () => hint,
+      onWait: (ms) => {
+        if (ms === 250 && ++polls === 60) hint = NOW / 1000 + 86_400;
+      },
+    });
+    expect((await session.fetch('/_serverFn/s-abc')).status).toBe(200);
+    expect(log.filter((l) => l === 'wait:250')).toHaveLength(60);
+  });
+
   test('a preview frame whose page never holds a session gives up after its wait', async () => {
     const { session, log } = harness({
       preview: true,
@@ -290,7 +333,7 @@ describe('createSession', () => {
     await expect(session.fetch('/_serverFn/s-abc')).rejects.toBeInstanceOf(
       SessionRequiredError,
     );
-    expect(log.filter((l) => l === 'wait:250')).toHaveLength(12);
+    expect(log.filter((l) => l === 'wait:250')).toHaveLength(120);
     expect(log.filter((l) => l === 'fetch')).toHaveLength(1);
   });
 });

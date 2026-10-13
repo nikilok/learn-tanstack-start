@@ -30,9 +30,11 @@ export const CLIENT_RENDER = 'client';
 
 /**
  * The server functions that answer with the register's data, which only a session may call: a
- * company page's (POST, each asking the browser check as well) and the search listings' (GET).
- * Keyed `file#variable`, the file relative to the app root. `call-ids.ts` gives each an id the
- * edge can recognise, and `calls.test.ts` checks each still exists.
+ * company page's (POST, each asking the browser check as well), the search listings' (GET) and
+ * the ask's ranked listing (POST, the ranked ids in its body; the browser check holds it as it
+ * holds every POST call, and no handler of it asks the check). Keyed `file#variable`, the file
+ * relative to the app root. `call-ids.ts` gives each an id the edge can recognise, and
+ * `calls.test.ts` checks each still exists.
  */
 export const SESSION_CALLS = [
   'src/api/companyPage.ts#getCompanyPage',

@@ -540,7 +540,10 @@ crawler ranges, no address, no secret), when it passes.
   GET, the edge checking the session ahead of the cache (the filter listing is
   edge-cached for 5 minutes; the name search sets no caching). They carry no
   browser check of their own, as the check stands in front of POST calls only;
-  the session's fetch sends a GET `s-` call as it is. The home loader streams a
+  the session's fetch sends a GET `s-` call as it is. The ask's ranked listing
+  (`searchRanked`) is the one POST among them, by design: its ids are one
+  visitor's answer and never enter a URL, so the check's hold applies to it as
+  to every POST call, though no handler of it asks the check. The home loader streams a
   search's first page with the document only where a company page is served in
   full (the owner, a crawler), or for everyone while `DOCUMENT_MODE` is not
   `enforce` (`rendersListing`, `lib/session/listing.server.ts`; which search it
@@ -653,7 +656,7 @@ crawler ranges, no address, no secret), when it passes.
   data lands.
 - **Data calls without a session are refused at the edge**, before any
   function runs. `SESSION_CALLS` (`getCompanyPage`, `getCompanyExtras`,
-  `searchHmrc`, `searchFiltered`) get `s-` ids (`call-ids.ts`);
+  `searchHmrc`, `searchFiltered`, `searchRanked`) get `s-` ids (`call-ids.ts`);
   `calls.test.ts` fails if one moves, or if a
   server function is placed in neither list. The browser's fetch (`start.ts`)
   holds an `s-` call made with no session until the page's first ask lands, so

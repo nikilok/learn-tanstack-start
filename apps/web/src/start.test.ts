@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 
 import { redirect } from '@tanstack/react-router';
-import { requestHandler } from '@tanstack/react-start/server';
+import {
+  createServerEntry,
+  getResponseHeader,
+} from '@tanstack/react-start/server';
 
 import { LONG_EDGE_CACHE, setRpcCacheControl } from './api/cache-headers';
 import { SERVER_FN_ERROR_MESSAGE } from './lib/server-fn-errors';
@@ -13,34 +16,37 @@ const [csrf] = options.requestMiddleware ?? [];
 
 const RPC_PATH = '/_serverFn/test';
 
-/** Runs the registered server-function middleware around `next`, as getCompanyProfile, inside a request for `path`; settles with what it returned or threw and the answered Cache-Control. */
+/** Runs the registered server-function middleware around `next`, as getCompanyProfile, inside a request for `path`; settles with what it returned or threw and the Cache-Control the response carries. */
 async function serve(path: string, next: () => Promise<unknown>) {
   const server = serverFnErrors?.options.server as unknown as (ctx: {
     next: () => Promise<unknown>;
     serverFnMeta: { id: string; name: string; filename: string };
   }) => Promise<unknown>;
-  const settled: { result?: unknown; error?: unknown } = {};
-  const respond = requestHandler(async () => {
-    try {
-      settled.result = await server({
-        next,
-        serverFnMeta: {
-          id: 'test',
-          name: 'getCompanyProfile',
-          filename: 'src/api/companiesHouse.ts',
-        },
-      });
-    } catch (error) {
-      settled.error = error;
-    }
-    // A server function answers 200 whether it succeeded or failed.
-    return new Response(null);
+  const settled: {
+    result?: unknown;
+    error?: unknown;
+    cacheControl: string | null;
+  } = { cacheControl: null };
+  const entry = createServerEntry({
+    fetch: async () => {
+      try {
+        settled.result = await server({
+          next,
+          serverFnMeta: {
+            id: 'test',
+            name: 'getCompanyProfile',
+            filename: 'src/api/companiesHouse.ts',
+          },
+        });
+      } catch (error) {
+        settled.error = error;
+      }
+      settled.cacheControl = getResponseHeader('cache-control') ?? null;
+      return new Response(null);
+    },
   });
-  const response = await respond(
-    new Request(`https://sponsorsearch.co.uk${path}`),
-    {},
-  );
-  return { ...settled, cacheControl: response.headers.get('cache-control') };
+  await entry.fetch(new Request(`https://sponsorsearch.co.uk${path}`));
+  return settled;
 }
 
 /** A handler that sets its 30-day header, then fails tagging its rows, as getHmrcCompanyBySlug can. */

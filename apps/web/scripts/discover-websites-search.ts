@@ -60,6 +60,17 @@ const flag = (name: string) =>
     .slice(1)
     .join('=');
 
+/** Every argument this script reads. Anything else stops the run: a typo such
+ *  as `--shards=3/8`, or `--shard 3/8`, would run the whole set and pay for
+ *  every other worker's companies. */
+const KNOWN_ARG =
+  /^--(?:dry-run|(?:shard|max-rows|max-searches|delay|max-disclosure)=.*)$/;
+const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
+if (unknownArgs.length > 0) {
+  console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
+  process.exit(1);
+}
+
 const dryRun = args.includes('--dry-run');
 const shard = parseShard(flag('shard'));
 const maxRows = parseStrictInt(flag('max-rows') ?? '300', 'max-rows');

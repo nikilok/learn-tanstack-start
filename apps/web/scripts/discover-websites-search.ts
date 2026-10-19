@@ -19,6 +19,11 @@
  * Run from monorepo root:
  *   bun apps/web/scripts/discover-websites-search.ts --dry-run --max-rows=20
  *   bun apps/web/scripts/discover-websites-search.ts --max-rows=500
+ *   bun apps/web/scripts/discover-websites-search.ts --shard=3/8 --max-rows=4000
+ *
+ * Parallel workers each take one `--shard=K/N`, all with the same N. Pause the
+ * scheduled workflow while local workers run: it takes the whole set, so it
+ * would search their companies too.
  *
  * Env: POSTGRES_URL, SERPER_API_KEY.
  */
@@ -35,6 +40,7 @@ import {
   makeWriteOutcome,
 } from '../src/lib/websites/discover-sql.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
+import { parseShard, workerSearchCeiling } from '../src/lib/websites/shard.ts';
 import { setGitHubOutput } from './ci-utils.ts';
 import {
   ERROR_RATE_THRESHOLD,
@@ -54,15 +60,28 @@ const flag = (name: string) =>
     .slice(1)
     .join('=');
 
-/** Ceiling on credits one run may spend. The only figure an input cannot raise. */
-const ABSOLUTE_MAX_SEARCHES = 5000;
+/** Every argument this script reads. Anything else stops the run: a typo such
+ *  as `--shards=3/8`, or `--shard 3/8`, would run the whole set and pay for
+ *  every other worker's companies. */
+const KNOWN_ARG =
+  /^--(?:dry-run|(?:shard|max-rows|max-searches|delay|max-disclosure)=.*)$/;
+const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
+if (unknownArgs.length > 0) {
+  console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
+  process.exit(1);
+}
 
 const dryRun = args.includes('--dry-run');
+const shard = parseShard(flag('shard'));
 const maxRows = parseStrictInt(flag('max-rows') ?? '300', 'max-rows');
-/** Defaults to the row count: one search per company, and never a surprise. */
+/**
+ * Defaults to the row count: one search per company, and never a surprise.
+ * The ceiling is the only figure an input cannot raise, and it shrinks as the
+ * split widens so a whole split stays under one run's worth.
+ */
 const maxSearches = Math.min(
   parseStrictInt(flag('max-searches') ?? String(maxRows), 'max-searches'),
-  ABSOLUTE_MAX_SEARCHES,
+  workerSearchCeiling(shard),
 );
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 /**
@@ -94,7 +113,7 @@ console.log(
   `Search website discovery — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(
-  `  max-rows: ${maxRows}  max-searches: ${maxSearches}  delay: ${delayMs}ms`,
+  `  shard: ${shard.index}/${shard.count}  max-rows: ${maxRows}  max-searches: ${maxSearches}  delay: ${delayMs}ms`,
 );
 console.log(
   `  before: ${before.target} companies undiscovered, ${before.discovered} already searched`,
@@ -105,7 +124,7 @@ const writeOutcome = makeWriteOutcome(sql);
 const summary = await discoverWebsites(
   { maxRows, maxSearches, delayMs, dryRun },
   {
-    selectRows: makeSelectUndiscovered(sql),
+    selectRows: makeSelectUndiscovered(sql, shard),
     search: async (query) => {
       const result = await searchCompany(query, apiKey);
       // Failures pass through WHOLE rather than field-by-field. Rebuilding

@@ -22,15 +22,21 @@ name: Discover Company Websites (Search)
 # size, is the lever — the 120-minute job timeout puts roughly 600 rows out of
 # reach in a single run.
 #
+# A manual run can split the set across parallel workers (`shards`). Each takes
+# its own slice of companies (apps/web/src/lib/websites/shard.ts), so none pays
+# for another's search, and gets 355 minutes: about 1,500 rows at ~12s a row.
+# Scheduled runs are a single worker, and the shared concurrency group keeps
+# them from overlapping a split.
+#
 # Overlapping the 21:43 website sweep is harmless: that job selects on
 # `url IS NOT NULL`, and a row this one has banked but not settled has no URL,
 # so it cannot be picked up half-written.
 #
 # COSTS MONEY, now 4x what it did. Every search spends one Serper credit, so a
 # day at the default 300 rows a run is 1,200 credits. Both the rows taken and
-# the searches run are capped, and the script clamps the total to its own
-# ABSOLUTE_MAX_SEARCHES regardless of what is dispatched here — the inputs
-# below can lower the spend but never raise it past that ceiling.
+# the searches run are capped per worker, and the script clamps each worker to
+# its share of a fixed run ceiling (shard.ts) regardless of what is dispatched
+# here — the inputs below can lower the spend but never raise it past that.
 
 on:
   schedule:
@@ -45,11 +51,15 @@ on:
         type: boolean
         default: false
       max-rows:
-        description: 'Companies to process this run (default 300)'
+        description: 'Companies each worker processes this run (default 300)'
         required: false
         type: number
       max-searches:
-        description: 'Hard ceiling on credits spent (defaults to max-rows)'
+        description: 'Hard ceiling on credits each worker spends (defaults to max-rows)'
+        required: false
+        type: number
+      shards:
+        description: 'Parallel workers, each searching its own slice (1-16, default 1)'
         required: false
         type: number
 
@@ -64,9 +74,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  discover:
+  # Turns the shards input into the matrix below. Checked here as well as in
+  # the script because workflow_dispatch type:number is not enforced for API
+  # and gh-CLI dispatches, which send strings.
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 5
+    outputs:
+      count: ${{ steps.split.outputs.count }}
+      shards: ${{ steps.split.outputs.shards }}
+    steps:
+      - name: Plan the split
+        id: split
+        shell: bash
+        env:
+          SHARDS: ${{ github.event.inputs.shards }}
+        run: |
+          COUNT="${SHARDS:-1}"
+          # Matched as text, never compared as a number: a value past bash's
+          # integer range fails `-gt` instead of being rejected, and jq's range
+          # would then hang. 1-16 mirrors MAX_SHARDS (shard.test.ts runs this).
+          case "$COUNT" in
+            [1-9]|1[0-6]) ;;
+            *) echo "shards must be a whole number from 1 to 16"; exit 1 ;;
+          esac
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -nc --argjson n "$COUNT" '[range($n)]')" >> "$GITHUB_OUTPUT"
+
+  discover:
+    needs: plan
+    name: discover ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
+    runs-on: ubuntu-latest
+    # Scheduled runs keep the window their cadence was sized for; a manual run
+    # gets nearly the hosted runner's six-hour limit.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 120 }}
+    strategy:
+      fail-fast: false
+      # Leaves room under the account's 20 concurrent jobs for other workflows.
+      max-parallel: 12
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -99,6 +146,8 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry-run }}
           MAX_ROWS: ${{ github.event.inputs.max-rows }}
           MAX_SEARCHES: ${{ github.event.inputs.max-searches }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
         run: |
           set -o pipefail
           # Built as an array and expanded quoted. Unquoted "$ROWS_FLAG" was
@@ -107,7 +156,7 @@ jobs:
           # exists to enforce. Numeric inputs are also validated rather than
           # trusted: workflow_dispatch type:number is not enforced for API and
           # gh-CLI dispatches, which send strings.
-          ARGS=()
+          ARGS=("--shard=$SHARD/$SHARD_COUNT")
           if [ "$DRY_RUN" = "true" ]; then
             ARGS+=(--dry-run)
           fi
@@ -128,12 +177,15 @@ jobs:
       - name: Write job summary
         if: always()
         shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
         run: |
           LOG=/tmp/discover-websites.log
           if [ ! -f "$LOG" ]; then exit 0; fi
           extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
           {
-            echo "## Search Website Discovery"
+            echo "## Search Website Discovery (worker $SHARD/$SHARD_COUNT)"
             echo ""
             echo "| Metric | Value |"
             echo "| --- | --- |"

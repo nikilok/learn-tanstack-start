@@ -5,6 +5,7 @@
 
 import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
+import { type Shard, WHOLE_SET } from './shard';
 
 /**
  * Passes a banked-but-unsettled row gets before it is left alone.
@@ -45,8 +46,12 @@ type Sql = (
  *
  * Still no cursor and no state file. Ordered by company number rather than
  * randomly so consecutive runs walk the set predictably.
+ *
+ * `shard` narrows the set to one worker's slice (shard.ts). The bucket is a
+ * pure function of the company number, so a banked row comes back to the
+ * worker that banked it.
  */
-export function makeSelectUndiscovered(sql: Sql) {
+export function makeSelectUndiscovered(sql: Sql, shard: Shard = WHOLE_SET) {
   return async (maxRows: number): Promise<DiscoveryRow[]> => {
     const rows = await sql`
       SELECT DISTINCT ON (m.company_number)
@@ -71,6 +76,11 @@ export function makeSelectUndiscovered(sql: Sql) {
         -- spent. buildQuery refuses these too; excluding them here keeps them
         -- out of the slice entirely rather than burning rows from it.
         AND coalesce(p.company_name, '') <> ''
+        -- This worker's slice: 28 bits of md5, so never negative.
+        AND mod(
+          ('x' || left(md5(m.company_number), 7))::bit(28)::int,
+          ${shard.count}::int
+        ) = ${shard.index}::int
       ORDER BY m.company_number
       LIMIT ${maxRows}
     `;

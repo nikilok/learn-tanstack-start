@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   MAX_SEARCHES_PER_RUN,
@@ -61,5 +65,62 @@ describe('workerSearchCeiling', () => {
       expect(ceiling).toBeLessThanOrEqual(MAX_SEARCHES_PER_WORKER);
       expect(ceiling * count).toBeLessThanOrEqual(MAX_SEARCHES_PER_RUN);
     }
+  });
+});
+
+const WORKFLOW = new URL(
+  '../../../../../.github/workflows/discover-websites-search.yaml',
+  import.meta.url,
+);
+
+/** Runs the workflow's own split step as Actions would, returning its exit status and outputs. */
+async function runSplit(
+  shards: string,
+): Promise<{ status: number | null; output: string }> {
+  const workflow = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
+    jobs: { plan: { steps: { run: string }[] } };
+  };
+  const dir = mkdtempSync(join(tmpdir(), 'split-'));
+  const out = join(dir, 'out');
+  writeFileSync(out, '');
+  try {
+    const result = spawnSync('bash', ['-c', workflow.jobs.plan.steps[0].run], {
+      env: { PATH: process.env.PATH, SHARDS: shards, GITHUB_OUTPUT: out },
+      timeout: 5000,
+    });
+    return { status: result.status, output: readFileSync(out, 'utf8') };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("the workflow's split step", () => {
+  test.each([
+    ['', 1],
+    ['1', 1],
+    ['12', 12],
+    [String(MAX_SHARDS), MAX_SHARDS],
+  ])('accepts %p as %p workers', async (input, count) => {
+    const { status, output } = await runSplit(input);
+    expect(status).toBe(0);
+    expect(output).toBe(
+      `count=${count}\nshards=${JSON.stringify([...Array(count).keys()])}\n`,
+    );
+  });
+
+  test.each([
+    ['0'],
+    [String(MAX_SHARDS + 1)],
+    ['012'],
+    ['abc'],
+    ['1 2'],
+    ['-3'],
+    // Past bash's integer range `-gt` errors rather than rejecting, and jq's
+    // range then hangs the job.
+    ['99999999999999999999'],
+  ])('rejects %p before writing a matrix', async (input) => {
+    const { status, output } = await runSplit(input);
+    expect(status).toBe(1);
+    expect(output).toBe('');
   });
 });

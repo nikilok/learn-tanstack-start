@@ -91,13 +91,13 @@ jobs:
           SHARDS: ${{ github.event.inputs.shards }}
         run: |
           COUNT="${SHARDS:-1}"
-          # 1-16 mirrors MAX_SHARDS in apps/web/src/lib/websites/shard.ts.
+          # Matched as text, never compared as a number: a value past bash's
+          # integer range fails `-gt` instead of being rejected, and jq's range
+          # would then hang. 1-16 mirrors MAX_SHARDS (shard.test.ts runs this).
           case "$COUNT" in
-            ''|*[!0-9]*|0*) echo "shards must be a whole number from 1 to 16"; exit 1 ;;
+            [1-9]|1[0-6]) ;;
+            *) echo "shards must be a whole number from 1 to 16"; exit 1 ;;
           esac
-          if [ "$COUNT" -gt 16 ]; then
-            echo "shards must be a whole number from 1 to 16"; exit 1
-          fi
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "shards=$(jq -nc --argjson n "$COUNT" '[range($n)]')" >> "$GITHUB_OUTPUT"
 

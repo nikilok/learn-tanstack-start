@@ -238,8 +238,10 @@ export async function discoverWebsites(
       }
 
       // Read-and-found-nothing is an answer; could-not-read is not, and storing
-      // it as one writes a permanent `none` no selector revisits.
-      if (origins.length > 0 && probes.length === 0 && unreadable > 0) {
+      // it as one writes a permanent `none` no selector revisits. A directory
+      // that loaded is not the company's site loading; a parked page is.
+      const siteLoaded = probes.some((p) => !p.onAggregator);
+      if (origins.length > 0 && !siteLoaded && unreadable > 0) {
         summary.unreadable += 1;
         if (!config.dryRun) await deps.markAttempt(row.companyNumber);
         continue;

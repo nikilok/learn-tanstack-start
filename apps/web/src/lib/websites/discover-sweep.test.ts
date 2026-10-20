@@ -645,6 +645,41 @@ describe('the disclosure walk is what makes rows publishable', () => {
     expect(h.attempts).toEqual(['03260168']);
   });
 
+  test('so does a row whose only loaded page is a directory after its redirect', async () => {
+    // The guard used to count any loaded probe, so this row was written as a
+    // permanent `none` with the company's site never read.
+    const h = harness({
+      urls: ['https://moved-listing.co.uk/x', 'https://dead.co.uk'],
+      probes: {
+        'https://moved-listing.co.uk': probe({
+          url: 'https://moved-listing.co.uk',
+          onAggregator: true,
+        }),
+        'https://dead.co.uk': null,
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(1);
+    expect(h.written).toHaveLength(0);
+    expect(h.attempts).toEqual(['03260168']);
+  });
+
+  test('a parked page is still an answer, not an unreadable row', async () => {
+    const h = harness({
+      urls: ['https://parked.co.uk', 'https://dead.co.uk'],
+      probes: {
+        'https://parked.co.uk': probe({
+          url: 'https://parked.co.uk',
+          parked: true,
+        }),
+        'https://dead.co.uk': null,
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(0);
+    expect(h.written[0].outcome.evidence).toBe('none');
+  });
+
   test('a result set of directories alone is a decided `none`', async () => {
     const h = harness({
       urls: [

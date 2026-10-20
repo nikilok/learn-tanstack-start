@@ -12,6 +12,7 @@ import type { StatedOnSite } from './stated-numbers';
 
 const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
+  companyName: 'ACME WIDGETS LIMITED',
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -22,6 +23,7 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
 
 const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
+  companyName: 'ACME WIDGETS LIMITED',
   postcode: 'SO22 5AZ',
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',
@@ -119,13 +121,44 @@ describe('rewalkWebsites: none rows', () => {
     expect(h.marked).toEqual([]);
   });
 
-  test('a postcode it finds upgrades the row to the postcode tier', async () => {
+  test('a postcode it finds on a site naming the company upgrades the row to the postcode tier', async () => {
     const h = harness({
-      walks: { 'https://real.co.uk': probe({ postcodeFound: true }) },
+      walks: {
+        'https://real.co.uk': probe({
+          postcodeFound: true,
+          postcodeNamed: true,
+        }),
+      },
     });
     const summary = await rewalkWebsites(config(), h.deps);
     expect(summary.noneToPostcode).toBe(1);
     expect(h.upgrades[0].outcome.evidence).toBe('postcode_on_page');
+  });
+
+  test('a postcode on a site that never names the company leaves the row as it was', async () => {
+    const h = harness({
+      walks: { 'https://real.co.uk': probe({ postcodeFound: true }) },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.noneToPostcode).toBe(0);
+    expect(h.upgrades).toEqual([]);
+    expect(h.marked).toEqual(['03260168']);
+  });
+
+  test('the probe and the walk are given the company name to look for', async () => {
+    const names: string[] = [];
+    const h = harness({
+      probe: async (row, url) => {
+        names.push(row.companyName);
+        return probe({ url });
+      },
+      walkDisclosure: async (row, base) => {
+        names.push(row.companyName);
+        return base;
+      },
+    });
+    await rewalkWebsites(config(), h.deps);
+    expect(names).toEqual(['ACME WIDGETS LIMITED', 'ACME WIDGETS LIMITED']);
   });
 
   test('read and still nothing: stamped as walked, nothing written', async () => {

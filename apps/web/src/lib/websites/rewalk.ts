@@ -21,6 +21,8 @@ export const MAX_WALK_ATTEMPTS = 3;
 
 export type RewalkRow = {
   companyNumber: string;
+  /** Companies House name, which a postcode match must find on the site. */
+  companyName: string;
   postcode: string | null;
   evidence: 'none' | 'postcode_on_page';
   /** The stored site; null on a `none` row. */
@@ -99,7 +101,7 @@ const NOTHING: DiscoveryOutcome = {
 function asDiscoveryRow(row: RewalkRow): DiscoveryRow {
   return {
     companyNumber: row.companyNumber,
-    companyName: '',
+    companyName: row.companyName,
     town: '',
     postcode: row.postcode,
     bankedCandidates: row.candidates,

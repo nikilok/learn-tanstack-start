@@ -35,6 +35,7 @@ const flat = (text: string) => text.replace(/\s+/g, ' ');
 
 const noneRow: RewalkRow = {
   companyNumber: '03260168',
+  companyName: 'ACME WIDGETS LIMITED',
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -164,6 +165,23 @@ describe('makeSelectRewalk', () => {
     await makeSelectRewalk(seeded.sql, { seed: 's' })(10);
     // The seeded sample runs before the migration, so it cannot name the column.
     expect(flat(seeded.calls[0].text)).toContain('0 AS walk_attempts');
+  });
+
+  test("reads the company's name, which a postcode match must find on the site", async () => {
+    for (const selection of [{}, { seed: 's' }]) {
+      const { sql, calls } = makeFakeSql([
+        { company_number: '03260168', company_name: 'ACME WIDGETS LIMITED' },
+        { company_number: '03260169', company_name: null },
+      ]);
+      const rows = await makeSelectRewalk(sql, selection)(10);
+      expect(flat(calls[0].text)).toContain(
+        "coalesce(p.company_name, '') AS company_name",
+      );
+      expect(rows.map((r) => r.companyName)).toEqual([
+        'ACME WIDGETS LIMITED',
+        '',
+      ]);
+    }
   });
 
   test('takes a none row only while its url is empty, as the upgrade guard requires', async () => {

@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  foldWalkPage,
   legalLinks,
   MAX_LEGAL_LINKS,
   readWalkPage,
+  type WalkPage,
   walkTargets,
 } from './disclosure-walk';
+import type { CandidateProbe } from './discover';
 
 const page = (links: string) => `<html><body><nav>${links}</nav></body></html>`;
 
@@ -123,8 +126,13 @@ describe('walkTargets', () => {
 });
 
 describe('readWalkPage', () => {
-  const row = { companyNumber: '03260168', postcode: 'SO22 5AZ' };
-  const footer = '<footer>Acme Ltd. Company No. 03260168, SO22 5AZ</footer>';
+  const row = {
+    companyNumber: '03260168',
+    companyName: 'ACME WIDGETS LIMITED',
+    postcode: 'SO22 5AZ',
+  };
+  const footer =
+    '<footer>Acme Widgets Ltd. Company No. 03260168, SO22 5AZ</footer>';
 
   test('reads proof and stated numbers off a page on the site', () => {
     const page = readWalkPage(
@@ -133,8 +141,22 @@ describe('readWalkPage', () => {
       footer,
       new Set(),
     );
-    expect(page).toMatchObject({ crnFound: true, postcodeFound: true });
+    expect(page).toMatchObject({
+      crnFound: true,
+      postcodeFound: true,
+      pageNamed: true,
+    });
     expect(page?.stated.map((s) => s.companyNumber)).toEqual(['03260168']);
+  });
+
+  test("a page showing the postcode under another business's name does not name the company", () => {
+    const page = readWalkPage(
+      row,
+      'https://contractor.co.uk/contact',
+      '<p>Our on-site offices: Unit 4, Winchester SO22 5AZ</p>',
+      new Set(),
+    );
+    expect(page).toMatchObject({ postcodeFound: true, pageNamed: false });
   });
 
   test('a disclosure path that redirects into a register proves nothing', () => {
@@ -158,5 +180,93 @@ describe('readWalkPage', () => {
         new Set(['sponsor-list.example']),
       ),
     ).toBeNull();
+  });
+});
+
+describe('foldWalkPage', () => {
+  const base: CandidateProbe = {
+    url: 'https://acme.co.uk',
+    evidenceUrl: null,
+    crnFound: false,
+    postcodeFound: false,
+    onAggregator: false,
+    parked: false,
+  };
+  const walked = (over: Partial<WalkPage> = {}): WalkPage => ({
+    crnFound: false,
+    postcodeFound: false,
+    pageNamed: false,
+    stated: [],
+    ...over,
+  });
+
+  test('a number on a walked page wins, with that page as the evidence', () => {
+    const folded = foldWalkPage(
+      { ...base, postcodeFound: true, postcodeNamed: true },
+      'https://acme.co.uk/terms',
+      walked({ crnFound: true }),
+    );
+    expect(folded).toMatchObject({
+      crnFound: true,
+      evidenceUrl: 'https://acme.co.uk/terms',
+    });
+  });
+
+  test('a postcode counts as named when the page names the company', () => {
+    expect(
+      foldWalkPage(
+        base,
+        'https://acme.co.uk/contact',
+        walked({ postcodeFound: true, pageNamed: true }),
+      ),
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
+  });
+
+  test('or when the domain does, whatever the page says', () => {
+    expect(
+      foldWalkPage(
+        { ...base, nameInDomain: true },
+        'https://acme.co.uk/contact',
+        walked({ postcodeFound: true }),
+      ),
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
+  });
+
+  test('a later named postcode replaces an earlier unnamed one', () => {
+    const unnamed = foldWalkPage(
+      base,
+      'https://acme.co.uk/contact',
+      walked({ postcodeFound: true }),
+    );
+    expect(unnamed).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+    });
+    expect(
+      foldWalkPage(
+        unnamed,
+        'https://acme.co.uk/privacy',
+        walked({ postcodeFound: true, pageNamed: true }),
+      ),
+    ).toMatchObject({
+      postcodeNamed: true,
+      evidenceUrl: 'https://acme.co.uk/privacy',
+    });
+  });
+
+  test('the first named postcode is kept', () => {
+    const named = {
+      ...base,
+      postcodeFound: true,
+      postcodeNamed: true,
+      evidenceUrl: 'https://acme.co.uk/',
+    };
+    expect(
+      foldWalkPage(
+        named,
+        'https://acme.co.uk/privacy',
+        walked({ postcodeFound: true, pageNamed: true }),
+      ),
+    ).toBe(named);
   });
 });

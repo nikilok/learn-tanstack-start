@@ -143,6 +143,7 @@ describe('discoverWebsites', () => {
         'https://real.co.uk': probe({
           url: 'https://real.co.uk',
           postcodeFound: true,
+          postcodeNamed: true,
         }),
       },
     });
@@ -266,6 +267,7 @@ describe('discoverWebsites', () => {
         'https://a.co.uk': probe({
           url: 'https://a.co.uk',
           postcodeFound: true,
+          postcodeNamed: true,
         }),
       },
     });

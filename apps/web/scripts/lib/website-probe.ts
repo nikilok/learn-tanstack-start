@@ -8,8 +8,10 @@
  * from the Serper client and started throwing on a body the client banks.
  */
 
+import { homepageNaming } from '../../src/lib/websites/company-naming.ts';
 import { isDiscoveryAggregator } from '../../src/lib/websites/crowded-hosts.ts';
 import {
+  foldWalkPage,
   legalLinks,
   readWalkPage,
   walkTargets,
@@ -50,6 +52,13 @@ export async function probeOrigin(
     ? pageHasPostcode(fetched.html, row.postcode)
     : false;
   const onAggregator = isDiscoveryAggregator(host, crowded);
+  // The domain asked for and the one landed on: either is the site's name.
+  const naming = homepageNaming(
+    row.companyName,
+    [new URL(canonical).hostname, host],
+    text,
+    postcodeFound,
+  );
   return {
     // The URL we ASKED for, not the post-redirect one: that is what a visitor
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
@@ -61,6 +70,7 @@ export async function probeOrigin(
     evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
     crnFound,
     postcodeFound,
+    ...naming,
     onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(fetched.html, fetched.url),
@@ -106,12 +116,8 @@ export async function walkDisclosure(
     const page = readWalkPage(row, fetched.url, fetched.html, options.crowded);
     if (!page) continue;
     stated.push(...page.stated);
-    if (page.crnFound) {
-      return { ...updated, crnFound: true, evidenceUrl: fetched.url, stated };
-    }
-    if (!updated.postcodeFound && page.postcodeFound) {
-      updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
-    }
+    updated = foldWalkPage(updated, fetched.url, page);
+    if (updated.crnFound) return { ...updated, stated };
   }
   return { ...updated, stated };
 }

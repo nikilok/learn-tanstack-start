@@ -6,7 +6,9 @@
  * guesses.
  */
 
+import { pageNamesCompany } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
+import type { CandidateProbe } from './discover';
 import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
 import { DISCLOSURE_PATHS } from './fetch-policy';
 import { type StatedOnSite, statedOnPage } from './stated-numbers';
@@ -91,17 +93,22 @@ export function walkTargets(
   return [...extra, ...paths];
 }
 
+/** What one walked page proves. */
+export type WalkPage = {
+  crnFound: boolean;
+  postcodeFound: boolean;
+  /** The page's text names the company. */
+  pageNamed: boolean;
+  stated: StatedOnSite[];
+};
+
 /** What one walked page proves; null when it was served from a directory. */
 export function readWalkPage(
-  row: { companyNumber: string; postcode: string | null },
+  row: { companyNumber: string; companyName: string; postcode: string | null },
   pageUrl: string,
   html: string,
   crowded: ReadonlySet<string>,
-): {
-  crnFound: boolean;
-  postcodeFound: boolean;
-  stated: StatedOnSite[];
-} | null {
+): WalkPage | null {
   let host: string;
   try {
     host = new URL(pageUrl).hostname;
@@ -114,6 +121,25 @@ export function readWalkPage(
   return {
     crnFound: pageHasCompanyNumber(html, row.companyNumber),
     postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
+    pageNamed: pageNamesCompany(visibleText(html), row.companyName),
     stated: statedOnPage(pageUrl, html),
+  };
+}
+
+/** A walked page folded into its candidate: a number wins, and a named postcode beats an unnamed one. */
+export function foldWalkPage(
+  probe: CandidateProbe,
+  pageUrl: string,
+  page: WalkPage,
+): CandidateProbe {
+  if (page.crnFound) return { ...probe, crnFound: true, evidenceUrl: pageUrl };
+  if (!page.postcodeFound || probe.postcodeNamed) return probe;
+  const named = !!probe.nameInDomain || page.pageNamed;
+  if (probe.postcodeFound && !named) return probe;
+  return {
+    ...probe,
+    postcodeFound: true,
+    postcodeNamed: named,
+    evidenceUrl: pageUrl,
   };
 }

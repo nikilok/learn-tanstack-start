@@ -78,7 +78,8 @@ jobs:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        # Pinned: this job's secret step runs whatever the checkout leaves.
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 

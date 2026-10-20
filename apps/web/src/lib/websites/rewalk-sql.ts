@@ -152,6 +152,7 @@ export function makeMarkWalked(sql: Sql) {
         walk_attempts = 0,
         walked_at     = now()
       WHERE company_number = ${row.companyNumber} AND source = 'search'
+        AND evidence = ${row.evidence} AND url IS NOT DISTINCT FROM ${row.url}
     `;
   };
 }
@@ -168,6 +169,7 @@ export function makeMarkUnreadable(sql: Sql) {
         walk_attempts = CASE WHEN walk_attempts + 1 >= ${MAX_WALK_ATTEMPTS}
           THEN 0 ELSE walk_attempts + 1 END
       WHERE company_number = ${row.companyNumber} AND source = 'search'
+        AND evidence = ${row.evidence} AND url IS NOT DISTINCT FROM ${row.url}
     `;
   };
 }
@@ -200,8 +202,11 @@ export function makeRewalkRemaining(sql: Sql) {
       SELECT
         count(*) FILTER (WHERE evidence = 'none')::int AS none,
         count(*) FILTER (WHERE evidence = 'postcode_on_page')::int AS postcode
-      FROM company_websites
+      FROM company_websites w
       WHERE source = 'search'
+        -- The selector joins the profile, so only rows it can return count.
+        AND EXISTS (SELECT 1 FROM companies_house_profiles p
+          WHERE p.company_number = w.company_number)
         AND (walk_version IS NULL OR walk_version < ${CURRENT_WALK_VERSION})
         AND (
           (evidence = 'none' AND status = 'none' AND jsonb_typeof(candidates) = 'array')

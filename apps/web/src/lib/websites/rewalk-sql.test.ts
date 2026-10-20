@@ -10,6 +10,7 @@ import {
   makeMarkUnreadable,
   makeMarkWalked,
   makeRecordStated,
+  makeRewalkRemaining,
   makeSelectRewalk,
   makeUpgrade,
 } from './rewalk-sql';
@@ -93,22 +94,47 @@ describe('makeUpgrade', () => {
   });
 });
 
+/** The SET and WHERE halves of an UPDATE. */
+const halves = (text: string) => ({
+  set: text.slice(text.indexOf(' SET '), text.indexOf(' WHERE ')),
+  where: text.slice(text.indexOf(' WHERE ')),
+});
+
 describe('markers', () => {
-  test('a walked row is stamped, and its answer untouched', async () => {
+  test('a walked row is stamped, its answer untouched, only while it holds what was read', async () => {
     const { sql, calls } = makeFakeSql();
-    await makeMarkWalked(sql)(noneRow);
-    const text = flat(calls[0].text);
-    expect(text).toContain('walk_version =');
-    expect(text).not.toMatch(/\b(url|evidence|status)\s*=/);
+    await makeMarkWalked(sql)(postcodeRow);
+    const { set, where } = halves(flat(calls[0].text));
+    expect(set).toContain('walk_version =');
+    expect(set).not.toMatch(/\b(url|evidence|status)\s*=/);
+    expect(where).toContain('evidence = $');
+    expect(where).toContain('url IS NOT DISTINCT FROM $');
+    expect(calls[0].params).toEqual(
+      expect.arrayContaining(['postcode_on_page', 'https://stored.co.uk']),
+    );
   });
 
-  test('an unreadable row only counts the attempt until the last one', async () => {
+  test('an unreadable row only counts the attempt, on the content it failed to read', async () => {
     const { sql, calls } = makeFakeSql();
     await makeMarkUnreadable(sql)(noneRow);
-    const text = flat(calls[0].text);
-    expect(text).toContain('walk_attempts + 1 >=');
+    const { set, where } = halves(flat(calls[0].text));
+    expect(set).toContain('walk_attempts + 1 >=');
     expect(calls[0].params).toContain(MAX_WALK_ATTEMPTS);
-    expect(text).not.toMatch(/\b(url|evidence|status|checked_at)\s*=/);
+    expect(set).not.toMatch(/\b(url|evidence|status|checked_at)\s*=/);
+    expect(where).toContain('evidence = $');
+    expect(where).toContain('url IS NOT DISTINCT FROM $');
+  });
+});
+
+describe('makeRewalkRemaining', () => {
+  test('counts only rows the selector can return', async () => {
+    // The selector joins the profile for the postcode; a row without one is
+    // never walked, so counting it would leave the total stuck above zero.
+    const { sql, calls } = makeFakeSql([{ none: 0, postcode: 0 }]);
+    await makeRewalkRemaining(sql)();
+    expect(flat(calls[0].text)).toMatch(
+      /EXISTS \( ?SELECT 1 FROM companies_house_profiles/,
+    );
   });
 });
 

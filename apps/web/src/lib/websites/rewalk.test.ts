@@ -239,6 +239,8 @@ describe('rewalkWebsites: what it records and writes', () => {
     });
     const summary = await rewalkWebsites(config(), h.deps);
     expect(summary.unpersisted).toBe(1);
+    // Refused, so not an upgrade: the run's `upgraded` output sums these.
+    expect(summary.noneToNumber).toBe(0);
   });
 
   test('a dry run writes nothing at all, and still counts', async () => {
@@ -273,5 +275,29 @@ describe('rewalkWebsites: what it records and writes', () => {
     const summary = await rewalkWebsites(config(), h.deps);
     expect(summary.errored).toBe(1);
     expect(summary.unchanged).toBe(1);
+  });
+
+  test('a row that throws spends an attempt, so it cannot lead every slice forever', async () => {
+    const h = harness({
+      probe: async () => {
+        throw new Error('boom');
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.errored).toBe(1);
+    expect(h.unreadable).toEqual(['03260168']);
+  });
+
+  test('a marker that cannot be written after a throw still leaves the row errored', async () => {
+    const h = harness({
+      probe: async () => {
+        throw new Error('boom');
+      },
+      markUnreadable: async () => {
+        throw new Error('database down');
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.errored).toBe(1);
   });
 });

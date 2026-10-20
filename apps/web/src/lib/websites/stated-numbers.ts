@@ -54,9 +54,23 @@ const PATTERNS = [
   new RegExp(`\\b${SUFFIX}\\b\\.?,?\\s+${FULL}(?![0-9A-Z])`, 'gi'),
 ];
 
-/** Registers whose numbers share the lead-ins: VAT, charities, regulators. Same clause only. */
-const OTHER_REGISTER =
-  /\b(vat|charity|charities|fca|frn|ico|data\s+protection|gmc|cqc|ofsted|urn|osr|fsa|sra|nmc|hcpc|gdc|gphc)\b[^.\n]{0,30}$/i;
+/** Registers a number can belong to; any but `company` is not Companies House's. */
+const REGISTER =
+  /\b(company|vat|charity|charities|fca|frn|ico|data\s+protection|gmc|cqc|ofsted|urn|osr|fsa|sra|nmc|hcpc|gdc|gphc)\b/gi;
+
+/** Whether the register named nearest a number, in its own clause, is another register. */
+export function namesOtherRegister(wordingBefore: string): boolean {
+  // "No." and "Reg." end abbreviations, not clauses.
+  const flat = wordingBefore.replace(
+    /\b(no|nr|num|reg|co|ltd|plc|inc)\./gi,
+    '$1',
+  );
+  const clause = flat.slice(
+    Math.max(...['.', '\n', '|', ';'].map((c) => flat.lastIndexOf(c))) + 1,
+  );
+  const named = [...clause.matchAll(REGISTER)].at(-1)?.[1];
+  return !!named && named.toLowerCase() !== 'company';
+}
 
 /** Most numbers a page may state and still be read; past it the page is a listing. A group's own page can list dozens. */
 export const MAX_STATED_PER_PAGE = 100;
@@ -93,8 +107,11 @@ export function statedCompanyNumbers(html: string): StatedNumber[] {
     ...text.matchAll(pattern),
   ]).sort((a, b) => a.index - b.index);
   for (const match of matches) {
-    const before = text.slice(Math.max(0, match.index - 40), match.index);
-    if (OTHER_REGISTER.test(before)) continue;
+    // The wording up to the number, lead-in included: "Registered in England
+    // and Wales, Charity No." names its register inside the match.
+    const numberAt = match.index + match[0].lastIndexOf(match[1]);
+    const before = text.slice(Math.max(0, match.index - 40), numberAt);
+    if (namesOtherRegister(before)) continue;
     const companyNumber = normaliseStatedNumber(match[1]);
     if (!companyNumber || found.has(companyNumber)) continue;
     const end = match.index + match[0].length + CONTEXT_AFTER;

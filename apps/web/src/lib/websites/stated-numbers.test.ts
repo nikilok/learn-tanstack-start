@@ -82,6 +82,23 @@ describe('statedCompanyNumbers', () => {
     expect(numbers(footer('Company No. 490 4492'))).toEqual(['04904492']);
   });
 
+  test('a charity number inside a registration lead-in is not a company number', () => {
+    expect(
+      numbers(footer('Registered in England and Wales, Charity No. 1098765')),
+    ).toEqual([]);
+  });
+
+  test('the register named nearest the number decides, within its clause', () => {
+    expect(
+      numbers(footer('Registered Charity No. 1188094, Company No. 11074784')),
+    ).toEqual(['11074784']);
+    expect(
+      numbers(
+        footer('Registered charity number 279057. Registered number 01436945'),
+      ),
+    ).toEqual(['01436945']);
+  });
+
   test('leaves other registers alone', () => {
     expect(
       numbers(

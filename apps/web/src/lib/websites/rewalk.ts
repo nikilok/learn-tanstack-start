@@ -179,14 +179,16 @@ export async function rewalkWebsites(
         continue;
       }
 
+      // A refused write is not an upgrade; a dry run counts what it would write.
+      if (!config.dryRun && !(await deps.upgrade(row, outcome))) {
+        summary.unpersisted += 1;
+        continue;
+      }
       if (row.evidence === 'none') {
         if (outcome.evidence === 'crn_on_page') summary.noneToNumber += 1;
         else summary.noneToPostcode += 1;
       } else {
         summary.postcodeToNumber += 1;
-      }
-      if (!config.dryRun && !(await deps.upgrade(row, outcome))) {
-        summary.unpersisted += 1;
       }
     } catch (error) {
       // Reason only, never the company or the URL.
@@ -194,6 +196,9 @@ export async function rewalkWebsites(
       deps.log(
         `  row failed: ${error instanceof Error ? error.name : 'unknown'}`,
       );
+      // Spend an attempt, so a row that always throws cannot lead every slice;
+      // best effort, as a database outage is already counted above.
+      if (!config.dryRun) await deps.markUnreadable(row).catch(() => {});
     }
   }
   return summary;

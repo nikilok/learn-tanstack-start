@@ -10,11 +10,11 @@
  * choose between candidates; the nightly sweep stays the single thing that
  * decides a URL renders. Two jobs claiming that would be two to keep in step.
  *
- * What it publishes follows from the existing ladder with no special case: a
- * candidate carrying the company's registration number lands at `crn_on_page`
- * and renders, one carrying only the registered postcode lands at
- * `postcode_on_page` and does not, because that tier is not in
- * PUBLISHABLE_EVIDENCE and has never been measured on a searched population.
+ * What it publishes follows from the existing ladder: a candidate carrying the
+ * company's registration number lands at `crn_on_page` and renders; one
+ * carrying only the registered postcode lands at `postcode_on_page` and
+ * renders only where at most ten mapped companies share that postcode, the
+ * slice a hand-labelled sample measured (lib/websites/publishable.ts).
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/discover-websites-search.ts --dry-run --max-rows=20

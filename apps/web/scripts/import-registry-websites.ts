@@ -56,7 +56,7 @@ import {
   isSameSite,
   normaliseWebsiteUrl,
 } from '../src/lib/websites/normalise-url.ts';
-import { PUBLISHABLE_EVIDENCE } from '../src/lib/websites/publishable.ts';
+import { publishableWebsiteGate } from '../src/lib/websites/publishable.ts';
 import {
   namesAreCompatible,
   normaliseCompanyNumber,
@@ -542,7 +542,7 @@ if (!dryRun && written < pending.length) {
 // Report
 // ─────────────────────────────────────────────────────────────────────────────
 
-const coverage = (await sql`
+const coverage = await db.execute(raw`
   WITH mapped AS (
     SELECT DISTINCT company_number AS cn FROM hmrc_company_mapping
     WHERE company_number IS NOT NULL
@@ -551,23 +551,22 @@ const coverage = (await sql`
     (SELECT count(*) FROM mapped)::int AS sponsors,
     (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
       WHERE w.status = 'verified')::int AS verified_sponsors,
-    -- The gate the company page renders behind, defined in
+    -- The gate the company page renders behind, by reference to
     -- lib/websites/publishable.ts. This importer deliberately leaves
     -- checked_at NULL and writes registry evidence, so reporting only the line
     -- above would show coverage growing while nothing new is renderable.
-    (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
-      WHERE w.status = 'verified' AND w.checked_at IS NOT NULL
-        AND w.evidence = ANY(${PUBLISHABLE_EVIDENCE}) AND w.url IS NOT NULL)::int AS renderable_sponsors,
+    (SELECT count(*) FROM company_websites JOIN mapped ON mapped.cn = company_websites.company_number
+      WHERE ${publishableWebsiteGate()})::int AS renderable_sponsors,
     (SELECT count(*) FROM company_websites WHERE status = 'verified')::int AS verified_total,
     (SELECT count(*) FROM company_websites WHERE status = 'candidate')::int AS candidate_total
-`) as {
+`);
+const c = coverage.rows[0] as {
   sponsors: number;
   verified_sponsors: number;
   renderable_sponsors: number;
   verified_total: number;
   candidate_total: number;
-}[];
-const c = coverage[0];
+};
 const durationSec = Math.round((Date.now() - startedAt) / 1000);
 
 // Keys stay stable between dry and live runs — the workflow's step summary

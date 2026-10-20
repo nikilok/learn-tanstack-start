@@ -4,7 +4,10 @@
  * lives here so the orchestrator stays testable without a database.
  */
 
-import { PUBLISHABLE_EVIDENCE } from './publishable.ts';
+import type { createClient } from '@ss/db/client';
+import { sql as raw } from 'drizzle-orm';
+
+import { publishableWebsiteGate } from './publishable.ts';
 import type { RevalidateResult } from './revalidate.ts';
 import { mergeRevalidation } from './revalidate.ts';
 import type { SweepRow } from './sweep.ts';
@@ -13,6 +16,8 @@ type Sql = (
   strings: TemplateStringsArray,
   ...values: unknown[]
 ) => Promise<Record<string, unknown>[]>;
+
+type Db = Pick<ReturnType<typeof createClient>, 'execute'>;
 
 /**
  * One bounded slice, oldest-checked first.
@@ -124,9 +129,9 @@ export function makeSleep() {
 
 /** Coverage counters for the run summary, including the renderable figure that
  *  is the whole point of the sweep. */
-export function makeCoverage(sql: Sql) {
+export function makeCoverage(db: Db) {
   return async () => {
-    const rows = await sql`
+    const result = await db.execute(raw`
       WITH mapped AS (
         SELECT DISTINCT company_number AS cn FROM hmrc_company_mapping
         WHERE company_number IS NOT NULL
@@ -135,18 +140,16 @@ export function makeCoverage(sql: Sql) {
         (SELECT count(*) FROM mapped)::int AS sponsors,
         (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
           WHERE w.status = 'verified')::int AS identified,
-        -- The gate the company page actually renders behind, which is narrower
-        -- than status+checked_at: evidence is bound from the same constant the
-        -- page reads (lib/websites/publishable.ts), so promoting a tier moves
-        -- this number with it. Counting every fetched row regardless of tier
-        -- reported 1,581 renderable when the site was showing 324.
-        (SELECT count(*) FROM company_websites w JOIN mapped ON mapped.cn = w.company_number
-          WHERE w.status = 'verified' AND w.checked_at IS NOT NULL
-            AND w.evidence = ANY(${PUBLISHABLE_EVIDENCE}) AND w.url IS NOT NULL)::int AS renderable,
+        -- The company page's own gate, by reference, so publishing a tier or a
+        -- slice of one moves this number with it. Counting every fetched row
+        -- regardless of tier reported 1,581 renderable when the site was
+        -- showing 324. Unaliased: the gate names "company_websites".
+        (SELECT count(*) FROM company_websites JOIN mapped ON mapped.cn = company_websites.company_number
+          WHERE ${publishableWebsiteGate()})::int AS renderable,
         (SELECT count(*) FROM company_websites WHERE status = 'dead')::int AS dead_total,
         (SELECT count(*) FROM company_websites WHERE checked_at IS NULL)::int AS never_checked
-    `;
-    const r = rows[0];
+    `);
+    const r = result.rows[0] as Record<string, unknown>;
     return {
       sponsors: Number(r.sponsors),
       identified: Number(r.identified),

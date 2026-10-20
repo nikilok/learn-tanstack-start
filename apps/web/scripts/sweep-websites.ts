@@ -9,7 +9,8 @@
  *
  * One bounded slice per run, oldest-checked first, so the cursor rotates
  * through the table without needing to remember where it got to — the same
- * shape as the phase5 sweeps.
+ * shape as the phase5 sweeps. Each run then refreshes every row's postcode
+ * share, which the publish gate reads (lib/websites/postcode-share.ts).
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/sweep-websites.ts --dry-run --max-rows=20 --verbose
@@ -19,13 +20,14 @@
  * Env: POSTGRES_URL. WEBSITE_SWEEP_DELAY_MS overrides the pacing.
  */
 
-import { neon } from '@ss/db/client';
+import { createClient, neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
   pageHasCompanyNumber,
   pageHasPostcode,
 } from '../src/lib/websites/extract.ts';
+import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts';
 import {
   makeApplyResult,
   makeCoverage,
@@ -77,7 +79,10 @@ const delayMs = process.env.WEBSITE_SWEEP_DELAY_MS
   : DEFAULT_DELAY_MS;
 
 const sql = neon(process.env.POSTGRES_URL as string);
-const coverage = makeCoverage(sql);
+const coverage = makeCoverage(createClient(process.env.POSTGRES_URL as string));
+const refreshPostcodeShares = makeRefreshPostcodeShares((text) =>
+  sql.query(text),
+);
 
 /** Adapt web-fetch's result to the shape the orchestrator asks for, so the
  *  sweep never has to know about HTTP. */
@@ -137,6 +142,16 @@ const summary = await sweepWebsites(
   },
 );
 
+// After the slice, so a failed refresh never costs the run its liveness work.
+let sharesMoved: number | null = null;
+try {
+  sharesMoved = await refreshPostcodeShares(dryRun);
+} catch (err) {
+  console.error(
+    `  postcode share refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+}
+
 const after = await coverage();
 const durationSec = Math.round((Date.now() - startedAt) / 1000);
 
@@ -155,6 +170,7 @@ console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);
 console.log(`  systemic_abort      : ${summary.systemicAbort}`);
+console.log(`  postcode_shares     : ${sharesMoved ?? 'failed'}`);
 console.log(`  never_checked_left  : ${after.neverChecked}`);
 console.log(`  dead_total          : ${after.deadTotal}`);
 console.log(
@@ -182,5 +198,11 @@ if (summary.systemicAbort) {
   console.error(
     '\n  ABORTED: nothing was reachable — check egress. The run stopped early, so only the first few rows were demoted.',
   );
+  process.exit(1);
+}
+// Stale shares keep publishing what they last allowed, and new postcode rows
+// cannot publish at all, so this must not pass as a healthy run.
+if (sharesMoved === null) {
+  console.error('\n  POSTCODE SHARES were not refreshed.');
   process.exit(1);
 }

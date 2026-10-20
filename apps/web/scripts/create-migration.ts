@@ -11,7 +11,8 @@ if (!name) {
 const journalPath = join(root, 'migrations', 'meta', '_journal.json');
 const journal = await Bun.file(journalPath).json();
 
-const nextIdx = journal.entries.length;
+// Last idx + 1, as drizzle-kit numbers, so a number the journal skips is never reused.
+const nextIdx = (journal.entries.at(-1)?.idx ?? -1) + 1;
 const tag = `${String(nextIdx).padStart(4, '0')}_${name}`;
 const sqlPath = join(root, 'migrations', `${tag}.sql`);
 

@@ -13,9 +13,9 @@
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
 import {
   buildQuery,
-  candidateOrigins,
   decideFromCandidates,
   MAX_CANDIDATES,
+  siteOrigins,
 } from './discover';
 
 export type DiscoveryRow = {
@@ -44,6 +44,8 @@ export type SearchResult =
 
 export type DiscoveryDeps = {
   selectRows(maxRows: number): Promise<DiscoveryRow[]>;
+  /** Hosts banked results name for too many companies (crowdKey form). */
+  crowdedHosts: ReadonlySet<string>;
   search(query: string): Promise<SearchResult>;
   /** Persist the raw result URLs the moment they arrive. */
   bankCandidates(companyNumber: string, urls: string[]): Promise<void>;
@@ -214,8 +216,9 @@ export async function discoverWebsites(
       }
 
       // Origins, not raw results: several results usually share one site, so
-      // this removes fetches rather than adding them.
-      const origins = candidateOrigins(urls);
+      // this removes fetches rather than adding them. Directories, listed or
+      // crowded, are dropped before they can take one of the slots.
+      const origins = siteOrigins(urls, deps.crowdedHosts);
       const probes: CandidateProbe[] = [];
       let unreadable = 0;
       for (const url of origins.slice(0, MAX_CANDIDATES)) {
@@ -235,8 +238,10 @@ export async function discoverWebsites(
       }
 
       // Read-and-found-nothing is an answer; could-not-read is not, and storing
-      // it as one writes a permanent `none` no selector revisits.
-      if (origins.length > 0 && probes.length === 0 && unreadable > 0) {
+      // it as one writes a permanent `none` no selector revisits. A directory
+      // that loaded is not the company's site loading; a parked page is.
+      const siteLoaded = probes.some((p) => !p.onAggregator);
+      if (origins.length > 0 && !siteLoaded && unreadable > 0) {
         summary.unreadable += 1;
         if (!config.dryRun) await deps.markAttempt(row.companyNumber);
         continue;

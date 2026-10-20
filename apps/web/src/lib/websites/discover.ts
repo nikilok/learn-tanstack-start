@@ -20,6 +20,7 @@
  * discarded rather than guessed at.
  */
 
+import { isDiscoveryAggregator } from './crowded-hosts';
 import type { WebsiteEvidence } from './decide';
 
 /** What one candidate site turned out to be, once fetched. */
@@ -37,6 +38,8 @@ export type CandidateProbe = {
   onAggregator: boolean;
   /** Parked, for sale, or a holding page. */
   parked: boolean;
+  /** Same-site legal pages the homepage links to, walked before the fixed paths. */
+  legalLinks?: string[];
 };
 
 export type DiscoveryOutcome = {
@@ -125,6 +128,18 @@ export function candidateOrigins(urls: readonly string[]): string[] {
     if (!origins.includes(origin)) origins.push(origin);
   }
   return origins;
+}
+
+/** Candidate origins without directories, so none of them takes a slot. */
+export function siteOrigins(
+  urls: readonly string[],
+  crowded: ReadonlySet<string>,
+): string[] {
+  return candidateOrigins(urls).filter((origin) => {
+    // A non-web result's origin is the string "null", which no fetch can use.
+    if (!/^https?:\/\//.test(origin)) return false;
+    return !isDiscoveryAggregator(new URL(origin).hostname, crowded);
+  });
 }
 
 /** Legal suffixes: no company's website ranks for the word "LIMITED". */

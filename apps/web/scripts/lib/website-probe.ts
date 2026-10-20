@@ -8,6 +8,11 @@
  * from the Serper client and started throwing on a body the client banks.
  */
 
+import { isDiscoveryAggregator } from '../../src/lib/websites/crowded-hosts.ts';
+import {
+  legalLinks,
+  walkTargets,
+} from '../../src/lib/websites/disclosure-walk.ts';
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
 import type { CandidateProbe } from '../../src/lib/websites/discover.ts';
 import {
@@ -15,18 +20,15 @@ import {
   pageHasPostcode,
   visibleText,
 } from '../../src/lib/websites/extract.ts';
-import { DISCLOSURE_PATHS } from '../../src/lib/websites/fetch-policy.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
-import {
-  isAggregatorHost,
-  looksParked,
-} from '../../src/lib/websites/page-signals.ts';
+import { looksParked } from '../../src/lib/websites/page-signals.ts';
 import { fetchSite } from './web-fetch.ts';
 
 /** Fetch one candidate origin and read the two query-independent signals. */
 export async function probeOrigin(
   row: DiscoveryRow,
   url: string,
+  crowded: ReadonlySet<string>,
 ): Promise<CandidateProbe | null> {
   // Raw provider output, so normalise as every other writer of url does.
   const canonical = normaliseWebsiteUrl(url);
@@ -56,12 +58,14 @@ export async function probeOrigin(
     evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
     crnFound,
     postcodeFound,
-    onAggregator: isAggregatorHost(host),
+    onAggregator: isDiscoveryAggregator(host, crowded),
     parked: looksParked(text),
+    legalLinks: legalLinks(fetched.html, fetched.url),
   };
 }
 
 export type WalkOptions = {
+  /** Fixed disclosure paths read after the homepage's legal links. */
   maxPaths: number;
   delayMs: number;
   /** Called per fetch attempted, for the caller's own counter. */
@@ -81,9 +85,14 @@ export async function walkDisclosure(
   options: WalkOptions,
 ): Promise<CandidateProbe | null> {
   let updated = base;
-  for (const path of DISCLOSURE_PATHS.slice(0, options.maxPaths)) {
+  const targets = walkTargets(
+    base.url,
+    base.legalLinks ?? [],
+    options.maxPaths,
+  );
+  for (const target of targets) {
     await new Promise((resolve) => setTimeout(resolve, options.delayMs));
-    const fetched = await fetchSite(`${base.url}${path}`);
+    const fetched = await fetchSite(target);
     options.onFetch?.();
     if (!fetched.ok) continue;
     if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {

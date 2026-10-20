@@ -3,6 +3,7 @@
  * stays testable without a database, as with the sweep's own sql.ts.
  */
 
+import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
 import { type Shard, WHOLE_SET } from './shard';
@@ -211,5 +212,32 @@ export function makeRemaining(sql: Sql) {
     `;
     const r = rows[0];
     return { target: Number(r.target), discovered: Number(r.discovered) };
+  };
+}
+
+/**
+ * Hosts in banked search results for at least CROWDED_HOST_COMPANIES
+ * companies, keyed as crowdKey keys them.
+ */
+export function makeCrowdedHosts(sql: Sql) {
+  return async (): Promise<Set<string>> => {
+    // `[.]`, not a backslash: the tagged template would cook `\.` to `.`.
+    const rows = await sql`
+      SELECT host FROM (
+        SELECT w.company_number,
+          regexp_replace(
+            regexp_replace(
+              lower(substring(r.link FROM '^[a-zA-Z]+://([^/:?#]+)')),
+              '[.]$', ''),
+            '^www[.]', '') AS host
+        FROM company_websites w,
+          jsonb_array_elements_text(w.candidates) AS r(link)
+        WHERE w.source = 'search' AND jsonb_typeof(w.candidates) = 'array'
+      ) results
+      WHERE host IS NOT NULL AND host <> ''
+      GROUP BY host
+      HAVING count(DISTINCT company_number) >= ${CROWDED_HOST_COMPANIES}
+    `;
+    return new Set(rows.map((r) => r.host as string));
   };
 }

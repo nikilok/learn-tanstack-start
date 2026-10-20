@@ -6,6 +6,7 @@ import {
   candidateOrigins,
   decideFromCandidates,
   MAX_CANDIDATES,
+  siteOrigins,
 } from './discover';
 
 const probe = (over: Partial<CandidateProbe> = {}): CandidateProbe => ({
@@ -151,6 +152,57 @@ describe('candidateOrigins', () => {
     expect(candidateOrigins(['not a url', 'https://ok.co.uk/p'])).toEqual([
       'https://ok.co.uk',
     ]);
+  });
+});
+
+describe('siteOrigins', () => {
+  test('directories never take a slot, so the company site behind five of them is reached', () => {
+    // Listed hosts and hosts search returns for many companies used to fill
+    // the top five, leaving the company's own site at rank six unread.
+    const crowded = new Set(['sponsor-list.example', 'company-data.example']);
+    const origins = siteOrigins(
+      [
+        'https://find-and-update.company-information.service.gov.uk/company/03260168',
+        'https://sponsor-list.example/company/acme-care',
+        'https://www.company-data.example/03260168',
+        'https://www.endole.co.uk/company/03260168',
+        'https://sponsorsearch.co.uk/company/acme-care',
+        'https://www.acme-care.example/contact',
+      ],
+      crowded,
+    );
+    expect(origins).toEqual(['https://www.acme-care.example']);
+  });
+
+  test('a Google Sites company site keeps its slot though the host is crowded', () => {
+    expect(
+      siteOrigins(
+        ['https://sites.google.com/view/acme-care'],
+        new Set(['sites.google.com']),
+      ),
+    ).toEqual(['https://sites.google.com']);
+  });
+
+  test('drops a result with no web origin rather than throwing', () => {
+    expect(
+      siteOrigins(
+        ['mailto:info@acme.co.uk', 'https://real.co.uk/x'],
+        new Set(),
+      ),
+    ).toEqual(['https://real.co.uk']);
+  });
+
+  test('keeps rank order among the sites left', () => {
+    expect(
+      siteOrigins(
+        [
+          'https://b.co.uk/x',
+          'https://linkedin.com/company/a',
+          'https://a.co.uk/y',
+        ],
+        new Set(),
+      ),
+    ).toEqual(['https://b.co.uk', 'https://a.co.uk']);
   });
 });
 

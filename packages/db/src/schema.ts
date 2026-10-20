@@ -462,10 +462,38 @@ export const companyWebsites = pgTable(
     // none or none is mapped there. Derived: every sweep run refreshes it
     // (lib/websites/postcode-share.ts) and the publish gate reads it.
     postcodeShare: integer('postcode_share'),
+    // The disclosure-walk version that last read this row (lib/websites/rewalk.ts).
+    walkVersion: smallint('walk_version'),
+    // Re-walks that could not read the row since its last completed walk.
+    walkAttempts: smallint('walk_attempts').notNull().default(0),
+    walkedAt: timestamp('walked_at'),
   },
   (table) => [
     index('idx_company_websites_cursor').on(table.checkedAt.asc().nullsFirst()),
     index('idx_company_websites_status').on(table.status),
+  ],
+);
+
+// Statutory company numbers a site states, whoever they belong to: a site's
+// own, its group's, a sibling's. One row per site host and number; the page
+// and the wording around the number are the evidence.
+export const websiteStatedNumbers = pgTable(
+  'website_stated_numbers',
+  {
+    // Host as crowdKey keys it: lower-case, without a leading `www.`.
+    host: varchar('host', { length: 253 }).notNull(),
+    companyNumber: varchar('company_number', { length: 20 }).notNull(),
+    pageUrl: text('page_url').notNull(),
+    context: text('context').notNull(),
+    firstSeenAt: timestamp('first_seen_at').defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'website_stated_numbers_pk',
+      columns: [table.host, table.companyNumber],
+    }),
+    index('idx_website_stated_numbers_company').on(table.companyNumber),
   ],
 );
 

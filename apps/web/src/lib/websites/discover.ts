@@ -22,6 +22,7 @@
 
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { WebsiteEvidence } from './decide';
+import type { StatedOnSite } from './stated-numbers';
 
 /** What one candidate site turned out to be, once fetched. */
 export type CandidateProbe = {
@@ -40,6 +41,8 @@ export type CandidateProbe = {
   parked: boolean;
   /** Same-site legal pages the homepage links to, walked before the fixed paths. */
   legalLinks?: string[];
+  /** Statutory company numbers the pages read for this candidate stated. */
+  stated?: StatedOnSite[];
 };
 
 export type DiscoveryOutcome = {

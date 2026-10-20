@@ -11,6 +11,7 @@
 import { isDiscoveryAggregator } from '../../src/lib/websites/crowded-hosts.ts';
 import {
   legalLinks,
+  readWalkPage,
   walkTargets,
 } from '../../src/lib/websites/disclosure-walk.ts';
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
@@ -22,6 +23,7 @@ import {
 } from '../../src/lib/websites/extract.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
 import { looksParked } from '../../src/lib/websites/page-signals.ts';
+import { statedOnPage } from '../../src/lib/websites/stated-numbers.ts';
 import { fetchSite } from './web-fetch.ts';
 
 /** Fetch one candidate origin and read the two query-independent signals. */
@@ -47,6 +49,7 @@ export async function probeOrigin(
   const postcodeFound = row.postcode
     ? pageHasPostcode(fetched.html, row.postcode)
     : false;
+  const onAggregator = isDiscoveryAggregator(host, crowded);
   return {
     // The URL we ASKED for, not the post-redirect one: that is what a visitor
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
@@ -58,9 +61,11 @@ export async function probeOrigin(
     evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
     crnFound,
     postcodeFound,
-    onAggregator: isDiscoveryAggregator(host, crowded),
+    onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(fetched.html, fetched.url),
+    // A directory's numbers are its listings', not the site naming itself.
+    stated: onAggregator ? [] : statedOnPage(fetched.url, fetched.html),
   };
 }
 
@@ -68,6 +73,8 @@ export type WalkOptions = {
   /** Fixed disclosure paths read after the homepage's legal links. */
   maxPaths: number;
   delayMs: number;
+  /** Hosts discovery treats as directories; a page served from one proves nothing. */
+  crowded: ReadonlySet<string>;
   /** Called per fetch attempted, for the caller's own counter. */
   onFetch?: () => void;
 };
@@ -85,6 +92,7 @@ export async function walkDisclosure(
   options: WalkOptions,
 ): Promise<CandidateProbe | null> {
   let updated = base;
+  const stated = [...(base.stated ?? [])];
   const targets = walkTargets(
     base.url,
     base.legalLinks ?? [],
@@ -95,16 +103,15 @@ export async function walkDisclosure(
     const fetched = await fetchSite(target);
     options.onFetch?.();
     if (!fetched.ok) continue;
-    if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {
-      return { ...updated, crnFound: true, evidenceUrl: fetched.url };
+    const page = readWalkPage(row, fetched.url, fetched.html, options.crowded);
+    if (!page) continue;
+    stated.push(...page.stated);
+    if (page.crnFound) {
+      return { ...updated, crnFound: true, evidenceUrl: fetched.url, stated };
     }
-    if (
-      !updated.postcodeFound &&
-      row.postcode &&
-      pageHasPostcode(fetched.html, row.postcode)
-    ) {
+    if (!updated.postcodeFound && page.postcodeFound) {
       updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
     }
   }
-  return updated;
+  return { ...updated, stated };
 }

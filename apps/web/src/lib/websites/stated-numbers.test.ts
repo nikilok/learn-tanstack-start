@@ -159,6 +159,13 @@ describe('normaliseStatedNumber', () => {
     expect(normaliseStatedNumber('sc 187424')).toBe('SC187424');
   });
 
+  test('keeps the one prefix with a digit in it, R0', () => {
+    expect(normaliseStatedNumber('R0 123456')).toBe('R0123456');
+    expect(numbers(footer('Company No. R0123456'))).toEqual(['R0123456']);
+    // Only R0: a letter and seven digits is no register's form.
+    expect(normaliseStatedNumber('A1234567')).toBeNull();
+  });
+
   test('refuses what cannot be a company number', () => {
     expect(normaliseStatedNumber('00000000')).toBeNull();
     expect(normaliseStatedNumber('12345')).toBeNull();

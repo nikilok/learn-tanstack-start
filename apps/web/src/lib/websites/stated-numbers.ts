@@ -93,7 +93,11 @@ export function normaliseStatedNumber(raw: string): string | null {
     if (number.length < 6) return null;
     number = number.padStart(8, '0');
   }
-  if (!/^(?:[A-Z]{2}\d{6}|\d{8})$/.test(number) || /^0+$/.test(number)) {
+  // R0 is the one register prefix with a digit in it.
+  if (
+    !/^(?:[A-Z]{2}\d{6}|R0\d{6}|\d{8})$/.test(number) ||
+    /^0+$/.test(number)
+  ) {
     return null;
   }
   return number;

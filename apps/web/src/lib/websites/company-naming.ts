@@ -180,18 +180,25 @@ export function hostNamesCompany(host: string, companyName: string): boolean {
   ) {
     return true;
   }
+  const kept = tokens(companyName).filter(
+    (word) => word !== 'LIMITED' && word !== 'LTD' && word !== 'PLC',
+  );
+  if (kept.length === 0) return false;
+  // A label that is only the first word, or the start of it, is as often
+  // another business's domain: london for LONDON CARE LTD.
+  const firstWordOnly = (label: string) => kept[0].startsWith(label);
   const initials = nameInitials(companyName);
   if (
     initials.length >= 3 &&
-    labels.some((l) => sharedPrefix(l, initials) >= 3)
+    labels.some((l) => !firstWordOnly(l) && sharedPrefix(l, initials) >= 3)
   ) {
     return true;
   }
   // A domain that is the name's own opening letters: M&G FA at mandg.
-  const compact = tokens(companyName)
-    .filter((word) => word !== 'LIMITED' && word !== 'LTD' && word !== 'PLC')
-    .join('');
-  return labels.some((l) => l.length >= 3 && compact.startsWith(l));
+  const compact = kept.join('');
+  return labels.some(
+    (l) => l.length >= 3 && !firstWordOnly(l) && compact.startsWith(l),
+  );
 }
 
 /** How a candidate's homepage names the company: in a domain it answered on, and beside a postcode it shows. */

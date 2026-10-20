@@ -75,6 +75,25 @@ describe('hostNamesCompany', () => {
     ).toBe(false);
   });
 
+  test("a label that is only the name's first word, or the start of it, does not", () => {
+    // As often another business's domain: a generic first word especially.
+    expect(
+      hostNamesCompany('www.london-plumbers.co.uk', 'LONDON CARE LTD'),
+    ).toBe(false);
+    expect(
+      hostNamesCompany('www.london.gov.uk', 'LONDON PROPERTY GROUP LTD'),
+    ).toBe(false);
+    expect(hostNamesCompany('glo.co.uk', 'GLOBAL LOGISTICS LTD')).toBe(false);
+    // Initials that spell the start of the first word are that word.
+    expect(
+      hostNamesCompany('www.london.co.uk', 'LONDON OFFICE NETWORK LTD'),
+    ).toBe(false);
+    // Running past the first word, the domain is the name.
+    expect(hostNamesCompany('www.londoncare.co.uk', 'LONDON CARE LTD')).toBe(
+      true,
+    );
+  });
+
   test('the top-level domain is not part of the name', () => {
     expect(hostNamesCompany('www.example.net', 'NET PAYMENTS LIMITED')).toBe(
       false,

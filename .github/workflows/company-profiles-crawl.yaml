@@ -8,7 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Origins to crawl this run (default: PROFILE_CRAWL_LIMIT var or 150)'
+        description: 'Origins to crawl this run (default: PROFILE_CRAWL_LIMIT var or 4000)'
+        type: string
+        default: ''
+      concurrency:
+        description: 'Origins crawled at once (default: PROFILE_CRAWL_CONCURRENCY var or 12)'
         type: string
         default: ''
 
@@ -43,5 +47,7 @@ jobs:
       - name: Crawl sweep
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
-          LIMIT: ${{ inputs.limit || vars.PROFILE_CRAWL_LIMIT || '150' }}
-        run: bun apps/web/scripts/profile-company.ts --no-extract --limit="$LIMIT"
+          # 4000 origins on 12 lanes is ~65 min at the measured 11.7 s/origin.
+          LIMIT: ${{ inputs.limit || vars.PROFILE_CRAWL_LIMIT || '4000' }}
+          CONCURRENCY: ${{ inputs.concurrency || vars.PROFILE_CRAWL_CONCURRENCY || '12' }}
+        run: bun apps/web/scripts/profile-company.ts --no-extract --limit="$LIMIT" --concurrency="$CONCURRENCY"

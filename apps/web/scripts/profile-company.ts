@@ -10,6 +10,7 @@
  *   bun apps/web/scripts/profile-company.ts --origin=https://example.co.uk --question="Who are their clients?"
  *   bun apps/web/scripts/profile-company.ts --company=12345678 [--no-extract | --from-snapshots]
  *   bun apps/web/scripts/profile-company.ts --limit=20 --no-extract        # crawl sweep
+ *   bun apps/web/scripts/profile-company.ts --limit=20 --no-extract --concurrency=4
  *   bun apps/web/scripts/profile-company.ts --limit=20 --from-snapshots    # extract sweep
  *   bun apps/web/scripts/profile-company.ts --limit=20                     # local backfill
  *   bun apps/web/scripts/profile-company.ts --limit=50 --from-snapshots --claim=mac-1
@@ -20,8 +21,10 @@
  * explicit flag.
  *
  * --origin persists NOTHING. --limit counts origins. --dry-run skips every
- * write. Answers stamp question_hash + model, so re-runs skip fresh rows and
- * a prompt edit or pin bump re-extracts rolling from stored snapshots.
+ * write. --concurrency=N crawls N origins at once, never two of one site;
+ * the per-page delay inside each origin is unchanged. Answers stamp
+ * question_hash + model, so re-runs skip fresh rows and a prompt edit or pin
+ * bump re-extracts rolling from stored snapshots.
  * --claim=<worker-id> lets concurrent workers share one due list through
  * profile_work_claims: each origin is won by exactly one worker, released on
  * completion, and --limit becomes that worker's win target. Claims are taken
@@ -52,6 +55,7 @@ import {
   makeRenewClaims,
 } from '../src/lib/profiles/claims.ts';
 import { truncateToTokenBudget } from '../src/lib/profiles/clean.ts';
+import { runPool, siteLane } from '../src/lib/profiles/crawl-pool.ts';
 import type { CrawlDeps, CrawlResult } from '../src/lib/profiles/crawl.ts';
 import { crawlOrigin, snapshotOrigin } from '../src/lib/profiles/crawl.ts';
 import {
@@ -110,6 +114,7 @@ const originArg = flag('origin');
 const companyArg = flag('company');
 const questionArg = flag('question');
 const companiesFileArg = flag('companies-file');
+const concurrencyArg = flag('concurrency');
 const noExtract = args.includes('--no-extract');
 const dryRun = args.includes('--dry-run');
 /** Per-page detail and text previews, for a human at a terminal. */
@@ -134,7 +139,7 @@ const fromSnapshots = args.includes('--from-snapshots') || workMode;
 // without '=') silently degrading to an uncoordinated run is how two workers
 // end up double-extracting a whole sweep.
 const KNOWN_ARGS =
-  /^--(origin|company|limit|question|claim|companies-file|delay)=|^--(no-extract|from-snapshots|dry-run|verbose|work)$/;
+  /^--(origin|company|limit|question|claim|companies-file|delay|concurrency)=|^--(no-extract|from-snapshots|dry-run|verbose|work)$/;
 const unknownArgs = args.filter((arg) => !KNOWN_ARGS.test(arg));
 if (unknownArgs.length > 0) {
   const shardHint = unknownArgs.some((arg) => arg.startsWith('--shard'))
@@ -190,6 +195,32 @@ if (questionArg && !originArg) {
   );
   process.exit(1);
 }
+
+/** Ceiling on --concurrency, so a mistyped dispatch input cannot fan out a whole night at once. */
+const MAX_CRAWL_CONCURRENCY = 32;
+
+/**
+ * Origins the crawl sweep reads at once; 1 when unset. Politeness stays the
+ * per-page delay inside an origin and two origins of one site never overlap,
+ * so this raises throughput without raising any one site's request rate.
+ */
+const crawlConcurrency = ((): number => {
+  if (concurrencyArg === undefined) return 1;
+  if (!noExtract || originArg) {
+    console.error(
+      '  --concurrency parallelizes the persisting crawl sweep; it needs --no-extract without --origin',
+    );
+    process.exit(1);
+  }
+  const n = parseStrictInt(concurrencyArg, 'concurrency');
+  if (n < 1 || n > MAX_CRAWL_CONCURRENCY) {
+    console.error(
+      `  --concurrency needs 1-${MAX_CRAWL_CONCURRENCY} origins at once`,
+    );
+    process.exit(1);
+  }
+  return n;
+})();
 
 /**
  * Worker identity for claim-coordinated extraction: concurrent workers (CI,
@@ -670,27 +701,37 @@ if (noExtract) {
       companies: [],
     }));
   }
-  console.log(`  origins: ${groups.length}  delay: ${delayMs}ms`);
+  console.log(
+    `  origins: ${groups.length}  delay: ${delayMs}ms  concurrency: ${crawlConcurrency}`,
+  );
   // The same per-origin tolerance the extraction loop has: one transient DB
   // or network error must not discard the rest of the night's rotation.
+  // The streak counts in completion order; an abort lets in-flight origins finish.
   let crawlStreak = 0;
-  for (const group of groups) {
-    try {
-      await crawlGroup(group);
-      crawlStreak = 0;
-    } catch (err) {
-      console.log(`  crawl failed, left in rotation — ${failureKind(err)}`);
-      crawlStreak++;
-      totals.crawlFailures = (totals.crawlFailures ?? 0) + 1;
-      if (crawlStreak >= SYSTEMIC_FAILURE_STREAK) {
-        console.error(
-          `  aborting: ${crawlStreak} consecutive crawl failures (network or db down?)`,
-        );
-        process.exitCode = 1;
-        break;
+  let crawlAborted = false;
+  await runPool(groups, {
+    concurrency: crawlConcurrency,
+    laneOf: (group) => siteLane(group.origin),
+    stop: () => crawlAborted,
+    run: async (group) => {
+      try {
+        await crawlGroup(group);
+        crawlStreak = 0;
+        totals.origins = (totals.origins ?? 0) + 1;
+      } catch (err) {
+        console.log(`  crawl failed, left in rotation — ${failureKind(err)}`);
+        crawlStreak++;
+        totals.crawlFailures = (totals.crawlFailures ?? 0) + 1;
+        if (crawlStreak >= SYSTEMIC_FAILURE_STREAK && !crawlAborted) {
+          console.error(
+            `  aborting: ${crawlStreak} consecutive crawl failures (network or db down?)`,
+          );
+          process.exitCode = 1;
+          crawlAborted = true;
+        }
       }
-    }
-  }
+    },
+  });
 } else {
   // Extraction modes: one extraction per origin serves every company on it.
   const questions = await loadQuestions();

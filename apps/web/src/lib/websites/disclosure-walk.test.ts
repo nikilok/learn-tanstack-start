@@ -4,6 +4,7 @@ import {
   foldWalkPage,
   legalLinks,
   MAX_LEGAL_LINKS,
+  readHomepage,
   readWalkPage,
   type WalkPage,
   walkTargets,
@@ -125,6 +126,55 @@ describe('walkTargets', () => {
   });
 });
 
+describe('readHomepage', () => {
+  const row = {
+    companyNumber: '03260168',
+    companyName: 'ACME WIDGETS LIMITED',
+    postcode: 'SO22 5AZ',
+  };
+  const address = '<p>Our offices: Unit 4, Winchester SO22 5AZ</p>';
+
+  test('keeps the URL asked for and takes the evidence from the page served', () => {
+    expect(
+      readHomepage(
+        row,
+        'https://acmewidgets.co.uk',
+        'https://www.acmewidgets.co.uk/',
+        address,
+        new Set(),
+      ),
+    ).toMatchObject({
+      url: 'https://acmewidgets.co.uk',
+      evidenceUrl: 'https://www.acmewidgets.co.uk/',
+      postcodeFound: true,
+      postcodeNamed: true,
+    });
+  });
+
+  test('a named domain that redirects to another business: the serving host decides', () => {
+    expect(
+      readHomepage(
+        row,
+        'https://acmewidgets.co.uk',
+        'https://otherbusiness.co.uk/',
+        address,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: false });
+  });
+
+  test('a homepage served from a directory states nothing', () => {
+    const page = readHomepage(
+      row,
+      'https://acme.co.uk',
+      'https://sponsor-list.example/acme',
+      '<footer>Acme Widgets Ltd. Company No. 03260168</footer>',
+      new Set(['sponsor-list.example']),
+    );
+    expect(page).toMatchObject({ onAggregator: true, stated: [] });
+  });
+});
+
 describe('readWalkPage', () => {
   const row = {
     companyNumber: '03260168',
@@ -133,6 +183,24 @@ describe('readWalkPage', () => {
   };
   const footer =
     '<footer>Acme Widgets Ltd. Company No. 03260168, SO22 5AZ</footer>';
+  const address = '<p>Our offices: Unit 4, Winchester SO22 5AZ</p>';
+
+  test('a page served from a host carrying the name names it, whatever it says', () => {
+    expect(
+      readWalkPage(
+        row,
+        'https://www.acmewidgets.co.uk/contact',
+        address,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, pageNamed: true });
+  });
+
+  test('a walked path that redirected off the site is judged where it landed', () => {
+    expect(
+      readWalkPage(row, 'https://elsewhere.co.uk/privacy', address, new Set()),
+    ).toMatchObject({ postcodeFound: true, pageNamed: false });
+  });
 
   test('reads proof and stated numbers off a page on the site', () => {
     const page = readWalkPage(
@@ -222,14 +290,14 @@ describe('foldWalkPage', () => {
     ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
   });
 
-  test('or when the domain does, whatever the page says', () => {
+  test("a walked page's own naming decides; the candidate lends it none", () => {
     expect(
       foldWalkPage(
-        { ...base, nameInDomain: true },
-        'https://acme.co.uk/contact',
+        base,
+        'https://elsewhere.co.uk/contact',
         walked({ postcodeFound: true }),
       ),
-    ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: false });
   });
 
   test('a later named postcode replaces an earlier unnamed one', () => {

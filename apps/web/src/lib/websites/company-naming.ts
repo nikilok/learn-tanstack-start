@@ -4,7 +4,7 @@
  * A postcode identifies an address, not a company: a contractor's on-site
  * office, a neighbour in the same business centre and another company
  * registered at the same office all show it. So a postcode only proves a site
- * when the site also names the company, in its domain or on the page.
+ * when the page showing it names the company, by its host or in its text.
  */
 
 /** Words that say what kind of company it is, never which one. */
@@ -201,21 +201,18 @@ export function hostNamesCompany(host: string, companyName: string): boolean {
   );
 }
 
-/** How a candidate's homepage names the company: in a domain it answered on, and beside a postcode it shows. */
-export function homepageNaming(
-  companyName: string,
-  hosts: readonly string[],
+/** Whether a fetched page names the company: by the host that served it, or in its text. */
+export function namesCompany(
+  servedHost: string,
   text: string,
-  postcodeFound: boolean,
-): { nameInDomain: boolean; postcodeNamed: boolean } {
-  const nameInDomain = hosts.some((host) =>
-    hostNamesCompany(host, companyName),
+  companyName: string,
+): boolean {
+  // The serving host, not the one asked for: a named domain that redirects
+  // to another business serves that business's page.
+  return (
+    hostNamesCompany(servedHost, companyName) ||
+    pageNamesCompany(text, companyName)
   );
-  return {
-    nameInDomain,
-    postcodeNamed:
-      postcodeFound && (nameInDomain || pageNamesCompany(text, companyName)),
-  };
 }
 
 /** Whether a page's visible text names the company: every word that says which company it is. */

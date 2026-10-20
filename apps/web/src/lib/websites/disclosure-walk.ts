@@ -1,16 +1,18 @@
 /**
- * Which pages a disclosure walk reads, and in what order. No I/O.
+ * What a candidate's fetched pages prove, and which pages a disclosure walk
+ * reads, in what order. No I/O.
  *
  * The homepage's own legal links come first: sites put the registration
  * number on pages like /terms-of-use or /legal/privacy that no fixed path list
  * guesses.
  */
 
-import { pageNamesCompany } from './company-naming';
+import { namesCompany } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
 import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
 import { DISCLOSURE_PATHS } from './fetch-policy';
+import { looksParked } from './page-signals';
 import { type StatedOnSite, statedOnPage } from './stated-numbers';
 
 /** Link targets or labels that name a legal page. */
@@ -93,11 +95,52 @@ export function walkTargets(
   return [...extra, ...paths];
 }
 
+/** What a candidate's homepage proves, read off the page its URL served. */
+export function readHomepage(
+  row: { companyNumber: string; companyName: string; postcode: string | null },
+  url: string,
+  servedUrl: string,
+  html: string,
+  crowded: ReadonlySet<string>,
+): CandidateProbe {
+  let host = '';
+  try {
+    host = new URL(servedUrl).host.toLowerCase();
+  } catch {
+    // An unreadable served URL judges no host.
+  }
+  const text = visibleText(html);
+  const crnFound = pageHasCompanyNumber(html, row.companyNumber);
+  const postcodeFound = row.postcode
+    ? pageHasPostcode(html, row.postcode)
+    : false;
+  const onAggregator = isDiscoveryAggregator(host, crowded);
+  return {
+    // The URL we ASKED for, not the post-redirect one: that is what a visitor
+    // clicks and what the sweep revalidates. The HOST is judged post-redirect,
+    // because a URL that 301s into a directory is what it lands on.
+    url,
+    // The page actually PARSED — post-redirect — matching the walk. On a
+    // redirecting candidate, `url` names a page the signals never came from.
+    evidenceUrl: crnFound || postcodeFound ? servedUrl : null,
+    crnFound,
+    postcodeFound,
+    // Named by the serving host too: a named domain that redirects to another
+    // business serves that business's page.
+    postcodeNamed: postcodeFound && namesCompany(host, text, row.companyName),
+    onAggregator,
+    parked: looksParked(text),
+    legalLinks: legalLinks(html, servedUrl),
+    // A directory's numbers are its listings', not the site naming itself.
+    stated: onAggregator ? [] : statedOnPage(servedUrl, html),
+  };
+}
+
 /** What one walked page proves. */
 export type WalkPage = {
   crnFound: boolean;
   postcodeFound: boolean;
-  /** The page's text names the company. */
+  /** The page names the company: by the host that served it, or in its text. */
   pageNamed: boolean;
   stated: StatedOnSite[];
 };
@@ -121,7 +164,8 @@ export function readWalkPage(
   return {
     crnFound: pageHasCompanyNumber(html, row.companyNumber),
     postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
-    pageNamed: pageNamesCompany(visibleText(html), row.companyName),
+    // Judged on this page's own host: a walked path can redirect off the site.
+    pageNamed: namesCompany(host, visibleText(html), row.companyName),
     stated: statedOnPage(pageUrl, html),
   };
 }
@@ -134,7 +178,7 @@ export function foldWalkPage(
 ): CandidateProbe {
   if (page.crnFound) return { ...probe, crnFound: true, evidenceUrl: pageUrl };
   if (!page.postcodeFound || probe.postcodeNamed) return probe;
-  const named = !!probe.nameInDomain || page.pageNamed;
+  const named = page.pageNamed;
   if (probe.postcodeFound && !named) return probe;
   return {
     ...probe,

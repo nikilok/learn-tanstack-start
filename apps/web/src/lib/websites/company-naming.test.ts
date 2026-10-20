@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  homepageNaming,
   hostNamesCompany,
   nameInitials,
+  namesCompany,
   nameWords,
   pageNamesCompany,
 } from './company-naming';
@@ -105,39 +105,23 @@ describe('hostNamesCompany', () => {
   });
 });
 
-describe('homepageNaming', () => {
+describe('namesCompany', () => {
   const name = 'ACME WIDGETS LIMITED';
 
-  test('a postcode on a homepage that names the company is named', () => {
+  test('a page whose text names the company, whatever host served it', () => {
     expect(
-      homepageNaming(
-        name,
-        ['contractor.co.uk'],
-        'Acme Widgets Ltd, SO22 5AZ',
-        true,
-      ),
-    ).toEqual({ nameInDomain: false, postcodeNamed: true });
+      namesCompany('contractor.co.uk', 'Acme Widgets Ltd, SO22 5AZ', name),
+    ).toBe(true);
   });
 
-  test('so is one on a domain carrying the name, whatever the page says', () => {
-    expect(
-      homepageNaming(name, ['acmewidgets.co.uk'], 'SO22 5AZ', true),
-    ).toEqual({
-      nameInDomain: true,
-      postcodeNamed: true,
-    });
+  test('a page served from a host carrying the name, whatever it says', () => {
+    expect(namesCompany('acmewidgets.co.uk', 'SO22 5AZ', name)).toBe(true);
   });
 
-  test('either domain counts: the one asked for or the one a redirect landed on', () => {
+  test("another business's page names neither way", () => {
     expect(
-      homepageNaming(name, ['old-brand.co.uk', 'acmewidgets.co.uk'], '', false),
-    ).toEqual({ nameInDomain: true, postcodeNamed: false });
-  });
-
-  test("a postcode on another business's homepage is not", () => {
-    expect(
-      homepageNaming(name, ['contractor.co.uk'], 'Our offices: SO22 5AZ', true),
-    ).toEqual({ nameInDomain: false, postcodeNamed: false });
+      namesCompany('contractor.co.uk', 'Our offices: SO22 5AZ', name),
+    ).toBe(false);
   });
 });
 

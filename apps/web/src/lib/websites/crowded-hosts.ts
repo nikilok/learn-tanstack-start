@@ -3,7 +3,7 @@
  * registers and platforms, listed or not. No I/O.
  */
 
-import { isAggregatorHost } from './page-signals';
+import { isAggregatorExempt, isAggregatorHost } from './page-signals';
 
 /** Companies a host must appear for to count as a directory; 99.9% of proven own sites appear for fewer. */
 export const CROWDED_HOST_COMPANIES = 50;
@@ -21,5 +21,6 @@ export function isDiscoveryAggregator(
   host: string,
   crowded: ReadonlySet<string>,
 ): boolean {
+  if (isAggregatorExempt(host)) return false;
   return isAggregatorHost(host) || crowded.has(crowdKey(host));
 }

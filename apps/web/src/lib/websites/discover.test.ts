@@ -174,6 +174,15 @@ describe('siteOrigins', () => {
     expect(origins).toEqual(['https://www.acme-care.example']);
   });
 
+  test('a Google Sites company site keeps its slot though the host is crowded', () => {
+    expect(
+      siteOrigins(
+        ['https://sites.google.com/view/acme-care'],
+        new Set(['sites.google.com']),
+      ),
+    ).toEqual(['https://sites.google.com']);
+  });
+
   test('drops a result with no web origin rather than throwing', () => {
     expect(
       siteOrigins(

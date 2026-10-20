@@ -38,4 +38,11 @@ describe('isDiscoveryAggregator', () => {
   test('an ordinary company site is untouched', () => {
     expect(isDiscoveryAggregator('www.acme-care.example', crowded)).toBe(false);
   });
+
+  test('Google Sites stays a company site even when crowded', () => {
+    // One host serves every Google Sites company, so it crosses the threshold
+    // (53 companies on 2026-10-20) while each site is still a company's own.
+    const withSites = new Set(['sites.google.com']);
+    expect(isDiscoveryAggregator('sites.google.com', withSites)).toBe(false);
+  });
 });

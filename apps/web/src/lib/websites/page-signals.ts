@@ -123,16 +123,18 @@ const AGGREGATOR_HOSTS = [
 /** Hosts inside a listed domain that ARE a company's own site. */
 const AGGREGATOR_EXEMPT_HOSTS = ['sites.google.com'];
 
+/** Whether a host is a company's own site even inside a listed or crowded domain. */
+export function isAggregatorExempt(host: string): boolean {
+  const clean = host.toLowerCase().replace(/^www\./, '');
+  return AGGREGATOR_EXEMPT_HOSTS.some(
+    (exempt) => clean === exempt || clean.endsWith(`.${exempt}`),
+  );
+}
+
 /** Whether a host is a directory rather than a company's own site. */
 export function isAggregatorHost(host: string): boolean {
+  if (isAggregatorExempt(host)) return false;
   const clean = host.toLowerCase().replace(/^www\./, '');
-  if (
-    AGGREGATOR_EXEMPT_HOSTS.some(
-      (exempt) => clean === exempt || clean.endsWith(`.${exempt}`),
-    )
-  ) {
-    return false;
-  }
   return AGGREGATOR_HOSTS.some(
     (aggregator) => clean === aggregator || clean.endsWith(`.${aggregator}`),
   );

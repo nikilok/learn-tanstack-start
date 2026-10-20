@@ -56,7 +56,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
           JOIN companies_house_profiles p USING (company_number)
           WHERE w.source = 'search'
             AND (
-              (w.evidence = 'none' AND w.status = 'none'
+              (w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
                 AND jsonb_typeof(w.candidates) = 'array'
                 AND ${evidence}::text IS DISTINCT FROM 'postcode_on_page')
               OR (w.evidence = 'postcode_on_page'
@@ -75,7 +75,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
         JOIN companies_house_profiles p USING (company_number)
         WHERE w.source = 'search'
           AND (
-            (w.evidence = 'none' AND w.status = 'none'
+            (w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
               AND jsonb_typeof(w.candidates) = 'array'
               AND ${evidence}::text IS DISTINCT FROM 'postcode_on_page')
             OR (w.evidence = 'postcode_on_page'
@@ -209,7 +209,8 @@ export function makeRewalkRemaining(sql: Sql) {
           WHERE p.company_number = w.company_number)
         AND (walk_version IS NULL OR walk_version < ${CURRENT_WALK_VERSION})
         AND (
-          (evidence = 'none' AND status = 'none' AND jsonb_typeof(candidates) = 'array')
+          (evidence = 'none' AND status = 'none' AND url IS NULL
+            AND jsonb_typeof(candidates) = 'array')
           OR (evidence = 'postcode_on_page'
             AND status IN ('verified', 'unreachable') AND url IS NOT NULL)
         )

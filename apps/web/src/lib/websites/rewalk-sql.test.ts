@@ -152,6 +152,22 @@ describe('makeSelectRewalk', () => {
     );
   });
 
+  test('takes a none row only while its url is empty, as the upgrade guard requires', async () => {
+    // Otherwise a refused upgrade leaves the row unmarked and it is re-read every run.
+    for (const selection of [{}, { seed: 'rewalk-2026-10-20' }]) {
+      const { sql, calls } = makeFakeSql();
+      await makeSelectRewalk(sql, selection)(10);
+      expect(flat(calls[0].text)).toContain(
+        "w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL",
+      );
+    }
+    const { sql, calls } = makeFakeSql([{ none: 0, postcode: 0 }]);
+    await makeRewalkRemaining(sql)();
+    expect(flat(calls[0].text)).toContain(
+      "evidence = 'none' AND status = 'none' AND url IS NULL",
+    );
+  });
+
   test('a seeded sample ignores the marker, so it can run before the migration', async () => {
     const { sql, calls } = makeFakeSql();
     await makeSelectRewalk(sql, { seed: 'rewalk-2026-10-20' })(150);

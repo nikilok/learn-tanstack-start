@@ -22,6 +22,7 @@ import {
 } from '../../src/lib/websites/extract.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
 import { looksParked } from '../../src/lib/websites/page-signals.ts';
+import { statedOnPage } from '../../src/lib/websites/stated-numbers.ts';
 import { fetchSite } from './web-fetch.ts';
 
 /** Fetch one candidate origin and read the two query-independent signals. */
@@ -47,6 +48,7 @@ export async function probeOrigin(
   const postcodeFound = row.postcode
     ? pageHasPostcode(fetched.html, row.postcode)
     : false;
+  const onAggregator = isDiscoveryAggregator(host, crowded);
   return {
     // The URL we ASKED for, not the post-redirect one: that is what a visitor
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
@@ -58,9 +60,11 @@ export async function probeOrigin(
     evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
     crnFound,
     postcodeFound,
-    onAggregator: isDiscoveryAggregator(host, crowded),
+    onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(fetched.html, fetched.url),
+    // A directory's numbers are its listings', not the site naming itself.
+    stated: onAggregator ? [] : statedOnPage(fetched.url, fetched.html),
   };
 }
 
@@ -85,6 +89,7 @@ export async function walkDisclosure(
   options: WalkOptions,
 ): Promise<CandidateProbe | null> {
   let updated = base;
+  const stated = [...(base.stated ?? [])];
   const targets = walkTargets(
     base.url,
     base.legalLinks ?? [],
@@ -95,8 +100,9 @@ export async function walkDisclosure(
     const fetched = await fetchSite(target);
     options.onFetch?.();
     if (!fetched.ok) continue;
+    stated.push(...statedOnPage(fetched.url, fetched.html));
     if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {
-      return { ...updated, crnFound: true, evidenceUrl: fetched.url };
+      return { ...updated, crnFound: true, evidenceUrl: fetched.url, stated };
     }
     if (
       !updated.postcodeFound &&
@@ -106,5 +112,5 @@ export async function walkDisclosure(
       updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
     }
   }
-  return updated;
+  return { ...updated, stated };
 }

@@ -1,0 +1,152 @@
+name: Re-walk Company Websites (Search)
+
+# Re-reads the search rows discovery has already settled, with today's walk
+# (homepage legal links, then seven fixed paths) behind the crowded-host
+# guard. Zero search credits: `none` rows reuse their banked results, postcode
+# rows walk the site they already hold. Upgrades only, and every statutory
+# company number the pages state is recorded in website_stated_numbers.
+#
+# Manual only. Each worker walks its own slice (shard.ts) and marks what it
+# read, so a dispatch resumes where the last one stopped. Like discovery it
+# leaves checked_at NULL on what it changes: the sweep stays the single thing
+# that decides a URL renders.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run — walk and decide, no DB writes'
+        type: boolean
+        default: false
+      max-rows:
+        description: 'Rows each worker walks this run (default 1500)'
+        required: false
+        type: number
+      shards:
+        description: 'Parallel workers, each walking its own slice (1-16, default 1)'
+        required: false
+        type: number
+      evidence:
+        description: 'Which settled rows to walk'
+        type: choice
+        options:
+          - all
+          - none
+          - postcode
+        default: all
+
+# Read-only token: the job reads Neon and fetches public pages; it pushes nothing.
+permissions:
+  contents: read
+
+concurrency:
+  group: rewalk-websites
+  cancel-in-progress: false
+
+jobs:
+  # Turns the shards input into the matrix below, validated as text.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      count: ${{ steps.split.outputs.count }}
+      shards: ${{ steps.split.outputs.shards }}
+    steps:
+      - name: Plan the split
+        id: split
+        shell: bash
+        env:
+          SHARDS: ${{ github.event.inputs.shards }}
+        run: |
+          COUNT="${SHARDS:-1}"
+          case "$COUNT" in
+            [1-9]|1[0-6]) ;;
+            *) echo "shards must be a whole number from 1 to 16"; exit 1 ;;
+          esac
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -nc --argjson n "$COUNT" '[range($n)]')" >> "$GITHUB_OUTPUT"
+
+  rewalk:
+    needs: plan
+    name: rewalk ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: Re-walk websites
+        shell: bash
+        # Inputs go through env, never interpolated into the script; the secret
+        # is scoped to this step.
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          DRY_RUN: ${{ github.event.inputs.dry-run }}
+          MAX_ROWS: ${{ github.event.inputs.max-rows }}
+          EVIDENCE: ${{ github.event.inputs.evidence }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
+        run: |
+          set -o pipefail
+          ARGS=("--shard=$SHARD/$SHARD_COUNT")
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          case "${MAX_ROWS:-1500}" in
+            ''|*[!0-9]*) echo "max-rows must be a positive integer"; exit 1 ;;
+          esac
+          ARGS+=("--max-rows=${MAX_ROWS:-1500}")
+          case "$EVIDENCE" in
+            none|postcode) ARGS+=("--evidence=$EVIDENCE") ;;
+            all|'') ;;
+            *) echo "evidence must be all, none or postcode"; exit 1 ;;
+          esac
+          bun apps/web/scripts/rewalk-websites.ts "${ARGS[@]}" | tee /tmp/rewalk-websites.log
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
+        run: |
+          LOG=/tmp/rewalk-websites.log
+          if [ ! -f "$LOG" ]; then exit 0; fi
+          extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
+          {
+            echo "## Website Re-walk (worker $SHARD/$SHARD_COUNT)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| 🎯 Selected | $(extract selected) |"
+            echo "| ⚙️ Processed | $(extract processed) |"
+            echo "| 🪪 None → number | $(extract none_to_number) |"
+            echo "| 📮 None → postcode | $(extract none_to_postcode) |"
+            echo "| 🔼 Postcode → number | $(extract postcode_to_number) |"
+            echo "| ➖ Unchanged | $(extract unchanged) |"
+            echo "| 📵 Unreadable | $(extract unreadable) |"
+            echo "| 🗃️ Unpersisted | $(extract unpersisted) |"
+            echo "| ❌ Errored | $(extract errored) |"
+            echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"
+            echo "| 📑 Disclosure fetches | $(extract disclosure_fetches) |"
+            echo "| 🔢 Stated numbers | $(extract stated_numbers) |"
+            echo "| ⏱️ Minutes | $(extract minutes) |"
+            echo "| ⏳ Left | $(extract left) |"
+          } >> "$GITHUB_STEP_SUMMARY"

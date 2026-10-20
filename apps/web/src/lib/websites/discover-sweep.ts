@@ -17,6 +17,7 @@ import {
   MAX_CANDIDATES,
   siteOrigins,
 } from './discover';
+import type { StatedOnSite } from './stated-numbers';
 
 export type DiscoveryRow = {
   companyNumber: string;
@@ -114,6 +115,79 @@ export const SEARCH_FAILURE_STREAK = 10;
 
 /** Heartbeat interval. Counts only — never a company or a URL. */
 const HEARTBEAT_ROWS = 25;
+
+/** What reading one company's candidates came to. */
+export type Settled = {
+  /** Null when no site could be read: not an answer, so nothing is written. */
+  outcome: DiscoveryOutcome | null;
+  /** Candidate homepages requested. */
+  fetches: number;
+  /** Statutory numbers the pages read stated. */
+  stated: StatedOnSite[];
+};
+
+/** The fetching half of discovery for one company: probe, decide, walk, decide. */
+export async function settleCandidates(
+  row: DiscoveryRow,
+  urls: readonly string[],
+  deps: Pick<
+    DiscoveryDeps,
+    'crowdedHosts' | 'probe' | 'walkDisclosure' | 'sleep'
+  >,
+  delayMs: number,
+): Promise<Settled> {
+  // Origins, not raw results: several results usually share one site, so
+  // this removes fetches rather than adding them. Directories, listed or
+  // crowded, are dropped before they can take one of the slots.
+  const origins = siteOrigins(urls, deps.crowdedHosts);
+  const probes: CandidateProbe[] = [];
+  let unreadable = 0;
+  let fetches = 0;
+  for (const url of origins.slice(0, MAX_CANDIDATES)) {
+    const probe = await deps.probe(row, url);
+    fetches += 1;
+    if (probe) {
+      probes.push(probe);
+      // The registration number is the company identifying itself, and
+      // nothing below it can beat that — so stop paying for fetches.
+      if (probe.crnFound && !probe.onAggregator && !probe.parked) break;
+    } else {
+      unreadable += 1;
+    }
+    // Every candidate, including failures: skipping the commonest outcome
+    // made five dead hosts ~20 unpaced requests.
+    await deps.sleep(delayMs);
+  }
+  const statedOf = () => probes.flatMap((p) => p.stated ?? []);
+
+  // Read-and-found-nothing is an answer; could-not-read is not, and storing
+  // it as one writes a permanent `none` no selector revisits. A directory
+  // that loaded is not the company's site loading; a parked page is.
+  const siteLoaded = probes.some((p) => !p.onAggregator);
+  if (origins.length > 0 && !siteLoaded && unreadable > 0) {
+    return { outcome: null, fetches, stated: statedOf() };
+  }
+
+  let outcome = decideFromCandidates(probes);
+
+  // Homepages settled nothing, so walk the legal pages of the top-ranked
+  // usable candidate. Measured over 20 companies: this tripled publishable
+  // rows, and walking every candidate instead found no more at three times
+  // the fetches — if the number is not on rank 1's site it is not on rank
+  // 2's either. The same pure decider runs again over the updated probe,
+  // so there is still one place a decision is made.
+  if (outcome.evidence !== 'crn_on_page') {
+    const top = probes.findIndex((p) => !p.onAggregator && !p.parked);
+    if (top >= 0) {
+      const walked = await deps.walkDisclosure(row, probes[top]);
+      if (walked) {
+        probes[top] = walked;
+        outcome = decideFromCandidates(probes);
+      }
+    }
+  }
+  return { outcome, fetches, stated: statedOf() };
+}
 
 export async function discoverWebsites(
   config: DiscoveryConfig,
@@ -215,56 +289,14 @@ export async function discoverWebsites(
         }
       }
 
-      // Origins, not raw results: several results usually share one site, so
-      // this removes fetches rather than adding them. Directories, listed or
-      // crowded, are dropped before they can take one of the slots.
-      const origins = siteOrigins(urls, deps.crowdedHosts);
-      const probes: CandidateProbe[] = [];
-      let unreadable = 0;
-      for (const url of origins.slice(0, MAX_CANDIDATES)) {
-        const probe = await deps.probe(row, url);
-        summary.candidateFetches += 1;
-        if (probe) {
-          probes.push(probe);
-          // The registration number is the company identifying itself, and
-          // nothing below it can beat that — so stop paying for fetches.
-          if (probe.crnFound && !probe.onAggregator && !probe.parked) break;
-        } else {
-          unreadable += 1;
-        }
-        // Every candidate, including failures: skipping the commonest outcome
-        // made five dead hosts ~20 unpaced requests.
-        await deps.sleep(config.delayMs);
-      }
-
-      // Read-and-found-nothing is an answer; could-not-read is not, and storing
-      // it as one writes a permanent `none` no selector revisits. A directory
-      // that loaded is not the company's site loading; a parked page is.
-      const siteLoaded = probes.some((p) => !p.onAggregator);
-      if (origins.length > 0 && !siteLoaded && unreadable > 0) {
+      const settled = await settleCandidates(row, urls, deps, config.delayMs);
+      summary.candidateFetches += settled.fetches;
+      if (!settled.outcome) {
         summary.unreadable += 1;
         if (!config.dryRun) await deps.markAttempt(row.companyNumber);
         continue;
       }
-
-      let outcome = decideFromCandidates(probes);
-
-      // Homepages settled nothing, so walk the legal pages of the top-ranked
-      // usable candidate. Measured over 20 companies: this tripled publishable
-      // rows, and walking every candidate instead found no more at three times
-      // the fetches — if the number is not on rank 1's site it is not on rank
-      // 2's either. The same pure decider runs again over the updated probe,
-      // so there is still one place a decision is made.
-      if (outcome.evidence !== 'crn_on_page') {
-        const top = probes.findIndex((p) => !p.onAggregator && !p.parked);
-        if (top >= 0) {
-          const walked = await deps.walkDisclosure(row, probes[top]);
-          if (walked) {
-            probes[top] = walked;
-            outcome = decideFromCandidates(probes);
-          }
-        }
-      }
+      const outcome = settled.outcome;
       if (outcome.evidence === 'crn_on_page') summary.foundByNumber += 1;
       else if (outcome.evidence === 'postcode_on_page') {
         summary.foundByAddress += 1;

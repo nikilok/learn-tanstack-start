@@ -13,9 +13,9 @@
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
 import {
   buildQuery,
-  candidateOrigins,
   decideFromCandidates,
   MAX_CANDIDATES,
+  siteOrigins,
 } from './discover';
 
 export type DiscoveryRow = {
@@ -44,6 +44,8 @@ export type SearchResult =
 
 export type DiscoveryDeps = {
   selectRows(maxRows: number): Promise<DiscoveryRow[]>;
+  /** Hosts banked results name for too many companies (crowdKey form). */
+  crowdedHosts: ReadonlySet<string>;
   search(query: string): Promise<SearchResult>;
   /** Persist the raw result URLs the moment they arrive. */
   bankCandidates(companyNumber: string, urls: string[]): Promise<void>;
@@ -214,8 +216,9 @@ export async function discoverWebsites(
       }
 
       // Origins, not raw results: several results usually share one site, so
-      // this removes fetches rather than adding them.
-      const origins = candidateOrigins(urls);
+      // this removes fetches rather than adding them. Directories, listed or
+      // crowded, are dropped before they can take one of the slots.
+      const origins = siteOrigins(urls, deps.crowdedHosts);
       const probes: CandidateProbe[] = [];
       let unreadable = 0;
       for (const url of origins.slice(0, MAX_CANDIDATES)) {

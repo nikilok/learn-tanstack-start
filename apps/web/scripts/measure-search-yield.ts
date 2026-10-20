@@ -25,6 +25,7 @@ import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { evidenceConfidence } from '../src/lib/websites/decide.ts';
 import {
   makeBankCandidates,
+  makeCrowdedHosts,
   makeMarkAttempt,
   makeWriteOutcome,
 } from '../src/lib/websites/discover-sql.ts';
@@ -50,7 +51,7 @@ const EXPERIMENT_MAX_N = 500;
 const n = Math.min(parseStrictInt(flag('n') ?? '40', 'n'), EXPERIMENT_MAX_N);
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 const maxDisclosure = parseStrictInt(
-  flag('max-disclosure') ?? '5',
+  flag('max-disclosure') ?? '7',
   'max-disclosure',
 );
 /** Fixed so the DRAW is deterministic for a given population state — NOT a free
@@ -112,19 +113,21 @@ console.log(
 console.log(`  n: ${n}  seed: ${seed}  (${n} credits)`);
 
 const writeOutcome = makeWriteOutcome(sql);
+const crowdedHosts = await makeCrowdedHosts(sql)();
 let disclosureFetches = 0;
 
 const summary = await discoverWebsites(
   { maxRows: n, maxSearches: n, delayMs, dryRun: false },
   {
     selectRows: selectRandom,
+    crowdedHosts,
     search: async (query) => {
       const result = await searchCompany(query, apiKey);
       return result.ok ? { ok: true, urls: result.urls } : result;
     },
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
-    probe: probeOrigin,
+    probe: (row, url) => probeOrigin(row, url, crowdedHosts),
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
         maxPaths: maxDisclosure,

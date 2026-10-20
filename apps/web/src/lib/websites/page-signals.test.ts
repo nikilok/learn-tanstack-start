@@ -19,6 +19,13 @@ describe('isAggregatorHost', () => {
     expect(isAggregatorHost('uk.linkedin.com')).toBe(true);
     expect(isAggregatorHost('notcarehome.co.uk')).toBe(false);
   });
+
+  test('our own company pages are a listing too', () => {
+    // Search returns them for thousands of companies, each carrying that
+    // company's number and registered postcode.
+    expect(isAggregatorHost('sponsorsearch.co.uk')).toBe(true);
+    expect(isAggregatorHost('www.sponsorsearch.co.uk')).toBe(true);
+  });
 });
 
 describe('looksParked', () => {

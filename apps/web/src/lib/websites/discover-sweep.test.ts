@@ -63,6 +63,7 @@ function harness(
   const urls = over.urls ?? ['https://a.co.uk', 'https://b.co.uk'];
   const deps: DiscoveryDeps = {
     selectRows: async () => over.rows ?? [row()],
+    crowdedHosts: new Set(),
     search: async (): Promise<SearchResult> => ({ ok: true, urls }),
     bankCandidates: async (companyNumber, list) => {
       banked.push({ companyNumber, urls: list });
@@ -126,12 +127,16 @@ describe('discoverWebsites', () => {
 
   test('keeps fetching past a directory listing that carries the number', async () => {
     // The early exit must not fire on a page the decision will discard, or a
-    // listing hides the company's real site further down the results.
+    // listing hides the company's real site further down the results. This one
+    // is only known to be a directory after its redirect.
     const h = harness({
-      urls: ['https://www.endole.co.uk/company/03260168', 'https://real.co.uk'],
+      urls: [
+        'https://moved-listing.co.uk/company/03260168',
+        'https://real.co.uk',
+      ],
       probes: {
-        'https://www.endole.co.uk/company/03260168': probe({
-          url: 'https://www.endole.co.uk/company/03260168',
+        'https://moved-listing.co.uk': probe({
+          url: 'https://moved-listing.co.uk',
           crnFound: true,
           onAggregator: true,
         }),
@@ -572,16 +577,85 @@ describe('the disclosure walk is what makes rows publishable', () => {
 
   test('skips aggregators when choosing which candidate to walk', async () => {
     const h = harness({
-      urls: ['https://endole.co.uk/x', 'https://real.co.uk/y'],
+      urls: ['https://moved-listing.co.uk/x', 'https://real.co.uk/y'],
       probes: {
-        'https://endole.co.uk': probe({
-          url: 'https://endole.co.uk',
+        'https://moved-listing.co.uk': probe({
+          url: 'https://moved-listing.co.uk',
           onAggregator: true,
         }),
       },
     });
     await discoverWebsites(config(), h.deps);
     expect(h.walked).toEqual(['https://real.co.uk']);
+  });
+
+  test('listed and crowded hosts are never fetched', async () => {
+    const h = harness({
+      urls: [
+        'https://www.endole.co.uk/company/03260168',
+        'https://sponsor-list.example/company/acme-care',
+        'https://real.co.uk/contact',
+      ],
+      crowdedHosts: new Set(['sponsor-list.example']),
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(h.probed).toEqual(['https://real.co.uk']);
+    expect(summary.candidateFetches).toBe(1);
+  });
+
+  test('a directory at rank one no longer takes the walk', async () => {
+    // A fifth of walks read a directory's legal pages instead of the company's.
+    const h = harness({
+      urls: [
+        'https://www.sponsor-list.example/company/acme-care',
+        'https://real.co.uk',
+      ],
+      crowdedHosts: new Set(['sponsor-list.example']),
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.walked).toEqual(['https://real.co.uk']);
+  });
+
+  test('directories cannot crowd the company site out of the five slots', async () => {
+    const h = harness({
+      urls: [
+        'https://find-and-update.company-information.service.gov.uk/company/03260168',
+        'https://www.endole.co.uk/company/03260168',
+        'https://sponsor-list.example/company/acme-care',
+        'https://company-data.example/03260168',
+        'https://sponsorsearch.co.uk/company/acme-care',
+        'https://real.co.uk/about',
+      ],
+      crowdedHosts: new Set(['sponsor-list.example', 'company-data.example']),
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.probed).toEqual(['https://real.co.uk']);
+  });
+
+  test('a row whose only site will not load stays undecided, whatever directories it lists', async () => {
+    // A directory answering is not the company's site answering; the row is
+    // retried like any other unreadable one.
+    const h = harness({
+      urls: ['https://www.endole.co.uk/company/03260168', 'https://dead.co.uk'],
+      probes: { 'https://dead.co.uk': null },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(1);
+    expect(h.written).toHaveLength(0);
+    expect(h.attempts).toEqual(['03260168']);
+  });
+
+  test('a result set of directories alone is a decided `none`', async () => {
+    const h = harness({
+      urls: [
+        'https://www.endole.co.uk/company/03260168',
+        'https://uk.linkedin.com/company/x',
+      ],
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(h.probed).toEqual([]);
+    expect(summary.foundNothing).toBe(1);
+    expect(h.written[0].outcome.evidence).toBe('none');
   });
 
   test('candidates are reduced to origins before anything is fetched', async () => {

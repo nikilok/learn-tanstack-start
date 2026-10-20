@@ -116,6 +116,8 @@ const AGGREGATOR_HOSTS = [
   'google.com',
   'amazon.co.uk',
   'ebay.co.uk',
+  // Our own company pages carry the number and postcode of every company.
+  'sponsorsearch.co.uk',
 ];
 
 /** Hosts inside a listed domain that ARE a company's own site. */

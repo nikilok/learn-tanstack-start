@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { makeSelectUndiscovered } from './discover-sql';
+import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
+import { makeCrowdedHosts, makeSelectUndiscovered } from './discover-sql';
 
 type Captured = { text: string; params: unknown[] };
 
@@ -58,5 +59,17 @@ describe('makeSelectUndiscovered', () => {
     expect(bucketAt).toBeGreaterThan(text.indexOf('WHERE'));
     expect(bucketAt).toBeLessThan(text.indexOf('ORDER BY'));
     expect(text.indexOf('ORDER BY')).toBeLessThan(text.indexOf('LIMIT'));
+  });
+});
+
+describe('makeCrowdedHosts', () => {
+  test('binds the threshold and strips www as crowdKey does', async () => {
+    // Written `'^www\.'` the tagged template would send `'^www.'`, matching
+    // any fourth character; the cooked text the fake records shows that.
+    const { sql, calls } = makeFakeSql();
+    await makeCrowdedHosts(sql)();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].params).toEqual([CROWDED_HOST_COMPANIES]);
+    expect(calls[0].text).toContain("'^www[.]'");
   });
 });

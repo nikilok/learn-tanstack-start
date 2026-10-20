@@ -34,6 +34,7 @@ import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { evidenceConfidence } from '../src/lib/websites/decide.ts';
 import {
   makeBankCandidates,
+  makeCrowdedHosts,
   makeMarkAttempt,
   makeRemaining,
   makeSelectUndiscovered,
@@ -89,10 +90,11 @@ const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
  *
  * Measured over 20 companies: walking these tripled publishable rows, and
  * walking every candidate rather than the top one found no more at three times
- * the fetches.
+ * the fetches. Seven reaches the contact pages; the homepage's own legal links
+ * are read before them.
  */
 const MAX_DISCLOSURE_PATHS = parseStrictInt(
-  flag('max-disclosure') ?? '5',
+  flag('max-disclosure') ?? '7',
   'max-disclosure',
 );
 let disclosureFetches = 0;
@@ -118,6 +120,8 @@ console.log(
 console.log(
   `  before: ${before.target} companies undiscovered, ${before.discovered} already searched`,
 );
+const crowdedHosts = await makeCrowdedHosts(sql)();
+console.log(`  crowded hosts: ${crowdedHosts.size}`);
 
 const writeOutcome = makeWriteOutcome(sql);
 
@@ -125,6 +129,7 @@ const summary = await discoverWebsites(
   { maxRows, maxSearches, delayMs, dryRun },
   {
     selectRows: makeSelectUndiscovered(sql, shard),
+    crowdedHosts,
     search: async (query) => {
       const result = await searchCompany(query, apiKey);
       // Failures pass through WHOLE rather than field-by-field. Rebuilding
@@ -135,7 +140,7 @@ const summary = await discoverWebsites(
     },
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
-    probe: probeOrigin,
+    probe: (row, url) => probeOrigin(row, url, crowdedHosts),
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
         maxPaths: MAX_DISCLOSURE_PATHS,

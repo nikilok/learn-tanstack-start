@@ -144,6 +144,7 @@ const summary = await discoverWebsites(
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
         maxPaths: MAX_DISCLOSURE_PATHS,
+        crowded: crowdedHosts,
         delayMs,
         onFetch: () => {
           disclosureFetches += 1;

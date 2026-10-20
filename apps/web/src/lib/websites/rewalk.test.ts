@@ -4,6 +4,7 @@ import type { CandidateProbe, DiscoveryOutcome } from './discover';
 import {
   type RewalkConfig,
   type RewalkDeps,
+  lostNetwork,
   type RewalkRow,
   rewalkWebsites,
 } from './rewalk';
@@ -15,6 +16,7 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   evidence: 'none',
   url: null,
   candidates: ['https://real.co.uk/contact'],
+  walkAttempts: 0,
   ...over,
 });
 
@@ -24,6 +26,7 @@ const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',
   candidates: ['https://higher.co.uk', 'https://stored.co.uk'],
+  walkAttempts: 0,
   ...over,
 });
 
@@ -299,5 +302,25 @@ describe('rewalkWebsites: what it records and writes', () => {
     });
     const summary = await rewalkWebsites(config(), h.deps);
     expect(summary.errored).toBe(1);
+  });
+});
+
+describe('lostNetwork', () => {
+  const slice = (walkAttempts: number) =>
+    Array.from({ length: 30 }, (_, i) =>
+      noneRow({ companyNumber: String(i + 1).padStart(8, '0'), walkAttempts }),
+    );
+
+  test('a slice of first attempts that reads almost nothing has lost its network', async () => {
+    const h = harness({ rows: slice(0), probe: async () => null });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(lostNetwork(summary)).toBe(true);
+  });
+
+  test('dead-site retries at the end of the backlog do not trip it', async () => {
+    const h = harness({ rows: slice(1), probe: async () => null });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(30);
+    expect(lostNetwork(summary)).toBe(false);
   });
 });

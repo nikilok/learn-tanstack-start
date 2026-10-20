@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { legalLinks, MAX_LEGAL_LINKS, walkTargets } from './disclosure-walk';
+import {
+  legalLinks,
+  MAX_LEGAL_LINKS,
+  readWalkPage,
+  walkTargets,
+} from './disclosure-walk';
 
 const page = (links: string) => `<html><body><nav>${links}</nav></body></html>`;
 
@@ -114,5 +119,44 @@ describe('walkTargets', () => {
     const targets = walkTargets(origin, [], 7);
     expect(targets).toHaveLength(7);
     expect(targets.some((t) => t.includes('/about'))).toBe(false);
+  });
+});
+
+describe('readWalkPage', () => {
+  const row = { companyNumber: '03260168', postcode: 'SO22 5AZ' };
+  const footer = '<footer>Acme Ltd. Company No. 03260168, SO22 5AZ</footer>';
+
+  test('reads proof and stated numbers off a page on the site', () => {
+    const page = readWalkPage(
+      row,
+      'https://acme.co.uk/privacy',
+      footer,
+      new Set(),
+    );
+    expect(page).toMatchObject({ crnFound: true, postcodeFound: true });
+    expect(page?.stated.map((s) => s.companyNumber)).toEqual(['03260168']);
+  });
+
+  test('a disclosure path that redirects into a register proves nothing', () => {
+    // /company-information -> the Companies House profile prints the number.
+    expect(
+      readWalkPage(
+        row,
+        'https://find-and-update.company-information.service.gov.uk/company/03260168',
+        footer,
+        new Set(),
+      ),
+    ).toBeNull();
+  });
+
+  test('nor does one that lands on a crowded directory', () => {
+    expect(
+      readWalkPage(
+        row,
+        'https://sponsor-list.example/company/acme',
+        footer,
+        new Set(['sponsor-list.example']),
+      ),
+    ).toBeNull();
   });
 });

@@ -39,6 +39,7 @@ const noneRow: RewalkRow = {
   evidence: 'none',
   url: null,
   candidates: [],
+  walkAttempts: 0,
 };
 const postcodeRow: RewalkRow = {
   ...noneRow,
@@ -74,6 +75,9 @@ describe('makeUpgrade', () => {
     const set = text.slice(text.indexOf(' SET '), text.indexOf(' WHERE '));
     expect(set).not.toMatch(/\burl\s*=/);
     expect(calls[0].params).toContain('https://stored.co.uk');
+    // Only while it holds the status the selector read: a row the sweep parks
+    // or marks dead meanwhile is left alone.
+    expect(text).toContain("status IN ('verified', 'unreachable')");
   });
 
   test('a row another job changed meanwhile reports false', async () => {
@@ -150,6 +154,16 @@ describe('makeSelectRewalk', () => {
     expect(calls[0].params).toEqual(
       expect.arrayContaining([CURRENT_WALK_VERSION, 8, 2, 100]),
     );
+  });
+
+  test('reads how many attempts a row has spent, so the network gate counts first attempts', async () => {
+    const { sql, calls } = makeFakeSql();
+    await makeSelectRewalk(sql)(10);
+    expect(flat(calls[0].text)).toContain('w.walk_attempts');
+    const seeded = makeFakeSql();
+    await makeSelectRewalk(seeded.sql, { seed: 's' })(10);
+    // The seeded sample runs before the migration, so it cannot name the column.
+    expect(flat(seeded.calls[0].text)).toContain('0 AS walk_attempts');
   });
 
   test('takes a none row only while its url is empty, as the upgrade guard requires', async () => {

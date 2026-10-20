@@ -28,7 +28,7 @@ import {
   makeSelectRewalk,
   makeUpgrade,
 } from '../src/lib/websites/rewalk-sql.ts';
-import { rewalkWebsites } from '../src/lib/websites/rewalk.ts';
+import { lostNetwork, rewalkWebsites } from '../src/lib/websites/rewalk.ts';
 import { parseShard } from '../src/lib/websites/shard.ts';
 import { setGitHubOutput } from './ci-utils.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
@@ -109,6 +109,7 @@ const summary = await rewalkWebsites(
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
         maxPaths,
+        crowded: crowdedHosts,
         delayMs,
         onFetch: () => {
           disclosureFetches += 1;
@@ -158,9 +159,9 @@ const MIN_GATE_SAMPLE = 25;
 // A dead site is an ordinary answer here; a run that can read almost nothing,
 // or that throws, has lost its network or its database.
 const reached = summary.processed;
-if (reached >= MIN_GATE_SAMPLE && summary.unreadable / reached > 0.8) {
+if (lostNetwork(summary)) {
   console.error(
-    `\n  ${summary.unreadable}/${reached} rows unreadable — check the runner's network.`,
+    `\n  ${summary.firstAttemptsUnreadable}/${summary.firstAttempts} first attempts unreadable — check the runner's network.`,
   );
   process.exit(1);
 }

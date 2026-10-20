@@ -35,6 +35,7 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
     candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
+    walkAttempts: Number(r.walk_attempts ?? 0),
   }));
 }
 
@@ -51,7 +52,8 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       // No marker predicate: a measurement draws from every settled row.
       return toRows(
         await sql`
-          SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code
+          SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+            0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
           WHERE w.source = 'search'
@@ -70,7 +72,8 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
     }
     return toRows(
       await sql`
-        SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code
+        SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+          w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)
         WHERE w.source = 'search'
@@ -136,7 +139,7 @@ export function makeUpgrade(sql: Sql) {
               walked_at     = now()
             WHERE company_number = ${row.companyNumber}
               AND source = 'search' AND evidence = 'postcode_on_page'
-              AND url = ${row.url}
+              AND url = ${row.url} AND status IN ('verified', 'unreachable')
             RETURNING company_number
           `;
     return updated.length > 0;

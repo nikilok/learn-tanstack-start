@@ -6,8 +6,10 @@
  * guesses.
  */
 
-import { visibleText } from './extract';
+import { isDiscoveryAggregator } from './crowded-hosts';
+import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
 import { DISCLOSURE_PATHS } from './fetch-policy';
+import { type StatedOnSite, statedOnPage } from './stated-numbers';
 
 /** Link targets or labels that name a legal page. */
 const LEGAL =
@@ -87,4 +89,31 @@ export function walkTargets(
     (path) => `${origin}${path}`,
   );
   return [...extra, ...paths];
+}
+
+/** What one walked page proves; null when it was served from a directory. */
+export function readWalkPage(
+  row: { companyNumber: string; postcode: string | null },
+  pageUrl: string,
+  html: string,
+  crowded: ReadonlySet<string>,
+): {
+  crnFound: boolean;
+  postcodeFound: boolean;
+  stated: StatedOnSite[];
+} | null {
+  let host: string;
+  try {
+    host = new URL(pageUrl).hostname;
+  } catch {
+    return null;
+  }
+  // A path that redirects into a register or directory lands on a page about
+  // the company, which is not the site naming itself.
+  if (isDiscoveryAggregator(host, crowded)) return null;
+  return {
+    crnFound: pageHasCompanyNumber(html, row.companyNumber),
+    postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
+    stated: statedOnPage(pageUrl, html),
+  };
 }

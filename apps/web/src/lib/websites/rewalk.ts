@@ -27,6 +27,8 @@ export type RewalkRow = {
   url: string | null;
   /** Banked search results, in rank order. */
   candidates: string[];
+  /** Unreadable re-walks this row has already had at this version. */
+  walkAttempts: number;
 };
 
 export type RewalkDeps = Pick<
@@ -58,6 +60,9 @@ export type RewalkSummary = {
   /** Read, with nothing to upgrade. */
   unchanged: number;
   unreadable: number;
+  /** Rows on their first attempt, and how many of those could not be read. */
+  firstAttempts: number;
+  firstAttemptsUnreadable: number;
   /** Upgrades the database refused: the row changed after it was read. */
   unpersisted: number;
   errored: number;
@@ -65,6 +70,20 @@ export type RewalkSummary = {
   /** Statutory numbers recorded (or, in a dry run, that would be). */
   statedNumbers: number;
 };
+
+/** First-attempt rows a run must reach before its read rate means anything. */
+const MIN_GATE_ROWS = 25;
+
+/**
+ * Whether a run read so little that its network, not the sites, has failed.
+ * Judged on first attempts only: the backlog's tail is dead-site retries.
+ */
+export function lostNetwork(summary: RewalkSummary): boolean {
+  return (
+    summary.firstAttempts >= MIN_GATE_ROWS &&
+    summary.firstAttemptsUnreadable / summary.firstAttempts > 0.8
+  );
+}
 
 /** Heartbeat interval. Counts only, never a company or a URL. */
 const HEARTBEAT_ROWS = 25;
@@ -136,6 +155,8 @@ export async function rewalkWebsites(
     postcodeToNumber: 0,
     unchanged: 0,
     unreadable: 0,
+    firstAttempts: 0,
+    firstAttemptsUnreadable: 0,
     unpersisted: 0,
     errored: 0,
     candidateFetches: 0,
@@ -145,6 +166,8 @@ export async function rewalkWebsites(
   for (const [index, row] of rows.entries()) {
     if (index > 0) await deps.sleep(config.delayMs);
     summary.processed += 1;
+    const firstAttempt = row.walkAttempts === 0;
+    if (firstAttempt) summary.firstAttempts += 1;
     if (summary.processed % HEARTBEAT_ROWS === 0) {
       deps.log(
         `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber} by number, ${summary.noneToPostcode} by postcode`,
@@ -170,6 +193,7 @@ export async function rewalkWebsites(
       const outcome = settled.outcome;
       if (!outcome) {
         summary.unreadable += 1;
+        if (firstAttempt) summary.firstAttemptsUnreadable += 1;
         if (!config.dryRun) await deps.markUnreadable(row);
         continue;
       }

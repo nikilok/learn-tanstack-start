@@ -11,6 +11,7 @@
 import { isDiscoveryAggregator } from '../../src/lib/websites/crowded-hosts.ts';
 import {
   legalLinks,
+  readWalkPage,
   walkTargets,
 } from '../../src/lib/websites/disclosure-walk.ts';
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
@@ -72,6 +73,8 @@ export type WalkOptions = {
   /** Fixed disclosure paths read after the homepage's legal links. */
   maxPaths: number;
   delayMs: number;
+  /** Hosts discovery treats as directories; a page served from one proves nothing. */
+  crowded: ReadonlySet<string>;
   /** Called per fetch attempted, for the caller's own counter. */
   onFetch?: () => void;
 };
@@ -100,15 +103,13 @@ export async function walkDisclosure(
     const fetched = await fetchSite(target);
     options.onFetch?.();
     if (!fetched.ok) continue;
-    stated.push(...statedOnPage(fetched.url, fetched.html));
-    if (pageHasCompanyNumber(fetched.html, row.companyNumber)) {
+    const page = readWalkPage(row, fetched.url, fetched.html, options.crowded);
+    if (!page) continue;
+    stated.push(...page.stated);
+    if (page.crnFound) {
       return { ...updated, crnFound: true, evidenceUrl: fetched.url, stated };
     }
-    if (
-      !updated.postcodeFound &&
-      row.postcode &&
-      pageHasPostcode(fetched.html, row.postcode)
-    ) {
+    if (!updated.postcodeFound && page.postcodeFound) {
       updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
     }
   }

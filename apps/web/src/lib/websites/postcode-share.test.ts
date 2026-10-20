@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  MAX_REFRESH_BATCHES,
   makeRefreshPostcodeShares,
   POSTCODE_SHARES_SQL,
+  REFRESH_BATCH_ROWS,
 } from './postcode-share';
 
 /** One line per statement, so assertions read the SQL rather than its layout. */
@@ -14,12 +16,13 @@ function flat(text: string): string {
     .trim();
 }
 
-/** A query stub that records each statement and answers with a count. */
-function stubQuery(moved: unknown) {
+/** A query stub that records each statement and answers each with the next
+ *  count, repeating the last once they run out. */
+function stubQuery(...moved: unknown[]) {
   const statements: string[] = [];
   const query = async (text: string) => {
     statements.push(flat(text));
-    return [{ moved }];
+    return [{ moved: moved[Math.min(statements.length, moved.length) - 1] }];
   };
   return { statements, query };
 }
@@ -54,7 +57,7 @@ describe('POSTCODE_SHARES_SQL', () => {
 });
 
 describe('makeRefreshPostcodeShares', () => {
-  test('a live run writes only the rows whose share moved', async () => {
+  test('a live run writes only the rows whose share moved, a batch at a time', async () => {
     const { statements, query } = stubQuery(37);
     expect(await makeRefreshPostcodeShares(query)(false)).toBe(37);
     expect(statements).toHaveLength(1);
@@ -64,14 +67,42 @@ describe('makeRefreshPostcodeShares', () => {
     // IS DISTINCT FROM, not <>: a share falling to NULL must be written too,
     // or a company whose postcode was cleared keeps publishing on its old one.
     expect(statements[0]).toContain(
-      `UPDATE company_websites w SET postcode_share = fresh.share FROM fresh ${MOVED_ROWS} RETURNING 1`,
+      `batch AS (SELECT fresh.company_number, fresh.share FROM company_websites w, fresh ${MOVED_ROWS} ORDER BY fresh.company_number LIMIT ${REFRESH_BATCH_ROWS})`,
+    );
+    expect(statements[0]).toContain(
+      'UPDATE company_websites w SET postcode_share = batch.share FROM batch WHERE w.company_number = batch.company_number RETURNING 1',
     );
   });
 
-  test('a dry run counts the same rows and writes nothing', async () => {
-    const { statements, query } = stubQuery(37);
-    expect(await makeRefreshPostcodeShares(query)(true)).toBe(37);
+  test('the first fill runs in batches until one comes back short', async () => {
+    // After migration 0051 every share moves at once. One statement for all
+    // of them, failing, would be retried whole by every later sweep run, so
+    // the arm would never publish.
+    const { statements, query } = stubQuery(
+      REFRESH_BATCH_ROWS,
+      REFRESH_BATCH_ROWS,
+      306,
+    );
+    expect(await makeRefreshPostcodeShares(query)(false)).toBe(
+      2 * REFRESH_BATCH_ROWS + 306,
+    );
+    expect(statements).toHaveLength(3);
+  });
+
+  test('shares that never settle fail the run instead of looping', async () => {
+    const { statements, query } = stubQuery(REFRESH_BATCH_ROWS);
+    await expect(makeRefreshPostcodeShares(query)(false)).rejects.toThrow(
+      `postcode shares still moving after ${MAX_REFRESH_BATCHES} batches`,
+    );
+    expect(statements).toHaveLength(MAX_REFRESH_BATCHES);
+  });
+
+  test('a dry run counts every moved row in one read and writes nothing', async () => {
+    const { statements, query } = stubQuery(116_306);
+    expect(await makeRefreshPostcodeShares(query)(true)).toBe(116_306);
+    expect(statements).toHaveLength(1);
     expect(statements[0]).not.toContain('UPDATE');
+    expect(statements[0]).not.toContain('LIMIT');
     expect(statements[0]).toContain(
       `WITH fresh AS (${flat(POSTCODE_SHARES_SQL)})`,
     );

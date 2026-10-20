@@ -48,29 +48,52 @@ export const POSTCODE_SHARES_SQL = String.raw`
 const MOVED = `w.company_number = fresh.company_number
     AND w.postcode_share IS DISTINCT FROM fresh.share`;
 
+/** Most rows one refresh statement writes. The first fill moves every row, and
+ *  one statement that failed would be retried whole by every later run. */
+export const REFRESH_BATCH_ROWS = 20_000;
+
+/** Batches a refresh may take before it gives up: far more than the table
+ *  holds, so reaching it means the shares are not settling. */
+export const MAX_REFRESH_BATCHES = 50;
+
 type Query = (text: string) => Promise<Record<string, unknown>[]>;
 
 /**
- * Bring every row's postcode_share up to date in one statement, writing only
- * the rows whose share moved, and return how many that was. A dry run counts
- * them and writes nothing.
+ * Bring every row's postcode_share up to date, writing only the rows whose
+ * share moved, at most REFRESH_BATCH_ROWS per statement so a failure keeps the
+ * batches before it. Returns how many rows moved; a dry run counts them and
+ * writes nothing.
  */
 export function makeRefreshPostcodeShares(query: Query) {
   return async (dryRun: boolean): Promise<number> => {
-    const [row] = await query(
-      dryRun
-        ? `WITH fresh AS (${POSTCODE_SHARES_SQL})
+    if (dryRun) {
+      const [row] = await query(`WITH fresh AS (${POSTCODE_SHARES_SQL})
   SELECT count(*)::int AS moved FROM company_websites w, fresh
-  WHERE ${MOVED}`
-        : `WITH fresh AS (${POSTCODE_SHARES_SQL}),
-  moved AS (
-    UPDATE company_websites w SET postcode_share = fresh.share
-    FROM fresh
+  WHERE ${MOVED}`);
+      return Number(row?.moved ?? 0);
+    }
+    let total = 0;
+    for (let batch = 0; batch < MAX_REFRESH_BATCHES; batch++) {
+      const [row] = await query(`WITH fresh AS (${POSTCODE_SHARES_SQL}),
+  batch AS (
+    SELECT fresh.company_number, fresh.share FROM company_websites w, fresh
     WHERE ${MOVED}
+    ORDER BY fresh.company_number
+    LIMIT ${REFRESH_BATCH_ROWS}
+  ),
+  moved AS (
+    UPDATE company_websites w SET postcode_share = batch.share
+    FROM batch
+    WHERE w.company_number = batch.company_number
     RETURNING 1
   )
-  SELECT count(*)::int AS moved FROM moved`,
+  SELECT count(*)::int AS moved FROM moved`);
+      const moved = Number(row?.moved ?? 0);
+      total += moved;
+      if (moved < REFRESH_BATCH_ROWS) return total;
+    }
+    throw new Error(
+      `postcode shares still moving after ${MAX_REFRESH_BATCHES} batches`,
     );
-    return Number(row?.moved ?? 0);
   };
 }

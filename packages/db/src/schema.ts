@@ -458,6 +458,10 @@ export const companyWebsites = pgTable(
     checkedAt: timestamp('checked_at'),
     verifiedAt: timestamp('verified_at'),
     discoveredAt: timestamp('discovered_at').defaultNow().notNull(),
+    // Mapped companies registered at this company's postcode; NULL when it has
+    // none or none is mapped there. Derived: every sweep run refreshes it
+    // (lib/websites/postcode-share.ts) and the publish gate reads it.
+    postcodeShare: integer('postcode_share'),
   },
   (table) => [
     index('idx_company_websites_cursor').on(table.checkedAt.asc().nullsFirst()),

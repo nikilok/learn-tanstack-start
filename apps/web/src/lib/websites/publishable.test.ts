@@ -1,6 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ANSWER_RETENTION_STATUSES, PUBLISHABLE_EVIDENCE } from './publishable';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
+
+import {
+  ANSWER_RETENTION_STATUSES,
+  answersRetentionGate,
+  POSTCODE_SHARE_LIMIT,
+  PUBLISHABLE_EVIDENCE,
+  publishableWebsiteGate,
+} from './publishable';
+
+const dialect = new PgDialect();
+
+/** Render a gate to SQL text and its bound params. */
+function render(gate: SQL): { text: string; params: unknown[] } {
+  const query = dialect.sqlToQuery(gate);
+  return { text: query.sql, params: query.params };
+}
 
 describe('PUBLISHABLE_EVIDENCE', () => {
   test('publishes only tiers a measurement or an owner stands behind', () => {
@@ -22,7 +39,70 @@ describe('PUBLISHABLE_EVIDENCE', () => {
     // This is the assertion that fails if anyone widens the list to `registry`.
     expect(PUBLISHABLE_EVIDENCE).not.toContain('registry');
     expect(PUBLISHABLE_EVIDENCE).not.toContain('registry_unconfirmed');
+  });
+
+  test('postcode_on_page as a whole is NOT publishable', () => {
+    // Only its measured slice is, through the gate's own arm: the full tier
+    // was 214/220 with its pooled lower bound under the bar, and four of the
+    // six misses sat at postcodes shared by more than ten companies.
     expect(PUBLISHABLE_EVIDENCE).not.toContain('postcode_on_page');
+  });
+});
+
+describe('the shared-postcode arm', () => {
+  test('admits a postcode shared by at most ten mapped companies', () => {
+    // The threshold the 2026-10-19 sample cleared: share <= 10 was 148/150
+    // (lower bound 96.1%) and 197/200 with the later validation sample, while
+    // share <= 50 was inconclusive. Moving it needs a new measurement, not an
+    // edit.
+    expect(POSTCODE_SHARE_LIMIT).toBe(10);
+  });
+
+  test('the render gate keeps every arm and adds the share bound', () => {
+    // `<=` on a NULL share is NULL, so a row the refresh has not reached, or
+    // whose company has no postcode, cannot publish through this arm.
+    expect(render(publishableWebsiteGate())).toEqual({
+      text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7)) and "company_websites"."url" is not null)',
+      params: [
+        'verified',
+        'manual',
+        'crn_on_page',
+        'registry_confirmed',
+        'search',
+        'postcode_on_page',
+        10,
+      ],
+    });
+  });
+
+  test('only search rows qualify, because only search rows were measured', () => {
+    // The sweep promotes a registry row onto postcode_on_page when its page
+    // shows the postcode, and one CQC row had got there by 2026-10-20. None
+    // was in the sample, so dropping the source condition publishes it blind.
+    const { text, params } = render(publishableWebsiteGate());
+    expect(text).toContain(
+      '("company_websites"."source" = $5 and "company_websites"."evidence" = $6',
+    );
+    expect(params.slice(4, 6)).toEqual(['search', 'postcode_on_page']);
+  });
+
+  test('retention carries the same arm and differs only in status', () => {
+    // A company whose share rises past the limit loses its answers as it
+    // loses its link; retention may only be wider on the transient status.
+    const publish = render(publishableWebsiteGate());
+    const retain = render(answersRetentionGate());
+    const shape = (text: string) => text.replace(/\$\d+/g, '?');
+    expect(shape(retain.text)).toBe(
+      shape(publish.text).replace(
+        '"company_websites"."status" = ?',
+        '"company_websites"."status" in (?, ?)',
+      ),
+    );
+    expect(retain.params).toEqual([
+      'verified',
+      'unreachable',
+      ...publish.params.slice(1),
+    ]);
   });
 });
 

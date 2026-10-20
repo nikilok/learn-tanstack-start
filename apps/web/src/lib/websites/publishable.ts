@@ -44,10 +44,59 @@
  *
  * This rung is REVOCABLE, so the list is not a one-way door — the sweep lowers
  * it back when a page stops showing the address.
+ *
+ * `postcode_on_page` is NOT in the list: the tier publishes only in part,
+ * through its own arm of the gate. A search-found row qualifies when its
+ * company's registered postcode is shared by at most POSTCODE_SHARE_LIMIT
+ * mapped companies (the share is defined once, in postcode-share.ts). Measured
+ * on a stratified, hand-labelled sample (seed `pc-precision-2026-10-19`) drawn
+ * 2026-10-19 from the 14,442 search rows at the tier: 50 rows from each of
+ * share 1, 2-3, 4-10 and 11-50, and 20 from 51+. The bar is the scorer's, a
+ * one-sided 95% Wilson lower bound of at least 95% with unsure counted as
+ * wrong, judged on the stricter of the pooled and population-weighted bounds:
+ *
+ *   admitted       correct   lower bound   verdict
+ *   share <= 3      99/100   95.6%         promote
+ *   share <= 10    148/150   96.1%         promote (96.3% weighted)
+ *   share = 1       50/50    94.9%         inconclusive: n=50 cannot clear it
+ *   share <= 50    195/200   94.95%        inconclusive
+ *
+ * share <= 10 ships. It covered 12,211 of the 14,442 rows at the draw.
+ *
+ * A validation sample (seed `pc-precision-post-2026-10-20`) then drew 50
+ * share <= 10 rows discovered after that draw, which brought in the
+ * shard-burst cohorts the first sample barely covered: 11 SC, 3 NI, 4 OC and
+ * 1 BR company. Its pass rule, set before labelling, allowed at most 2 misses,
+ * and it scored 49/50. Across both samples share <= 10 is 197/200, lower bound
+ * 96.3% pooled and population-weighted alike (the would-publish population:
+ * 11,997 rows found before the first draw, 3,521 after).
+ *
+ * Labels: in the first sample the owner's on 110 rows and Claude's on the
+ * other 110, with Claude labelling every row blind to the strata and to the
+ * owner's verdicts. Across both samples the owner's blind audits overturned
+ * none of 116 correct calls Claude made, which bounds Claude's false-correct
+ * rate at 2.3% (one-sided 95%).
+ *
+ * Rubric (the owner's): correct is the company's own site, its parent's or its
+ * subsidiary's, with Companies House PSC records deciding; a sister company's
+ * site is wrong. The owner also counted sites the company shares or is listed
+ * on as correct.
+ *
+ * What the result does not cover:
+ *   - share <= 10 cleared the first sample with one failure of headroom, and
+ *     partly on the owner's calls on shared and listing sites.
+ *   - A company-name word in the domain looked stronger (195/196), but it was
+ *     found after the fact on the same rows and is not part of this gate.
+ *   - Only `source = 'search'` was measured, so the arm admits nothing else.
+ *
+ * Unlike `registry_confirmed`, revalidation never demotes this tier when its
+ * page stops showing the postcode: such a row keeps rendering until it fails,
+ * parks or lands on a directory. A share that rises above the limit
+ * unpublishes it at the next sweep run.
  */
 
 import { companyWebsites } from '@ss/db/schema';
-import { and, eq, inArray, isNotNull, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lte, or, type SQL } from 'drizzle-orm';
 
 import type { WebsiteEvidence } from './decide';
 
@@ -56,6 +105,18 @@ export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
   'crn_on_page',
   'registry_confirmed',
 ];
+
+/** Most mapped companies a search-found postcode may be shared by and still publish. */
+export const POSTCODE_SHARE_LIMIT = 10;
+
+/** The measured slice of `postcode_on_page`; a NULL share fails it. */
+function sharedPostcodeArm(): SQL {
+  return and(
+    eq(companyWebsites.source, 'search'),
+    eq(companyWebsites.evidence, 'postcode_on_page'),
+    lte(companyWebsites.postcodeShare, POSTCODE_SHARE_LIMIT),
+  ) as SQL;
+}
 
 /**
  * The render gate, as one expression both readers share.
@@ -70,7 +131,8 @@ export const PUBLISHABLE_EVIDENCE: WebsiteEvidence[] = [
  * All four conditions carry weight. `verified` says the row survived
  * discovery; `checked_at` says a sweep actually fetched the URL, which status
  * alone does not imply; the evidence filter says the company identified
- * itself; and `url` can be null on a row that reached `none`.
+ * itself, by a publishable tier or by a postcode few mapped companies share;
+ * and `url` can be null on a row that reached `none`.
  *
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
  * must not alias the table.
@@ -80,7 +142,10 @@ function gateWithStatusArm(statusArm: SQL): SQL {
   return and(
     statusArm,
     isNotNull(companyWebsites.checkedAt),
-    inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
+    or(
+      inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
+      sharedPostcodeArm(),
+    ),
     isNotNull(companyWebsites.url),
   ) as SQL;
 }
@@ -102,8 +167,8 @@ export function publishableWebsiteGate(): SQL {
  * cost when the status self-heals. So retention tolerates `unreachable` and
  * fires only on genuine loss: `dead` (written off after two consecutive
  * failures), `none`/`candidate`, an evidence demotion below the publishable
- * tiers, or a null URL. It never renders anything — the render gate is the
- * only publish decision.
+ * tiers, a postcode share above the limit, or a null URL. It never renders
+ * anything — the render gate is the only publish decision.
  */
 export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
 

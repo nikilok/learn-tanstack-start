@@ -115,6 +115,11 @@ direction.
 
 **Is `postcode_on_page` publishable, and under what conditions?**
 
+Answered 2026-10-20: search rows whose registered postcode is shared by at most
+ten mapped companies now publish, with the share carried on the row as
+suggested below. The measurement, the labelling rubric and the caveats are in
+`apps/web/src/lib/websites/publishable.ts`.
+
 Needed: a hand-labelled sample of post-origin-fix `postcode_on_page` rows drawn
 from a **representative** slice, with a Wilson lower bound against the 95% bar —
 the same process `registry_confirmed` went through (it shipped at 94.0% with the

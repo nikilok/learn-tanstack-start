@@ -17,17 +17,18 @@ export type WebsiteEvidence =
   | 'manual'
   | 'crn_on_page'
   /** A registry URL whose page carries the company's REGISTERED OFFICE
-   *  POSTCODE. Published, and the only rung published on anything other than
-   *  the company's own registration number or an owner's decision — see
-   *  publishable.ts, which records both the measurement and the fact that it
-   *  shipped on a product judgement rather than on clearing the scorer's bar.
-   *  Do not quote a precision figure for this tier from here.
+   *  POSTCODE. Published — see publishable.ts, which records both the
+   *  measurement and the fact that it shipped on a product judgement rather
+   *  than on clearing the scorer's bar. Do not quote a precision figure for
+   *  this tier from here.
    *
    *  Unlike every other rung it is REVOCABLE: mergeRevalidation lowers it back
    *  to `registry` when a later pass reads a substantial page that no longer
    *  shows the address. */
   | 'registry_confirmed'
   | 'registry'
+  /** Published only in part: a search-found row whose postcode few mapped
+   *  companies share (publishable.ts). Not revocable on page content. */
   | 'postcode_on_page'
   | 'llm_adjudicated'
   | 'registry_unconfirmed'

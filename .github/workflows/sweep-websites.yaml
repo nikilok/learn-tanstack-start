@@ -11,9 +11,10 @@ name: Sweep Company Websites
 #
 # Own concurrency group, NOT phase5-sweep: GitHub keeps only one pending run per
 # group and the five sweep workflows are already staggered to avoid evicting one
-# another. This job touches no table they write and makes no Companies House
-# calls, so there is nothing to serialise against — including the 05:37 tier-2
-# sweep the 05:43 slot sits alongside on Sundays and Wednesdays.
+# another. This job writes no table they write (the postcode-share refresh only
+# reads the mapping and profiles) and makes no Companies House calls, so there
+# is nothing to serialise against — including the 05:37 tier-2 sweep the 05:43
+# slot sits alongside on Sundays and Wednesdays.
 #
 # Three eight-hourly runs, because search discovery now runs four times a day
 # and a run's worth of new rows lands ahead of every re-check: never-checked
@@ -165,6 +166,7 @@ jobs:
             echo "| ⬇️ Demoted | $(extract demoted) |"
             echo "| 🚧 No site there | $(extract no_site_there) |"
             echo "| 💾 Updated | $(extract updated) |"
+            echo "| 📮 Postcode shares moved | $(extract postcode_shares) |"
             echo "| ❌ Errored | $(extract errored) |"
             echo "| ⏳ Never checked left | $(extract never_checked_left) |"
             echo "| 🌐 Sponsors renderable | $(extract sponsor_renderable) |"

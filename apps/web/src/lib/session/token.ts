@@ -1,5 +1,7 @@
-// The session cookie's value: signed, and bound to the address it was issued to. Web Crypto only,
-// so the edge middleware and the server verify it the same way.
+// The session cookie's value: signed, and bound to the address it was issued to and the device it
+// was issued to. Web Crypto only, so the edge middleware and the server verify it the same way.
+
+import { DEVICE_KEY_RE } from '../device/key';
 
 /** How long a session lasts after it is issued. */
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -20,8 +22,22 @@ const STANDING_CODE: Record<SessionStanding, string> = {
   unverified: 'u',
 };
 
-// Expiry in epoch seconds, the standing, then a base64url HMAC-SHA256.
-const VALUE_RE = /^(\d{10})\.([pu])\.([\w-]{43})$/;
+// A device key as a session value spells it: the shape the pages send (`DEVICE_KEY_RE`), so the two
+// cannot drift apart.
+const DEVICE_GROUP = DEVICE_KEY_RE.source.replace(/^\^|\$$/g, '');
+
+// Expiry in epoch seconds, the standing, the device key (`-` when there is none), then a base64url
+// HMAC-SHA256 over them and the address scope.
+const VALUE_RE = new RegExp(
+  `^(\\d{10})\\.([pu])\\.(${DEVICE_GROUP}|-)\\.([\\w-]{43})$`,
+);
+
+// The shape before sessions named their device: expiry, standing, signature. Still read, as a
+// session naming no device, until the last of them runs out, so a deploy takes no session away.
+const LEGACY_VALUE_RE = /^(\d{10})\.([pu])\.([\w-]{43})$/;
+
+/** How a session value spells the device it was issued to: its key, or `-` for none. */
+const NO_DEVICE = '-';
 
 const encoder = new TextEncoder();
 const keys = new Map<string, Promise<CryptoKey>>();
@@ -57,9 +73,21 @@ function signingKey(secret: string): Promise<CryptoKey> {
   return key;
 }
 
-/** The bytes a session's signature covers: its standing, its expiry and the address scope. */
-function message(code: string, expires: string, scope: string) {
-  return encoder.encode(`${code}.${expires}.${scope}`);
+/**
+ * The bytes a session's signature covers: its standing, its expiry, the address scope and the
+ * device. A value of the earlier shape signed no device (`undefined`).
+ */
+function message(
+  code: string,
+  expires: string,
+  scope: string,
+  device: string | undefined,
+) {
+  return encoder.encode(
+    device === undefined
+      ? `${code}.${expires}.${scope}`
+      : `${code}.${expires}.${scope}.${device}`,
+  );
 }
 
 /** Bytes as unpadded base64url, safe in a cookie value. */
@@ -85,11 +113,13 @@ export function sessionSecret(
   return value || undefined;
 }
 
-/** A session value for one address scope, and its expiry in epoch seconds. */
+/** A session value for one address scope and device, and its expiry in epoch seconds. */
 export async function issueSession(options: {
   scope: string;
   standing: SessionStanding;
   secret: string;
+  /** The device key the page sent, or null when it had none. */
+  device?: string | null;
   now?: number;
   ttlSeconds?: number;
 }): Promise<{ value: string; expires: number }> {
@@ -97,44 +127,58 @@ export async function issueSession(options: {
     scope,
     standing,
     secret,
+    device = null,
     now = Date.now(),
     ttlSeconds = SESSION_TTL_SECONDS,
   } = options;
   const expires = Math.floor(now / 1000) + ttlSeconds;
   const code = STANDING_CODE[standing];
+  // Only a key the reader takes is named: anything else would sign a value nobody could read.
+  const named =
+    device !== null && DEVICE_KEY_RE.test(device) ? device : NO_DEVICE;
   const signature = await crypto.subtle.sign(
     'HMAC',
     await signingKey(secret),
-    message(code, String(expires), scope),
+    message(code, String(expires), scope, named),
   );
   return {
-    value: `${expires}.${code}.${toBase64Url(signature)}`,
+    value: `${expires}.${code}.${named}.${toBase64Url(signature)}`,
     expires,
   };
 }
 
 /** What a request's session value says about it. */
 export type SessionRead =
-  | { status: 'valid'; standing: SessionStanding; expires: number }
+  | {
+      status: 'valid';
+      standing: SessionStanding;
+      expires: number;
+      /** The device key it was issued to, or null when the page had none. */
+      device: string | null;
+    }
   | { status: 'absent' | 'malformed' | 'expired' | 'elsewhere' };
 
 /**
  * Reads a session value for the address scope it is presented from. `elsewhere` is a value that
- * was not issued to this scope — the visitor's address changed, or it was never ours. Never throws.
+ * was not issued to this scope — the visitor's address changed, or it was never ours. The device it
+ * names is covered by the signature, so it cannot be swapped for another; a value of the earlier
+ * shape names none. Never throws.
  */
 export async function readSession(
   value: string | undefined,
   options: { scope: string; secret: string; now?: number },
 ): Promise<SessionRead> {
   if (!value) return { status: 'absent' };
-  const match = VALUE_RE.exec(value);
-  if (!match) return { status: 'malformed' };
-  const [, expires, code, signature] = match as unknown as [
-    string,
-    string,
-    string,
-    string,
-  ];
+  const current = VALUE_RE.exec(value);
+  const legacy = current ? null : LEGACY_VALUE_RE.exec(value);
+  let expires: string;
+  let code: string;
+  let device: string | undefined;
+  let signature: string;
+  if (current)
+    [, expires = '', code = '', device = '', signature = ''] = current;
+  else if (legacy) [, expires = '', code = '', signature = ''] = legacy;
+  else return { status: 'malformed' };
   const { scope, secret, now = Date.now() } = options;
   if (Number(expires) * 1000 <= now) return { status: 'expired' };
   let verified: boolean;
@@ -143,7 +187,7 @@ export async function readSession(
       'HMAC',
       await signingKey(secret),
       fromBase64Url(signature),
-      message(code, expires, scope),
+      message(code, expires, scope, device),
     );
   } catch {
     return { status: 'malformed' };
@@ -153,6 +197,7 @@ export async function readSession(
     status: 'valid',
     standing: code === 'p' ? 'person' : 'unverified',
     expires: Number(expires),
+    device: device === undefined || device === NO_DEVICE ? null : device,
   };
 }
 

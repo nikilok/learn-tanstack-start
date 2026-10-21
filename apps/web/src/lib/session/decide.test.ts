@@ -120,6 +120,45 @@ describe('decide', () => {
     ).toEqual({ render: 'client', why: 'unverified' });
   });
 
+  test('a session issued to a device suspended since is refused; another device, or none, goes through', async () => {
+    const device = 'a'.repeat(32);
+    const suspended = new Set([device]);
+    const issued = async (named: string | null) =>
+      (
+        await issueSession({
+          scope: visitor,
+          standing: 'person',
+          secret,
+          device: named,
+        })
+      ).value;
+    expect(
+      await decide({
+        headers: request(visitor, await issued(device)),
+        ranges,
+        secret,
+        suspended,
+      }),
+    ).toEqual({ render: 'client', why: 'suspended' });
+    for (const named of ['b'.repeat(32), null])
+      expect(
+        await decide({
+          headers: request(visitor, await issued(named)),
+          ranges,
+          secret,
+          suspended,
+        }),
+      ).toEqual({ render: 'server', why: 'session' });
+    // With no list read, nobody is suspended.
+    expect(
+      await decide({
+        headers: request(visitor, await issued(device)),
+        ranges,
+        secret,
+      }),
+    ).toEqual({ render: 'server', why: 'session' });
+  });
+
   test('a call it cannot place goes through', async () => {
     expect(
       await decide({ headers: request(visitor), ranges: null, secret }),

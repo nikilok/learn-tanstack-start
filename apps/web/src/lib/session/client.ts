@@ -6,6 +6,7 @@ import {
   onCheckReset,
   sessionAskReleased,
 } from '../device/browser-check';
+import { documentDeviceKey } from '../device/document-key';
 import {
   SESSION_CALL_PATH,
   SESSION_HEADER,
@@ -18,9 +19,13 @@ import {
 /** What one ask for a session came back with; `failed` is no answer at all. */
 export type SessionOutcome = 'ok' | 'refused' | 'off' | 'failed';
 
-/** One ask: its answer, and the moment the browser check lets it go to the server. */
+/**
+ * One ask: its answer, the moment it is sent (after any wait for its device key; at once when
+ * absent), and the moment the browser check lets it go to the server.
+ */
 export type SessionAsk = {
   answer: Promise<SessionOutcome>;
+  sent?: Promise<void>;
   released: Promise<void>;
 };
 
@@ -126,9 +131,10 @@ export function createSession(deps: SessionDeps) {
 
   /**
    * Asks until a session is held or none can be had. The server's answer is timed from when the
-   * check lets the ask go; the check's own hold has a longer bound of its own. An ask that failed
-   * before the check let it go means the check itself cannot run, and none is asked while it cannot:
-   * the ask would only wait on it.
+   * check lets the ask go; the check's own hold has a longer bound of its own, timed from when the
+   * ask is sent, as the check holds nothing before then. An ask that failed before the check let it
+   * go means the check itself cannot run, and none is asked while it cannot: the ask would only
+   * wait on it.
    */
   const obtain = async (): Promise<Got> => {
     if (!checkRuns) return 'none';
@@ -146,8 +152,8 @@ export function createSession(deps: SessionDeps) {
           .then(() => deps.timeout(ANSWER_TIMEOUT_MS))
           .then(() => 'stalled' as const),
         // The hold's bound stands only while the check still holds the ask.
-        deps
-          .timeout(HOLD_LIMIT_MS)
+        (ask.sent ?? Promise.resolve())
+          .then(() => deps.timeout(HOLD_LIMIT_MS))
           .then(() =>
             released ? new Promise<never>(() => {}) : ('held' as const),
           ),
@@ -180,12 +186,18 @@ export function createSession(deps: SessionDeps) {
     return hintHeld() ? 'ok' : 'none';
   };
 
+  /**
+   * Whether this document asks for a session when it starts: not a preview frame, which shares its
+   * page's session, and not one holding a session with time to run — a call refused anyway (the
+   * address moved) renews it then.
+   */
+  const asksOnLoad = () =>
+    !deps.preview() && !hintLeft(SESSION_RENEW_SECONDS * 1000);
+
   /** Starts this document's ask, once; later calls return the same promise. */
   const start = (): Promise<Got> => {
     if (first) return first;
-    // A preview frame shares its page's session, and a session with time to run needs no ask: a
-    // call refused anyway (the address moved) renews it then.
-    if (deps.preview() || hintLeft(SESSION_RENEW_SECONDS * 1000)) {
+    if (!asksOnLoad()) {
       first = Promise.resolve<Got>('ok');
       return first;
     }
@@ -280,7 +292,7 @@ export function createSession(deps: SessionDeps) {
     throw new SessionRequiredError();
   };
 
-  return { start, renew, fetch: sessionFetch };
+  return { start, renew, asksOnLoad, fetch: sessionFetch };
 }
 
 /** Whether a call is a session call (`SESSION_CALLS`), the only kind refused without a session. */
@@ -309,22 +321,55 @@ function refused(response: Response): boolean {
   );
 }
 
-/** One ask of the session endpoint. */
-function askForSession(): SessionAsk {
-  const released = sessionAskReleased();
-  const answer = (async (): Promise<SessionOutcome> => {
-    try {
-      const response = await fetch(SESSION_PATH, { method: 'POST' });
-      if (!response.ok) return 'failed';
-      const { session } = (await response.json()) as { session?: unknown };
-      return session === 'ok' || session === 'refused' || session === 'off'
-        ? session
-        : 'failed';
-    } catch {
-      return 'failed';
-    }
-  })();
-  return { answer, released };
+/** How long an ask waits for this document's device key before it goes without one. */
+export const KEY_WAIT_MS = 3000;
+
+/** What one ask of the session endpoint reaches, injectable for tests. */
+export type AskDeps = {
+  /** This document's device key, or null where it has none (`documentDeviceKey`). */
+  deviceKey: () => Promise<string | null>;
+  /** Resolves after `ms`. */
+  timeout: (ms: number) => Promise<void>;
+  /** Sends the ask with this JSON body. */
+  post: (body: string) => Promise<Response>;
+  /** When the browser check lets the ask go (`sessionAskReleased`), asked for as the ask is made. */
+  released: () => Promise<void>;
+};
+
+/**
+ * One ask of the session endpoint, naming this document's device key: it waits up to
+ * `KEY_WAIT_MS` for the key and goes without one past that, as it does where none can be
+ * computed. Its answer is `failed` for anything but a well-formed one.
+ */
+export function createAsk(deps: AskDeps): () => SessionAsk {
+  return () => {
+    const released = deps.released();
+    let markSent: () => void = () => {};
+    const sent = new Promise<void>((resolve) => {
+      markSent = resolve;
+    });
+    const answer = (async (): Promise<SessionOutcome> => {
+      try {
+        const key = await Promise.race([
+          deps.deviceKey().catch(() => null),
+          deps.timeout(KEY_WAIT_MS).then(() => null),
+        ]);
+        markSent();
+        const response = await deps.post(JSON.stringify(key ? { key } : {}));
+        if (!response.ok) return 'failed';
+        const { session } = (await response.json()) as { session?: unknown };
+        return session === 'ok' || session === 'refused' || session === 'off'
+          ? session
+          : 'failed';
+      } catch {
+        return 'failed';
+      } finally {
+        // An ask that failed before it was sent leaves no hold to time.
+        markSent();
+      }
+    })();
+    return { answer, sent, released };
+  };
 }
 
 /** The session's expiry from the readable hint cookie, in epoch seconds, or null. */
@@ -345,7 +390,18 @@ const delay = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const session = createSession({
-  ask: askForSession,
+  ask: createAsk({
+    deviceKey: documentDeviceKey,
+    timeout: delay,
+    // Read at call time: the browser check wraps the global fetch once it starts.
+    post: (body) =>
+      globalThis.fetch(SESSION_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    released: sessionAskReleased,
+  }),
   wait: delay,
   timeout: delay,
   hintExpiry: readHintExpiry,
@@ -358,6 +414,12 @@ const session = createSession({
   startCheck: initBrowserCheck,
   onCheckReset,
 });
+
+// A page that will ask for a session starts its device key as this module loads, beside hydration
+// (the computation yields as it goes), so the ask, made later from a root effect, rarely waits for
+// it. A page that will not ask leaves the key to the pings' idle start (`beacons.ts`).
+if (typeof window !== 'undefined' && session.asksOnLoad())
+  void documentDeviceKey();
 
 /** Starts this document's session, from a root effect. Safe to call more than once, and a no-op on the server. */
 export function startSession(): void {

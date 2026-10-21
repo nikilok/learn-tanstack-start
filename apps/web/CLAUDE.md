@@ -500,7 +500,8 @@ asks the browser check on every call, as the extras do, and answers `denied`
 when the check names the caller automated while company pages and the check
 are both enforced (`pageAllowed`), so the switch's rollback reaches it too.
 At the edge a data call needs a session (the httpOnly `ss-session` cookie, bound
-to the visitor's address and issued by `POST /api/session`), unless it comes
+to the visitor's address, naming the device it was issued to, and issued by
+`POST /api/session`), unless it comes
 from a crawler address or the owner's browser, or the edge cannot decide (no
 crawler ranges, no address, no secret), when it passes.
 
@@ -573,10 +574,35 @@ crawler ranges, no address, no secret), when it passes.
 - **The shell carries no company data**: not in markup, dehydrated state or
   structured data. Nothing that reads the database may be added to its `head`
   or `pendingComponent`, and the `ssr` slug check returns only a boolean.
-- **Sessions:** a check that cannot run issues a one-hour session; a refused
-  renewal leaves a held session to run out; `BROWSER_CHECK_ENFORCE` off issues
-  sessions whatever the check says. The browser asks on load only without a
-  session with time to run.
+- **Sessions:** a check that cannot run issues a one-hour session; a renewal
+  the check refuses leaves a held session to run out (a suspended device's,
+  below, is taken away); `BROWSER_CHECK_ENFORCE` off issues sessions whatever
+  the check says. The browser asks on load only without a session with time to
+  run.
+- **A session names the device it was issued to** (`token.ts`: the device key
+  sits in the signed value, `-` for none, its shape `DEVICE_KEY_RE`'s). The ask
+  sends the document's device key as `{ key }` (`createAsk` in `client.ts`,
+  through `documentDeviceKey`, which the pings share), waiting up to
+  `KEY_WAIT_MS` for it. A page that will ask starts the key as `client.ts`
+  loads, so the ask rarely waits; the check's hold on the ask is timed from
+  when it is sent. A session naming no device is a one-hour one, kept without a
+  check while the page still names none; a renewal whose key did not arrive
+  keeps the device its held session names. A held session is confirmed without
+  a check only while the page names its device or none. The edge does not
+  compare the device presenting a session with the one it names: the device in
+  it is what the sessions' list is checked against.
+- **Device keys refused a session are a list of their own** (Global Config
+  `sessionSuspendedDeviceKeys`, apart from the extras' `suspendedDeviceKeys`;
+  `device/suspended.ts`). A device on it is refused a session under `enforce`,
+  asking with its key or holding one issued to it, ahead of any held session
+  being kept, with every session cookie cleared; a session issued to it is
+  refused at the edge (`decide`, the list read at most once a minute); `observe`
+  only logs. The owner is issued one regardless.
+- **The hint cookie is `ss-session-expiry`,** renamed when sessions began naming
+  their device so every browser asks once and its session comes to name its
+  device. A session of the earlier shape (no device) still reads, as naming
+  none, until it runs out, so the change took no session away; the earlier
+  hint, `ss-session-hint`, is cleared wherever the hint is set or cleared.
 - **The browser check holds the session ask until its challenge has run**, and
   a slow device can take a long while. So the ask's answer is timed from when
   the check lets it go (`sessionAskReleased`: a fetch wrapper installed before
@@ -625,7 +651,7 @@ crawler ranges, no address, no secret), when it passes.
 - **Whatever cannot be decided is served in full** (no crawler ranges, no
   address), and a data call passes the edge without a secret.
 - **/download preview frames never ask for a session**: they share the page's
-  cookie and wait for its `ss-session-hint`, as long as the page's ask may take.
+  cookie and wait for its `ss-session-expiry`, as long as the page's ask may take.
   They do run the browser check, which their data call carries.
 
 ## /download live Preview — the app iframing itself

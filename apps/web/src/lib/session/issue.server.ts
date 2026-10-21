@@ -3,8 +3,14 @@ import {
   browserVerdict,
   enforcing,
 } from '../device/browser-check.server';
+import { DEVICE_KEY_RE } from '../device/key';
+import { sessionSuspendedKeys } from '../device/suspended';
 import { addressScope, clientAddress } from './address';
-import { SESSION_COOKIE, SESSION_HINT_COOKIE } from './calls';
+import {
+  LEGACY_SESSION_HINT_COOKIE,
+  SESSION_COOKIE,
+  SESSION_HINT_COOKIE,
+} from './calls';
 import { type DocumentMode, documentMode } from './decide';
 import { ownerRequest } from './owner';
 import { crawlerRanges, inRanges, type Ranges } from './ranges';
@@ -53,20 +59,34 @@ export type IssueDeps = {
   enforce?: boolean;
   /** Whether the request comes from the owner's browser (`owner.ts`). */
   owner?: () => Promise<boolean>;
+  /** The device keys refused a session (`device/suspended.ts`), read once an ask. */
+  suspendedKeys?: () => Promise<ReadonlySet<string>>;
 };
 
+/** The device key an ask's body names (`{ key }`), or null for a body that names none. */
+export function deviceOf(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const { key } = body as { key?: unknown };
+  return typeof key === 'string' && DEVICE_KEY_RE.test(key) ? key : null;
+}
+
 /**
- * The answer to `POST /api/session`: confirms a session held for this address with time to run,
- * or issues one if the browser check passes. A check that cannot run issues a short session, and
- * a crawler address is answered `off` without one.
+ * The answer to `POST /api/session`: confirms a session held for this address and device with time
+ * to run, or issues one if the browser check passes. The session names the device the page sent
+ * (`device`), or, when the page's key did not arrive, the device its held session already names; a
+ * session naming no device, like one issued when the check cannot run, is a short one. A crawler
+ * address is answered `off` without one.
  *
  * A failed check refuses only under `enforce` with `BROWSER_CHECK_ENFORCE` on; a session still
- * held is then left to run out, not taken away. Under `observe` a failed check is issued an
- * `unverified` session, which the edge treats as none. The owner's browser is issued one without
- * asking the check. Never throws.
+ * held is then left to run out, not taken away. A device on the sessions' list (`device/
+ * suspended.ts`), asking with its key or holding a session issued to it, is refused under `enforce`
+ * and its session taken away, as the edge refuses it anyway; under `observe` it is only logged.
+ * Under `observe` a failed check is issued an `unverified` session, which the edge treats as none.
+ * The owner's browser is issued one without asking the check. Never throws.
  */
 export async function sessionResponse(
   headers: Headers,
+  device: string | null,
   deps: IssueDeps = {},
 ): Promise<Response> {
   const mode = 'mode' in deps ? deps.mode : documentMode();
@@ -88,32 +108,67 @@ export async function sessionResponse(
     secret,
     now,
   });
-  if (
-    held.status === 'valid' &&
-    held.standing === 'person' &&
-    held.expires - now / 1000 > SESSION_RENEW_SECONDS
-  )
-    return answer('ok');
+  const heldDevice = held.status === 'valid' ? held.device : null;
+  // The device a session issued now names: the page's, or, when its key did not arrive, the one the
+  // held session names, which that session's signature vouches for.
+  const bound = device ?? heldDevice;
 
-  /** A session of `standing` for this address, set beside its readable hint. */
+  /** A session of `standing` for this address and device, set beside its readable hint. */
   const issue = async (standing: SessionStanding, ttl: number) => {
     const { value, expires } = await issueSession({
       scope,
       standing,
       secret,
+      device: bound,
       now,
       ttlSeconds: ttl,
     });
     return answer('ok', [
       cookie(SESSION_COOKIE, value, ttl, true),
       cookie(SESSION_HINT_COOKIE, String(expires), ttl, false),
+      cookie(LEGACY_SESSION_HINT_COOKIE, '', 0, false),
     ]);
   };
+  /** No session: the cookies cleared, so the page does not take a hint for one. */
+  const refusal = () =>
+    answer('refused', [
+      cookie(SESSION_COOKIE, '', 0, true),
+      cookie(SESSION_HINT_COOKIE, '', 0, false),
+      cookie(LEGACY_SESSION_HINT_COOKIE, '', 0, false),
+    ]);
 
   if (await (deps.owner ?? (() => ownerRequest(headers)))()) {
     console.info('[session] owner');
     return issue('person', SESSION_TTL_SECONDS);
   }
+
+  // The asking device, and the one the held session was issued to: either on the sessions' list is
+  // no session under `enforce`, and only said under `observe`.
+  const named = [device, heldDevice].filter(
+    (key): key is string => key !== null,
+  );
+  if (named.length > 0) {
+    const suspended = await (deps.suspendedKeys ?? sessionSuspendedKeys)();
+    if (named.some((key) => suspended.has(key))) {
+      const refuse = mode === 'enforce';
+      console.info(
+        `[session] suspended device${refuse ? ': refused' : ' (not enforced)'}`,
+      );
+      if (refuse) return refusal();
+    }
+  }
+
+  // Kept while it has time to run, unless the page now names a device the session does not. One
+  // naming no device is a short session, kept until it runs out while the page still names none,
+  // rather than checked again on every load.
+  if (
+    held.status === 'valid' &&
+    held.standing === 'person' &&
+    (device === null || held.device === device) &&
+    (held.expires - now / 1000 > SESSION_RENEW_SECONDS ||
+      (held.device === null && device === null))
+  )
+    return answer('ok');
 
   const said = await (deps.verdict ?? (() => browserVerdict('session')))();
   const automated = said === 'automated' || said === 'verified crawler';
@@ -125,14 +180,15 @@ export async function sessionResponse(
   if (refuse) {
     if (held.status === 'valid' && held.standing === 'person')
       return answer('ok');
-    return answer('refused', [
-      cookie(SESSION_COOKIE, '', 0, true),
-      cookie(SESSION_HINT_COOKIE, '', 0, false),
-    ]);
+    return refusal();
   }
 
+  // A session naming no device is a short one, checked again once it runs out.
+  if (bound === null) console.info('[session] no device: short session');
   return issue(
     automated && mode === 'observe' ? 'unverified' : 'person',
-    said === 'unchecked' ? SESSION_UNCHECKED_TTL_SECONDS : SESSION_TTL_SECONDS,
+    said === 'unchecked' || bound === null
+      ? SESSION_UNCHECKED_TTL_SECONDS
+      : SESSION_TTL_SECONDS,
   );
 }

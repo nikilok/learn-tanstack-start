@@ -31,6 +31,7 @@ export type RewalkSelection = {
 function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
+    companyName: (r.company_name as string | null) ?? '',
     postcode: (r.postal_code as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
@@ -53,6 +54,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       return toRows(
         await sql`
           SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+            coalesce(p.company_name, '') AS company_name,
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
@@ -73,6 +75,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
     return toRows(
       await sql`
         SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+          coalesce(p.company_name, '') AS company_name,
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)

@@ -24,7 +24,11 @@ describe('decideFromCandidates', () => {
     // The company identifying itself outranks position: a lower-ranked result
     // carrying the number beats a higher-ranked one carrying only an address.
     const outcome = decideFromCandidates([
-      probe({ url: 'https://first.co.uk', postcodeFound: true }),
+      probe({
+        url: 'https://first.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+      }),
       probe({ url: 'https://second.co.uk', crnFound: true }),
     ]);
     expect(outcome.evidence).toBe('crn_on_page');
@@ -35,12 +39,45 @@ describe('decideFromCandidates', () => {
   test('otherwise the highest-ranked address match wins', () => {
     const outcome = decideFromCandidates([
       probe({ url: 'https://a.co.uk' }),
-      probe({ url: 'https://b.co.uk', postcodeFound: true }),
-      probe({ url: 'https://c.co.uk', postcodeFound: true }),
+      probe({
+        url: 'https://b.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+      }),
+      probe({
+        url: 'https://c.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+      }),
     ]);
     expect(outcome.evidence).toBe('postcode_on_page');
     expect(outcome.url).toBe('https://b.co.uk');
     expect(outcome.rank).toBe(2);
+  });
+
+  test('a postcode on a site that never names the company is not proof', () => {
+    // Wave 1 of the re-walk: a contractor's site listing its on-site office at
+    // the company's premises, and a neighbour in the same business centre.
+    const outcome = decideFromCandidates([
+      probe({ url: 'https://contractor.co.uk', postcodeFound: true }),
+    ]);
+    expect(outcome.evidence).toBe('none');
+  });
+
+  test('a lower-ranked postcode the site names beats a higher-ranked one it does not', () => {
+    const outcome = decideFromCandidates([
+      probe({ url: 'https://neighbour.co.uk', postcodeFound: true }),
+      probe({
+        url: 'https://acme.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+      }),
+    ]);
+    expect(outcome).toMatchObject({
+      url: 'https://acme.co.uk',
+      evidence: 'postcode_on_page',
+      rank: 2,
+    });
   });
 
   test('finds nothing rather than guessing at the top result', () => {
@@ -66,7 +103,11 @@ describe('decideFromCandidates', () => {
         crnFound: true,
         onAggregator: true,
       }),
-      probe({ url: 'https://real.co.uk', postcodeFound: true }),
+      probe({
+        url: 'https://real.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+      }),
     ]);
     expect(outcome.url).toBe('https://real.co.uk');
     expect(outcome.evidence).toBe('postcode_on_page');
@@ -74,7 +115,12 @@ describe('decideFromCandidates', () => {
 
   test('a parked page never wins either', () => {
     const outcome = decideFromCandidates([
-      probe({ url: 'https://parked.co.uk', postcodeFound: true, parked: true }),
+      probe({
+        url: 'https://parked.co.uk',
+        postcodeFound: true,
+        postcodeNamed: true,
+        parked: true,
+      }),
     ]);
     expect(outcome.evidence).toBe('none');
   });

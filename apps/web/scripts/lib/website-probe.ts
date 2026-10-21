@@ -8,22 +8,15 @@
  * from the Serper client and started throwing on a body the client banks.
  */
 
-import { isDiscoveryAggregator } from '../../src/lib/websites/crowded-hosts.ts';
 import {
-  legalLinks,
+  foldWalkPage,
+  readHomepage,
   readWalkPage,
   walkTargets,
 } from '../../src/lib/websites/disclosure-walk.ts';
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
 import type { CandidateProbe } from '../../src/lib/websites/discover.ts';
-import {
-  pageHasCompanyNumber,
-  pageHasPostcode,
-  visibleText,
-} from '../../src/lib/websites/extract.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
-import { looksParked } from '../../src/lib/websites/page-signals.ts';
-import { statedOnPage } from '../../src/lib/websites/stated-numbers.ts';
 import { fetchSite } from './web-fetch.ts';
 
 /** Fetch one candidate origin and read the two query-independent signals. */
@@ -37,36 +30,7 @@ export async function probeOrigin(
   if (!canonical) return null;
   const fetched = await fetchSite(canonical);
   if (!fetched.ok) return null;
-  const host = (() => {
-    try {
-      return new URL(fetched.url).host.toLowerCase();
-    } catch {
-      return '';
-    }
-  })();
-  const text = visibleText(fetched.html);
-  const crnFound = pageHasCompanyNumber(fetched.html, row.companyNumber);
-  const postcodeFound = row.postcode
-    ? pageHasPostcode(fetched.html, row.postcode)
-    : false;
-  const onAggregator = isDiscoveryAggregator(host, crowded);
-  return {
-    // The URL we ASKED for, not the post-redirect one: that is what a visitor
-    // clicks and what the sweep revalidates. The HOST is judged post-redirect,
-    // because a URL that 301s into a directory is what it lands on.
-    url: canonical,
-    // The page actually PARSED — post-redirect — matching walkDisclosure. On a
-    // redirecting candidate, `canonical` names a page the signals never came
-    // from.
-    evidenceUrl: crnFound || postcodeFound ? fetched.url : null,
-    crnFound,
-    postcodeFound,
-    onAggregator,
-    parked: looksParked(text),
-    legalLinks: legalLinks(fetched.html, fetched.url),
-    // A directory's numbers are its listings', not the site naming itself.
-    stated: onAggregator ? [] : statedOnPage(fetched.url, fetched.html),
-  };
+  return readHomepage(row, canonical, fetched.url, fetched.html, crowded);
 }
 
 export type WalkOptions = {
@@ -106,12 +70,8 @@ export async function walkDisclosure(
     const page = readWalkPage(row, fetched.url, fetched.html, options.crowded);
     if (!page) continue;
     stated.push(...page.stated);
-    if (page.crnFound) {
-      return { ...updated, crnFound: true, evidenceUrl: fetched.url, stated };
-    }
-    if (!updated.postcodeFound && page.postcodeFound) {
-      updated = { ...updated, postcodeFound: true, evidenceUrl: fetched.url };
-    }
+    updated = foldWalkPage(updated, fetched.url, page);
+    if (updated.crnFound) return { ...updated, stated };
   }
   return { ...updated, stated };
 }

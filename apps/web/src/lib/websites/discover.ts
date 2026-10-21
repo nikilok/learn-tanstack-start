@@ -14,6 +14,10 @@
  *   - the registered company number on the page (Companies Act 2006 s.82)
  *   - the registered office postcode on the page (the same regulations)
  *
+ * The name still has one use: a postcode is an address, and a site at that
+ * address that never names the company is another business there. So the
+ * name is required beside the postcode (company-naming.ts), never enough alone.
+ *
  * Measured on 150 live company sites (2026-08-01): the postcode appears on
  * 59.3%, the number on 28.0%, one or the other on 64.7%. So roughly a third of
  * real company websites cannot be confirmed this way at all, and are correctly
@@ -35,6 +39,8 @@ export type CandidateProbe = {
   crnFound: boolean;
   /** The company's registered office postcode was on the page. */
   postcodeFound: boolean;
+  /** The postcode was read on a page that names the company: by the host that served it, or in its text. */
+  postcodeNamed?: boolean;
   /** A directory or profile listing rather than a company's site. */
   onAggregator: boolean;
   /** Parked, for sale, or a holding page. */
@@ -70,9 +76,9 @@ export const MAX_CANDIDATES = 5;
  *
  * A registration number wins outright wherever it appears, because it is the
  * company identifying itself and no lower-ranked result can beat that. Failing
- * that, the highest-ranked postcode match wins: rank is the only ordering
- * information the search gave us, so where the evidence ties, position breaks
- * it.
+ * that, the highest-ranked postcode match on a site that names the company
+ * wins: rank is the only ordering information the search gave us, so where
+ * the evidence ties, position breaks it.
  *
  * Directory listings and holding pages are discarded before either test.
  * Endole, OpenCorporates and the Companies House service all print the
@@ -97,7 +103,11 @@ export function decideFromCandidates(
     };
   }
 
-  const byAddress = usable.find(({ probe }) => probe.postcodeFound);
+  // A postcode is an address, so it proves the site only where the site also
+  // names the company: otherwise it is another business at the same address.
+  const byAddress = usable.find(
+    ({ probe }) => probe.postcodeFound && probe.postcodeNamed,
+  );
   if (byAddress) {
     return {
       url: byAddress.probe.url,

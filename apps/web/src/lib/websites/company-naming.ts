@@ -183,9 +183,12 @@ export function hostNamesCompany(host: string, companyName: string): boolean {
   if (kept.length === 0) return false;
   // The first word that names anything, as the initials read it: not THE.
   const first = kept.find((word) => !LEGAL.has(word)) ?? kept[0];
+  // The name up to and including that word: THELONDON for THE LONDON ...
+  const lead = kept.slice(0, kept.indexOf(first) + 1).join('');
   // A label that is only the first word, or the start of it, is as often
   // another business's domain: london for LONDON CARE LTD.
-  const firstWordOnly = (label: string) => first.startsWith(label);
+  const firstWordOnly = (label: string) =>
+    first.startsWith(label) || lead.startsWith(label);
   const initials = nameInitials(companyName);
   if (
     initials.length >= 3 &&

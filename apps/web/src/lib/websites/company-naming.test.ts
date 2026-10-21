@@ -104,6 +104,13 @@ describe('hostNamesCompany', () => {
     expect(
       hostNamesCompany('www.london.co.uk', 'THE LONDON OFFICE NETWORK LTD'),
     ).toBe(false);
+    // Nor is THE plus the first word, the name's own opening letters or not.
+    expect(
+      hostNamesCompany('www.thelondon.co.uk', 'THE LONDON OFFICE NETWORK LTD'),
+    ).toBe(false);
+    expect(
+      hostNamesCompany('theglobal.co.uk', 'THE GLOBAL LOGISTICS LTD'),
+    ).toBe(false);
     // Running past the first word, the domain is the name.
     expect(hostNamesCompany('www.londoncare.co.uk', 'LONDON CARE LTD')).toBe(
       true,

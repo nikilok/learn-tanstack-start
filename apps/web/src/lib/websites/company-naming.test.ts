@@ -88,6 +88,10 @@ describe('hostNamesCompany', () => {
     expect(
       hostNamesCompany('www.london.co.uk', 'LONDON OFFICE NETWORK LTD'),
     ).toBe(false);
+    // A leading THE is not the first word: the initials skip it too.
+    expect(
+      hostNamesCompany('www.london.co.uk', 'THE LONDON OFFICE NETWORK LTD'),
+    ).toBe(false);
     // Running past the first word, the domain is the name.
     expect(hostNamesCompany('www.londoncare.co.uk', 'LONDON CARE LTD')).toBe(
       true,

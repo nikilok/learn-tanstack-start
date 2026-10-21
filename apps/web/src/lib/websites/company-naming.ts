@@ -153,10 +153,13 @@ function hostLabels(host: string): string[] {
   return labels
     .flatMap((label) => label.split('-'))
     .map((label) => label.toUpperCase().replace(/[^A-Z0-9]/g, ''))
-    .map((label) =>
-      label.startsWith('THE') && label.length > 6 ? label.slice(3) : label,
-    )
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((label) =>
+      // theplbgroup is PLBGROUP, but thermalenergy is not RMALENERGY: keep both.
+      label.startsWith('THE') && label.length > 6
+        ? [label, label.slice(3)]
+        : [label],
+    );
 }
 
 /** Length of the prefix two strings share. */
@@ -170,16 +173,10 @@ function sharedPrefix(a: string, b: string): number {
 export function hostNamesCompany(host: string, companyName: string): boolean {
   const labels = hostLabels(host);
   if (labels.length === 0) return false;
-  const joined = labels.join('');
-  // Three-letter words and initials only at the start of a label, where
-  // they are a name rather than letters inside another word.
+  // Words and initials only at the start of a label, where they are a name
+  // rather than letters inside another word: ROSE is not in primrose.
   const words = nameWords(companyName);
-  if (words.some((w) => w.length >= 4 && joined.includes(w))) return true;
-  if (
-    words.some((w) => w.length === 3 && labels.some((l) => l.startsWith(w)))
-  ) {
-    return true;
-  }
+  if (words.some((w) => labels.some((l) => l.startsWith(w)))) return true;
   const kept = tokens(companyName).filter(
     (word) => word !== 'LIMITED' && word !== 'LTD' && word !== 'PLC',
   );
@@ -217,10 +214,23 @@ export function namesCompany(
   );
 }
 
-/** Whether a page's visible text names the company: every word that says which company it is. */
+/** Slack, in words, for what a page puts between a name's words: "Acme & Co Widgets". */
+const NAME_SPAN_SLACK = 3;
+
+/** Whether a page's visible text names the company: every word that says which company it is, together. */
 export function pageNamesCompany(text: string, companyName: string): boolean {
   const words = nameWords(companyName);
   if (words.length === 0) return false;
-  const page = ` ${text.toUpperCase().replace(/[^A-Z0-9]+/g, ' ')} `;
-  return words.every((word) => page.includes(` ${word} `));
+  const page = text
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .filter(Boolean);
+  // Together, as a name is written: ROSE in one listing and BAKERY in
+  // another are not ROSE BAKERY.
+  const span = words.length + NAME_SPAN_SLACK;
+  return page.some(
+    (token, i) =>
+      words.includes(token) &&
+      words.every((word) => page.slice(i, i + span).includes(word)),
+  );
 }

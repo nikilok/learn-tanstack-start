@@ -37,12 +37,24 @@ describe('hostNamesCompany', () => {
     expect(hostNamesCompany('uk.acme.com', 'ACME LIMITED')).toBe(true);
   });
 
-  test('a three-letter word only where a label starts with it', () => {
+  test('a word only where a label starts with it, not inside another word', () => {
     expect(
       hostNamesCompany('bizengineering.com', 'BIZ ENGINEERING LIMITED'),
     ).toBe(true);
     expect(hostNamesCompany('showbiz.co.uk', 'BIZ ENGINEERING LIMITED')).toBe(
       false,
+    );
+    expect(hostNamesCompany('primrosedental.co.uk', 'ROSE BAKERY LTD')).toBe(
+      false,
+    );
+  });
+
+  test('a leading THE is read both ways: theplbgroup is PLBGROUP, thermalenergy is not RMALENERGY', () => {
+    expect(
+      hostNamesCompany('www.thermalenergy.com', 'THERMAL ENERGY (UK) LTD'),
+    ).toBe(true);
+    expect(hostNamesCompany('www.theacme.co.uk', 'ACME WIDGETS LTD')).toBe(
+      true,
     );
   });
 
@@ -143,6 +155,18 @@ describe('pageNamesCompany', () => {
     expect(
       pageNamesCompany('AcmeWidgets.example', 'ACME WIDGETS LIMITED'),
     ).toBe(false);
+  });
+
+  test('the words together, as a name is written, not scattered across listings', () => {
+    expect(
+      pageNamesCompany(
+        'Rose Garden Florist, Unit 2. Hill Street Bakery, Unit 3.',
+        'ROSE BAKERY LTD',
+      ),
+    ).toBe(false);
+    expect(
+      pageNamesCompany('Rose & Co. Bakery, Unit 2', 'ROSE BAKERY LTD'),
+    ).toBe(true);
   });
 
   test('generic words need not appear', () => {

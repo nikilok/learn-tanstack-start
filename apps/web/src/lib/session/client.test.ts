@@ -4,7 +4,9 @@ import { join } from 'node:path';
 
 import { SESSION_RENEW_SECONDS } from './calls';
 import {
+  createAsk,
   createSession,
+  KEY_WAIT_MS,
   retrySessionCall,
   type SessionDeps,
   type SessionOutcome,
@@ -54,6 +56,8 @@ class Clock {
 /** One scripted ask: what it answers, how long the check holds it, and how long the server takes. */
 type Ask = {
   outcome: SessionOutcome;
+  /** Before it is sent, as when it waits for its device key. */
+  sendMs?: number;
   /** Before the check lets it go; `Infinity`, never. */
   holdMs?: number;
   /** Once it is let go; `Infinity`, never answers. */
@@ -116,7 +120,13 @@ function harness(options: {
       const released = new Promise<void>((resolve) => {
         release = resolve;
       });
+      let markSent = () => {};
+      const sent = new Promise<void>((resolve) => {
+        markSent = resolve;
+      });
       const answer = (async (): Promise<SessionOutcome> => {
+        if (a.sendMs) await clock.sleep(a.sendMs);
+        markSent();
         if (a.holdMs) await clock.sleep(a.holdMs);
         if (a.failsHeld) {
           log.push('answer:failed');
@@ -129,7 +139,7 @@ function harness(options: {
         log.push(`answer:${a.outcome}`);
         return a.outcome;
       })();
-      return { answer, released };
+      return { answer, sent, released };
     },
     wait: async (ms) => {
       log.push(`wait:${ms}`);
@@ -517,6 +527,19 @@ describe('createSession — a slow or stuck browser check', () => {
     },
   );
 
+  test("the hold's bound is timed from when the ask is sent: one that waited for its key and was let go just before the bound still counts", async () => {
+    const h = harness({
+      asks: [{ outcome: 'ok', sendMs: 3000, holdMs: 58_000, serverMs: 1000 }],
+      edge: true,
+    });
+    expect(
+      await settle(h, h.session.fetch('/_serverFn/s-abc', PAGE_CALL)),
+    ).toEqual({
+      result: '200',
+      at: 62_000,
+    });
+  });
+
   test('an ask let go just before the hold bound and answered just after it still counts', async () => {
     const h = harness({
       asks: [{ outcome: 'ok', holdMs: 59_000, serverMs: 2000 }],
@@ -810,5 +833,100 @@ describe('createSession — a /download preview frame', () => {
       at: 70_000,
     });
     expect(h.log.filter((l) => l.startsWith('fetch:'))).toHaveLength(1);
+  });
+});
+
+describe('createAsk', () => {
+  const KEY = 'a'.repeat(32);
+
+  /** One ask over a scripted device key and answer, on virtual time, recording what it sent. */
+  function asking(
+    deviceKey: () => Promise<string | null>,
+    answer: () => Response = () =>
+      new Response(JSON.stringify({ session: 'ok' }), { status: 200 }),
+  ) {
+    const clock = new Clock();
+    const sent: string[] = [];
+    let releases = 0;
+    const ask = createAsk({
+      deviceKey,
+      timeout: (ms) => clock.sleep(ms),
+      post: async (body) => {
+        sent.push(body);
+        return answer();
+      },
+      released: () => {
+        releases++;
+        return new Promise(() => {});
+      },
+    });
+    return { clock, sent, ask, releases: () => releases };
+  }
+
+  test("names the document's device key", async () => {
+    const a = asking(async () => KEY);
+    const { answer } = a.ask();
+    await a.clock.run();
+    expect(await answer).toBe('ok');
+    expect(a.sent).toEqual([JSON.stringify({ key: KEY })]);
+  });
+
+  test('waits for the key up to its bound, then goes without one', async () => {
+    const a = asking(() => new Promise(() => {}));
+    const { answer } = a.ask();
+    await a.clock.run(KEY_WAIT_MS - 1);
+    expect(a.sent).toEqual([]);
+    await a.clock.run();
+    expect(await answer).toBe('ok');
+    expect(a.sent).toEqual(['{}']);
+  });
+
+  test('a key that cannot be computed, or whose computation fails, is none', async () => {
+    for (const deviceKey of [
+      async () => null,
+      async () => {
+        throw new Error('blocked');
+      },
+    ]) {
+      const a = asking(deviceKey);
+      const { answer } = a.ask();
+      await a.clock.run();
+      expect(await answer).toBe('ok');
+      expect(a.sent).toEqual(['{}']);
+    }
+  });
+
+  test('is sent once its key arrives or its wait for one runs out, and not before', async () => {
+    const a = asking(() => new Promise(() => {}));
+    const ask = a.ask();
+    let sent = false;
+    void ask.sent?.then(() => {
+      sent = true;
+    });
+    await a.clock.run(KEY_WAIT_MS - 1);
+    expect(sent).toBe(false);
+    await a.clock.run();
+    expect(sent).toBe(true);
+    expect(a.sent).toEqual(['{}']);
+  });
+
+  test("asks for the check's release as the ask is made, before its key arrives", () => {
+    const a = asking(() => new Promise(() => {}));
+    a.ask();
+    expect(a.releases()).toBe(1);
+    expect(a.sent).toEqual([]);
+  });
+
+  test('an answer that is not a well-formed one fails', async () => {
+    for (const answer of [
+      () => new Response('', { status: 500 }),
+      () => new Response('not json', { status: 200 }),
+      () => new Response(JSON.stringify({ session: 'maybe' }), { status: 200 }),
+    ]) {
+      const a = asking(async () => KEY, answer);
+      const { answer: got } = a.ask();
+      await a.clock.run();
+      expect(await got).toBe('failed');
+    }
   });
 });

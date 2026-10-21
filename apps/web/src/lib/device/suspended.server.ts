@@ -1,21 +1,14 @@
-import { get } from '@vercel/global-config';
-
-/** The Global Config item holding the suspended device keys: a list of keys. */
-export const SUSPENDED_KEYS_ITEM = 'suspendedDeviceKeys';
-
-/** Reads the list; undefined when no Global Config is connected (local runs, tests). */
-export type ReadSuspended = () => Promise<unknown>;
-
-const readSuspended: ReadSuspended = async () => {
-  if (!process.env.GLOBAL_CONFIG && !process.env.EDGE_CONFIG) return undefined;
-  return get(SUSPENDED_KEYS_ITEM);
-};
+import {
+  type ReadSuspended,
+  readSuspended,
+  suspendedKeysOf,
+} from './suspended';
 
 /**
- * Whether a device key is suspended from the company extras: listed under
- * SUSPENDED_KEYS_ITEM. False whenever the list cannot be read (no store
- * connected, a failed read, a value that is not a list), so a store that is
- * down or misconfigured suspends nobody. Never throws.
+ * Whether a device key is suspended from the company extras: listed under SUSPENDED_KEYS_ITEM
+ * (`suspended.ts`). False whenever the list cannot be read (no store connected, a failed read, a
+ * value that is not a list), so a store that is down or misconfigured suspends nobody. Read afresh
+ * on every call. Never throws.
  */
 export async function isSuspended(
   key: string,
@@ -31,5 +24,5 @@ export async function isSuspended(
     );
     return false;
   }
-  return Array.isArray(list) && list.includes(key);
+  return suspendedKeysOf(list).has(key);
 }

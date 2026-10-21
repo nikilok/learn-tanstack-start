@@ -1,5 +1,6 @@
 import { ENGAGED_FLAG, ENGAGED_HOOK } from '../../scripts/engagement-init';
 import { isDesktopPreview } from '../../utils/desktop-preview';
+import { documentDeviceKey } from './document-key';
 import { createPinger } from './key';
 import { createReadiness } from './readiness';
 
@@ -32,7 +33,7 @@ export function noteCompanyView(): void {
   pinger.view();
 }
 
-/** Boots the device-keyed pings once per document, from a root effect; the key computation is deferred to idle so hydration never waits on it. The /download preview iframes stay out, as with every telemetry channel, and leave the extras readiness off. */
+/** Boots the device-keyed pings once per document, from a root effect; the key computation is deferred to idle so hydration never waits on it, unless the session ask, also made after hydration, has started it first (`documentDeviceKey`). The /download preview iframes stay out, as with every telemetry channel, and leave the extras readiness off. */
 export function initDeviceBeacons(): void {
   if (booted) return;
   booted = true;
@@ -53,22 +54,15 @@ export function initDeviceBeacons(): void {
   pinger.present();
 
   const start = () => {
-    import('./setup')
-      .then(({ computeDeviceKey }) => computeDeviceKey())
-      .then(
-        (key) => {
-          if (key === null) {
-            readiness.off();
-            return;
-          }
-          readiness.key(key);
-          pinger.ready(key);
-        },
-        () => {
-          // A failed import sends nothing, like a failed computation.
-          readiness.off();
-        },
-      );
+    // Computed once per document, the session ask may have asked for it already; it never rejects.
+    void documentDeviceKey().then((key) => {
+      if (key === null) {
+        readiness.off();
+        return;
+      }
+      readiness.key(key);
+      pinger.ready(key);
+    });
   };
   if (typeof window.requestIdleCallback === 'function') {
     window.requestIdleCallback(start, { timeout: 4000 });

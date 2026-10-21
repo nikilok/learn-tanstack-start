@@ -11,9 +11,14 @@ export const SESSION_RENEW_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * A readable cookie beside it holding only the session's expiry (epoch seconds), so a /download
- * preview frame can tell its page holds one. Not a credential.
+ * preview frame can tell its page holds one. Not a credential. Renamed when sessions began naming
+ * their device (`token.ts`), so every browser asks once and its session comes to name its device:
+ * under the old name, a session issued before then would not be asked for again for weeks.
  */
-export const SESSION_HINT_COOKIE = 'ss-session-hint';
+export const SESSION_HINT_COOKIE = 'ss-session-expiry';
+
+/** The hint's earlier name: cleared wherever the hint is set or cleared, so no browser keeps both. */
+export const LEGACY_SESSION_HINT_COOKIE = 'ss-session-hint';
 
 /**
  * The query parameter the edge adds when it serves a company document as the app shell. The

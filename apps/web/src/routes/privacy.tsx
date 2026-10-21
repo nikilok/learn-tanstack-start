@@ -21,7 +21,7 @@ function PrivacyPolicy() {
   return (
     <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_a]:text-(--link-blue) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:mt-2 [&_li]:leading-relaxed [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6">
       <h1>Privacy Policy</h1>
-      <p className="text-(--sea-ink-soft)">Last updated: 11 October 2026</p>
+      <p className="text-(--sea-ink-soft)">Last updated: 21 October 2026</p>
 
       <h2>Who we are</h2>
       <p>
@@ -68,10 +68,10 @@ function PrivacyPolicy() {
           site and our hosting provider&apos;s browser check set strictly
           necessary security cookies. Ours are <code>ss-session</code>, a signed
           token tied to your network address that lets search results and
-          company pages load, and <code>ss-session-hint</code>, which holds only
-          that token&apos;s expiry time; both last up to 30 days, and we keep no
-          record of them on our servers. None of these cookies is used for
-          analytics, advertising or tracking.
+          company pages load, and <code>ss-session-expiry</code>, which holds
+          only that token&apos;s expiry time; both last up to 30 days, and we
+          keep no record of them on our servers. None of these cookies is used
+          for analytics, advertising or tracking.
         </li>
         <li>
           <strong>Preferences.</strong> Your light/dark mode choice, and whether

@@ -1,6 +1,7 @@
 import { next, rewrite } from '@vercel/edge';
 
 import { BROWSER_CHECK_PATH } from './src/lib/device/browser-check-config';
+import { sessionSuspendedKeys } from './src/lib/device/suspended';
 import {
   CLIENT_RENDER,
   RENDER_PARAM,
@@ -118,6 +119,7 @@ async function decision(request: Request) {
     ranges: await crawlerRanges(),
     secret: sessionSecret(),
     owner: await ownerRequest(request.headers),
+    suspended: await sessionSuspendedKeys(),
   });
 }
 

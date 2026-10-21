@@ -64,12 +64,19 @@ export type Decision =
     }
   | {
       render: 'client';
-      why: 'no session' | 'expired' | 'elsewhere' | 'malformed' | 'unverified';
+      why:
+        | 'no session'
+        | 'expired'
+        | 'elsewhere'
+        | 'malformed'
+        | 'unverified'
+        | 'suspended';
     };
 
 /**
  * Decides whether one session call goes through: whatever would be served the full document goes
- * through (`decideDocument`), and anyone else by the session cookie held for their address.
+ * through (`decideDocument`), and anyone else by the session cookie held for their address — unless
+ * the device it was issued to has since been put on the sessions' list (`device/suspended.ts`).
  * Never throws.
  */
 export async function decide(input: {
@@ -77,9 +84,11 @@ export async function decide(input: {
   ranges: Ranges | null;
   secret: string | undefined;
   owner?: boolean;
+  /** The device keys refused a session (`sessionSuspendedKeys`); none when absent. */
+  suspended?: ReadonlySet<string>;
   now?: number;
 }): Promise<Decision> {
-  const { headers, ranges, secret, owner = false, now } = input;
+  const { headers, ranges, secret, owner = false, suspended, now } = input;
   const document = decideDocument({ headers, ranges, owner });
   if (document.render === 'server') return document;
   // A visitor: `decideDocument` has placed their address, and so given it a scope.
@@ -94,9 +103,11 @@ export async function decide(input: {
   });
   switch (session.status) {
     case 'valid':
-      return session.standing === 'person'
-        ? { render: 'server', why: 'session' }
-        : { render: 'client', why: 'unverified' };
+      if (session.standing !== 'person')
+        return { render: 'client', why: 'unverified' };
+      return session.device !== null && suspended?.has(session.device)
+        ? { render: 'client', why: 'suspended' }
+        : { render: 'server', why: 'session' };
     case 'absent':
       return { render: 'client', why: 'no session' };
     default:

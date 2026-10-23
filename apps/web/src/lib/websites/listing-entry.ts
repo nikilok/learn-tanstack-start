@@ -26,9 +26,9 @@ export const NEAR_POSTCODE = 200;
 const ANY_POSTCODE =
   /(?<![A-Z0-9])[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}(?![A-Z0-9])/g;
 
-/** A domain as a page writes one, alone, in a URL or after an email's `@`. */
+/** A domain as a page writes one, alone, in a URL or after an email's `@`: labels, then a top-level domain of letters. */
 const WRITTEN_SITE =
-  /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+(?:CO\.UK|ORG\.UK|UK|COM|NET|ORG|IO|CO|BIZ|INFO|EU|IE))(?![A-Z0-9-])/g;
+  /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-])/g;
 
 /** Whether the page lists the company among other businesses, giving it another website beside its postcode. */
 export function isListingEntry(

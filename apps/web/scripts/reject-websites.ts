@@ -48,6 +48,11 @@ if (!listFile || (apply && !backupFile)) {
   console.error('  --list is required, and --apply needs --backup');
   process.exit(1);
 }
+// A re-run's backup would hold rows the first run already changed.
+if (apply && (await Bun.file(backupFile as string).exists())) {
+  console.error(`  ${backupFile} already exists; use a new --backup path`);
+  process.exit(1);
+}
 
 type Rejection = { companyNumber: string; url: string };
 const list = (await Bun.file(listFile).json()) as Rejection[];

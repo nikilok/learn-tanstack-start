@@ -354,6 +354,12 @@ describe('readWalkPage', () => {
         new Set(),
       ),
     ).toMatchObject({ postcodeFound: true, pageNamed: true });
+    // Whatever top-level domain the listing gives the company's site under.
+    const dev = exhibitors.replace('acmewidgets.co.uk', 'acmewidgets.dev');
+    expect(readHomepage(row, url, url, dev, new Set())).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+    });
   });
 
   test('a disclosure path that redirects into a register proves nothing', () => {

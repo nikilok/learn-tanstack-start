@@ -35,6 +35,18 @@ describe('isListingEntry', () => {
     expect(isListingEntry(conference, written, postcode, names)).toBe(true);
   });
 
+  test('a site under any top-level domain, written or as an email', () => {
+    for (const entry of [
+      'W: elmbanknutrition.dev',
+      'E: hello@elmbanknutrition.london',
+    ]) {
+      const page = exhibitors(
+        `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\n${entry}`,
+      );
+      expect(isListingEntry(conference, page, postcode, names)).toBe(true);
+    }
+  });
+
   test("the company's own site may give its other domains, and a host that names it is its own", () => {
     // A brand site whose email is on the legal name's domain: one address.
     const brand =

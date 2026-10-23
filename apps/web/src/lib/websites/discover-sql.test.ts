@@ -6,15 +6,15 @@ import { makeCrowdedHosts, makeSelectUndiscovered } from './discover-sql';
 type Captured = { text: string; params: unknown[] };
 
 /** Fake tagged-template sql client: records each call's text (with $n
- *  placeholders) and params, resolves with no rows. */
-function makeFakeSql() {
+ *  placeholders) and params, resolves with the given rows. */
+function makeFakeSql(result: Record<string, unknown>[] = []) {
   const calls: Captured[] = [];
   const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings
       .map((s, i) => (i < values.length ? `${s}$${i + 1}` : s))
       .join('');
     calls.push({ text, params: values });
-    return Promise.resolve([]);
+    return Promise.resolve(result);
   }) as unknown as Parameters<typeof makeSelectUndiscovered>[0];
   return { sql, calls };
 }
@@ -47,6 +47,29 @@ describe('makeSelectUndiscovered', () => {
     const { sql, calls } = makeFakeSql();
     await makeSelectUndiscovered(sql)(300);
     expect(boundShard(calls[0])).toEqual({ count: 1, index: 0 });
+  });
+
+  test("reads the sponsor register's names, which a site may name the company by", async () => {
+    const { sql, calls } = makeFakeSql([
+      {
+        company_number: '03260168',
+        company_name: 'ACME WIDGETS LIMITED',
+        sponsor_names: ['Acme Widgets Ltd T/A Acme Dental'],
+      },
+      {
+        company_number: '03260169',
+        company_name: 'ACME TWO LIMITED',
+        sponsor_names: null,
+      },
+    ]);
+    const rows = await makeSelectUndiscovered(sql)(10);
+    expect(calls[0].text.replace(/\s+/g, ' ')).toContain(
+      'FROM hmrc_company_mapping s WHERE s.company_number = m.company_number',
+    );
+    expect(rows.map((r) => r.sponsorNames)).toEqual([
+      ['Acme Widgets Ltd T/A Acme Dental'],
+      [],
+    ]);
   });
 
   test('filters before ordering and limiting', async () => {

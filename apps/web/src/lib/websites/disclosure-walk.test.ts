@@ -130,9 +130,33 @@ describe('readHomepage', () => {
   const row = {
     companyNumber: '03260168',
     companyName: 'ACME WIDGETS LIMITED',
+    sponsorNames: [] as string[],
     postcode: 'SO22 5AZ',
   };
   const address = '<p>Our offices: Unit 4, Winchester SO22 5AZ</p>';
+
+  test("a homepage under the sponsor register's trading name names the company", () => {
+    const trading = {
+      ...row,
+      sponsorNames: ['Acme Widgets Ltd T/A Elmbank Dental'],
+    };
+    const read = (r: typeof row) =>
+      readHomepage(
+        r,
+        'https://elmbankdental.co.uk',
+        'https://elmbankdental.co.uk/',
+        address,
+        new Set(),
+      );
+    expect(read(trading)).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: true,
+    });
+    expect(read(row)).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+    });
+  });
 
   test('keeps the URL asked for and takes the evidence from the page served', () => {
     expect(
@@ -179,11 +203,29 @@ describe('readWalkPage', () => {
   const row = {
     companyNumber: '03260168',
     companyName: 'ACME WIDGETS LIMITED',
+    sponsorNames: [] as string[],
     postcode: 'SO22 5AZ',
   };
   const footer =
     '<footer>Acme Widgets Ltd. Company No. 03260168, SO22 5AZ</footer>';
   const address = '<p>Our offices: Unit 4, Winchester SO22 5AZ</p>';
+
+  test("a walked page in the sponsor register's trading name names the company", () => {
+    const trading = {
+      ...row,
+      sponsorNames: ['Acme Widgets Ltd T/A Elmbank Dental'],
+    };
+    const html = '<p>Elmbank Dental, Unit 4, Winchester SO22 5AZ</p>';
+    const url = 'https://bookings.example.co.uk/contact';
+    expect(readWalkPage(trading, url, html, new Set())).toMatchObject({
+      postcodeFound: true,
+      pageNamed: true,
+    });
+    expect(readWalkPage(row, url, html, new Set())).toMatchObject({
+      postcodeFound: true,
+      pageNamed: false,
+    });
+  });
 
   test('a page served from a host carrying the name names it, whatever it says', () => {
     expect(

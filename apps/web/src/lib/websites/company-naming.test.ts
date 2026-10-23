@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  hostIsWholeName,
   hostNamesCompany,
   nameInitials,
   namesCompany,
   nameWords,
+  pageHasWholeName,
   pageNamesCompany,
+  registerNames,
 } from './company-naming';
 
 describe('nameWords', () => {
@@ -129,21 +132,166 @@ describe('hostNamesCompany', () => {
 });
 
 describe('namesCompany', () => {
-  const name = 'ACME WIDGETS LIMITED';
+  const names = { companyName: 'ACME WIDGETS LIMITED', sponsorNames: [] };
 
   test('a page whose text names the company, whatever host served it', () => {
     expect(
-      namesCompany('contractor.co.uk', 'Acme Widgets Ltd, SO22 5AZ', name),
+      namesCompany('contractor.co.uk', 'Acme Widgets Ltd, SO22 5AZ', names),
     ).toBe(true);
   });
 
   test('a page served from a host carrying the name, whatever it says', () => {
-    expect(namesCompany('acmewidgets.co.uk', 'SO22 5AZ', name)).toBe(true);
+    expect(namesCompany('acmewidgets.co.uk', 'SO22 5AZ', names)).toBe(true);
   });
 
   test("another business's page names neither way", () => {
     expect(
-      namesCompany('contractor.co.uk', 'Our offices: SO22 5AZ', name),
+      namesCompany('contractor.co.uk', 'Our offices: SO22 5AZ', names),
+    ).toBe(false);
+  });
+
+  // A clinic trading under its sponsor-register name, which never shows the
+  // registered one: rejected until the register's names counted.
+  const trading = {
+    companyName: 'FENWICK CHIROPRACTIC LTD',
+    sponsorNames: ['Fenwick Chiropractic Ltd T/A Elmbank Chiropractic Clinic'],
+  };
+
+  test("a site under the sponsor register's trading name, by its host", () => {
+    const text = 'Book online. 209 High Road, SO22 5AZ';
+    expect(namesCompany('www.elmbankchiropractic.co.uk', text, trading)).toBe(
+      true,
+    );
+    expect(
+      namesCompany('www.elmbankchiropractic.co.uk', text, {
+        ...trading,
+        sponsorNames: [],
+      }),
+    ).toBe(false);
+  });
+
+  test("a site under the sponsor register's trading name, in its text", () => {
+    expect(
+      namesCompany(
+        'www.clinic-bookings.co.uk',
+        'Elmbank Chiropractic Clinic, 209 High Road, SO22 5AZ',
+        trading,
+      ),
+    ).toBe(true);
+  });
+
+  test('a name of short or generic words, by the whole name', () => {
+    const shortName = { companyName: 'QX ASSOCIATES LTD', sponsorNames: [] };
+    expect(
+      hostNamesCompany('www.qx-associates.co.uk', 'QX ASSOCIATES LTD'),
+    ).toBe(false);
+    expect(namesCompany('www.qx-associates.co.uk', 'SO22 5AZ', shortName)).toBe(
+      true,
+    );
+    expect(
+      namesCompany(
+        'www.example.co.uk',
+        'QX Associates Limited, SO22 5AZ',
+        shortName,
+      ),
+    ).toBe(true);
+  });
+
+  test("the register's names still need the page to carry one", () => {
+    expect(
+      namesCompany('contractor.co.uk', 'Our offices: SO22 5AZ', {
+        ...names,
+        sponsorNames: ['Acme Widgets Ltd T/A Acme Dental'],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('registerNames', () => {
+  test('splits an entry at its trading name', () => {
+    expect(
+      registerNames('Fenwick Chiropractic Ltd T/A Elmbank Chiropractic Clinic'),
+    ).toEqual(['Fenwick Chiropractic Ltd', 'Elmbank Chiropractic Clinic']);
+    expect(registerNames('Acme Ltd trading as Acme Dental')).toEqual([
+      'Acme Ltd',
+      'Acme Dental',
+    ]);
+    expect(registerNames('Acme Ltd (t/a Acme Dental)')).toEqual([
+      'Acme Ltd',
+      'Acme Dental',
+    ]);
+    expect(registerNames('Acme Widgets LLP | Acme Services LLP')).toEqual([
+      'Acme Widgets LLP',
+      'Acme Services LLP',
+    ]);
+  });
+
+  test('leaves a name without one, or with the letters inside words, whole', () => {
+    expect(registerNames('ACME WIDGETS LIMITED')).toEqual([
+      'ACME WIDGETS LIMITED',
+    ]);
+    expect(registerNames('ACME TRADING ASSOCIATES LTD')).toEqual([
+      'ACME TRADING ASSOCIATES LTD',
+    ]);
+    expect(registerNames('BEST/ACME LTD')).toEqual(['BEST/ACME LTD']);
+  });
+});
+
+describe('hostIsWholeName', () => {
+  test('a domain that is the whole name run together', () => {
+    expect(
+      hostIsWholeName('www.qx-associates.co.uk', 'QX ASSOCIATES LTD'),
+    ).toBe(true);
+    expect(hostIsWholeName('7b.co.uk', '7B LIMITED')).toBe(true);
+    expect(
+      hostIsWholeName('qxassociates.com', 'THE QX ASSOCIATES (U.K.) LIMITED'),
+    ).toBe(true);
+  });
+
+  test('only the whole name', () => {
+    expect(hostIsWholeName('qx.co.uk', 'QX ASSOCIATES LTD')).toBe(false);
+    expect(
+      hostIsWholeName('qxassociatesgroup.co.uk', 'QX ASSOCIATES LTD'),
+    ).toBe(false);
+  });
+
+  test('a name of only generic words names nothing', () => {
+    expect(
+      hostIsWholeName('global-solutions.co.uk', 'GLOBAL SOLUTIONS LTD'),
+    ).toBe(false);
+  });
+});
+
+describe('pageHasWholeName', () => {
+  test('the whole name as one phrase, spaced or run together', () => {
+    expect(pageHasWholeName('Welcome to Starcare PLC', 'STAR CARE PLC')).toBe(
+      true,
+    );
+    expect(pageHasWholeName('Star-Care homes', 'STAR CARE PLC')).toBe(true);
+    expect(
+      pageHasWholeName('I-AM Associates, London', 'I AM ASSOCIATES LIMITED'),
+    ).toBe(true);
+    expect(
+      pageHasWholeName('The Rose & Crown, Unit 2', 'ROSE AND CROWN LTD'),
+    ).toBe(true);
+  });
+
+  test('never inside another word, across a line or a wider gap', () => {
+    expect(pageHasWholeName('AQX Associates', 'QX ASSOCIATES LTD')).toBe(false);
+    expect(pageHasWholeName('QX Associateship', 'QX ASSOCIATES LTD')).toBe(
+      false,
+    );
+    expect(pageHasWholeName('Star\nCare homes', 'STAR CARE PLC')).toBe(false);
+    expect(pageHasWholeName('Star -- Care homes', 'STAR CARE PLC')).toBe(false);
+  });
+
+  test('a name too short, or only generic, says nothing on a page', () => {
+    expect(pageHasWholeName('Unit 7B, High Street', '7B LIMITED')).toBe(false);
+    expect(
+      pageHasWholeName(
+        'Global solutions for every business',
+        'GLOBAL SOLUTIONS LTD',
+      ),
     ).toBe(false);
   });
 });

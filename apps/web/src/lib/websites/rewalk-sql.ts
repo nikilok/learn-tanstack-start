@@ -32,6 +32,9 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
     companyName: (r.company_name as string | null) ?? '',
+    sponsorNames: Array.isArray(r.sponsor_names)
+      ? (r.sponsor_names as string[])
+      : [],
     postcode: (r.postal_code as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
@@ -55,6 +58,10 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
         await sql`
           SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
             coalesce(p.company_name, '') AS company_name,
+            ARRAY(
+              SELECT s.organisation_name FROM hmrc_company_mapping s
+              WHERE s.company_number = w.company_number
+            ) AS sponsor_names,
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
@@ -76,6 +83,10 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       await sql`
         SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
           coalesce(p.company_name, '') AS company_name,
+          ARRAY(
+            SELECT s.organisation_name FROM hmrc_company_mapping s
+            WHERE s.company_number = w.company_number
+          ) AS sponsor_names,
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)

@@ -12,6 +12,7 @@ import { discoverWebsites, SEARCH_FAILURE_STREAK } from './discover-sweep';
 const row = (over: Partial<DiscoveryRow> = {}): DiscoveryRow => ({
   companyNumber: '03260168',
   companyName: 'BRENDONCARE FOUNDATION LIMITED',
+  sponsorNames: [],
   town: 'Winchester',
   postcode: 'SO22 5AZ',
   bankedCandidates: null,

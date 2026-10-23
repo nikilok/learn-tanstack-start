@@ -36,6 +36,7 @@ const flat = (text: string) => text.replace(/\s+/g, ' ');
 const noneRow: RewalkRow = {
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -180,6 +181,26 @@ describe('makeSelectRewalk', () => {
       expect(rows.map((r) => r.companyName)).toEqual([
         'ACME WIDGETS LIMITED',
         '',
+      ]);
+    }
+  });
+
+  test("reads the sponsor register's names, which a postcode match may find instead", async () => {
+    for (const selection of [{}, { seed: 's' }]) {
+      const { sql, calls } = makeFakeSql([
+        {
+          company_number: '03260168',
+          sponsor_names: ['Acme Widgets Ltd T/A Acme Dental'],
+        },
+        { company_number: '03260169', sponsor_names: null },
+      ]);
+      const rows = await makeSelectRewalk(sql, selection)(10);
+      expect(flat(calls[0].text)).toContain(
+        'FROM hmrc_company_mapping s WHERE s.company_number = w.company_number',
+      );
+      expect(rows.map((r) => r.sponsorNames)).toEqual([
+        ['Acme Widgets Ltd T/A Acme Dental'],
+        [],
       ]);
     }
   });

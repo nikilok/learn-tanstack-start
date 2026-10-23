@@ -23,6 +23,8 @@ export type RewalkRow = {
   companyNumber: string;
   /** Companies House name, which a postcode match must find on the site. */
   companyName: string;
+  /** Sponsor-register entries, which a postcode match may find instead. */
+  sponsorNames: string[];
   postcode: string | null;
   evidence: 'none' | 'postcode_on_page';
   /** The stored site; null on a `none` row. */
@@ -102,6 +104,7 @@ function asDiscoveryRow(row: RewalkRow): DiscoveryRow {
   return {
     companyNumber: row.companyNumber,
     companyName: row.companyName,
+    sponsorNames: row.sponsorNames,
     town: '',
     postcode: row.postcode,
     bankedCandidates: row.candidates,

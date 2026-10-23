@@ -7,7 +7,7 @@
  * guesses.
  */
 
-import { namesCompany } from './company-naming';
+import { type CompanyNames, namesCompany } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
 import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
@@ -95,9 +95,15 @@ export function walkTargets(
   return [...extra, ...paths];
 }
 
+/** The row fields a candidate's pages are read against. */
+type ProbeRow = CompanyNames & {
+  companyNumber: string;
+  postcode: string | null;
+};
+
 /** What a candidate's homepage proves, read off the page its URL served. */
 export function readHomepage(
-  row: { companyNumber: string; companyName: string; postcode: string | null },
+  row: ProbeRow,
   url: string,
   servedUrl: string,
   html: string,
@@ -127,7 +133,7 @@ export function readHomepage(
     postcodeFound,
     // Named by the serving host too: a named domain that redirects to another
     // business serves that business's page.
-    postcodeNamed: postcodeFound && namesCompany(host, text, row.companyName),
+    postcodeNamed: postcodeFound && namesCompany(host, text, row),
     onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(html, servedUrl),
@@ -147,7 +153,7 @@ export type WalkPage = {
 
 /** What one walked page proves; null when it was served from a directory. */
 export function readWalkPage(
-  row: { companyNumber: string; companyName: string; postcode: string | null },
+  row: ProbeRow,
   pageUrl: string,
   html: string,
   crowded: ReadonlySet<string>,
@@ -165,7 +171,7 @@ export function readWalkPage(
     crnFound: pageHasCompanyNumber(html, row.companyNumber),
     postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
     // Judged on this page's own host: a walked path can redirect off the site.
-    pageNamed: namesCompany(host, visibleText(html), row.companyName),
+    pageNamed: namesCompany(host, visibleText(html), row),
     stated: statedOnPage(pageUrl, html),
   };
 }

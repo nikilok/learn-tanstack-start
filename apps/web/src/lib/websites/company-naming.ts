@@ -4,8 +4,17 @@
  * A postcode identifies an address, not a company: a contractor's on-site
  * office, a neighbour in the same business centre and another company
  * registered at the same office all show it. So a postcode only proves a site
- * when the page showing it names the company, by its host or in its text.
+ * when the page showing it names the company, by its host or in its text:
+ * by its registered name, or a name the sponsor register lists for it.
  */
+
+/** The names a site may use for a company. */
+export type CompanyNames = {
+  /** Companies House name. */
+  companyName: string;
+  /** Sponsor-register entries for the company, trading names included. */
+  sponsorNames: readonly string[];
+};
 
 /** Words that say what kind of company it is, never which one. */
 const LEGAL = new Set([
@@ -142,15 +151,20 @@ export function nameInitials(companyName: string): string {
     .join('');
 }
 
-/** The host's own labels, upper-cased: no `www`, top-level or second-level domain. */
-function hostLabels(host: string): string[] {
+/** The host's own labels: no `www`, top-level or second-level domain. */
+function ownLabels(host: string): string[] {
   const labels = host.toLowerCase().replace(/\.$/, '').split('.');
   if (labels[0] === 'www') labels.shift();
   if (labels.length > 1) labels.pop();
   if (labels.length > 1 && SECOND_LEVEL.has(labels[labels.length - 1])) {
     labels.pop();
   }
-  return labels
+  return labels;
+}
+
+/** The host's own labels, upper-cased and split at hyphens. */
+function hostLabels(host: string): string[] {
+  return ownLabels(host)
     .flatMap((label) => label.split('-'))
     .map((label) => label.toUpperCase().replace(/[^A-Z0-9]/g, ''))
     .filter(Boolean)
@@ -203,17 +217,96 @@ export function hostNamesCompany(host: string, companyName: string): boolean {
   );
 }
 
+/** A sponsor-register entry's names: ACME LTD T/A ACME DENTAL is both. */
+export function registerNames(organisationName: string): string[] {
+  return organisationName
+    .split(/\bt\s*\/\s*a\b|\btrading\s+as\b|\|/i)
+    .map((part) => part.replace(/^[\s()]+|[\s()]+$/g, ''))
+    .filter((part) => tokens(part).length > 0);
+}
+
+/** Every name to look for: the registered one first, then the register's, once each. */
+function namesOf(names: CompanyNames): string[] {
+  const seen = new Set<string>();
+  return [
+    names.companyName,
+    ...names.sponsorNames.flatMap(registerNames),
+  ].filter((name) => {
+    const key = tokens(name).join(' ');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Form words a written name drops: SK ASSOCIATES for SK ASSOCIATES LTD. */
+const FORM = new Set([
+  'LIMITED',
+  'LTD',
+  'PLC',
+  'LLP',
+  'LLC',
+  'CIC',
+  'INC',
+  'UK',
+]);
+
+/** A name's words as a site writes it: no form words, no leading THE. */
+function writtenName(name: string): string[] {
+  const words = tokens(name.replace(/\bU\.\s?K\b\.?/gi, 'UK')).filter(
+    (word) => !FORM.has(word),
+  );
+  return words[0] === 'THE' ? words.slice(1) : words;
+}
+
+/** Whether a written name says which company it is: not only generic and legal words. */
+function distinctive(words: readonly string[]): boolean {
+  return words.some((word) => !GENERIC.has(word) && !LEGAL.has(word));
+}
+
+/** Whether a domain label is the whole name run together: sk-associates for SK ASSOCIATES LTD. */
+export function hostIsWholeName(host: string, name: string): boolean {
+  const words = writtenName(name);
+  if (!distinctive(words)) return false;
+  const whole = words.join('');
+  return ownLabels(host).some(
+    (label) => label.toUpperCase().replace(/[^A-Z0-9]/g, '') === whole,
+  );
+}
+
+/** Letters a whole name needs before its phrase on a page means anything: 6A does not. */
+const MIN_WHOLE_NAME = 5;
+
+/** Whether a page writes the whole name as one phrase, spaced or run together: Angelcare for ANGEL CARE PLC. */
+export function pageHasWholeName(text: string, name: string): boolean {
+  const words = writtenName(name);
+  if (!distinctive(words) || words.join('').length < MIN_WHOLE_NAME) {
+    return false;
+  }
+  // One separator at most between words, never a line break: a phrase, not
+  // two blocks of text that happen to meet.
+  const phrase = words
+    .map((word) => (word === 'AND' ? '(?:AND|&)' : word))
+    .join("[ .'’&-]?");
+  return new RegExp(`(?<![A-Z0-9])${phrase}(?![A-Z0-9])`).test(
+    text.toUpperCase().replace(/[^\S\n]+/g, ' '),
+  );
+}
+
 /** Whether a fetched page names the company: by the host that served it, or in its text. */
 export function namesCompany(
   servedHost: string,
   text: string,
-  companyName: string,
+  names: CompanyNames,
 ): boolean {
   // The serving host, not the one asked for: a named domain that redirects
   // to another business serves that business's page.
-  return (
-    hostNamesCompany(servedHost, companyName) ||
-    pageNamesCompany(text, companyName)
+  return namesOf(names).some(
+    (name) =>
+      hostNamesCompany(servedHost, name) ||
+      hostIsWholeName(servedHost, name) ||
+      pageNamesCompany(text, name) ||
+      pageHasWholeName(text, name),
   );
 }
 

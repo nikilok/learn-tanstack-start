@@ -13,6 +13,7 @@ import type { StatedOnSite } from './stated-numbers';
 const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -24,6 +25,7 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
 const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',

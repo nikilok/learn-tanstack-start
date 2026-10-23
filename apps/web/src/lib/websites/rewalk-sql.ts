@@ -11,12 +11,17 @@ import {
   type RewalkRow,
 } from './rewalk';
 import { type Shard, WHOLE_SET } from './shard';
+import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
-type Sql = (
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-) => Promise<Record<string, unknown>[]>;
+type Sql = {
+  (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ): Promise<Record<string, unknown>[]>;
+  /** Constant SQL text spliced in as written, never a value. */
+  unsafe(rawSql: string): unknown;
+};
 
 /** Which settled rows to re-walk. */
 export type RewalkSelection = {
@@ -32,9 +37,7 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
     companyName: (r.company_name as string | null) ?? '',
-    sponsorNames: Array.isArray(r.sponsor_names)
-      ? (r.sponsor_names as string[])
-      : [],
+    sponsorNames: sponsorNamesOf(r),
     postcode: (r.postal_code as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
@@ -58,10 +61,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
         await sql`
           SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
             coalesce(p.company_name, '') AS company_name,
-            ARRAY(
-              SELECT s.organisation_name FROM hmrc_company_mapping s
-              WHERE s.company_number = w.company_number
-            ) AS sponsor_names,
+            ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
@@ -83,10 +83,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       await sql`
         SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
           coalesce(p.company_name, '') AS company_name,
-          ARRAY(
-            SELECT s.organisation_name FROM hmrc_company_mapping s
-            WHERE s.company_number = w.company_number
-          ) AS sponsor_names,
+          ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)

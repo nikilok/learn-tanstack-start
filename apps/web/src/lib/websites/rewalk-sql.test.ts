@@ -14,20 +14,30 @@ import {
   makeSelectRewalk,
   makeUpgrade,
 } from './rewalk-sql';
+import { SPONSOR_NAMES_COLUMN } from './sponsor-names';
 import type { StatedOnSite } from './stated-numbers';
 
 type Captured = { text: string; params: unknown[] };
 
-/** Fake tagged-template client: records each call's text ($n placeholders) and params. */
+/** A raw fragment as the fake client holds it. */
+type Raw = { raw: string };
+const isRaw = (value: unknown): value is Raw =>
+  typeof value === 'object' && value !== null && 'raw' in value;
+
+/** Fake tagged-template client: records each call's text ($n placeholders, raw fragments spliced in as the driver does) and params. */
 function makeFakeSql(result: Record<string, unknown>[] = []) {
   const calls: Captured[] = [];
   const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    const text = strings
-      .map((s, i) => (i < values.length ? `${s}$${i + 1}` : s))
-      .join('');
-    calls.push({ text, params: values });
+    let text = strings[0];
+    const params: unknown[] = [];
+    values.forEach((value, i) => {
+      text += isRaw(value) ? value.raw : `$${params.push(value)}`;
+      text += strings[i + 1];
+    });
+    calls.push({ text, params });
     return Promise.resolve(result);
   }) as unknown as Parameters<typeof makeUpgrade>[0];
+  sql.unsafe = (raw: string): Raw => ({ raw });
   return { sql, calls };
 }
 
@@ -195,9 +205,7 @@ describe('makeSelectRewalk', () => {
         { company_number: '03260169', sponsor_names: null },
       ]);
       const rows = await makeSelectRewalk(sql, selection)(10);
-      expect(flat(calls[0].text)).toContain(
-        'FROM hmrc_company_mapping s WHERE s.company_number = w.company_number',
-      );
+      expect(calls[0].text).toContain(SPONSOR_NAMES_COLUMN);
       expect(rows.map((r) => r.sponsorNames)).toEqual([
         ['Acme Widgets Ltd T/A Acme Dental'],
         [],

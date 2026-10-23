@@ -2,20 +2,31 @@ import { describe, expect, test } from 'bun:test';
 
 import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import { makeCrowdedHosts, makeSelectUndiscovered } from './discover-sql';
+import { SPONSOR_NAMES_COLUMN } from './sponsor-names';
 
 type Captured = { text: string; params: unknown[] };
 
+/** A raw fragment as the fake client holds it. */
+type Raw = { raw: string };
+const isRaw = (value: unknown): value is Raw =>
+  typeof value === 'object' && value !== null && 'raw' in value;
+
 /** Fake tagged-template sql client: records each call's text (with $n
- *  placeholders) and params, resolves with the given rows. */
+ *  placeholders, raw fragments spliced in as the driver does) and params,
+ *  resolves with the given rows. */
 function makeFakeSql(result: Record<string, unknown>[] = []) {
   const calls: Captured[] = [];
   const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    const text = strings
-      .map((s, i) => (i < values.length ? `${s}$${i + 1}` : s))
-      .join('');
-    calls.push({ text, params: values });
+    let text = strings[0];
+    const params: unknown[] = [];
+    values.forEach((value, i) => {
+      text += isRaw(value) ? value.raw : `$${params.push(value)}`;
+      text += strings[i + 1];
+    });
+    calls.push({ text, params });
     return Promise.resolve(result);
   }) as unknown as Parameters<typeof makeSelectUndiscovered>[0];
+  sql.unsafe = (raw: string): Raw => ({ raw });
   return { sql, calls };
 }
 
@@ -63,9 +74,7 @@ describe('makeSelectUndiscovered', () => {
       },
     ]);
     const rows = await makeSelectUndiscovered(sql)(10);
-    expect(calls[0].text.replace(/\s+/g, ' ')).toContain(
-      'FROM hmrc_company_mapping s WHERE s.company_number = m.company_number',
-    );
+    expect(calls[0].text).toContain(SPONSOR_NAMES_COLUMN);
     expect(rows.map((r) => r.sponsorNames)).toEqual([
       ['Acme Widgets Ltd T/A Acme Dental'],
       [],

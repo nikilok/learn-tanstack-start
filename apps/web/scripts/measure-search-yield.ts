@@ -31,6 +31,10 @@ import {
 } from '../src/lib/websites/discover-sql.ts';
 import type { DiscoveryRow } from '../src/lib/websites/discover-sweep.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
+import {
+  SPONSOR_NAMES_COLUMN,
+  sponsorNamesOf,
+} from '../src/lib/websites/sponsor-names.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
 import { probeOrigin, walkDisclosure } from './lib/website-probe.ts';
@@ -82,10 +86,7 @@ async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
       SELECT DISTINCT ON (m.company_number)
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
-        ARRAY(
-          SELECT s.organisation_name FROM hmrc_company_mapping s
-          WHERE s.company_number = m.company_number
-        ) AS sponsor_names,
+        ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
         p.postal_code
       FROM hmrc_company_mapping m
@@ -102,9 +103,7 @@ async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
     companyName: (r.company_name as string | null) ?? '',
-    sponsorNames: Array.isArray(r.sponsor_names)
-      ? (r.sponsor_names as string[])
-      : [],
+    sponsorNames: sponsorNamesOf(r),
     town: (r.town as string | null) ?? '',
     postcode: (r.postal_code as string | null) ?? null,
     bankedCandidates: null,

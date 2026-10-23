@@ -13,8 +13,10 @@ import { pageHasCompanyNumber, visibleText } from './extract';
 /** Companies House register prefixes a number may carry. */
 const PREFIX =
   '(?:SC|NI|OC|SO|NC|R0|IP|SP|RS|LP|SL|SF|NL|NF|NP|NR|FC|GE|CE|BR|CS|ZC|OE|RC|AC)';
+/** A number in digit groups; refused where another group follows on its line, as a phone number's does. */
+const GROUPED = `(?:${PREFIX}\\s?\\d{3}\\s\\d{3}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{4}\\s\\d{4}|\\d{3}\\s\\d{4})(?![^\\S\\n]\\d)`;
 /** A number as sites write it: prefixed, padded or not, or in digit groups. */
-const NUMBER = `(${PREFIX}\\s?\\d{6}|${PREFIX}\\s?\\d{3}\\s\\d{3}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{4}\\s\\d{4}|\\d{3}\\s\\d{4}|\\d{6,8})`;
+const NUMBER = `(${PREFIX}\\s?\\d{6}|${GROUPED}|\\d{6,8})`;
 /** Only the full forms, where the wording around them is looser. */
 const FULL = `(${PREFIX}\\s?\\d{6}|\\d{8})`;
 const PLACE =
@@ -58,7 +60,11 @@ const PATTERNS = [
 const REGISTER =
   /\b(company|vat|charity|charities|fca|frn|ico|data\s+protection|gmc|cqc|ofsted|urn|osr|fsa|sra|nmc|hcpc|gdc|gphc)\b/gi;
 
-/** Whether the register named nearest a number, in its own clause, is another register. */
+/** A phone line's label right before a number ("Tel No.", "Fax:"); an earlier one labels its own digits. */
+const PHONE_LABEL =
+  /\b(?:tel|telephone|phone|fax|mobile)\b\.?\s*(?:(?:no|number|nr)\b\.?)?\s*[:#\-–]?\s*$/i;
+
+/** Whether a number's own label, in its clause, is a phone line's or another register's. */
 export function namesOtherRegister(wordingBefore: string): boolean {
   // "No." and "Reg." end abbreviations, not clauses.
   const flat = wordingBefore.replace(
@@ -68,6 +74,7 @@ export function namesOtherRegister(wordingBefore: string): boolean {
   const clause = flat.slice(
     Math.max(...['.', '\n', '|', ';'].map((c) => flat.lastIndexOf(c))) + 1,
   );
+  if (PHONE_LABEL.test(clause)) return true;
   const named = [...clause.matchAll(REGISTER)].at(-1)?.[1];
   return !!named && named.toLowerCase() !== 'company';
 }

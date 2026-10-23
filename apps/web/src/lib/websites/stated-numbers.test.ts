@@ -94,6 +94,31 @@ describe('statedCompanyNumbers', () => {
     ).toEqual(['03260168']);
   });
 
+  test('nor is a phone line the statutory wording runs into', () => {
+    expect(
+      numbers(footer('Registered in England and Wales | Tel No. 0123 4567')),
+    ).toEqual([]);
+    expect(
+      numbers(footer('Registered in England and Wales | Fax No: 0123 4567')),
+    ).toEqual([]);
+    // Unlabelled on the next line: its third group gives it away.
+    expect(
+      numbers(footer('Registered in England and Wales<br>020 7946 0000')),
+    ).toEqual([]);
+  });
+
+  test('a phone line earlier on the line does not hide the number', () => {
+    expect(
+      numbers(footer('Tel: 01234 567890 Registered in England Number 123456')),
+    ).toEqual(['00123456']);
+  });
+
+  test('digit groups still read with an address on the next line', () => {
+    expect(numbers(footer('Company No. 0123 4567<br>12 High Street'))).toEqual([
+      '01234567',
+    ]);
+  });
+
   test('a charity number inside a registration lead-in is not a company number', () => {
     expect(
       numbers(footer('Registered in England and Wales, Charity No. 1098765')),
@@ -200,6 +225,12 @@ describe('pageShowsCompanyNumber', () => {
   test('a phone number with the same digits is not its number', () => {
     expect(
       pageShowsCompanyNumber(footer('Tel: 020 0123 4567'), '01234567'),
+    ).toBe(false);
+    expect(
+      pageShowsCompanyNumber(
+        footer('Registered in England and Wales | Tel No. 0123 4567'),
+        '01234567',
+      ),
     ).toBe(false);
   });
 

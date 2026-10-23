@@ -4,6 +4,8 @@
  * left alone, and nothing here can lower a row's evidence.
  */
 
+import type { NeonQueryFunction } from '@ss/db/client';
+
 import type { DiscoveryOutcome } from './discover';
 import {
   CURRENT_WALK_VERSION,
@@ -14,14 +16,7 @@ import { type Shard, WHOLE_SET } from './shard';
 import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
-type Sql = {
-  (
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ): Promise<Record<string, unknown>[]>;
-  /** Constant SQL text spliced in as written, never a value. */
-  unsafe(rawSql: string): unknown;
-};
+type Sql = NeonQueryFunction<false, false>;
 
 /** Which settled rows to re-walk. */
 export type RewalkSelection = {

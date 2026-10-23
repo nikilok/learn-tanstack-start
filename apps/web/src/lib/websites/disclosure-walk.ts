@@ -146,7 +146,7 @@ export function readHomepage(
 export type WalkPage = {
   crnFound: boolean;
   postcodeFound: boolean;
-  /** The page names the company: by the host that served it, or in its text. */
+  /** The page shows the postcode and names the company: by the host that served it, or in its text. */
   pageNamed: boolean;
   stated: StatedOnSite[];
 };
@@ -167,11 +167,14 @@ export function readWalkPage(
   // A path that redirects into a register or directory lands on a page about
   // the company, which is not the site naming itself.
   if (isDiscoveryAggregator(host, crowded)) return null;
+  const postcodeFound = row.postcode
+    ? pageHasPostcode(html, row.postcode)
+    : false;
   return {
     crnFound: pageHasCompanyNumber(html, row.companyNumber),
-    postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
+    postcodeFound,
     // Judged on this page's own host: a walked path can redirect off the site.
-    pageNamed: namesCompany(host, visibleText(html), row),
+    pageNamed: postcodeFound && namesCompany(host, visibleText(html), row),
     stated: statedOnPage(pageUrl, html),
   };
 }

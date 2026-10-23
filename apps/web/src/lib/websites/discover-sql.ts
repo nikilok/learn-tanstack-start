@@ -3,6 +3,8 @@
  * stays testable without a database, as with the sweep's own sql.ts.
  */
 
+import type { NeonQueryFunction } from '@ss/db/client';
+
 import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
@@ -18,14 +20,7 @@ import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
  */
 export const MAX_DISCOVERY_ATTEMPTS = 3;
 
-type Sql = {
-  (
-    strings: TemplateStringsArray,
-    ...values: unknown[]
-  ): Promise<Record<string, unknown>[]>;
-  /** Constant SQL text spliced in as written, never a value. */
-  unsafe(rawSql: string): unknown;
-};
+type Sql = NeonQueryFunction<false, false>;
 
 /**
  * Companies still to search: no website row at all, OR one this job banked

@@ -81,12 +81,12 @@ const sql = neon(process.env.POSTGRES_URL as string);
  * the bias this script exists to remove.
  */
 async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
+  // The register's names for the sample alone; the column reads p.company_number.
   const rows = await sql`
-    SELECT * FROM (
+    SELECT p.*, ${sql.unsafe(SPONSOR_NAMES_COLUMN)} FROM (
       SELECT DISTINCT ON (m.company_number)
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
-        ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
         p.postal_code
       FROM hmrc_company_mapping m
@@ -96,8 +96,8 @@ async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
         AND w.company_number IS NULL
         AND coalesce(p.company_name, '') <> ''
       ORDER BY m.company_number
-    ) x
-    ORDER BY md5(x.company_number || ${seed})
+    ) p
+    ORDER BY md5(p.company_number || ${seed})
     LIMIT ${maxRows}
   `;
   return rows.map((r) => ({

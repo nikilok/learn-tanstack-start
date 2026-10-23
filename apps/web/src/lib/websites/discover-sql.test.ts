@@ -2,40 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import { makeCrowdedHosts, makeSelectUndiscovered } from './discover-sql';
-import { SPONSOR_NAMES_COLUMN } from './sponsor-names';
-
-type Captured = { text: string; params: unknown[] };
-
-/** A raw fragment as the fake client holds it. */
-type Raw = { raw: string };
-const isRaw = (value: unknown): value is Raw =>
-  typeof value === 'object' && value !== null && 'raw' in value;
-
-/** Fake tagged-template sql client: records each call's text (with $n
- *  placeholders, raw fragments spliced in as the driver does) and params,
- *  resolves with the given rows. */
-function makeFakeSql(result: Record<string, unknown>[] = []) {
-  const calls: Captured[] = [];
-  const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    let text = strings[0];
-    const params: unknown[] = [];
-    values.forEach((value, i) => {
-      text += isRaw(value) ? value.raw : `$${params.push(value)}`;
-      text += strings[i + 1];
-    });
-    calls.push({ text, params });
-    return Promise.resolve(result);
-  }) as unknown as Parameters<typeof makeSelectUndiscovered>[0];
-  sql.unsafe = (raw: string): Raw => ({ raw });
-  return { sql, calls };
-}
+import { type FakeSqlCall, makeFakeSql } from './fake-sql';
+import { SPONSOR_NAMES_COLUMN, SPONSOR_NAMES_KEY } from './sponsor-names';
 
 /** The bucket predicate, capturing the placeholders of its count and index. */
 const BUCKET =
   /mod\(\s*\('x' \|\| left\(md5\(m\.company_number\), 7\)\)::bit\(28\)::int,\s*\$(\d+)::int\s*\) = \$(\d+)::int/;
 
 /** The count and index the selector bound into its bucket predicate. */
-function boundShard(call: Captured): { count: unknown; index: unknown } {
+function boundShard(call: FakeSqlCall): { count: unknown; index: unknown } {
   const match = BUCKET.exec(call.text);
   if (!match) throw new Error('bucket predicate missing from the selector');
   return {
@@ -61,22 +36,28 @@ describe('makeSelectUndiscovered', () => {
   });
 
   test("reads the sponsor register's names, which a site may name the company by", async () => {
+    // Rows are keyed by the column's alias, so the reader's key is the alias.
+    expect(SPONSOR_NAMES_COLUMN.endsWith(` AS ${SPONSOR_NAMES_KEY}`)).toBe(
+      true,
+    );
     const { sql, calls } = makeFakeSql([
       {
         company_number: '03260168',
         company_name: 'ACME WIDGETS LIMITED',
-        sponsor_names: ['Acme Widgets Ltd T/A Acme Dental'],
+        [SPONSOR_NAMES_KEY]: ['Acme Widgets Ltd T/A Acme Dental'],
       },
       {
         company_number: '03260169',
         company_name: 'ACME TWO LIMITED',
-        sponsor_names: null,
+        [SPONSOR_NAMES_KEY]: [],
       },
+      { company_number: '03260170', company_name: 'ACME THREE LIMITED' },
     ]);
     const rows = await makeSelectUndiscovered(sql)(10);
     expect(calls[0].text).toContain(SPONSOR_NAMES_COLUMN);
     expect(rows.map((r) => r.sponsorNames)).toEqual([
       ['Acme Widgets Ltd T/A Acme Dental'],
+      [],
       [],
     ]);
   });
@@ -88,7 +69,13 @@ describe('makeSelectUndiscovered', () => {
     await makeSelectUndiscovered(sql, { index: 0, count: 4 })(10);
     const text = calls[0].text;
     const bucketAt = text.search(BUCKET);
-    expect(bucketAt).toBeGreaterThan(text.indexOf('WHERE'));
+    // The main WHERE: the register-names column has one of its own.
+    expect(bucketAt).toBeGreaterThan(
+      text.indexOf('WHERE m.company_number IS NOT NULL'),
+    );
+    expect(text.indexOf('WHERE m.company_number IS NOT NULL')).toBeGreaterThan(
+      text.indexOf('FROM hmrc_company_mapping m'),
+    );
     expect(bucketAt).toBeLessThan(text.indexOf('ORDER BY'));
     expect(text.indexOf('ORDER BY')).toBeLessThan(text.indexOf('LIMIT'));
   });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { DiscoveryOutcome } from './discover';
+import { makeFakeSql } from './fake-sql';
 import {
   CURRENT_WALK_VERSION,
   MAX_WALK_ATTEMPTS,
@@ -14,32 +15,8 @@ import {
   makeSelectRewalk,
   makeUpgrade,
 } from './rewalk-sql';
-import { SPONSOR_NAMES_COLUMN } from './sponsor-names';
+import { SPONSOR_NAMES_COLUMN, SPONSOR_NAMES_KEY } from './sponsor-names';
 import type { StatedOnSite } from './stated-numbers';
-
-type Captured = { text: string; params: unknown[] };
-
-/** A raw fragment as the fake client holds it. */
-type Raw = { raw: string };
-const isRaw = (value: unknown): value is Raw =>
-  typeof value === 'object' && value !== null && 'raw' in value;
-
-/** Fake tagged-template client: records each call's text ($n placeholders, raw fragments spliced in as the driver does) and params. */
-function makeFakeSql(result: Record<string, unknown>[] = []) {
-  const calls: Captured[] = [];
-  const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    let text = strings[0];
-    const params: unknown[] = [];
-    values.forEach((value, i) => {
-      text += isRaw(value) ? value.raw : `$${params.push(value)}`;
-      text += strings[i + 1];
-    });
-    calls.push({ text, params });
-    return Promise.resolve(result);
-  }) as unknown as Parameters<typeof makeUpgrade>[0];
-  sql.unsafe = (raw: string): Raw => ({ raw });
-  return { sql, calls };
-}
 
 const flat = (text: string) => text.replace(/\s+/g, ' ');
 
@@ -200,9 +177,9 @@ describe('makeSelectRewalk', () => {
       const { sql, calls } = makeFakeSql([
         {
           company_number: '03260168',
-          sponsor_names: ['Acme Widgets Ltd T/A Acme Dental'],
+          [SPONSOR_NAMES_KEY]: ['Acme Widgets Ltd T/A Acme Dental'],
         },
-        { company_number: '03260169', sponsor_names: null },
+        { company_number: '03260169', [SPONSOR_NAMES_KEY]: [] },
       ]);
       const rows = await makeSelectRewalk(sql, selection)(10);
       expect(calls[0].text).toContain(SPONSOR_NAMES_COLUMN);

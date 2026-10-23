@@ -238,6 +238,17 @@ describe('readWalkPage', () => {
     ).toMatchObject({ postcodeFound: true, pageNamed: true });
   });
 
+  test('a page without the postcode names nothing, whoever it names', () => {
+    expect(
+      readWalkPage(
+        row,
+        'https://www.acmewidgets.co.uk/privacy',
+        '<p>Acme Widgets Ltd privacy policy</p>',
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: false, pageNamed: false });
+  });
+
   test('a walked path that redirected off the site is judged where it landed', () => {
     expect(
       readWalkPage(row, 'https://elsewhere.co.uk/privacy', address, new Set()),

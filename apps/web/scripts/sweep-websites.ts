@@ -23,16 +23,8 @@
 import { createClient, neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
-import { pageHasPostcode } from '../src/lib/websites/extract.ts';
 import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts';
-import {
-  makeApplyResult,
-  makeCoverage,
-  makeSelectRows,
-  makeSleep,
-} from '../src/lib/websites/sql.ts';
-import { pageShowsCompanyNumber } from '../src/lib/websites/stated-numbers.ts';
-import type { FetchedPage } from '../src/lib/websites/sweep.ts';
+import { makeCoverage } from '../src/lib/websites/sql.ts';
 import { sweepWebsites } from '../src/lib/websites/sweep.ts';
 import { setGitHubOutput } from './ci-utils.ts';
 import {
@@ -40,11 +32,7 @@ import {
   loadScriptEnv,
   parseStrictInt,
 } from './lib/script-utils.ts';
-import {
-  fetchPage as fetchOnePage,
-  fetchSite as fetchOneSite,
-  type SiteFetch,
-} from './lib/web-fetch.ts';
+import { makeSweepDeps } from './lib/sweep-deps.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -82,25 +70,6 @@ const refreshPostcodeShares = makeRefreshPostcodeShares((text) =>
   sql.query(text),
 );
 
-/** Adapt web-fetch's result to the shape the orchestrator asks for, so the
- *  sweep never has to know about HTTP. */
-function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
-  if (result.ok) {
-    return {
-      ok: true,
-      url: result.url,
-      html: result.html,
-      attemptedUrl: result.attemptedUrl,
-    };
-  }
-  return {
-    ok: false,
-    reason: result.reason,
-    attemptedUrl: result.attemptedUrl ?? requested,
-    status: result.status,
-  };
-}
-
 const startedAt = Date.now();
 console.log(
   `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
@@ -124,20 +93,7 @@ const summary = await sweepWebsites(
     // never passes --verbose, so CI cannot turn it on by accident.
     logRows: verbose,
   },
-  {
-    selectRows: makeSelectRows(sql),
-    fetchSite: async (url) => toFetchedPage(await fetchOneSite(url), url),
-    fetchPage: async (url) =>
-      toFetchedPage(
-        { ...(await fetchOnePage(url)), attempts: 1, attemptedUrl: url },
-        url,
-      ),
-    hasCompanyNumber: pageShowsCompanyNumber,
-    hasPostcode: pageHasPostcode,
-    applyResult: makeApplyResult(sql),
-    sleep: makeSleep(),
-    log: (message) => console.log(message),
-  },
+  makeSweepDeps(sql, (message) => console.log(message)),
 );
 
 // After the slice, so a failed refresh never costs the run its liveness work.

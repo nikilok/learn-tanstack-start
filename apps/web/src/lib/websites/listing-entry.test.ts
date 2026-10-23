@@ -104,6 +104,20 @@ describe('isListingEntry', () => {
       'Gamma Hatcheries, Rugeley WS15 1RD. E: jane.mary.doe @mailhost.com',
     ].join('\n');
     expect(isListingEntry(conference, mail, postcode, names)).toBe(false);
+    // Mail providers and social networks are no business's own site, one each or not.
+    for (const [beta, gamma] of [
+      ['E: beta.feeds@gmail.com', 'E: gamma@outlook.com'],
+      ['facebook.com/betafeeds', 'instagram.com/gammahatch'],
+    ]) {
+      const platforms = [
+        `Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. ${beta}`,
+        entry,
+        `Gamma Hatcheries, Rugeley WS15 1RD. ${gamma}`,
+      ].join('\n');
+      expect(isListingEntry(conference, platforms, postcode, names)).toBe(
+        false,
+      );
+    }
     // One other business giving two sites is still one business.
     const twoSites = [
       'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk, betagroup.com',

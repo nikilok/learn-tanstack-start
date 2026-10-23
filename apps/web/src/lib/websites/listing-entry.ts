@@ -15,12 +15,44 @@ import {
   registrableDomain,
 } from './company-naming';
 import { postcodePattern, postcodeText } from './extract';
+import { isAggregatorHost } from './page-signals';
 
 /** Other businesses, by their postcodes, a listing must give their own websites beside. */
 export const LISTING_OTHER_SITES = 2;
 
 /** The most characters between a postcode and the website a listing gives beside it. */
 export const NEAR_POSTCODE = 200;
+
+/** Mail providers of personal addresses, whose domains are no business's own site. */
+const CONSUMER_MAIL = new Set([
+  'aol.com',
+  'btinternet.com',
+  'gmail.com',
+  'gmx.com',
+  'googlemail.com',
+  'hotmail.co.uk',
+  'hotmail.com',
+  'icloud.com',
+  'live.co.uk',
+  'live.com',
+  'mail.com',
+  'me.com',
+  'msn.com',
+  'ntlworld.com',
+  'outlook.com',
+  'proton.me',
+  'protonmail.com',
+  'sky.com',
+  'talktalk.net',
+  'virginmedia.com',
+  'yahoo.co.uk',
+  'yahoo.com',
+]);
+
+/** Whether a site is no business's own: a mail provider, a social network or a directory. */
+function isPlatform(site: string): boolean {
+  return CONSUMER_MAIL.has(site) || isAggregatorHost(site);
+}
 
 /** Any UK postcode, bounded, its two codes at most one space apart. */
 const ANY_POSTCODE =
@@ -96,7 +128,7 @@ export function isListingEntry(
   for (const m of page.matchAll(WRITTEN_SITE)) {
     const beside = besidePostcode(postcodes, m.index);
     const site = registrableDomain(m[1]);
-    if (!beside || site === served) continue;
+    if (!beside || site === served || isPlatform(site)) continue;
     const namesIt = named(site);
     if (beside.own) givesCompany ||= namesIt;
     else if (!namesIt) {

@@ -139,3 +139,10 @@ for (const r of list) {
   ] += 1;
 }
 console.log('  applied:', done);
+// A moved row's site is still on it: what runs next must not take it as rejected.
+if (done.moved > 0) {
+  console.error(
+    '  rows changed since the backup were left; plan again and apply with a new --backup',
+  );
+  process.exitCode = 1;
+}

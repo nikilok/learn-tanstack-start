@@ -33,13 +33,22 @@ const WRITTEN_SITE =
 /** A postcode the page writes, and whether it is the company's own. */
 type Written = { index: number; code: string; own: boolean };
 
-/** The postcode a site is written beside: the nearest, within NEAR_POSTCODE; null when none is. */
+/** The postcode a site is written beside: the nearest, within NEAR_POSTCODE; null when none is. Postcodes are in page order. */
 function besidePostcode(
   postcodes: readonly Written[],
   index: number,
 ): Written | null {
+  // The first postcode at or after the site, by binary search.
+  let after = 0;
+  let end = postcodes.length;
+  while (after < end) {
+    const middle = (after + end) >> 1;
+    if (postcodes[middle].index < index) after = middle + 1;
+    else end = middle;
+  }
   let best: Written | null = null;
-  for (const postcode of postcodes) {
+  for (const postcode of [postcodes[after - 1], postcodes[after]]) {
+    if (!postcode) continue;
     const distance = Math.abs(postcode.index - index);
     if (
       distance <= NEAR_POSTCODE &&

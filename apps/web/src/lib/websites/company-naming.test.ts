@@ -373,6 +373,10 @@ describe('registrableDomain', () => {
     expect(registrableDomain('acme.myshopify.com')).toBe('myshopify.com');
     expect(registrableDomain('Acme.Co.UK.')).toBe('acme.co.uk');
     expect(registrableDomain('acme.com.au')).toBe('acme.com.au');
+    // A registry's second level is no one site: acme.uk.com is not uk.com.
+    expect(registrableDomain('www.acmewidgets.uk.com')).toBe(
+      'acmewidgets.uk.com',
+    );
   });
 });
 

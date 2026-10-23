@@ -39,6 +39,7 @@ describe('isListingEntry', () => {
     for (const entry of [
       'W: elmbanknutrition.dev',
       'E: hello@elmbanknutrition.london',
+      'W: www.elmbanknutrition.uk.com',
     ]) {
       const page = exhibitors(
         `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\n${entry}`,
@@ -133,6 +134,13 @@ describe('isListingEntry', () => {
     expect(
       isListingEntry('www.feeds-example.co.uk', own, postcode, names),
     ).toBe(false);
+  });
+
+  test('a site written before its postcode, and nearest it, is beside it too', () => {
+    const page = exhibitors(
+      'Elmbank Nutrition, elmbanknutrition.co.uk, SO22 5AZ',
+    );
+    expect(isListingEntry(conference, page, postcode, names)).toBe(true);
   });
 
   test('blank lines between an entry and its site count as one break', () => {

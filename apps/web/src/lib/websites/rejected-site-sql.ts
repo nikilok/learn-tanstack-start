@@ -1,6 +1,7 @@
 /**
  * Database wiring for rejecting a site. Each write is guarded on the row still
- * holding what was read, so a row another job changed meanwhile is left alone.
+ * holding the snapshot it was decided on, so a row another job changed since is
+ * left alone.
  */
 
 import type { NeonQueryFunction } from '@ss/db/client';
@@ -9,30 +10,28 @@ import { rejectSite } from './rejected-site';
 
 type Sql = NeonQueryFunction<false, false>;
 
+/** The fields of a row a rejection is decided on, as they were backed up. */
+export type RowSnapshot = {
+  companyNumber: string;
+  url: string | null;
+  evidence: string;
+  candidates: unknown;
+};
+
 /** What rejecting a site did to one row. */
-export type RejectOutcome =
-  | 'reset'
-  | 'stripped'
-  | 'unchanged'
-  | 'missing'
-  | 'moved';
+export type RejectOutcome = 'reset' | 'stripped' | 'unchanged' | 'moved';
 
 /** A candidates value as the write and its guard bind it: SQL NULL for none. */
 function asJson(value: unknown): string | null {
   return value === null || value === undefined ? null : JSON.stringify(value);
 }
 
-/** Reject a site on one row: back to `none` if it holds it, and out of its banked candidates. */
+/** Reject a site on one row, from its backed-up snapshot: back to `none` if it holds it, and out of its banked candidates. */
 export function makeRejectSite(sql: Sql) {
   return async (
-    companyNumber: string,
+    row: RowSnapshot,
     rejectedUrl: string,
   ): Promise<RejectOutcome> => {
-    const [row] = (await sql`
-      SELECT url, evidence, candidates FROM company_websites
-      WHERE company_number = ${companyNumber}
-    `) as { url: string | null; evidence: string; candidates: unknown }[];
-    if (!row) return 'missing';
     const change = rejectSite(row, rejectedUrl);
     if (!change) return 'unchanged';
     const candidates = asJson(change.candidates);
@@ -51,14 +50,14 @@ export function makeRejectSite(sql: Sql) {
             failure_count = 0,
             walk_attempts = 0,
             candidates    = ${candidates}::jsonb
-          WHERE company_number = ${companyNumber}
+          WHERE company_number = ${row.companyNumber}
             AND url = ${row.url} AND evidence = ${row.evidence}
             AND candidates IS NOT DISTINCT FROM ${read}::jsonb
           RETURNING company_number
         `
       : await sql`
           UPDATE company_websites SET candidates = ${candidates}::jsonb
-          WHERE company_number = ${companyNumber}
+          WHERE company_number = ${row.companyNumber}
             AND url IS NOT DISTINCT FROM ${row.url} AND evidence = ${row.evidence}
             AND candidates IS NOT DISTINCT FROM ${read}::jsonb
           RETURNING company_number

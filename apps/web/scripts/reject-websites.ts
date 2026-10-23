@@ -3,7 +3,8 @@
  * banked search results, so no later walk or discovery pass chooses them
  * again. A row holding the site goes back to `none` with its walk marker
  * kept. Every listed row is backed up before anything is written, and each
- * write is guarded on the row still holding what was read. Prints counts only.
+ * write is guarded on the row still holding what was backed up. Prints counts
+ * only.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/reject-websites.ts --list=rejections.json
@@ -71,7 +72,12 @@ console.log(`  db: ${dbFingerprint(process.env.POSTGRES_URL as string)}`);
 const numbers = list.map((r) => r.companyNumber);
 const rows = (await sql`
   SELECT * FROM company_websites WHERE company_number = ANY(${numbers}::text[])
-`) as { company_number: string; url: string | null; candidates: unknown }[];
+`) as {
+  company_number: string;
+  url: string | null;
+  evidence: string;
+  candidates: unknown;
+}[];
 const byNumber = new Map(rows.map((r) => [r.company_number, r]));
 
 const planned: Record<string, number> = {
@@ -102,12 +108,27 @@ await Bun.write(
 );
 console.log(`  backed up: ${rows.length} rows`);
 const reject = makeRejectSite(sql);
-const done: Record<RejectOutcome, number> = {
+const done: Record<RejectOutcome | 'missing', number> = {
   reset: 0,
   stripped: 0,
   unchanged: 0,
   missing: 0,
   moved: 0,
 };
-for (const r of list) done[await reject(r.companyNumber, r.url)] += 1;
+for (const r of list) {
+  const row = byNumber.get(r.companyNumber);
+  done[
+    row
+      ? await reject(
+          {
+            companyNumber: row.company_number,
+            url: row.url,
+            evidence: row.evidence,
+            candidates: row.candidates,
+          },
+          r.url,
+        )
+      : 'missing'
+  ] += 1;
+}
 console.log('  applied:', done);

@@ -106,7 +106,7 @@ const GENERIC = new Set([
   'WORLDWIDE',
 ]);
 
-/** Second-level labels under a country code, as in co.uk or com.au. */
+/** Second-level labels a domain is registered under, as in co.uk, com.au or uk.com. */
 const SECOND_LEVEL = new Set([
   'co',
   'com',
@@ -119,6 +119,7 @@ const SECOND_LEVEL = new Set([
   'me',
   'nhs',
   'sch',
+  'uk',
 ]);
 
 /** A name's words, upper-cased, `&` read as AND. */

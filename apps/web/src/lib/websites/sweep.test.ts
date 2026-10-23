@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { pageShowsCompanyNumber } from './stated-numbers.ts';
 import type { FetchedPage, SweepConfig, SweepDeps, SweepRow } from './sweep.ts';
 import { SYSTEMIC_FAILURE_STREAK, sweepWebsites } from './sweep.ts';
 
@@ -111,6 +112,24 @@ describe('sweepWebsites', () => {
     expect(probed).toEqual(['https://www.example.co.uk/privacy']);
     expect(summary.disclosureFetches).toBe(1);
     expect(summary.promoted).toBe(1);
+  });
+
+  test('with the shipped check, digit groups in statutory wording promote and a phone number does not', async () => {
+    const evidenceAfter = async (footer: string) => {
+      const h = harness({
+        rows: [row({ evidence: 'postcode_on_page', everChecked: true })],
+        fetchSite: async (url) => live(url, `<footer>${footer}</footer>`),
+        hasCompanyNumber: pageShowsCompanyNumber,
+      });
+      await sweepWebsites(config(), h.deps);
+      return (h.applied[0].result as { evidence: string }).evidence;
+    };
+    expect(await evidenceAfter('Acme Ltd. Company No. 0326 0168')).toBe(
+      'crn_on_page',
+    );
+    expect(await evidenceAfter('Call us: 020 0326 0168')).toBe(
+      'postcode_on_page',
+    );
   });
 
   test('never re-probes a row that already has the number on file', async () => {

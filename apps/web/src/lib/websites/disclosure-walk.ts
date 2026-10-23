@@ -10,10 +10,14 @@
 import { type CompanyNames, namesCompany } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
-import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
+import { pageHasPostcode, visibleText } from './extract';
 import { DISCLOSURE_PATHS } from './fetch-policy';
 import { looksParked } from './page-signals';
-import { type StatedOnSite, statedOnPage } from './stated-numbers';
+import {
+  pageShowsCompanyNumber,
+  type StatedOnSite,
+  statedOnPage,
+} from './stated-numbers';
 
 /** Link targets or labels that name a legal page. */
 const LEGAL =
@@ -116,11 +120,13 @@ export function readHomepage(
     // An unreadable served URL judges no host.
   }
   const text = visibleText(html);
-  const crnFound = pageHasCompanyNumber(html, row.companyNumber);
+  const onAggregator = isDiscoveryAggregator(host, crowded);
+  // A directory's numbers are its listings', not the site naming itself.
+  const stated = onAggregator ? [] : statedOnPage(servedUrl, html);
+  const crnFound = pageShowsCompanyNumber(html, row.companyNumber, stated);
   const postcodeFound = row.postcode
     ? pageHasPostcode(html, row.postcode)
     : false;
-  const onAggregator = isDiscoveryAggregator(host, crowded);
   return {
     // The URL we ASKED for, not the post-redirect one: that is what a visitor
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
@@ -137,8 +143,7 @@ export function readHomepage(
     onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(html, servedUrl),
-    // A directory's numbers are its listings', not the site naming itself.
-    stated: onAggregator ? [] : statedOnPage(servedUrl, html),
+    stated,
   };
 }
 
@@ -167,15 +172,16 @@ export function readWalkPage(
   // A path that redirects into a register or directory lands on a page about
   // the company, which is not the site naming itself.
   if (isDiscoveryAggregator(host, crowded)) return null;
+  const stated = statedOnPage(pageUrl, html);
   const postcodeFound = row.postcode
     ? pageHasPostcode(html, row.postcode)
     : false;
   return {
-    crnFound: pageHasCompanyNumber(html, row.companyNumber),
+    crnFound: pageShowsCompanyNumber(html, row.companyNumber, stated),
     postcodeFound,
     // Judged on this page's own host: a walked path can redirect off the site.
     pageNamed: postcodeFound && namesCompany(host, visibleText(html), row),
-    stated: statedOnPage(pageUrl, html),
+    stated,
   };
 }
 

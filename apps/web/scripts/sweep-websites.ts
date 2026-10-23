@@ -23,10 +23,7 @@
 import { createClient, neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
-import {
-  pageHasCompanyNumber,
-  pageHasPostcode,
-} from '../src/lib/websites/extract.ts';
+import { pageHasPostcode } from '../src/lib/websites/extract.ts';
 import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts';
 import {
   makeApplyResult,
@@ -34,6 +31,7 @@ import {
   makeSelectRows,
   makeSleep,
 } from '../src/lib/websites/sql.ts';
+import { pageShowsCompanyNumber } from '../src/lib/websites/stated-numbers.ts';
 import type { FetchedPage } from '../src/lib/websites/sweep.ts';
 import { sweepWebsites } from '../src/lib/websites/sweep.ts';
 import { setGitHubOutput } from './ci-utils.ts';
@@ -134,7 +132,7 @@ const summary = await sweepWebsites(
         { ...(await fetchOnePage(url)), attempts: 1, attemptedUrl: url },
         url,
       ),
-    hasCompanyNumber: pageHasCompanyNumber,
+    hasCompanyNumber: pageShowsCompanyNumber,
     hasPostcode: pageHasPostcode,
     applyResult: makeApplyResult(sql),
     sleep: makeSleep(),

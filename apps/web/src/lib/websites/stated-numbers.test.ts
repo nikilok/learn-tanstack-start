@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   MAX_STATED_PER_PAGE,
   normaliseStatedNumber,
+  pageShowsCompanyNumber,
   statedCompanyNumbers,
 } from './stated-numbers';
 
@@ -80,6 +81,48 @@ describe('statedCompanyNumbers', () => {
   test('joins a number written in digit groups', () => {
     expect(numbers(footer('Company No. 128 936 86'))).toEqual(['12893686']);
     expect(numbers(footer('Company No. 490 4492'))).toEqual(['04904492']);
+    expect(numbers(footer('Company No. 0123 4567'))).toEqual(['01234567']);
+    expect(numbers(footer('Registered in Scotland No. SC 123 456'))).toEqual([
+      'SC123456',
+    ]);
+  });
+
+  test('a phone number in digit groups is not a company number', () => {
+    expect(numbers(footer('Tel: 020 0123 4567'))).toEqual([]);
+    expect(
+      numbers(footer('Company No. 03260168. Call 0123 4567 today')),
+    ).toEqual(['03260168']);
+  });
+
+  test('nor is a phone line the statutory wording runs into', () => {
+    expect(
+      numbers(footer('Registered in England and Wales | Tel No. 0123 4567')),
+    ).toEqual([]);
+    expect(
+      numbers(footer('Registered in England and Wales | Fax No: 0123 4567')),
+    ).toEqual([]);
+    // Unlabelled on the next line: its third group gives it away.
+    expect(
+      numbers(footer('Registered in England and Wales<br>020 7946 0000')),
+    ).toEqual([]);
+    expect(
+      numbers(footer('Registered in England and Wales No. 020 7946-0000')),
+    ).toEqual([]);
+  });
+
+  test('a phone line earlier on the line does not hide the number', () => {
+    expect(
+      numbers(footer('Tel: 01234 567890 Registered in England Number 123456')),
+    ).toEqual(['00123456']);
+  });
+
+  test('digit groups still read with an address on the next line', () => {
+    expect(numbers(footer('Company No. 0123 4567<br>12 High Street'))).toEqual([
+      '01234567',
+    ]);
+    expect(numbers(footer('Company No. 123 4567, 12 High Street'))).toEqual([
+      '01234567',
+    ]);
   });
 
   test('a charity number inside a registration lead-in is not a company number', () => {
@@ -150,6 +193,68 @@ describe('statedCompanyNumbers', () => {
       (_, i) => `Company No. ${String(10000000 + i)}`,
     ).join('<br>');
     expect(numbers(footer(many))).toEqual([]);
+  });
+});
+
+describe('pageShowsCompanyNumber', () => {
+  test('its own number in digit groups, in statutory wording', () => {
+    expect(
+      pageShowsCompanyNumber(footer('Company No. 0123 4567'), '01234567'),
+    ).toBe(true);
+    expect(
+      pageShowsCompanyNumber(
+        footer('Registered in England and Wales No. 128 936 86'),
+        '12893686',
+      ),
+    ).toBe(true);
+  });
+
+  test('dropped zeros, in statutory wording', () => {
+    // Most own numbers the re-walk's token match missed were written so.
+    expect(
+      pageShowsCompanyNumber(footer('Company No. 123456'), '00123456'),
+    ).toBe(true);
+    expect(
+      pageShowsCompanyNumber(footer('Company Reg: 0123456'), '00123456'),
+    ).toBe(true);
+  });
+
+  test('a prefix written apart from its digits, in statutory wording', () => {
+    expect(
+      pageShowsCompanyNumber(
+        footer('A partnership registered in England under number OC 123456.'),
+        'OC123456',
+      ),
+    ).toBe(true);
+  });
+
+  test('a phone number with the same digits is not its number', () => {
+    expect(
+      pageShowsCompanyNumber(footer('Tel: 020 0123 4567'), '01234567'),
+    ).toBe(false);
+    expect(
+      pageShowsCompanyNumber(
+        footer('Registered in England and Wales | Tel No. 0123 4567'),
+        '01234567',
+      ),
+    ).toBe(false);
+  });
+
+  test("another company's number in digit groups is not its number", () => {
+    expect(
+      pageShowsCompanyNumber(footer('Company No. 0123 4568'), '01234567'),
+    ).toBe(false);
+  });
+
+  test('one token still counts wherever it is', () => {
+    expect(pageShowsCompanyNumber('<p>Ref 03260168</p>', '03260168')).toBe(
+      true,
+    );
+  });
+
+  test('reads the numbers it is handed instead of the page', () => {
+    const html = footer('Company No. 0123 4567');
+    expect(pageShowsCompanyNumber(html, '01234567', [])).toBe(false);
   });
 });
 

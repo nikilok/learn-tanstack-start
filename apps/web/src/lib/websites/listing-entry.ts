@@ -19,7 +19,7 @@ import { postcodePattern, postcodeText } from './extract';
 /** Distinct postcodes a page must write to list several businesses. */
 export const LISTING_POSTCODES = 3;
 
-/** Characters between the company's postcode and the website a listing gives it. */
+/** The most characters between the company's postcode and the website a listing gives it. */
 export const NEAR_POSTCODE = 200;
 
 /** Any UK postcode, bounded, its two codes at most one space apart. */

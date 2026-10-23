@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { DiscoveryOutcome } from './discover';
+import { makeFakeSql } from './fake-sql';
 import {
   CURRENT_WALK_VERSION,
   MAX_WALK_ATTEMPTS,
@@ -14,28 +15,15 @@ import {
   makeSelectRewalk,
   makeUpgrade,
 } from './rewalk-sql';
+import { SPONSOR_NAMES_COLUMN, SPONSOR_NAMES_KEY } from './sponsor-names';
 import type { StatedOnSite } from './stated-numbers';
-
-type Captured = { text: string; params: unknown[] };
-
-/** Fake tagged-template client: records each call's text ($n placeholders) and params. */
-function makeFakeSql(result: Record<string, unknown>[] = []) {
-  const calls: Captured[] = [];
-  const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
-    const text = strings
-      .map((s, i) => (i < values.length ? `${s}$${i + 1}` : s))
-      .join('');
-    calls.push({ text, params: values });
-    return Promise.resolve(result);
-  }) as unknown as Parameters<typeof makeUpgrade>[0];
-  return { sql, calls };
-}
 
 const flat = (text: string) => text.replace(/\s+/g, ' ');
 
 const noneRow: RewalkRow = {
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -180,6 +168,24 @@ describe('makeSelectRewalk', () => {
       expect(rows.map((r) => r.companyName)).toEqual([
         'ACME WIDGETS LIMITED',
         '',
+      ]);
+    }
+  });
+
+  test("reads the sponsor register's names, which a postcode match may find instead", async () => {
+    for (const selection of [{}, { seed: 's' }]) {
+      const { sql, calls } = makeFakeSql([
+        {
+          company_number: '03260168',
+          [SPONSOR_NAMES_KEY]: ['Acme Widgets Ltd T/A Acme Dental'],
+        },
+        { company_number: '03260169', [SPONSOR_NAMES_KEY]: [] },
+      ]);
+      const rows = await makeSelectRewalk(sql, selection)(10);
+      expect(calls[0].text).toContain(SPONSOR_NAMES_COLUMN);
+      expect(rows.map((r) => r.sponsorNames)).toEqual([
+        ['Acme Widgets Ltd T/A Acme Dental'],
+        [],
       ]);
     }
   });

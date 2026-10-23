@@ -13,8 +13,8 @@ import {
 } from './discover-sweep';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
-/** The walk rows are brought up to: walk g behind the crowded-host guard. */
-export const CURRENT_WALK_VERSION = 1;
+/** The walk rows are brought up to: walk g behind the crowded-host guard, naming a company by its register names too. */
+export const CURRENT_WALK_VERSION = 2;
 
 /** Unreadable re-walks before a row keeps its old answer for this version. */
 export const MAX_WALK_ATTEMPTS = 3;
@@ -23,6 +23,8 @@ export type RewalkRow = {
   companyNumber: string;
   /** Companies House name, which a postcode match must find on the site. */
   companyName: string;
+  /** Sponsor-register entries, which a postcode match may find instead. */
+  sponsorNames: string[];
   postcode: string | null;
   evidence: 'none' | 'postcode_on_page';
   /** The stored site; null on a `none` row. */
@@ -102,6 +104,7 @@ function asDiscoveryRow(row: RewalkRow): DiscoveryRow {
   return {
     companyNumber: row.companyNumber,
     companyName: row.companyName,
+    sponsorNames: row.sponsorNames,
     town: '',
     postcode: row.postcode,
     bankedCandidates: row.candidates,

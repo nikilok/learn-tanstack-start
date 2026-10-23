@@ -7,7 +7,7 @@
  * guesses.
  */
 
-import { namesCompany } from './company-naming';
+import { type CompanyNames, namesCompany } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
 import { pageHasCompanyNumber, pageHasPostcode, visibleText } from './extract';
@@ -95,9 +95,15 @@ export function walkTargets(
   return [...extra, ...paths];
 }
 
+/** The row fields a candidate's pages are read against. */
+type ProbeRow = CompanyNames & {
+  companyNumber: string;
+  postcode: string | null;
+};
+
 /** What a candidate's homepage proves, read off the page its URL served. */
 export function readHomepage(
-  row: { companyNumber: string; companyName: string; postcode: string | null },
+  row: ProbeRow,
   url: string,
   servedUrl: string,
   html: string,
@@ -127,7 +133,7 @@ export function readHomepage(
     postcodeFound,
     // Named by the serving host too: a named domain that redirects to another
     // business serves that business's page.
-    postcodeNamed: postcodeFound && namesCompany(host, text, row.companyName),
+    postcodeNamed: postcodeFound && namesCompany(host, text, row),
     onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(html, servedUrl),
@@ -140,14 +146,14 @@ export function readHomepage(
 export type WalkPage = {
   crnFound: boolean;
   postcodeFound: boolean;
-  /** The page names the company: by the host that served it, or in its text. */
+  /** The page shows the postcode and names the company: by the host that served it, or in its text. */
   pageNamed: boolean;
   stated: StatedOnSite[];
 };
 
 /** What one walked page proves; null when it was served from a directory. */
 export function readWalkPage(
-  row: { companyNumber: string; companyName: string; postcode: string | null },
+  row: ProbeRow,
   pageUrl: string,
   html: string,
   crowded: ReadonlySet<string>,
@@ -161,11 +167,14 @@ export function readWalkPage(
   // A path that redirects into a register or directory lands on a page about
   // the company, which is not the site naming itself.
   if (isDiscoveryAggregator(host, crowded)) return null;
+  const postcodeFound = row.postcode
+    ? pageHasPostcode(html, row.postcode)
+    : false;
   return {
     crnFound: pageHasCompanyNumber(html, row.companyNumber),
-    postcodeFound: row.postcode ? pageHasPostcode(html, row.postcode) : false,
+    postcodeFound,
     // Judged on this page's own host: a walked path can redirect off the site.
-    pageNamed: namesCompany(host, visibleText(html), row.companyName),
+    pageNamed: postcodeFound && namesCompany(host, visibleText(html), row),
     stated: statedOnPage(pageUrl, html),
   };
 }

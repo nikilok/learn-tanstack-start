@@ -22,6 +22,8 @@ import type { StatedOnSite } from './stated-numbers';
 export type DiscoveryRow = {
   companyNumber: string;
   companyName: string;
+  /** Sponsor-register entries for the company, which a site may name it by. */
+  sponsorNames: string[];
   town: string;
   postcode: string | null;
   /** Results a previous pass already paid for and never got to settle. Set

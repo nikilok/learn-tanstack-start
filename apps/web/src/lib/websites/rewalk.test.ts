@@ -13,6 +13,7 @@ import type { StatedOnSite } from './stated-numbers';
 const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'none',
   url: null,
@@ -24,6 +25,7 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
 const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyNumber: '03260168',
   companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
   postcode: 'SO22 5AZ',
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',
@@ -159,6 +161,28 @@ describe('rewalkWebsites: none rows', () => {
     });
     await rewalkWebsites(config(), h.deps);
     expect(names).toEqual(['ACME WIDGETS LIMITED', 'ACME WIDGETS LIMITED']);
+  });
+
+  test("the probe and the walk are given the register's names too, on either kind of row", async () => {
+    const register = ['Acme Widgets Ltd T/A Elmbank Dental'];
+    const given: string[][] = [];
+    const h = harness({
+      rows: [
+        noneRow({ sponsorNames: register }),
+        postcodeRow({ companyNumber: '03260169', sponsorNames: register }),
+      ],
+      probe: async (row, url) => {
+        given.push(row.sponsorNames);
+        return probe({ url });
+      },
+      walkDisclosure: async (row, base) => {
+        given.push(row.sponsorNames);
+        return base;
+      },
+    });
+    await rewalkWebsites(config(), h.deps);
+    expect(given.length).toBeGreaterThan(2);
+    expect(given.every((names) => names === register)).toBe(true);
   });
 
   test('read and still nothing: stamped as walked, nothing written', async () => {

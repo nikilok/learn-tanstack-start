@@ -31,6 +31,10 @@ import {
 } from '../src/lib/websites/discover-sql.ts';
 import type { DiscoveryRow } from '../src/lib/websites/discover-sweep.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
+import {
+  SPONSOR_NAMES_COLUMN,
+  sponsorNamesOf,
+} from '../src/lib/websites/sponsor-names.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
 import { probeOrigin, walkDisclosure } from './lib/website-probe.ts';
@@ -77,8 +81,9 @@ const sql = neon(process.env.POSTGRES_URL as string);
  * the bias this script exists to remove.
  */
 async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
+  // The register's names for the sample alone; the column reads p.company_number.
   const rows = await sql`
-    SELECT * FROM (
+    SELECT p.*, ${sql.unsafe(SPONSOR_NAMES_COLUMN)} FROM (
       SELECT DISTINCT ON (m.company_number)
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
@@ -91,13 +96,14 @@ async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
         AND w.company_number IS NULL
         AND coalesce(p.company_name, '') <> ''
       ORDER BY m.company_number
-    ) x
-    ORDER BY md5(x.company_number || ${seed})
+    ) p
+    ORDER BY md5(p.company_number || ${seed})
     LIMIT ${maxRows}
   `;
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
     companyName: (r.company_name as string | null) ?? '',
+    sponsorNames: sponsorNamesOf(r),
     town: (r.town as string | null) ?? '',
     postcode: (r.postal_code as string | null) ?? null,
     bankedCandidates: null,

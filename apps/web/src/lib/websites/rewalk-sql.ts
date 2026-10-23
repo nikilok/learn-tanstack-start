@@ -4,6 +4,8 @@
  * left alone, and nothing here can lower a row's evidence.
  */
 
+import type { NeonQueryFunction } from '@ss/db/client';
+
 import type { DiscoveryOutcome } from './discover';
 import {
   CURRENT_WALK_VERSION,
@@ -11,12 +13,10 @@ import {
   type RewalkRow,
 } from './rewalk';
 import { type Shard, WHOLE_SET } from './shard';
+import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
-type Sql = (
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-) => Promise<Record<string, unknown>[]>;
+type Sql = NeonQueryFunction<false, false>;
 
 /** Which settled rows to re-walk. */
 export type RewalkSelection = {
@@ -32,6 +32,7 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
   return rows.map((r) => ({
     companyNumber: r.company_number as string,
     companyName: (r.company_name as string | null) ?? '',
+    sponsorNames: sponsorNamesOf(r),
     postcode: (r.postal_code as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
@@ -55,6 +56,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
         await sql`
           SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
             coalesce(p.company_name, '') AS company_name,
+            ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
@@ -76,6 +78,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       await sql`
         SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
           coalesce(p.company_name, '') AS company_name,
+          ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)

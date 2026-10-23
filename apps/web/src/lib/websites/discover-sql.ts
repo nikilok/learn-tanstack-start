@@ -3,10 +3,13 @@
  * stays testable without a database, as with the sweep's own sql.ts.
  */
 
+import type { NeonQueryFunction } from '@ss/db/client';
+
 import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
 import { type Shard, WHOLE_SET } from './shard';
+import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
 
 /**
  * Passes a banked-but-unsettled row gets before it is left alone.
@@ -17,10 +20,7 @@ import { type Shard, WHOLE_SET } from './shard';
  */
 export const MAX_DISCOVERY_ATTEMPTS = 3;
 
-type Sql = (
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-) => Promise<Record<string, unknown>[]>;
+type Sql = NeonQueryFunction<false, false>;
 
 /**
  * Companies still to search: no website row at all, OR one this job banked
@@ -58,6 +58,7 @@ export function makeSelectUndiscovered(sql: Sql, shard: Shard = WHOLE_SET) {
       SELECT DISTINCT ON (m.company_number)
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
+        ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
         p.postal_code,
         -- Carried so a retry can reuse what the failed pass already paid for.
@@ -88,6 +89,7 @@ export function makeSelectUndiscovered(sql: Sql, shard: Shard = WHOLE_SET) {
     return rows.map((r) => ({
       companyNumber: r.company_number as string,
       companyName: (r.company_name as string | null) ?? '',
+      sponsorNames: sponsorNamesOf(r),
       town: (r.town as string | null) ?? '',
       postcode: (r.postal_code as string | null) ?? null,
       bankedCandidates: Array.isArray(r.candidates)

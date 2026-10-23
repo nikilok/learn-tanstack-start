@@ -16,10 +16,7 @@ import {
 } from './company-naming';
 import { postcodePattern, postcodeText } from './extract';
 
-/** Distinct postcodes a page must write to list several businesses. */
-export const LISTING_POSTCODES = 3;
-
-/** Other businesses a listing must give their own websites, beside their own postcodes. */
+/** Other businesses, by their postcodes, a listing must give their own websites beside. */
 export const LISTING_OTHER_SITES = 2;
 
 /** The most characters between a postcode and the website a listing gives beside it. */
@@ -34,7 +31,7 @@ const WRITTEN_SITE =
   /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-])/g;
 
 /** A postcode the page writes, and whether it is the company's own. */
-type Written = { index: number; own: boolean };
+type Written = { index: number; code: string; own: boolean };
 
 /** The postcode a site is written beside: the nearest, within NEAR_POSTCODE; null when none is. */
 function besidePostcode(
@@ -66,23 +63,43 @@ export function isListingEntry(
   if (!pattern) return false;
   // Runs of blank lines count as one boundary, as a reader sees the page.
   const page = postcodeText(text).replace(/\s*\n\s*/g, '\n');
-  const all = [...page.matchAll(ANY_POSTCODE)];
-  const distinct = new Set(all.map((m) => m[0].replace(' ', '')));
-  if (distinct.size < LISTING_POSTCODES) return false;
   const own = new Set([...page.matchAll(pattern)].map((m) => m.index));
-  const postcodes = all.map((m) => ({ index: m.index, own: own.has(m.index) }));
+  const postcodes = [...page.matchAll(ANY_POSTCODE)].map((m) => ({
+    index: m.index,
+    code: m[0].replace(' ', ''),
+    own: own.has(m.index),
+  }));
+  // Fewer than the company's postcode and the others' can list nothing; most pages stop here.
+  if (new Set(postcodes.map((p) => p.code)).size <= LISTING_OTHER_SITES) {
+    return false;
+  }
   // Sites at the domain they are registered under: a shop or CDN subdomain is
   // the platform's, and the serving site's own pages are no other business.
   const served = registrableDomain(servedHost);
   let givesCompany = false;
-  const otherSites = new Set<string>();
+  /** Each other business's postcode, and the sites written beside it. */
+  const besideOthers = new Map<string, Set<string>>();
   for (const m of page.matchAll(WRITTEN_SITE)) {
     const beside = besidePostcode(postcodes, m.index);
     const site = registrableDomain(m[1]);
     if (!beside || site === served) continue;
     const namesIt = hostNamesAny(site, names);
     if (beside.own) givesCompany ||= namesIt;
-    else if (!namesIt) otherSites.add(site);
+    else if (!namesIt) {
+      besideOthers.set(
+        beside.code,
+        (besideOthers.get(beside.code) ?? new Set()).add(site),
+      );
+    }
   }
-  return givesCompany && otherSites.size >= LISTING_OTHER_SITES;
+  // A business's own site is beside its postcode alone: one beside several is
+  // a regulator's or a member body's. A business giving two sites counts once.
+  const entries = new Map<string, number>();
+  for (const sites of besideOthers.values()) {
+    for (const site of sites) entries.set(site, (entries.get(site) ?? 0) + 1);
+  }
+  const others = [...besideOthers.values()].filter((sites) =>
+    [...sites].some((site) => entries.get(site) === 1),
+  );
+  return givesCompany && others.length >= LISTING_OTHER_SITES;
 }

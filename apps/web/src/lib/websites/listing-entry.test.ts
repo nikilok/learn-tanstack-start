@@ -95,6 +95,13 @@ describe('isListingEntry', () => {
       'Gamma Hatcheries, Rugeley WS15 1RD',
     ].join('\n');
     expect(isListingEntry(conference, bare, postcode, names)).toBe(false);
+    // One other business giving two sites is still one business.
+    const twoSites = [
+      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk, betagroup.com',
+      entry,
+      'Gamma Hatcheries, Rugeley WS15 1RD',
+    ].join('\n');
+    expect(isListingEntry(conference, twoSites, postcode, names)).toBe(false);
     // The listing's own pages are not other businesses: one other gives its site.
     const own = [
       'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. Stand: poultry-conference.co.uk/b',

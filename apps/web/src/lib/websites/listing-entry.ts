@@ -11,7 +11,7 @@
 
 import {
   type CompanyNames,
-  hostNamesAny,
+  hostNamer,
   registrableDomain,
 } from './company-naming';
 import { postcodePattern, postcodeText } from './extract';
@@ -26,9 +26,13 @@ export const NEAR_POSTCODE = 200;
 const ANY_POSTCODE =
   /(?<![A-Z0-9])[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}(?![A-Z0-9])/g;
 
-/** A domain as a page writes one, alone, in a URL or after an email's `@`: labels, then a top-level domain of letters; never an email's dotted name before its `@`. */
+/**
+ * A domain as a page writes one, alone, in a URL or after an email's `@`:
+ * labels, then a top-level domain of letters. Only a whole dotted token, so
+ * never part of a longer one, nor an email's dotted name before its `@`.
+ */
 const WRITTEN_SITE =
-  /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]| ?@)/g;
+  /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
 
 /** A postcode the page writes, and whether it is the company's own. */
 type Written = { index: number; code: string; own: boolean };
@@ -67,7 +71,8 @@ export function isListingEntry(
   postcode: string,
   names: CompanyNames,
 ): boolean {
-  if (hostNamesAny(servedHost, names)) return false;
+  const named = hostNamer(names);
+  if (named(servedHost)) return false;
   const pattern = postcodePattern(postcode, 'g');
   if (!pattern) return false;
   // Runs of blank lines count as one boundary, as a reader sees the page.
@@ -92,7 +97,7 @@ export function isListingEntry(
     const beside = besidePostcode(postcodes, m.index);
     const site = registrableDomain(m[1]);
     if (!beside || site === served) continue;
-    const namesIt = hostNamesAny(site, names);
+    const namesIt = named(site);
     if (beside.own) givesCompany ||= namesIt;
     else if (!namesIt) {
       besideOthers.set(

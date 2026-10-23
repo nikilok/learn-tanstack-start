@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   hostIsWholeName,
-  hostNamesAny,
+  hostNamer,
   hostNamesCompany,
   nameInitials,
   namesCompany,
@@ -349,20 +349,22 @@ describe('namesCompany', () => {
   });
 });
 
-describe('hostNamesAny', () => {
-  const trading = {
+describe('hostNamer', () => {
+  const named = hostNamer({
     companyName: 'FENWICK CHIROPRACTIC LTD',
     sponsorNames: ['Fenwick Chiropractic Ltd T/A Elmbank Chiropractic Clinic'],
-  };
-
-  test('a host naming the company by its registered name or a register name', () => {
-    expect(hostNamesAny('www.fenwickchiro.co.uk', trading)).toBe(true);
-    expect(hostNamesAny('elmbankchiropractic.co.uk', trading)).toBe(true);
   });
 
-  test("never another business's host, nor one word of a trading name", () => {
-    expect(hostNamesAny('www.example.co.uk', trading)).toBe(false);
-    expect(hostNamesAny('www.clinic4u.co.uk', trading)).toBe(false);
+  test('a host naming the company by its registered name or a register name', () => {
+    expect(named('www.fenwickchiro.co.uk')).toBe(true);
+    expect(named('elmbankchiropractic.co.uk')).toBe(true);
+  });
+
+  test("never another business's host, nor one word of a trading name, asked again or not", () => {
+    for (const _ of [1, 2]) {
+      expect(named('www.example.co.uk')).toBe(false);
+      expect(named('www.clinic4u.co.uk')).toBe(false);
+    }
   });
 });
 

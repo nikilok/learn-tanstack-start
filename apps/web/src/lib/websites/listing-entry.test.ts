@@ -96,11 +96,12 @@ describe('isListingEntry', () => {
       'Gamma Hatcheries, Rugeley WS15 1RD',
     ].join('\n');
     expect(isListingEntry(conference, bare, postcode, names)).toBe(false);
-    // Personal emails at one mail provider: no site of their own, and a dotted name is no site.
+    // Personal emails at one mail provider: no site of their own, and a dotted
+    // name is no site, however many parts it has.
     const mail = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. E: john.smith@mailhost.com',
+      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. E: john.smith.jr@mailhost.com',
       entry,
-      'Gamma Hatcheries, Rugeley WS15 1RD. E: jane.doe @mailhost.com',
+      'Gamma Hatcheries, Rugeley WS15 1RD. E: jane.mary.doe @mailhost.com',
     ].join('\n');
     expect(isListingEntry(conference, mail, postcode, names)).toBe(false);
     // One other business giving two sites is still one business.

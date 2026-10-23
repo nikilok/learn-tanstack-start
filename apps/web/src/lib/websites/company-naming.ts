@@ -358,9 +358,18 @@ function hostNames(
   );
 }
 
-/** Whether a host names the company: by its registered name, or a name the sponsor register lists. */
-export function hostNamesAny(host: string, names: CompanyNames): boolean {
-  return hostNames(host, names, registerNamesOf(names));
+/** Whether a host names the company, by its registered name or a name the sponsor register lists: the register read once, each host's answer kept. */
+export function hostNamer(names: CompanyNames): (host: string) => boolean {
+  const register = registerNamesOf(names);
+  const answers = new Map<string, boolean>();
+  return (host) => {
+    let named = answers.get(host);
+    if (named === undefined) {
+      named = hostNames(host, names, register);
+      answers.set(host, named);
+    }
+    return named;
+  };
 }
 
 /** Whether a fetched page names the company: by the host that served it, or in its text. */

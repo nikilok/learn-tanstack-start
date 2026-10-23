@@ -174,6 +174,17 @@ describe('extract — false-positive guards', () => {
       pageHasCompanyNumber('<p>No. <strong>0326</strong>0168</p>', '03260168'),
     ).toBe(true);
   });
+
+  test('digit groups are never joined anywhere on a page', () => {
+    // A phone number would match; statutory wording reads groups instead
+    // (pageShowsCompanyNumber).
+    expect(pageHasCompanyNumber('<p>Tel: 020 0123 4567</p>', '01234567')).toBe(
+      false,
+    );
+    expect(
+      pageHasCompanyNumber('<p>Company No. 0123 4567</p>', '01234567'),
+    ).toBe(false);
+  });
 });
 
 describe('extract — truncated markup', () => {

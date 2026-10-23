@@ -173,6 +173,33 @@ describe('readHomepage', () => {
     );
     expect(page).toMatchObject({ onAggregator: true, stated: [] });
   });
+
+  test('its number in digit groups, in statutory wording, proves the site', () => {
+    expect(
+      readHomepage(
+        row,
+        'https://acmewidgets.co.uk',
+        'https://www.acmewidgets.co.uk/',
+        '<footer>Acme Widgets Ltd. Company No. 0326 0168</footer>',
+        new Set(),
+      ),
+    ).toMatchObject({
+      crnFound: true,
+      evidenceUrl: 'https://www.acmewidgets.co.uk/',
+    });
+  });
+
+  test('a phone number with the same digits proves nothing', () => {
+    expect(
+      readHomepage(
+        row,
+        'https://acmewidgets.co.uk',
+        'https://acmewidgets.co.uk/',
+        '<footer>Call us: 020 0326 0168</footer>',
+        new Set(),
+      ),
+    ).toMatchObject({ crnFound: false, evidenceUrl: null });
+  });
 });
 
 describe('readWalkPage', () => {
@@ -215,6 +242,26 @@ describe('readWalkPage', () => {
       pageNamed: true,
     });
     expect(page?.stated.map((s) => s.companyNumber)).toEqual(['03260168']);
+  });
+
+  test('its number in digit groups, in statutory wording, proves the page', () => {
+    const page = readWalkPage(
+      row,
+      'https://acme.co.uk/terms',
+      '<footer>Registered in England and Wales No. 0326 0168</footer>',
+      new Set(),
+    );
+    expect(page?.crnFound).toBe(true);
+  });
+
+  test('a phone number with the same digits does not', () => {
+    const page = readWalkPage(
+      row,
+      'https://acme.co.uk/contact',
+      '<p>Call us: 020 0326 0168</p>',
+      new Set(),
+    );
+    expect(page?.crnFound).toBe(false);
   });
 
   test("a page showing the postcode under another business's name does not name the company", () => {

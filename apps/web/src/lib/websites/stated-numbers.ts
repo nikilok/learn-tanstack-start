@@ -8,13 +8,13 @@
  */
 
 import { crowdKey } from './crowded-hosts';
-import { visibleText } from './extract';
+import { pageHasCompanyNumber, visibleText } from './extract';
 
 /** Companies House register prefixes a number may carry. */
 const PREFIX =
   '(?:SC|NI|OC|SO|NC|R0|IP|SP|RS|LP|SL|SF|NL|NF|NP|NR|FC|GE|CE|BR|CS|ZC|OE|RC|AC)';
 /** A number as sites write it: prefixed, padded or not, or in digit groups. */
-const NUMBER = `(${PREFIX}\\s?\\d{6}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{3}\\s\\d{4}|\\d{6,8})`;
+const NUMBER = `(${PREFIX}\\s?\\d{6}|${PREFIX}\\s?\\d{3}\\s\\d{3}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{4}\\s\\d{4}|\\d{3}\\s\\d{4}|\\d{6,8})`;
 /** Only the full forms, where the wording around them is looser. */
 const FULL = `(${PREFIX}\\s?\\d{6}|\\d{8})`;
 const PLACE =
@@ -130,6 +130,20 @@ export function statedCompanyNumbers(html: string): StatedNumber[] {
     companyNumber,
     context,
   }));
+}
+
+/** Whether a page carries this company's number: one token anywhere, or stated in statutory wording, digit groups and dropped zeros included. `stated` reuses numbers already read off the page. */
+export function pageShowsCompanyNumber(
+  html: string,
+  companyNumber: string,
+  stated?: readonly StatedNumber[],
+): boolean {
+  if (pageHasCompanyNumber(html, companyNumber)) return true;
+  const own = normaliseStatedNumber(companyNumber);
+  return (
+    own !== null &&
+    (stated ?? statedCompanyNumbers(html)).some((s) => s.companyNumber === own)
+  );
 }
 
 /** A stated number tied to the site and page it was read on. */

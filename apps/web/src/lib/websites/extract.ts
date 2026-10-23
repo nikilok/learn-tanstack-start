@@ -154,9 +154,24 @@ export function pageHasCompanyNumber(
 const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/;
 
 export function pageHasPostcode(html: string, postcode: string): boolean {
+  const pattern = postcodePattern(postcode);
+  return pattern !== null && pattern.test(postcodeText(visibleText(html)));
+}
+
+/**
+ * Visible text as a postcode is read in it: spaces and tabs collapsed,
+ * upper-cased. A newline is a block boundary and must survive, or the fusion
+ * postcodePattern guards against comes straight back.
+ */
+export function postcodeText(text: string): string {
+  return text.replace(/[^\S\n]+/g, ' ').toUpperCase();
+}
+
+/** The bounded pattern a UK postcode is found by in postcodeText; null for one too short or not UK. */
+export function postcodePattern(postcode: string, flags = ''): RegExp | null {
   const needle = postcode.replace(/\s+/g, '').toUpperCase();
   // Below this a "postcode" is too short to be distinctive enough to trust.
-  if (needle.length < 5) return false;
+  if (needle.length < 5) return null;
   // Non-UK postcodes are refused outright rather than matched loosely. The
   // `length - 3` split below assumes the UK inward code, so a French '92400'
   // became the pattern `92 ?400` — matching any standalone 92400 on the page, a
@@ -164,7 +179,7 @@ export function pageHasPostcode(html: string, postcode: string): boolean {
   // all-digit postcode and 346 sweepable rows a 5-character one, and one
   // coincidence is enough to promote a candidate row to the verified floor and
   // publish an unconfirmed link.
-  if (!UK_POSTCODE.test(needle)) return false;
+  if (!UK_POSTCODE.test(needle)) return null;
 
   // Whitespace is COLLAPSED, never removed. Removing it page-wide let a needle
   // be assembled from fragments that are never adjacent to a reader: with
@@ -172,12 +187,7 @@ export function pageHasPostcode(html: string, postcode: string): boolean {
   // "...M11AEX..." and "M1 1AE" matched a coincidence. A postcode's inward and
   // outward codes are separated by at most one space, so that is all we allow,
   // and the match is bounded so it cannot start or end mid-token.
-  // Spaces and tabs collapse; a newline is a block boundary and must survive,
-  // or the fusion this guards against comes straight back.
-  const text = visibleText(html)
-    .replace(/[^\S\n]+/g, ' ')
-    .toUpperCase();
   const split = needle.length - 3;
   const pattern = `${escapeRegExp(needle.slice(0, split))} ?${escapeRegExp(needle.slice(split))}`;
-  return new RegExp(`(?<![A-Z0-9])${pattern}(?![A-Z0-9])`).test(text);
+  return new RegExp(`(?<![A-Z0-9])${pattern}(?![A-Z0-9])`, flags);
 }

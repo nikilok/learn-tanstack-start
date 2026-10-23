@@ -1,0 +1,108 @@
+/**
+ * Take sites judged not to be a company's off their rows and out of the rows'
+ * banked search results, so no later walk or discovery pass chooses them
+ * again. A row holding the site goes back to `none` with its walk marker
+ * kept. Every listed row is backed up before anything is written, and each
+ * write is guarded on the row still holding what was read. Prints counts only.
+ *
+ * Run from monorepo root:
+ *   bun apps/web/scripts/reject-websites.ts --list=rejections.json
+ *   bun apps/web/scripts/reject-websites.ts --list=rejections.json --backup=backup.json --apply
+ *
+ * The list: [{ "companyNumber": "01234567", "url": "https://example.co.uk" }]
+ *
+ * Env: POSTGRES_URL.
+ */
+
+import { neon } from '@ss/db/client';
+
+import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
+import {
+  makeRejectSite,
+  type RejectOutcome,
+} from '../src/lib/websites/rejected-site-sql.ts';
+import { rejectSite } from '../src/lib/websites/rejected-site.ts';
+import { loadScriptEnv } from './lib/script-utils.ts';
+
+loadScriptEnv(import.meta.url);
+
+const args = process.argv.slice(2);
+const flag = (name: string) =>
+  args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=');
+
+/** Every argument this script reads; anything else stops the run. */
+const KNOWN_ARG = /^--(?:apply|(?:list|backup)=.*)$/;
+const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
+if (unknownArgs.length > 0) {
+  console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
+  process.exit(1);
+}
+const listFile = flag('list');
+const backupFile = flag('backup');
+const apply = args.includes('--apply');
+if (!listFile || (apply && !backupFile)) {
+  console.error('  --list is required, and --apply needs --backup');
+  process.exit(1);
+}
+
+type Rejection = { companyNumber: string; url: string };
+const list = (await Bun.file(listFile).json()) as Rejection[];
+if (
+  !Array.isArray(list) ||
+  !list.every(
+    (r) => typeof r.companyNumber === 'string' && typeof r.url === 'string',
+  )
+) {
+  console.error('  the list must be [{ companyNumber, url }]');
+  process.exit(1);
+}
+
+const sql = neon(process.env.POSTGRES_URL as string);
+console.log(`  db: ${dbFingerprint(process.env.POSTGRES_URL as string)}`);
+const numbers = list.map((r) => r.companyNumber);
+const rows = (await sql`
+  SELECT * FROM company_websites WHERE company_number = ANY(${numbers}::text[])
+`) as { company_number: string; url: string | null; candidates: unknown }[];
+const byNumber = new Map(rows.map((r) => [r.company_number, r]));
+
+const planned: Record<string, number> = {
+  reset: 0,
+  stripped: 0,
+  unchanged: 0,
+  missing: 0,
+};
+for (const r of list) {
+  const row = byNumber.get(r.companyNumber);
+  const change = row ? rejectSite(row, r.url) : null;
+  planned[
+    !row
+      ? 'missing'
+      : !change
+        ? 'unchanged'
+        : change.reset
+          ? 'reset'
+          : 'stripped'
+  ] += 1;
+}
+console.log(`  listed: ${list.length}`, planned);
+if (!apply) process.exit(0);
+
+await Bun.write(
+  backupFile as string,
+  JSON.stringify({ at: new Date().toISOString(), rows }, null, 1),
+);
+console.log(`  backed up: ${rows.length} rows`);
+const reject = makeRejectSite(sql);
+const done: Record<RejectOutcome, number> = {
+  reset: 0,
+  stripped: 0,
+  unchanged: 0,
+  missing: 0,
+  moved: 0,
+};
+for (const r of list) done[await reject(r.companyNumber, r.url)] += 1;
+console.log('  applied:', done);

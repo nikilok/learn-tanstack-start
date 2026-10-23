@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   hostIsWholeName,
+  hostNamesAny,
   hostNamesCompany,
   nameInitials,
   namesCompany,
@@ -9,6 +10,7 @@ import {
   pageHasWholeName,
   pageNamesCompany,
   registerNames,
+  registrableDomain,
 } from './company-naming';
 
 describe('nameWords', () => {
@@ -344,6 +346,33 @@ describe('namesCompany', () => {
         sponsorNames: ['Acme Widgets Ltd T/A Acme Dental'],
       }),
     ).toBe(false);
+  });
+});
+
+describe('hostNamesAny', () => {
+  const trading = {
+    companyName: 'FENWICK CHIROPRACTIC LTD',
+    sponsorNames: ['Fenwick Chiropractic Ltd T/A Elmbank Chiropractic Clinic'],
+  };
+
+  test('a host naming the company by its registered name or a register name', () => {
+    expect(hostNamesAny('www.fenwickchiro.co.uk', trading)).toBe(true);
+    expect(hostNamesAny('elmbankchiropractic.co.uk', trading)).toBe(true);
+  });
+
+  test("never another business's host, nor one word of a trading name", () => {
+    expect(hostNamesAny('www.example.co.uk', trading)).toBe(false);
+    expect(hostNamesAny('www.clinic4u.co.uk', trading)).toBe(false);
+  });
+});
+
+describe('registrableDomain', () => {
+  test('the domain a host is registered under, past any subdomain', () => {
+    expect(registrableDomain('shop.acme.co.uk')).toBe('acme.co.uk');
+    expect(registrableDomain('www.acme.com')).toBe('acme.com');
+    expect(registrableDomain('acme.myshopify.com')).toBe('myshopify.com');
+    expect(registrableDomain('Acme.Co.UK.')).toBe('acme.co.uk');
+    expect(registrableDomain('acme.com.au')).toBe('acme.com.au');
   });
 });
 

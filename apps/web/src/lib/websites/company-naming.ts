@@ -161,6 +161,14 @@ function ownLabels(host: string): string[] {
   return labels;
 }
 
+/** The domain a host is registered under: acme.co.uk for shop.acme.co.uk, myshopify.com for acme.myshopify.com. */
+export function registrableDomain(host: string): string {
+  const labels = host.toLowerCase().replace(/\.$/, '').split('.');
+  const suffix =
+    labels.length > 2 && SECOND_LEVEL.has(labels[labels.length - 2]) ? 2 : 1;
+  return labels.slice(-(suffix + 1)).join('.');
+}
+
 /** The host's own labels, upper-cased and split at hyphens. */
 function hostLabels(host: string): string[] {
   return ownLabels(host)
@@ -336,6 +344,24 @@ function pageCarriesRegisterName(page: string, name: string): boolean {
   return nameWords(name).length >= 2 && hasPhrase(page, writtenName(name));
 }
 
+/** Whether a host names the company, given the register's names for it. */
+function hostNames(
+  host: string,
+  names: CompanyNames,
+  register: readonly string[],
+): boolean {
+  return (
+    hostNamesCompany(host, names.companyName) ||
+    hostIsWholeName(host, names.companyName) ||
+    register.some((name) => hostCarriesRegisterName(host, name))
+  );
+}
+
+/** Whether a host names the company: by its registered name, or a name the sponsor register lists. */
+export function hostNamesAny(host: string, names: CompanyNames): boolean {
+  return hostNames(host, names, registerNamesOf(names));
+}
+
 /** Whether a fetched page names the company: by the host that served it, or in its text. */
 export function namesCompany(
   servedHost: string,
@@ -346,13 +372,7 @@ export function namesCompany(
   // The serving host, not the one asked for: a named domain that redirects
   // to another business serves that business's page. Hosts first: they cost
   // nothing next to reading the page.
-  if (
-    hostNamesCompany(servedHost, names.companyName) ||
-    hostIsWholeName(servedHost, names.companyName) ||
-    register.some((name) => hostCarriesRegisterName(servedHost, name))
-  ) {
-    return true;
-  }
+  if (hostNames(servedHost, names, register)) return true;
   const page = phrasePage(text);
   return (
     pageNamesCompany(page, names.companyName) ||

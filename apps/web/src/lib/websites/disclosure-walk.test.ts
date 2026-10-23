@@ -327,6 +327,35 @@ describe('readWalkPage', () => {
     expect(page).toMatchObject({ postcodeFound: true, pageNamed: false });
   });
 
+  // An exhibitor list: the company named beside its postcode, with its own site.
+  const exhibitors = [
+    '<h1>Exhibitors</h1>',
+    '<p>Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk</p>',
+    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
+    '<p>Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu</p>',
+  ].join('');
+
+  test('a listing that gives the company its own site elsewhere does not name it as its own', () => {
+    const url = 'https://www.poultry-conference.co.uk/exhibitors';
+    expect(readWalkPage(row, url, exhibitors, new Set())).toMatchObject({
+      postcodeFound: true,
+      pageNamed: false,
+    });
+    expect(readHomepage(row, url, url, exhibitors, new Set())).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+    });
+    // The same entries on the company's own domain are its own page.
+    expect(
+      readWalkPage(
+        row,
+        'https://acmewidgets.com/stockists',
+        exhibitors,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, pageNamed: true });
+  });
+
   test('a disclosure path that redirects into a register proves nothing', () => {
     // /company-information -> the Companies House profile prints the number.
     expect(

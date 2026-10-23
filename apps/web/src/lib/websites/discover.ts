@@ -39,7 +39,7 @@ export type CandidateProbe = {
   crnFound: boolean;
   /** The company's registered office postcode was on the page. */
   postcodeFound: boolean;
-  /** The postcode was read on a page that names the company: by the host that served it, or in its text. */
+  /** The postcode was read on a page that names the company as its own: by the host that served it, or in its text, never as a listing's entry. */
   postcodeNamed?: boolean;
   /** A directory or profile listing rather than a company's site. */
   onAggregator: boolean;

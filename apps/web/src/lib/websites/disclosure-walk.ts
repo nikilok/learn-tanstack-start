@@ -12,6 +12,7 @@ import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
 import { pageHasPostcode, visibleText } from './extract';
 import { DISCLOSURE_PATHS } from './fetch-policy';
+import { isListingEntry } from './listing-entry';
 import { looksParked } from './page-signals';
 import {
   pageShowsCompanyNumber,
@@ -105,6 +106,14 @@ type ProbeRow = CompanyNames & {
   postcode: string | null;
 };
 
+/** Whether a page showing the postcode names the company as its own: named, and not as one entry of a listing. */
+function namedAsItself(host: string, text: string, row: ProbeRow): boolean {
+  return (
+    namesCompany(host, text, row) &&
+    !isListingEntry(host, text, row.postcode ?? '', row)
+  );
+}
+
 /** What a candidate's homepage proves, read off the page its URL served. */
 export function readHomepage(
   row: ProbeRow,
@@ -139,7 +148,7 @@ export function readHomepage(
     postcodeFound,
     // Named by the serving host too: a named domain that redirects to another
     // business serves that business's page.
-    postcodeNamed: postcodeFound && namesCompany(host, text, row),
+    postcodeNamed: postcodeFound && namedAsItself(host, text, row),
     onAggregator,
     parked: looksParked(text),
     legalLinks: legalLinks(html, servedUrl),
@@ -151,7 +160,7 @@ export function readHomepage(
 export type WalkPage = {
   crnFound: boolean;
   postcodeFound: boolean;
-  /** The page shows the postcode and names the company: by the host that served it, or in its text. */
+  /** The page shows the postcode and names the company as its own: by the host that served it, or in its text, never as a listing's entry. */
   pageNamed: boolean;
   stated: StatedOnSite[];
 };
@@ -180,7 +189,7 @@ export function readWalkPage(
     crnFound: pageShowsCompanyNumber(html, row.companyNumber, stated),
     postcodeFound,
     // Judged on this page's own host: a walked path can redirect off the site.
-    pageNamed: postcodeFound && namesCompany(host, visibleText(html), row),
+    pageNamed: postcodeFound && namedAsItself(host, visibleText(html), row),
     stated,
   };
 }

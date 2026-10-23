@@ -66,6 +66,13 @@ if (
   console.error('  the list must be [{ companyNumber, url }]');
   process.exit(1);
 }
+// Each write is guarded on one snapshot, so a second site for a company needs a run of its own.
+if (new Set(list.map((r) => r.companyNumber)).size < list.length) {
+  console.error(
+    '  a company is listed twice; list its other site in a second run',
+  );
+  process.exit(1);
+}
 
 const sql = neon(process.env.POSTGRES_URL as string);
 console.log(`  db: ${dbFingerprint(process.env.POSTGRES_URL as string)}`);

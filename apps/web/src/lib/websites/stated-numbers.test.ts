@@ -105,6 +105,9 @@ describe('statedCompanyNumbers', () => {
     expect(
       numbers(footer('Registered in England and Wales<br>020 7946 0000')),
     ).toEqual([]);
+    expect(
+      numbers(footer('Registered in England and Wales No. 020 7946-0000')),
+    ).toEqual([]);
   });
 
   test('a phone line earlier on the line does not hide the number', () => {
@@ -115,6 +118,9 @@ describe('statedCompanyNumbers', () => {
 
   test('digit groups still read with an address on the next line', () => {
     expect(numbers(footer('Company No. 0123 4567<br>12 High Street'))).toEqual([
+      '01234567',
+    ]);
+    expect(numbers(footer('Company No. 123 4567, 12 High Street'))).toEqual([
       '01234567',
     ]);
   });

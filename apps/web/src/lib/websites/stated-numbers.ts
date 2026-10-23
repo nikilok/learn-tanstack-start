@@ -13,8 +13,8 @@ import { pageHasCompanyNumber, visibleText } from './extract';
 /** Companies House register prefixes a number may carry. */
 const PREFIX =
   '(?:SC|NI|OC|SO|NC|R0|IP|SP|RS|LP|SL|SF|NL|NF|NP|NR|FC|GE|CE|BR|CS|ZC|OE|RC|AC)';
-/** A number in digit groups; refused where another group follows on its line, as a phone number's does. */
-const GROUPED = `(?:${PREFIX}\\s?\\d{3}\\s\\d{3}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{4}\\s\\d{4}|\\d{3}\\s\\d{4})(?![^\\S\\n]\\d)`;
+/** A number in digit groups; refused where another group follows on its line, after a space or a mark, as a phone number's does. */
+const GROUPED = `(?:${PREFIX}\\s?\\d{3}\\s\\d{3}|\\d{1,2}\\s\\d{3}\\s\\d{3}|\\d{3}\\s\\d{3}\\s\\d{2}|\\d{4}\\s\\d{4}|\\d{3}\\s\\d{4})(?![^\\S\\n]\\d|[^\\d\\s]\\d)`;
 /** A number as sites write it: prefixed, padded or not, or in digit groups. */
 const NUMBER = `(${PREFIX}\\s?\\d{6}|${GROUPED}|\\d{6,8})`;
 /** Only the full forms, where the wording around them is looser. */

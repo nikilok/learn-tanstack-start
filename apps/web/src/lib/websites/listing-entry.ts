@@ -114,8 +114,10 @@ export function isListingEntry(
   if (named(servedHost)) return false;
   const pattern = postcodePattern(postcode, 'g');
   if (!pattern) return false;
-  // Runs of blank lines count as one boundary, as a reader sees the page.
-  const page = postcodeText(text).replace(/\s*\n\s*/g, '\n');
+  // Runs of blank lines count as one boundary, as a reader sees the page; one
+  // optional space before a newline keeps the match linear, as postcodeText
+  // has already collapsed every run of spaces.
+  const page = postcodeText(text).replace(/ ?\n[\n ]*/g, '\n');
   const own = new Set([...page.matchAll(pattern)].map((m) => m.index));
   const postcodes = [...page.matchAll(ANY_POSTCODE)].map((m) => ({
     index: m.index,

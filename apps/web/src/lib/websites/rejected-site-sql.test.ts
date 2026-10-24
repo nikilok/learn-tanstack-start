@@ -16,6 +16,8 @@ const held = {
   candidates,
   rowHash: 'e3b0c44298fc1c149afbf4c8996fb924',
 };
+// The same row backed up without the site anywhere on it.
+const clean = { ...held, url: null, candidates: ['https://www.club.co.uk/'] };
 const written = [{ company_number: '03260168' }];
 const guard = 'WHERE company_number = $2 AND md5(company_websites::text) = $3';
 
@@ -49,15 +51,24 @@ describe('makeRejectSite', () => {
     expect(text).toContain(guard);
   });
 
-  test('nothing to change writes nothing', async () => {
+  test('nothing to change writes nothing, once the row is confirmed as backed up', async () => {
     const { sql, calls } = makeFakeSql(written);
-    const clean = {
-      ...held,
-      url: null,
-      candidates: ['https://www.club.co.uk/'],
-    };
     expect(await makeRejectSite(sql)(clean, trust)).toBe('unchanged');
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
+    const text = flat(calls[0].text);
+    expect(text.trim()).toStartWith(
+      'SELECT company_number FROM company_websites',
+    );
+    expect(text).toContain(
+      'WHERE company_number = $1 AND md5(company_websites::text) = $2',
+    );
+    expect(calls[0].params).toEqual(['03260168', held.rowHash]);
+  });
+
+  test('a row clean when backed up, given the site by another job since, reports moved, not unchanged', async () => {
+    const { sql, calls } = makeFakeSql([]);
+    expect(await makeRejectSite(sql)(clean, trust)).toBe('moved');
+    expect(flat(calls[0].text)).not.toContain('UPDATE');
   });
 
   test('a row another job changed since the backup reports so', async () => {

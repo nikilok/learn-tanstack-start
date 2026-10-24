@@ -1,7 +1,7 @@
 /**
- * Database wiring for rejecting a site. Each write is guarded on the whole row
- * still hashing as it did when it was backed up, so a row another job changed
- * since, in any column, is left alone.
+ * Database wiring for rejecting a site. Every outcome holds only for the whole
+ * row still hashing as it did when it was backed up, so a row another job
+ * changed since, in any column, is left alone and reported as moved.
  */
 
 import type { NeonQueryFunction } from '@ss/db/client';
@@ -34,7 +34,15 @@ export function makeRejectSite(sql: Sql) {
     rejectedUrl: string,
   ): Promise<RejectOutcome> => {
     const change = rejectSite(row, rejectedUrl);
-    if (!change) return 'unchanged';
+    // A row clean as backed up is confirmed as one: the site may have arrived since.
+    if (!change) {
+      const same = await sql`
+        SELECT company_number FROM company_websites
+        WHERE company_number = ${row.companyNumber}
+          AND md5(company_websites::text) = ${row.rowHash}
+      `;
+      return same.length === 0 ? 'moved' : 'unchanged';
+    }
     const candidates = asJson(change.candidates);
     // The walk marker stays: the row was read, and the site is gone from all a walk reads.
     const updated = change.reset

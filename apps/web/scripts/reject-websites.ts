@@ -2,9 +2,9 @@
  * Take sites judged not to be a company's off their rows and out of the rows'
  * banked search results, so no later walk or discovery pass chooses them
  * again. A row holding the site goes back to `none` with its walk marker
- * kept. Every listed row is backed up before anything is written, and each
- * write is guarded on the row still holding what was backed up. Prints counts
- * only.
+ * kept. Every listed row is backed up before anything is written, and every
+ * outcome, a write or none, holds only for the row still as it was backed up.
+ * Prints counts only.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/reject-websites.ts --list=rejections.json

@@ -74,7 +74,7 @@ const ANY_POSTCODE = new RegExp(
  * after `://` still is.
  */
 const WRITTEN_SITE =
-  /(?<![A-Z0-9.-]|(?:^|[^/])\/|\/{3})((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
+  /(?<![A-Z0-9.-]|(?:^|[^/])\/|\/{3})((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9_+-]|\.[A-Z0-9]| ?@)/g;
 
 /** A postcode the page writes, and whether it is the company's own. */
 type Written = { index: number; code: string; own: boolean };

@@ -164,10 +164,12 @@ describe('isListingEntry', () => {
       'Eta Farms, Thirsk YO7 1AA. E: sam@mailhost.com',
     );
     expect(isListingEntry(conference, shared, postcode, names)).toBe(false);
-    // A dotted name is no site, however many parts it has.
+    // A dotted name is no site, however many parts it has or how it goes on.
     for (const email of [
       'john.smith.jr@gmail.com',
       'jane.mary.doe @gmail.com',
+      'jane.doe_sales@gmail.com',
+      'jane.doe+sales@gmail.com',
     ]) {
       const dotted = oneShort(`Zeta Vets, Malton YO17 7AB. E: ${email}`);
       expect(isListingEntry(conference, dotted, postcode, names)).toBe(false);

@@ -97,12 +97,14 @@ describe('planRun', () => {
 });
 
 describe('applyRun', () => {
-  /** A run's calls, in the order made. */
+  /** A run's calls, each recorded once it has finished. */
   const recorder = (outcomes: RejectOutcome[] = []) => {
     const calls: string[] = [];
     let backedUp: Record<string, unknown>[] = [];
     const deps = {
       backup: async (stored: Record<string, unknown>[]) => {
+        // Finishes a tick late, as a file write does, so a write not waiting for it shows.
+        await new Promise((resolve) => setTimeout(resolve, 1));
         calls.push('backup');
         backedUp = stored;
       },
@@ -114,21 +116,24 @@ describe('applyRun', () => {
     return { calls, deps, backedUp: () => backedUp };
   };
 
-  test('backs every row up as stored before rejecting any', async () => {
-    const plan = await planRun(
-      [entry('03260168'), entry('04111111')],
-      async () => [onSite, banking],
-    );
-    const run = recorder(['reset', 'stripped']);
-    const result = await applyRun(
-      [entry('03260168'), entry('04111111')],
-      plan,
-      run.deps,
-    );
-    expect(run.calls).toEqual(['backup', 'reject 03260168', 'reject 04111111']);
-    expect(run.backedUp()).toEqual([onSite.stored, banking.stored]);
+  test('backs every row up as stored, one with nothing to change too, before rejecting any', async () => {
+    const entries = [entry('03260168'), entry('04111111'), entry('05222222')];
+    const plan = await planRun(entries, async () => [onSite, banking, clean]);
+    const run = recorder(['reset', 'stripped', 'unchanged']);
+    const result = await applyRun(entries, plan, run.deps);
+    expect(run.calls).toEqual([
+      'backup',
+      'reject 03260168',
+      'reject 04111111',
+      'reject 05222222',
+    ]);
+    expect(run.backedUp()).toEqual([
+      onSite.stored,
+      banking.stored,
+      clean.stored,
+    ]);
     expect(result).toEqual({
-      applied: { reset: 1, stripped: 1, unchanged: 0, missing: 0, moved: 0 },
+      applied: { reset: 1, stripped: 1, unchanged: 1, missing: 0, moved: 0 },
       failure: null,
     });
   });

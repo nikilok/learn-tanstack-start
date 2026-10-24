@@ -22,8 +22,12 @@ function isRaw(value: unknown): value is Raw {
   );
 }
 
-/** A fake client: raw fragments are spliced in as text and the rest bound as $n, as the driver does. */
-export function makeFakeSql(result: Record<string, unknown>[] = []) {
+/**
+ * A fake client: raw fragments are spliced in as text and the rest bound as
+ * $n, as the driver does. Each call resolves with the next result given, the
+ * last one repeating.
+ */
+export function makeFakeSql(...results: Record<string, unknown>[][]) {
   const calls: FakeSqlCall[] = [];
   const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
     let text = strings[0];
@@ -33,7 +37,9 @@ export function makeFakeSql(result: Record<string, unknown>[] = []) {
       text += strings[i + 1];
     });
     calls.push({ text, params });
-    return Promise.resolve(result);
+    return Promise.resolve(
+      results[Math.min(calls.length, results.length) - 1] ?? [],
+    );
   }) as unknown as NeonQueryFunction<false, false>;
   sql.unsafe = (raw: string) =>
     ({ sql: raw }) as unknown as ReturnType<typeof sql.unsafe>;

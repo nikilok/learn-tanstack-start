@@ -187,6 +187,32 @@ describe('readHomepage', () => {
     ).toMatchObject({ postcodeFound: true, postcodeNamed: false });
   });
 
+  test("a brand homepage linking each branch to its what3words page is the company's own", () => {
+    const branches = [
+      ['Ashbourne DE6 1HA', 'filled.count.soap'],
+      ['Rugeley WS15 1RD', 'index.home.raft'],
+      ['Market Rasen LN8 3AA', 'grape.lion.tent'],
+      ['Driffield YO25 6AB', 'stone.river.coat'],
+      ['Malton YO17 7AB', 'mint.pause.lamp'],
+    ];
+    const html = [
+      ...branches.map(
+        ([branch, words]) =>
+          `<p>${branch}, <a href="https://what3words.com/${words}">https://what3words.com/${words}</a>, open daily from nine to five.</p>`,
+      ),
+      '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. Email: hello@acmewidgets.co.uk</p>',
+    ].join('');
+    expect(
+      readHomepage(
+        row,
+        'https://www.smile-group.co.uk',
+        'https://www.smile-group.co.uk/',
+        html,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
+  });
+
   test('a homepage served from a directory states nothing', () => {
     const page = readHomepage(
       row,
@@ -325,6 +351,46 @@ describe('readWalkPage', () => {
       new Set(),
     );
     expect(page).toMatchObject({ postcodeFound: true, pageNamed: false });
+  });
+
+  // An exhibitor list: the company named beside its postcode, with its own site, among five others.
+  const exhibitors = [
+    '<h1>Exhibitors</h1>',
+    '<p>Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk</p>',
+    '<p>Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu</p>',
+    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
+    '<p>Delta Grain, Market Rasen LN8 3AA. W: deltagrain.com</p>',
+    '<p>Epsilon Eggs, Driffield YO25 6AB. W: epsiloneggs.co.uk</p>',
+    '<p>Zeta Vets, Malton YO17 7AB. W: zetavets.org.uk</p>',
+  ].join('');
+
+  test('a listing that gives the company its own site elsewhere does not name it as its own', () => {
+    const url = 'https://www.poultry-conference.co.uk/exhibitors';
+    expect(readWalkPage(row, url, exhibitors, new Set())).toMatchObject({
+      postcodeFound: true,
+      pageNamed: false,
+    });
+    expect(readHomepage(row, url, url, exhibitors, new Set())).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+    });
+    // The same entries on the company's own domain are its own page.
+    expect(
+      readWalkPage(
+        row,
+        'https://acmewidgets.com/stockists',
+        exhibitors,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, pageNamed: true });
+    // Whatever domain the listing gives the company's site under.
+    for (const site of ['acmewidgets.dev', 'acmewidgets.uk.com']) {
+      const page = exhibitors.replace('acmewidgets.co.uk', site);
+      expect(readHomepage(row, url, url, page, new Set())).toMatchObject({
+        postcodeFound: true,
+        postcodeNamed: false,
+      });
+    }
   });
 
   test('a disclosure path that redirects into a register proves nothing', () => {

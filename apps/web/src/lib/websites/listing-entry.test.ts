@@ -9,18 +9,38 @@ const names = {
 };
 const postcode = 'SO22 5AZ';
 const conference = 'www.poultry-conference.co.uk';
+const brandHost = 'www.feeds-example.co.uk';
 
-/** A conference's exhibitor list: each entry an address and the exhibitor's own site. */
-const exhibitors = (entry: string) =>
-  [
+/** Other exhibitors, each with an address and its own site. */
+const OTHERS = [
+  ['Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA', 'betafeeds.co.uk'],
+  ['Gamma Hatcheries, Rugeley WS15 1RD', 'gammahatch.eu'],
+  ['Delta Grain, Market Rasen LN8 3AA', 'deltagrain.com'],
+  ['Epsilon Eggs, Driffield YO25 6AB', 'epsiloneggs.co.uk'],
+  ['Zeta Vets, Malton YO17 7AB', 'zetavets.org.uk'],
+];
+
+/** A conference's exhibitor list: the company's entry after the first two of `count` others. */
+const exhibitors = (entry: string, count = OTHERS.length) => {
+  const others = OTHERS.slice(0, count).map(
+    ([address, site]) => `${address}\nW: ${site}`,
+  );
+  return [
     'EPIC Poultry Conference 2026',
     'Exhibitors',
-    'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA',
-    'W: betafeeds.co.uk',
+    ...others.slice(0, 2),
     entry,
-    'Gamma Hatcheries, Rugeley WS15 1RD',
-    'W: gammahatch.eu',
+    ...others.slice(2),
   ].join('\n');
+};
+
+/** The company's own entry, giving its own site. */
+const entry =
+  'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: elmbanknutrition.co.uk';
+
+/** Four exhibitors that each give their own site, one short of a listing, and the entries under test. */
+const oneShort = (...lines: string[]) =>
+  exhibitors([entry, ...lines].join('\n'), 4);
 
 describe('isListingEntry', () => {
   test('an exhibitor list giving the company its own website beside its postcode', () => {
@@ -36,25 +56,46 @@ describe('isListingEntry', () => {
   });
 
   test('a site under any top-level domain, written or as an email', () => {
-    for (const entry of [
+    for (const site of [
       'W: elmbanknutrition.dev',
       'E: hello@elmbanknutrition.london',
       'W: www.elmbanknutrition.uk.com',
     ]) {
       const page = exhibitors(
-        `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\n${entry}`,
+        `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\n${site}`,
       );
       expect(isListingEntry(conference, page, postcode, names)).toBe(true);
     }
+  });
+
+  test('five other businesses giving their own sites make a listing, and four do not', () => {
+    expect(
+      isListingEntry(conference, exhibitors(entry, 5), postcode, names),
+    ).toBe(true);
+    expect(
+      isListingEntry(conference, exhibitors(entry, 4), postcode, names),
+    ).toBe(false);
+  });
+
+  test("a company's own privacy page cites its regulators with their addresses and sites", () => {
+    // A brand site: its controller's address with a legal-name email, then the bodies it answers to.
+    const privacy = [
+      'Privacy policy',
+      'Elmbank Nutrition is a trading name of QX Agri Ltd, Unit 4, Winchester SO22 5AZ, the data controller.',
+      'Contact our data protection lead at privacy@elmbanknutrition.co.uk.',
+      "You may complain to the Information Commissioner's Office, Wycliffe House, Water Lane, Wilmslow SK9 5AF. Website: ico.org.uk",
+      'Or to the Financial Ombudsman Service, Exchange Tower, London E14 9SR. Website: www.financial-ombudsman.org.uk',
+      'We are authorised by the Financial Conduct Authority, 12 Endeavour Square, London E20 1JN. www.fca.org.uk',
+      'and the Prudential Regulation Authority, 20 Moorgate, London EC2R 6DA. www.bankofengland.co.uk',
+    ].join('\n');
+    expect(isListingEntry(brandHost, privacy, postcode, names)).toBe(false);
   });
 
   test("the company's own site may give its other domains, and a host that names it is its own", () => {
     // A brand site whose email is on the legal name's domain: one address.
     const brand =
       'Our homes. Elmbank Nutrition, Unit 4, Winchester SO22 5AZ. Email: info@elmbanknutrition.co.uk';
-    expect(
-      isListingEntry('www.feeds-example.co.uk', brand, postcode, names),
-    ).toBe(false);
+    expect(isListingEntry(brandHost, brand, postcode, names)).toBe(false);
     const page = exhibitors(
       'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: elmbanknutrition.com',
     );
@@ -64,81 +105,85 @@ describe('isListingEntry', () => {
   });
 
   test("a brand site's branches and its legal-name email are one business", () => {
-    // Its host spells the brand, not the registered name; no other business is given a site.
-    const brand = [
-      'Our homes',
-      'Ashbourne DE6 1HA',
-      'Rugeley WS15 1RD',
-      'Elmbank Nutrition, Winchester SO22 5AZ. Email: info@elmbanknutrition.co.uk',
-    ].join('\n');
-    expect(
-      isListingEntry('www.feeds-example.co.uk', brand, postcode, names),
-    ).toBe(false);
+    const branches = OTHERS.map(([address]) => address.split(', ').at(-1));
+    const own =
+      'Elmbank Nutrition, Winchester SO22 5AZ. Email: info@elmbanknutrition.co.uk';
+    // Its host spells the brand, not the registered name; no branch is given a site.
+    const brand = ['Our homes', ...branches, own].join('\n');
+    expect(isListingEntry(brandHost, brand, postcode, names)).toBe(false);
     // A regulator's site beside every branch is one site, not other businesses,
     // and a body the company belongs to is written beside the company's own address.
     const rated = [
-      'Ashbourne DE6 1HA. Rated: cqc.org.uk',
-      'Rugeley WS15 1RD. Rated: cqc.org.uk',
+      ...branches.map((branch) => `${branch}. Rated: cqc.org.uk`),
       'Elmbank Nutrition, Winchester SO22 5AZ. Member: feedassoc.org.uk. Email: info@elmbanknutrition.co.uk',
     ].join('\n');
-    expect(
-      isListingEntry('www.feeds-example.co.uk', rated, postcode, names),
-    ).toBe(false);
+    expect(isListingEntry(brandHost, rated, postcode, names)).toBe(false);
+    // A what3words address is no site.
+    const words = [
+      'filled.count.soap',
+      'index.home.raft',
+      'grape.lion.tent',
+      'stone.river.coat',
+      'mint.pause.lamp',
+    ];
+    const located = [
+      ...branches.map((branch, i) => `${branch}, ///${words[i]}`),
+      own,
+    ].join('\n');
+    expect(isListingEntry(brandHost, located, postcode, names)).toBe(false);
   });
 
   test('a listing gives other businesses their own sites, beside their own postcodes', () => {
-    const entry =
-      'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: elmbanknutrition.co.uk';
     // The other entries give no sites.
     const bare = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA',
-      entry,
-      'Gamma Hatcheries, Rugeley WS15 1RD',
+      ...OTHERS.map(([address]) => address),
+      'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: elmbanknutrition.co.uk',
     ].join('\n');
     expect(isListingEntry(conference, bare, postcode, names)).toBe(false);
-    // Personal emails at one mail provider: no site of their own, and a dotted
-    // name is no site, however many parts it has.
-    const mail = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. E: john.smith.jr@mailhost.com',
-      entry,
-      'Gamma Hatcheries, Rugeley WS15 1RD. E: jane.mary.doe @mailhost.com',
-    ].join('\n');
-    expect(isListingEntry(conference, mail, postcode, names)).toBe(false);
-    // Mail providers and social networks are no business's own site, one each or not.
-    for (const [beta, gamma] of [
-      ['E: beta.feeds@gmail.com', 'E: gamma@outlook.com'],
-      ['facebook.com/betafeeds', 'instagram.com/gammahatch'],
+    // Personal emails at one mail provider: no site of their own.
+    const shared = oneShort(
+      'Zeta Vets, Malton YO17 7AB. E: jo@mailhost.com',
+      'Eta Farms, Thirsk YO7 1AA. E: sam@mailhost.com',
+    );
+    expect(isListingEntry(conference, shared, postcode, names)).toBe(false);
+    // A dotted name is no site, however many parts it has.
+    for (const email of [
+      'john.smith.jr@gmail.com',
+      'jane.mary.doe @gmail.com',
     ]) {
-      const platforms = [
-        `Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. ${beta}`,
-        entry,
-        `Gamma Hatcheries, Rugeley WS15 1RD. ${gamma}`,
-      ].join('\n');
+      const dotted = oneShort(`Zeta Vets, Malton YO17 7AB. E: ${email}`);
+      expect(isListingEntry(conference, dotted, postcode, names)).toBe(false);
+    }
+    // Mail providers and social networks are no business's own site, one each or not.
+    for (const [zeta, eta] of [
+      ['E: zeta.vets@gmail.com', 'E: eta@outlook.com'],
+      ['facebook.com/zetavets', 'instagram.com/etafarms'],
+    ]) {
+      const platforms = oneShort(
+        `Zeta Vets, Malton YO17 7AB. ${zeta}`,
+        `Eta Farms, Thirsk YO7 1AA. ${eta}`,
+      );
       expect(isListingEntry(conference, platforms, postcode, names)).toBe(
         false,
       );
     }
     // One other business giving two sites is still one business.
-    const twoSites = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk, betagroup.com',
-      entry,
-      'Gamma Hatcheries, Rugeley WS15 1RD',
-    ].join('\n');
+    const twoSites = exhibitors(entry, 4).replace(
+      'W: betafeeds.co.uk',
+      'W: betafeeds.co.uk, betagroup.com',
+    );
     expect(isListingEntry(conference, twoSites, postcode, names)).toBe(false);
-    // The listing's own pages are not other businesses: one other gives its site.
-    const own = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. Stand: poultry-conference.co.uk/b',
-      entry,
-      'Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu',
-    ].join('\n');
+    // The listing's own pages are not other businesses.
+    const own = oneShort(
+      'Zeta Vets, Malton YO17 7AB. Stand: poultry-conference.co.uk/z',
+    );
     expect(isListingEntry(conference, own, postcode, names)).toBe(false);
   });
 
   test("a chain's branch list names no other site for the company", () => {
     const branches = [
       'Our nurseries',
-      'Ashbourne DE6 1HA',
-      'Rugeley WS15 1RD',
+      ...OTHERS.map(([address]) => address.split(', ').at(-1)),
       'Elmbank Nutrition, Winchester SO22 5AZ',
       'Book a visit online.',
     ].join('\n');
@@ -146,16 +191,16 @@ describe('isListingEntry', () => {
   });
 
   test('its own address in the header, footer and contact block is one address', () => {
-    // Beside one partner that gives two sites: two addresses in all.
+    // Beside partners that each give a site: one address short of a listing in all.
     const own = [
       'Elmbank Nutrition, Winchester SO22 5AZ',
       'Visit us: Unit 4, SO22 5AZ',
       'Elmbank Nutrition SO22 5AZ. Email: info@elmbanknutrition.co.uk',
-      'Partner: Beta Feeds, Ashbourne DE6 1HA. betafeeds.co.uk, betagroup.com',
+      ...OTHERS.slice(0, 4).map(
+        ([address, site]) => `Partner: ${address}. ${site}`,
+      ),
     ].join('\n');
-    expect(
-      isListingEntry('www.feeds-example.co.uk', own, postcode, names),
-    ).toBe(false);
+    expect(isListingEntry(brandHost, own, postcode, names)).toBe(false);
   });
 
   test('a site written before its postcode, and nearest it, is beside it too', () => {
@@ -171,16 +216,6 @@ describe('isListingEntry', () => {
       `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ${'\n \n'.repeat(120)}W: elmbanknutrition.co.uk`,
     );
     expect(isListingEntry(conference, page, postcode, names)).toBe(true);
-  });
-
-  test('two addresses are not yet a listing', () => {
-    // However many sites the one other business gives.
-    const page = [
-      'Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk, betagroup.com',
-      'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ',
-      'W: elmbanknutrition.co.uk',
-    ].join('\n');
-    expect(isListingEntry(conference, page, postcode, names)).toBe(false);
   });
 
   test("the site must sit beside the company's own postcode", () => {
@@ -209,9 +244,7 @@ describe('isListingEntry', () => {
   });
 
   test('a page without the postcode, or a postcode that is not UK, lists nothing for it', () => {
-    const page = exhibitors(
-      'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: elmbanknutrition.co.uk',
-    );
+    const page = exhibitors(entry);
     expect(isListingEntry(conference, page, 'BN1 1AA', names)).toBe(false);
     expect(isListingEntry(conference, page, '92400', names)).toBe(false);
   });

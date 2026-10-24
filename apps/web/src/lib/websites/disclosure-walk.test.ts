@@ -327,12 +327,15 @@ describe('readWalkPage', () => {
     expect(page).toMatchObject({ postcodeFound: true, pageNamed: false });
   });
 
-  // An exhibitor list: the company named beside its postcode, with its own site.
+  // An exhibitor list: the company named beside its postcode, with its own site, among five others.
   const exhibitors = [
     '<h1>Exhibitors</h1>',
     '<p>Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk</p>',
-    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
     '<p>Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu</p>',
+    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
+    '<p>Delta Grain, Market Rasen LN8 3AA. W: deltagrain.com</p>',
+    '<p>Epsilon Eggs, Driffield YO25 6AB. W: epsiloneggs.co.uk</p>',
+    '<p>Zeta Vets, Malton YO17 7AB. W: zetavets.org.uk</p>',
   ].join('');
 
   test('a listing that gives the company its own site elsewhere does not name it as its own', () => {

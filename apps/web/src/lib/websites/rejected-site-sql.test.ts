@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { makeFakeSql } from './fake-sql';
-import { makeRejectSite } from './rejected-site-sql';
+import { makeReadListed, makeRejectSite } from './rejected-site-sql';
 
 const flat = (text: string) => text.replace(/\s+/g, ' ');
 const trust = 'https://www.club-trust.org';
@@ -20,6 +20,42 @@ const held = {
 const clean = { ...held, url: null, candidates: ['https://www.club.co.uk/'] };
 const written = [{ company_number: '03260168' }];
 const guard = 'WHERE company_number = $2 AND md5(company_websites::text) = $3';
+
+describe('makeReadListed', () => {
+  test('reads each listed row exactly as stored, with its source and the hash its rejection is guarded on', async () => {
+    // As to_jsonb renders a row: a timestamp to the microsecond, in no time zone.
+    const stored = {
+      company_number: '03260168',
+      url: trust,
+      candidates,
+      source: 'search',
+      checked_at: '2026-10-20T03:00:00.123456',
+    };
+    const registry = {
+      company_number: '04567890',
+      url: null,
+      candidates: null,
+      source: 'cqc',
+    };
+    const { sql, calls } = makeFakeSql([
+      { stored, row_hash: held.rowHash },
+      { stored: registry, row_hash: 'c4ca4238a0b923820dcc509a6f75849b' },
+    ]);
+    const rows = await makeReadListed(sql)(['03260168', '04567890']);
+    expect(calls).toHaveLength(1);
+    const text = flat(calls[0].text);
+    expect(text).toContain(
+      'SELECT to_jsonb(w) AS stored, md5(w::text) AS row_hash',
+    );
+    expect(text).toContain('WHERE w.company_number = ANY($1::text[])');
+    expect(calls[0].params).toEqual([['03260168', '04567890']]);
+    // The backup holds the row as stored, not a copy the driver parsed.
+    expect(rows[0].stored).toBe(stored);
+    expect(rows.map((r) => r.source)).toEqual(['search', 'cqc']);
+    expect(rows[0].snapshot).toEqual(held);
+    expect(rows[1].snapshot.url).toBeNull();
+  });
+});
 
 describe('makeRejectSite', () => {
   test('a row on the site is reset and loses the site, only while the whole row is as it was backed up', async () => {

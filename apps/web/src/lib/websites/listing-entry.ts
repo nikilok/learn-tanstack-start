@@ -4,9 +4,10 @@
  *
  * An exhibitor list, a supplier directory or a member page gives each business
  * its own address and its own website. So where the page gives the company
- * another website beside its postcode, and other businesses their own websites
- * beside theirs, it is a listing. A company's own site may give its other
- * domains and list its branches, but it gives no other business a site.
+ * another website beside its postcode, and many other businesses their own
+ * websites beside theirs, it is a listing. A company's own site may give its
+ * other domains and list its branches, and cites only a few other bodies, such
+ * as its regulators, with their addresses and sites.
  */
 
 import {
@@ -22,8 +23,8 @@ import {
 } from './extract';
 import { isAggregatorHost } from './page-signals';
 
-/** Other businesses, by their postcodes, a listing must give their own websites beside. */
-export const LISTING_OTHER_SITES = 2;
+/** Other businesses, by their postcodes, a listing must give their own websites beside: more than an own page's regulators. */
+export const LISTING_OTHER_SITES = 5;
 
 /** The most characters between a postcode and the website a listing gives beside it. */
 export const NEAR_POSTCODE = 200;
@@ -68,10 +69,11 @@ const ANY_POSTCODE = new RegExp(
 /**
  * A domain as a page writes one, alone, in a URL or after an email's `@`:
  * labels, then a top-level domain of letters. Only a whole dotted token, so
- * never part of a longer one, nor an email's dotted name before its `@`.
+ * never part of a longer one, nor an email's dotted name before its `@`, nor a
+ * what3words address after its `///`.
  */
 const WRITTEN_SITE =
-  /(?<![A-Z0-9.-])((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
+  /(?<![A-Z0-9.-]|\/{3})((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
 
 /** A postcode the page writes, and whether it is the company's own. */
 type Written = { index: number; code: string; own: boolean };

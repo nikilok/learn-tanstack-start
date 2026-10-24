@@ -19,8 +19,40 @@ export type RowSnapshot = {
   rowHash: string;
 };
 
+/** A listed row: exactly as stored, for the backup, and what a rejection is decided on. */
+export type ListedRow = {
+  stored: Record<string, unknown>;
+  source: string;
+  snapshot: RowSnapshot;
+};
+
 /** What rejecting a site did to one row. */
 export type RejectOutcome = 'reset' | 'stripped' | 'unchanged' | 'moved';
+
+/** Read the listed rows as stored now, each with the hash its rejection is guarded on. */
+export function makeReadListed(sql: Sql) {
+  return async (companyNumbers: readonly string[]): Promise<ListedRow[]> => {
+    // to_jsonb keeps each column as stored: a timestamp to the microsecond, in no time zone.
+    const rows = await sql`
+      SELECT to_jsonb(w) AS stored, md5(w::text) AS row_hash
+      FROM company_websites w
+      WHERE w.company_number = ANY(${companyNumbers}::text[])
+    `;
+    return rows.map((r) => {
+      const stored = r.stored as Record<string, unknown>;
+      return {
+        stored,
+        source: stored.source as string,
+        snapshot: {
+          companyNumber: stored.company_number as string,
+          url: (stored.url as string | null) ?? null,
+          candidates: stored.candidates,
+          rowHash: r.row_hash as string,
+        },
+      };
+    });
+  };
+}
 
 /** A candidates value as the write binds it: SQL NULL for none. */
 function asJson(value: unknown): string | null {

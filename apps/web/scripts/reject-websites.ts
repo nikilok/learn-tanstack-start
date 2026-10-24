@@ -2,9 +2,10 @@
  * Take sites judged not to be a company's off their rows and out of the rows'
  * banked search results, so no later walk or discovery pass chooses them
  * again. A row holding the site goes back to `none` with its walk marker
- * kept. Every listed row is backed up before anything is written, and every
- * outcome, a write or none, holds only for the row still as it was backed up.
- * Prints counts only.
+ * kept. Search rows only: a registry's row takes its site back on the next
+ * import. Every listed row is backed up exactly as stored before anything is
+ * written, and every outcome, a write or none, holds only for the row still
+ * as it was backed up. Prints counts only.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/reject-websites.ts --list=rejections.json
@@ -19,6 +20,7 @@ import { neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import {
+  makeReadListed,
   makeRejectSite,
   type RejectOutcome,
 } from '../src/lib/websites/rejected-site-sql.ts';
@@ -76,44 +78,47 @@ if (new Set(list.map((r) => r.companyNumber)).size < list.length) {
 
 const sql = neon(process.env.POSTGRES_URL as string);
 console.log(`  db: ${dbFingerprint(process.env.POSTGRES_URL as string)}`);
-const numbers = list.map((r) => r.companyNumber);
-// The hash is of the row as backed up; each write is guarded on it.
-const rows = (await sql`
-  SELECT w.*, md5(w::text) AS row_hash FROM company_websites w
-  WHERE w.company_number = ANY(${numbers}::text[])
-`) as {
-  company_number: string;
-  url: string | null;
-  candidates: unknown;
-  row_hash: string;
-}[];
-const byNumber = new Map(rows.map((r) => [r.company_number, r]));
+const rows = await makeReadListed(sql)(list.map((r) => r.companyNumber));
+const byNumber = new Map(rows.map((r) => [r.snapshot.companyNumber, r]));
 
 const planned: Record<string, number> = {
   reset: 0,
   stripped: 0,
   unchanged: 0,
   missing: 0,
+  not_search: 0,
 };
 for (const r of list) {
   const row = byNumber.get(r.companyNumber);
-  const change = row ? rejectSite(row, r.url) : null;
+  const change = row ? rejectSite(row.snapshot, r.url) : null;
   planned[
     !row
       ? 'missing'
-      : !change
-        ? 'unchanged'
-        : change.reset
-          ? 'reset'
-          : 'stripped'
+      : row.source !== 'search'
+        ? 'not_search'
+        : !change
+          ? 'unchanged'
+          : change.reset
+            ? 'reset'
+            : 'stripped'
   ] += 1;
 }
 console.log(`  listed: ${list.length}`, planned);
+if (planned.not_search > 0) {
+  console.error(
+    "  a registry's row takes its site back on the next import; list search rows only",
+  );
+  process.exit(1);
+}
 if (!apply) process.exit(0);
 
 await Bun.write(
   backupFile as string,
-  JSON.stringify({ at: new Date().toISOString(), rows }, null, 1),
+  JSON.stringify(
+    { at: new Date().toISOString(), rows: rows.map((r) => r.stored) },
+    null,
+    1,
+  ),
 );
 console.log(`  backed up: ${rows.length} rows`);
 const reject = makeRejectSite(sql);
@@ -126,19 +131,7 @@ const done: Record<RejectOutcome | 'missing', number> = {
 };
 for (const r of list) {
   const row = byNumber.get(r.companyNumber);
-  done[
-    row
-      ? await reject(
-          {
-            companyNumber: row.company_number,
-            url: row.url,
-            candidates: row.candidates,
-            rowHash: row.row_hash,
-          },
-          r.url,
-        )
-      : 'missing'
-  ] += 1;
+  done[row ? await reject(row.snapshot, r.url) : 'missing'] += 1;
 }
 console.log('  applied:', done);
 // A moved or missing row's rejection was not applied: what runs next must not take it as done.

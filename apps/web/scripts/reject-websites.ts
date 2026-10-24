@@ -77,13 +77,15 @@ if (new Set(list.map((r) => r.companyNumber)).size < list.length) {
 const sql = neon(process.env.POSTGRES_URL as string);
 console.log(`  db: ${dbFingerprint(process.env.POSTGRES_URL as string)}`);
 const numbers = list.map((r) => r.companyNumber);
+// The hash is of the row as backed up; each write is guarded on it.
 const rows = (await sql`
-  SELECT * FROM company_websites WHERE company_number = ANY(${numbers}::text[])
+  SELECT w.*, md5(w::text) AS row_hash FROM company_websites w
+  WHERE w.company_number = ANY(${numbers}::text[])
 `) as {
   company_number: string;
   url: string | null;
-  evidence: string;
   candidates: unknown;
+  row_hash: string;
 }[];
 const byNumber = new Map(rows.map((r) => [r.company_number, r]));
 
@@ -130,8 +132,8 @@ for (const r of list) {
           {
             companyNumber: row.company_number,
             url: row.url,
-            evidence: row.evidence,
             candidates: row.candidates,
+            rowHash: row.row_hash,
           },
           r.url,
         )

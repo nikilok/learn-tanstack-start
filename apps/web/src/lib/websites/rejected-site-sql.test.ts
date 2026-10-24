@@ -9,45 +9,44 @@ const candidates = [
   'https://www.club-trust.org/about',
   'https://www.club.co.uk/',
 ];
-// The row as it was backed up.
+// The row as it was backed up, with its hash then.
 const held = {
   companyNumber: '03260168',
   url: trust,
-  evidence: 'postcode_on_page',
   candidates,
+  rowHash: 'e3b0c44298fc1c149afbf4c8996fb924',
 };
 const written = [{ company_number: '03260168' }];
+const guard = 'WHERE company_number = $2 AND md5(company_websites::text) = $3';
 
 describe('makeRejectSite', () => {
-  test('a row on the site is reset and loses the site, only while it holds what was backed up', async () => {
+  test('a row on the site is reset and loses the site, only while the whole row is as it was backed up', async () => {
     const { sql, calls } = makeFakeSql(written);
     expect(await makeRejectSite(sql)(held, trust)).toBe('reset');
     // No read of its own: the guard is the backed-up row.
     expect(calls).toHaveLength(1);
     const text = flat(calls[0].text);
     expect(text).toContain("url = NULL, status = 'none', evidence = 'none'");
-    expect(text).toContain(
-      'AND url = $3 AND evidence = $4 AND candidates IS NOT DISTINCT FROM $5::jsonb',
-    );
+    // Every column it clears is in the hash: checked_at, verified_at and the rest.
+    expect(text).toContain(guard);
     expect(calls[0].params).toEqual([
       JSON.stringify(['https://www.club.co.uk/']),
       '03260168',
-      trust,
-      'postcode_on_page',
-      JSON.stringify(candidates),
+      held.rowHash,
     ]);
     // The walk marker stays, so the row is not walked again under this version.
     expect(text).not.toContain('walk_version');
   });
 
-  test('a row already reset only loses the site from its candidates', async () => {
+  test('a row already reset only loses the site from its candidates, under the same guard', async () => {
     const { sql, calls } = makeFakeSql(written);
-    const none = { ...held, url: null, evidence: 'none' };
-    expect(await makeRejectSite(sql)(none, trust)).toBe('stripped');
+    expect(await makeRejectSite(sql)({ ...held, url: null }, trust)).toBe(
+      'stripped',
+    );
     const text = flat(calls[0].text);
     const set = text.slice(text.indexOf(' SET '), text.indexOf(' WHERE '));
     expect(set).toBe(' SET candidates = $1::jsonb');
-    expect(text).toContain('url IS NOT DISTINCT FROM $3');
+    expect(text).toContain(guard);
   });
 
   test('nothing to change writes nothing', async () => {
@@ -55,7 +54,6 @@ describe('makeRejectSite', () => {
     const clean = {
       ...held,
       url: null,
-      evidence: 'none',
       candidates: ['https://www.club.co.uk/'],
     };
     expect(await makeRejectSite(sql)(clean, trust)).toBe('unchanged');
@@ -67,12 +65,11 @@ describe('makeRejectSite', () => {
     expect(await makeRejectSite(sql)(held, trust)).toBe('moved');
   });
 
-  test('a row banking no candidates is guarded on none, not on JSON null', async () => {
+  test('a row banking no candidates writes none, not JSON null', async () => {
     const { sql, calls } = makeFakeSql(written);
     expect(
       await makeRejectSite(sql)({ ...held, candidates: null }, trust),
     ).toBe('reset');
-    expect(calls[0].params).not.toContain('null');
-    expect(calls[0].params.filter((p) => p === null)).toHaveLength(2);
+    expect(calls[0].params[0]).toBeNull();
   });
 });

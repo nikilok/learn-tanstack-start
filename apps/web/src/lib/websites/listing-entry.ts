@@ -14,7 +14,12 @@ import {
   hostNamer,
   registrableDomain,
 } from './company-naming';
-import { postcodePattern, postcodeText } from './extract';
+import {
+  POSTCODE_INWARD,
+  POSTCODE_OUTWARD,
+  postcodePattern,
+  postcodeText,
+} from './extract';
 import { isAggregatorHost } from './page-signals';
 
 /** Other businesses, by their postcodes, a listing must give their own websites beside. */
@@ -55,8 +60,10 @@ function isPlatform(site: string): boolean {
 }
 
 /** Any UK postcode, bounded, its two codes at most one space apart. */
-const ANY_POSTCODE =
-  /(?<![A-Z0-9])[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}(?![A-Z0-9])/g;
+const ANY_POSTCODE = new RegExp(
+  `(?<![A-Z0-9])${POSTCODE_OUTWARD} ?${POSTCODE_INWARD}(?![A-Z0-9])`,
+  'g',
+);
 
 /**
  * A domain as a page writes one, alone, in a URL or after an email's `@`:

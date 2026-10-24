@@ -137,6 +137,19 @@ export function pageHasCompanyNumber(
   );
 }
 
+/** A UK postcode's outward code, as a pattern: one or two letters, a digit, then an optional letter or digit. */
+export const POSTCODE_OUTWARD = '[A-Z]{1,2}\\d[A-Z\\d]?';
+
+/** A UK postcode's inward code, as a pattern: a digit and two letters. */
+export const POSTCODE_INWARD = '\\d[A-Z]{2}';
+
+/**
+ * A UK postcode: one or two letters, digits, an optional letter, then the
+ * three-character inward code. Only these are distinctive enough to serve as
+ * identity evidence.
+ */
+const UK_POSTCODE = new RegExp(`^${POSTCODE_OUTWARD}${POSTCODE_INWARD}$`);
+
 /**
  * Whether this company's registered office postcode appears in the page's
  * visible text.
@@ -146,13 +159,6 @@ export function pageHasCompanyNumber(
  * sites that omit the number. Compared with whitespace removed, since
  * "SW1A 1AA", "SW1A1AA" and "sw1a  1aa" are one postcode.
  */
-/**
- * A UK postcode: one or two letters, digits, an optional letter, then the
- * three-character inward code. Only these are distinctive enough to serve as
- * identity evidence.
- */
-const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2}$/;
-
 export function pageHasPostcode(html: string, postcode: string): boolean {
   const pattern = postcodePattern(postcode);
   return pattern !== null && pattern.test(postcodeText(visibleText(html)));

@@ -69,11 +69,12 @@ const ANY_POSTCODE = new RegExp(
 /**
  * A domain as a page writes one, alone, in a URL or after an email's `@`:
  * labels, then a top-level domain of letters. Only a whole dotted token, so
- * never part of a longer one, nor an email's dotted name before its `@`, nor a
- * what3words address after its `///`.
+ * never part of a longer one, an email's dotted name before its `@`, a URL's
+ * path after a single `/`, or a what3words address after its `///`; a domain
+ * after `://` still is.
  */
 const WRITTEN_SITE =
-  /(?<![A-Z0-9.-]|\/{3})((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
+  /(?<![A-Z0-9.-]|(?:^|[^/])\/|\/{3})((?:[A-Z0-9][A-Z0-9-]*\.)+[A-Z]{2,24})(?![A-Z0-9-]|\.[A-Z0-9]| ?@)/g;
 
 /** A postcode the page writes, and whether it is the company's own. */
 type Written = { index: number; code: string; own: boolean };

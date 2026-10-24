@@ -48,11 +48,16 @@ describe('isListingEntry', () => {
       'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nT: 01962 000000 E: sales@elmbanknutrition.co.uk',
     );
     expect(isListingEntry(conference, page, postcode, names)).toBe(true);
-    // A written domain, not only an email address.
-    const written = exhibitors(
-      'Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\nW: www.elmbanknutrition.co.uk',
-    );
-    expect(isListingEntry(conference, written, postcode, names)).toBe(true);
+    // A written domain, not only an email address, alone or in a URL.
+    for (const site of [
+      'W: www.elmbanknutrition.co.uk',
+      'W: https://www.elmbanknutrition.co.uk/',
+    ]) {
+      const written = exhibitors(
+        `Elmbank Nutrition, Unit 4, Winchester SO22 5AZ\n${site}`,
+      );
+      expect(isListingEntry(conference, written, postcode, names)).toBe(true);
+    }
   });
 
   test('a site under any top-level domain, written or as an email', () => {
@@ -131,6 +136,19 @@ describe('isListingEntry', () => {
       own,
     ].join('\n');
     expect(isListingEntry(brandHost, located, postcode, names)).toBe(false);
+    // Nor is a URL's path: a page on its own site, or a what3words page, for each branch.
+    for (const link of [
+      (i: number) => `feeds-example.co.uk/homes/${words[i].split('.')[0]}.html`,
+      (i: number) => `https://what3words.com/${words[i]}`,
+    ]) {
+      const linked = [
+        ...branches.map(
+          (branch, i) => `${branch}, ${link(i)}, open daily from nine to five.`,
+        ),
+        own,
+      ].join('\n');
+      expect(isListingEntry(brandHost, linked, postcode, names)).toBe(false);
+    }
   });
 
   test('a listing gives other businesses their own sites, beside their own postcodes', () => {

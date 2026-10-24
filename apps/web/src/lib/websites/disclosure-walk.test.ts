@@ -187,6 +187,32 @@ describe('readHomepage', () => {
     ).toMatchObject({ postcodeFound: true, postcodeNamed: false });
   });
 
+  test("a brand homepage linking each branch to its what3words page is the company's own", () => {
+    const branches = [
+      ['Ashbourne DE6 1HA', 'filled.count.soap'],
+      ['Rugeley WS15 1RD', 'index.home.raft'],
+      ['Market Rasen LN8 3AA', 'grape.lion.tent'],
+      ['Driffield YO25 6AB', 'stone.river.coat'],
+      ['Malton YO17 7AB', 'mint.pause.lamp'],
+    ];
+    const html = [
+      ...branches.map(
+        ([branch, words]) =>
+          `<p>${branch}, <a href="https://what3words.com/${words}">https://what3words.com/${words}</a>, open daily from nine to five.</p>`,
+      ),
+      '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. Email: hello@acmewidgets.co.uk</p>',
+    ].join('');
+    expect(
+      readHomepage(
+        row,
+        'https://www.smile-group.co.uk',
+        'https://www.smile-group.co.uk/',
+        html,
+        new Set(),
+      ),
+    ).toMatchObject({ postcodeFound: true, postcodeNamed: true });
+  });
+
   test('a homepage served from a directory states nothing', () => {
     const page = readHomepage(
       row,

@@ -90,7 +90,7 @@ describe('isListingEntry', () => {
       'Contact our data protection lead at privacy@elmbanknutrition.co.uk.',
       "You may complain to the Information Commissioner's Office, Wycliffe House, Water Lane, Wilmslow SK9 5AF. Website: ico.org.uk",
       'Or to the Financial Ombudsman Service, Exchange Tower, London E14 9SR. Website: www.financial-ombudsman.org.uk',
-      'We are authorised by the Financial Conduct Authority, 12 Endeavour Square, London E20 1JN. www.fca.org.uk',
+      'Claims may be covered by the Financial Services Compensation Scheme, 15 St Botolph Street, London EC3A 7QU. www.fscs.org.uk',
       'and the Prudential Regulation Authority, 20 Moorgate, London EC2R 6DA. www.bankofengland.co.uk',
     ].join('\n');
     expect(isListingEntry(brandHost, privacy, postcode, names)).toBe(false);
@@ -116,10 +116,10 @@ describe('isListingEntry', () => {
     // Its host spells the brand, not the registered name; no branch is given a site.
     const brand = ['Our homes', ...branches, own].join('\n');
     expect(isListingEntry(brandHost, brand, postcode, names)).toBe(false);
-    // A regulator's site beside every branch is one site, not other businesses,
+    // A rating body's site beside every branch is one site, not other businesses,
     // and a body the company belongs to is written beside the company's own address.
     const rated = [
-      ...branches.map((branch) => `${branch}. Rated: cqc.org.uk`),
+      ...branches.map((branch) => `${branch}. Rated: ratings.food.gov.uk`),
       'Elmbank Nutrition, Winchester SO22 5AZ. Member: feedassoc.org.uk. Email: info@elmbanknutrition.co.uk',
     ].join('\n');
     expect(isListingEntry(brandHost, rated, postcode, names)).toBe(false);
@@ -185,11 +185,11 @@ describe('isListingEntry', () => {
         false,
       );
     }
-    // One other business giving two sites is still one business.
-    const twoSites = exhibitors(entry, 4).replace(
+    // One other business giving two sites is still one business, beside a sixth address.
+    const twoSites = `${exhibitors(entry, 4).replace(
       'W: betafeeds.co.uk',
       'W: betafeeds.co.uk, betagroup.com',
-    );
+    )}\nEta Farms, Thirsk YO7 1AA`;
     expect(isListingEntry(conference, twoSites, postcode, names)).toBe(false);
     // The listing's own pages are not other businesses.
     const own = oneShort(
@@ -209,14 +209,16 @@ describe('isListingEntry', () => {
   });
 
   test('its own address in the header, footer and contact block is one address', () => {
-    // Beside partners that each give a site: one address short of a listing in all.
+    // A car park's site beside a repeat of it is the company's own entry, so
+    // four partners giving sites, and a sixth address, are one short of a listing.
     const own = [
-      'Elmbank Nutrition, Winchester SO22 5AZ',
-      'Visit us: Unit 4, SO22 5AZ',
       'Elmbank Nutrition SO22 5AZ. Email: info@elmbanknutrition.co.uk',
+      'Visit us: Unit 4, SO22 5AZ. Parking: parkwise.co.uk',
+      'Elmbank Nutrition, Winchester SO22 5AZ',
       ...OTHERS.slice(0, 4).map(
         ([address, site]) => `Partner: ${address}. ${site}`,
       ),
+      'Partner: Eta Farms, Thirsk YO7 1AA',
     ].join('\n');
     expect(isListingEntry(brandHost, own, postcode, names)).toBe(false);
   });

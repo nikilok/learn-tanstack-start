@@ -11,13 +11,13 @@
  */
 
 import { hostNamer } from './company-naming';
-import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
+import { sponsorNamesColumnFor, sponsorNamesOf } from './sponsor-names';
 
-/** Every row holding a url or a named url, with its company's names. */
+/** Every row holding a url or a named url, with its company's names: the register's even where no profile is held. */
 export const NAMED_URL_ROWS_SQL = `
   SELECT w.company_number, w.url, w.named_url,
     coalesce(p.company_name, '') AS company_name,
-    ${SPONSOR_NAMES_COLUMN}
+    ${sponsorNamesColumnFor('w.company_number')}
   FROM company_websites w
   LEFT JOIN companies_house_profiles p USING (company_number)
   WHERE w.url IS NOT NULL OR w.named_url IS NOT NULL`;

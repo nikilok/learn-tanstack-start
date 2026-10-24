@@ -39,9 +39,11 @@ const row = (
 
 describe('NAMED_URL_ROWS_SQL', () => {
   test("reads every row with a url, or a named url to clear, with its company's names", () => {
+    // The register's names by the row's own number: a row with no profile
+    // still has its trading names.
     const text = flat(NAMED_URL_ROWS_SQL);
     expect(text).toContain(
-      "SELECT w.company_number, w.url, w.named_url, coalesce(p.company_name, '') AS company_name, ARRAY(SELECT s.organisation_name FROM hmrc_company_mapping s WHERE s.company_number = p.company_number) AS sponsor_names",
+      "SELECT w.company_number, w.url, w.named_url, coalesce(p.company_name, '') AS company_name, ARRAY(SELECT s.organisation_name FROM hmrc_company_mapping s WHERE s.company_number = w.company_number) AS sponsor_names",
     );
     expect(text).toContain(
       'FROM company_websites w LEFT JOIN companies_house_profiles p USING (company_number) WHERE w.url IS NOT NULL OR w.named_url IS NOT NULL',

@@ -86,17 +86,43 @@
  *   - share <= 10 cleared the first sample with one failure of headroom, and
  *     partly on the owner's calls on shared and listing sites.
  *   - A company-name word in the domain looked stronger (195/196), but it was
- *     found after the fact on the same rows and is not part of this gate.
+ *     found after the fact on the same rows; it was measured on its own later,
+ *     on the rows the limit holds (below).
  *   - Only `source = 'search'` was measured, so the arm admits nothing else.
  *
  * Unlike `registry_confirmed`, revalidation never demotes this tier when its
  * page stops showing the postcode: such a row keeps rendering until it fails,
  * parks or lands on a directory. A share that rises above the limit
- * unpublishes it at the next sweep run.
+ * unpublishes it at the next sweep run, unless its host names the company.
+ *
+ * Above the limit, a row publishes through its own arm when its url's host
+ * names the company (the naming rule's host check, stored as named_url by
+ * named-url.ts) and a sweep confirmed it live within NAMED_HOST_LIVE_DAYS.
+ * Measured 2026-10-24 on a hand-labelled sample (seed
+ * `held-precision-2026-10-24`) of the 3,741 verified search rows the limit
+ * held, drawn at shares 11-20, 21-50 and 51+: of 80 rows whose host names the
+ * company, 77 loaded and all 77 were right, lower bound 96.6% (91.0% counting
+ * the 3 that did not load as wrong). The sample's 2 wrong rows, a
+ * shopping-centre landlord and a trade magazine in the same building, were
+ * both on hosts that name no company. 23 of the right rows are parent or group
+ * sites. Labels were Claude's, with a blind second labeller agreeing on 96 of
+ * the 100 held rows; the owner has not audited them. A site that stops loading
+ * leaves at its next sweep check, and NAMED_HOST_LIVE_DAYS bounds how long ago
+ * that check may be.
  */
 
 import { companyWebsites } from '@ss/db/schema';
-import { and, eq, inArray, isNotNull, lte, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 
 import type { WebsiteEvidence } from './decide';
 
@@ -118,6 +144,27 @@ function sharedPostcodeArm(): SQL {
   ) as SQL;
 }
 
+/** Days since its last sweep check a named-host row may publish: past the sweep's monthly cycle, so only a stalled sweep closes it. */
+export const NAMED_HOST_LIVE_DAYS = 45;
+
+/** A search-found postcode row at any share whose own url's host names the company; a NULL share or a url changed since the check fails it. */
+function namedHostArm(): SQL {
+  return and(
+    eq(companyWebsites.source, 'search'),
+    eq(companyWebsites.evidence, 'postcode_on_page'),
+    isNotNull(companyWebsites.postcodeShare),
+    eq(companyWebsites.namedUrl, companyWebsites.url),
+  ) as SQL;
+}
+
+/** A sweep confirmed the row live within NAMED_HOST_LIVE_DAYS. */
+function confirmedRecently(): SQL {
+  return gte(
+    companyWebsites.checkedAt,
+    sql`now() - make_interval(days => ${NAMED_HOST_LIVE_DAYS})`,
+  );
+}
+
 /**
  * The render gate, as one expression both readers share.
  *
@@ -131,27 +178,32 @@ function sharedPostcodeArm(): SQL {
  * All four conditions carry weight. `verified` says the row survived
  * discovery; `checked_at` says a sweep actually fetched the URL, which status
  * alone does not imply; the evidence filter says the company identified
- * itself, by a publishable tier or by a postcode few mapped companies share;
- * and `url` can be null on a row that reached `none`.
+ * itself, by a publishable tier, by a postcode few mapped companies share, or
+ * by a postcode on a recently confirmed site whose host names it; and `url`
+ * can be null on a row that reached `none`.
  *
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
  * must not alias the table.
  */
-/** The arms both gates share; only the status arm differs between them. */
-function gateWithStatusArm(statusArm: SQL): SQL {
+/** The arms both gates share; the status arm and the named-host arm differ between them. */
+function gateWithStatusArm(statusArm: SQL, namedHost: SQL): SQL {
   return and(
     statusArm,
     isNotNull(companyWebsites.checkedAt),
     or(
       inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
       sharedPostcodeArm(),
+      namedHost,
     ),
     isNotNull(companyWebsites.url),
   ) as SQL;
 }
 
 export function publishableWebsiteGate(): SQL {
-  return gateWithStatusArm(eq(companyWebsites.status, 'verified') as SQL);
+  return gateWithStatusArm(
+    eq(companyWebsites.status, 'verified') as SQL,
+    and(namedHostArm(), confirmedRecently()) as SQL,
+  );
 }
 
 /**
@@ -167,7 +219,9 @@ export function publishableWebsiteGate(): SQL {
  * cost when the status self-heals. So retention tolerates `unreachable` and
  * fires only on genuine loss: `dead` (written off after two consecutive
  * failures), `none`/`candidate`, an evidence demotion below the publishable
- * tiers, a postcode share above the limit, or a null URL. It never renders
+ * tiers, a postcode share above the limit on a host that does not name the
+ * company, or a null URL. A stalled sweep is no loss, so the named-host arm
+ * keeps its rows here however long ago their last check was. It never renders
  * anything — the render gate is the only publish decision.
  */
 export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
@@ -175,5 +229,6 @@ export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
 export function answersRetentionGate(): SQL {
   return gateWithStatusArm(
     inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]) as SQL,
+    namedHostArm(),
   );
 }

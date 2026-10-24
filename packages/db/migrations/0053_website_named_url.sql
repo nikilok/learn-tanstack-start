@@ -1,0 +1,1 @@
+ALTER TABLE "company_websites" ADD COLUMN "named_url" text;

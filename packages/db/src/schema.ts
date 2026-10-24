@@ -462,6 +462,10 @@ export const companyWebsites = pgTable(
     // none or none is mapped there. Derived: every sweep run refreshes it
     // (lib/websites/postcode-share.ts) and the publish gate reads it.
     postcodeShare: integer('postcode_share'),
+    // The url as it was when its host was found to name the company, else NULL.
+    // Derived: every sweep run refreshes it (lib/websites/named-url.ts), and the
+    // publish gate reads it only while it still equals url.
+    namedUrl: text('named_url'),
     // The disclosure-walk version that last read this row (lib/websites/rewalk.ts).
     walkVersion: smallint('walk_version'),
     // Re-walks that could not read the row since its last completed walk.

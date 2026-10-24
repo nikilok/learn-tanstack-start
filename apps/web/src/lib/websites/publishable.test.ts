@@ -6,6 +6,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import {
   ANSWER_RETENTION_STATUSES,
   answersRetentionGate,
+  NAMED_HOST_LIVE_DAYS,
   POSTCODE_SHARE_LIMIT,
   PUBLISHABLE_EVIDENCE,
   publishableWebsiteGate,
@@ -62,7 +63,7 @@ describe('the shared-postcode arm', () => {
     // `<=` on a NULL share is NULL, so a row the refresh has not reached, or
     // whose company has no postcode, cannot publish through this arm.
     expect(render(publishableWebsiteGate())).toEqual({
-      text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7)) and "company_websites"."url" is not null)',
+      text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or (("company_websites"."source" = $8 and "company_websites"."evidence" = $9 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $10))) and "company_websites"."url" is not null)',
       params: [
         'verified',
         'manual',
@@ -71,6 +72,9 @@ describe('the shared-postcode arm', () => {
         'search',
         'postcode_on_page',
         10,
+        'search',
+        'postcode_on_page',
+        45,
       ],
     });
   });
@@ -86,23 +90,57 @@ describe('the shared-postcode arm', () => {
     expect(params.slice(4, 6)).toEqual(['search', 'postcode_on_page']);
   });
 
-  test('retention carries the same arm and differs only in status', () => {
-    // A company whose share rises past the limit loses its answers as it
-    // loses its link; retention may only be wider on the transient status.
+  test('retention carries the same arms, wider only on status and the sweep check', () => {
+    // A company whose share rises past the limit on a host that does not name
+    // it loses its answers as it loses its link. Retention may only be wider
+    // on the transient status, and on a sweep that has not come round lately.
     const publish = render(publishableWebsiteGate());
     const retain = render(answersRetentionGate());
     const shape = (text: string) => text.replace(/\$\d+/g, '?');
     expect(shape(retain.text)).toBe(
-      shape(publish.text).replace(
-        '"company_websites"."status" = ?',
-        '"company_websites"."status" in (?, ?)',
-      ),
+      shape(publish.text)
+        .replace(
+          '"company_websites"."status" = ?',
+          '"company_websites"."status" in (?, ?)',
+        )
+        .replace(
+          /\((\("company_websites"\."source" = \? and [^)]*"company_websites"\."named_url" = "company_websites"\."url"\)) and "company_websites"\."checked_at" >= now\(\) - make_interval\(days => \?\)\)/,
+          '$1',
+        ),
     );
     expect(retain.params).toEqual([
       'verified',
       'unreachable',
-      ...publish.params.slice(1),
+      ...publish.params.slice(1, -1),
     ]);
+  });
+});
+
+describe('the named-host arm', () => {
+  test('admits a postcode row at any share only while its named url is still its url', () => {
+    // The 2026-10-24 sample of rows the share limit held: where the host names
+    // the company, 77/77 that loaded were right at every share band drawn. A
+    // url changed since the sweep last checked its host fails the equality, so
+    // no writer has to clear named_url for the gate to close.
+    const { text, params } = render(publishableWebsiteGate());
+    expect(text).toContain(
+      '("company_websites"."source" = $8 and "company_websites"."evidence" = $9 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url")',
+    );
+    expect(params.slice(7, 9)).toEqual(['search', 'postcode_on_page']);
+  });
+
+  test('publishes only a row a sweep confirmed live within NAMED_HOST_LIVE_DAYS', () => {
+    // Every row the arm admitted at release had been checked within 30 days,
+    // and the sweep comes round monthly: 45 days closes the arm on a stalled
+    // sweep without flickering rows at the edge of a cycle.
+    expect(NAMED_HOST_LIVE_DAYS).toBe(45);
+    const { text, params } = render(publishableWebsiteGate());
+    expect(text).toContain(
+      'and "company_websites"."checked_at" >= now() - make_interval(days => $10))',
+    );
+    expect(params.at(-1)).toBe(NAMED_HOST_LIVE_DAYS);
+    // Retention keeps the arm with no bound: a stalled sweep is no loss.
+    expect(render(answersRetentionGate()).text).not.toContain('make_interval');
   });
 });
 

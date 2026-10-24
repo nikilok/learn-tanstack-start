@@ -167,6 +167,7 @@ jobs:
             echo "| 🚧 No site there | $(extract no_site_there) |"
             echo "| 💾 Updated | $(extract updated) |"
             echo "| 📮 Postcode shares moved | $(extract postcode_shares) |"
+            echo "| 🏷️ Named urls moved | $(extract named_urls) |"
             echo "| ❌ Errored | $(extract errored) |"
             echo "| ⏳ Never checked left | $(extract never_checked_left) |"
             echo "| 🌐 Sponsors renderable | $(extract sponsor_renderable) |"

@@ -10,7 +10,8 @@
  * One bounded slice per run, oldest-checked first, so the cursor rotates
  * through the table without needing to remember where it got to — the same
  * shape as the phase5 sweeps. Each run then refreshes every row's postcode
- * share, which the publish gate reads (lib/websites/postcode-share.ts).
+ * share and named url, which the publish gate reads
+ * (lib/websites/postcode-share.ts, lib/websites/named-url.ts).
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/sweep-websites.ts --dry-run --max-rows=20 --verbose
@@ -23,6 +24,7 @@
 import { createClient, neon } from '@ss/db/client';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
+import { makeRefreshNamedUrls } from '../src/lib/websites/named-url.ts';
 import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts';
 import { makeCoverage } from '../src/lib/websites/sql.ts';
 import { sweepWebsites } from '../src/lib/websites/sweep.ts';
@@ -69,6 +71,9 @@ const coverage = makeCoverage(createClient(process.env.POSTGRES_URL as string));
 const refreshPostcodeShares = makeRefreshPostcodeShares((text) =>
   sql.query(text),
 );
+const refreshNamedUrls = makeRefreshNamedUrls((text, params) =>
+  sql.query(text, params),
+);
 
 const startedAt = Date.now();
 console.log(
@@ -105,6 +110,14 @@ try {
     `  postcode share refresh failed: ${err instanceof Error ? err.message : String(err)}`,
   );
 }
+let namedUrlsMoved: number | null = null;
+try {
+  namedUrlsMoved = await refreshNamedUrls(dryRun);
+} catch (err) {
+  console.error(
+    `  named url refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+}
 
 const after = await coverage();
 const durationSec = Math.round((Date.now() - startedAt) / 1000);
@@ -125,6 +138,7 @@ console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);
 console.log(`  systemic_abort      : ${summary.systemicAbort}`);
 console.log(`  postcode_shares     : ${sharesMoved ?? 'failed'}`);
+console.log(`  named_urls          : ${namedUrlsMoved ?? 'failed'}`);
 console.log(`  never_checked_left  : ${after.neverChecked}`);
 console.log(`  dead_total          : ${after.deadTotal}`);
 console.log(
@@ -158,5 +172,10 @@ if (summary.systemicAbort) {
 // cannot publish at all, so this must not pass as a healthy run.
 if (sharesMoved === null) {
   console.error('\n  POSTCODE SHARES were not refreshed.');
+  process.exit(1);
+}
+// A url changed this run cannot publish through its host until this runs again.
+if (namedUrlsMoved === null) {
+  console.error('\n  NAMED URLS were not refreshed.');
   process.exit(1);
 }

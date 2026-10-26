@@ -42,10 +42,18 @@ const EVIDENCES: WebsiteEvidence[] = [
   'registry_unconfirmed',
   'llm_adjudicated',
   'postcode_on_page',
+  'name_and_place',
   'registry',
   'registry_confirmed',
   'crn_on_page',
   'manual',
+];
+
+const RECHECKS: RevalidateInput['nameAndPlace'][] = [
+  undefined,
+  'holds',
+  'gone',
+  'unknown',
 ];
 
 const FAILURES: { reason: RevalidateFailure; status?: number }[] = [
@@ -142,22 +150,27 @@ function* allCases(): Generator<Case> {
             for (const p of pageShapes) {
               // Nor do page-shape signals: there is no page to shape.
               if (!o.outcome.ok && p.label !== 'plain') continue;
-              yield {
-                label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label} + ${p.label}`,
-                input: {
-                  storedUrl: STORED_URL,
-                  evidence,
-                  status,
-                  failureCount,
-                  attemptedUrl: STORED_URL,
-                  outcome: o.outcome,
-                  crnFoundAt: d.crnFoundAt,
-                  postcodeFoundAt: d.postcodeFoundAt,
-                  postcodeConfirms: p.postcodeConfirms,
-                  onAggregator: p.onAggregator,
-                  looksParked: p.looksParked,
-                },
-              };
+              for (const recheck of RECHECKS) {
+                // A re-check reads a page too.
+                if (!o.outcome.ok && recheck !== undefined) continue;
+                yield {
+                  label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label} + ${p.label} + recheck:${recheck ?? '-'}`,
+                  input: {
+                    storedUrl: STORED_URL,
+                    evidence,
+                    status,
+                    failureCount,
+                    attemptedUrl: STORED_URL,
+                    outcome: o.outcome,
+                    crnFoundAt: d.crnFoundAt,
+                    postcodeFoundAt: d.postcodeFoundAt,
+                    postcodeConfirms: p.postcodeConfirms,
+                    onAggregator: p.onAggregator,
+                    looksParked: p.looksParked,
+                    nameAndPlace: recheck,
+                  },
+                };
+              }
             }
           }
         }
@@ -473,5 +486,71 @@ describe('state machine invariants — the revocable rung', () => {
     expect(regained.evidence).toBe('registry_confirmed');
     expect(regained.confidence).toBe('0.970');
     expect(regained.status).toBe('verified');
+  });
+});
+
+describe('state machine invariants — the name_and_place re-check', () => {
+  /** I15. Only a re-check that read the proof gone may hold a published row back, and only one that read the proof may publish a row that is not. */
+  test('I15 — a name_and_place row renders only on a read proof, or on a pass that cannot tell while published', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      const { input } = c;
+      if (!input.outcome.ok || input.onAggregator || input.looksParked)
+        continue;
+      const r = revalidate(input);
+      if (r.evidence !== 'name_and_place') continue;
+      const held =
+        input.nameAndPlace === 'gone' ||
+        (input.nameAndPlace !== 'holds' && input.status !== 'verified');
+      if ((r.status === 'candidate') !== held) {
+        violations.push(`${c.label} -> ${r.status}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I16. The re-check moves status alone: the tier, its confidence and the url are what they would be without it. */
+  test('I16 — the re-check never moves the tier', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (c.input.nameAndPlace === undefined) continue;
+      const r = revalidate(c.input);
+      const without = revalidate({ ...c.input, nameAndPlace: undefined });
+      if (
+        r.evidence !== without.evidence ||
+        r.confidence !== without.confidence ||
+        r.url !== without.url
+      ) {
+        violations.push(`${c.label} -> ${r.evidence}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I17. Held then read again lands exactly where it was. */
+  test('I17 — a hold then a re-check that reads the proof is a round trip', () => {
+    const base = {
+      storedUrl: STORED_URL,
+      evidence: 'name_and_place' as WebsiteEvidence,
+      failureCount: 0,
+      attemptedUrl: STORED_URL,
+      outcome: { ok: true } as const,
+    };
+    const held = revalidate({
+      ...base,
+      status: 'verified',
+      nameAndPlace: 'gone',
+    });
+    expect(held).toMatchObject({ status: 'candidate', confidence: '0.900' });
+    const restored = revalidate({
+      ...base,
+      status: held.status,
+      nameAndPlace: 'holds',
+    });
+    expect(restored).toMatchObject({
+      status: 'verified',
+      evidence: 'name_and_place',
+      confidence: '0.900',
+    });
   });
 });

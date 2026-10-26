@@ -109,6 +109,12 @@
  * the 100 held rows; the owner has not audited them. A site that stops loading
  * leaves at its next sweep check, and NAMED_HOST_LIVE_DAYS bounds how long ago
  * that check may be.
+ *
+ * `name_and_place` publishes through its own arm, search rows only: the
+ * two-signal rule (name-and-place.ts), sealed before a fresh draw, scored
+ * 65/65 on it (lower bound 96.0%) and 135/135 over three draws, and the
+ * owner's blind audit passed all 22 of its picks shown. The sweep holds a row
+ * back while its proof is gone.
  */
 
 import { companyWebsites } from '@ss/db/schema';
@@ -141,6 +147,14 @@ function sharedPostcodeArm(): SQL {
     eq(companyWebsites.source, 'search'),
     eq(companyWebsites.evidence, 'postcode_on_page'),
     lte(companyWebsites.postcodeShare, POSTCODE_SHARE_LIMIT),
+  ) as SQL;
+}
+
+/** A search-found site the two-signal rule proved. */
+function nameAndPlaceArm(): SQL {
+  return and(
+    eq(companyWebsites.source, 'search'),
+    eq(companyWebsites.evidence, 'name_and_place'),
   ) as SQL;
 }
 
@@ -178,8 +192,9 @@ function confirmedRecently(): SQL {
  * All four conditions carry weight. `verified` says the row survived
  * discovery; `checked_at` says a sweep actually fetched the URL, which status
  * alone does not imply; the evidence filter says the company identified
- * itself, by a publishable tier, by a postcode few mapped companies share, or
- * by a postcode on a recently confirmed site whose host names it; and `url`
+ * itself, by a publishable tier, by a postcode few mapped companies share, by
+ * its name and place, or by a postcode on a recently confirmed site whose host
+ * names it; and `url`
  * can be null on a row that reached `none`.
  *
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
@@ -193,6 +208,7 @@ function gateWithStatusArm(statusArm: SQL, namedHost: SQL): SQL {
     or(
       inArray(companyWebsites.evidence, PUBLISHABLE_EVIDENCE),
       sharedPostcodeArm(),
+      nameAndPlaceArm(),
       namedHost,
     ),
     isNotNull(companyWebsites.url),

@@ -14,6 +14,10 @@ const row = (over: Partial<SweepRow> = {}): SweepRow => ({
   everChecked: false,
   evidenceUrl: null,
   confidence: '0.950',
+  companyName: 'ACME WIDGETS LIMITED',
+  sponsorNames: [],
+  registerTowns: [],
+  locality: null,
   ...over,
 });
 
@@ -528,5 +532,383 @@ describe('the sweep computes its signals from the right inputs', () => {
     const summary = await sweepWebsites(config(), h.deps);
     expect(summary.demoted).toBe(1);
     expect(summary.promoted).toBe(0);
+  });
+});
+
+describe("a name_and_place row's re-check", () => {
+  const SITE = 'https://www.qmx.co.uk';
+  const PROOF = `${SITE}/privacy`;
+  /** Enough text that a page missing the proof says it is missing. */
+  const filler = 'Clinical data for practices across the north. '.repeat(40);
+  const html = (text: string) =>
+    `<html><body><nav><a href="/services">Services</a></nav><p>${text}</p></body></html>`;
+  const proved = row({
+    companyNumber: '09990117',
+    url: SITE,
+    evidence: 'name_and_place',
+    evidenceUrl: PROOF,
+    confidence: '0.900',
+    everChecked: true,
+    postcode: 'HG1 9ZQ',
+    companyName: 'QUILLMERE ANALYTICS LIMITED',
+    registerTowns: ['Harrogate'],
+    locality: 'Harrogate',
+  });
+  const NAME = 'This site is run by Quillmere Analytics Ltd.';
+
+  /** A sweep of one row: the homepage and pages given, every other page not there. */
+  const sweepOf = async (
+    over: Partial<SweepRow>,
+    homepage: string,
+    pages: Record<string, FetchedPage>,
+    deps: Partial<SweepDeps> = {},
+  ) => {
+    const fetched: string[] = [];
+    const h = harness({
+      rows: [{ ...proved, ...over }],
+      fetchSite: async (url) => live(url, homepage),
+      fetchPage: async (url) => {
+        fetched.push(url);
+        return (
+          pages[url] ?? {
+            ok: false,
+            reason: 'http_error',
+            status: 404,
+            attemptedUrl: url,
+          }
+        );
+      },
+      ...deps,
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    const result = h.applied[0].result as {
+      status: string;
+      evidence: string;
+      confidence: string;
+    };
+    return { summary, result, fetched };
+  };
+
+  test('the proof still on its page keeps the row published, reading only that page', async () => {
+    const { result, fetched } = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(`${NAME} ${filler}`)),
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      evidence: 'name_and_place',
+    });
+    expect(fetched).toEqual([PROOF]);
+  });
+
+  test('the name gone from every page read holds the row back, the tier kept', async () => {
+    const { result, summary, fetched } = await sweepOf(
+      {},
+      html(`${filler} Harrogate`),
+      { [PROOF]: live(PROOF, html(filler)) },
+    );
+    expect(result).toMatchObject({
+      status: 'candidate',
+      evidence: 'name_and_place',
+      confidence: '0.900',
+    });
+    expect(summary.nameAndPlaceGone).toBe(1);
+    // The proof page, then the walk's nine fixed paths, bar the proof page itself.
+    expect(fetched).toHaveLength(9);
+  });
+
+  test('the place gone is as good as the name gone', async () => {
+    const { result } = await sweepOf({}, html(filler), {
+      [PROOF]: live(PROOF, html(`${NAME} ${filler}`)),
+    });
+    expect(result.status).toBe('candidate');
+  });
+
+  test('the proof found again on another page of the walk', async () => {
+    const { result } = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(filler)),
+      [`${SITE}/terms`]: live(`${SITE}/terms`, html(NAME)),
+    });
+    expect(result.status).toBe('verified');
+  });
+
+  test('a proof page that would not answer is not evidence of absence', async () => {
+    const { result, summary } = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: { ok: false, reason: 'timeout', attemptedUrl: PROOF },
+    });
+    expect(result.status).toBe('verified');
+    expect(summary.nameAndPlaceUnread).toBe(1);
+  });
+
+  test('nor is a thin proof page, a thin homepage, or a walked page that refused us', async () => {
+    const thinProof = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html('Accept cookies')),
+    });
+    expect(thinProof.result.status).toBe('verified');
+    const thinHome = await sweepOf({}, html('Harrogate'), {
+      [PROOF]: live(PROOF, html(filler)),
+    });
+    expect(thinHome.result.status).toBe('verified');
+    const refused = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(filler)),
+      [`${SITE}/terms`]: {
+        ok: false,
+        reason: 'http_error',
+        status: 403,
+        attemptedUrl: `${SITE}/terms`,
+      },
+    });
+    expect(refused.result.status).toBe('verified');
+  });
+
+  test('a proof page robots.txt now closes is unread; a walked file is not there', async () => {
+    const closed = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: { ok: false, reason: 'blocked_by_robots', attemptedUrl: PROOF },
+    });
+    expect(closed.result.status).toBe('verified');
+    const file = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(filler)),
+      [`${SITE}/terms`]: {
+        ok: false,
+        reason: 'not_html',
+        attemptedUrl: `${SITE}/terms`,
+      },
+    });
+    expect(file.result.status).toBe('candidate');
+  });
+
+  describe('a homepage that shows a plain fetch nothing', () => {
+    const shell = '<html><body><div id="root"></div></body></html>';
+    const notThere = (url: string): FetchedPage => ({
+      ok: false,
+      reason: 'http_error',
+      status: 404,
+      attemptedUrl: url,
+    });
+
+    test('is read in a browser, as discovery read it, and so is its walk', async () => {
+      const rendered: string[] = [];
+      const { result, summary, fetched } = await sweepOf(
+        {},
+        shell,
+        {},
+        {
+          renderPage: async (url) => {
+            rendered.push(url);
+            if (url === SITE)
+              return live(`${SITE}/`, html(`${filler} Harrogate`));
+            if (url === PROOF) return live(PROOF, html(`${NAME} ${filler}`));
+            return notThere(url);
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'name_and_place',
+      });
+      expect(summary.nameAndPlaceRendered).toBe(1);
+      expect(rendered).toEqual([SITE, PROOF]);
+      expect(fetched).toEqual([]);
+    });
+
+    test('restores a held row once the browser reads the proof', async () => {
+      const { result } = await sweepOf(
+        { status: 'candidate' },
+        shell,
+        {},
+        {
+          renderPage: async (url) =>
+            url === SITE
+              ? live(`${SITE}/`, html(`${NAME} ${filler} Harrogate`))
+              : notThere(url),
+        },
+      );
+      expect(result.status).toBe('verified');
+    });
+
+    test('a render that fails, or lands on a directory, reads nothing: the row stays as it was', async () => {
+      for (const shown of [
+        { ok: false, reason: 'timeout', attemptedUrl: SITE } as FetchedPage,
+        live(
+          'https://www.yell.com/biz/quillmere',
+          html(`${NAME} ${filler} Harrogate`),
+        ),
+      ]) {
+        const { result, summary } = await sweepOf(
+          { status: 'candidate' },
+          shell,
+          {},
+          { renderPage: async () => shown },
+        );
+        expect(result.status).toBe('candidate');
+        expect(summary).toMatchObject({
+          nameAndPlaceRendered: 1,
+          nameAndPlaceUnread: 1,
+        });
+      }
+    });
+
+    test('a homepage that reads normally is never rendered', async () => {
+      const { summary } = await sweepOf(
+        {},
+        html(`${filler} Harrogate`),
+        { [PROOF]: live(PROOF, html(`${NAME} ${filler}`)) },
+        {
+          renderPage: async () => {
+            throw new Error('rendered');
+          },
+        },
+      );
+      expect(summary).toMatchObject({ nameAndPlaceRendered: 0, errored: 0 });
+    });
+  });
+
+  test('a homepage whose menu its scripts build is unread: a proof read in a browser is never withdrawn by a raw read', async () => {
+    const { result, summary } = await sweepOf(
+      {},
+      `<html><body><p>${filler} Harrogate</p></body></html>`,
+      { [PROOF]: live(PROOF, html(filler)) },
+    );
+    expect(result.status).toBe('verified');
+    expect(summary.nameAndPlaceUnread).toBe(1);
+  });
+
+  test('a row held back stays held while its proof cannot be read, and returns when it can', async () => {
+    const unread = await sweepOf(
+      { status: 'candidate' },
+      html(`${filler} Harrogate`),
+      {
+        [PROOF]: { ok: false, reason: 'timeout', attemptedUrl: PROOF },
+      },
+    );
+    expect(unread.result.status).toBe('candidate');
+    const read = await sweepOf(
+      { status: 'candidate' },
+      html(`${filler} Harrogate`),
+      {
+        [PROOF]: live(PROOF, html(`${NAME} ${filler}`)),
+      },
+    );
+    expect(read.result.status).toBe('verified');
+  });
+
+  test('the officer arm re-reads the officers, resigned ones included', async () => {
+    const team = 'https://www.quillmere.co.uk/team';
+    const asked: string[] = [];
+    const { result } = await sweepOf(
+      { url: 'https://www.quillmere.co.uk', evidenceUrl: team },
+      html(`${filler} Harrogate`),
+      { [team]: live(team, html(`Idris Tallowmere, founder. ${filler}`)) },
+      {
+        officers: async (companyNumber) => {
+          asked.push(companyNumber);
+          return [{ forename: 'IDRIS', surname: 'TALLOWMERE', current: false }];
+        },
+      },
+    );
+    expect(result.status).toBe('verified');
+    expect(asked).toEqual(['09990117']);
+  });
+
+  test('asks for officers only once the proof page has been read', async () => {
+    const Q = 'https://www.quillmere.co.uk';
+    const asked: string[] = [];
+    const { result, fetched } = await sweepOf(
+      { url: Q, evidenceUrl: `${Q}/privacy` },
+      html(`${filler} Harrogate`),
+      { [`${Q}/privacy`]: live(`${Q}/privacy`, html(`${NAME} ${filler}`)) },
+      {
+        officers: async (companyNumber) => {
+          asked.push(companyNumber);
+          return [];
+        },
+      },
+    );
+    expect(result.status).toBe('verified');
+    expect(fetched).toEqual([`${Q}/privacy`]);
+    expect(asked).toEqual([]);
+  });
+
+  test('a bot challenge, on the homepage, the proof page or a walked page, leaves it unread', async () => {
+    const challenge = html(
+      `Just a moment... Checking your browser before accessing. ${filler}`,
+    );
+    const home = await sweepOf({}, challenge, {
+      [PROOF]: live(PROOF, html(filler)),
+    });
+    expect(home.result.status).toBe('verified');
+    const proof = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, challenge),
+    });
+    expect(proof.result.status).toBe('verified');
+    const walked = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(filler)),
+      [`${SITE}/terms`]: live(`${SITE}/terms`, challenge),
+    });
+    expect(walked.result.status).toBe('verified');
+  });
+
+  test('a proof that moved is read where it is now, and that page is kept', async () => {
+    const terms = `${SITE}/terms`;
+    const { result } = await sweepOf({}, html(`${filler} Harrogate`), {
+      [terms]: live(terms, html(`${NAME} ${filler}`)),
+    });
+    expect(result).toMatchObject({ status: 'verified', evidenceUrl: terms });
+  });
+
+  test('a held row a failed fetch interrupted stays held until its proof is read', async () => {
+    const { result } = await sweepOf(
+      { status: 'unreachable' },
+      html(`${filler} Harrogate`),
+      { [PROOF]: { ok: false, reason: 'timeout', attemptedUrl: PROOF } },
+    );
+    expect(result.status).toBe('candidate');
+  });
+
+  test('with the proof page gone, the officers still decide it once every page is read', async () => {
+    const Q = 'https://www.quillmere.co.uk';
+    const { result } = await sweepOf(
+      { url: Q, evidenceUrl: `${Q}/team`, status: 'candidate' },
+      html(`${filler} Harrogate. Idris Tallowmere, director.`),
+      {},
+      {
+        officers: async () => [
+          { forename: 'IDRIS', surname: 'TALLOWMERE', current: true },
+        ],
+      },
+    );
+    expect(result.status).toBe('verified');
+  });
+
+  test('without the officer lookup the officer arm is unread, never gone', async () => {
+    const { result, summary } = await sweepOf(
+      {
+        url: 'https://www.quillmere.co.uk',
+        evidenceUrl: 'https://www.quillmere.co.uk/team',
+      },
+      html(`${filler} Harrogate`),
+      {},
+    );
+    expect(result.status).toBe('verified');
+    expect(summary.nameAndPlaceUnread).toBe(1);
+  });
+
+  test('its number on the site promotes it, with no re-check', async () => {
+    const { result, fetched } = await sweepOf(
+      {},
+      html(`${filler} Company No. 09990117`),
+      {},
+      { hasCompanyNumber: (page) => page.includes('09990117') },
+    );
+    expect(result.evidence).toBe('crn_on_page');
+    expect(fetched).toEqual([]);
+  });
+
+  test('other tiers are never re-checked', async () => {
+    const { fetched } = await sweepOf(
+      { evidence: 'postcode_on_page', confidence: '0.850' },
+      html(filler),
+      {},
+    );
+    expect(fetched).toEqual([]);
   });
 });

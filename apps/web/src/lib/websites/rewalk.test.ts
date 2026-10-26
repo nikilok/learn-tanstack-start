@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
+import { readPage } from './name-and-place';
 import {
+  CURRENT_WALK_VERSION,
   type RewalkConfig,
   type RewalkDeps,
   lostNetwork,
@@ -15,6 +17,8 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyName: 'ACME WIDGETS LIMITED',
   sponsorNames: [],
   postcode: 'SO22 5AZ',
+  registerTowns: [],
+  locality: null,
   evidence: 'none',
   url: null,
   candidates: ['https://real.co.uk/contact'],
@@ -27,6 +31,8 @@ const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   companyName: 'ACME WIDGETS LIMITED',
   sponsorNames: [],
   postcode: 'SO22 5AZ',
+  registerTowns: [],
+  locality: null,
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',
   candidates: ['https://higher.co.uk', 'https://stored.co.uk'],
@@ -83,6 +89,7 @@ function harness(
       walked.push(base.url);
       return over.walks?.[base.url] ?? base;
     },
+    officers: async () => [],
     upgrade: async (row, outcome) => {
       upgrades.push({ row, outcome });
       return true;
@@ -200,6 +207,140 @@ describe('rewalkWebsites: none rows', () => {
     expect(h.unreadable).toEqual(['03260168']);
     expect(h.upgrades).toEqual([]);
     expect(h.marked).toEqual([]);
+  });
+});
+
+describe('rewalkWebsites: the two-signal rule', () => {
+  test('is walk 3, so a dispatched re-walk reads every none row again', () => {
+    expect(CURRENT_WALK_VERSION).toBe(3);
+  });
+
+  const company = noneRow({
+    companyNumber: '09990117',
+    companyName: 'QUILLMERE ANALYTICS LIMITED',
+    postcode: 'HG1 9ZQ',
+    registerTowns: ['Harrogate'],
+    locality: 'Harrogate',
+    candidates: ['https://a.co.uk/about'],
+  });
+
+  test('a none row the rule proves gains its site, counted apart', async () => {
+    const h = harness({
+      rows: [company],
+      probes: {
+        'https://a.co.uk': probe({
+          url: 'https://a.co.uk',
+          pages: [
+            readPage(
+              'https://a.co.uk/',
+              'Quillmere Analytics Ltd, Station Parade, Harrogate.',
+              company,
+              [],
+            ),
+          ],
+        }),
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: 'https://a.co.uk',
+      evidence: 'name_and_place',
+    });
+    expect(summary.noneToNameAndPlace).toBe(1);
+    expect(summary.noneToPostcode).toBe(0);
+  });
+
+  test('officers that cannot be read: a failed ask spends an attempt, a stopped run leaves the row as it was', async () => {
+    const unread = async (answer: 'failed' | 'stopped') => {
+      const h = harness({
+        rows: [{ ...company, candidates: ['https://quillmere.co.uk/'] }],
+        probes: {
+          'https://quillmere.co.uk': probe({
+            url: 'https://quillmere.co.uk',
+            pages: [
+              readPage(
+                'https://quillmere.co.uk/',
+                'Quillmere Analytics, Harrogate.',
+                company,
+                [],
+              ),
+            ],
+          }),
+        },
+        officers: async () => answer,
+      });
+      const summary = await rewalkWebsites(config(), h.deps);
+      expect(h.marked).toEqual([]);
+      expect(summary.officerFailures).toBe(1);
+      return {
+        unreadable: h.unreadable,
+        counted: summary.unreadable,
+        lookups: summary.officerLookups,
+      };
+    };
+    expect(await unread('failed')).toEqual({
+      unreadable: ['09990117'],
+      counted: 1,
+      lookups: 1,
+    });
+    // An outage stops the asking: the row is neither stamped nor charged.
+    expect(await unread('stopped')).toEqual({
+      unreadable: [],
+      counted: 0,
+      lookups: 0,
+    });
+  });
+
+  test('a silent candidate read in a browser: counted, its upgrade too, and what both reads stated recorded', async () => {
+    const h = harness({
+      rows: [company],
+      probes: {
+        'https://a.co.uk': probe({
+          url: 'https://a.co.uk',
+          siteLinks: 0,
+          stated: [stated('a.co.uk', '07590616')],
+        }),
+      },
+      render: async (_row, base) => ({
+        ...base,
+        siteLinks: 3,
+        crnFound: true,
+        evidenceUrl: 'https://a.co.uk/legal',
+        stated: [stated('a.co.uk', '09990117')],
+      }),
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: 'https://a.co.uk',
+      evidence: 'crn_on_page',
+      evidenceUrl: 'https://a.co.uk/legal',
+    });
+    expect(summary).toMatchObject({
+      rendered: 1,
+      upgradedByRender: 1,
+      noneToNumber: 1,
+    });
+    expect(h.recorded[0].map((s) => s.companyNumber)).toEqual([
+      '07590616',
+      '09990117',
+    ]);
+  });
+
+  test('a render that finds nothing is still counted, and upgrades nothing', async () => {
+    const h = harness({
+      rows: [company],
+      probes: {
+        'https://a.co.uk': probe({ url: 'https://a.co.uk', siteLinks: 0 }),
+      },
+      render: async () => null,
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({
+      rendered: 1,
+      upgradedByRender: 0,
+      unchanged: 1,
+    });
+    expect(h.upgrades).toEqual([]);
   });
 });
 

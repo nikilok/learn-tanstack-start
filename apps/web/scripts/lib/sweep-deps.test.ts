@@ -1,14 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
+import { makeFakeSql } from '../../src/lib/websites/fake-sql.ts';
 import { makeSweepDeps } from './sweep-deps.ts';
 
-/** A database the checks below never reach. */
-async function unusedSql(): Promise<Record<string, unknown>[]> {
-  throw new Error('no query expected');
-}
-
 describe('makeSweepDeps', () => {
-  const deps = makeSweepDeps(unusedSql, () => {});
+  const { sql, calls } = makeFakeSql();
+  const deps = makeSweepDeps(sql, () => {});
   const footer = (text: string) => `<footer>${text}</footer>`;
 
   test('the number check reads the statutory wording the token match misses', () => {
@@ -31,6 +28,41 @@ describe('makeSweepDeps', () => {
     expect(
       deps.hasCompanyNumber(footer('Tel: 020 0123 4567'), '01234567'),
     ).toBe(false);
+  });
+
+  test('without an officer lookup the officer arm is never re-read', () => {
+    expect(deps.officers).toBeUndefined();
+    const officers = async () => [];
+    expect(makeSweepDeps(sql, () => {}, officers).officers).toBe(officers);
+    expect(calls).toEqual([]);
+  });
+
+  test('without a renderer no page is read in a browser; with one, the sweep reads what it rendered', async () => {
+    expect(deps.renderPage).toBeUndefined();
+    let closed = 0;
+    const rendered = makeSweepDeps(sql, () => {}, undefined, {
+      visit: () => ({
+        render: async (url) => ({
+          ok: true,
+          url: `${url}home`,
+          status: 200,
+          html: '<p>Rendered</p>',
+          attempts: 1,
+          attemptedUrl: url,
+        }),
+        close: async () => {
+          closed += 1;
+        },
+      }),
+    });
+    expect(await rendered.renderPage?.('https://qmx.co.uk/')).toEqual({
+      ok: true,
+      url: 'https://qmx.co.uk/home',
+      html: '<p>Rendered</p>',
+      attemptedUrl: 'https://qmx.co.uk/',
+    });
+    expect(closed).toBe(1);
+    expect(calls).toEqual([]);
   });
 
   test('the postcode check matches the registered office', () => {

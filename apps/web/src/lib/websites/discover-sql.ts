@@ -10,6 +10,7 @@ import type { DiscoveryOutcome } from './discover';
 import type { DiscoveryRow } from './discover-sweep';
 import { type Shard, WHOLE_SET } from './shard';
 import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
+import { SPONSOR_TOWNS_COLUMN, sponsorTownsOf } from './sponsor-towns';
 
 /**
  * Passes a banked-but-unsettled row gets before it is left alone.
@@ -59,7 +60,9 @@ export function makeSelectUndiscovered(sql: Sql, shard: Shard = WHOLE_SET) {
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
         ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
+        ${sql.unsafe(SPONSOR_TOWNS_COLUMN)},
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
+        p.locality,
         p.postal_code,
         -- Carried so a retry can reuse what the failed pass already paid for.
         w.candidates
@@ -92,6 +95,8 @@ export function makeSelectUndiscovered(sql: Sql, shard: Shard = WHOLE_SET) {
       sponsorNames: sponsorNamesOf(r),
       town: (r.town as string | null) ?? '',
       postcode: (r.postal_code as string | null) ?? null,
+      registerTowns: sponsorTownsOf(r),
+      locality: (r.locality as string | null) ?? null,
       bankedCandidates: Array.isArray(r.candidates)
         ? (r.candidates as string[])
         : null,

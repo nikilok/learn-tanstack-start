@@ -10,6 +10,7 @@
 
 import {
   foldWalkPage,
+  pageKey,
   readHomepage,
   readWalkPage,
   walkTargets,
@@ -17,7 +18,11 @@ import {
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
 import type { CandidateProbe } from '../../src/lib/websites/discover.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
-import { fetchSite } from './web-fetch.ts';
+import { fetchSite, type SiteFetch } from './web-fetch.ts';
+import type { Renderer } from './web-render.ts';
+
+/** Longest one candidate's visit in the browser may run; a site too slow for it keeps what was read. */
+const VISIT_MS = 90_000;
 
 /** Fetch one candidate origin and read the two query-independent signals. */
 export async function probeOrigin(
@@ -41,14 +46,19 @@ export type WalkOptions = {
   crowded: ReadonlySet<string>;
   /** Called per fetch attempted, for the caller's own counter. */
   onFetch?: () => void;
+  /** The fetcher; the real one unless a test supplies its own. */
+  fetch?: (url: string) => Promise<SiteFetch>;
+  /** Epoch milliseconds after which the walk reads no further page. */
+  deadline?: number;
 };
 
 /**
- * Probe a candidate's legal pages when its homepage proved nothing.
+ * Probe a candidate's legal and about pages when its homepage proved nothing.
  *
- * Returns the probe updated with whatever they found, so the same pure decider
- * settles the row either way. Stops at the first registration number: nothing
- * below it can beat the company naming itself.
+ * Returns the probe updated with whatever they found, and with every page it
+ * read for the two-signal rule, so the same pure deciders settle the row
+ * either way. Stops at the first registration number: nothing below it can
+ * beat the company naming itself.
  */
 export async function walkDisclosure(
   row: DiscoveryRow,
@@ -57,21 +67,69 @@ export async function walkDisclosure(
 ): Promise<CandidateProbe | null> {
   let updated = base;
   const stated = [...(base.stated ?? [])];
+  const pages = [...(base.pages ?? [])];
+  const read = new Set(pages.map((page) => pageKey(page.url)));
   const targets = walkTargets(
     base.url,
     base.legalLinks ?? [],
     options.maxPaths,
+    base.aboutLinks ?? [],
   );
+  const fetch = options.fetch ?? fetchSite;
   for (const target of targets) {
+    if (options.deadline !== undefined && Date.now() >= options.deadline) {
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, options.delayMs));
-    const fetched = await fetchSite(target);
+    const fetched = await fetch(target);
     options.onFetch?.();
     if (!fetched.ok) continue;
     const page = readWalkPage(row, fetched.url, fetched.html, options.crowded);
     if (!page) continue;
     stated.push(...page.stated);
+    // A path that redirected to a page already read adds nothing to read.
+    if (!read.has(pageKey(page.read.url))) {
+      read.add(pageKey(page.read.url));
+      pages.push(page.read);
+    }
     updated = foldWalkPage(updated, fetched.url, page);
-    if (updated.crnFound) return { ...updated, stated };
+    if (updated.crnFound) return { ...updated, stated, pages };
   }
-  return { ...updated, stated };
+  return { ...updated, stated, pages };
+}
+
+/**
+ * Read a candidate again in a browser, in one visit: its homepage, then the
+ * walk's pages from the links the rendered homepage shows, every page
+ * rendered. Null when the homepage would not render.
+ */
+export async function renderCandidate(
+  row: DiscoveryRow,
+  base: CandidateProbe,
+  renderer: Pick<Renderer, 'visit'>,
+  options: WalkOptions,
+): Promise<CandidateProbe | null> {
+  const visit = renderer.visit();
+  const deadline = Date.now() + VISIT_MS;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    const home = await visit.render(base.url);
+    options.onFetch?.();
+    if (!home.ok) return null;
+    const probe = readHomepage(
+      row,
+      base.url,
+      home.url,
+      home.html,
+      options.crowded,
+    );
+    if (probe.crnFound || probe.onAggregator || probe.parked) return probe;
+    return await walkDisclosure(row, probe, {
+      ...options,
+      fetch: (url) => visit.render(url),
+      deadline,
+    });
+  } finally {
+    await visit.close();
+  }
 }

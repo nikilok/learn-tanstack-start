@@ -16,6 +16,7 @@ import {
   makeUpgrade,
 } from './rewalk-sql';
 import { SPONSOR_NAMES_COLUMN, SPONSOR_NAMES_KEY } from './sponsor-names';
+import { SPONSOR_TOWNS_COLUMN, SPONSOR_TOWNS_KEY } from './sponsor-towns';
 import type { StatedOnSite } from './stated-numbers';
 
 const flat = (text: string) => text.replace(/\s+/g, ' ');
@@ -25,6 +26,8 @@ const noneRow: RewalkRow = {
   companyName: 'ACME WIDGETS LIMITED',
   sponsorNames: [],
   postcode: 'SO22 5AZ',
+  registerTowns: [],
+  locality: null,
   evidence: 'none',
   url: null,
   candidates: [],
@@ -186,6 +189,28 @@ describe('makeSelectRewalk', () => {
       expect(rows.map((r) => r.sponsorNames)).toEqual([
         ['Acme Widgets Ltd T/A Acme Dental'],
         [],
+      ]);
+    }
+  });
+
+  test("reads the register's towns and the registered locality, the two-signal rule's places", async () => {
+    for (const selection of [{}, { seed: 's' }]) {
+      const { sql, calls } = makeFakeSql([
+        {
+          company_number: '09990117',
+          locality: 'Harrogate',
+          [SPONSOR_TOWNS_KEY]: ['Harrogate'],
+        },
+        { company_number: '09990118' },
+      ]);
+      const rows = await makeSelectRewalk(sql, selection)(10);
+      expect(calls[0].text).toContain(SPONSOR_TOWNS_COLUMN);
+      expect(flat(calls[0].text)).toContain(
+        "coalesce(p.company_name, '') AS company_name, p.locality,",
+      );
+      expect(rows.map((r) => [r.registerTowns, r.locality])).toEqual([
+        [['Harrogate'], 'Harrogate'],
+        [[], null],
       ]);
     }
   });

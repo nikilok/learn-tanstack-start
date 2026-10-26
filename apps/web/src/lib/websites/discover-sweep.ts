@@ -10,6 +10,8 @@
  * keep in agreement.
  */
 
+import { hostNamer } from './company-naming';
+import { needsRender } from './disclosure-walk';
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
 import {
   buildQuery,
@@ -17,6 +19,8 @@ import {
   MAX_CANDIDATES,
   siteOrigins,
 } from './discover';
+import { judgeSite } from './name-and-place';
+import type { Officer, OfficerLookup } from './officer-names';
 import type { StatedOnSite } from './stated-numbers';
 
 export type DiscoveryRow = {
@@ -26,6 +30,10 @@ export type DiscoveryRow = {
   sponsorNames: string[];
   town: string;
   postcode: string | null;
+  /** Towns the sponsor register lists the company at. */
+  registerTowns: string[];
+  /** The registered office locality. */
+  locality: string | null;
   /** Results a previous pass already paid for and never got to settle. Set
    *  only on a retry, and reusing them is what stops a second charge. */
   bankedCandidates: string[] | null;
@@ -60,6 +68,13 @@ export type DiscoveryDeps = {
     row: DiscoveryRow,
     probe: CandidateProbe,
   ): Promise<CandidateProbe | null>;
+  /** The company's officers, resigned ones included, or why they could not be read. */
+  officers(companyNumber: string): Promise<OfficerLookup>;
+  /** Read a silent candidate again in a browser, homepage and walk; null when it would not render. Absent, nothing is rendered. */
+  render?(
+    row: DiscoveryRow,
+    probe: CandidateProbe,
+  ): Promise<CandidateProbe | null>;
   write(row: DiscoveryRow, outcome: DiscoveryOutcome): Promise<boolean>;
   /** Note that a pass took this row and could not settle it. */
   markAttempt(companyNumber: string): Promise<void>;
@@ -85,9 +100,17 @@ export type DiscoverySummary = {
   foundByNumber: number;
   /** Companies where a candidate carried the registered office postcode. */
   foundByAddress: number;
-  /** Searched, fetched, and confirmed by neither. */
+  /** Companies the two-signal rule found a site for. */
+  foundByNameAndPlace: number;
+  /** Searched, fetched, and confirmed by none of them. */
   foundNothing: number;
   candidateFetches: number;
+  /** Companies House officer lookups, and how many failed. */
+  officerLookups: number;
+  officerFailures: number;
+  /** Candidates read again in a browser, and companies found from what one showed. */
+  rendered: number;
+  foundByRender: number;
   /** Names too thin to search — the credit was never spent. */
   unsearchable: number;
   /** Rows resumed from banked candidates, costing no further credit. */
@@ -120,21 +143,48 @@ const HEARTBEAT_ROWS = 25;
 
 /** What reading one company's candidates came to. */
 export type Settled = {
-  /** Null when no site could be read: not an answer, so nothing is written. */
+  /** Null when no site, or no officer list it needed, could be read: not an answer, so nothing is written. */
   outcome: DiscoveryOutcome | null;
   /** Candidate homepages requested. */
   fetches: number;
   /** Statutory numbers the pages read stated. */
   stated: StatedOnSite[];
+  /** Whether the company's officers were asked for, and why they could not be read. */
+  officers: 'unasked' | 'read' | 'failed' | 'stopped';
+  /** Candidates read again in a browser, and whether the outcome came from one. */
+  rendered: number;
+  byRender: boolean;
 };
 
-/** The fetching half of discovery for one company: probe, decide, walk, decide. */
+/** One of the top candidates in rank order: its homepage probe, null when it could not be read. */
+type Slot = { url: string; probe: CandidateProbe | null; walked: boolean };
+
+/** A candidate that is a site at all: not a directory, not a holding page. */
+function usable(probe: CandidateProbe): boolean {
+  return !probe.onAggregator && !probe.parked;
+}
+
+/** A URL's host, or '' when it will not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** The fetching half of discovery for one company: probe, decide, walk, decide, then the two-signal rule. */
 export async function settleCandidates(
   row: DiscoveryRow,
   urls: readonly string[],
   deps: Pick<
     DiscoveryDeps,
-    'crowdedHosts' | 'probe' | 'walkDisclosure' | 'sleep'
+    | 'crowdedHosts'
+    | 'probe'
+    | 'walkDisclosure'
+    | 'officers'
+    | 'render'
+    | 'sleep'
   >,
   delayMs: number,
 ): Promise<Settled> {
@@ -142,17 +192,17 @@ export async function settleCandidates(
   // this removes fetches rather than adding them. Directories, listed or
   // crowded, are dropped before they can take one of the slots.
   const origins = siteOrigins(urls, deps.crowdedHosts);
-  const probes: CandidateProbe[] = [];
+  const slots: Slot[] = [];
   let unreadable = 0;
   let fetches = 0;
   for (const url of origins.slice(0, MAX_CANDIDATES)) {
     const probe = await deps.probe(row, url);
     fetches += 1;
+    slots.push({ url, probe, walked: false });
     if (probe) {
-      probes.push(probe);
       // The registration number is the company identifying itself, and
       // nothing below it can beat that — so stop paying for fetches.
-      if (probe.crnFound && !probe.onAggregator && !probe.parked) break;
+      if (probe.crnFound && usable(probe)) break;
     } else {
       unreadable += 1;
     }
@@ -160,35 +210,115 @@ export async function settleCandidates(
     // made five dead hosts ~20 unpaced requests.
     await deps.sleep(delayMs);
   }
-  const statedOf = () => probes.flatMap((p) => p.stated ?? []);
+  const probes = () =>
+    slots.flatMap((slot) => (slot.probe ? [slot.probe] : []));
+  let officers: Settled['officers'] = 'unasked';
+  let rendered = 0;
+  const settled = (
+    outcome: DiscoveryOutcome | null,
+    byRender = false,
+  ): Settled => ({
+    outcome,
+    fetches,
+    stated: probes().flatMap((p) => p.stated ?? []),
+    officers,
+    rendered,
+    byRender,
+  });
 
   // Read-and-found-nothing is an answer; could-not-read is not, and storing
   // it as one writes a permanent `none` no selector revisits. A directory
   // that loaded is not the company's site loading; a parked page is.
-  const siteLoaded = probes.some((p) => !p.onAggregator);
+  const siteLoaded = probes().some((p) => !p.onAggregator);
   if (origins.length > 0 && !siteLoaded && unreadable > 0) {
-    return { outcome: null, fetches, stated: statedOf() };
+    return settled(null);
   }
 
-  let outcome = decideFromCandidates(probes);
+  /** Walk a candidate's pages, once, keeping what they read. */
+  const walk = async (slot: Slot, probe: CandidateProbe) => {
+    slot.walked = true;
+    slot.probe = (await deps.walkDisclosure(row, probe)) ?? probe;
+  };
+
+  let outcome = decideFromCandidates(probes());
 
   // Homepages settled nothing, so walk the legal pages of the top-ranked
   // usable candidate. Measured over 20 companies: this tripled publishable
-  // rows, and walking every candidate instead found no more at three times
-  // the fetches — if the number is not on rank 1's site it is not on rank
-  // 2's either. The same pure decider runs again over the updated probe,
-  // so there is still one place a decision is made.
+  // rows. The same pure decider runs again over the updated probe, so there
+  // is still one place a decision is made.
   if (outcome.evidence !== 'crn_on_page') {
-    const top = probes.findIndex((p) => !p.onAggregator && !p.parked);
-    if (top >= 0) {
-      const walked = await deps.walkDisclosure(row, probes[top]);
-      if (walked) {
-        probes[top] = walked;
-        outcome = decideFromCandidates(probes);
+    const top = slots.find((slot) => slot.probe && usable(slot.probe));
+    if (top?.probe) {
+      await walk(top, top.probe);
+      outcome = decideFromCandidates(probes());
+    }
+  }
+  if (outcome.evidence !== 'none') return settled(outcome);
+
+  // The two-signal rule, down the candidates in rank order as it was sealed.
+  const named = hostNamer(row);
+  let found: Officer[] | null | undefined;
+  for (const slot of slots) {
+    const { probe } = slot;
+    if (probe && !usable(probe)) continue;
+    // A site naming the company that refused us may be its own: no pick past it.
+    if ((!probe || probe.challenged) && named(hostOf(slot.url))) break;
+    if (!probe) continue;
+    if (!slot.walked) {
+      await walk(slot, probe);
+      outcome = decideFromCandidates(probes());
+      // A number or named postcode on its pages: the existing proofs own the row.
+      if (outcome.evidence !== 'none') return settled(outcome);
+    }
+    const site = slot.probe ?? probe;
+    // Raw pages that show the walk nothing are read again in a browser, before the people lookup.
+    let seen: CandidateProbe | null = null;
+    if (deps.render && needsRender(site)) {
+      rendered += 1;
+      const shown = await deps.render(row, site);
+      if (shown) {
+        // What the raw pages stated stays on record beside what the rendered ones did.
+        slot.probe = {
+          ...shown,
+          stated: [...(site.stated ?? []), ...(shown.stated ?? [])],
+        };
+        outcome = decideFromCandidates(probes());
+        if (outcome.evidence !== 'none') return settled(outcome, true);
+        // A render that landed on a directory or a holding page proves nothing.
+        if (usable(shown)) seen = slot.probe;
+      }
+    }
+    // The rule on the raw pages, as it was measured, then on the rendered ones.
+    for (const read of seen ? [site, seen] : [site]) {
+      const pages = { url: read.url, pages: read.pages ?? [] };
+      let verdict = judgeSite(row, pages);
+      if (verdict.kind === 'needs_officers') {
+        if (found === undefined) {
+          const answer = await deps.officers(row.companyNumber);
+          found = Array.isArray(answer) ? answer : null;
+          officers = Array.isArray(answer) ? 'read' : answer;
+        }
+        if (!found) return settled(null);
+        verdict = judgeSite(
+          row,
+          pages,
+          found.filter((officer) => officer.current),
+        );
+      }
+      if (verdict.kind === 'proved') {
+        return settled(
+          {
+            url: read.url,
+            evidenceUrl: verdict.evidenceUrl,
+            evidence: 'name_and_place',
+            rank: probes().indexOf(slot.probe ?? read) + 1,
+          },
+          read === seen,
+        );
       }
     }
   }
-  return { outcome, fetches, stated: statedOf() };
+  return settled(outcome);
 }
 
 export async function discoverWebsites(
@@ -202,8 +332,13 @@ export async function discoverWebsites(
     searched: 0,
     foundByNumber: 0,
     foundByAddress: 0,
+    foundByNameAndPlace: 0,
     foundNothing: 0,
     candidateFetches: 0,
+    officerLookups: 0,
+    officerFailures: 0,
+    rendered: 0,
+    foundByRender: 0,
     unsearchable: 0,
     retried: 0,
     unreadable: 0,
@@ -228,7 +363,7 @@ export async function discoverWebsites(
     // Rows reached, emitted before the `continue`s that used to skip it.
     if (summary.processed % HEARTBEAT_ROWS === 0) {
       deps.log(
-        `  ${summary.processed}/${rows.length} — ${summary.foundByNumber + summary.foundByAddress} found, ${summary.searched} searched`,
+        `  ${summary.processed}/${rows.length} — ${summary.foundByNumber + summary.foundByAddress + summary.foundByNameAndPlace} found, ${summary.searched} searched`,
       );
     }
 
@@ -293,15 +428,28 @@ export async function discoverWebsites(
 
       const settled = await settleCandidates(row, urls, deps, config.delayMs);
       summary.candidateFetches += settled.fetches;
+      summary.rendered += settled.rendered;
+      if (settled.byRender) summary.foundByRender += 1;
+      if (settled.officers === 'read' || settled.officers === 'failed') {
+        summary.officerLookups += 1;
+      }
+      if (settled.officers === 'failed' || settled.officers === 'stopped') {
+        summary.officerFailures += 1;
+      }
       if (!settled.outcome) {
         summary.unreadable += 1;
-        if (!config.dryRun) await deps.markAttempt(row.companyNumber);
+        // A run that had stopped asking for officers spends no attempt: the row comes back next run.
+        if (!config.dryRun && settled.officers !== 'stopped') {
+          await deps.markAttempt(row.companyNumber);
+        }
         continue;
       }
       const outcome = settled.outcome;
       if (outcome.evidence === 'crn_on_page') summary.foundByNumber += 1;
       else if (outcome.evidence === 'postcode_on_page') {
         summary.foundByAddress += 1;
+      } else if (outcome.evidence === 'name_and_place') {
+        summary.foundByNameAndPlace += 1;
       } else summary.foundNothing += 1;
 
       if (!config.dryRun) {

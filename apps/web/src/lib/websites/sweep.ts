@@ -10,10 +10,32 @@
 
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
 import { evidenceRank } from './decide.ts';
+import {
+  needsRender,
+  pageKey,
+  readHomepage,
+  readWalkPage,
+  walkTargets,
+} from './disclosure-walk.ts';
 import { visibleText } from './extract.ts';
 import { DISCLOSURE_PATHS } from './fetch-policy.ts';
-import { isAggregatorHost, looksParked, pageTooThin } from './page-signals.ts';
-import type { RevalidateFailure, RevalidateResult } from './revalidate.ts';
+import {
+  judgeSite,
+  type NameAndPlaceRow,
+  type PageRead,
+} from './name-and-place.ts';
+import type { Officer, OfficerLookup } from './officer-names.ts';
+import {
+  isAggregatorHost,
+  looksChallenged,
+  looksParked,
+  pageTooThin,
+} from './page-signals.ts';
+import type {
+  NameAndPlaceCheck,
+  RevalidateFailure,
+  RevalidateResult,
+} from './revalidate.ts';
 import { revalidate } from './revalidate.ts';
 
 /** Hostname of a URL, or '' when it will not parse. */
@@ -41,6 +63,12 @@ export type SweepRow = {
    *  against them and lock on them rather than reasoning in SQL. */
   evidenceUrl: string | null;
   confidence: string | null;
+  /** Companies House name; with the register's names, towns and the
+   *  registered locality, what a `name_and_place` re-check reads. */
+  companyName: string;
+  sponsorNames: string[];
+  registerTowns: string[];
+  locality: string | null;
 };
 
 export type FetchedPage =
@@ -62,6 +90,10 @@ export type SweepDeps = {
   fetchPage(url: string): Promise<FetchedPage>;
   hasCompanyNumber(html: string, companyNumber: string): boolean;
   hasPostcode(html: string, postcode: string): boolean;
+  /** The company's officers, resigned ones included, or why they could not be read. Absent, the officer arm is never re-read. */
+  officers?(companyNumber: string): Promise<OfficerLookup>;
+  /** Read one exact URL in a browser. Absent, a `name_and_place` homepage that shows a plain fetch nothing is not read. */
+  renderPage?(url: string): Promise<FetchedPage>;
   applyResult(row: SweepRow, result: RevalidateResult): Promise<boolean>;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
@@ -113,6 +145,11 @@ export type SweepSummary = {
   demoted: number;
   /** Rows held back from rendering: parked, for sale, or a directory. */
   noSiteThere: number;
+  /** `name_and_place` rows whose name or place was gone from every page read, and those not read well enough to tell. */
+  nameAndPlaceGone: number;
+  nameAndPlaceUnread: number;
+  /** `name_and_place` homepages read again in a browser. */
+  nameAndPlaceRendered: number;
   updated: number;
   lockMissed: number;
   errored: number;
@@ -199,6 +236,143 @@ async function findDisclosure(
   return { crnFoundAt: null, postcodeFoundAt };
 }
 
+/** Hosts a re-check treats as directories beyond the listed ones: none, as the sweep's own checks do. */
+const NO_CROWDED: ReadonlySet<string> = new Set();
+
+/** A failed fetch that says a page is not there to read, rather than that it would not answer. */
+function notThere(
+  page: Extract<FetchedPage, { ok: false }>,
+  proofPage: boolean,
+): boolean {
+  if (page.reason === 'http_error') {
+    return page.status === 404 || page.status === 410;
+  }
+  // A file, or a path robots.txt closes, was never read for the proof: unless it was the proof page.
+  return (
+    !proofPage &&
+    (page.reason === 'not_html' || page.reason === 'blocked_by_robots')
+  );
+}
+
+/**
+ * Re-read a `name_and_place` row's proof: the homepage, its proof page, then
+ * the walk's pages until the rule holds again. A homepage that shows a plain
+ * fetch nothing is read in a browser, as discovery read it, and so is the
+ * walk. Officers are asked for only once the proof page has been tried.
+ * `gone` only when every page it tried was read or is not there; resigned
+ * officers count, as turnover is not the site changing.
+ */
+async function recheckNameAndPlace(
+  row: SweepRow,
+  homepage: { url: string; servedUrl: string; html: string },
+  config: SweepConfig,
+  deps: SweepDeps,
+  summary: SweepSummary,
+): Promise<{ check: NameAndPlaceCheck; proofAt: string | null }> {
+  const company: NameAndPlaceRow = {
+    companyNumber: row.companyNumber,
+    companyName: row.companyName,
+    sponsorNames: row.sponsorNames,
+    postcode: row.postcode,
+    registerTowns: row.registerTowns,
+    locality: row.locality,
+  };
+  let home = readHomepage(
+    company,
+    homepage.url,
+    homepage.servedUrl,
+    homepage.html,
+    NO_CROWDED,
+  );
+  let homeText = visibleText(homepage.html);
+  let fetchPage = deps.fetchPage;
+  const tried = new Set([pageKey(homepage.url), pageKey(homepage.servedUrl)]);
+  if (deps.renderPage && needsRender(home)) {
+    summary.nameAndPlaceRendered++;
+    const shown = await deps.renderPage(homepage.url);
+    if (shown.ok) {
+      const seen = readHomepage(
+        company,
+        homepage.url,
+        shown.url,
+        shown.html,
+        NO_CROWDED,
+      );
+      // A render that landed on a directory or a holding page reads nothing.
+      if (!seen.onAggregator && !seen.parked) {
+        home = seen;
+        homeText = visibleText(shown.html);
+        fetchPage = deps.renderPage;
+        tried.add(pageKey(shown.url));
+      }
+    }
+  }
+  const pages: PageRead[] = [...(home.pages ?? [])];
+  const site = { url: row.url, pages };
+  // A cookie wall, a script shell, a menu its scripts build or a bot challenge shows nothing either way.
+  let unread =
+    pageTooThin(homeText) || looksChallenged(homeText) || home.siteLinks === 0;
+  const proofPage = row.evidenceUrl;
+  let mayAsk = !proofPage || tried.has(pageKey(proofPage));
+  let officers: Officer[] | null | undefined;
+  const judge = async () => {
+    let verdict = judgeSite(company, site, officers ?? undefined);
+    if (verdict.kind === 'needs_officers' && officers === undefined && mayAsk) {
+      const answer = await deps.officers?.(row.companyNumber);
+      officers = Array.isArray(answer) ? answer : null;
+      verdict = judgeSite(company, site, officers ?? undefined);
+    }
+    return verdict;
+  };
+  let verdict = await judge();
+  if (verdict.kind === 'proved') {
+    return { check: 'holds', proofAt: verdict.evidenceUrl };
+  }
+
+  const base = `${new URL(homepage.url).origin}${new URL(row.url).pathname.replace(/\/+$/, '')}`;
+  const targets = [
+    ...(proofPage ? [proofPage] : []),
+    ...walkTargets(
+      base,
+      home.legalLinks ?? [],
+      DISCLOSURE_PATHS.length,
+      home.aboutLinks ?? [],
+    ),
+  ];
+  for (const target of targets) {
+    if (tried.has(pageKey(target))) continue;
+    tried.add(pageKey(target));
+    await deps.sleep(config.delayMs);
+    summary.disclosureFetches++;
+    const page = await fetchPage(target);
+    if (target === proofPage) mayAsk = true;
+    if (!page.ok) {
+      if (!notThere(page, target === proofPage)) unread = true;
+      continue;
+    }
+    const text = visibleText(page.html);
+    if (looksChallenged(text) || (target === proofPage && pageTooThin(text))) {
+      unread = true;
+    }
+    const read = readWalkPage(company, page.url, page.html, NO_CROWDED);
+    if (!read) continue;
+    pages.push(read.read);
+    verdict = await judge();
+    if (verdict.kind === 'proved') {
+      return { check: 'holds', proofAt: verdict.evidenceUrl };
+    }
+  }
+  // Every page read: the officers decide it now if anything does.
+  mayAsk = true;
+  verdict = await judge();
+  if (verdict.kind === 'proved') {
+    return { check: 'holds', proofAt: verdict.evidenceUrl };
+  }
+  // Still asking for officers: they could not be read, so neither could the proof.
+  if (verdict.kind === 'needs_officers') unread = true;
+  return { check: unread ? 'unknown' : 'gone', proofAt: null };
+}
+
 /**
  * Remove a row's identifiers from free text.
  *
@@ -233,6 +407,9 @@ export async function sweepWebsites(
     corroborated: 0,
     demoted: 0,
     noSiteThere: 0,
+    nameAndPlaceGone: 0,
+    nameAndPlaceUnread: 0,
+    nameAndPlaceRendered: 0,
     updated: 0,
     lockMissed: 0,
     errored: 0,
@@ -254,6 +431,8 @@ export async function sweepWebsites(
       let onAggregator = false;
       let looksParkedPage = false;
       let thinPage = false;
+      let nameAndPlace: NameAndPlaceCheck | undefined;
+      let nameAndPlaceAt: string | null = null;
       if (fetched.ok) {
         // Read off the homepage we already have — no extra request.
         //
@@ -293,6 +472,30 @@ export async function sweepWebsites(
         );
         crnFoundAt = found.crnFoundAt;
         postcodeFoundAt = found.postcodeFoundAt;
+
+        // A number promotes it and a directory or holding page holds it anyway.
+        if (
+          row.evidence === 'name_and_place' &&
+          !crnFoundAt &&
+          !onAggregator &&
+          !looksParkedPage
+        ) {
+          const recheck = await recheckNameAndPlace(
+            row,
+            {
+              url: fetched.attemptedUrl,
+              servedUrl: fetched.url,
+              html: fetched.html,
+            },
+            config,
+            deps,
+            summary,
+          );
+          nameAndPlace = recheck.check;
+          nameAndPlaceAt = recheck.proofAt;
+          if (nameAndPlace === 'gone') summary.nameAndPlaceGone++;
+          if (nameAndPlace === 'unknown') summary.nameAndPlaceUnread++;
+        }
       }
 
       const result = revalidate({
@@ -310,6 +513,8 @@ export async function sweepWebsites(
         onAggregator,
         looksParked: looksParkedPage,
         pageTooThin: thinPage,
+        nameAndPlace,
+        nameAndPlaceAt,
       });
 
       if (fetched.ok) {

@@ -187,6 +187,17 @@ async function readCapped(res: Response): Promise<string> {
   return new TextDecoder('utf-8', { fatal: false }).decode(merged);
 }
 
+/** The guards a page must pass before we may request it, for a caller that fetches some other way: null when it may be fetched. */
+export async function checkFetchable(
+  url: string,
+): Promise<FetchFailure | null> {
+  try {
+    return await guard(new URL(url));
+  } catch {
+    return 'dns_or_refused';
+  }
+}
+
 /** Every guard that must hold before we are allowed to request a URL. */
 async function guard(target: URL): Promise<FetchFailure | null> {
   const resolution = await resolveHost(target.hostname);

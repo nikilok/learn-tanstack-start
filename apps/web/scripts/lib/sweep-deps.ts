@@ -12,6 +12,7 @@ import {
 import { pageShowsCompanyNumber } from '../../src/lib/websites/stated-numbers.ts';
 import type { FetchedPage, SweepDeps } from '../../src/lib/websites/sweep.ts';
 import { fetchPage, fetchSite, type SiteFetch } from './web-fetch.ts';
+import type { Renderer } from './web-render.ts';
 
 /** Adapt web-fetch's result to the shape the orchestrator asks for, so the
  *  sweep never has to know about HTTP. */
@@ -32,10 +33,12 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
   };
 }
 
-/** The sweep's dependencies against this database, logging through `log`. */
+/** The sweep's dependencies against this database, logging through `log`; without `officers` the officer arm is never re-read, and without `renderer` no page is read in a browser. */
 export function makeSweepDeps(
   sql: Parameters<typeof makeSelectRows>[0],
   log: (message: string) => void,
+  officers?: SweepDeps['officers'],
+  renderer?: Pick<Renderer, 'visit'>,
 ): SweepDeps {
   return {
     selectRows: makeSelectRows(sql),
@@ -47,6 +50,18 @@ export function makeSweepDeps(
       ),
     hasCompanyNumber: pageShowsCompanyNumber,
     hasPostcode: pageHasPostcode,
+    officers,
+    // A visit of its own for each page, as the sweep asks for them one at a time.
+    renderPage: renderer
+      ? async (url) => {
+          const visit = renderer.visit();
+          try {
+            return toFetchedPage(await visit.render(url), url);
+          } finally {
+            await visit.close();
+          }
+        }
+      : undefined,
     applyResult: makeApplyResult(sql),
     sleep: makeSleep(),
     log,

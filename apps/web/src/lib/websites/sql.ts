@@ -4,18 +4,17 @@
  * lives here so the orchestrator stays testable without a database.
  */
 
-import type { createClient } from '@ss/db/client';
+import type { createClient, NeonQueryFunction } from '@ss/db/client';
 import { sql as raw } from 'drizzle-orm';
 
 import { publishableWebsiteGate } from './publishable.ts';
 import type { RevalidateResult } from './revalidate.ts';
 import { mergeRevalidation } from './revalidate.ts';
+import { sponsorNamesColumnFor, sponsorNamesOf } from './sponsor-names.ts';
+import { sponsorTownsColumnFor, sponsorTownsOf } from './sponsor-towns.ts';
 import type { SweepRow } from './sweep.ts';
 
-type Sql = (
-  strings: TemplateStringsArray,
-  ...values: unknown[]
-) => Promise<Record<string, unknown>[]>;
+type Sql = NeonQueryFunction<false, false>;
 
 type Db = Pick<ReturnType<typeof createClient>, 'execute'>;
 
@@ -26,7 +25,8 @@ type Db = Pick<ReturnType<typeof createClient>, 'execute'>;
  * checked one, so the first passes drain the backlog the importer created and
  * subsequent passes rotate through by age. The postcode comes from the profile
  * because it is the weaker corroboration when the number is absent; a company
- * we hold no address for simply skips that check.
+ * we hold no address for simply skips that check. The names and places are
+ * what a `name_and_place` row's re-check reads.
  */
 export function makeSelectRows(sql: Sql) {
   return async (maxRows: number): Promise<SweepRow[]> => {
@@ -45,7 +45,11 @@ export function makeSelectRows(sql: Sql) {
         -- forever, having never actually been probed once.
         (w.checked_at IS NOT NULL
           AND w.status NOT IN ('pending', 'unreachable', 'dead')) AS ever_checked,
-        p.postal_code
+        p.postal_code,
+        coalesce(p.company_name, '') AS company_name,
+        p.locality,
+        ${sql.unsafe(sponsorNamesColumnFor('w.company_number'))},
+        ${sql.unsafe(sponsorTownsColumnFor('w.company_number'))}
       FROM company_websites w
       LEFT JOIN companies_house_profiles p
         ON p.company_number = w.company_number
@@ -63,6 +67,10 @@ export function makeSelectRows(sql: Sql) {
       everChecked: r.ever_checked === true,
       evidenceUrl: (r.evidence_url as string | null) ?? null,
       confidence: (r.confidence as string | null) ?? null,
+      companyName: (r.company_name as string | null) ?? '',
+      sponsorNames: sponsorNamesOf(r),
+      registerTowns: sponsorTownsOf(r),
+      locality: (r.locality as string | null) ?? null,
     }));
   };
 }

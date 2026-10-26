@@ -14,6 +14,7 @@ import {
 } from './rewalk';
 import { type Shard, WHOLE_SET } from './shard';
 import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
+import { SPONSOR_TOWNS_COLUMN, sponsorTownsOf } from './sponsor-towns';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
 type Sql = NeonQueryFunction<false, false>;
@@ -34,6 +35,8 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
     companyName: (r.company_name as string | null) ?? '',
     sponsorNames: sponsorNamesOf(r),
     postcode: (r.postal_code as string | null) ?? null,
+    registerTowns: sponsorTownsOf(r),
+    locality: (r.locality as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
     url: (r.url as string | null) ?? null,
     candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
@@ -55,8 +58,9 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
       return toRows(
         await sql`
           SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
-            coalesce(p.company_name, '') AS company_name,
+            coalesce(p.company_name, '') AS company_name, p.locality,
             ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
+            ${sql.unsafe(SPONSOR_TOWNS_COLUMN)},
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
@@ -77,8 +81,9 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
     return toRows(
       await sql`
         SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
-          coalesce(p.company_name, '') AS company_name,
+          coalesce(p.company_name, '') AS company_name, p.locality,
           ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
+          ${sql.unsafe(SPONSOR_TOWNS_COLUMN)},
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)

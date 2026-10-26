@@ -14,7 +14,10 @@
  * company's registration number lands at `crn_on_page` and renders; one
  * carrying only the registered postcode lands at `postcode_on_page` and
  * renders only where at most ten mapped companies share that postcode, the
- * slice a hand-labelled sample measured (lib/websites/publishable.ts).
+ * slice a hand-labelled sample measured (lib/websites/publishable.ts); one
+ * proved by the two-signal rule lands at `name_and_place` and renders. A
+ * candidate whose homepage shows a plain fetch nothing is read again in
+ * headless Chromium; `--no-render` skips that.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/discover-websites-search.ts --dry-run --max-rows=20
@@ -25,7 +28,7 @@
  * scheduled workflow while local workers run: it takes the whole set, so it
  * would search their companies too.
  *
- * Env: POSTGRES_URL, SERPER_API_KEY.
+ * Env: POSTGRES_URL, SERPER_API_KEY, COMPANIES_HOUSE_SEED_API_KEY.
  */
 
 import { neon } from '@ss/db/client';
@@ -41,15 +44,22 @@ import {
   makeWriteOutcome,
 } from '../src/lib/websites/discover-sql.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
+import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
 import { parseShard, workerSearchCeiling } from '../src/lib/websites/shard.ts';
 import { setGitHubOutput } from './ci-utils.ts';
+import { makeOfficerLookup, OFFICER_BREAKER } from './lib/ch-officers.ts';
 import {
   ERROR_RATE_THRESHOLD,
   loadScriptEnv,
   parseStrictInt,
 } from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
-import { probeOrigin, walkDisclosure } from './lib/website-probe.ts';
+import { launchRenderer } from './lib/web-render.ts';
+import {
+  probeOrigin,
+  renderCandidate,
+  walkDisclosure,
+} from './lib/website-probe.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -65,7 +75,7 @@ const flag = (name: string) =>
  *  as `--shards=3/8`, or `--shard 3/8`, would run the whole set and pay for
  *  every other worker's companies. */
 const KNOWN_ARG =
-  /^--(?:dry-run|(?:shard|max-rows|max-searches|delay|max-disclosure)=.*)$/;
+  /^--(?:dry-run|no-render|(?:shard|max-rows|max-searches|delay|max-disclosure)=.*)$/;
 const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
 if (unknownArgs.length > 0) {
   console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
@@ -74,7 +84,7 @@ if (unknownArgs.length > 0) {
 
 const dryRun = args.includes('--dry-run');
 const shard = parseShard(flag('shard'));
-const maxRows = parseStrictInt(flag('max-rows') ?? '300', 'max-rows');
+const maxRows = parseStrictInt(flag('max-rows') ?? '120', 'max-rows');
 /**
  * Defaults to the row count: one search per company, and never a surprise.
  * The ceiling is the only figure an input cannot raise, and it shrinks as the
@@ -85,19 +95,13 @@ const maxSearches = Math.min(
   workerSearchCeiling(shard),
 );
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
-/**
- * Legal pages tried on the top-ranked candidate when homepages settle nothing.
- *
- * Measured over 20 companies: walking these tripled publishable rows, and
- * walking every candidate rather than the top one found no more at three times
- * the fetches. Seven reaches the contact pages; the homepage's own legal links
- * are read before them.
- */
+/** Fixed paths walked on a candidate, after its homepage's legal links and before its about links: all nine reach the about pages. */
 const MAX_DISCLOSURE_PATHS = parseStrictInt(
-  flag('max-disclosure') ?? '7',
+  flag('max-disclosure') ?? String(DISCLOSURE_PATHS.length),
   'max-disclosure',
 );
 let disclosureFetches = 0;
+let renderFetches = 0;
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -106,6 +110,14 @@ if (!apiKey) {
   console.error('  SERPER_API_KEY is not set');
   process.exit(1);
 }
+const chKey = process.env.COMPANIES_HOUSE_SEED_API_KEY;
+if (!chKey) {
+  console.error('  COMPANIES_HOUSE_SEED_API_KEY is not set');
+  process.exit(1);
+}
+
+// Started before anything is spent: a browser that will not start stops the run here.
+const renderer = args.includes('--no-render') ? null : await launchRenderer();
 
 const sql = neon(process.env.POSTGRES_URL as string);
 const remaining = makeRemaining(sql);
@@ -124,6 +136,11 @@ const crowdedHosts = await makeCrowdedHosts(sql)();
 console.log(`  crowded hosts: ${crowdedHosts.size}`);
 
 const writeOutcome = makeWriteOutcome(sql);
+const walkOptions = {
+  maxPaths: MAX_DISCLOSURE_PATHS,
+  crowded: crowdedHosts,
+  delayMs,
+};
 
 const summary = await discoverWebsites(
   { maxRows, maxSearches, delayMs, dryRun },
@@ -141,27 +158,35 @@ const summary = await discoverWebsites(
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
     probe: (row, url) => probeOrigin(row, url, crowdedHosts),
+    officers: makeOfficerLookup({ apiKey: chKey, workers: shard.count }),
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
-        maxPaths: MAX_DISCLOSURE_PATHS,
-        crowded: crowdedHosts,
-        delayMs,
+        ...walkOptions,
         onFetch: () => {
           disclosureFetches += 1;
         },
       }),
+    render: renderer
+      ? (row, base) =>
+          renderCandidate(row, base, renderer, {
+            ...walkOptions,
+            onFetch: () => {
+              renderFetches += 1;
+            },
+          })
+      : undefined,
     write: (row, outcome) =>
       writeOutcome(row, outcome, evidenceConfidence(outcome.evidence)),
     sleep,
     log: (message) => console.log(message),
   },
-);
+).finally(() => renderer?.close());
 
 const after = await remaining();
-const found = summary.foundByNumber + summary.foundByAddress;
+const found =
+  summary.foundByNumber + summary.foundByAddress + summary.foundByNameAndPlace;
 // Rows decided, not credits spent: retries settle without spending one.
-const decided =
-  summary.foundByNumber + summary.foundByAddress + summary.foundNothing;
+const decided = found + summary.foundNothing;
 const hitRate = decided === 0 ? 0 : (found / decided) * 100;
 
 console.log('\n─── summary ───');
@@ -170,10 +195,16 @@ console.log(`  processed           : ${summary.processed}`);
 console.log(`  searched            : ${summary.searched}`);
 console.log(`  found_by_number     : ${summary.foundByNumber}`);
 console.log(`  found_by_address    : ${summary.foundByAddress}`);
+console.log(`  found_by_name_place : ${summary.foundByNameAndPlace}`);
 console.log(`  found_nothing       : ${summary.foundNothing}`);
 console.log(`  hit_rate            : ${hitRate.toFixed(1)}%`);
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
 console.log(`  disclosure_fetches  : ${disclosureFetches}`);
+console.log(`  officer_lookups     : ${summary.officerLookups}`);
+console.log(`  officer_failures    : ${summary.officerFailures}`);
+console.log(`  rendered            : ${summary.rendered}`);
+console.log(`  render_fetches      : ${renderFetches}`);
+console.log(`  found_by_render     : ${summary.foundByRender}`);
 console.log(`  unsearchable        : ${summary.unsearchable}`);
 console.log(`  written             : ${summary.written}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
@@ -221,6 +252,12 @@ if (attempted >= MIN_GATE_SAMPLE && errorRate > ERROR_RATE_THRESHOLD) {
 if (summary.creditsLost > 0) {
   console.error(
     `\n  ${summary.creditsLost} searches were charged but not persisted — those companies will be re-searched.`,
+  );
+  process.exit(1);
+}
+if (summary.officerFailures >= OFFICER_BREAKER) {
+  console.error(
+    `\n  ${summary.officerFailures} companies' officers could not be read from Companies House; they are left for the next run.`,
   );
   process.exit(1);
 }

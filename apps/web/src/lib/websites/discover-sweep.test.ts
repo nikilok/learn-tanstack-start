@@ -8,6 +8,8 @@ import type {
   SearchResult,
 } from './discover-sweep';
 import { discoverWebsites, SEARCH_FAILURE_STREAK } from './discover-sweep';
+import { readPage } from './name-and-place';
+import type { Officer } from './officer-names';
 
 const row = (over: Partial<DiscoveryRow> = {}): DiscoveryRow => ({
   companyNumber: '03260168',
@@ -15,6 +17,8 @@ const row = (over: Partial<DiscoveryRow> = {}): DiscoveryRow => ({
   sponsorNames: [],
   town: 'Winchester',
   postcode: 'SO22 5AZ',
+  registerTowns: [],
+  locality: null,
   bankedCandidates: null,
   ...over,
 });
@@ -82,6 +86,7 @@ function harness(
       walked.push(base.url);
       return over.disclosure ? (over.disclosure[base.url] ?? base) : base;
     },
+    officers: async () => [],
     markAttempt: async (companyNumber) => {
       attempts.push(companyNumber);
     },
@@ -568,14 +573,32 @@ describe('the disclosure walk is what makes rows publishable', () => {
     expect(h.walked).toEqual([]);
   });
 
-  test('walks only the TOP-ranked usable candidate, not every one', async () => {
-    // Escalating to ranks 2 and 3 was measured and found nothing at double the
-    // fetches: if the number is not on rank 1's site it is not on rank 2's.
+  test('walks the top-ranked usable candidate first, the rest only as the two-signal rule reaches them', async () => {
     const h = harness({
       urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
     });
     await discoverWebsites(config(), h.deps);
+    expect(h.walked).toEqual([
+      'https://a.co.uk',
+      'https://b.co.uk',
+      'https://c.co.uk',
+    ]);
+  });
+
+  test('a homepage proof below the top walk ends the walking', async () => {
+    const h = harness({
+      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+      probes: {
+        'https://b.co.uk': probe({
+          url: 'https://b.co.uk',
+          postcodeFound: true,
+          postcodeNamed: true,
+        }),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
     expect(h.walked).toEqual(['https://a.co.uk']);
+    expect(h.written[0].outcome.evidence).toBe('postcode_on_page');
   });
 
   test('skips aggregators when choosing which candidate to walk', async () => {
@@ -704,5 +727,479 @@ describe('the disclosure walk is what makes rows publishable', () => {
     const summary = await discoverWebsites(config(), h.deps);
     expect(h.probed).toEqual(['https://acme.co.uk']);
     expect(summary.candidateFetches).toBe(1);
+  });
+});
+
+describe('the two-signal rule in discovery', () => {
+  const company = row({
+    companyNumber: '09990117',
+    companyName: 'QUILLMERE ANALYTICS LIMITED',
+    postcode: 'HG1 9ZQ',
+    registerTowns: ['Harrogate'],
+    locality: 'Harrogate',
+  });
+  const PROVES = 'Quillmere Analytics Ltd, Station Parade, Harrogate.';
+  const ABROAD = 'Quillmere Analytics Ltd. Rothschild Blvd, Tel Aviv.';
+  const NAMED = 'Quillmere Analytics: clinical data from Harrogate.';
+  const idris: Officer = {
+    forename: 'IDRIS',
+    surname: 'TALLOWMERE',
+    current: true,
+  };
+
+  /** A candidate whose homepage reads as the text given. */
+  const site = (
+    url: string,
+    text: string,
+    over: Partial<CandidateProbe> = {},
+  ): CandidateProbe =>
+    probe({ url, pages: [readPage(`${url}/`, text, company, [])], ...over });
+
+  /** A walk that read one more page, at the path given. */
+  const walkedTo = (base: CandidateProbe, path: string, text: string) => ({
+    ...base,
+    pages: [
+      ...(base.pages ?? []),
+      readPage(`${base.url}${path}`, text, company, []),
+    ],
+  });
+
+  test('proves a site by its exact name and a town, and counts it', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk'],
+      probes: { 'https://a.co.uk': site('https://a.co.uk', PROVES) },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toEqual({
+      url: 'https://a.co.uk',
+      evidenceUrl: 'https://a.co.uk/',
+      evidence: 'name_and_place',
+      rank: 1,
+    });
+    expect(summary.foundByNameAndPlace).toBe(1);
+    expect(summary.foundNothing).toBe(0);
+  });
+
+  test('picks the first candidate in rank order that passes', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+      probes: {
+        'https://a.co.uk': site('https://a.co.uk', ABROAD),
+        'https://b.co.uk': site('https://b.co.uk', PROVES),
+        'https://c.co.uk': site('https://c.co.uk', PROVES),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome.url).toBe('https://b.co.uk');
+    expect(h.walked).toEqual(['https://a.co.uk', 'https://b.co.uk']);
+  });
+
+  test('reads a walked page: the name on its privacy page', async () => {
+    const a = site('https://a.co.uk', 'Clinical data. Harrogate.');
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk'],
+      probes: { 'https://a.co.uk': a },
+      disclosure: {
+        'https://a.co.uk': walkedTo(
+          a,
+          '/privacy',
+          'This site is run by Quillmere Analytics Ltd.',
+        ),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome.evidenceUrl).toBe('https://a.co.uk/privacy');
+  });
+
+  test('a number on a lower candidate it walks proves that site the existing way', async () => {
+    const b = site('https://b.co.uk', PROVES);
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://a.co.uk': site('https://a.co.uk', ABROAD),
+        'https://b.co.uk': b,
+      },
+      disclosure: {
+        'https://b.co.uk': {
+          ...b,
+          crnFound: true,
+          evidenceUrl: 'https://b.co.uk/terms',
+        },
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://b.co.uk',
+      evidence: 'crn_on_page',
+    });
+    expect(summary.foundByNumber).toBe(1);
+  });
+
+  test('a named postcode on a lower candidate it walks stops the rule there', async () => {
+    const b = site('https://b.co.uk', 'Clinical data.');
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+      probes: {
+        'https://a.co.uk': site('https://a.co.uk', ABROAD),
+        'https://b.co.uk': b,
+        'https://c.co.uk': site('https://c.co.uk', PROVES),
+      },
+      disclosure: {
+        'https://b.co.uk': { ...b, postcodeFound: true, postcodeNamed: true },
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://b.co.uk',
+      evidence: 'postcode_on_page',
+    });
+    expect(h.walked).not.toContain('https://c.co.uk');
+  });
+
+  test("a directory listing the officers is never picked past the top site's named postcode", async () => {
+    // A study wrong pick: the first sealed rule passed over a top result
+    // showing the named registered postcode on a walked page.
+    const top = site('https://a.co.uk', 'Clinical data.');
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://a.co.uk': top,
+        'https://b.co.uk': site(
+          'https://b.co.uk',
+          'Quillmere Analytics Limited, Harrogate HG1 9ZQ. Directors: Idris Tallowmere.',
+        ),
+      },
+      disclosure: {
+        'https://a.co.uk': {
+          ...top,
+          postcodeFound: true,
+          postcodeNamed: true,
+        },
+      },
+      officers: async () => [idris],
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://a.co.uk',
+      evidence: 'postcode_on_page',
+    });
+  });
+
+  test('a site on a domain naming the company that will not load stops the rule', async () => {
+    // The audited namesake: the company's own site refused our fetcher and
+    // the next result was a same-name business.
+    const h = harness({
+      rows: [company],
+      urls: ['https://quillmere.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://quillmere.co.uk': null,
+        'https://b.co.uk': site('https://b.co.uk', PROVES),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome.evidence).toBe('none');
+  });
+
+  test('so does a bot challenge on a domain naming the company', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://quillmere.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://quillmere.co.uk': site(
+          'https://quillmere.co.uk',
+          'Just a moment...',
+          {
+            challenged: true,
+          },
+        ),
+        'https://b.co.uk': site('https://b.co.uk', PROVES),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome.evidence).toBe('none');
+  });
+
+  test('an unreadable site on a domain naming nobody is passed over', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://hestwick.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://hestwick.co.uk': null,
+        'https://b.co.uk': site('https://b.co.uk', PROVES),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://b.co.uk',
+      evidence: 'name_and_place',
+    });
+  });
+
+  test('asks for the officers only when they decide it, once per company', async () => {
+    const asked: string[] = [];
+    const h = harness({
+      rows: [company],
+      urls: ['https://quillmere.co.uk', 'https://quillmere-analytics.co.uk'],
+      probes: {
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', NAMED),
+        'https://quillmere-analytics.co.uk': site(
+          'https://quillmere-analytics.co.uk',
+          `${NAMED} Idris Tallowmere, managing director.`,
+        ),
+      },
+      officers: async (companyNumber) => {
+        asked.push(companyNumber);
+        return [idris];
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(asked).toEqual(['09990117']);
+    expect(summary.officerLookups).toBe(1);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://quillmere-analytics.co.uk',
+      evidence: 'name_and_place',
+    });
+  });
+
+  test('never asks when the exact name decides it', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk'],
+      probes: { 'https://a.co.uk': site('https://a.co.uk', PROVES) },
+      officers: async () => {
+        throw new Error('asked');
+      },
+    });
+    const summary = await discoverWebsites(config(), h.deps);
+    expect(summary.errored).toBe(0);
+    expect(summary.officerLookups).toBe(0);
+  });
+
+  test('a resigned officer named on the site proves nothing', async () => {
+    const h = harness({
+      rows: [company],
+      urls: ['https://quillmere.co.uk'],
+      probes: {
+        'https://quillmere.co.uk': site(
+          'https://quillmere.co.uk',
+          `${NAMED} Idris Tallowmere, founder.`,
+        ),
+      },
+      officers: async () => [{ ...idris, current: false }],
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome.evidence).toBe('none');
+  });
+
+  test('officers that cannot be read leave the row unsettled; only a failed ask spends an attempt', async () => {
+    const unread = async (answer: 'failed' | 'stopped') => {
+      const h = harness({
+        rows: [company],
+        urls: ['https://quillmere.co.uk'],
+        probes: {
+          'https://quillmere.co.uk': site('https://quillmere.co.uk', NAMED),
+        },
+        officers: async () => answer,
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(h.written).toEqual([]);
+      expect(summary.unreadable).toBe(1);
+      expect(summary.officerFailures).toBe(1);
+      return { attempts: h.attempts, lookups: summary.officerLookups };
+    };
+    // A company Companies House keeps failing for is bounded by the attempt cap.
+    expect(await unread('failed')).toEqual({
+      attempts: ['09990117'],
+      lookups: 1,
+    });
+    // A run that had stopped asking spends nothing: an outage cannot retire rows.
+    expect(await unread('stopped')).toEqual({ attempts: [], lookups: 0 });
+  });
+
+  describe('a silent candidate read again in a browser', () => {
+    /** A candidate whose homepage links nowhere: a menu its scripts build. */
+    const silent = (url: string, text = 'Loading.') =>
+      site(url, text, { siteLinks: 0, thin: true });
+
+    /** What each candidate shows in a browser, recording which were rendered. */
+    const browser = (shown: Record<string, CandidateProbe | null>) => {
+      const asked: string[] = [];
+      const render = async (_row: DiscoveryRow, base: CandidateProbe) => {
+        asked.push(base.url);
+        return shown[base.url] ?? null;
+      };
+      return { asked, render };
+    };
+
+    test('a number its rendered pages show proves it, counted as found by rendering', async () => {
+      const b = silent('https://b.co.uk');
+      const view = browser({
+        'https://b.co.uk': {
+          ...b,
+          siteLinks: 6,
+          crnFound: true,
+          evidenceUrl: 'https://b.co.uk/terms',
+        },
+      });
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk', 'https://b.co.uk'],
+        probes: {
+          'https://a.co.uk': site('https://a.co.uk', ABROAD),
+          'https://b.co.uk': b,
+        },
+        render: view.render,
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(view.asked).toEqual(['https://b.co.uk']);
+      expect(h.written[0].outcome).toEqual({
+        url: 'https://b.co.uk',
+        evidenceUrl: 'https://b.co.uk/terms',
+        evidence: 'crn_on_page',
+        rank: 2,
+      });
+      expect(summary).toMatchObject({
+        rendered: 1,
+        foundByRender: 1,
+        foundByNumber: 1,
+      });
+    });
+
+    test('so does a named postcode', async () => {
+      const a = silent('https://a.co.uk');
+      const view = browser({
+        'https://a.co.uk': {
+          ...a,
+          postcodeFound: true,
+          postcodeNamed: true,
+          evidenceUrl: 'https://a.co.uk/contact',
+        },
+      });
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk'],
+        probes: { 'https://a.co.uk': a },
+        render: view.render,
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(h.written[0].outcome).toMatchObject({
+        evidence: 'postcode_on_page',
+        evidenceUrl: 'https://a.co.uk/contact',
+      });
+      expect(summary.foundByRender).toBe(1);
+    });
+
+    test('the rule reads the raw pages, then the rendered ones, asking for the officers once', async () => {
+      const raw = silent('https://quillmere.co.uk', NAMED);
+      const view = browser({
+        'https://quillmere.co.uk': walkedTo(
+          { ...raw, siteLinks: 4, thin: false },
+          '/team',
+          'Idris Tallowmere, managing director.',
+        ),
+      });
+      const asked: string[] = [];
+      const h = harness({
+        rows: [company],
+        urls: ['https://quillmere.co.uk'],
+        probes: { 'https://quillmere.co.uk': raw },
+        render: view.render,
+        officers: async (companyNumber) => {
+          asked.push(companyNumber);
+          return [idris];
+        },
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(asked).toEqual(['09990117']);
+      expect(h.written[0].outcome).toEqual({
+        url: 'https://quillmere.co.uk',
+        evidenceUrl: 'https://quillmere.co.uk/team',
+        evidence: 'name_and_place',
+        rank: 1,
+      });
+      expect(summary).toMatchObject({
+        foundByNameAndPlace: 1,
+        foundByRender: 1,
+        officerLookups: 1,
+      });
+    });
+
+    test('raw pages the rule proves still win: the render only looked for a number or postcode first', async () => {
+      const a = silent('https://a.co.uk', PROVES);
+      const view = browser({
+        'https://a.co.uk': walkedTo({ ...a, siteLinks: 4 }, '/about', PROVES),
+      });
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk'],
+        probes: { 'https://a.co.uk': a },
+        render: view.render,
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(view.asked).toEqual(['https://a.co.uk']);
+      expect(h.written[0].outcome.evidence).toBe('name_and_place');
+      expect(summary).toMatchObject({ rendered: 1, foundByRender: 0 });
+    });
+
+    test('a render that fails, or lands on a directory or a holding page, leaves the raw reading as it was', async () => {
+      const a = silent('https://a.co.uk');
+      const elsewhere = site('https://a.co.uk', PROVES);
+      for (const shown of [
+        null,
+        { ...elsewhere, onAggregator: true },
+        { ...elsewhere, parked: true },
+      ]) {
+        const h = harness({
+          rows: [company],
+          urls: ['https://a.co.uk'],
+          probes: { 'https://a.co.uk': a },
+          render: browser({ 'https://a.co.uk': shown }).render,
+        });
+        const summary = await discoverWebsites(config(), h.deps);
+        expect(h.written[0].outcome.evidence).toBe('none');
+        expect(summary).toMatchObject({ rendered: 1, foundByRender: 0 });
+      }
+    });
+
+    test('a candidate that reads normally is never rendered, nor one that challenged the plain fetch', async () => {
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk', 'https://b.co.uk'],
+        probes: {
+          'https://a.co.uk': site('https://a.co.uk', 'Clinical data.', {
+            siteLinks: 5,
+            thin: false,
+          }),
+          'https://b.co.uk': site('https://b.co.uk', 'Just a moment...', {
+            siteLinks: 0,
+            thin: true,
+            challenged: true,
+          }),
+        },
+        render: async () => {
+          throw new Error('rendered');
+        },
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(summary).toMatchObject({ rendered: 0, errored: 0 });
+      expect(h.written[0].outcome.evidence).toBe('none');
+    });
+
+    test('without a browser, nothing is rendered', async () => {
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk'],
+        probes: { 'https://a.co.uk': silent('https://a.co.uk') },
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(summary).toMatchObject({ rendered: 0, errored: 0 });
+      expect(h.written[0].outcome.evidence).toBe('none');
+    });
   });
 });

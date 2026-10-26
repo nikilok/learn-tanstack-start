@@ -6,7 +6,11 @@ name: Discover Company Websites (Search)
 # covers 6,750 companies. The other 109,000 have no registry entry naming a
 # site, so the only way to find one is to look for it: one Serper query per
 # company, then fetch the top candidates and keep whichever carries the
-# company's own registration number or its registered office postcode.
+# company's own registration number or its registered office postcode, or else
+# its name and place (the two-signal rule, whose officer lookups share the
+# phase-5 sweeps' Companies House key, paced to one call every two seconds). A
+# candidate whose homepage shows a plain fetch nothing is read again in
+# headless Chromium.
 #
 # Like the registry importer, this job deliberately leaves checked_at NULL. It
 # fetches pages, but only to choose between candidates — the nightly sweep
@@ -14,17 +18,19 @@ name: Discover Company Websites (Search)
 # claiming that would be two jobs to keep in agreement.
 #
 # Own concurrency group, four times a day at six-hourly spacing. The loop is
-# serial with a per-company delay, so 300 rows takes 50-90 minutes and the
+# serial with a per-company delay, so 120 rows takes an estimated 60-105
+# minutes, walking each candidate the two-signal rule reaches and rendering
+# the silent ones, and the
 # schedule has to clear that with room for GitHub's own lag, which has been
 # running around 90 minutes: only one run may sit pending per group and a
 # newer arrival cancels whichever was already waiting, so slots close enough to
 # stack up would silently drop the one in the middle. Cadence, not run
-# size, is the lever — the 120-minute job timeout puts roughly 600 rows out of
+# size, is the lever — the 120-minute job timeout puts roughly 170 rows out of
 # reach in a single run.
 #
 # A manual run can split the set across parallel workers (`shards`). Each takes
 # its own slice of companies (apps/web/src/lib/websites/shard.ts), so none pays
-# for another's search, and gets 355 minutes: about 1,500 rows at ~12s a row.
+# for another's search, and gets 355 minutes: about 500 rows at ~42s a row.
 # Scheduled runs are a single worker, and the shared concurrency group keeps
 # them from overlapping a split.
 #
@@ -33,7 +39,7 @@ name: Discover Company Websites (Search)
 # so it cannot be picked up half-written.
 #
 # COSTS MONEY, now 4x what it did. Every search spends one Serper credit, so a
-# day at the default 300 rows a run is 1,200 credits. Both the rows taken and
+# day at the default 120 rows a run is at most 480 credits. Both the rows taken and
 # the searches run are capped per worker, and the script clamps each worker to
 # its share of a fixed run ceiling (shard.ts) regardless of what is dispatched
 # here — the inputs below can lower the spend but never raise it past that.
@@ -51,7 +57,7 @@ on:
         type: boolean
         default: false
       max-rows:
-        description: 'Companies each worker processes this run (default 300)'
+        description: 'Companies each worker processes this run (default 120)'
         required: false
         type: number
       max-searches:
@@ -134,6 +140,10 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
 
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
       - name: Discover websites
         shell: bash
         # Inputs go through env, never interpolated into the run script.
@@ -143,6 +153,7 @@ jobs:
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
           DRY_RUN: ${{ github.event.inputs.dry-run }}
           MAX_ROWS: ${{ github.event.inputs.max-rows }}
           MAX_SEARCHES: ${{ github.event.inputs.max-searches }}
@@ -194,9 +205,14 @@ jobs:
             echo "| 🔎 Searched | $(extract searched) |"
             echo "| 🪪 Found by number | $(extract found_by_number) |"
             echo "| 📮 Found by address | $(extract found_by_address) |"
+            echo "| 🧭 Found by name and place | $(extract found_by_name_place) |"
             echo "| 🚫 Found nothing | $(extract found_nothing) |"
             echo "| 📈 Hit rate | $(extract hit_rate) |"
             echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"
+            echo "| 👤 Officer lookups | $(extract officer_lookups) |"
+            echo "| ⚠️ Officer lookups failed | $(extract officer_failures) |"
+            echo "| 🖥️ Rendered | $(extract rendered) |"
+            echo "| ✨ Found by render | $(extract found_by_render) |"
             echo "| 💾 Written | $(extract written) |"
             echo "| 🔁 Retried | $(extract retried) |"
             echo "| 📵 Unreadable | $(extract unreadable) |"

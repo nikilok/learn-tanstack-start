@@ -30,6 +30,9 @@ export type WebsiteEvidence =
   /** Published only in part: a search-found row whose postcode few mapped
    *  companies share (publishable.ts). Not revocable on page content. */
   | 'postcode_on_page'
+  /** A search-found site the two-signal rule proved (name-and-place.ts):
+   *  published, and held back by the sweep while the proof is gone. */
+  | 'name_and_place'
   | 'llm_adjudicated'
   | 'registry_unconfirmed'
   | 'domain_similarity'
@@ -88,6 +91,8 @@ const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
   { tiers: ['domain_similarity'], confidence: 0.4 },
   { tiers: ['registry_unconfirmed', 'llm_adjudicated'], confidence: 0.6 },
   { tiers: ['postcode_on_page'], confidence: 0.85 },
+  // Above the postcode tier, so the sweep's postcode check never trades it for one that publishes less.
+  { tiers: ['name_and_place'], confidence: 0.9 },
   { tiers: ['registry'], confidence: 0.95 },
   { tiers: ['registry_confirmed'], confidence: 0.97 },
   { tiers: ['crn_on_page'], confidence: 0.99 },

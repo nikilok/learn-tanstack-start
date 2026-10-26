@@ -4,6 +4,7 @@ import { CROWDED_HOST_COMPANIES } from './crowded-hosts';
 import { makeCrowdedHosts, makeSelectUndiscovered } from './discover-sql';
 import { type FakeSqlCall, makeFakeSql } from './fake-sql';
 import { SPONSOR_NAMES_COLUMN, SPONSOR_NAMES_KEY } from './sponsor-names';
+import { SPONSOR_TOWNS_COLUMN, SPONSOR_TOWNS_KEY } from './sponsor-towns';
 
 /** The bucket predicate, capturing the placeholders of its count and index. */
 const BUCKET =
@@ -33,6 +34,30 @@ describe('makeSelectUndiscovered', () => {
     const { sql, calls } = makeFakeSql();
     await makeSelectUndiscovered(sql)(300);
     expect(boundShard(calls[0])).toEqual({ count: 1, index: 0 });
+  });
+
+  test("reads the register's towns and the registered locality, the two-signal rule's places", async () => {
+    expect(SPONSOR_TOWNS_COLUMN.endsWith(` AS ${SPONSOR_TOWNS_KEY}`)).toBe(
+      true,
+    );
+    const { sql, calls } = makeFakeSql([
+      {
+        company_number: '09990117',
+        locality: 'Harrogate',
+        [SPONSOR_TOWNS_KEY]: ['Harrogate', 'Leeds'],
+      },
+      { company_number: '09990118', locality: null },
+    ]);
+    const rows = await makeSelectUndiscovered(sql)(10);
+    expect(calls[0].text).toContain(SPONSOR_TOWNS_COLUMN);
+    // In the select list, not inside the town's coalesce.
+    expect(calls[0].text.replace(/\s+/g, ' ')).toContain(
+      'AS town, p.locality, p.postal_code,',
+    );
+    expect(rows.map((r) => [r.registerTowns, r.locality])).toEqual([
+      [['Harrogate', 'Leeds'], 'Harrogate'],
+      [[], null],
+    ]);
   });
 
   test("reads the sponsor register's names, which a site may name the company by", async () => {

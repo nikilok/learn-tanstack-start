@@ -9,12 +9,13 @@ import type { DiscoveryOutcome } from './discover';
 import {
   type DiscoveryDeps,
   type DiscoveryRow,
+  type Settled,
   settleCandidates,
 } from './discover-sweep';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
-/** The walk rows are brought up to: walk g behind the crowded-host guard, naming a company by its register names too. */
-export const CURRENT_WALK_VERSION = 2;
+/** The walk rows are brought up to: walk 3 reads every fixed path and about links, and walks each candidate the two-signal rule reaches. */
+export const CURRENT_WALK_VERSION = 3;
 
 /** Unreadable re-walks before a row keeps its old answer for this version. */
 export const MAX_WALK_ATTEMPTS = 3;
@@ -26,6 +27,10 @@ export type RewalkRow = {
   /** Sponsor-register entries, which a postcode match may find instead. */
   sponsorNames: string[];
   postcode: string | null;
+  /** Towns the sponsor register lists the company at. */
+  registerTowns: string[];
+  /** The registered office locality. */
+  locality: string | null;
   evidence: 'none' | 'postcode_on_page';
   /** The stored site; null on a `none` row. */
   url: string | null;
@@ -37,7 +42,13 @@ export type RewalkRow = {
 
 export type RewalkDeps = Pick<
   DiscoveryDeps,
-  'crowdedHosts' | 'probe' | 'walkDisclosure' | 'sleep' | 'log'
+  | 'crowdedHosts'
+  | 'probe'
+  | 'walkDisclosure'
+  | 'officers'
+  | 'render'
+  | 'sleep'
+  | 'log'
 > & {
   selectRows(maxRows: number): Promise<RewalkRow[]>;
   /** Write an upgrade; false when the row changed after it was read. */
@@ -60,6 +71,7 @@ export type RewalkSummary = {
   processed: number;
   noneToNumber: number;
   noneToPostcode: number;
+  noneToNameAndPlace: number;
   postcodeToNumber: number;
   /** Read, with nothing to upgrade. */
   unchanged: number;
@@ -71,6 +83,12 @@ export type RewalkSummary = {
   unpersisted: number;
   errored: number;
   candidateFetches: number;
+  /** Companies House officer lookups, and how many failed. */
+  officerLookups: number;
+  officerFailures: number;
+  /** Candidates read again in a browser, and rows upgraded from what one showed. */
+  rendered: number;
+  upgradedByRender: number;
   /** Statutory numbers recorded (or, in a dry run, that would be). */
   statedNumbers: number;
 };
@@ -107,6 +125,8 @@ function asDiscoveryRow(row: RewalkRow): DiscoveryRow {
     sponsorNames: row.sponsorNames,
     town: '',
     postcode: row.postcode,
+    registerTowns: row.registerTowns,
+    locality: row.locality,
     bankedCandidates: row.candidates,
   };
 }
@@ -115,35 +135,44 @@ function asDiscoveryRow(row: RewalkRow): DiscoveryRow {
 async function walkStoredSite(
   row: RewalkRow,
   deps: RewalkDeps,
-): Promise<{
-  outcome: DiscoveryOutcome | null;
-  stated: StatedOnSite[];
-  fetches: number;
-}> {
-  if (!row.url) return { outcome: NOTHING, stated: [], fetches: 0 };
+): Promise<Settled> {
+  /** What the walk came to: no officers asked and nothing rendered for a postcode row. */
+  const settled = (
+    outcome: DiscoveryOutcome | null,
+    stated: StatedOnSite[],
+    fetches: number,
+  ): Settled => ({
+    outcome,
+    stated,
+    fetches,
+    officers: 'unasked',
+    rendered: 0,
+    byRender: false,
+  });
+  if (!row.url) return settled(NOTHING, [], 0);
   const view = asDiscoveryRow(row);
   const probe = await deps.probe(view, row.url);
-  if (!probe) return { outcome: null, stated: [], fetches: 1 };
+  if (!probe) return settled(null, [], 1);
   // Now a directory or a holding page: the sweep's to judge, not an upgrade.
   if (probe.onAggregator || probe.parked) {
-    return { outcome: NOTHING, stated: probe.stated ?? [], fetches: 1 };
+    return settled(NOTHING, probe.stated ?? [], 1);
   }
   const walked = probe.crnFound
     ? probe
     : ((await deps.walkDisclosure(view, probe)) ?? probe);
   const stated = walked.stated ?? probe.stated ?? [];
-  if (!walked.crnFound) return { outcome: NOTHING, stated, fetches: 1 };
-  return {
-    // The stored URL itself: a postcode row is never moved to another site.
-    outcome: {
+  if (!walked.crnFound) return settled(NOTHING, stated, 1);
+  // The stored URL itself: a postcode row is never moved to another site.
+  return settled(
+    {
       url: row.url,
       evidenceUrl: walked.evidenceUrl,
       evidence: 'crn_on_page',
       rank: null,
     },
     stated,
-    fetches: 1,
-  };
+    1,
+  );
 }
 
 /** Re-walk a slice of settled rows, upgrading where the new walk proves more. */
@@ -157,6 +186,7 @@ export async function rewalkWebsites(
     processed: 0,
     noneToNumber: 0,
     noneToPostcode: 0,
+    noneToNameAndPlace: 0,
     postcodeToNumber: 0,
     unchanged: 0,
     unreadable: 0,
@@ -165,6 +195,10 @@ export async function rewalkWebsites(
     unpersisted: 0,
     errored: 0,
     candidateFetches: 0,
+    officerLookups: 0,
+    officerFailures: 0,
+    rendered: 0,
+    upgradedByRender: 0,
     statedNumbers: 0,
   };
 
@@ -175,7 +209,7 @@ export async function rewalkWebsites(
     if (firstAttempt) summary.firstAttempts += 1;
     if (summary.processed % HEARTBEAT_ROWS === 0) {
       deps.log(
-        `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber} by number, ${summary.noneToPostcode} by postcode`,
+        `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber} by number, ${summary.noneToPostcode} by postcode, ${summary.noneToNameAndPlace} by name and place`,
       );
     }
     try {
@@ -189,6 +223,13 @@ export async function rewalkWebsites(
             )
           : await walkStoredSite(row, deps);
       summary.candidateFetches += settled.fetches;
+      summary.rendered += settled.rendered;
+      if (settled.officers === 'read' || settled.officers === 'failed') {
+        summary.officerLookups += 1;
+      }
+      if (settled.officers === 'failed' || settled.officers === 'stopped') {
+        summary.officerFailures += 1;
+      }
       const stated = dedupeStated(settled.stated);
       summary.statedNumbers += stated.length;
       if (!config.dryRun && stated.length > 0) {
@@ -196,6 +237,8 @@ export async function rewalkWebsites(
       }
 
       const outcome = settled.outcome;
+      // A run that had stopped asking for officers leaves the row as it was, for the next run.
+      if (!outcome && settled.officers === 'stopped') continue;
       if (!outcome) {
         summary.unreadable += 1;
         if (firstAttempt) summary.firstAttemptsUnreadable += 1;
@@ -213,9 +256,12 @@ export async function rewalkWebsites(
         summary.unpersisted += 1;
         continue;
       }
+      if (settled.byRender) summary.upgradedByRender += 1;
       if (row.evidence === 'none') {
         if (outcome.evidence === 'crn_on_page') summary.noneToNumber += 1;
-        else summary.noneToPostcode += 1;
+        else if (outcome.evidence === 'name_and_place') {
+          summary.noneToNameAndPlace += 1;
+        } else summary.noneToPostcode += 1;
       } else {
         summary.postcodeToNumber += 1;
       }

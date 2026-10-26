@@ -8,7 +8,7 @@ import { isAggregatorExempt, isAggregatorHost } from './page-signals';
 /** Companies a host must appear for to count as a directory; 99.9% of proven own sites appear for fewer. */
 export const CROWDED_HOST_COMPANIES = 50;
 
-/** Platforms that give each business a subdomain of their own: site builders and hosts, a donation platform, booking pages, careers platforms, directories. Never schools', the NHS's or universities' shared domains, whose subdomains are their own sites. */
+/** Platforms that give each business a subdomain of their own: site builders and hosts, a donation platform, booking pages, a prescriptions app, careers platforms, directories. Never schools', the NHS's or universities' shared domains, whose subdomains are their own sites. */
 export const PLATFORM_DOMAINS = [
   // Site builders and hosts.
   'wordpress.com',
@@ -46,6 +46,8 @@ export const PLATFORM_DOMAINS = [
   'setmore.com',
   'janeapp.co.uk',
   'mytreatwell.co.uk',
+  // A prescriptions app, which hosts each pharmacy's page.
+  'healthera.co.uk',
   // Careers platforms, which host a business's jobs pages.
   'teamtailor.com',
   'pinpointhq.com',
@@ -72,6 +74,7 @@ export const PLATFORM_DOMAINS = [
   'maptons.com',
   'hotels-of-london.com',
   'restaurants-us.com',
+  'the7.co.uk',
 ];
 
 /** Whether a host is a business's page on a shared platform rather than a site of its own. */

@@ -18,7 +18,7 @@ import {
   walkTargets,
 } from './disclosure-walk.ts';
 import { visibleText } from './extract.ts';
-import { DISCLOSURE_PATHS } from './fetch-policy.ts';
+import { DISCLOSURE_PATHS, RENDER_VISIT_MS } from './fetch-policy.ts';
 import {
   judgeSite,
   type NameAndPlaceRow,
@@ -286,9 +286,11 @@ async function recheckNameAndPlace(
   );
   let homeText = visibleText(homepage.html);
   let fetchPage = deps.fetchPage;
+  let deadline: number | null = null;
   const tried = new Set([pageKey(homepage.url), pageKey(homepage.servedUrl)]);
   if (deps.renderPage && needsRender(home)) {
     summary.nameAndPlaceRendered++;
+    const started = Date.now();
     const shown = await deps.renderPage(homepage.url);
     if (shown.ok) {
       const seen = readHomepage(
@@ -304,6 +306,7 @@ async function recheckNameAndPlace(
         homeText = visibleText(shown.html);
         fetchPage = deps.renderPage;
         tried.add(pageKey(shown.url));
+        deadline = started + RENDER_VISIT_MS;
       }
     }
   }
@@ -341,6 +344,11 @@ async function recheckNameAndPlace(
   ];
   for (const target of targets) {
     if (tried.has(pageKey(target))) continue;
+    // A site too slow for its visit in the browser is unread, never gone.
+    if (deadline !== null && Date.now() >= deadline) {
+      unread = true;
+      break;
+    }
     tried.add(pageKey(target));
     await deps.sleep(config.delayMs);
     summary.disclosureFetches++;

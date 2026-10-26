@@ -17,12 +17,10 @@ import {
 } from '../../src/lib/websites/disclosure-walk.ts';
 import type { DiscoveryRow } from '../../src/lib/websites/discover-sweep.ts';
 import type { CandidateProbe } from '../../src/lib/websites/discover.ts';
+import { RENDER_VISIT_MS } from '../../src/lib/websites/fetch-policy.ts';
 import { normaliseWebsiteUrl } from '../../src/lib/websites/normalise-url.ts';
 import { fetchSite, type SiteFetch } from './web-fetch.ts';
 import type { Renderer } from './web-render.ts';
-
-/** Longest one candidate's visit in the browser may run; a site too slow for it keeps what was read. */
-const VISIT_MS = 90_000;
 
 /** Fetch one candidate origin and read the two query-independent signals. */
 export async function probeOrigin(
@@ -110,7 +108,8 @@ export async function renderCandidate(
   options: WalkOptions,
 ): Promise<CandidateProbe | null> {
   const visit = renderer.visit();
-  const deadline = Date.now() + VISIT_MS;
+  // A site too slow for its visit keeps what was read.
+  const deadline = Date.now() + RENDER_VISIT_MS;
   try {
     await new Promise((resolve) => setTimeout(resolve, options.delayMs));
     const home = await visit.render(base.url);

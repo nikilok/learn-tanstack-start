@@ -52,6 +52,9 @@ export function urlVariants(url: string): string[] {
   return out;
 }
 
+/** Longest one site's visit in the browser may run, in discovery and in the sweep's re-check. */
+export const RENDER_VISIT_MS = 90_000;
+
 /** Paths probed for a trading disclosure when the homepage carries none. UK
  *  companies must publish the number somewhere on the site, and on larger sites
  *  it lives on a legal page rather than the front page — which is most of why

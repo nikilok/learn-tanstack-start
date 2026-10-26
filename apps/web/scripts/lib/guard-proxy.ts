@@ -15,6 +15,9 @@ import { isPrivateAddress } from '../../src/lib/websites/fetch-policy.ts';
 /** Longest a connection may sit idle before it is dropped. */
 const IDLE_MS = 20_000;
 
+/** The ports a page's own traffic may reach: the web's. */
+export const WEB_PORTS: ReadonlySet<number> = new Set([80, 443, 8080, 8443]);
+
 /** The address to connect to for a host; null when it resolves nowhere or to any private address. */
 export type Resolve = (host: string) => Promise<string | null>;
 
@@ -65,10 +68,14 @@ export type GuardProxy = {
   close(): Promise<void>;
 };
 
-/** Start a guard proxy on the loopback interface. */
-export async function startGuardProxy(
-  resolve: Resolve = publicAddress,
-): Promise<GuardProxy> {
+/** Start a guard proxy on the loopback interface; a test passes its own resolver and ports. */
+export async function startGuardProxy({
+  resolve = publicAddress,
+  ports = WEB_PORTS,
+}: {
+  resolve?: Resolve;
+  ports?: ReadonlySet<number>;
+} = {}): Promise<GuardProxy> {
   const server = createServer(async (req, res) => {
     req.on('error', () => res.destroy());
     res.on('error', () => {});
@@ -83,12 +90,14 @@ export async function startGuardProxy(
       return refuse();
     }
     if (target.protocol !== 'http:') return refuse();
+    const port = Number(target.port || 80);
+    if (!ports.has(port)) return refuse();
     const address = await resolve(target.hostname);
     if (!address) return refuse();
     const upstream = request(
       {
         host: address,
-        port: Number(target.port || 80),
+        port,
         method: req.method,
         path: `${target.pathname}${target.search}`,
         headers: { ...endToEnd(req.headers), host: target.host },
@@ -108,7 +117,8 @@ export async function startGuardProxy(
   server.on('connect', async (req, client: Duplex, head: Buffer) => {
     client.on('error', () => client.destroy());
     const target = connectTarget(req.url ?? '');
-    const address = target ? await resolve(target.host) : null;
+    const address =
+      target && ports.has(target.port) ? await resolve(target.host) : null;
     if (!target || !address) {
       client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
       return;

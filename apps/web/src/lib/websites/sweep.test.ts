@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setSystemTime, test } from 'bun:test';
 
 import { pageShowsCompanyNumber } from './stated-numbers.ts';
 import type { FetchedPage, SweepConfig, SweepDeps, SweepRow } from './sweep.ts';
@@ -744,6 +744,35 @@ describe("a name_and_place row's re-check", () => {
           nameAndPlaceRendered: 1,
           nameAndPlaceUnread: 1,
         });
+      }
+    });
+
+    test('a site too slow for its visit is unread, never gone', async () => {
+      const rendered: string[] = [];
+      try {
+        const { result, summary } = await sweepOf(
+          {},
+          shell,
+          {},
+          {
+            renderPage: async (url) => {
+              rendered.push(url);
+              // Every page takes most of the visit.
+              setSystemTime(new Date(Date.now() + 60_000));
+              return url === SITE
+                ? live(`${SITE}/`, html(`${filler} Harrogate`))
+                : notThere(url);
+            },
+          },
+        );
+        expect(rendered).toEqual([SITE, PROOF]);
+        expect(result.status).toBe('verified');
+        expect(summary).toMatchObject({
+          nameAndPlaceGone: 0,
+          nameAndPlaceUnread: 1,
+        });
+      } finally {
+        setSystemTime();
       }
     });
 

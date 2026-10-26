@@ -7,6 +7,7 @@ import {
   type GuardProxy,
   publicAddress,
   startGuardProxy,
+  WEB_PORTS,
 } from './guard-proxy.ts';
 
 describe('connectTarget', () => {
@@ -41,6 +42,8 @@ describe('publicAddress', () => {
 describe('startGuardProxy', () => {
   // Loopback only: the site and the proxy both listen on 127.0.0.1, and the
   // test resolver lets one made-up host reach the site.
+  const resolve = async (host: string) =>
+    host === 'qmx.test' ? '127.0.0.1' : null;
   let proxy: GuardProxy;
   let site: ReturnType<typeof createServer>;
   let sitePort = 0;
@@ -55,9 +58,10 @@ describe('startGuardProxy', () => {
     await new Promise<void>((done) => site.listen(0, '127.0.0.1', done));
     const address = site.address();
     sitePort = typeof address === 'object' && address ? address.port : 0;
-    proxy = await startGuardProxy(async (host) =>
-      host === 'qmx.test' ? '127.0.0.1' : null,
-    );
+    proxy = await startGuardProxy({
+      resolve,
+      ports: new Set([sitePort]),
+    });
   });
 
   afterAll(async () => {
@@ -65,10 +69,10 @@ describe('startGuardProxy', () => {
     await new Promise<void>((done) => site.close(() => done()));
   });
 
-  /** A plain request sent through the proxy, as a browser sends one. */
-  const viaProxy = (url: string) =>
+  /** A plain request sent through a proxy, as a browser sends one. */
+  const viaProxy = (url: string, through: GuardProxy = proxy) =>
     new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const { port } = new URL(proxy.url);
+      const { port } = new URL(through.url);
       const req = request(
         {
           host: '127.0.0.1',
@@ -86,10 +90,10 @@ describe('startGuardProxy', () => {
       req.end();
     });
 
-  /** The proxy's answer to a CONNECT, and what the tunnel then carries back. */
-  const tunnel = (target: string) =>
+  /** A proxy's answer to a CONNECT, and what the tunnel then carries back. */
+  const tunnel = (target: string, through: GuardProxy = proxy) =>
     new Promise<string>((resolve, reject) => {
-      const { port } = new URL(proxy.url);
+      const { port } = new URL(through.url);
       const socket = connect(Number(port), '127.0.0.1', () => {
         socket.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`);
       });
@@ -129,5 +133,23 @@ describe('startGuardProxy', () => {
     expect(open).toContain('page /tunnelled');
     expect(await tunnel(`127.0.0.1:${sitePort}`)).toStartWith('HTTP/1.1 403');
     expect(await tunnel('qmx.test')).toStartWith('HTTP/1.1 403');
+  });
+
+  test('only the web ports are reachable', () => {
+    expect([...WEB_PORTS]).toEqual([80, 443, 8080, 8443]);
+  });
+
+  test('a port that is not a web one is refused on either path, before any connection', async () => {
+    const webOnly = await startGuardProxy({ resolve });
+    try {
+      expect(
+        (await viaProxy(`http://qmx.test:${sitePort}/`, webOnly)).status,
+      ).toBe(403);
+      expect(await tunnel(`qmx.test:${sitePort}`, webOnly)).toStartWith(
+        'HTTP/1.1 403',
+      );
+    } finally {
+      await webOnly.close();
+    }
   });
 });

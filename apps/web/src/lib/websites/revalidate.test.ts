@@ -479,3 +479,46 @@ describe('a name_and_place row is held while its proof is gone, never demoted', 
     ).toBe('verified');
   });
 });
+
+describe('an assessed row is held on a holding page, never demoted', () => {
+  test('a closed or maintenance page holds it back with its tier kept', () => {
+    const r = revalidate(input({ evidence: 'assessed', placeholder: true }));
+    expect(r.status).toBe('candidate');
+    expect(r.evidence).toBe('assessed');
+    expect(r.confidence).toBe('0.750');
+    expect(r.note).toContain('holding page');
+  });
+
+  test('a live page with no holding language publishes it', () => {
+    const r = revalidate(input({ evidence: 'assessed' }));
+    expect(r.status).toBe('verified');
+    expect(r.verified).toBe(true);
+  });
+
+  test('the holding-page signal holds no other tier', () => {
+    for (const evidence of ['postcode_on_page', 'name_and_place'] as const) {
+      expect(revalidate(input({ evidence, placeholder: true })).status).toBe(
+        'verified',
+      );
+    }
+  });
+
+  test('a number or a postcode found later promotes it, as any proof does', () => {
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          crnFoundAt: 'https://www.example.co.uk/terms',
+        }),
+      ).evidence,
+    ).toBe('crn_on_page');
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          postcodeFoundAt: 'https://www.example.co.uk/contact',
+        }),
+      ).evidence,
+    ).toBe('postcode_on_page');
+  });
+});

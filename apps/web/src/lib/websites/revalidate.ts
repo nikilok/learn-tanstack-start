@@ -77,6 +77,8 @@ export type RevalidateInput = {
    * it, which reads to a visitor as a company website that flickers.
    */
   pageTooThin?: boolean;
+  /** The page is a holding page (looksPlaceholder): read for `assessed` rows, which it holds back. */
+  placeholder?: boolean;
   /** A `name_and_place` row's re-check: its name or officer and its place still read, gone from pages that read, or not known this pass. */
   nameAndPlace?: NameAndPlaceCheck;
   /** The page the re-check read the proof on, when it holds. */
@@ -356,6 +358,10 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     // overturning.
     status = 'candidate';
     note += '; parked page, held back from rendering';
+  } else if (evidence === 'assessed' && input.placeholder) {
+    // Held, never demoted, as a parked page is: a pass that finds the site back restores it.
+    status = 'candidate';
+    note += '; holding page, held back from rendering';
   } else if (evidence === 'name_and_place' && input.nameAndPlace === 'gone') {
     // Held, never demoted: the tier stays, so a pass that reads the proof again restores it.
     status = 'candidate';

@@ -29,6 +29,7 @@ import {
   isAggregatorHost,
   looksChallenged,
   looksParked,
+  looksPlaceholder,
   pageTooThin,
 } from './page-signals.ts';
 import type {
@@ -143,7 +144,7 @@ export type SweepSummary = {
    *  large "promoted" figure is a silent unpublish wearing the job's
    *  healthiest-looking metric. */
   demoted: number;
-  /** Rows held back from rendering: parked, for sale, or a directory. */
+  /** Rows held back from rendering: parked, for sale, a directory, or an `assessed` row's holding page. */
   noSiteThere: number;
   /** `name_and_place` rows whose name or place was gone from every page read, and those not read well enough to tell. */
   nameAndPlaceGone: number;
@@ -438,6 +439,7 @@ export async function sweepWebsites(
       let postcodeConfirms = false;
       let onAggregator = false;
       let looksParkedPage = false;
+      let placeholder = false;
       let thinPage = false;
       let nameAndPlace: NameAndPlaceCheck | undefined;
       let nameAndPlaceAt: string | null = null;
@@ -459,12 +461,15 @@ export async function sweepWebsites(
         const host = hostOf(fetched.url);
         onAggregator = isAggregatorHost(host);
         looksParkedPage = looksParked(text);
+        placeholder = row.evidence === 'assessed' && looksPlaceholder(text);
         thinPage = pageTooThin(text);
         postcodeConfirms = Boolean(
           row.postcode && deps.hasPostcode(fetched.html, row.postcode),
         );
         if (postcodeConfirms) summary.corroborated++;
-        if (onAggregator || looksParkedPage) summary.noSiteThere++;
+        if (onAggregator || looksParkedPage || placeholder) {
+          summary.noSiteThere++;
+        }
 
         // Attribute proof to the URL this row will STORE (the variant we
         // tried), not to fetched.url which is post-redirect. Otherwise a site
@@ -520,6 +525,7 @@ export async function sweepWebsites(
         postcodeConfirms,
         onAggregator,
         looksParked: looksParkedPage,
+        placeholder,
         pageTooThin: thinPage,
         nameAndPlace,
         nameAndPlaceAt,

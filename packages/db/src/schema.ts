@@ -471,6 +471,13 @@ export const companyWebsites = pgTable(
     // Re-walks that could not read the row since its last completed walk.
     walkAttempts: smallint('walk_attempts').notNull().default(0),
     walkedAt: timestamp('walked_at'),
+    // When the fallback job (lib/websites/fallback.ts) settled this row, with
+    // a pick or without; NULL until it has.
+    fallbackCheckedAt: timestamp('fallback_checked_at'),
+    // The page the company page links to instead of url, such as a group
+    // site's UK section. url stays the origin every check compares, and the
+    // link is read only while it is on url's site (lib/websites/link-url.ts).
+    linkUrl: text('link_url'),
   },
   (table) => [
     index('idx_company_websites_cursor').on(table.checkedAt.asc().nullsFirst()),

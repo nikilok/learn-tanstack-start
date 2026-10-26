@@ -34,6 +34,10 @@ describe('statusForEvidence', () => {
     expect(statusForEvidence('manual')).toBe('verified');
   });
 
+  test('an assessed row lands verified, so its own arm can publish it', () => {
+    expect(statusForEvidence('assessed')).toBe('verified');
+  });
+
   test('uncorroborated evidence stays a candidate and is never rendered', () => {
     expect(statusForEvidence('llm_adjudicated')).toBe('candidate');
     expect(statusForEvidence('domain_similarity')).toBe('candidate');
@@ -52,6 +56,7 @@ describe('evidenceRank', () => {
       'domain_similarity',
       'registry_unconfirmed',
       'llm_adjudicated',
+      'assessed',
       'postcode_on_page',
       'name_and_place',
       'registry',
@@ -69,6 +74,7 @@ describe('evidenceRank', () => {
       'llm_adjudicated',
     ];
     const verified: WebsiteEvidence[] = [
+      'assessed',
       'postcode_on_page',
       'name_and_place',
       'registry',
@@ -103,6 +109,40 @@ describe('evidenceRank', () => {
     ).toEqual({ action: 'update' });
   });
 
+  test('assessed sits below every proof and above every unproven tier', () => {
+    // A choice between search results, not a proof: a number, a postcode or the
+    // two-signal rule found later replaces it, and no weaker tier can.
+    const row = existing({
+      url: 'https://quillmere.co.uk',
+      evidence: 'assessed',
+      source: 'search',
+    });
+    for (const evidence of [
+      'postcode_on_page',
+      'name_and_place',
+      'crn_on_page',
+    ] as const) {
+      expect(
+        decideWebsite(
+          row,
+          proposed({ url: 'https://other.co.uk', evidence, source: 'search' }),
+        ),
+      ).toEqual({ action: 'update' });
+    }
+    for (const evidence of [
+      'llm_adjudicated',
+      'registry_unconfirmed',
+      'domain_similarity',
+    ] as const) {
+      expect(
+        decideWebsite(
+          row,
+          proposed({ url: 'https://other.co.uk', evidence, source: 'search' }),
+        ),
+      ).toEqual({ action: 'keep' });
+    }
+  });
+
   test('an unconfirmed registry row is not promoted by an LLM agreeing', () => {
     // The two tie deliberately, so neither can overwrite the other.
     expect(evidenceRank('registry_unconfirmed')).toBe(
@@ -118,6 +158,7 @@ describe('evidenceRank', () => {
       'domain_similarity',
       'registry_unconfirmed',
       'llm_adjudicated',
+      'assessed',
       'postcode_on_page',
       'name_and_place',
       'registry',
@@ -300,6 +341,43 @@ describe('decideWebsite — dead rows accept corrections', () => {
   test('the SQL guard admits dead-row corrections too', () => {
     expect(upgradeOnlyPredicateSql()).toContain(
       "company_websites.status = 'dead'",
+    );
+  });
+
+  test('an assessed site never replaces a dead row, though it lands verified', () => {
+    // The dead row's url once carried a proof; a choice between search
+    // results is not one, so the dead-row floor stays at the postcode tier.
+    const dead = existing({
+      url: 'https://old-domain.co.uk',
+      evidence: 'crn_on_page',
+      status: 'dead',
+    });
+    expect(
+      decideWebsite(
+        dead,
+        proposed({
+          url: 'https://new-domain.co.uk',
+          evidence: 'assessed',
+          source: 'search',
+        }),
+      ),
+    ).toEqual({ action: 'keep' });
+    expect(
+      decideWebsite(
+        dead,
+        proposed({
+          url: 'https://new-domain.co.uk',
+          evidence: 'postcode_on_page',
+          source: 'search',
+        }),
+      ),
+    ).toEqual({ action: 'update' });
+    // The SQL floor is the postcode tier's confidence, above assessed's.
+    expect(upgradeOnlyPredicateSql()).toContain(
+      `status = 'dead' AND excluded.confidence >= ${evidenceConfidence('postcode_on_page')})`,
+    );
+    expect(evidenceConfidence('assessed')).toBeLessThan(
+      evidenceConfidence('postcode_on_page'),
     );
   });
 });

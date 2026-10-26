@@ -1,11 +1,12 @@
 /**
  * The two-signal rule (R2-EO) for a site that states neither the company's
- * number nor its named registered postcode: an identity signal and a place
- * signal, both on the site. Sealed and measured before any build; see
- * publishable.ts for the figures. No I/O.
+ * number nor its named registered postcode, on a site whose own domain names
+ * the company: an identity signal and a place signal, both on the site.
+ * Sealed and measured before any build; see publishable.ts for the figures.
+ * No I/O.
  */
 
-import { type CompanyNames, hostNamer, namesCompany } from './company-naming';
+import { type CompanyNames, hostNamer } from './company-naming';
 import { pageHasExactLegalName } from './exact-legal-name';
 import { type Officer, officerNamedIn } from './officer-names';
 import {
@@ -25,8 +26,6 @@ export type PageRead = {
   url: string;
   /** Visible text, whitespace collapsed, at most PAGE_TEXT_CHARS. */
   text: string;
-  /** The page, or the host that served it, names the company. */
-  named: boolean;
   /** Statutory company numbers the page states, whoever they belong to. */
   statedNumbers: string[];
   /** Postcodes read off the whole page. */
@@ -56,20 +55,12 @@ const NOT_PROVED: SiteVerdict = { kind: 'not_proved' };
 export function readPage(
   servedUrl: string,
   visible: string,
-  names: CompanyNames,
   stated: readonly StatedNumber[],
 ): PageRead {
   const flat = visible.replace(/\s+/g, ' ').trim();
-  let host = '';
-  try {
-    host = new URL(servedUrl).hostname.toLowerCase();
-  } catch {
-    // An unreadable URL names no host.
-  }
   return {
     url: servedUrl,
     text: flat.slice(0, PAGE_TEXT_CHARS),
-    named: namesCompany(host, flat, names),
     statedNumbers: stated.map((s) => s.companyNumber),
     postcodes: pagePostcodes(flat),
   };
@@ -92,26 +83,24 @@ function showsPlace(row: NameAndPlaceRow, pages: readonly PageRead[]): boolean {
   );
 }
 
-/** Whether the site's domain or any of its pages names the company. */
-function siteNamesCompany(
-  row: NameAndPlaceRow,
-  siteUrl: string,
-  pages: readonly PageRead[],
-): boolean {
+/** Whether the site's own domain names the company. */
+function domainNamesCompany(row: NameAndPlaceRow, siteUrl: string): boolean {
   let host = '';
   try {
     host = new URL(siteUrl).hostname.toLowerCase();
   } catch {
     // An unreadable URL names no host.
   }
-  return hostNamer(row)(host) || pages.some((page) => page.named);
+  return hostNamer(row)(host);
 }
 
 /**
- * The rule on one candidate site: the exact registered name on a page stating
- * no other company's number, or an officer named on a site that names the
- * company; and a place of the company's. `officers` is undefined until looked
- * up, and is asked for only when it decides the verdict.
+ * The rule on one candidate site whose own domain names the company: the
+ * exact registered name on a page stating no other company's number, or an
+ * officer named on the site; and a place of the company's. A directory, an
+ * association or a neighbour names the company on a domain of its own.
+ * `officers` is undefined until looked up, and is asked for only when it
+ * decides the verdict.
  */
 export function judgeSite(
   row: NameAndPlaceRow,
@@ -119,14 +108,16 @@ export function judgeSite(
   officers?: readonly Officer[],
 ): SiteVerdict {
   const { pages } = site;
-  if (pages.length === 0 || !showsPlace(row, pages)) return NOT_PROVED;
+  if (pages.length === 0 || !domainNamesCompany(row, site.url)) {
+    return NOT_PROVED;
+  }
+  if (!showsPlace(row, pages)) return NOT_PROVED;
   const namePage = pages.find(
     (page) =>
       pageHasExactLegalName(page.text, row.companyName) &&
       page.statedNumbers.every((number) => number === row.companyNumber),
   );
   if (namePage) return { kind: 'proved', evidenceUrl: namePage.url };
-  if (!siteNamesCompany(row, site.url, pages)) return NOT_PROVED;
   if (!officers) return { kind: 'needs_officers' };
   // The pages joined as one text, as the rule was measured.
   const text = pages.map((page) => page.text).join(' \n ');

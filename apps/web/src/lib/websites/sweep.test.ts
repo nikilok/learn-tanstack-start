@@ -536,7 +536,7 @@ describe('the sweep computes its signals from the right inputs', () => {
 });
 
 describe("a name_and_place row's re-check", () => {
-  const SITE = 'https://www.qmx.co.uk';
+  const SITE = 'https://www.quillmere.co.uk';
   const PROOF = `${SITE}/privacy`;
   /** Enough text that a page missing the proof says it is missing. */
   const filler = 'Clinical data for practices across the north. '.repeat(40);
@@ -566,6 +566,8 @@ describe("a name_and_place row's re-check", () => {
     const fetched: string[] = [];
     const h = harness({
       rows: [{ ...proved, ...over }],
+      // Officers who are named on none of these pages, unless a test says otherwise.
+      officers: async () => [],
       fetchSite: async (url) => live(url, homepage),
       fetchPage: async (url) => {
         fetched.push(url);
@@ -916,6 +918,7 @@ describe("a name_and_place row's re-check", () => {
       },
       html(`${filler} Harrogate`),
       {},
+      { officers: undefined },
     );
     expect(result.status).toBe('verified');
     expect(summary.nameAndPlaceUnread).toBe(1);

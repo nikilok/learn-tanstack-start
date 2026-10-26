@@ -242,7 +242,7 @@ export function readHomepage(
     legalLinks: legalLinks(html, servedUrl),
     aboutLinks: aboutOf(links),
     stated,
-    pages: [readPage(servedUrl, text, row, stated)],
+    pages: [readPage(servedUrl, text, stated)],
   };
 }
 
@@ -284,7 +284,7 @@ export function readWalkPage(
     // Judged on this page's own host: a walked path can redirect off the site.
     pageNamed: postcodeFound && namedAsItself(host, text, row),
     stated,
-    read: readPage(pageUrl, text, row, stated),
+    read: readPage(pageUrl, text, stated),
   };
 }
 

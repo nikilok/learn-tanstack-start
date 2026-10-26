@@ -336,7 +336,6 @@ describe('readHomepage', () => {
       {
         url: 'https://www.acmewidgets.co.uk/',
         text: 'Our team Acme Widgets Ltd. Company No. 03260168, Winchester',
-        named: true,
         statedNumbers: ['03260168'],
         postcodes: [],
       },
@@ -436,7 +435,6 @@ describe('readWalkPage', () => {
     expect(page?.stated.map((s) => s.companyNumber)).toEqual(['03260168']);
     expect(page?.read).toMatchObject({
       url: 'https://acme.co.uk/privacy',
-      named: true,
       statedNumbers: ['03260168'],
       postcodes: ['SO22 5AZ'],
     });
@@ -553,7 +551,6 @@ describe('foldWalkPage', () => {
     read: {
       url: 'https://acme.co.uk/terms',
       text: '',
-      named: false,
       statedNumbers: [],
       postcodes: [],
     },

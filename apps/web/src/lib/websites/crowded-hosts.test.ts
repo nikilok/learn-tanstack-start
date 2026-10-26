@@ -75,6 +75,16 @@ describe('isPlatformPage', () => {
     expect(isPlatformPage('careers.quillmere.co.uk')).toBe(false);
   });
 
+  test("a business's listing on a subdomain directory is never its own site", () => {
+    // A walk-3 wave picked a firm's listing on such a directory over its own site.
+    expect(isPlatformPage('quillmereukltd.the7.co.uk')).toBe(true);
+  });
+
+  test("a pharmacy's page on its prescriptions app is never its own site", () => {
+    // A walk-3 wave picked a pharmacy's page hosted by such an app.
+    expect(isPlatformPage('quillmerepharmacy.healthera.co.uk')).toBe(true);
+  });
+
   test("a school's, a practice's or a university's shared domain is not a platform", () => {
     expect(isPlatformPage('quillmere-primary.herts.sch.uk')).toBe(false);
     expect(isPlatformPage('quillmere.scot.nhs.uk')).toBe(false);

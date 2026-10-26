@@ -873,26 +873,51 @@ describe('the two-signal rule in discovery', () => {
     expect(summary.foundByNumber).toBe(1);
   });
 
-  test('a named postcode on a lower candidate it walks stops the rule there', async () => {
+  test("a named postcode on a lower result's pages stops the rule there, picking nothing", async () => {
+    // The first walk-3 waves' wrong postcode picks: a club's community trust,
+    // a trade directory and an association, each a lower result.
     const b = site('https://b.co.uk', 'Clinical data.');
     const h = harness({
       rows: [company],
-      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://quillmere.co.uk'],
       probes: {
         'https://a.co.uk': site('https://a.co.uk', ABROAD),
         'https://b.co.uk': b,
-        'https://c.co.uk': site('https://c.co.uk', PROVES),
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
       },
       disclosure: {
         'https://b.co.uk': { ...b, postcodeFound: true, postcodeNamed: true },
       },
     });
     await discoverWebsites(config(), h.deps);
-    expect(h.written[0].outcome).toMatchObject({
-      url: 'https://b.co.uk',
-      evidence: 'postcode_on_page',
+    expect(h.written[0].outcome.evidence).toBe('none');
+    expect(h.walked).not.toContain('https://quillmere.co.uk');
+  });
+
+  test("the top result's own named postcode still proves it", async () => {
+    const a = site('https://a.co.uk', 'Clinical data.');
+    const h = harness({
+      rows: [company],
+      urls: ['https://a.co.uk', 'https://b.co.uk'],
+      probes: {
+        'https://a.co.uk': a,
+        'https://b.co.uk': site('https://b.co.uk', 'Clinical data.'),
+      },
+      disclosure: {
+        'https://a.co.uk': {
+          ...a,
+          postcodeFound: true,
+          postcodeNamed: true,
+          evidenceUrl: 'https://a.co.uk/contact',
+        },
+      },
     });
-    expect(h.walked).not.toContain('https://c.co.uk');
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://a.co.uk',
+      evidence: 'postcode_on_page',
+      evidenceUrl: 'https://a.co.uk/contact',
+    });
   });
 
   test("a directory listing the officers is never picked past the top site's named postcode", async () => {
@@ -1133,6 +1158,26 @@ describe('the two-signal rule in discovery', () => {
         evidenceUrl: 'https://a.co.uk/contact',
       });
       expect(summary.foundByRender).toBe(1);
+    });
+
+    test("a lower result's rendered named postcode stops the rule too, and is not counted as found", async () => {
+      const b = silent('https://b.co.uk');
+      const view = browser({
+        'https://b.co.uk': { ...b, postcodeFound: true, postcodeNamed: true },
+      });
+      const h = harness({
+        rows: [company],
+        urls: ['https://a.co.uk', 'https://b.co.uk', 'https://quillmere.co.uk'],
+        probes: {
+          'https://a.co.uk': site('https://a.co.uk', ABROAD),
+          'https://b.co.uk': b,
+          'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
+        },
+        render: view.render,
+      });
+      const summary = await discoverWebsites(config(), h.deps);
+      expect(h.written[0].outcome.evidence).toBe('none');
+      expect(summary).toMatchObject({ rendered: 1, foundByRender: 0 });
     });
 
     test('the rule reads the raw pages, then the rendered ones, asking for the officers once', async () => {

@@ -753,27 +753,26 @@ describe('the two-signal rule in discovery', () => {
     text: string,
     over: Partial<CandidateProbe> = {},
   ): CandidateProbe =>
-    probe({ url, pages: [readPage(`${url}/`, text, company, [])], ...over });
+    probe({ url, pages: [readPage(`${url}/`, text, [])], ...over });
 
   /** A walk that read one more page, at the path given. */
   const walkedTo = (base: CandidateProbe, path: string, text: string) => ({
     ...base,
-    pages: [
-      ...(base.pages ?? []),
-      readPage(`${base.url}${path}`, text, company, []),
-    ],
+    pages: [...(base.pages ?? []), readPage(`${base.url}${path}`, text, [])],
   });
 
   test('proves a site by its exact name and a town, and counts it', async () => {
     const h = harness({
       rows: [company],
-      urls: ['https://a.co.uk'],
-      probes: { 'https://a.co.uk': site('https://a.co.uk', PROVES) },
+      urls: ['https://quillmere.co.uk'],
+      probes: {
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
+      },
     });
     const summary = await discoverWebsites(config(), h.deps);
     expect(h.written[0].outcome).toEqual({
-      url: 'https://a.co.uk',
-      evidenceUrl: 'https://a.co.uk/',
+      url: 'https://quillmere.co.uk',
+      evidenceUrl: 'https://quillmere.co.uk/',
       evidence: 'name_and_place',
       rank: 1,
     });
@@ -784,26 +783,59 @@ describe('the two-signal rule in discovery', () => {
   test('picks the first candidate in rank order that passes', async () => {
     const h = harness({
       rows: [company],
-      urls: ['https://a.co.uk', 'https://b.co.uk', 'https://c.co.uk'],
+      urls: [
+        'https://quillmere.com',
+        'https://quillmere.co.uk',
+        'https://quillmere-analytics.co.uk',
+      ],
       probes: {
-        'https://a.co.uk': site('https://a.co.uk', ABROAD),
-        'https://b.co.uk': site('https://b.co.uk', PROVES),
-        'https://c.co.uk': site('https://c.co.uk', PROVES),
+        'https://quillmere.com': site('https://quillmere.com', ABROAD),
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
+        'https://quillmere-analytics.co.uk': site(
+          'https://quillmere-analytics.co.uk',
+          PROVES,
+        ),
       },
     });
     await discoverWebsites(config(), h.deps);
-    expect(h.written[0].outcome.url).toBe('https://b.co.uk');
-    expect(h.walked).toEqual(['https://a.co.uk', 'https://b.co.uk']);
+    expect(h.written[0].outcome.url).toBe('https://quillmere.co.uk');
+    expect(h.walked).toEqual([
+      'https://quillmere.com',
+      'https://quillmere.co.uk',
+    ]);
+  });
+
+  test("a directory naming the company proves nothing: the rule moves on to the company's own domain", async () => {
+    const h = harness({
+      rows: [company],
+      urls: [
+        'https://harrogate-business-finder.example',
+        'https://quillmere.co.uk',
+      ],
+      probes: {
+        'https://harrogate-business-finder.example': site(
+          'https://harrogate-business-finder.example',
+          PROVES,
+        ),
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
+      },
+    });
+    await discoverWebsites(config(), h.deps);
+    expect(h.written[0].outcome).toMatchObject({
+      url: 'https://quillmere.co.uk',
+      evidence: 'name_and_place',
+      rank: 2,
+    });
   });
 
   test('reads a walked page: the name on its privacy page', async () => {
-    const a = site('https://a.co.uk', 'Clinical data. Harrogate.');
+    const a = site('https://quillmere.co.uk', 'Clinical data. Harrogate.');
     const h = harness({
       rows: [company],
-      urls: ['https://a.co.uk'],
-      probes: { 'https://a.co.uk': a },
+      urls: ['https://quillmere.co.uk'],
+      probes: { 'https://quillmere.co.uk': a },
       disclosure: {
-        'https://a.co.uk': walkedTo(
+        'https://quillmere.co.uk': walkedTo(
           a,
           '/privacy',
           'This site is run by Quillmere Analytics Ltd.',
@@ -811,7 +843,9 @@ describe('the two-signal rule in discovery', () => {
       },
     });
     await discoverWebsites(config(), h.deps);
-    expect(h.written[0].outcome.evidenceUrl).toBe('https://a.co.uk/privacy');
+    expect(h.written[0].outcome.evidenceUrl).toBe(
+      'https://quillmere.co.uk/privacy',
+    );
   });
 
   test('a number on a lower candidate it walks proves that site the existing way', async () => {
@@ -896,10 +930,13 @@ describe('the two-signal rule in discovery', () => {
     // the next result was a same-name business.
     const h = harness({
       rows: [company],
-      urls: ['https://quillmere.co.uk', 'https://b.co.uk'],
+      urls: ['https://quillmere.co.uk', 'https://quillmere-analytics.co.uk'],
       probes: {
         'https://quillmere.co.uk': null,
-        'https://b.co.uk': site('https://b.co.uk', PROVES),
+        'https://quillmere-analytics.co.uk': site(
+          'https://quillmere-analytics.co.uk',
+          PROVES,
+        ),
       },
     });
     await discoverWebsites(config(), h.deps);
@@ -909,7 +946,7 @@ describe('the two-signal rule in discovery', () => {
   test('so does a bot challenge on a domain naming the company', async () => {
     const h = harness({
       rows: [company],
-      urls: ['https://quillmere.co.uk', 'https://b.co.uk'],
+      urls: ['https://quillmere.co.uk', 'https://quillmere-analytics.co.uk'],
       probes: {
         'https://quillmere.co.uk': site(
           'https://quillmere.co.uk',
@@ -918,7 +955,10 @@ describe('the two-signal rule in discovery', () => {
             challenged: true,
           },
         ),
-        'https://b.co.uk': site('https://b.co.uk', PROVES),
+        'https://quillmere-analytics.co.uk': site(
+          'https://quillmere-analytics.co.uk',
+          PROVES,
+        ),
       },
     });
     await discoverWebsites(config(), h.deps);
@@ -928,15 +968,15 @@ describe('the two-signal rule in discovery', () => {
   test('an unreadable site on a domain naming nobody is passed over', async () => {
     const h = harness({
       rows: [company],
-      urls: ['https://hestwick.co.uk', 'https://b.co.uk'],
+      urls: ['https://hestwick.co.uk', 'https://quillmere.co.uk'],
       probes: {
         'https://hestwick.co.uk': null,
-        'https://b.co.uk': site('https://b.co.uk', PROVES),
+        'https://quillmere.co.uk': site('https://quillmere.co.uk', PROVES),
       },
     });
     await discoverWebsites(config(), h.deps);
     expect(h.written[0].outcome).toMatchObject({
-      url: 'https://b.co.uk',
+      url: 'https://quillmere.co.uk',
       evidence: 'name_and_place',
     });
   });
@@ -1131,25 +1171,29 @@ describe('the two-signal rule in discovery', () => {
     });
 
     test('raw pages the rule proves still win: the render only looked for a number or postcode first', async () => {
-      const a = silent('https://a.co.uk', PROVES);
+      const a = silent('https://quillmere.co.uk', PROVES);
       const view = browser({
-        'https://a.co.uk': walkedTo({ ...a, siteLinks: 4 }, '/about', PROVES),
+        'https://quillmere.co.uk': walkedTo(
+          { ...a, siteLinks: 4 },
+          '/about',
+          PROVES,
+        ),
       });
       const h = harness({
         rows: [company],
-        urls: ['https://a.co.uk'],
-        probes: { 'https://a.co.uk': a },
+        urls: ['https://quillmere.co.uk'],
+        probes: { 'https://quillmere.co.uk': a },
         render: view.render,
       });
       const summary = await discoverWebsites(config(), h.deps);
-      expect(view.asked).toEqual(['https://a.co.uk']);
+      expect(view.asked).toEqual(['https://quillmere.co.uk']);
       expect(h.written[0].outcome.evidence).toBe('name_and_place');
       expect(summary).toMatchObject({ rendered: 1, foundByRender: 0 });
     });
 
     test('a render that fails, or lands on a directory or a holding page, leaves the raw reading as it was', async () => {
       const a = silent('https://a.co.uk');
-      const elsewhere = site('https://a.co.uk', PROVES);
+      const elsewhere = site('https://quillmere.co.uk', PROVES);
       for (const shown of [
         null,
         { ...elsewhere, onAggregator: true },

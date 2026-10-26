@@ -113,8 +113,12 @@
  * `name_and_place` publishes through its own arm, search rows only: the
  * two-signal rule (name-and-place.ts), sealed before a fresh draw, scored
  * 65/65 on it (lower bound 96.0%) and 135/135 over three draws, and the
- * owner's blind audit passed all 22 of its picks shown. The sweep holds a row
- * back while its proof is gone.
+ * owner's blind audit passed all 22 of its picks shown. The first re-walk
+ * wave, oldest companies first, picked 3 wrong sites in 11, every one on a
+ * domain naming someone else (a directory, an association, a port), so the
+ * rule now reads only a site whose own domain names the company: that keeps
+ * 128 of the sealed draws' 133 picks and all 8 right ones in the wave. The
+ * sweep holds a row back while its proof is gone.
  */
 
 import { companyWebsites } from '@ss/db/schema';

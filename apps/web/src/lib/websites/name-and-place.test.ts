@@ -29,7 +29,6 @@ const page = (url: string, text: string, stated: string[] = []): PageRead =>
   readPage(
     url,
     text,
-    row,
     stated.map((companyNumber) => ({ companyNumber, context: '' })),
   );
 
@@ -45,18 +44,18 @@ describe('judgeSite: what proves a site', () => {
       row,
       site(
         page(
-          'https://qmx.co.uk/',
+          'https://quillmere.co.uk/',
           'Clinical data. Harrogate, North Yorkshire.',
         ),
         page(
-          'https://qmx.co.uk/privacy',
+          'https://quillmere.co.uk/privacy',
           'This site is run by Quillmere Analytics Ltd.',
         ),
       ),
     );
     expect(verdict).toEqual({
       kind: 'proved',
-      evidenceUrl: 'https://qmx.co.uk/privacy',
+      evidenceUrl: 'https://quillmere.co.uk/privacy',
     });
   });
 
@@ -66,7 +65,7 @@ describe('judgeSite: what proves a site', () => {
         row,
         site(
           page(
-            'https://qmx.co.uk/',
+            'https://quillmere.co.uk/',
             'Quillmere Analytics Ltd, 12 Station Parade, HG1 2AB',
           ),
         ),
@@ -165,13 +164,58 @@ describe("judgeSite: the study's wrong picks stay unproved", () => {
   });
 });
 
+describe("judgeSite: the first wave's wrong picks stay unproved", () => {
+  test('a business directory listing it by its exact name and town', () => {
+    expect(
+      judgeSite(
+        row,
+        site(
+          page(
+            'https://harrogate-business-finder.example/business-directory',
+            'Business directory. Quillmere Analytics Ltd, Station Parade, Harrogate. Hestwick Tiles Ltd, Ripon.',
+          ),
+        ),
+      ).kind,
+    ).toBe('not_proved');
+  });
+
+  test("a trade association's committee page naming it as a member", () => {
+    expect(
+      judgeSite(
+        row,
+        site(
+          page(
+            'https://data-analysts-association.example/about-us/committees/',
+            'Technical committee: Quillmere Analytics Ltd (Harrogate), Varrowby Holdings Limited (Leeds).',
+          ),
+        ),
+      ).kind,
+    ).toBe('not_proved');
+  });
+
+  test('the homepage of the port it works at, naming it and its director', () => {
+    expect(
+      judgeSite(
+        row,
+        site(
+          page(
+            'https://harrogate-port.example/',
+            'Towage is provided by Quillmere Analytics Limited, led by Idris Tallowmere. Harrogate.',
+          ),
+        ),
+        [idris],
+      ).kind,
+    ).toBe('not_proved');
+  });
+});
+
 describe('judgeSite: each signal as measured', () => {
   test("the exact name on a page stating another company's number does not count", () => {
     const verdict = judgeSite(
       row,
       site(
         page(
-          'https://qmx.co.uk/',
+          'https://quillmere.co.uk/',
           'Quillmere Analytics Ltd is a trading name of Varrowby Holdings Limited, company number 08881234. Harrogate.',
           ['08881234'],
         ),
@@ -187,7 +231,7 @@ describe('judgeSite: each signal as measured', () => {
         row,
         site(
           page(
-            'https://qmx.co.uk/',
+            'https://quillmere.co.uk/',
             'Quillmere Analytics Ltd, Harrogate. Company number 09990117.',
             ['09990117'],
           ),
@@ -204,12 +248,15 @@ describe('judgeSite: each signal as measured', () => {
       postcode: null,
     };
     const software = site(
-      page('https://qmx.co.uk/', 'Quillmere Analytics Ltd builds software.'),
+      page(
+        'https://quillmere.co.uk/',
+        'Quillmere Analytics Ltd builds software.',
+      ),
     );
     expect(judgeSite(ware, software).kind).toBe('not_proved');
     const town = site(
       page(
-        'https://qmx.co.uk/',
+        'https://quillmere.co.uk/',
         'Quillmere Analytics Ltd, Baldock Street, Ware.',
       ),
     );
@@ -258,7 +305,7 @@ describe('judgeSite: each signal as measured', () => {
     ).toBe('proved');
   });
 
-  test('a page naming the company is enough on a domain that does not', () => {
+  test('a page naming the company is not enough on a domain that does not', () => {
     expect(
       judgeSite(
         row,
@@ -270,28 +317,26 @@ describe('judgeSite: each signal as measured', () => {
         ),
         [idris],
       ).kind,
-    ).toBe('proved');
+    ).toBe('not_proved');
   });
 
   test('a site with no pages read proves nothing', () => {
-    expect(judgeSite(row, { url: 'https://qmx.co.uk', pages: [] }).kind).toBe(
-      'not_proved',
-    );
+    expect(
+      judgeSite(row, { url: 'https://quillmere.co.uk', pages: [] }).kind,
+    ).toBe('not_proved');
   });
 });
 
 describe('readPage', () => {
   test('keeps PAGE_TEXT_CHARS of text and reads postcodes off the whole page', () => {
     const filler = 'x '.repeat(PAGE_TEXT_CHARS);
-    const read = page('https://qmx.co.uk/', `${filler} HG1 2AB`);
+    const read = page('https://quillmere.co.uk/', `${filler} HG1 2AB`);
     expect(read.text).toHaveLength(PAGE_TEXT_CHARS);
     expect(read.postcodes).toEqual(['HG1 2AB']);
   });
 
-  test('collapses whitespace, and is named by the host that served it', () => {
+  test('collapses whitespace', () => {
     const read = page('https://www.Quillmere.co.uk/about', 'About\n\n  us');
     expect(read.text).toBe('About us');
-    expect(read.named).toBe(true);
-    expect(page('https://hestwick.co.uk/', 'About us').named).toBe(false);
   });
 });

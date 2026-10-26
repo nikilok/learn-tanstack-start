@@ -226,15 +226,14 @@ describe('rewalkWebsites: the two-signal rule', () => {
 
   test('a none row the rule proves gains its site, counted apart', async () => {
     const h = harness({
-      rows: [company],
+      rows: [{ ...company, candidates: ['https://quillmere.co.uk/about'] }],
       probes: {
-        'https://a.co.uk': probe({
-          url: 'https://a.co.uk',
+        'https://quillmere.co.uk': probe({
+          url: 'https://quillmere.co.uk',
           pages: [
             readPage(
-              'https://a.co.uk/',
+              'https://quillmere.co.uk/',
               'Quillmere Analytics Ltd, Station Parade, Harrogate.',
-              company,
               [],
             ),
           ],
@@ -243,7 +242,7 @@ describe('rewalkWebsites: the two-signal rule', () => {
     });
     const summary = await rewalkWebsites(config(), h.deps);
     expect(h.upgrades[0].outcome).toMatchObject({
-      url: 'https://a.co.uk',
+      url: 'https://quillmere.co.uk',
       evidence: 'name_and_place',
     });
     expect(summary.noneToNameAndPlace).toBe(1);
@@ -261,7 +260,6 @@ describe('rewalkWebsites: the two-signal rule', () => {
               readPage(
                 'https://quillmere.co.uk/',
                 'Quillmere Analytics, Harrogate.',
-                company,
                 [],
               ),
             ],

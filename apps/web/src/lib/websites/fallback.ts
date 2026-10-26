@@ -116,8 +116,10 @@ export type FallbackSummary = {
   processed: number;
   /** Settled unasked: no candidate's domain names the company, so nothing could be kept. */
   noneNamed: number;
-  /** Settled unasked: no candidate loaded with a page to read. */
+  /** Settled unasked: every candidate loaded, and none had a page to read. */
   noneReadable: number;
+  /** Left for the next pass: nothing was readable, and a candidate did not load. */
+  unloaded: number;
   asked: number;
   /** Choices kept, and how many of those link to a UK section. */
   picked: number;
@@ -197,6 +199,7 @@ type ReadCandidate = PickerCandidate & {
 type RowOutcome =
   | 'noneNamed'
   | 'noneReadable'
+  | 'unloaded'
   | 'belowThreshold'
   | 'notNamed'
   | 'holdingPage'
@@ -230,6 +233,7 @@ async function decideRow(
   if (!origins.some(namesCompany)) return { outcome: 'noneNamed' };
 
   const read: ReadCandidate[] = [];
+  let failed = false;
   for (const origin of origins) {
     const canonical = normaliseWebsiteUrl(origin);
     if (!canonical) continue;
@@ -238,13 +242,16 @@ async function decideRow(
     const page = await deps.fetchSite(canonical);
     if (!page.ok) {
       summary.homepageFailures++;
+      failed = true;
       continue;
     }
     const candidate = readCandidate(origin, page.html);
     if (looksParked(candidate.text)) continue;
     read.push({ ...candidate, html: page.html, canonical, served: page.url });
   }
-  if (read.length === 0) return { outcome: 'noneReadable' };
+  // A failed load is no answer: the row is settled only once every candidate was read.
+  if (read.length === 0)
+    return { outcome: failed ? 'unloaded' : 'noneReadable' };
 
   summary.asked++;
   const answer = await deps.pick(
@@ -309,6 +316,7 @@ export async function fallbackWebsites(
     processed: 0,
     noneNamed: 0,
     noneReadable: 0,
+    unloaded: 0,
     asked: 0,
     picked: 0,
     ukSections: 0,
@@ -340,6 +348,13 @@ export async function fallbackWebsites(
     } catch (err) {
       summary.errored++;
       deps.log(`  ERROR row ${index + 1}: ${redacted(err, row)}`);
+    }
+    // A run whose homepages stop loading has lost its network: stop, rather than read the rest of the slice.
+    if (lostNetwork(summary)) {
+      deps.log(
+        `  stopping after ${index + 1}/${rows.length} rows: homepages are not loading`,
+      );
+      break;
     }
     if ((index + 1) % HEARTBEAT_ROWS === 0) {
       deps.log(

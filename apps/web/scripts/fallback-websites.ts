@@ -106,6 +106,7 @@ console.log(`  selected            : ${summary.selected}`);
 console.log(`  processed           : ${summary.processed}`);
 console.log(`  none_named          : ${summary.noneNamed}`);
 console.log(`  none_readable       : ${summary.noneReadable}`);
+console.log(`  unloaded            : ${summary.unloaded}`);
 console.log(`  asked               : ${summary.asked}`);
 console.log(`  picked              : ${summary.picked}`);
 console.log(`  uk_sections         : ${summary.ukSections}`);

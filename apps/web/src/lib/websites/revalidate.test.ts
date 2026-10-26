@@ -522,3 +522,42 @@ describe('an assessed row is held on a holding page, never demoted', () => {
     ).toBe('postcode_on_page');
   });
 });
+
+describe('an assessed row promotes nothing while its page shows nothing to link to', () => {
+  test('a holding notice that still shows the number or the postcode holds the row, unpromoted', () => {
+    // A promoted row is no longer read as assessed, so a hold that let the
+    // promotion through would publish the holding page from the next pass on.
+    for (const proof of [
+      { crnFoundAt: 'https://www.example.co.uk/' },
+      { postcodeFoundAt: 'https://www.example.co.uk/', postcodeConfirms: true },
+    ]) {
+      const r = revalidate(
+        input({ evidence: 'assessed', placeholder: true, ...proof }),
+      );
+      expect(r).toMatchObject({ status: 'candidate', evidence: 'assessed' });
+      expect(r.confidence).toBe('0.750');
+    }
+  });
+
+  test('a page another host served holds it the same way', () => {
+    const r = revalidate(
+      input({
+        evidence: 'assessed',
+        servedElsewhere: true,
+        crnFoundAt: 'https://www.example.co.uk/terms',
+      }),
+    );
+    expect(r).toMatchObject({ status: 'candidate', evidence: 'assessed' });
+  });
+
+  test('once the site is back, the proof it shows promotes the row as usual', () => {
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          crnFoundAt: 'https://www.example.co.uk/',
+        }),
+      ),
+    ).toMatchObject({ status: 'verified', evidence: 'crn_on_page' });
+  });
+});

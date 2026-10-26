@@ -109,6 +109,7 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: false,
       placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'corroborated',
@@ -116,6 +117,7 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: false,
       placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'parked',
@@ -123,6 +125,7 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: true,
       placeholder: true,
+      servedElsewhere: false,
     },
     {
       label: 'aggregator',
@@ -130,6 +133,7 @@ function* allCases(): Generator<Case> {
       onAggregator: true,
       looksParked: false,
       placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'confirmed+aggregator',
@@ -137,6 +141,7 @@ function* allCases(): Generator<Case> {
       onAggregator: true,
       looksParked: false,
       placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'confirmed+parked',
@@ -144,6 +149,7 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: true,
       placeholder: true,
+      servedElsewhere: false,
     },
     // A holding page that is not parked: closed, or down for maintenance.
     {
@@ -152,6 +158,7 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: false,
       placeholder: true,
+      servedElsewhere: false,
     },
     {
       label: 'confirmed+holding',
@@ -159,6 +166,24 @@ function* allCases(): Generator<Case> {
       onAggregator: false,
       looksParked: false,
       placeholder: true,
+      servedElsewhere: false,
+    },
+    // A page served from a host that names no company of the row's.
+    {
+      label: 'elsewhere',
+      postcodeConfirms: false,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: false,
+      servedElsewhere: true,
+    },
+    {
+      label: 'confirmed+elsewhere',
+      postcodeConfirms: true,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: false,
+      servedElsewhere: true,
     },
   ];
 
@@ -190,6 +215,7 @@ function* allCases(): Generator<Case> {
                     onAggregator: p.onAggregator,
                     looksParked: p.looksParked,
                     placeholder: p.placeholder,
+                    servedElsewhere: p.servedElsewhere,
                     nameAndPlace: recheck,
                   },
                 };
@@ -583,45 +609,41 @@ describe('state machine invariants — the name_and_place re-check', () => {
 });
 
 describe('state machine invariants — the assessed tier', () => {
-  /** I18. A holding page holds an `assessed` row back on every pass that reads one, and the tier stays. */
-  test('I18 — an assessed row on a holding page never renders', () => {
+  /** I18. A holding page, or a page another host served, holds an `assessed` row back on every pass that reads one, and promotes nothing. */
+  test('I18 — an assessed row on a holding page or another host never renders or promotes', () => {
     const violations: string[] = [];
     for (const c of CASES) {
       const { input } = c;
-      if (input.evidence !== 'assessed' || !input.placeholder) continue;
-      if (!input.outcome.ok) continue;
+      if (input.evidence !== 'assessed' || !input.outcome.ok) continue;
+      if (!input.placeholder && !input.servedElsewhere) continue;
       const r = revalidate(input);
-      if (r.evidence === 'assessed' && r.status === 'verified') {
-        violations.push(`${c.label} rendered`);
-      }
-      if (evidenceRank(r.evidence) < evidenceRank('assessed')) {
-        violations.push(`${c.label} demoted to ${r.evidence}`);
+      if (r.status === 'verified') violations.push(`${c.label} rendered`);
+      if (r.evidence !== 'assessed') {
+        violations.push(`${c.label} moved to ${r.evidence}`);
       }
     }
     expect(violations.slice(0, 10)).toEqual([]);
   });
 
-  /** I19. The holding-page signal moves an `assessed` row's status alone, and nothing on any other row. */
-  test('I19 — the holding-page signal moves only an assessed row, and only its status', () => {
+  /** I19. The two signals move an `assessed` row's status, and withhold a promotion, and nothing on any other row. */
+  test('I19 — the holding-page and other-host signals move only an assessed row', () => {
     const violations: string[] = [];
     for (const c of CASES) {
-      if (!c.input.placeholder) continue;
+      if (!c.input.placeholder && !c.input.servedElsewhere) continue;
       const r = revalidate(c.input);
-      const without = revalidate({ ...c.input, placeholder: false });
+      const without = revalidate({
+        ...c.input,
+        placeholder: false,
+        servedElsewhere: false,
+      });
       if (c.input.evidence !== 'assessed') {
         if (JSON.stringify(r) !== JSON.stringify(without)) {
           violations.push(`${c.label} moved`);
         }
         continue;
       }
-      if (
-        r.evidence !== without.evidence ||
-        r.confidence !== without.confidence ||
-        r.url !== without.url ||
-        r.evidenceUrl !== without.evidenceUrl ||
-        r.failureCount !== without.failureCount
-      ) {
-        violations.push(`${c.label} -> ${r.evidence}`);
+      if (r.url !== without.url || r.failureCount !== without.failureCount) {
+        violations.push(`${c.label} -> ${r.url} f${r.failureCount}`);
       }
     }
     expect(violations.slice(0, 10)).toEqual([]);

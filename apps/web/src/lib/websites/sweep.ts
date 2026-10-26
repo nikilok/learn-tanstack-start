@@ -8,6 +8,7 @@
  * rotates through the table without needing to remember where it got to.
  */
 
+import { hostNamer } from './company-naming.ts';
 import type { WebsiteEvidence, WebsiteStatus } from './decide.ts';
 import { evidenceRank } from './decide.ts';
 import {
@@ -144,7 +145,7 @@ export type SweepSummary = {
    *  large "promoted" figure is a silent unpublish wearing the job's
    *  healthiest-looking metric. */
   demoted: number;
-  /** Rows held back from rendering: parked, for sale, a directory, or an `assessed` row's holding page. */
+  /** Rows held back from rendering: parked, for sale, a directory, or an `assessed` row on a holding page or another host. */
   noSiteThere: number;
   /** `name_and_place` rows whose name or place was gone from every page read, and those not read well enough to tell. */
   nameAndPlaceGone: number;
@@ -440,6 +441,7 @@ export async function sweepWebsites(
       let onAggregator = false;
       let looksParkedPage = false;
       let placeholder = false;
+      let servedElsewhere = false;
       let thinPage = false;
       let nameAndPlace: NameAndPlaceCheck | undefined;
       let nameAndPlaceAt: string | null = null;
@@ -462,12 +464,13 @@ export async function sweepWebsites(
         onAggregator = isAggregatorHost(host);
         looksParkedPage = looksParked(text);
         placeholder = row.evidence === 'assessed' && looksPlaceholder(text);
+        servedElsewhere = row.evidence === 'assessed' && !hostNamer(row)(host);
         thinPage = pageTooThin(text);
         postcodeConfirms = Boolean(
           row.postcode && deps.hasPostcode(fetched.html, row.postcode),
         );
         if (postcodeConfirms) summary.corroborated++;
-        if (onAggregator || looksParkedPage || placeholder) {
+        if (onAggregator || looksParkedPage || placeholder || servedElsewhere) {
           summary.noSiteThere++;
         }
 
@@ -526,6 +529,7 @@ export async function sweepWebsites(
         onAggregator,
         looksParked: looksParkedPage,
         placeholder,
+        servedElsewhere,
         pageTooThin: thinPage,
         nameAndPlace,
         nameAndPlaceAt,

@@ -79,6 +79,8 @@ export type RevalidateInput = {
   pageTooThin?: boolean;
   /** The page is a holding page (looksPlaceholder): read for `assessed` rows, which it holds back. */
   placeholder?: boolean;
+  /** The page was served from a host that names no company of the row's: read for `assessed` rows, which it holds back. */
+  servedElsewhere?: boolean;
   /** A `name_and_place` row's re-check: its name or officer and its place still read, gone from pages that read, or not known this pass. */
   nameAndPlace?: NameAndPlaceCheck;
   /** The page the re-check read the proof on, when it holds. */
@@ -163,6 +165,14 @@ const ANSWERED_BUT_UNREAD = new Set<RevalidateFailure>([
 function hostAnswered(reason: RevalidateFailure, status?: number): boolean {
   return (
     ANSWERED_BUT_UNREAD.has(reason) || (reason === 'http_error' && !!status)
+  );
+}
+
+/** Whether an `assessed` row's page shows nothing to link to: a holding page, or another host's page. */
+function assessedHeld(input: RevalidateInput): boolean {
+  return (
+    input.evidence === 'assessed' &&
+    Boolean(input.placeholder || input.servedElsewhere)
   );
 }
 
@@ -289,6 +299,11 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     // discoveryRank work elsewhere exists to prevent.
     if (evidence === 'registry_confirmed') evidence = 'registry';
     note = 'live; directory or profile listing, not a company website';
+  } else if (assessedHeld(input)) {
+    // Promotes nothing, as a directory does: a later pass that finds the site back records any proof.
+    note = input.placeholder
+      ? 'live; holding page'
+      : 'live; served from a host that names no company of the row';
   } else if (input.crnFoundAt) {
     evidence = nextEvidence(evidence, 'crn_on_page');
     evidenceUrl = input.crnFoundAt;
@@ -358,10 +373,10 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     // overturning.
     status = 'candidate';
     note += '; parked page, held back from rendering';
-  } else if (evidence === 'assessed' && input.placeholder) {
+  } else if (assessedHeld(input)) {
     // Held, never demoted, as a parked page is: a pass that finds the site back restores it.
     status = 'candidate';
-    note += '; holding page, held back from rendering';
+    note += '; held back from rendering';
   } else if (evidence === 'name_and_place' && input.nameAndPlace === 'gone') {
     // Held, never demoted: the tier stays, so a pass that reads the proof again restores it.
     status = 'candidate';

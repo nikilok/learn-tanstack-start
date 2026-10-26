@@ -164,6 +164,7 @@ jobs:
             echo "| ⚙️ Processed | $(extract processed) |"
             echo "| 🏷️ No candidate named | $(extract none_named) |"
             echo "| 📭 Nothing readable | $(extract none_readable) |"
+            echo "| 📵 Unloaded, left for next pass | $(extract unloaded) |"
             echo "| ❓ Asked | $(extract asked) |"
             echo "| ✅ Picked | $(extract picked) |"
             echo "| 🇬🇧 UK sections | $(extract uk_sections) |"

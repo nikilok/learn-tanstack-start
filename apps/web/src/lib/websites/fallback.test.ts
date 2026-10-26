@@ -145,6 +145,30 @@ describe('fallbackWebsites — which rows are asked', () => {
     expect(h.asked[0].candidates.map((c) => c.origin)).toEqual([OTHER, OWN]);
   });
 
+  test('leaves a row for the next pass when nothing loads, rather than settling it', async () => {
+    // A failed load is no answer: settling here would keep the row from the picker for good.
+    const h = harness(picked(OWN), { fetchSite: async () => ({ ok: false }) });
+    const summary = await fallbackWebsites(config(), h.deps);
+    expect(summary.unloaded).toBe(1);
+    expect(h.asked).toEqual([]);
+    expect(h.settled).toEqual([]);
+  });
+
+  test('stops the run once its homepages stop loading, settling nothing', async () => {
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      row({ companyNumber: String(10000000 + i) }),
+    );
+    const h = harness(picked(OWN), {
+      rows,
+      fetchSite: async () => ({ ok: false }),
+    });
+    const summary = await fallbackWebsites(config(), h.deps);
+    expect(summary.processed).toBeLessThan(40);
+    expect(lostNetwork(summary)).toBe(true);
+    expect(h.settled).toEqual([]);
+    expect(h.logs.join('\n')).toContain('homepages are not loading');
+  });
+
   test('settles a row with nothing readable, unasked', async () => {
     const parked =
       '<p>This domain is for sale. Buy this domain today from our brokers.</p>';
@@ -348,6 +372,7 @@ describe('fallbackWebsites — failures', () => {
       processed: 0,
       noneNamed: 0,
       noneReadable: 0,
+      unloaded: 0,
       asked: 0,
       picked: 0,
       ukSections: 0,

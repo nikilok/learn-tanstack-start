@@ -124,3 +124,11 @@ export function isSameSite(a: string | null, b: string | null): boolean {
     u.replace(/^https?:\/\//, '').replace(/^www\./, '');
   return strip(a) === strip(b);
 }
+
+/** A hostname as a site is compared: lower case, without a trailing dot or a leading `www.`. */
+export function siteOf(hostname: string): string {
+  return hostname
+    .toLowerCase()
+    .replace(/\.$/, '')
+    .replace(/^www\./, '');
+}

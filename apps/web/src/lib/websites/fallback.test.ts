@@ -188,6 +188,21 @@ describe('fallbackWebsites — what is kept', () => {
     expect(h.settled).toEqual([]);
   });
 
+  test('refuses a named domain whose page is served from a host that names no company', async () => {
+    // The domain redirects to another business, whose page is what was read.
+    const h = harness(picked(OWN), {
+      fetchSite: async (url) => ({
+        ok: true,
+        url: url === OWN ? `${OTHER}/` : url,
+        html: PAGES[url],
+      }),
+    });
+    const summary = await fallbackWebsites(config(), h.deps);
+    expect(summary.notNamed).toBe(1);
+    expect(h.written).toEqual([]);
+    expect(h.settled).toEqual(['09990117']);
+  });
+
   test('refuses a choice whose domain names no company, and settles the row', async () => {
     const h = harness(picked(OTHER));
     const summary = await fallbackWebsites(config(), h.deps);
@@ -273,6 +288,20 @@ describe('fallbackWebsites — UK sections', () => {
     const summary = await fallbackWebsites(config(), h.deps);
     expect(h.written).toEqual([{ url: GROUP, linkUrl: `${GROUP}/en-gb/` }]);
     expect(summary.ukSections).toBe(1);
+  });
+
+  test('a section served from the same host written with a trailing dot is the same site', async () => {
+    const h = harness(picked(GROUP), {
+      rows: [groupRow],
+      fetchSite: async (url) => ({ ok: true, url, html: withSection }),
+      fetchPage: async () => ({
+        ok: true,
+        url: 'https://www.quillmere-group.com./en-gb/',
+        html: PAGES[GROUP],
+      }),
+    });
+    await fallbackWebsites(config(), h.deps);
+    expect(h.written).toEqual([{ url: GROUP, linkUrl: `${GROUP}/en-gb/` }]);
   });
 
   test('a section that does not load, or lands on another site, is no link', async () => {

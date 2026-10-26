@@ -15,7 +15,7 @@ import { hostNamer } from './company-naming';
 import { MAX_CANDIDATES, siteOrigins } from './discover';
 import { visibleText } from './extract';
 import { PAGE_TEXT_CHARS } from './name-and-place';
-import { normaliseWebsiteUrl } from './normalise-url';
+import { normaliseWebsiteUrl, siteOf } from './normalise-url';
 import { looksParked, looksPlaceholder } from './page-signals';
 import { ukSection } from './uk-section';
 
@@ -186,8 +186,12 @@ export function pickerCompany(row: FallbackRow): PickerCompany {
   };
 }
 
-/** A candidate read off its homepage, with the page it was read from. */
-type ReadCandidate = PickerCandidate & { html: string; canonical: string };
+/** A candidate read off its homepage, with the page it was read from and the url that served it. */
+type ReadCandidate = PickerCandidate & {
+  html: string;
+  canonical: string;
+  served: string;
+};
 
 /** What one row came to. */
 type RowOutcome =
@@ -238,7 +242,7 @@ async function decideRow(
     }
     const candidate = readCandidate(origin, page.html);
     if (looksParked(candidate.text)) continue;
-    read.push({ ...candidate, html: page.html, canonical });
+    read.push({ ...candidate, html: page.html, canonical, served: page.url });
   }
   if (read.length === 0) return { outcome: 'noneReadable' };
 
@@ -252,7 +256,10 @@ async function decideRow(
   if (answer.reason !== 'picked') return { outcome: 'unavailable' };
   const chosen = read.find((candidate) => candidate.origin === answer.pick);
   if (!chosen) return { outcome: 'unavailable' };
-  if (!namesCompany(chosen.origin)) return { outcome: 'notNamed' };
+  // The served host too: a named domain that redirects elsewhere serves another business's page.
+  if (!namesCompany(chosen.origin) || !named(siteHost(chosen.served))) {
+    return { outcome: 'notNamed' };
+  }
   if (looksPlaceholder(chosen.text)) return { outcome: 'holdingPage' };
 
   const section = ukSection(chosen.canonical, chosen.html);
@@ -272,10 +279,10 @@ async function decideRow(
   return { outcome: 'picked', pick: { url: chosen.canonical, linkUrl } };
 }
 
-/** A url's host, www-insensitive; '' when it will not parse. */
+/** A url's host as a site is compared (siteOf); '' when it will not parse. */
 function siteHost(url: string): string {
   try {
-    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    return siteOf(new URL(url).hostname);
   } catch {
     return '';
   }

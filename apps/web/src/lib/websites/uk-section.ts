@@ -8,6 +8,8 @@
  * read from, so the link stays on the site every check reads.
  */
 
+import { siteOf } from './normalise-url';
+
 /** A first path segment naming the UK: en-gb, en-uk, uk, gb, uk-en or gb-en. */
 const UK_SEGMENT = /^\/(en[-_](?:gb|uk)|(?:uk|gb)(?:[-_]en)?)(?:\/|$)/i;
 
@@ -24,14 +26,6 @@ function attribute(tag: string, name: string): string | null {
     'i',
   ).exec(tag);
   return match ? (match[1] ?? match[2] ?? match[3] ?? '').trim() : null;
-}
-
-/** Host compared www-insensitively, as the walk reads a site. */
-function siteOf(hostname: string): string {
-  return hostname
-    .toLowerCase()
-    .replace(/\.$/, '')
-    .replace(/^www\./, '');
 }
 
 /** A same-site href's path, or null for another site's, the home itself or an unreadable one. */

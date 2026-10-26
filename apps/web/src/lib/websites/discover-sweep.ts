@@ -156,6 +156,14 @@ export type Settled = {
   byRender: boolean;
 };
 
+/** No site: what a row comes to when nothing proves one. */
+const NOTHING: DiscoveryOutcome = {
+  url: null,
+  evidenceUrl: null,
+  evidence: 'none',
+  rank: null,
+};
+
 /** One of the top candidates in rank order: its homepage probe, null when it could not be read. */
 type Slot = { url: string; probe: CandidateProbe | null; walked: boolean };
 
@@ -246,14 +254,16 @@ export async function settleCandidates(
   // usable candidate. Measured over 20 companies: this tripled publishable
   // rows. The same pure decider runs again over the updated probe, so there
   // is still one place a decision is made.
-  if (outcome.evidence !== 'crn_on_page') {
-    const top = slots.find((slot) => slot.probe && usable(slot.probe));
-    if (top?.probe) {
-      await walk(top, top.probe);
-      outcome = decideFromCandidates(probes());
-    }
+  const top = slots.find((slot) => slot.probe && usable(slot.probe));
+  if (outcome.evidence !== 'crn_on_page' && top?.probe) {
+    await walk(top, top.probe);
+    outcome = decideFromCandidates(probes());
   }
   if (outcome.evidence !== 'none') return settled(outcome);
+
+  /** What a candidate's own pages proved: a number proves it anywhere, a named postcode below the top result only stops the rule, as sealed. */
+  const owned = (slot: Slot, proof: DiscoveryOutcome): DiscoveryOutcome =>
+    proof.evidence === 'postcode_on_page' && slot !== top ? NOTHING : proof;
 
   // The two-signal rule, down the candidates in rank order as it was sealed.
   const named = hostNamer(row);
@@ -268,7 +278,7 @@ export async function settleCandidates(
       await walk(slot, probe);
       outcome = decideFromCandidates(probes());
       // A number or named postcode on its pages: the existing proofs own the row.
-      if (outcome.evidence !== 'none') return settled(outcome);
+      if (outcome.evidence !== 'none') return settled(owned(slot, outcome));
     }
     const site = slot.probe ?? probe;
     // Raw pages that show the walk nothing are read again in a browser, before the people lookup.
@@ -283,7 +293,10 @@ export async function settleCandidates(
           stated: [...(site.stated ?? []), ...(shown.stated ?? [])],
         };
         outcome = decideFromCandidates(probes());
-        if (outcome.evidence !== 'none') return settled(outcome, true);
+        if (outcome.evidence !== 'none') {
+          const proof = owned(slot, outcome);
+          return settled(proof, proof.evidence !== 'none');
+        }
         // A render that landed on a directory or a holding page proves nothing.
         if (usable(shown)) seen = slot.probe;
       }

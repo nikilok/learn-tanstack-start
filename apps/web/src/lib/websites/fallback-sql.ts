@@ -15,16 +15,21 @@ import { SPONSOR_TOWNS_COLUMN, sponsorTownsOf } from './sponsor-towns';
 
 type Sql = NeonQueryFunction<false, false>;
 
+/** A search row left empty and not yet settled: what every read and write here requires. Constant SQL text; `table` is the row's alias, or none. */
+function unsettled(table?: string): string {
+  const col = (name: string) => (table ? `${table}.${name}` : name);
+  return `${col('source')} = 'search' AND ${col('status')} = 'none' AND ${col('evidence')} = 'none' AND ${col('url')} IS NULL AND ${col('fallback_checked_at')} IS NULL`;
+}
+
 /**
- * The rows the fallback reads: search rows the current walk read and left
- * empty, for a company the register shows as active, not yet settled. One
+ * The rows the fallback reads: unsettled search rows the current walk read,
+ * with banked results, for a company the register shows as active. One
  * declaration for the selector and the count. Constant SQL text, interpolated
  * raw; the row is `w`, its profile `p`.
  */
-const FALLBACK_ROWS = `w.source = 'search' AND w.status = 'none' AND w.evidence = 'none'
-  AND w.url IS NULL AND jsonb_typeof(w.candidates) = 'array'
+const FALLBACK_ROWS = `${unsettled('w')}
+  AND jsonb_typeof(w.candidates) = 'array'
   AND w.walk_version = ${CURRENT_WALK_VERSION}
-  AND w.fallback_checked_at IS NULL
   AND p.company_status = 'active'`;
 
 /** SIC descriptions by code. */
@@ -97,8 +102,7 @@ export function makeWritePick(sql: Sql) {
         failure_count       = 0,
         fallback_checked_at = now()
       WHERE company_number = ${row.companyNumber}
-        AND source = 'search' AND status = 'none' AND evidence = 'none'
-        AND url IS NULL AND fallback_checked_at IS NULL
+        AND ${sql.unsafe(unsettled())}
       RETURNING company_number
     `;
     return updated.length > 0;
@@ -111,8 +115,7 @@ export function makeMarkSettled(sql: Sql) {
     await sql`
       UPDATE company_websites SET fallback_checked_at = now()
       WHERE company_number = ${row.companyNumber}
-        AND source = 'search' AND status = 'none' AND evidence = 'none'
-        AND url IS NULL AND fallback_checked_at IS NULL
+        AND ${sql.unsafe(unsettled())}
     `;
   };
 }

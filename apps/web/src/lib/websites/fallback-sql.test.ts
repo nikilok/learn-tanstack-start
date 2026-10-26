@@ -27,12 +27,16 @@ const row: FallbackRow = {
   candidates: [],
 };
 
+/** The unsettled-row condition the selector and both writes share, unaliased as the writes render it. */
+const UNSETTLED =
+  "source = 'search' AND status = 'none' AND evidence = 'none' AND url IS NULL AND fallback_checked_at IS NULL";
+
 /** The selector's predicate, every clause of it. */
 const PREDICATE = [
   "w.source = 'search' AND w.status = 'none' AND w.evidence = 'none'",
-  "AND w.url IS NULL AND jsonb_typeof(w.candidates) = 'array'",
+  'AND w.url IS NULL AND w.fallback_checked_at IS NULL',
+  "AND jsonb_typeof(w.candidates) = 'array'",
   `AND w.walk_version = ${CURRENT_WALK_VERSION}`,
-  'AND w.fallback_checked_at IS NULL',
   "AND p.company_status = 'active'",
 ].join(' ');
 
@@ -107,9 +111,7 @@ describe('makeWritePick', () => {
     // The sweep confirms the site before it renders.
     expect(text).toContain('checked_at = NULL');
     expect(text).toContain('fallback_checked_at = now()');
-    expect(text).toContain(
-      "AND source = 'search' AND status = 'none' AND evidence = 'none' AND url IS NULL AND fallback_checked_at IS NULL",
-    );
+    expect(text).toContain(`AND ${UNSETTLED}`);
     expect(calls[0].params).toEqual([
       'https://www.quillmere-group.com',
       'https://www.quillmere-group.com/en-gb/',
@@ -135,9 +137,7 @@ describe('makeMarkSettled', () => {
     await makeMarkSettled(sql)(row);
     const text = flat(calls[0].text);
     expect(text).toContain('SET fallback_checked_at = now()');
-    expect(text).toContain(
-      "AND source = 'search' AND status = 'none' AND evidence = 'none' AND url IS NULL AND fallback_checked_at IS NULL",
-    );
+    expect(text).toContain(`AND ${UNSETTLED}`);
   });
 });
 

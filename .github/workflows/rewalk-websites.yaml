@@ -1,10 +1,17 @@
 name: Re-walk Company Websites (Search)
 
 # Re-reads the search rows discovery has already settled, with today's walk
-# (homepage legal links, then seven fixed paths) behind the crowded-host
-# guard. Zero search credits: `none` rows reuse their banked results, postcode
-# rows walk the site they already hold. Upgrades only, and every statutory
-# company number the pages state is recorded in website_stated_numbers.
+# (homepage legal links, the nine fixed paths, then about links) behind the
+# crowded-host guard, and the two-signal rule on `none` rows. Zero search
+# credits: `none` rows reuse their banked results, postcode rows walk the site
+# they already hold. Upgrades only, and every statutory company number the
+# pages state is recorded in website_stated_numbers. The rule's officer
+# lookups share the phase-5 sweeps' Companies House key, paced to one call
+# every two seconds across the job's workers. A candidate whose homepage shows
+# a plain fetch nothing is read again in headless Chromium. Walking each
+# candidate the rule reaches, and rendering the silent ones, makes a row about
+# three times slower than walk v2 (an estimate until a timed run), so a worker
+# takes about 350 rows inside its 355 minutes.
 #
 # Manual only. Each worker walks its own slice (shard.ts) and marks what it
 # read, so a dispatch resumes where the last one stopped. Like discovery it
@@ -19,7 +26,7 @@ on:
         type: boolean
         default: false
       max-rows:
-        description: 'Rows each worker walks this run (default 1500)'
+        description: 'Rows each worker walks this run (default 350)'
         required: false
         type: number
       shards:
@@ -93,12 +100,17 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
 
+      - name: Install Playwright Chromium
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
       - name: Re-walk websites
         shell: bash
         # Inputs go through env, never interpolated into the script; the secret
         # is scoped to this step.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
           DRY_RUN: ${{ github.event.inputs.dry-run }}
           MAX_ROWS: ${{ github.event.inputs.max-rows }}
           EVIDENCE: ${{ github.event.inputs.evidence }}
@@ -110,10 +122,10 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             ARGS+=(--dry-run)
           fi
-          case "${MAX_ROWS:-1500}" in
+          case "${MAX_ROWS:-350}" in
             ''|*[!0-9]*) echo "max-rows must be a positive integer"; exit 1 ;;
           esac
-          ARGS+=("--max-rows=${MAX_ROWS:-1500}")
+          ARGS+=("--max-rows=${MAX_ROWS:-350}")
           case "$EVIDENCE" in
             none|postcode) ARGS+=("--evidence=$EVIDENCE") ;;
             all|'') ;;
@@ -140,6 +152,7 @@ jobs:
             echo "| ⚙️ Processed | $(extract processed) |"
             echo "| 🪪 None → number | $(extract none_to_number) |"
             echo "| 📮 None → postcode | $(extract none_to_postcode) |"
+            echo "| 🧭 None → name and place | $(extract none_to_name_place) |"
             echo "| 🔼 Postcode → number | $(extract postcode_to_number) |"
             echo "| ➖ Unchanged | $(extract unchanged) |"
             echo "| 📵 Unreadable | $(extract unreadable) |"
@@ -147,6 +160,10 @@ jobs:
             echo "| ❌ Errored | $(extract errored) |"
             echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"
             echo "| 📑 Disclosure fetches | $(extract disclosure_fetches) |"
+            echo "| 👤 Officer lookups | $(extract officer_lookups) |"
+            echo "| ⚠️ Officer lookups failed | $(extract officer_failures) |"
+            echo "| 🖥️ Rendered | $(extract rendered) |"
+            echo "| ✨ Upgraded by render | $(extract upgraded_by_render) |"
             echo "| 🔢 Stated numbers | $(extract stated_numbers) |"
             echo "| ⏱️ Minutes | $(extract minutes) |"
             echo "| ⏳ Left | $(extract left) |"

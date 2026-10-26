@@ -26,6 +26,7 @@
 
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { WebsiteEvidence } from './decide';
+import type { PageRead } from './name-and-place';
 import type { StatedOnSite } from './stated-numbers';
 
 /** What one candidate site turned out to be, once fetched. */
@@ -45,10 +46,20 @@ export type CandidateProbe = {
   onAggregator: boolean;
   /** Parked, for sale, or a holding page. */
   parked: boolean;
+  /** The homepage is a bot challenge, not the site. */
+  challenged?: boolean;
+  /** Same-site pages the homepage links to; none means a menu its scripts build. */
+  siteLinks?: number;
+  /** The homepage carries too little text to have been read. */
+  thin?: boolean;
   /** Same-site legal pages the homepage links to, walked before the fixed paths. */
   legalLinks?: string[];
+  /** Same-site about and team pages the homepage links to, walked after the fixed paths. */
+  aboutLinks?: string[];
   /** Statutory company numbers the pages read for this candidate stated. */
   stated?: StatedOnSite[];
+  /** The pages read so far, homepage first, as the two-signal rule reads them. */
+  pages?: PageRead[];
 };
 
 export type DiscoveryOutcome = {

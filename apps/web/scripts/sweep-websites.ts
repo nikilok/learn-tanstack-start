@@ -19,6 +19,10 @@
  *   bun apps/web/scripts/sweep-websites.ts            # full slice (CI)
  *
  * Env: POSTGRES_URL. WEBSITE_SWEEP_DELAY_MS overrides the pacing.
+ * COMPANIES_HOUSE_SEED_API_KEY lets a `name_and_place` row's officer be re-read.
+ * A `name_and_place` homepage that shows a plain fetch nothing is read in
+ * headless Chromium; `--no-render` skips that, as does a browser that will not
+ * start, which leaves such a row as it was.
  */
 
 import { createClient, neon } from '@ss/db/client';
@@ -29,12 +33,14 @@ import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts
 import { makeCoverage } from '../src/lib/websites/sql.ts';
 import { sweepWebsites } from '../src/lib/websites/sweep.ts';
 import { setGitHubOutput } from './ci-utils.ts';
+import { makeOfficerLookup } from './lib/ch-officers.ts';
 import {
   ERROR_RATE_THRESHOLD,
   loadScriptEnv,
   parseStrictInt,
 } from './lib/script-utils.ts';
 import { makeSweepDeps } from './lib/sweep-deps.ts';
+import { launchRenderer, type Renderer } from './lib/web-render.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -68,6 +74,7 @@ const delayMs = process.env.WEBSITE_SWEEP_DELAY_MS
 
 const sql = neon(process.env.POSTGRES_URL as string);
 const coverage = makeCoverage(createClient(process.env.POSTGRES_URL as string));
+const chKey = process.env.COMPANIES_HOUSE_SEED_API_KEY;
 const refreshPostcodeShares = makeRefreshPostcodeShares((text) =>
   sql.query(text),
 );
@@ -80,6 +87,17 @@ console.log(
   `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(`  max-rows: ${maxRows}  delay: ${delayMs}ms`);
+if (!chKey) console.log('  officer re-check: off, no Companies House key');
+let renderer: Renderer | null = null;
+if (!args.includes('--no-render')) {
+  try {
+    renderer = await launchRenderer();
+  } catch (err) {
+    console.log(
+      `  render re-check: off, the browser would not start (${err instanceof Error ? err.name : 'unknown'})`,
+    );
+  }
+}
 
 const before = await coverage();
 console.log(
@@ -98,8 +116,13 @@ const summary = await sweepWebsites(
     // never passes --verbose, so CI cannot turn it on by accident.
     logRows: verbose,
   },
-  makeSweepDeps(sql, (message) => console.log(message)),
-);
+  makeSweepDeps(
+    sql,
+    (message) => console.log(message),
+    chKey ? makeOfficerLookup({ apiKey: chKey, workers: 1 }) : undefined,
+    renderer ?? undefined,
+  ),
+).finally(() => renderer?.close());
 
 // After the slice, so a failed refresh never costs the run its liveness work.
 let sharesMoved: number | null = null;
@@ -133,6 +156,9 @@ console.log(`  disclosure_fetches  : ${summary.disclosureFetches}`);
 console.log(`  corroborated        : ${summary.corroborated}`);
 console.log(`  demoted             : ${summary.demoted}`);
 console.log(`  no_site_there       : ${summary.noSiteThere}`);
+console.log(`  name_place_gone     : ${summary.nameAndPlaceGone}`);
+console.log(`  name_place_unread   : ${summary.nameAndPlaceUnread}`);
+console.log(`  name_place_rendered : ${summary.nameAndPlaceRendered}`);
 console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);

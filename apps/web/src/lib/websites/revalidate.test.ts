@@ -400,3 +400,82 @@ describe('a thin page never withdraws a confirmation', () => {
     ).toBe('registry_confirmed');
   });
 });
+
+describe('a name_and_place row is held while its proof is gone, never demoted', () => {
+  const live = (over: Partial<RevalidateInput> = {}) =>
+    revalidate(input({ evidence: 'name_and_place', ...over }));
+
+  test('a re-check that found the name or place gone holds it back, tier kept', () => {
+    const result = live({ nameAndPlace: 'gone' });
+    expect(result.status).toBe('candidate');
+    expect(result.evidence).toBe('name_and_place');
+    expect(result.confidence).toBe('0.900');
+  });
+
+  test('one that could not read the proof keeps a published row published, and nothing else', () => {
+    expect(live({ nameAndPlace: 'unknown' }).status).toBe('verified');
+    for (const status of ['candidate', 'unreachable', 'dead'] as const) {
+      expect(live({ nameAndPlace: 'unknown', status }).status).toBe(
+        'candidate',
+      );
+    }
+  });
+
+  test('a held row a failed fetch interrupted is not published by a pass that cannot read its proof', () => {
+    // Held, then a timeout overwrote the hold with `unreachable`.
+    const held = live({ nameAndPlace: 'gone' });
+    const failed = revalidate(
+      input({
+        evidence: 'name_and_place',
+        status: held.status,
+        outcome: { ok: false, reason: 'timeout' },
+      }),
+    );
+    expect(failed.status).toBe('unreachable');
+    expect(
+      live({ nameAndPlace: 'unknown', status: failed.status }).status,
+    ).toBe('candidate');
+    expect(live({ nameAndPlace: 'holds', status: failed.status }).status).toBe(
+      'verified',
+    );
+  });
+
+  test('holding, it keeps the page the proof was read on', () => {
+    const at = 'https://www.example.co.uk/about-us';
+    expect(
+      live({ nameAndPlace: 'holds', nameAndPlaceAt: at }).evidenceUrl,
+    ).toBe(at);
+    expect(live({ nameAndPlace: 'gone' }).evidenceUrl).toBeNull();
+  });
+
+  test('the proof read again restores it', () => {
+    expect(live({ nameAndPlace: 'holds', status: 'candidate' }).status).toBe(
+      'verified',
+    );
+  });
+
+  test('a postcode on the page moves neither its tier nor its proof page', () => {
+    const result = live({
+      postcodeFoundAt: 'https://www.example.co.uk/contact',
+      nameAndPlace: 'holds',
+    });
+    expect(result.evidence).toBe('name_and_place');
+    expect(result.evidenceUrl).toBeNull();
+  });
+
+  test('its number on the site promotes it', () => {
+    expect(
+      live({
+        crnFoundAt: 'https://www.example.co.uk/terms',
+        nameAndPlace: 'gone',
+      }),
+    ).toMatchObject({ evidence: 'crn_on_page', status: 'verified' });
+  });
+
+  test('the re-check means nothing to any other tier', () => {
+    expect(
+      revalidate(input({ evidence: 'postcode_on_page', nameAndPlace: 'gone' }))
+        .status,
+    ).toBe('verified');
+  });
+});

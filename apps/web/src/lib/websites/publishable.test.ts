@@ -63,7 +63,7 @@ describe('the shared-postcode arm', () => {
     // `<=` on a NULL share is NULL, so a row the refresh has not reached, or
     // whose company has no postcode, cannot publish through this arm.
     expect(render(publishableWebsiteGate())).toEqual({
-      text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or (("company_websites"."source" = $8 and "company_websites"."evidence" = $9 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $10))) and "company_websites"."url" is not null)',
+      text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or ("company_websites"."source" = $8 and "company_websites"."evidence" = $9) or (("company_websites"."source" = $10 and "company_websites"."evidence" = $11 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $12))) and "company_websites"."url" is not null)',
       params: [
         'verified',
         'manual',
@@ -72,6 +72,8 @@ describe('the shared-postcode arm', () => {
         'search',
         'postcode_on_page',
         10,
+        'search',
+        'name_and_place',
         'search',
         'postcode_on_page',
         45,
@@ -124,9 +126,9 @@ describe('the named-host arm', () => {
     // no writer has to clear named_url for the gate to close.
     const { text, params } = render(publishableWebsiteGate());
     expect(text).toContain(
-      '("company_websites"."source" = $8 and "company_websites"."evidence" = $9 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url")',
+      '("company_websites"."source" = $10 and "company_websites"."evidence" = $11 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url")',
     );
-    expect(params.slice(7, 9)).toEqual(['search', 'postcode_on_page']);
+    expect(params.slice(9, 11)).toEqual(['search', 'postcode_on_page']);
   });
 
   test('publishes only a row a sweep confirmed live within NAMED_HOST_LIVE_DAYS', () => {
@@ -136,11 +138,28 @@ describe('the named-host arm', () => {
     expect(NAMED_HOST_LIVE_DAYS).toBe(45);
     const { text, params } = render(publishableWebsiteGate());
     expect(text).toContain(
-      'and "company_websites"."checked_at" >= now() - make_interval(days => $10))',
+      'and "company_websites"."checked_at" >= now() - make_interval(days => $12))',
     );
     expect(params.at(-1)).toBe(NAMED_HOST_LIVE_DAYS);
     // Retention keeps the arm with no bound: a stalled sweep is no loss.
     expect(render(answersRetentionGate()).text).not.toContain('make_interval');
+  });
+});
+
+describe('the name-and-place arm', () => {
+  test('admits a search row the two-signal rule proved, on both gates', () => {
+    // Sealed before a fresh draw and scored 65/65 on it (lower bound 96.0%);
+    // only search rows were measured, as with the postcode arms.
+    const arm =
+      '("company_websites"."source" = $8 and "company_websites"."evidence" = $9)';
+    const { text, params } = render(publishableWebsiteGate());
+    expect(text).toContain(arm);
+    expect(params.slice(7, 9)).toEqual(['search', 'name_and_place']);
+    const retain = render(answersRetentionGate());
+    expect(retain.text).toContain(
+      '("company_websites"."source" = $9 and "company_websites"."evidence" = $10)',
+    );
+    expect(retain.params.slice(8, 10)).toEqual(['search', 'name_and_place']);
   });
 });
 

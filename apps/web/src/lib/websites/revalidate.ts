@@ -77,7 +77,14 @@ export type RevalidateInput = {
    * it, which reads to a visitor as a company website that flickers.
    */
   pageTooThin?: boolean;
+  /** A `name_and_place` row's re-check: its name or officer and its place still read, gone from pages that read, or not known this pass. */
+  nameAndPlace?: NameAndPlaceCheck;
+  /** The page the re-check read the proof on, when it holds. */
+  nameAndPlaceAt?: string | null;
 };
+
+/** What re-reading a `name_and_place` row's proof found. */
+export type NameAndPlaceCheck = 'holds' | 'gone' | 'unknown';
 
 export type RevalidateResult = {
   url: string;
@@ -305,6 +312,12 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidence = 'registry';
     note =
       'live; registered office postcode no longer on the site, confirmation withdrawn';
+  } else if (evidence === 'name_and_place') {
+    // Its proof is the re-check's: a postcode alone moves nothing, nor its proof page.
+    if (input.nameAndPlace === 'holds') {
+      evidenceUrl = input.nameAndPlaceAt ?? null;
+      note = 'live; name or officer, and place, still on the site';
+    }
   } else if (input.postcodeFoundAt) {
     evidence = nextEvidence(evidence, 'postcode_on_page');
     evidenceUrl = input.postcodeFoundAt;
@@ -343,6 +356,18 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     // overturning.
     status = 'candidate';
     note += '; parked page, held back from rendering';
+  } else if (evidence === 'name_and_place' && input.nameAndPlace === 'gone') {
+    // Held, never demoted: the tier stays, so a pass that reads the proof again restores it.
+    status = 'candidate';
+    note += '; name or place no longer on the site, held back from rendering';
+  } else if (
+    evidence === 'name_and_place' &&
+    input.nameAndPlace !== 'holds' &&
+    input.status !== 'verified'
+  ) {
+    // Unread: only a published row stays published, and only a read proof restores one.
+    status = 'candidate';
+    note += '; name or place not read this pass, held back until it is';
   }
 
   return {

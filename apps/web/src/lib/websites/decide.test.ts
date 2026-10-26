@@ -30,6 +30,7 @@ describe('statusForEvidence', () => {
     expect(statusForEvidence('crn_on_page')).toBe('verified');
     expect(statusForEvidence('registry')).toBe('verified');
     expect(statusForEvidence('postcode_on_page')).toBe('verified');
+    expect(statusForEvidence('name_and_place')).toBe('verified');
     expect(statusForEvidence('manual')).toBe('verified');
   });
 
@@ -52,6 +53,7 @@ describe('evidenceRank', () => {
       'registry_unconfirmed',
       'llm_adjudicated',
       'postcode_on_page',
+      'name_and_place',
       'registry',
       'crn_on_page',
       'manual',
@@ -68,6 +70,7 @@ describe('evidenceRank', () => {
     ];
     const verified: WebsiteEvidence[] = [
       'postcode_on_page',
+      'name_and_place',
       'registry',
       'crn_on_page',
       'manual',
@@ -75,6 +78,29 @@ describe('evidenceRank', () => {
     const ceiling = Math.max(...candidates.map(evidenceRank));
     const floor = Math.min(...verified.map(evidenceRank));
     expect(ceiling).toBeLessThan(floor);
+  });
+
+  test('name_and_place sits above the postcode tier and below a registry join', () => {
+    // The sweep promotes on any postcode it reads; a lower rung would trade a
+    // published proof for a postcode row the share limit may hold back.
+    const row = existing({
+      url: 'https://quillmere.co.uk',
+      evidence: 'name_and_place',
+      source: 'search',
+    });
+    expect(
+      decideWebsite(
+        row,
+        proposed({
+          url: 'https://other.co.uk',
+          evidence: 'postcode_on_page',
+          source: 'search',
+        }),
+      ),
+    ).toEqual({ action: 'keep' });
+    expect(
+      decideWebsite(row, proposed({ url: 'https://other.co.uk' })),
+    ).toEqual({ action: 'update' });
   });
 
   test('an unconfirmed registry row is not promoted by an LLM agreeing', () => {
@@ -93,6 +119,7 @@ describe('evidenceRank', () => {
       'registry_unconfirmed',
       'llm_adjudicated',
       'postcode_on_page',
+      'name_and_place',
       'registry',
       'crn_on_page',
       'manual',

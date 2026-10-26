@@ -12,9 +12,10 @@ name: Sweep Company Websites
 # Own concurrency group, NOT phase5-sweep: GitHub keeps only one pending run per
 # group and the five sweep workflows are already staggered to avoid evicting one
 # another. This job writes no table they write (the postcode-share refresh only
-# reads the mapping and profiles) and makes no Companies House calls, so there
-# is nothing to serialise against — including the 05:37 tier-2 sweep the 05:43
-# slot sits alongside on Sundays and Wednesdays.
+# reads the mapping and profiles), and its only Companies House calls are a
+# name_and_place row's officers, one every two seconds at most, so there is nothing to
+# serialise against — including the 05:37 tier-2 sweep the 05:43 slot sits
+# alongside on Sundays and Wednesdays.
 #
 # Three eight-hourly runs, because search discovery now runs four times a day
 # and a run's worth of new rows lands ahead of every re-check: never-checked
@@ -79,6 +80,12 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
 
+      - name: Install Playwright Chromium
+        # Optional here: the sweep runs without a browser, as it does when one will not start.
+        continue-on-error: true
+        run: bun x playwright install --with-deps chromium
+        working-directory: apps/web
+
       - name: Sweep websites
         shell: bash
         # Inputs go through env, never interpolated into the run script.
@@ -87,6 +94,7 @@ jobs:
         # postinstall script `bun install` executes.
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          COMPANIES_HOUSE_SEED_API_KEY: ${{ secrets.COMPANIES_HOUSE_SEED_API_KEY }}
           DRY_RUN: ${{ github.event.inputs.dry-run }}
           MAX_ROWS: ${{ github.event.inputs.max-rows }}
         run: |
@@ -165,6 +173,9 @@ jobs:
             echo "| 🪪 Name corroborated | $(extract corroborated) |"
             echo "| ⬇️ Demoted | $(extract demoted) |"
             echo "| 🚧 No site there | $(extract no_site_there) |"
+            echo "| 🧭 Name or place gone | $(extract name_place_gone) |"
+            echo "| 🌫️ Name or place unread | $(extract name_place_unread) |"
+            echo "| 🖥️ Name or place rendered | $(extract name_place_rendered) |"
             echo "| 💾 Updated | $(extract updated) |"
             echo "| 📮 Postcode shares moved | $(extract postcode_shares) |"
             echo "| 🏷️ Named urls moved | $(extract named_urls) |"

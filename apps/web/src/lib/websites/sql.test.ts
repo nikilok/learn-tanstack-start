@@ -3,10 +3,52 @@ import { describe, expect, test } from 'bun:test';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 
+import { makeFakeSql } from './fake-sql';
 import { publishableWebsiteGate } from './publishable';
-import { makeCoverage } from './sql';
+import { sponsorNamesColumnFor, SPONSOR_NAMES_KEY } from './sponsor-names';
+import { SPONSOR_TOWNS_KEY, sponsorTownsColumnFor } from './sponsor-towns';
+import { makeCoverage, makeSelectRows } from './sql';
 
 const dialect = new PgDialect();
+
+describe('makeSelectRows', () => {
+  test("reads the company's names and places, which a name_and_place re-check reads", async () => {
+    const { sql, calls } = makeFakeSql([
+      {
+        company_number: '09990117',
+        url: 'https://www.qmx.co.uk',
+        company_name: 'QUILLMERE ANALYTICS LIMITED',
+        locality: 'Harrogate',
+        [SPONSOR_NAMES_KEY]: ['Quillmere Analytics Ltd'],
+        [SPONSOR_TOWNS_KEY]: ['Harrogate'],
+      },
+      { company_number: '09990118', url: 'https://hestwick.co.uk' },
+    ]);
+    const rows = await makeSelectRows(sql)(10);
+    expect(calls[0].text.replace(/\s+/g, ' ')).toContain(
+      "p.postal_code, coalesce(p.company_name, '') AS company_name, p.locality,",
+    );
+    // Keyed on the website row, so a company without a profile keeps its register entries.
+    expect(calls[0].text).toContain(sponsorNamesColumnFor('w.company_number'));
+    expect(calls[0].text).toContain(sponsorTownsColumnFor('w.company_number'));
+    expect(
+      rows.map((r) => [
+        r.companyName,
+        r.sponsorNames,
+        r.registerTowns,
+        r.locality,
+      ]),
+    ).toEqual([
+      [
+        'QUILLMERE ANALYTICS LIMITED',
+        ['Quillmere Analytics Ltd'],
+        ['Harrogate'],
+        'Harrogate',
+      ],
+      ['', [], [], null],
+    ]);
+  });
+});
 
 describe('makeCoverage', () => {
   test('counts renderable rows through the page gate itself', async () => {

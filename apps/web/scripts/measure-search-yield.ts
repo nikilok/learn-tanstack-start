@@ -17,6 +17,7 @@
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/measure-search-yield.ts --n=40
+ *   bun apps/web/scripts/measure-search-yield.ts --n=40 --no-render
  */
 
 import { neon } from '@ss/db/client';
@@ -31,13 +32,24 @@ import {
 } from '../src/lib/websites/discover-sql.ts';
 import type { DiscoveryRow } from '../src/lib/websites/discover-sweep.ts';
 import { discoverWebsites } from '../src/lib/websites/discover-sweep.ts';
+import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
 import {
   SPONSOR_NAMES_COLUMN,
   sponsorNamesOf,
 } from '../src/lib/websites/sponsor-names.ts';
+import {
+  SPONSOR_TOWNS_COLUMN,
+  sponsorTownsOf,
+} from '../src/lib/websites/sponsor-towns.ts';
+import { makeOfficerLookup } from './lib/ch-officers.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
 import { searchCompany } from './lib/serper.ts';
-import { probeOrigin, walkDisclosure } from './lib/website-probe.ts';
+import { launchRenderer } from './lib/web-render.ts';
+import {
+  probeOrigin,
+  renderCandidate,
+  walkDisclosure,
+} from './lib/website-probe.ts';
 
 loadScriptEnv(import.meta.url);
 
@@ -55,7 +67,7 @@ const EXPERIMENT_MAX_N = 500;
 const n = Math.min(parseStrictInt(flag('n') ?? '40', 'n'), EXPERIMENT_MAX_N);
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 const maxDisclosure = parseStrictInt(
-  flag('max-disclosure') ?? '7',
+  flag('max-disclosure') ?? String(DISCLOSURE_PATHS.length),
   'max-disclosure',
 );
 /** Fixed so the DRAW is deterministic for a given population state — NOT a free
@@ -68,6 +80,14 @@ if (!apiKey) {
   console.error('  SERPER_API_KEY is not set');
   process.exit(1);
 }
+const chKey = process.env.COMPANIES_HOUSE_SEED_API_KEY;
+if (!chKey) {
+  console.error('  COMPANIES_HOUSE_SEED_API_KEY is not set');
+  process.exit(1);
+}
+
+// Started before any credit is spent: a browser that will not start stops the run here.
+const renderer = args.includes('--no-render') ? null : await launchRenderer();
 
 const sql = neon(process.env.POSTGRES_URL as string);
 
@@ -83,11 +103,13 @@ const sql = neon(process.env.POSTGRES_URL as string);
 async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
   // The register's names for the sample alone; the column reads p.company_number.
   const rows = await sql`
-    SELECT p.*, ${sql.unsafe(SPONSOR_NAMES_COLUMN)} FROM (
+    SELECT p.*, ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
+      ${sql.unsafe(SPONSOR_TOWNS_COLUMN)} FROM (
       SELECT DISTINCT ON (m.company_number)
         m.company_number,
         coalesce(p.company_name, '') AS company_name,
         coalesce(nullif(p.locality, ''), p.address_line_2, '') AS town,
+        p.locality,
         p.postal_code
       FROM hmrc_company_mapping m
       JOIN companies_house_profiles p ON p.company_number = m.company_number
@@ -106,6 +128,8 @@ async function selectRandom(maxRows: number): Promise<DiscoveryRow[]> {
     sponsorNames: sponsorNamesOf(r),
     town: (r.town as string | null) ?? '',
     postcode: (r.postal_code as string | null) ?? null,
+    registerTowns: sponsorTownsOf(r),
+    locality: (r.locality as string | null) ?? null,
     bankedCandidates: null,
   }));
 }
@@ -121,6 +145,11 @@ console.log(`  n: ${n}  seed: ${seed}  (${n} credits)`);
 const writeOutcome = makeWriteOutcome(sql);
 const crowdedHosts = await makeCrowdedHosts(sql)();
 let disclosureFetches = 0;
+const walkOptions = {
+  maxPaths: maxDisclosure,
+  crowded: crowdedHosts,
+  delayMs,
+};
 
 const summary = await discoverWebsites(
   { maxRows: n, maxSearches: n, delayMs, dryRun: false },
@@ -134,15 +163,17 @@ const summary = await discoverWebsites(
     bankCandidates: makeBankCandidates(sql),
     markAttempt: makeMarkAttempt(sql),
     probe: (row, url) => probeOrigin(row, url, crowdedHosts),
+    officers: makeOfficerLookup({ apiKey: chKey, workers: 1 }),
     walkDisclosure: (row, base) =>
       walkDisclosure(row, base, {
-        maxPaths: maxDisclosure,
-        crowded: crowdedHosts,
-        delayMs,
+        ...walkOptions,
         onFetch: () => {
           disclosureFetches += 1;
         },
       }),
+    render: renderer
+      ? (row, base) => renderCandidate(row, base, renderer, walkOptions)
+      : undefined,
     write: async (row, outcome) => {
       const persisted = await writeOutcome(
         row,
@@ -157,7 +188,7 @@ const summary = await discoverWebsites(
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (message) => console.log(message),
   },
-);
+).finally(() => renderer?.close());
 
 // Decades are read back after the run so the sample is described by what was
 // actually processed, not by what was selected.
@@ -178,14 +209,15 @@ if (numbers.length > 0) {
   }
 }
 
-const found = summary.foundByNumber + summary.foundByAddress;
-const decided =
-  summary.foundByNumber + summary.foundByAddress + summary.foundNothing;
+const found =
+  summary.foundByNumber + summary.foundByAddress + summary.foundByNameAndPlace;
+const decided = found + summary.foundNothing;
 
 console.log('\n─── yield ───');
 console.log(`  searched            : ${summary.searched}`);
 console.log(`  crn_on_page         : ${summary.foundByNumber}  ← publishable`);
 console.log(`  postcode_on_page    : ${summary.foundByAddress}`);
+console.log(`  name_and_place      : ${summary.foundByNameAndPlace}`);
 console.log(`  none                : ${summary.foundNothing}`);
 console.log(
   `  publishable rate    : ${decided === 0 ? '-' : ((summary.foundByNumber / decided) * 100).toFixed(1)}%`,
@@ -195,6 +227,8 @@ console.log(
 );
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
 console.log(`  disclosure_fetches  : ${disclosureFetches}`);
+console.log(`  rendered            : ${summary.rendered}`);
+console.log(`  found_by_render     : ${summary.foundByRender}`);
 console.log(`  written             : ${summary.written}`);
 console.log(`  unpersisted         : ${summary.unpersisted}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
@@ -205,7 +239,7 @@ console.log(`  stopped_early       : ${summary.stoppedEarly || 'no'}`);
 console.log('\n─── by incorporation decade ───');
 const decades = [...new Set([...decadeOf.values()])].sort();
 console.log(
-  `  ${'decade'.padEnd(10)} ${'n'.padEnd(4)} ${'crn'.padEnd(5)} pcode  none`,
+  `  ${'decade'.padEnd(10)} ${'n'.padEnd(4)} ${'crn'.padEnd(5)} pcode  n&p   none`,
 );
 for (const d of decades) {
   const members = numbers.filter((cn) => decadeOf.get(cn) === d);
@@ -213,8 +247,11 @@ for (const d of decades) {
   const p = members.filter(
     (cn) => outcomeOf.get(cn) === 'postcode_on_page',
   ).length;
+  const np = members.filter(
+    (cn) => outcomeOf.get(cn) === 'name_and_place',
+  ).length;
   console.log(
-    `  ${d.padEnd(10)} ${String(members.length).padEnd(4)} ${String(c).padEnd(5)} ${String(p).padEnd(6)} ${members.length - c - p}`,
+    `  ${d.padEnd(10)} ${String(members.length).padEnd(4)} ${String(c).padEnd(5)} ${String(p).padEnd(6)} ${String(np).padEnd(5)} ${members.length - c - p - np}`,
   );
 }
 

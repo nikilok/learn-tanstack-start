@@ -63,6 +63,18 @@ describe('isPlatformPage', () => {
     );
   });
 
+  test("a business's jobs pages on a careers platform are never its own site", () => {
+    // The first walk-3 waves picked a company's careers page on such a platform.
+    expect(isPlatformPage('quillmere.career.softgarden.de')).toBe(true);
+    expect(isPlatformPage('quillmere.jobs.personio.de')).toBe(true);
+    expect(isPlatformPage('boards.greenhouse.io')).toBe(true);
+    expect(isPlatformPage('jobs.lever.co')).toBe(true);
+    expect(isPlatformPage('quillmere.wd3.myworkdayjobs.com')).toBe(true);
+    expect(isPlatformPage('quillmere.applytojob.com')).toBe(true);
+    // A business's own careers subdomain is its own site.
+    expect(isPlatformPage('careers.quillmere.co.uk')).toBe(false);
+  });
+
   test("a school's, a practice's or a university's shared domain is not a platform", () => {
     expect(isPlatformPage('quillmere-primary.herts.sch.uk')).toBe(false);
     expect(isPlatformPage('quillmere.scot.nhs.uk')).toBe(false);

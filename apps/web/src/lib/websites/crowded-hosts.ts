@@ -8,7 +8,7 @@ import { isAggregatorExempt, isAggregatorHost } from './page-signals';
 /** Companies a host must appear for to count as a directory; 99.9% of proven own sites appear for fewer. */
 export const CROWDED_HOST_COMPANIES = 50;
 
-/** Platforms that give each business a subdomain of their own: site builders and hosts, a donation platform, booking and careers pages, directories. Never schools', the NHS's or universities' shared domains, whose subdomains are their own sites. */
+/** Platforms that give each business a subdomain of their own: site builders and hosts, a donation platform, booking pages, careers platforms, directories. Never schools', the NHS's or universities' shared domains, whose subdomains are their own sites. */
 export const PLATFORM_DOMAINS = [
   // Site builders and hosts.
   'wordpress.com',
@@ -42,12 +42,29 @@ export const PLATFORM_DOMAINS = [
   'bandcamp.com',
   // A donation platform.
   'raiselysite.com',
-  // Booking and careers pages.
-  'teamtailor.com',
-  'pinpointhq.com',
+  // Booking pages.
   'setmore.com',
   'janeapp.co.uk',
   'mytreatwell.co.uk',
+  // Careers platforms, which host a business's jobs pages.
+  'teamtailor.com',
+  'pinpointhq.com',
+  'softgarden.de',
+  'personio.de',
+  'personio.com',
+  'workable.com',
+  'greenhouse.io',
+  'lever.co',
+  'recruitee.com',
+  'smartrecruiters.com',
+  'bamboohr.com',
+  'myworkdayjobs.com',
+  'icims.com',
+  'jobvite.com',
+  'breezy.hr',
+  'applytojob.com',
+  'ashbyhq.com',
+  'hirehive.com',
   // Directories that give each business a subdomain.
   'wheree.com',
   'opendi.co.uk',

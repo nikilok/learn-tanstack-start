@@ -9,8 +9,9 @@ name: Fallback Company Websites (Search)
 #
 # The picker is a private package, installed here alone into a folder of its
 # own at the exact version and integrity below, so no manifest, lockfile or
-# other job needs its registry. The job's token reads the package; the key is
-# a secret scoped to the run step. A new version changes both values here.
+# other job needs its registry. A read-only token, a secret scoped to the
+# install step, reads the package; the key is a secret scoped to the run step.
+# A new version changes both values here.
 #
 # Manual only. Each worker settles its own slice (shard.ts) and marks what it
 # settled, so a dispatch resumes where the last one stopped.
@@ -31,10 +32,9 @@ on:
         required: false
         type: number
 
-# Reads the repository and the picker package; pushes nothing.
+# Reads the repository; pushes nothing.
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: fallback-websites
@@ -98,14 +98,18 @@ jobs:
       - name: Install the site picker
         shell: bash
         # One tarball, outside the repository: fetched from its registry with
-        # the job's token, and unpacked only when it matches the integrity
-        # pinned above. Nothing else is resolved, as the picker's entry imports
-        # nothing outside its package. npm reads the token from the
-        # environment, so it is never written down, and prints errors only.
+        # its own read-only token, and unpacked only when it matches the
+        # integrity pinned above. Nothing else is resolved, as the picker's
+        # entry imports nothing outside its package. npm reads the token from
+        # the environment, so it is never written down, and prints errors only.
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "$GITHUB_PACKAGES_TOKEN" ]; then
+            echo "PICKER_PACKAGES_TOKEN is not set"
+            exit 1
+          fi
           DIR="$RUNNER_TEMP/picker"
           mkdir -p "$DIR"
           cd "$DIR"

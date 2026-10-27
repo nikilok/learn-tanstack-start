@@ -142,7 +142,7 @@ export function isAggregatorHost(host: string): boolean {
 
 /** Phrases that appear on a domain-for-sale, holding or default server page. */
 const PARKED_PHRASES =
-  /(domain (is |name )?(is )?for sale|buy this domain|this domain (name )?is (for sale|parked)|parked (free )?(courtesy|by)|godaddy\.com\/forsale|nameshift|dan\.com|sedo\.com|under construction|coming soon|site is being built|default web site page|welcome to nginx|apache2 (ubuntu|debian) default page|index of \/)/i;
+  /(domain (is |name )?(is )?for sale|buy this domain|this domain (name )?is (for sale|parked)|parked (free )?(courtesy|by)|godaddy\.com\/forsale|nameshift|dan\.com|sedo\.com|under construction|coming soon|launching soon|site is being built|default web site page|welcome to nginx|apache2 (ubuntu|debian) default page|index of \/)/i;
 
 /**
  * A page with nothing on it: parked, for sale, or a default server response.

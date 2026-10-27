@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isSameSite, normaliseWebsiteUrl } from './normalise-url.ts';
+import { isSameSite, normaliseWebsiteUrl, siteOf } from './normalise-url.ts';
 
 describe('normaliseWebsiteUrl', () => {
   test('assumes https for scheme-less values', () => {
@@ -122,6 +122,13 @@ describe('normaliseWebsiteUrl', () => {
     const once = normaliseWebsiteUrl('www.caremark.co.uk/arun/');
     expect(once).not.toBeNull();
     expect(normaliseWebsiteUrl(once)).toBe(once as string);
+  });
+});
+
+describe('siteOf', () => {
+  test('compares a host without case, a trailing dot or a leading www.', () => {
+    expect(siteOf('WWW.Quillmere-Group.com.')).toBe('quillmere-group.com');
+    expect(siteOf('uk.quillmere-group.com')).toBe('uk.quillmere-group.com');
   });
 });
 

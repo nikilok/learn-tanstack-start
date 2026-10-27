@@ -1,0 +1,182 @@
+name: Fallback Company Websites (Search)
+
+# For search rows the current walk read and left empty, whose company is
+# active: the site picker chooses among each row's banked candidates, and a
+# choice whose own domain names the company, on a homepage that is not a
+# holding page, is written as `assessed`. Zero search credits. Like the walk
+# it leaves checked_at NULL on what it writes, so the sweep decides what
+# renders, and the tier renders only while its arm is switched on.
+#
+# The picker is a private package, installed here alone into a folder of its
+# own at the exact version and integrity below, so no manifest, lockfile or
+# other job needs its registry. The job's token reads the package; the key is
+# a secret scoped to the run step. A new version changes both values here.
+#
+# Manual only. Each worker settles its own slice (shard.ts) and marks what it
+# settled, so a dispatch resumes where the last one stopped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run: ask and decide, no DB writes'
+        type: boolean
+        default: false
+      max-rows:
+        description: 'Rows each worker settles this run (default 500)'
+        required: false
+        type: number
+      shards:
+        description: 'Parallel workers, each settling its own slice (1-16, default 1)'
+        required: false
+        type: number
+
+# Reads the repository and the picker package; pushes nothing.
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: fallback-websites
+  cancel-in-progress: false
+
+env:
+  PICKER_PACKAGE: '@nikilok/thoth-engine'
+  PICKER_VERSION: '0.2.0'
+  PICKER_INTEGRITY: 'sha512-M1kQS3MgEqfY6kOsH077aiMhzJJ7pIP4LxpWv9hVNO7EB6a0tXau7pmLCjc3Pjxk+l+3pQXLvP3eBlUNa/o4Kg=='
+
+jobs:
+  # Turns the shards input into the matrix below, validated as text.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      count: ${{ steps.split.outputs.count }}
+      shards: ${{ steps.split.outputs.shards }}
+    steps:
+      - name: Plan the split
+        id: split
+        shell: bash
+        env:
+          SHARDS: ${{ github.event.inputs.shards }}
+        run: |
+          COUNT="${SHARDS:-1}"
+          case "$COUNT" in
+            [1-9]|1[0-6]) ;;
+            *) echo "shards must be a whole number from 1 to 16"; exit 1 ;;
+          esac
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "shards=$(jq -nc --argjson n "$COUNT" '[range($n)]')" >> "$GITHUB_OUTPUT"
+
+  fallback:
+    needs: plan
+    name: fallback ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - name: Checkout repository
+        # Pinned: this job's secret step runs whatever the checkout leaves.
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: Install the site picker
+        shell: bash
+        # One tarball, outside the repository: fetched from its registry with
+        # the job's token, and unpacked only when it matches the integrity
+        # pinned above. Nothing else is resolved, as the picker's entry imports
+        # nothing outside its package. npm reads the token from the
+        # environment, so it is never written down, and prints errors only.
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          DIR="$RUNNER_TEMP/picker"
+          mkdir -p "$DIR"
+          cd "$DIR"
+          printf '%s\n' '@nikilok:registry=https://npm.pkg.github.com' '//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}' > .npmrc
+          TARBALL=$(npm pack "$PICKER_PACKAGE@$PICKER_VERSION" --json --loglevel=error | jq -r '.[0].filename')
+          rm .npmrc
+          GOT="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
+          if [ "$GOT" != "$PICKER_INTEGRITY" ]; then
+            echo "The picker package does not match its pinned integrity"
+            exit 1
+          fi
+          mkdir -p "node_modules/$PICKER_PACKAGE"
+          tar -xzf "$TARBALL" --strip-components=1 -C "node_modules/$PICKER_PACKAGE"
+          ENTRY=$(SPEC="$PICKER_PACKAGE/site-pick" bun -e 'console.log(Bun.resolveSync(process.env.SPEC, process.cwd()))')
+          echo "PICKER_MODULE=$ENTRY" >> "$GITHUB_ENV"
+
+      - name: Run the fallback
+        shell: bash
+        # Inputs go through env, never interpolated into the script; the secrets
+        # are scoped to this step.
+        env:
+          POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
+          PICKER_API_KEY: ${{ secrets.PICKER_API_KEY }}
+          DRY_RUN: ${{ github.event.inputs.dry-run }}
+          MAX_ROWS: ${{ github.event.inputs.max-rows }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
+        run: |
+          set -o pipefail
+          ARGS=("--shard=$SHARD/$SHARD_COUNT")
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          case "${MAX_ROWS:-500}" in
+            ''|*[!0-9]*) echo "max-rows must be a positive integer"; exit 1 ;;
+          esac
+          ARGS+=("--max-rows=${MAX_ROWS:-500}")
+          bun apps/web/scripts/fallback-websites.ts "${ARGS[@]}" | tee /tmp/fallback-websites.log
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ needs.plan.outputs.count }}
+        run: |
+          LOG=/tmp/fallback-websites.log
+          if [ ! -f "$LOG" ]; then exit 0; fi
+          extract() { grep -E "^  $1 +:" "$LOG" | tail -n1 | sed -E "s/^  $1 +: //" || true; }
+          {
+            echo "## Website Fallback (worker $SHARD/$SHARD_COUNT)"
+            echo ""
+            echo "| Metric | Value |"
+            echo "| --- | --- |"
+            echo "| 🎯 Selected | $(extract selected) |"
+            echo "| ⚙️ Processed | $(extract processed) |"
+            echo "| 🏷️ No candidate named | $(extract none_named) |"
+            echo "| 📭 Nothing readable | $(extract none_readable) |"
+            echo "| 📵 Unloaded, left for next pass | $(extract unloaded) |"
+            echo "| ❓ Asked | $(extract asked) |"
+            echo "| ✅ Picked | $(extract picked) |"
+            echo "| 🇬🇧 UK sections | $(extract uk_sections) |"
+            echo "| ➖ Below threshold | $(extract below_threshold) |"
+            echo "| 🚫 Not named | $(extract not_named) |"
+            echo "| 🚧 Holding page | $(extract holding_page) |"
+            echo "| ⏸️ Unavailable | $(extract unavailable) |"
+            echo "| 🗃️ Unpersisted | $(extract unpersisted) |"
+            echo "| ❌ Errored | $(extract errored) |"
+            echo "| 📄 Homepage fetches | $(extract homepage_fetches) |"
+            echo "| ⚠️ Homepage failures | $(extract homepage_failures) |"
+            echo "| 🔢 Tokens | $(extract tokens) |"
+            echo "| ⏱️ Minutes | $(extract minutes) |"
+            echo "| ⏳ Left | $(extract left) |"
+          } >> "$GITHUB_STEP_SUMMARY"

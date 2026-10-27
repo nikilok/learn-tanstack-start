@@ -41,6 +41,7 @@ const EVIDENCES: WebsiteEvidence[] = [
   'domain_similarity',
   'registry_unconfirmed',
   'llm_adjudicated',
+  'assessed',
   'postcode_on_page',
   'name_and_place',
   'registry',
@@ -107,36 +108,82 @@ function* allCases(): Generator<Case> {
       postcodeConfirms: false,
       onAggregator: false,
       looksParked: false,
+      placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'corroborated',
       postcodeConfirms: true,
       onAggregator: false,
       looksParked: false,
+      placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'parked',
       postcodeConfirms: false,
       onAggregator: false,
       looksParked: true,
+      placeholder: true,
+      servedElsewhere: false,
     },
     {
       label: 'aggregator',
       postcodeConfirms: false,
       onAggregator: true,
       looksParked: false,
+      placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'confirmed+aggregator',
       postcodeConfirms: true,
       onAggregator: true,
       looksParked: false,
+      placeholder: false,
+      servedElsewhere: false,
     },
     {
       label: 'confirmed+parked',
       postcodeConfirms: true,
       onAggregator: false,
       looksParked: true,
+      placeholder: true,
+      servedElsewhere: false,
+    },
+    // A holding page that is not parked: closed, or down for maintenance.
+    {
+      label: 'holding',
+      postcodeConfirms: false,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: true,
+      servedElsewhere: false,
+    },
+    {
+      label: 'confirmed+holding',
+      postcodeConfirms: true,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: true,
+      servedElsewhere: false,
+    },
+    // A page served from a host that names no company of the row's.
+    {
+      label: 'elsewhere',
+      postcodeConfirms: false,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: false,
+      servedElsewhere: true,
+    },
+    {
+      label: 'confirmed+elsewhere',
+      postcodeConfirms: true,
+      onAggregator: false,
+      looksParked: false,
+      placeholder: false,
+      servedElsewhere: true,
     },
   ];
 
@@ -167,6 +214,8 @@ function* allCases(): Generator<Case> {
                     postcodeConfirms: p.postcodeConfirms,
                     onAggregator: p.onAggregator,
                     looksParked: p.looksParked,
+                    placeholder: p.placeholder,
+                    servedElsewhere: p.servedElsewhere,
                     nameAndPlace: recheck,
                   },
                 };
@@ -356,12 +405,13 @@ describe('state machine invariants', () => {
 describe('decideWebsite invariants', () => {
   /**
    * I9. A dead row may be displaced by a fresh address, but only by evidence
-   * good enough to render on its own. Without a floor, the weakest tier —
-   * "the registry's name for this company does not match Companies House" —
-   * could replace a proven company number at someone else's address, and two
-   * timeouts are enough to make a row dead.
+   * backed by a proof. Without a floor, the weakest tier — "the registry's
+   * name for this company does not match Companies House" — could replace a
+   * proven company number at someone else's address, and two timeouts are
+   * enough to make a row dead. Landing verified is not enough: `assessed` does
+   * and is no proof.
    */
-  test('I9 — only render-worthy evidence may displace a dead row', () => {
+  test('I9 — only proven evidence may displace a dead row', () => {
     const violations: string[] = [];
     for (const evidence of EVIDENCES) {
       const result = decideWebsite(
@@ -374,11 +424,14 @@ describe('decideWebsite invariants', () => {
         { url: 'https://someone-else.co.uk', evidence, source: 'cqc' },
       );
       const displaced = result.action === 'update';
-      const worthy = statusForEvidence(evidence) === 'verified';
-      if (displaced && !worthy)
-        violations.push(`${evidence} displaced a proof`);
+      const proven = evidenceRank(evidence) >= evidenceRank('postcode_on_page');
+      if (displaced !== proven)
+        violations.push(
+          `${evidence} ${displaced ? 'displaced' : 'did not displace'} a dead row`,
+        );
     }
     expect(violations).toEqual([]);
+    expect(statusForEvidence('assessed')).toBe('verified');
   });
 
   /** I10. The SQL predicate must admit exactly what decideWebsite admits: the
@@ -551,6 +604,71 @@ describe('state machine invariants — the name_and_place re-check', () => {
       status: 'verified',
       evidence: 'name_and_place',
       confidence: '0.900',
+    });
+  });
+});
+
+describe('state machine invariants — the assessed tier', () => {
+  /** I18. A holding page, or a page another host served, holds an `assessed` row back on every pass that reads one, and promotes nothing. */
+  test('I18 — an assessed row on a holding page or another host never renders or promotes', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      const { input } = c;
+      if (input.evidence !== 'assessed' || !input.outcome.ok) continue;
+      if (!input.placeholder && !input.servedElsewhere) continue;
+      const r = revalidate(input);
+      if (r.status === 'verified') violations.push(`${c.label} rendered`);
+      if (r.evidence !== 'assessed') {
+        violations.push(`${c.label} moved to ${r.evidence}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I19. The two signals move an `assessed` row's status, and withhold a promotion, and nothing on any other row. */
+  test('I19 — the holding-page and other-host signals move only an assessed row', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (!c.input.placeholder && !c.input.servedElsewhere) continue;
+      const r = revalidate(c.input);
+      const without = revalidate({
+        ...c.input,
+        placeholder: false,
+        servedElsewhere: false,
+      });
+      if (c.input.evidence !== 'assessed') {
+        if (JSON.stringify(r) !== JSON.stringify(without)) {
+          violations.push(`${c.label} moved`);
+        }
+        continue;
+      }
+      if (r.url !== without.url || r.failureCount !== without.failureCount) {
+        violations.push(`${c.label} -> ${r.url} f${r.failureCount}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I20. Held then read again lands exactly where it was. */
+  test('I20 — a hold then a pass that finds the site back is a round trip', () => {
+    const base = {
+      storedUrl: STORED_URL,
+      evidence: 'assessed' as WebsiteEvidence,
+      failureCount: 0,
+      attemptedUrl: STORED_URL,
+      outcome: { ok: true } as const,
+    };
+    const held = revalidate({
+      ...base,
+      status: 'verified',
+      placeholder: true,
+    });
+    expect(held).toMatchObject({ status: 'candidate', confidence: '0.750' });
+    const restored = revalidate({ ...base, status: held.status });
+    expect(restored).toMatchObject({
+      status: 'verified',
+      evidence: 'assessed',
+      confidence: '0.750',
     });
   });
 });

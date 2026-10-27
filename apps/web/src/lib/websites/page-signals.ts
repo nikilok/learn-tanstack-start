@@ -160,6 +160,17 @@ export function looksParked(visibleText: string): boolean {
   return flat.length < PARKED_MAX_TEXT && PARKED_PHRASES.test(flat);
 }
 
+/** Phrases a business's own holding page shows: down for maintenance, closed, or no longer trading. */
+const HOLDING_PHRASES =
+  /(maintenance mode|under maintenance|scheduled maintenance|we.ll be back soon|be back shortly|ceased trading|no longer trading|stopped trading|has now closed|permanently closed|website (is )?(currently )?(offline|unavailable|down))/i;
+
+/** A page with nothing to link to: parked, or a short page saying the site is down or the business has closed. Gated on length as looksParked is. */
+export function looksPlaceholder(visibleText: string): boolean {
+  if (looksParked(visibleText)) return true;
+  const flat = visibleText.replace(/\s+/g, ' ').trim();
+  return flat.length < PARKED_MAX_TEXT && HOLDING_PHRASES.test(flat);
+}
+
 /**
  * Below this a page cannot be taken as evidence of ABSENCE.
  *

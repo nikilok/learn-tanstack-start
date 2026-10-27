@@ -119,9 +119,14 @@
  * rule now reads only a site whose own domain names the company: that keeps
  * 128 of the sealed draws' 133 picks and all 8 right ones in the wave. The
  * sweep holds a row back while its proof is gone.
+ *
+ * `assessed` publishes through its own arm, search rows only, while its url's
+ * host names the company, the company is active and a sweep confirmed it live
+ * within NAMED_HOST_LIVE_DAYS. ASSESSED_PUBLISHES switches the whole arm off
+ * at once.
  */
 
-import { companyWebsites } from '@ss/db/schema';
+import { companiesHouseProfiles, companyWebsites } from '@ss/db/schema';
 import {
   and,
   eq,
@@ -175,6 +180,25 @@ function namedHostArm(): SQL {
   ) as SQL;
 }
 
+/** Whether `assessed` rows publish at all: off until a pass's audit clears the tier. */
+export const ASSESSED_PUBLISHES: boolean = false;
+
+/** A search-found site the fallback chose, while its url's host names the company and the company is active. */
+function assessedArm(): SQL {
+  return and(
+    eq(companyWebsites.source, 'search'),
+    eq(companyWebsites.evidence, 'assessed'),
+    eq(companyWebsites.namedUrl, companyWebsites.url),
+    sql`exists (select 1 from ${companiesHouseProfiles} where ${and(
+      eq(companiesHouseProfiles.companyNumber, companyWebsites.companyNumber),
+      eq(companiesHouseProfiles.companyStatus, 'active'),
+    )})`,
+  ) as SQL;
+}
+
+/** Which switchable arms a gate carries; each defaults to its switch. */
+export type GateOptions = { assessed?: boolean };
+
 /** A sweep confirmed the row live within NAMED_HOST_LIVE_DAYS. */
 function confirmedRecently(): SQL {
   return gte(
@@ -204,8 +228,12 @@ function confirmedRecently(): SQL {
  * Renders unaliased (`"company_websites"."status"`), so a correlated EXISTS
  * must not alias the table.
  */
-/** The arms both gates share; the status arm and the named-host arm differ between them. */
-function gateWithStatusArm(statusArm: SQL, namedHost: SQL): SQL {
+/** The arms both gates share; the status arm and the arms bounded by the sweep check differ between them, and a switched-off arm is left out. */
+function gateWithStatusArm(
+  statusArm: SQL,
+  namedHost: SQL,
+  assessed: SQL | undefined,
+): SQL {
   return and(
     statusArm,
     isNotNull(companyWebsites.checkedAt),
@@ -214,15 +242,19 @@ function gateWithStatusArm(statusArm: SQL, namedHost: SQL): SQL {
       sharedPostcodeArm(),
       nameAndPlaceArm(),
       namedHost,
+      assessed,
     ),
     isNotNull(companyWebsites.url),
   ) as SQL;
 }
 
-export function publishableWebsiteGate(): SQL {
+export function publishableWebsiteGate({
+  assessed = ASSESSED_PUBLISHES,
+}: GateOptions = {}): SQL {
   return gateWithStatusArm(
     eq(companyWebsites.status, 'verified') as SQL,
     and(namedHostArm(), confirmedRecently()) as SQL,
+    assessed ? (and(assessedArm(), confirmedRecently()) as SQL) : undefined,
   );
 }
 
@@ -240,15 +272,18 @@ export function publishableWebsiteGate(): SQL {
  * fires only on genuine loss: `dead` (written off after two consecutive
  * failures), `none`/`candidate`, an evidence demotion below the publishable
  * tiers, a postcode share above the limit on a host that does not name the
- * company, or a null URL. A stalled sweep is no loss, so the named-host arm
- * keeps its rows here however long ago their last check was. It never renders
- * anything — the render gate is the only publish decision.
+ * company, or a null URL. A stalled sweep is no loss, so the named-host and
+ * assessed arms keep their rows here however long ago their last check was.
+ * It never renders anything — the render gate is the only publish decision.
  */
 export const ANSWER_RETENTION_STATUSES = ['verified', 'unreachable'] as const;
 
-export function answersRetentionGate(): SQL {
+export function answersRetentionGate({
+  assessed = ASSESSED_PUBLISHES,
+}: GateOptions = {}): SQL {
   return gateWithStatusArm(
     inArray(companyWebsites.status, [...ANSWER_RETENTION_STATUSES]) as SQL,
     namedHostArm(),
+    assessed ? assessedArm() : undefined,
   );
 }

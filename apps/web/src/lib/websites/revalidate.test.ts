@@ -479,3 +479,85 @@ describe('a name_and_place row is held while its proof is gone, never demoted', 
     ).toBe('verified');
   });
 });
+
+describe('an assessed row is held on a holding page, never demoted', () => {
+  test('a closed or maintenance page holds it back with its tier kept', () => {
+    const r = revalidate(input({ evidence: 'assessed', placeholder: true }));
+    expect(r.status).toBe('candidate');
+    expect(r.evidence).toBe('assessed');
+    expect(r.confidence).toBe('0.750');
+    expect(r.note).toContain('holding page');
+  });
+
+  test('a live page with no holding language publishes it', () => {
+    const r = revalidate(input({ evidence: 'assessed' }));
+    expect(r.status).toBe('verified');
+    expect(r.verified).toBe(true);
+  });
+
+  test('the holding-page signal holds no other tier', () => {
+    for (const evidence of ['postcode_on_page', 'name_and_place'] as const) {
+      expect(revalidate(input({ evidence, placeholder: true })).status).toBe(
+        'verified',
+      );
+    }
+  });
+
+  test('a number or a postcode found later promotes it, as any proof does', () => {
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          crnFoundAt: 'https://www.example.co.uk/terms',
+        }),
+      ).evidence,
+    ).toBe('crn_on_page');
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          postcodeFoundAt: 'https://www.example.co.uk/contact',
+        }),
+      ).evidence,
+    ).toBe('postcode_on_page');
+  });
+});
+
+describe('an assessed row promotes nothing while its page shows nothing to link to', () => {
+  test('a holding notice that still shows the number or the postcode holds the row, unpromoted', () => {
+    // A promoted row is no longer read as assessed, so a hold that let the
+    // promotion through would publish the holding page from the next pass on.
+    for (const proof of [
+      { crnFoundAt: 'https://www.example.co.uk/' },
+      { postcodeFoundAt: 'https://www.example.co.uk/', postcodeConfirms: true },
+    ]) {
+      const r = revalidate(
+        input({ evidence: 'assessed', placeholder: true, ...proof }),
+      );
+      expect(r).toMatchObject({ status: 'candidate', evidence: 'assessed' });
+      expect(r.confidence).toBe('0.750');
+    }
+  });
+
+  test('a page another host served holds it the same way', () => {
+    const r = revalidate(
+      input({
+        evidence: 'assessed',
+        servedElsewhere: true,
+        crnFoundAt: 'https://www.example.co.uk/terms',
+      }),
+    );
+    expect(r).toMatchObject({ status: 'candidate', evidence: 'assessed' });
+  });
+
+  test('once the site is back, the proof it shows promotes the row as usual', () => {
+    expect(
+      revalidate(
+        input({
+          evidence: 'assessed',
+          crnFoundAt: 'https://www.example.co.uk/',
+        }),
+      ),
+    ).toMatchObject({ status: 'verified', evidence: 'crn_on_page' });
+  });
+});

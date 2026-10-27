@@ -19,6 +19,7 @@ import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { DEVICE_KEY_RE } from '../lib/device/key';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
+import { websiteLinkSql } from '../lib/websites/link-url';
 import { publishableWebsiteGate } from '../lib/websites/publishable';
 import { setRpcCacheControl } from './cache-headers';
 
@@ -107,7 +108,7 @@ const getCompanyExtras = createServerFn({ method: 'POST' })
       data.companyNumber === null
         ? []
         : db
-            .select({ url: companyWebsites.url })
+            .select({ url: websiteLinkSql() })
             .from(companyWebsites)
             .where(
               and(

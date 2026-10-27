@@ -33,6 +33,10 @@ export type WebsiteEvidence =
   /** A search-found site the two-signal rule proved (name-and-place.ts):
    *  published, and held back by the sweep while the proof is gone. */
   | 'name_and_place'
+  /** A search-found site the fallback job chose where no proof reached the
+   *  company (fallback.ts): lands verified, publishes only through its own
+   *  arm, and never replaces a dead row's url. */
+  | 'assessed'
   | 'llm_adjudicated'
   | 'registry_unconfirmed'
   | 'domain_similarity'
@@ -82,14 +86,17 @@ export type DecideWebsiteResult =
  * company name does not recognisably match Companies House, which is worth no
  * more and no less than an LLM's opinion.
  *
- * `manual` is terminal — an owner decision outranks every discoverer. The
- * verified/candidate boundary is VERIFIED_FLOOR: at or above it the answer is
- * backed by something found on the page or by an exact registry join.
+ * `manual` is terminal — an owner decision outranks every discoverer. Two
+ * boundaries sit on it: VERIFIED_FLOOR, at or above which a row lands
+ * `verified`, and DEAD_ROW_FLOOR, at or above which the answer is backed by
+ * something found on the page or by an exact registry join.
  */
 const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
   { tiers: ['none'], confidence: 0 },
   { tiers: ['domain_similarity'], confidence: 0.4 },
   { tiers: ['registry_unconfirmed', 'llm_adjudicated'], confidence: 0.6 },
+  // Below every proof, so any number, postcode or two-signal proof found later replaces it.
+  { tiers: ['assessed'], confidence: 0.75 },
   { tiers: ['postcode_on_page'], confidence: 0.85 },
   // Above the postcode tier, so the sweep's postcode check never trades it for one that publishes less.
   { tiers: ['name_and_place'], confidence: 0.9 },
@@ -98,11 +105,6 @@ const LADDER: { tiers: WebsiteEvidence[]; confidence: number }[] = [
   { tiers: ['crn_on_page'], confidence: 0.99 },
   { tiers: ['manual'], confidence: 1 },
 ];
-
-const VERIFIED_FLOOR = 3;
-/** Confidence of the weakest tier that renders on its own. Derived from the
- *  ladder so the SQL floor cannot drift from statusForEvidence. */
-const VERIFIED_FLOOR_CONFIDENCE = LADDER[VERIFIED_FLOOR].confidence;
 
 const RANK = new Map<WebsiteEvidence, number>();
 const CONFIDENCE = new Map<WebsiteEvidence, number>();
@@ -122,6 +124,15 @@ for (const [rank, rung] of LADDER.entries()) {
 export function evidenceRank(evidence: WebsiteEvidence): number {
   return RANK.get(evidence) ?? 0;
 }
+
+/** Rank of the weakest tier whose rows land `verified`. */
+const VERIFIED_FLOOR = evidenceRank('assessed');
+/** Rank of the weakest tier that may replace a dead row's url: a proof found
+ *  on the page or a registry join, never a choice between search results. */
+const DEAD_ROW_FLOOR = evidenceRank('postcode_on_page');
+/** DEAD_ROW_FLOOR's confidence, derived from the ladder so the SQL floor
+ *  cannot drift from decideWebsite. */
+const DEAD_ROW_FLOOR_CONFIDENCE = LADDER[DEAD_ROW_FLOOR].confidence;
 
 /** Rank for comparing two DISCOVERIES, with the sweep's own confirmation
  *  collapsed away. See the comment in decideWebsite. */
@@ -177,10 +188,10 @@ export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
     ` OR ${collapsed} < excluded.confidence` +
     ` OR (${collapsed} = excluded.confidence AND ${table}.source = excluded.source)` +
     // Mirrors decideWebsite's dead-row branch INCLUDING its evidence floor:
-    // only a proposal strong enough to render on its own may displace a dead
-    // row, or an unconfirmed guess replaces a proven number in the database
-    // even though the in-process decision refused it.
-    ` OR (${table}.status = 'dead' AND excluded.confidence >= ${VERIFIED_FLOOR_CONFIDENCE})` +
+    // only a proposal backed by a proof may displace a dead row, or an
+    // unconfirmed guess replaces a proven number in the database even though
+    // the in-process decision refused it.
+    ` OR (${table}.status = 'dead' AND excluded.confidence >= ${DEAD_ROW_FLOOR_CONFIDENCE})` +
     `)`
   );
 }
@@ -212,12 +223,12 @@ export function decideWebsite(
   // for this company does not match Companies House". Since two timeouts are
   // enough to mark a row dead, a live site with a proven number could be
   // replaced by an unconfirmed guess at someone else's address, and the proof
-  // page destroyed with it. Only evidence good enough to render on its own may
-  // displace a dead row.
+  // page destroyed with it. Only evidence backed by a proof may displace a
+  // dead row: a row that lands verified without one (`assessed`) may not.
   if (
     existing.status === 'dead' &&
     !isSameSite(existing.url, proposed.url) &&
-    statusForEvidence(proposed.evidence) === 'verified'
+    evidenceRank(proposed.evidence) >= DEAD_ROW_FLOOR
   ) {
     return { action: 'update' };
   }

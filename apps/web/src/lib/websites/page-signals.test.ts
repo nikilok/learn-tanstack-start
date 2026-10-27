@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { isAggregatorHost, looksChallenged, looksParked } from './page-signals';
+import {
+  isAggregatorHost,
+  looksChallenged,
+  looksParked,
+  looksPlaceholder,
+} from './page-signals';
 
 describe('isAggregatorHost', () => {
   test('rejects a directory listing', () => {
@@ -56,6 +61,50 @@ describe('looksParked', () => {
     expect(looksParked('Stoneacre Lodge residential home. 01302 882148.')).toBe(
       false,
     );
+  });
+});
+
+describe('looksPlaceholder', () => {
+  test('catches a business that has closed, on its own domain', () => {
+    expect(
+      looksPlaceholder(
+        'Harrowby Joinery Ltd. We have ceased trading. Thank you to all our customers.',
+      ),
+    ).toBe(true);
+    expect(
+      looksPlaceholder('Quillmere Bakery has now closed. Thank you.'),
+    ).toBe(true);
+  });
+
+  test('catches a site down for maintenance', () => {
+    expect(
+      looksPlaceholder(
+        "Site under maintenance. We'll be back soon. Quillmere Lettings",
+      ),
+    ).toBe(true);
+    expect(looksPlaceholder('Our website is currently offline.')).toBe(true);
+  });
+
+  test('catches every parked page too', () => {
+    expect(
+      looksPlaceholder(
+        "Coming Soon pinnaclecarehome.com we're under construction.",
+      ),
+    ).toBe(true);
+  });
+
+  test('does NOT fire on a real site that mentions maintenance in passing', () => {
+    // A facilities firm sells planned maintenance: the length gate separates
+    // its homepage from a holding page, as it does for looksParked.
+    const realPage = `${'Home Services Planned maintenance Reactive repairs Case studies Careers Contact. '.repeat(20)} Our engineers are on site while your building is under maintenance.`;
+    expect(realPage.length).toBeGreaterThan(1500);
+    expect(looksPlaceholder(realPage)).toBe(false);
+  });
+
+  test('does not fire on a short page with no holding language', () => {
+    expect(
+      looksPlaceholder('Stoneacre Lodge residential home. 01302 882148.'),
+    ).toBe(false);
   });
 });
 

@@ -944,3 +944,82 @@ describe("a name_and_place row's re-check", () => {
     expect(fetched).toEqual([]);
   });
 });
+
+describe('sweepWebsites — assessed rows', () => {
+  const holding =
+    '<html><body><h1>Harrowby Joinery Ltd</h1><p>We have ceased trading. Thank you to all our customers.</p></body></html>';
+
+  test('a holding page holds an assessed row back and counts it', async () => {
+    const h = harness({
+      rows: [row({ evidence: 'assessed', confidence: '0.750' })],
+      fetchSite: async (url) => live(url, holding),
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(h.applied[0].result).toMatchObject({
+      status: 'candidate',
+      evidence: 'assessed',
+    });
+    expect(summary.noSiteThere).toBe(1);
+  });
+
+  test('the same page holds no other tier', async () => {
+    const h = harness({
+      rows: [row({ evidence: 'postcode_on_page', confidence: '0.850' })],
+      fetchSite: async (url) => live(url, holding),
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(h.applied[0].result).toMatchObject({ status: 'verified' });
+    expect(summary.noSiteThere).toBe(0);
+  });
+});
+
+describe('sweepWebsites — an assessed row served from another host', () => {
+  const page =
+    '<html><body><nav>Home About Services Contact</nav><p>Fabrication since 1987.</p></body></html>';
+  const assessedRow = row({
+    evidence: 'assessed',
+    confidence: '0.750',
+    url: 'https://www.acmewidgets.co.uk',
+  });
+
+  test('is held while the host that served its page names no company of the row', async () => {
+    const h = harness({
+      rows: [assessedRow],
+      fetchSite: async (url) => ({
+        ok: true,
+        url: 'https://www.elsewhere-trading.co.uk/',
+        html: page,
+        attemptedUrl: url,
+      }),
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(h.applied[0].result).toMatchObject({
+      status: 'candidate',
+      evidence: 'assessed',
+    });
+    expect(summary.noSiteThere).toBe(1);
+  });
+
+  test('renders while its own host serves it', async () => {
+    const h = harness({
+      rows: [assessedRow],
+      fetchSite: async (url) => live(url, page),
+    });
+    await sweepWebsites(config(), h.deps);
+    expect(h.applied[0].result).toMatchObject({ status: 'verified' });
+  });
+
+  test('another tier redirecting the same way is not held by it', async () => {
+    const h = harness({
+      rows: [row({ evidence: 'postcode_on_page', confidence: '0.850' })],
+      fetchSite: async (url) => ({
+        ok: true,
+        url: 'https://www.elsewhere-trading.co.uk/',
+        html: page,
+        attemptedUrl: url,
+      }),
+    });
+    await sweepWebsites(config(), h.deps);
+    expect(h.applied[0].result).toMatchObject({ status: 'verified' });
+  });
+});

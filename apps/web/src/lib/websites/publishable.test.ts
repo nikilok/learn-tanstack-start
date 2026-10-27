@@ -5,6 +5,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 
 import {
   ANSWER_RETENTION_STATUSES,
+  ASSESSED_PUBLISHES,
   answersRetentionGate,
   NAMED_HOST_LIVE_DAYS,
   POSTCODE_SHARE_LIMIT,
@@ -160,6 +161,52 @@ describe('the name-and-place arm', () => {
       '("company_websites"."source" = $9 and "company_websites"."evidence" = $10)',
     );
     expect(retain.params.slice(8, 10)).toEqual(['search', 'name_and_place']);
+  });
+});
+
+describe('the assessed arm', () => {
+  const arm =
+    '"company_websites"."source" = $13 and "company_websites"."evidence" = $14 and "company_websites"."named_url" = "company_websites"."url" and exists (select 1 from "companies_house_profiles" where ("companies_house_profiles"."company_number" = "company_websites"."company_number" and "companies_house_profiles"."company_status" = $15))';
+
+  test('ships switched off, so no gate admits an assessed row', () => {
+    // The tier publishes only after a pass's audit clears it: switching it on
+    // is its own reviewed change.
+    expect(ASSESSED_PUBLISHES).toBe(false);
+    for (const gate of [publishableWebsiteGate(), answersRetentionGate()]) {
+      expect(render(gate).params).not.toContain('assessed');
+    }
+  });
+
+  test('switched off, both gates are exactly what they were without it', () => {
+    const shape = (gate: SQL) => render(gate).text;
+    expect(shape(publishableWebsiteGate({ assessed: false }))).toBe(
+      shape(publishableWebsiteGate()),
+    );
+    expect(render(publishableWebsiteGate()).params).toHaveLength(12);
+    expect(render(answersRetentionGate()).params).toHaveLength(12);
+  });
+
+  test('switched on, admits a search row whose url host names an active company, swept recently', () => {
+    // The host check is named_url, refreshed every sweep run, so a rename that
+    // stops naming the company closes the arm at the next run; a company that
+    // stops being active closes it at once.
+    const { text, params } = render(publishableWebsiteGate({ assessed: true }));
+    expect(text).toContain(
+      `((${arm}) and "company_websites"."checked_at" >= now() - make_interval(days => $16))`,
+    );
+    expect(params.slice(12)).toEqual([
+      'search',
+      'assessed',
+      'active',
+      NAMED_HOST_LIVE_DAYS,
+    ]);
+  });
+
+  test('retention keeps the arm without the sweep bound', () => {
+    const { text, params } = render(answersRetentionGate({ assessed: true }));
+    expect(text).toContain(`(${arm})`);
+    expect(text.match(/make_interval/g)).toBeNull();
+    expect(params.slice(12)).toEqual(['search', 'assessed', 'active']);
   });
 });
 

@@ -62,8 +62,9 @@ describe('the shared-postcode arm', () => {
 
   test('the render gate keeps every arm and adds the share bound', () => {
     // `<=` on a NULL share is NULL, so a row the refresh has not reached, or
-    // whose company has no postcode, cannot publish through this arm.
-    expect(render(publishableWebsiteGate())).toEqual({
+    // whose company has no postcode, cannot publish through this arm. The
+    // arm-off shape: the assessed arm's own tests pin what switching it on adds.
+    expect(render(publishableWebsiteGate({ assessed: false }))).toEqual({
       text: '("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or ("company_websites"."source" = $8 and "company_websites"."evidence" = $9) or (("company_websites"."source" = $10 and "company_websites"."evidence" = $11 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $12))) and "company_websites"."url" is not null)',
       params: [
         'verified',
@@ -97,8 +98,8 @@ describe('the shared-postcode arm', () => {
     // A company whose share rises past the limit on a host that does not name
     // it loses its answers as it loses its link. Retention may only be wider
     // on the transient status, and on a sweep that has not come round lately.
-    const publish = render(publishableWebsiteGate());
-    const retain = render(answersRetentionGate());
+    const publish = render(publishableWebsiteGate({ assessed: false }));
+    const retain = render(answersRetentionGate({ assessed: false }));
     const shape = (text: string) => text.replace(/\$\d+/g, '?');
     expect(shape(retain.text)).toBe(
       shape(publish.text)
@@ -168,22 +169,45 @@ describe('the assessed arm', () => {
   const arm =
     '"company_websites"."source" = $13 and "company_websites"."evidence" = $14 and "company_websites"."named_url" = "company_websites"."url" and exists (select 1 from "companies_house_profiles" where ("companies_house_profiles"."company_number" = "company_websites"."company_number" and "companies_house_profiles"."company_status" = $15))';
 
-  test('ships switched off, so no gate admits an assessed row', () => {
-    // The tier publishes only after a pass's audit clears it: switching it on
-    // is its own reviewed change.
-    expect(ASSESSED_PUBLISHES).toBe(false);
-    for (const gate of [publishableWebsiteGate(), answersRetentionGate()]) {
-      expect(render(gate).params).not.toContain('assessed');
+  test('ships switched on, so both gates carry the arm by default', () => {
+    // On since the first pass's audit cleared the tier.
+    expect(ASSESSED_PUBLISHES).toBe(true);
+    const shape = (gate: SQL) => render(gate).text;
+    expect(shape(publishableWebsiteGate())).toBe(
+      shape(publishableWebsiteGate({ assessed: true })),
+    );
+    expect(shape(answersRetentionGate())).toBe(
+      shape(answersRetentionGate({ assessed: true })),
+    );
+  });
+
+  test('switching it on only adds the arm to each gate', () => {
+    const END = ') and "company_websites"."url" is not null)';
+    for (const [on, off] of [
+      [publishableWebsiteGate(), publishableWebsiteGate({ assessed: false })],
+      [answersRetentionGate(), answersRetentionGate({ assessed: false })],
+    ]) {
+      const a = render(on),
+        b = render(off);
+      expect(a.text.startsWith(b.text.slice(0, b.text.lastIndexOf(END)))).toBe(
+        true,
+      );
+      expect(a.text.endsWith(END)).toBe(true);
+      expect(a.params.slice(0, b.params.length)).toEqual(b.params);
     }
   });
 
   test('switched off, both gates are exactly what they were without it', () => {
-    const shape = (gate: SQL) => render(gate).text;
-    expect(shape(publishableWebsiteGate({ assessed: false }))).toBe(
-      shape(publishableWebsiteGate()),
-    );
-    expect(render(publishableWebsiteGate()).params).toHaveLength(12);
-    expect(render(answersRetentionGate()).params).toHaveLength(12);
+    // The rollback: every assessed row leaves both gates at once.
+    for (const gate of [
+      publishableWebsiteGate({ assessed: false }),
+      answersRetentionGate({ assessed: false }),
+    ]) {
+      const { text, params } = render(gate);
+      expect(text).not.toContain(arm);
+      expect(params).not.toContain('assessed');
+      expect(params).toHaveLength(12);
+    }
   });
 
   test('switched on, admits a search row whose url host names an active company, swept recently', () => {

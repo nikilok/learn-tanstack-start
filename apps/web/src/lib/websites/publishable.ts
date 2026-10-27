@@ -180,8 +180,8 @@ function namedHostArm(): SQL {
   ) as SQL;
 }
 
-/** Whether `assessed` rows publish at all: off until a pass's audit clears the tier. */
-export const ASSESSED_PUBLISHES: boolean = false;
+/** Whether `assessed` rows publish at all: on since the first pass's audit cleared the tier; off withdraws every one at once. */
+export const ASSESSED_PUBLISHES: boolean = true;
 
 /** A search-found site the fallback chose, while its url's host names the company and the company is active. */
 function assessedArm(): SQL {

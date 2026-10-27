@@ -190,7 +190,7 @@ describe('buildFilterConditions', () => {
     // The four conditions come from publishableWebsiteGate, so this assertion
     // is what fails if the filter and the company page ever drift apart.
     expect(text).toBe(
-      'EXISTS (SELECT 1 FROM "company_websites" WHERE "company_websites"."company_number" = c.company_number AND ("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or ("company_websites"."source" = $8 and "company_websites"."evidence" = $9) or (("company_websites"."source" = $10 and "company_websites"."evidence" = $11 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $12))) and "company_websites"."url" is not null))',
+      'EXISTS (SELECT 1 FROM "company_websites" WHERE "company_websites"."company_number" = c.company_number AND ("company_websites"."status" = $1 and "company_websites"."checked_at" is not null and ("company_websites"."evidence" in ($2, $3, $4) or ("company_websites"."source" = $5 and "company_websites"."evidence" = $6 and "company_websites"."postcode_share" <= $7) or ("company_websites"."source" = $8 and "company_websites"."evidence" = $9) or (("company_websites"."source" = $10 and "company_websites"."evidence" = $11 and "company_websites"."postcode_share" is not null and "company_websites"."named_url" = "company_websites"."url") and "company_websites"."checked_at" >= now() - make_interval(days => $12)) or (("company_websites"."source" = $13 and "company_websites"."evidence" = $14 and "company_websites"."named_url" = "company_websites"."url" and exists (select 1 from "companies_house_profiles" where ("companies_house_profiles"."company_number" = "company_websites"."company_number" and "companies_house_profiles"."company_status" = $15))) and "company_websites"."checked_at" >= now() - make_interval(days => $16))) and "company_websites"."url" is not null))',
     );
     // Evidence tiers are bound params, never inlined, so the allow-list can
     // never be widened by a string that reached the query builder.
@@ -206,6 +206,10 @@ describe('buildFilterConditions', () => {
       'name_and_place',
       'search',
       'postcode_on_page',
+      45,
+      'search',
+      'assessed',
+      'active',
       45,
     ]);
   });

@@ -34,6 +34,7 @@ const row = (over: Partial<FallbackRow> = {}): FallbackRow => ({
     `${OWN}/about-us`,
     `${OWN}/contact`,
   ],
+  attempts: 0,
   ...over,
 });
 
@@ -59,6 +60,7 @@ type Harness = {
   asked: { company: PickerCompany; candidates: PickerCandidate[] }[];
   written: FallbackPick[];
   settled: string[];
+  unloaded: string[];
   fetched: string[];
   logs: string[];
 };
@@ -70,6 +72,7 @@ function harness(
   const asked: Harness['asked'] = [];
   const written: FallbackPick[] = [];
   const settled: string[] = [];
+  const unloaded: string[] = [];
   const fetched: string[] = [];
   const logs: string[] = [];
   const serve = async (url: string): Promise<FallbackPage> => {
@@ -93,11 +96,14 @@ function harness(
     markSettled: async (settledRow) => {
       settled.push(settledRow.companyNumber);
     },
+    markUnloaded: async (unloadedRow) => {
+      unloaded.push(unloadedRow.companyNumber);
+    },
     sleep: async () => {},
     log: (message) => logs.push(message),
     ...over,
   };
-  return { deps, asked, written, settled, fetched, logs };
+  return { deps, asked, written, settled, unloaded, fetched, logs };
 }
 
 const picked = (pick: string): PickerAnswer => ({
@@ -152,6 +158,22 @@ describe('fallbackWebsites — which rows are asked', () => {
     expect(summary.unloaded).toBe(1);
     expect(h.asked).toEqual([]);
     expect(h.settled).toEqual([]);
+    // The attempt is counted, so a row that never loads is settled after the last one.
+    expect(h.unloaded).toEqual(['09990117']);
+  });
+
+  test('a run of retried rows that fail again keeps going, as its network is fine', async () => {
+    // Retried rows lead every slice; their failures must not stop the run before fresh rows.
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      row({ companyNumber: String(10000000 + i), attempts: 1 }),
+    );
+    const h = harness(picked(OWN), {
+      rows,
+      fetchSite: async () => ({ ok: false }),
+    });
+    const summary = await fallbackWebsites(config(), h.deps);
+    expect(summary.processed).toBe(40);
+    expect(h.unloaded).toHaveLength(40);
   });
 
   test('stops the run once its homepages stop loading, settling nothing', async () => {
@@ -384,15 +406,18 @@ describe('fallbackWebsites — failures', () => {
       errored: 0,
       tokens: 0,
     };
-    expect(
-      lostNetwork({ ...base, homepageFetches: 60, homepageFailures: 55 }),
-    ).toBe(true);
-    expect(
-      lostNetwork({ ...base, homepageFetches: 60, homepageFailures: 20 }),
-    ).toBe(false);
-    expect(
-      lostNetwork({ ...base, homepageFetches: 10, homepageFailures: 10 }),
-    ).toBe(false);
+    const run = (freshFetches: number, freshFailures: number) => ({
+      ...base,
+      homepageFetches: 200,
+      homepageFailures: 200,
+      freshFetches,
+      freshFailures,
+    });
+    expect(lostNetwork(run(60, 55))).toBe(true);
+    expect(lostNetwork(run(60, 20))).toBe(false);
+    // Only first attempts count: retried rows' failures say nothing about the network.
+    expect(lostNetwork(run(10, 10))).toBe(false);
+    expect(lostNetwork(run(0, 0))).toBe(false);
   });
 });
 

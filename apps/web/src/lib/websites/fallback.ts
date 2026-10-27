@@ -36,6 +36,8 @@ export type FallbackRow = {
   trades: string[];
   /** Banked search results, in rank order. */
   candidates: string[];
+  /** Earlier passes that could not load any of its candidates. */
+  attempts: number;
 };
 
 /** The register's facts as the picker reads them. */
@@ -99,6 +101,8 @@ export type FallbackDeps = {
   writePick(row: FallbackRow, pick: FallbackPick): Promise<boolean>;
   /** Settle a row without a choice. */
   markSettled(row: FallbackRow): Promise<void>;
+  /** Count a pass that could not load the row's candidates; the last allowed one settles it. */
+  markUnloaded(row: FallbackRow): Promise<void>;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
 };
@@ -118,7 +122,7 @@ export type FallbackSummary = {
   noneNamed: number;
   /** Settled unasked: every candidate loaded, and none had a page to read. */
   noneReadable: number;
-  /** Left for the next pass: nothing was readable, and a candidate did not load. */
+  /** Nothing was readable and a candidate did not load: counted, and left for the next pass until the last attempt. */
   unloaded: number;
   asked: number;
   /** Choices kept, and how many of those link to a UK section. */
@@ -136,18 +140,28 @@ export type FallbackSummary = {
   /** Homepages fetched, and how many of those did not load. */
   homepageFetches: number;
   homepageFailures: number;
+  /** The same for rows on their first attempt, which the network check reads. */
+  freshFetches: number;
+  freshFailures: number;
   /** Input tokens billed. */
   tokens: number;
 };
 
+/** Passes that may fail to load a row's candidates before it is settled unread. */
+export const MAX_FALLBACK_ATTEMPTS = 3;
+
 /** Fetches a run must make before its failure rate means anything. */
 const MIN_GATE_FETCHES = 50;
 
-/** Whether a run's homepages failed so widely that its network, not the sites, has failed. */
+/**
+ * Whether a run's homepages failed so widely that its network, not the sites,
+ * has failed. Judged on first attempts only: rows retried for their failed
+ * loads would fail again on a working network.
+ */
 export function lostNetwork(summary: FallbackSummary): boolean {
   return (
-    summary.homepageFetches >= MIN_GATE_FETCHES &&
-    summary.homepageFailures / summary.homepageFetches > 0.8
+    summary.freshFetches >= MIN_GATE_FETCHES &&
+    summary.freshFailures / summary.freshFetches > 0.8
   );
 }
 
@@ -239,9 +253,11 @@ async function decideRow(
     if (!canonical) continue;
     await deps.sleep(config.delayMs);
     summary.homepageFetches++;
+    if (row.attempts === 0) summary.freshFetches++;
     const page = await deps.fetchSite(canonical);
     if (!page.ok) {
       summary.homepageFailures++;
+      if (row.attempts === 0) summary.freshFailures++;
       failed = true;
       continue;
     }
@@ -328,6 +344,8 @@ export async function fallbackWebsites(
     errored: 0,
     homepageFetches: 0,
     homepageFailures: 0,
+    freshFetches: 0,
+    freshFailures: 0,
     tokens: 0,
   };
   const rows = await deps.selectRows(config.maxRows);
@@ -341,7 +359,10 @@ export async function fallbackWebsites(
         const written = await deps.writePick(row, decided.pick);
         if (!written) outcome = 'unpersisted';
       }
-      if (SETTLES.has(outcome) && !config.dryRun) await deps.markSettled(row);
+      if (!config.dryRun) {
+        if (SETTLES.has(outcome)) await deps.markSettled(row);
+        if (outcome === 'unloaded') await deps.markUnloaded(row);
+      }
       summary[outcome]++;
       if (outcome === 'picked' && decided.pick?.linkUrl) summary.ukSections++;
       summary.processed++;

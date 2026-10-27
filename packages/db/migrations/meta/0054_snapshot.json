@@ -1,5 +1,5 @@
 {
-  "id": "88f9d81b-81dc-4bb3-8e85-9ea832f7fbc7",
+  "id": "09b1ce81-b737-4720-b622-ae0a76d9413c",
   "prevId": "b4245be0-c878-4cc2-a0a9-1df473bd6e20",
   "version": "7",
   "dialect": "postgresql",
@@ -1007,6 +1007,13 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "fallback_attempts": {
+          "name": "fallback_attempts",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "link_url": {
           "name": "link_url",

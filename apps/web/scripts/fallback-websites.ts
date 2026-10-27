@@ -21,6 +21,7 @@ import { makeCrowdedHosts } from '../src/lib/websites/discover-sql.ts';
 import {
   makeFallbackRemaining,
   makeMarkSettled,
+  makeMarkUnloaded,
   makeSelectFallback,
   makeWritePick,
 } from '../src/lib/websites/fallback-sql.ts';
@@ -95,6 +96,7 @@ const summary = await fallbackWebsites(
     pick,
     writePick: makeWritePick(sql),
     markSettled: makeMarkSettled(sql),
+    markUnloaded: makeMarkUnloaded(sql),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (message) => console.log(message),
   },
@@ -129,7 +131,7 @@ setGitHubOutput('picked', String(summary.picked));
 const MIN_GATE_SAMPLE = 25;
 if (lostNetwork(summary)) {
   console.error(
-    `\n  ${summary.homepageFailures}/${summary.homepageFetches} homepages did not load; check the runner's network.`,
+    `\n  ${summary.freshFailures}/${summary.freshFetches} first-attempt homepages did not load; check the runner's network.`,
   );
   process.exit(1);
 }

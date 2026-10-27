@@ -7,7 +7,11 @@
 import type { NeonQueryFunction } from '@ss/db/client';
 
 import { evidenceConfidence } from './decide';
-import type { FallbackPick, FallbackRow } from './fallback';
+import {
+  type FallbackPick,
+  type FallbackRow,
+  MAX_FALLBACK_ATTEMPTS,
+} from './fallback';
 import { CURRENT_WALK_VERSION } from './rewalk';
 import { type Shard, WHOLE_SET } from './shard';
 import { SPONSOR_NAMES_COLUMN, sponsorNamesOf } from './sponsor-names';
@@ -54,7 +58,7 @@ export function makeSelectFallback(
 ) {
   return async (maxRows: number): Promise<FallbackRow[]> => {
     const rows = await sql`
-      SELECT w.company_number, w.candidates,
+      SELECT w.company_number, w.candidates, w.fallback_attempts,
         coalesce(p.company_name, '') AS company_name, p.locality, p.postal_code,
         to_char(p.date_of_creation, 'YYYY-MM-DD') AS incorporated, p.sic_codes,
         ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
@@ -66,7 +70,8 @@ export function makeSelectFallback(
           ('x' || left(md5(w.company_number), 7))::bit(28)::int,
           ${shard.count}::int
         ) = ${shard.index}::int
-      ORDER BY w.company_number
+      -- Rows never tried first, so retries cannot crowd fresh rows out of the slice.
+      ORDER BY w.fallback_attempts, w.company_number
       LIMIT ${maxRows}
     `;
     return rows.map((r) => ({
@@ -79,6 +84,7 @@ export function makeSelectFallback(
       incorporated: (r.incorporated as string | null) ?? null,
       trades: tradesOf(r.sic_codes, descriptions),
       candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
+      attempts: Number(r.fallback_attempts ?? 0),
     }));
   };
 }
@@ -114,6 +120,20 @@ export function makeMarkSettled(sql: Sql) {
   return async (row: FallbackRow): Promise<void> => {
     await sql`
       UPDATE company_websites SET fallback_checked_at = now()
+      WHERE company_number = ${row.companyNumber}
+        AND ${sql.unsafe(unsettled())}
+    `;
+  };
+}
+
+/** Count a pass that could not load the row's candidates; the last allowed one settles it unread. */
+export function makeMarkUnloaded(sql: Sql) {
+  return async (row: FallbackRow): Promise<void> => {
+    await sql`
+      UPDATE company_websites SET
+        fallback_checked_at = CASE WHEN fallback_attempts + 1 >= ${MAX_FALLBACK_ATTEMPTS}
+          THEN now() ELSE NULL END,
+        fallback_attempts = fallback_attempts + 1
       WHERE company_number = ${row.companyNumber}
         AND ${sql.unsafe(unsettled())}
     `;

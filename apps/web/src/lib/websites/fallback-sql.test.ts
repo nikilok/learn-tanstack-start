@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { makeFakeSql } from './fake-sql';
-import type { FallbackRow } from './fallback';
+import { type FallbackRow, MAX_FALLBACK_ATTEMPTS } from './fallback';
 import {
   makeFallbackRemaining,
   makeMarkSettled,
+  makeMarkUnloaded,
   makeSelectFallback,
   makeWritePick,
   tradesOf,
@@ -25,6 +26,7 @@ const row: FallbackRow = {
   incorporated: null,
   trades: [],
   candidates: [],
+  attempts: 0,
 };
 
 /** The unsettled-row condition the selector and both writes share, unaliased as the writes render it. */
@@ -46,6 +48,10 @@ describe('makeSelectFallback', () => {
     await makeSelectFallback(sql, {})(50);
     expect(flat(calls[0].text)).toContain(PREDICATE);
     expect(calls[0].params.at(-1)).toBe(50);
+    // Rows never tried first, so retries cannot crowd fresh rows out of the slice.
+    expect(flat(calls[0].text)).toContain(
+      'ORDER BY w.fallback_attempts, w.company_number',
+    );
   });
 
   test('carries the facts the picker reads, its SIC codes as descriptions', async () => {
@@ -58,6 +64,7 @@ describe('makeSelectFallback', () => {
         postal_code: 'WF1 2AB',
         incorporated: '1987-03-14',
         sic_codes: ['25110', '99999'],
+        fallback_attempts: 2,
         [SPONSOR_NAMES_KEY]: ['Quillmere Fabrication Ltd'],
         [SPONSOR_TOWNS_KEY]: ['Wakefield'],
       },
@@ -78,6 +85,7 @@ describe('makeSelectFallback', () => {
         '99999',
       ],
       candidates: ['https://www.quillmerefabrication.co.uk/about'],
+      attempts: 2,
     });
   });
 
@@ -138,6 +146,20 @@ describe('makeMarkSettled', () => {
     const text = flat(calls[0].text);
     expect(text).toContain('SET fallback_checked_at = now()');
     expect(text).toContain(`AND ${UNSETTLED}`);
+  });
+});
+
+describe('makeMarkUnloaded', () => {
+  test('counts the attempt and settles the row on the last allowed one, only while it is still unsettled', async () => {
+    const { sql, calls } = makeFakeSql([]);
+    await makeMarkUnloaded(sql)(row);
+    const text = flat(calls[0].text);
+    expect(text).toContain(
+      'fallback_checked_at = CASE WHEN fallback_attempts + 1 >= $1 THEN now() ELSE NULL END',
+    );
+    expect(text).toContain('fallback_attempts = fallback_attempts + 1');
+    expect(text).toContain(`AND ${UNSETTLED}`);
+    expect(calls[0].params[0]).toBe(MAX_FALLBACK_ATTEMPTS);
   });
 });
 

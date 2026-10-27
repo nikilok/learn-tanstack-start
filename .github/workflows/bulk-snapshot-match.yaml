@@ -31,7 +31,6 @@ concurrency:
 # Least privilege by default; jobs that push declare their own elevation.
 permissions:
   contents: read
-  packages: read
 
 jobs:
   match:
@@ -58,7 +57,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
 
       - name: Run bulk snapshot match
         shell: bash

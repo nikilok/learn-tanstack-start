@@ -9,8 +9,8 @@ name: Fallback Company Websites (Search)
 #
 # The picker is the engine package's `site-pick` subpath, a dependency of the
 # app installed with everything else, so the lockfile pins its version and
-# integrity. The job's token reads the package registry; the key is a secret
-# scoped to the run step.
+# integrity. A read-only token, a secret scoped to the install step, reads the
+# package registry; the key is a secret scoped to the run step.
 #
 # Manual only. Each worker settles its own slice (shard.ts) and marks what it
 # settled, so a dispatch resumes where the last one stopped.
@@ -31,10 +31,9 @@ on:
         required: false
         type: number
 
-# Reads the repository and the picker package; pushes nothing.
+# Reads the repository; pushes nothing.
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: fallback-websites
@@ -90,7 +89,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
 
       - name: Run the fallback
         shell: bash

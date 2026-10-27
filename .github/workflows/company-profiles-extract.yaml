@@ -22,7 +22,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   # Turns the workers count into the matrix below, validated as text. Four at
@@ -72,7 +71,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
         working-directory: apps/web
 
       - name: Install Playwright Chromium

@@ -45,7 +45,6 @@ on:
 # Read-only token: the job reads Neon and fetches public pages; it pushes nothing.
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: rewalk-websites
@@ -101,7 +100,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
 
       - name: Install Playwright Chromium
         run: bun x playwright install --with-deps chromium

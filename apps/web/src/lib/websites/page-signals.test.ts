@@ -7,6 +7,8 @@ import {
   looksPlaceholder,
 } from './page-signals';
 
+const PRE_LAUNCH_PAGE = `${'Brackenmoor Integrated Solutions Limited '.repeat(6)}${'new website launching soon '.repeat(3)}Contact Us Name Email Message Send`;
+
 describe('isAggregatorHost', () => {
   test('rejects a directory listing', () => {
     // Beachcroft Homes Limited pointed at a carehome.co.uk listing page.
@@ -46,6 +48,17 @@ describe('looksParked', () => {
     expect(
       looksParked("Coming Soon pinnaclecarehome.com we're under construction."),
     ).toBe(true);
+  });
+
+  test("catches a website builder's pre-launch page", () => {
+    // The company's name repeated, then this: a fallback pick in wave 1.
+    expect(looksParked(PRE_LAUNCH_PAGE)).toBe(true);
+  });
+
+  test('does NOT reject a real site announcing a launch in passing', () => {
+    const realPage = `${'Home Products Trade accounts Delivery About us Contact. '.repeat(30)} Our new online shop is launching soon.`;
+    expect(realPage.length).toBeGreaterThan(1500);
+    expect(looksParked(realPage)).toBe(false);
   });
 
   test('does NOT reject a real site that mentions the phrase in passing', () => {
@@ -91,6 +104,7 @@ describe('looksPlaceholder', () => {
         "Coming Soon pinnaclecarehome.com we're under construction.",
       ),
     ).toBe(true);
+    expect(looksPlaceholder(PRE_LAUNCH_PAGE)).toBe(true);
   });
 
   test('does NOT fire on a real site that mentions maintenance in passing', () => {

@@ -1,11 +1,9 @@
 /**
- * The site picker the fallback job asks: a module outside this repo, which
- * the job's workflow installs and names by path in PICKER_MODULE. Loaded and
- * checked before any row is read, so a missing or broken install stops the
- * run there. The key goes to the module and nowhere else.
+ * The site picker the fallback job asks: the engine package's `site-pick`
+ * subpath, a dependency of the app like any other. Loaded and checked before
+ * any row is read, so a missing or broken package stops the run there. The
+ * key goes to the module and nowhere else.
  */
-
-import { pathToFileURL } from 'node:url';
 
 import type {
   Picker,
@@ -54,17 +52,14 @@ const PROBE: PickerCompany = {
   trades: [],
 };
 
-/** Load the picker at `modulePath` with its key, or throw before any row is read. */
+/** Load the picker with its key, or throw before any row is read. */
 export async function loadPicker(
-  modulePath: string | undefined,
   apiKey: string | undefined,
-  importModule: (url: string) => Promise<unknown> = (url) => import(url),
+  importModule: () => Promise<unknown> = () =>
+    import('@nikilok/thoth-engine/site-pick'),
 ): Promise<Picker> {
-  if (!modulePath) throw new Error('PICKER_MODULE is not set');
   if (!apiKey) throw new Error('PICKER_API_KEY is not set');
-  const loaded = (await importModule(pathToFileURL(modulePath).href)) as {
-    pickSite?: unknown;
-  } | null;
+  const loaded = (await importModule()) as { pickSite?: unknown } | null;
   const pickSite = loaded?.pickSite;
   if (typeof pickSite !== 'function') {
     throw new Error('The picker module exports no pickSite');

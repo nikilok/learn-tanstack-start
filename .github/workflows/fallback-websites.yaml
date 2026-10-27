@@ -7,11 +7,10 @@ name: Fallback Company Websites (Search)
 # it leaves checked_at NULL on what it writes, so the sweep decides what
 # renders, and the tier renders only while its arm is switched on.
 #
-# The picker is a private package, installed here alone into a folder of its
-# own at the exact version and integrity below, so no manifest, lockfile or
-# other job needs its registry. A read-only token, a secret scoped to the
-# install step, reads the package; the key is a secret scoped to the run step.
-# A new version changes both values here.
+# The picker is the engine package's `site-pick` subpath, a dependency of the
+# app installed with everything else, so the lockfile pins its version and
+# integrity. The job's token reads the package registry; the key is a secret
+# scoped to the run step.
 #
 # Manual only. Each worker settles its own slice (shard.ts) and marks what it
 # settled, so a dispatch resumes where the last one stopped.
@@ -32,18 +31,14 @@ on:
         required: false
         type: number
 
-# Reads the repository; pushes nothing.
+# Reads the repository and the picker package; pushes nothing.
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: fallback-websites
   cancel-in-progress: false
-
-env:
-  PICKER_PACKAGE: '@nikilok/thoth-engine'
-  PICKER_VERSION: '0.2.0'
-  PICKER_INTEGRITY: 'sha512-M1kQS3MgEqfY6kOsH077aiMhzJJ7pIP4LxpWv9hVNO7EB6a0tXau7pmLCjc3Pjxk+l+3pQXLvP3eBlUNa/o4Kg=='
 
 jobs:
   # Turns the shards input into the matrix below, validated as text.
@@ -94,37 +89,8 @@ jobs:
         shell: bash
         working-directory: apps/web
         run: bun install --frozen-lockfile
-
-      - name: Install the site picker
-        shell: bash
-        # One tarball, outside the repository: fetched from its registry with
-        # its own read-only token, and unpacked only when it matches the
-        # integrity pinned above. Nothing else is resolved, as the picker's
-        # entry imports nothing outside its package. npm reads the token from
-        # the environment, so it is never written down, and prints errors only.
         env:
-          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$GITHUB_PACKAGES_TOKEN" ]; then
-            echo "PICKER_PACKAGES_TOKEN is not set"
-            exit 1
-          fi
-          DIR="$RUNNER_TEMP/picker"
-          mkdir -p "$DIR"
-          cd "$DIR"
-          printf '%s\n' '@nikilok:registry=https://npm.pkg.github.com' '//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}' > .npmrc
-          TARBALL=$(npm pack "$PICKER_PACKAGE@$PICKER_VERSION" --json --loglevel=error | jq -r '.[0].filename')
-          rm .npmrc
-          GOT="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | base64 -w0)"
-          if [ "$GOT" != "$PICKER_INTEGRITY" ]; then
-            echo "The picker package does not match its pinned integrity"
-            exit 1
-          fi
-          mkdir -p "node_modules/$PICKER_PACKAGE"
-          tar -xzf "$TARBALL" --strip-components=1 -C "node_modules/$PICKER_PACKAGE"
-          ENTRY=$(SPEC="$PICKER_PACKAGE/site-pick" bun -e 'console.log(Bun.resolveSync(process.env.SPEC, process.cwd()))')
-          echo "PICKER_MODULE=$ENTRY" >> "$GITHUB_ENV"
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run the fallback
         shell: bash

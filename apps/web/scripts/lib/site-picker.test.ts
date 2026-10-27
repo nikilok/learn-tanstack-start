@@ -4,7 +4,6 @@ import type { PickerCompany } from '../../src/lib/websites/fallback.ts';
 import { isPickerAnswer, loadPicker } from './site-picker.ts';
 
 const KEY = 'test-key-0123456789';
-const MODULE = '/tmp/picker/site-pick.ts';
 
 const COMPANY: PickerCompany = {
   number: '09990117',
@@ -34,19 +33,19 @@ function moduleAnswering(answer: unknown) {
 }
 
 describe('loadPicker', () => {
-  test('stops before any row without its module path or its key', async () => {
+  test('stops before any row without its key', async () => {
     const { importModule } = moduleAnswering(null);
-    await expect(loadPicker(undefined, KEY, importModule)).rejects.toThrow(
-      'PICKER_MODULE is not set',
+    await expect(loadPicker('', importModule)).rejects.toThrow(
+      'PICKER_API_KEY is not set',
     );
-    await expect(loadPicker(MODULE, '', importModule)).rejects.toThrow(
+    await expect(loadPicker(undefined, importModule)).rejects.toThrow(
       'PICKER_API_KEY is not set',
     );
   });
 
   test('stops when the module exports no pickSite', async () => {
     await expect(
-      loadPicker(MODULE, KEY, async () => ({ other: () => null })),
+      loadPicker(KEY, async () => ({ other: () => null })),
     ).rejects.toThrow('exports no pickSite');
   });
 
@@ -56,7 +55,7 @@ describe('loadPicker', () => {
       reason: 'picked',
       tokens: 2900,
     });
-    const pick = await loadPicker(MODULE, KEY, importModule);
+    const pick = await loadPicker(KEY, importModule);
     expect(calls).toEqual([{ candidates: [], options: { apiKey: KEY } }]);
     const answer = await pick(COMPANY, [
       { origin: 'https://www.quillmerefabrication.co.uk', title: '', text: '' },
@@ -68,16 +67,21 @@ describe('loadPicker', () => {
   test('stops when the probe is answered outside the contract', async () => {
     const pickSite = async () => ({ pick: null, reason: 'picked', tokens: 0 });
     await expect(
-      loadPicker(MODULE, KEY, async () => ({ pickSite })),
+      loadPicker(KEY, async () => ({ pickSite })),
     ).rejects.toThrow('outside its contract');
   });
 
   test('throws on an answer outside the contract, rather than reading it', async () => {
     const { importModule } = moduleAnswering({ pick: 'x', reason: 'maybe' });
-    const pick = await loadPicker(MODULE, KEY, importModule);
+    const pick = await loadPicker(KEY, importModule);
     await expect(
       pick(COMPANY, [{ origin: 'x', title: '', text: '' }]),
     ).rejects.toThrow('outside its contract');
+  });
+
+  test('loads the engine’s picker by its subpath and probes it without a request', async () => {
+    const pick = await loadPicker(KEY);
+    expect(typeof pick).toBe('function');
   });
 });
 

@@ -31,13 +31,14 @@ const LEADS = [
   `\\bco\\.?\\s*(?:reg(?:istration)?\\.?\\s*)?(?:no|number)\\b\\.?`,
   `registered\\s+(?:company\\s+)?(?:no|number|num)\\b\\.?`,
   `registered\\s+in\\s+${PLACE}\\b[^.\\n]{0,50}?(?:no|number|num)\\b\\.?`,
-  `registered\\s+in\\s+${PLACE}\\b\\s*(?:under|with)?\\s*[:,(\\-–]?`,
+  `registered\\s+in\\s+${PLACE}\\b(?:\\s*(?:under|with))?(?:\\s*[:,(\\-–])?`,
   `reg(?:istration)?\\.?\\s+(?:no|number)\\b\\.?`,
 ];
 
+// Each optional word or mark carries its own leading blanks, so a long blank run is never split between adjacent `\s*`.
 const PATTERNS = [
   new RegExp(
-    `(?:${LEADS.join('|')})\\s*(?:is\\s+)?[:.#\\-–]?\\s*${NUMBER}(?![0-9A-Z])`,
+    `(?:${LEADS.join('|')})(?:\\s*is\\s)?(?:\\s*[:.#\\-–])?\\s*${NUMBER}(?![0-9A-Z])`,
     'gi',
   ),
   // "a public company SC610054"
@@ -62,7 +63,7 @@ const REGISTER =
 
 /** A phone line's label right before a number ("Tel No.", "Fax:"); an earlier one labels its own digits. */
 const PHONE_LABEL =
-  /\b(?:tel|telephone|phone|fax|mobile)\b\.?\s*(?:(?:no|number|nr)\b\.?)?\s*[:#\-–]?\s*$/i;
+  /\b(?:tel|telephone|phone|fax|mobile)\b\.?(?:\s*(?:no|number|nr)\b\.?)?(?:\s*[:#\-–])?\s*$/i;
 
 /** Whether a number's own label, in its clause, is a phone line's or another register's. */
 export function namesOtherRegister(wordingBefore: string): boolean {

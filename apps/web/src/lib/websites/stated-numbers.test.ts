@@ -204,7 +204,23 @@ describe('statedCompanyNumbers', () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
-  test('a capped blank run keeps its line break', () => {
+  test('the wording keeps its distances across a long blank run', () => {
+    const blank = ' '.repeat(60);
+    // The lead-in reaches only 50 characters for its "No.".
+    expect(
+      numbers(
+        footer(`Registered in England and Wales${blank}Order No. 123 4567`),
+      ),
+    ).toEqual([]);
+    // Another register's label 60 blanks back is out of the number's clause.
+    expect(
+      numbers(
+        footer(`FCA firm 654321${blank}Registered in England No. 0123 4567`),
+      ),
+    ).toEqual(['01234567']);
+  });
+
+  test('a long blank run keeps its line break', () => {
     expect(
       numbers(footer('Company No. 0123 4567   \n\n   12 High Street')),
     ).toEqual(['01234567']);

@@ -187,6 +187,32 @@ describe('statedCompanyNumbers', () => {
     expect(stated.context).toContain('Company No. 03260168');
   });
 
+  test('reads a long blank run after the statutory wording at once', () => {
+    // A group's legal notice left 5,106 blank characters after "registered in England & Wales"; the re-walk hung on it for a week.
+    const blank = ' \n'.repeat(300);
+    const started = performance.now();
+    expect(
+      numbers(
+        footer(`Acme plc, registered in England &amp; Wales${blank}Hello`),
+      ),
+    ).toEqual([]);
+    expect(
+      numbers(
+        footer(`Acme plc, registered in England &amp; Wales${blank}01234567`),
+      ),
+    ).toEqual(['01234567']);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  test('a squeezed blank run keeps its line break', () => {
+    expect(
+      numbers(footer('Company No. 0123 4567   \n\n   12 High Street')),
+    ).toEqual(['01234567']);
+    expect(
+      numbers(footer('Registered in England and Wales\n\n 020 7946 0000')),
+    ).toEqual([]);
+  });
+
   test('a page stating more numbers than any group lists is a listing', () => {
     const many = Array.from(
       { length: MAX_STATED_PER_PAGE + 1 },

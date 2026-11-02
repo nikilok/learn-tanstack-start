@@ -204,13 +204,21 @@ describe('statedCompanyNumbers', () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
-  test('a squeezed blank run keeps its line break', () => {
+  test('a capped blank run keeps its line break', () => {
     expect(
       numbers(footer('Company No. 0123 4567   \n\n   12 High Street')),
     ).toEqual(['01234567']);
     expect(
       numbers(footer('Registered in England and Wales\n\n 020 7946 0000')),
     ).toEqual([]);
+  });
+
+  test('digit groups apart by more than one blank stay apart', () => {
+    // A phone number split across lines, its groups two spaces apart.
+    expect(
+      numbers(footer('Registered in England and Wales\n020  7946\n0000')),
+    ).toEqual([]);
+    expect(numbers(footer('Company No. 0123     4567'))).toEqual([]);
   });
 
   test('a page stating more numbers than any group lists is a listing', () => {

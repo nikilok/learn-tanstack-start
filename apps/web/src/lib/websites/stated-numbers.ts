@@ -110,15 +110,15 @@ export function normaliseStatedNumber(raw: string): string | null {
   return number;
 }
 
-/** A page's text with each blank run squeezed to one character: a line break where the run spans lines, else a space. */
-function squeezeBlankRuns(text: string): string {
-  // The patterns' adjacent `\s*` backtrack polynomially on a long run.
-  return text.replace(/\s+/g, (run) => (run.includes('\n') ? '\n' : ' '));
+/** A page's text with each blank run longer than two cut to two characters, line breaks kept where the run spanned lines. */
+function capBlankRuns(text: string): string {
+  // The patterns' adjacent `\s*` backtrack polynomially on a long run; they tell one blank from more, never two from more.
+  return text.replace(/\s{3,}/g, (run) => (run.includes('\n') ? '\n\n' : '  '));
 }
 
 /** Statutory company numbers stated in a page's visible text, first wording kept. */
 export function statedCompanyNumbers(html: string): StatedNumber[] {
-  const text = squeezeBlankRuns(visibleText(html));
+  const text = capBlankRuns(visibleText(html));
   const found = new Map<string, string>();
   const matches = PATTERNS.flatMap((pattern) => [
     ...text.matchAll(pattern),

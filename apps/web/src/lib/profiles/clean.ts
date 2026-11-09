@@ -54,9 +54,10 @@ export function cleanPageText(html: string): string {
     .replace(COMMENTS, '\n')
     .replace(SCRIPT_STYLE, '\n')
     .replace(BOILERPLATE, '\n');
+  // Postgres text rejects U+0000 (a raw NUL or a decoded &#0;).
   return visibleText(stripped)
     .split('\n')
-    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .map((line) => line.replaceAll('\u0000', ' ').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join('\n');
 }

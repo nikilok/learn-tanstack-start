@@ -8,7 +8,11 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Origin win target for this worker (default: PROFILE_EXTRACT_LIMIT var or 80)'
+        description: 'Origin win target for each worker (default: PROFILE_EXTRACT_LIMIT var or 80)'
+        type: string
+        default: ''
+      workers:
+        description: 'Parallel macOS workers, 1-4 (default: PROFILE_EXTRACT_WORKERS var or 1)'
         type: string
         default: ''
 
@@ -20,9 +24,37 @@ permissions:
   contents: read
 
 jobs:
+  # Turns the workers count into the matrix below, validated as text. Four at
+  # most: the plan allows five macOS jobs at once and hmrc-ingestion needs one.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      workers: ${{ steps.split.outputs.workers }}
+    steps:
+      - name: Plan the workers
+        id: split
+        shell: bash
+        env:
+          WORKERS: ${{ inputs.workers || vars.PROFILE_EXTRACT_WORKERS || '1' }}
+        run: |
+          case "$WORKERS" in
+            [1-4]) ;;
+            *) echo "workers must be a whole number from 1 to 4"; exit 1 ;;
+          esac
+          echo "workers=$(jq -nc --argjson n "$WORKERS" '[range($n)]')" >> "$GITHUB_OUTPUT"
+
   extract:
+    needs: plan
+    name: extract ${{ matrix.worker }}
     runs-on: macos-latest
-    timeout-minutes: 170
+    # A dispatched wave may use the job's whole six hours; the nightly run
+    # stays inside its window.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 170 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJSON(needs.plan.outputs.workers) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -57,18 +89,21 @@ jobs:
           path: ~/.cache/litert-lm
           key: litert-lm-cache-${{ hashFiles('packages/gemma/src/model-pin.ts') }}
 
+      # Workers share one due list; the claims table hands each origin to one
+      # of them.
       - name: Extract sweep
         env:
           POSTGRES_URL: ${{ secrets.POSTGRES_URL }}
           LIMIT: ${{ inputs.limit || vars.PROFILE_EXTRACT_LIMIT || '80' }}
           RUN_ID: ${{ github.run_id }}
-        run: bun apps/web/scripts/profile-company.ts --from-snapshots --limit="$LIMIT" --claim="ci-$RUN_ID"
+          WORKER: ${{ matrix.worker }}
+        run: bun apps/web/scripts/profile-company.ts --from-snapshots --limit="$LIMIT" --claim="ci-$RUN_ID-$WORKER"
 
       # hashFiles() cannot see outside the workspace, so the downloaded-model
-      # check is a shell test.
+      # check is a shell test. One worker saves, so a cold cache is not raced.
       - name: Check model downloaded
         id: model-present
-        if: always() && steps.model-cache.outputs.cache-hit != 'true'
+        if: always() && matrix.worker == 0 && steps.model-cache.outputs.cache-hit != 'true'
         run: |
           if ls "$HOME/.cache/litert-lm/"*.litertlm >/dev/null 2>&1; then
             echo "present=true" >> "$GITHUB_OUTPUT"

@@ -85,6 +85,15 @@ describe('cleanPageText', () => {
     const html = '<p>  A \t  B  </p>\n\n\n<div></div>\n<p>C</p>';
     expect(cleanPageText(html)).toBe('A B\nC');
   });
+
+  // 2026-11-09: NULs on 8 of 12 head origins failed every snapshot write.
+  test('drops raw NUL bytes and decoded &#0;, which Postgres text rejects', () => {
+    const text = cleanPageText(
+      '<p>Domiciliary\u0000care</p>\n<p>Live-in&#0;support\u0000</p>',
+    );
+    expect(text).toBe('Domiciliary care\nLive-in support');
+    expect(text.includes('\u0000')).toBe(false);
+  });
 });
 
 describe('estimateTokens', () => {

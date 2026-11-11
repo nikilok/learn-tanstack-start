@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
+import type { AskBoxMode } from '../lib/ask/session';
 import { shouldAutoFocusSearch } from '../lib/search/autofocus';
 import { loadStoredFilters } from '../lib/search/persist';
 import { isDesktopPreview } from '../utils/desktop-preview';
@@ -22,6 +23,8 @@ import styles from './SearchBar.module.css';
  * blinking I-beam, so a phrase can still be typed on top of the filters
  * (classic mode never reaches stuck-while-empty: that state is the hero page).
  * Autofocus is the hero's alone — `shouldAutoFocusSearch` holds the rules.
+ * While a question runs or its plan is applied (`askMode`), the input wears
+ * the ask ring and the pill its rim.
  */
 export default function SearchBar({
   search,
@@ -36,6 +39,7 @@ export default function SearchBar({
   onPillClick,
   onBlur,
   askEnabled = false,
+  askMode = 'off',
   onAsk,
 }: {
   search: string;
@@ -50,6 +54,7 @@ export default function SearchBar({
   onPillClick: () => void;
   onBlur: () => void;
   askEnabled?: boolean;
+  askMode?: AskBoxMode;
   onAsk?: () => void;
 }) {
   const showPill = isStuck && !pillClicked && (!!search || filtersActive);
@@ -117,6 +122,7 @@ export default function SearchBar({
           onBlur={isStuck ? onBlur : undefined}
           placeholder={placeholder}
           askEnabled={askEnabled}
+          askMode={askMode}
           onAsk={onAsk}
         />
       </div>
@@ -140,7 +146,7 @@ export default function SearchBar({
                   ? `Edit search for ${search}`
                   : 'Search within the filtered list'
               }
-              className="inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3.5 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none"
+              className={`inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3.5 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none${askMode === 'off' ? '' : ` ${styles.askPill}`}`}
             >
               {search ? (
                 <span className="truncate">{search}</span>

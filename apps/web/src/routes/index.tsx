@@ -53,6 +53,7 @@ import {
 import { applyOverlay, describeFilters, paramsKey } from '../lib/ask/overlay';
 import {
   type AskAccess,
+  askBoxMode,
   askEntry,
   askEntryState,
   type AskProgress,
@@ -400,6 +401,12 @@ function Home() {
     couldAsk,
     shortcut: askKey,
   });
+  // The ring the box wears (lib/ask/session): turning while a question
+  // runs, steady while its plan is applied, gone otherwise.
+  const askMode = askBoxMode({
+    applied: applied !== null,
+    progress: askProgress,
+  });
   // A running ask holds the prefix as a load does: the text may move on
   // before it answers, and the offer must hold through that text's search.
   const prefixHeld = resultsData.isLoading || askProgress.status === 'pending';
@@ -680,6 +687,7 @@ function Home() {
             onPillClick={onPillClick}
             onBlur={onPillDismiss}
             askEnabled={eligible}
+            askMode={askMode}
             onAsk={onAsk}
           />
         </div>

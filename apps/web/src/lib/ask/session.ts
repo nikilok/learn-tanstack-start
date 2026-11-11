@@ -22,6 +22,9 @@ export type AskHint =
   | { status: 'eligible' | 'pending' | 'unavailable'; shortcut: string | null }
   | { status: 'empty'; reason: EmptyReason; shortcut: string | null };
 
+/** What the box shows of the ask: a running question, an applied plan, or nothing. */
+export type AskBoxMode = 'off' | 'pending' | 'on';
+
 /** The access a document starts with: the readable hint the owner cookie leaves beside itself opens it, so an owner is open from the first render and nobody else ever mints to find out. */
 export function initialAskAccess(hint: boolean): AskAccess {
   return hint ? 'open' : 'off';
@@ -138,6 +141,18 @@ export function deriveAskHint({
   if (progress.status !== 'idle')
     return { eligible, hint: { ...progress, shortcut } };
   return { eligible, hint: eligible ? { status: 'eligible', shortcut } : null };
+}
+
+/** The mode the box shows: on while a plan is applied, pending while a question runs, else off. */
+export function askBoxMode({
+  applied,
+  progress,
+}: {
+  applied: boolean;
+  progress: AskProgress;
+}): AskBoxMode {
+  if (applied) return 'on';
+  return progress.status === 'pending' ? 'pending' : 'off';
 }
 
 /**

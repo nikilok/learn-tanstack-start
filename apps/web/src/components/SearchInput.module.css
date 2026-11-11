@@ -15,6 +15,54 @@
     0 0 30px 8px var(--glow-b);
 }
 
+/*
+ * Ask ring: a spectrum line around the field while a question runs or its plan
+ * is applied. A conic gradient on a 2px frame with the field cut out, over the
+ * field's own border and 1px beyond. The angle turns while pending and holds
+ * otherwise, so the colours never jump; off, it fades where it stopped.
+ */
+@property --ask-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0turn;
+}
+
+.ring {
+  position: absolute;
+  inset: -1px;
+  /* The input's rounded-lg plus the 1px outside it. */
+  border-radius: calc(0.5rem + 1px);
+  padding: 2px;
+  background: conic-gradient(from var(--ask-angle), var(--spectrum-stops));
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  animation: ask-sweep 1.4s linear infinite paused;
+}
+
+.ring[data-ask] {
+  opacity: 1;
+}
+
+.ring[data-ask='pending'] {
+  animation-play-state: running;
+}
+
+@keyframes ask-sweep {
+  to {
+    --ask-angle: 1turn;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: none;
+  }
+}
+
 /* Spotlight scrim behind the pinned search overlay; index.tsx applies `.search-glow` by name (hence :global). */
 /* Solid `--bg-base` at the bar's top edge, fading OUT below the results and IN over the 2rem above — reads as a spotlight even with no header covering the top (desktop shell). */
 :global(.search-glow)::after {

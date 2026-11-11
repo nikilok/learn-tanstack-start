@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AppliedAsk } from './applied-store';
 import { paramsKey } from './overlay';
 import {
+  askBoxMode,
   askEntry,
   askEntryState,
   listedRanking,
@@ -370,5 +371,31 @@ describe('listedRanking', () => {
         hydrated: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe('askBoxMode', () => {
+  test('on while a plan is applied, pending while a question runs, else off', () => {
+    expect(askBoxMode({ applied: true, progress: { status: 'idle' } })).toBe(
+      'on',
+    );
+    expect(askBoxMode({ applied: true, progress: { status: 'pending' } })).toBe(
+      'on',
+    );
+    expect(
+      askBoxMode({ applied: false, progress: { status: 'pending' } }),
+    ).toBe('pending');
+    expect(askBoxMode({ applied: false, progress: { status: 'idle' } })).toBe(
+      'off',
+    );
+    expect(
+      askBoxMode({ applied: false, progress: { status: 'unavailable' } }),
+    ).toBe('off');
+    expect(
+      askBoxMode({
+        applied: false,
+        progress: { status: 'empty', reason: 'name' },
+      }),
+    ).toBe('off');
   });
 });

@@ -18,6 +18,15 @@
   }
 }
 
+/* Ask-mode rim: the pill is the input's collapsed form. The fill on the padding
+   box over the spectrum on the border box leaves the 1px border as the ring. */
+.askPill {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--sea-ink), var(--sea-ink)) padding-box,
+    linear-gradient(90deg, var(--spectrum-stops)) border-box;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .caret {
     animation: none;

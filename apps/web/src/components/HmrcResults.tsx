@@ -14,7 +14,11 @@ import type { HmrcRow } from '../api/hmrc';
 import { restoresScroll, wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import type { AskHint } from '../lib/ask/session';
-import { nextSceneLast, sceneShown } from '../lib/search/empty-state';
+import {
+  nextSceneLast,
+  quietListing,
+  sceneShown,
+} from '../lib/search/empty-state';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import {
   formatLocation,
@@ -323,11 +327,13 @@ export default function HmrcResults({
   // while the offer stands or the ask runs, and the parent keeps the offer up
   // through the load of a text that only adds to the one it stood on. The
   // scene is for the ask's own empty answer, or a text that cannot be asked,
-  // which is every text today's flow saw.
-  const quiet =
-    ask !== null &&
-    (ask.status === 'eligible' || ask.status === 'pending') &&
-    (confirmedEmpty || isLoading);
+  // which is every text today's flow saw. A question that runs is quiet
+  // whatever its text found by name (one asked from the hero's examples can
+  // have rows): its answer is on the way (lib/search/empty-state).
+  const quiet = quietListing(ask ?? null, {
+    confirmedEmpty,
+    loading: isLoading,
+  });
   // Whether the scene was the last settled empty view, so a refine-load from
   // it keeps the WebGPU hole mounted (no zoom replay) while one from the
   // quiet offer does not pretend there was a hole (lib/search/empty-state).

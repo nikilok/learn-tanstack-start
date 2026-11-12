@@ -25,11 +25,6 @@ export type AskHint =
 /** What the box shows of the ask: a running question, an applied plan, or nothing. */
 export type AskBoxMode = 'off' | 'pending' | 'on';
 
-/** The access a document starts with: the readable hint the owner cookie leaves beside itself opens it, so an owner is open from the first render and nobody else ever mints to find out. */
-export function initialAskAccess(hint: boolean): AskAccess {
-  return hint ? 'open' : 'off';
-}
-
 // The plan rides on the router's own history state, as its docs have it, so
 // the entry the ask produced restores it by itself: on Forward, on Back onto
 // it, on a reload. router-core already declares its internals there, so an

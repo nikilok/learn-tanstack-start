@@ -66,7 +66,6 @@ import {
   type AskProgress,
   listedRanking,
   deriveAskHint,
-  initialAskAccess,
   nextEmptyPrefix,
   reconcileApplied,
 } from '../lib/ask/session';
@@ -110,6 +109,17 @@ const PENDING_FILTER_DATA = {
   loadingMore: false,
   fetchMore: () => {},
 };
+
+/** Writes `value` into the search box through its own input path, as typed: the native setter keeps React's value tracker in step, whichever event the input binds. */
+function writeBox(el: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    'value',
+  )?.set;
+  if (setter) setter.call(el, value);
+  else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 /** The server snapshot of device readiness: nothing is ready before hydration. */
 const serverSnapshot = () => WAITING;
@@ -260,13 +270,17 @@ function Home() {
   const [askProgress, setAskProgress] = useState<AskProgress>(ASK_IDLE);
   // Known at mount from the owner hint the document's own response left
   // (lib/ask/access-hint.server), so an owner's offer never waits on a mint
-  // and nobody else mints at all. Off on the hydration mount by construction
-  // (server HTML matches); the layout effect opens it before the first paint,
-  // and costs a document without the hint nothing.
-  const [askAccess, setAskAccess] = useState<AskAccess>(() =>
-    hydrationDone() ? initialAskAccess(hasOwnerHint()) : 'off',
-  );
+  // and nobody else mints at all. Off on every first render, so a hydration
+  // render matches the server: the route hydrates in its own Suspense
+  // boundary after the root's effects, so `hydrationDone()` is already true
+  // there. The layout effect opens it before the first paint, and costs a
+  // document without the hint nothing.
+  const [askAccess, setAskAccess] = useState<AskAccess>('off');
+  // False on the first render only, for the same reason: what the entry
+  // carries (its ranking) is read from the second on.
+  const [mounted, setMounted] = useState(false);
   useLayoutEffect(() => {
+    setMounted(true);
     if (hasOwnerHint()) setAskAccess('open');
   }, []);
   // This history entry's state: an entry the ask produced carries its plan
@@ -291,7 +305,7 @@ function Home() {
     applied,
     entry: askEntry(entryState),
     urlKey: urlParamsKey,
-    hydrated: hydrationDone(),
+    hydrated: mounted,
   });
   const rankedMode = ranking !== null;
   const listingMode = hasFilters || pendingStoredFilters || rankedMode;
@@ -635,6 +649,14 @@ function Home() {
     else queuedAskRef.current = text;
   };
 
+  /** Asks one of the hero's example questions: the text enters the box as typed, then is asked as the arrow asks it. */
+  const askExample = (text: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    writeBox(el, text);
+    onAsk();
+  };
+
   // Enter pressed before the offer: asked once the text's name search
   // settles empty, as the offer would have; dropped when it does not.
   const enterIntentRef = useRef<string | null>(null);
@@ -698,17 +720,10 @@ function Home() {
     });
   };
 
-  /** Clears the question through the input's own clear path, which ends the ask and restores the base filters. The native setter keeps React's value tracker in step, whichever event the input binds. */
+  /** Clears the question through the input's own clear path, which ends the ask and restores the base filters. */
   const clearAsk = () => {
     const el = inputRef.current;
-    if (!el) return;
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
-      'value',
-    )?.set;
-    if (setter) setter.call(el, '');
-    else el.value = '';
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (el) writeBox(el, '');
   };
 
   // Applied filters are durable: the URL is authoritative when it carries
@@ -925,7 +940,12 @@ function Home() {
 
         {/* Hero shows only when input AND debounced search are both empty, so it
             appears only after the results grid has fully cleared. */}
-        {heroVisible && <HeroText count={sponsorCount} />}
+        {heroVisible && (
+          <HeroText
+            count={sponsorCount}
+            onAsk={askAccess === 'open' && !preview ? askExample : undefined}
+          />
+        )}
 
         <div className="page-flip-listing">
           <Suspense fallback={<SkeletonCards />}>

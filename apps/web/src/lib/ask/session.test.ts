@@ -8,7 +8,6 @@ import {
   askEntryState,
   listedRanking,
   deriveAskHint,
-  initialAskAccess,
   nextEmptyPrefix,
   reconcileApplied,
 } from './session';
@@ -24,13 +23,6 @@ const plan: AppliedAsk = {
 const planKey = paramsKey(merged);
 const otherKey = paramsKey({ rating: 'A' });
 const bareKey = paramsKey({});
-
-describe('initialAskAccess', () => {
-  test('the owner hint opens at once; without it the document is off', () => {
-    expect(initialAskAccess(true)).toBe('open');
-    expect(initialAskAccess(false)).toBe('off');
-  });
-});
 
 describe('askEntry', () => {
   test("reads the plan from an entry the ask produced, as the router's state carries it", () => {

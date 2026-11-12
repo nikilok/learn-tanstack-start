@@ -2,6 +2,7 @@ import { FILTER_DIMENSION_COUNT } from '@ss/search-filters';
 import { Link } from '@tanstack/react-router';
 
 import { FILTER_SECTIONS } from '../lib/search/sections';
+import AskExamples from './AskExamples';
 import Odometer from './Odometer';
 
 import styles from './HeroText.module.css';
@@ -10,9 +11,11 @@ import styles from './HeroText.module.css';
  * Empty-state landing hero — a big, confident stat (Grok / Colossus style): the
  * live sponsor count abbreviated as "<n>K+" in high-contrast type over a muted
  * supporting label, plus a chip row broadcasting the filter capability that
- * links to /filters. The number is the petrol-pump <Odometer>, rolling up to
- * the live count. Rendered only while the search input is empty, so its
- * entrance animation runs on mount and unmounts the moment the user types.
+ * links to /filters, or, while asking is open (`onAsk`), the rotating example
+ * questions in its place (AskExamples). The number is the petrol-pump
+ * <Odometer>, rolling up to the live count. Rendered only while the search
+ * input is empty, so its entrance animation runs on mount and unmounts the
+ * moment the user types.
  * Theme-aware via --sea-ink tokens; honours reduced-motion.
  */
 // Conservative floor (in thousands) shown if the live count is unavailable (cold
@@ -24,7 +27,13 @@ const FACETS = FILTER_SECTIONS.filter((s) => s.schemaLabel !== null).map(
   (s) => s.title,
 );
 
-export default function HeroText({ count }: { count?: number }) {
+export default function HeroText({
+  count,
+  onAsk,
+}: {
+  count?: number;
+  onAsk?: (text: string) => void;
+}) {
   // Whole thousands, floored, so "<n>K+" is always a truthful lower bound of the
   // live count (e.g. 114,145 → "114K+").
   const thousands =
@@ -46,23 +55,27 @@ export default function HeroText({ count }: { count?: number }) {
           licensed UK visa sponsors
         </span>
       </h2>
-      <Link
-        to="/filters"
-        className={styles.filtersLink}
-        aria-label={`Filter the register ${FILTER_DIMENSION_COUNT} ways`}
-      >
-        <span className={styles.filtersCount}>
-          {FILTER_DIMENSION_COUNT} filters
-        </span>
-        {FACETS.map((facet) => (
-          <span key={facet} className={styles.facet}>
-            {facet}
+      {onAsk ? (
+        <AskExamples onAsk={onAsk} />
+      ) : (
+        <Link
+          to="/filters"
+          className={styles.filtersLink}
+          aria-label={`Filter the register ${FILTER_DIMENSION_COUNT} ways`}
+        >
+          <span className={styles.filtersCount}>
+            {FILTER_DIMENSION_COUNT} filters
           </span>
-        ))}
-        <span className={styles.filtersGo} aria-hidden="true">
-          →
-        </span>
-      </Link>
+          {FACETS.map((facet) => (
+            <span key={facet} className={styles.facet}>
+              {facet}
+            </span>
+          ))}
+          <span className={styles.filtersGo} aria-hidden="true">
+            →
+          </span>
+        </Link>
+      )}
     </>
   );
 }

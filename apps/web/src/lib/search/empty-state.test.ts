@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { nextSceneLast, sceneShown } from './empty-state';
+import { nextSceneLast, quietListing, sceneShown } from './empty-state';
 
 const gpu = () => true;
 const noGpu = () => false;
@@ -99,5 +99,32 @@ describe('sceneShown', () => {
     expect(load(true, gpu)).toBe(true);
     expect(load(true, noGpu)).toBe(false);
     expect(load(false, gpu)).toBe(false);
+  });
+});
+
+describe('quietListing', () => {
+  const settled = { confirmedEmpty: true, loading: false };
+  const rows = { confirmedEmpty: false, loading: false };
+
+  test('a running question is quiet whatever the name search found: its answer is on the way', () => {
+    expect(quietListing({ status: 'pending' }, settled)).toBe(true);
+    expect(quietListing({ status: 'pending' }, rows)).toBe(true);
+  });
+
+  test('the offer is quiet only while the text has nothing by name or is still loading', () => {
+    expect(quietListing({ status: 'eligible' }, settled)).toBe(true);
+    expect(
+      quietListing(
+        { status: 'eligible' },
+        { confirmedEmpty: false, loading: true },
+      ),
+    ).toBe(true);
+    expect(quietListing({ status: 'eligible' }, rows)).toBe(false);
+  });
+
+  test('an empty or failed answer, or no ask at all, leaves the listing to the scene', () => {
+    expect(quietListing({ status: 'empty' }, settled)).toBe(false);
+    expect(quietListing({ status: 'unavailable' }, settled)).toBe(false);
+    expect(quietListing(null, settled)).toBe(false);
   });
 });

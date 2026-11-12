@@ -1,0 +1,201 @@
+/*
+ * The hero's ask row: "Ask for" and one example of what the register can be
+ * asked (lib/ask/examples), in the filters row's place while asking is open.
+ * Enters on the hero's curve a beat after the subline, as the filters row does.
+ * An example types in letter by letter, left to right, holds, and is erased
+ * right to left and quickly before the next types; the beats are the timer's
+ * own, set inline from lib/ask/examples. The ring is the one the search box
+ * wears while a question runs: still here, turning under the pointer.
+ */
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem 0.5rem;
+  max-width: 30rem;
+  margin: 1.1rem auto 0;
+  padding: 0.3rem 0.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: clamp(0.875rem, 2.2vw, 1rem);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--sea-ink-soft);
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(0.4em);
+  animation: examples-in 0.6s 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes examples-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.examples:hover,
+.examples:focus-visible {
+  color: var(--sea-ink);
+}
+
+.examples:focus-visible {
+  outline: 2px solid var(--link-blue);
+  outline-offset: 2px;
+}
+
+/* The ask ring in miniature: a 2px conic spectrum frame with the middle cut out. */
+@property --example-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0turn;
+}
+
+.mark {
+  flex: none;
+  width: 0.85em;
+  height: 0.85em;
+  border-radius: 999px;
+  padding: 2px;
+  background: conic-gradient(from var(--example-angle), var(--spectrum-stops));
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: example-ring 1.4s linear infinite paused;
+}
+
+.examples:hover .mark,
+.examples:focus-visible .mark {
+  animation-play-state: running;
+}
+
+@keyframes example-ring {
+  to {
+    --example-angle: 1turn;
+  }
+}
+
+/* A phone's width stacks the row, "Ask for" above and the example with its arrow below, whichever example is typing, so its height holds across them. */
+.break {
+  display: none;
+  flex-basis: 100%;
+  height: 0;
+}
+
+@media (max-width: 30rem) {
+  .break {
+    display: block;
+  }
+}
+
+/*
+ * The examples share one cell, each anchored to its left and kept to one line
+ * (every example fits a phone's), so the one erased and the one typing never
+ * reflow; the component glides the cell's width between them over the erase.
+ */
+.phrase {
+  display: inline-grid;
+  color: var(--sea-ink);
+  white-space: nowrap;
+}
+
+.shown,
+.leaving {
+  grid-area: 1 / 1;
+  justify-self: start;
+}
+
+/* One letter: a box of its own so it can rise, and a space stays a space. */
+.letter {
+  display: inline-block;
+  white-space: pre;
+}
+
+/* Typing: each letter rises in on its beat, once the example's wait is over. */
+.shown .letter {
+  opacity: 0;
+  transform: translateY(0.2em);
+  animation: letter-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--wait) + var(--i) * var(--beat));
+}
+
+@keyframes letter-in {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Erasing: the letters go right to left across the erase, the last within it; the span's own animation marks its end for the component. */
+.leaving {
+  pointer-events: none;
+  animation: erased var(--erase) step-end both;
+}
+
+.leaving .letter {
+  animation: letter-out 90ms ease-out both;
+  animation-delay: calc(
+    (var(--n) - 1 - var(--i)) * (var(--erase) - 90ms) / var(--n)
+  );
+}
+
+@keyframes letter-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes erased {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* The arrow the box asks with, lifting as the pointer arrives. */
+.go {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  color: var(--sea-ink-soft);
+  transition:
+    transform 150ms ease,
+    color 150ms ease;
+}
+
+.examples:hover .go,
+.examples:focus-visible .go {
+  transform: translateY(-2px);
+  color: var(--sea-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .examples {
+    opacity: 1;
+    transform: none;
+    animation: none;
+  }
+
+  .mark,
+  .shown .letter,
+  .leaving .letter {
+    animation: none;
+  }
+
+  .shown .letter {
+    opacity: 1;
+    transform: none;
+  }
+
+  .leaving {
+    display: none;
+  }
+
+  .examples:hover .go,
+  .examples:focus-visible .go {
+    transform: none;
+  }
+}

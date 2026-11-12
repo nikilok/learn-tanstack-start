@@ -14,8 +14,8 @@ import {
   letters,
 } from './examples';
 
-/** The longest example that stays one line at a phone's width, in characters. */
-const PHONE_LINE = 44;
+/** The longest example worth typing out, in characters: past this a phone wraps it and the typing drags. */
+const LONGEST = 44;
 
 describe('ASK_EXAMPLES', () => {
   test('each clears the gate the box applies to a typed text, so asking one as written never does nothing', () => {
@@ -31,9 +31,9 @@ describe('ASK_EXAMPLES', () => {
     }
   });
 
-  test('each fits one line on a phone, and none repeats', () => {
+  test('each stays short, and none repeats', () => {
     for (const text of ASK_EXAMPLES) {
-      expect(text.length).toBeLessThanOrEqual(PHONE_LINE);
+      expect(letters(text).length).toBeLessThanOrEqual(LONGEST);
     }
     expect(new Set(ASK_EXAMPLES).size).toBe(ASK_EXAMPLES.length);
   });

@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -25,17 +26,37 @@ const BEATS = {
   '--erase': `${EXAMPLE_ERASE_MS}ms`,
 } as CSSProperties;
 
-/** An example letter by letter, each on its own beat. */
+/** An example letter by letter, each on its own beat, its words kept whole so a line breaks only at a space; a space is a beat with nothing to show. */
 function Letters({ text }: { text: string }) {
-  return letters(text).map((letter, i) => (
-    <span
-      key={i}
-      className={styles.letter}
-      style={{ '--i': i } as CSSProperties}
-    >
-      {letter}
-    </span>
-  ));
+  const nodes: ReactNode[] = [];
+  let word: ReactNode[] = [];
+  const endWord = (key: number) => {
+    if (!word.length) return;
+    nodes.push(
+      <span key={`w${key}`} className={styles.word}>
+        {word}
+      </span>,
+    );
+    word = [];
+  };
+  letters(text).forEach((letter, i) => {
+    if (letter === ' ') {
+      endWord(i);
+      nodes.push(' ');
+      return;
+    }
+    word.push(
+      <span
+        key={i}
+        className={styles.letter}
+        style={{ '--i': i } as CSSProperties}
+      >
+        {letter}
+      </span>,
+    );
+  });
+  endWord(-1);
+  return nodes;
 }
 
 /**
@@ -54,8 +75,11 @@ export default function AskExamples({
   const [rotation, setRotation] = useState(FIRST_EXAMPLE);
   // True once the example the shown one replaced has been erased, and it goes.
   const [erased, setErased] = useState(false);
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [still, setStill] = useState(false);
+  // The rotation rests while the pointer is over the row or it holds focus: either way what is read is what would be asked.
+  const paused = hovered || focused;
   const cellRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -82,6 +106,8 @@ export default function AskExamples({
     if (rotation.leaving === null || !cell) return;
     const [leaving, shown] = cell.children;
     if (!leaving || !shown) return;
+    // A phone's phrase wraps instead (the stylesheet), and a cell that may wrap has no one width to glide between.
+    if (getComputedStyle(cell).whiteSpace !== 'nowrap') return;
     const from = leaving.getBoundingClientRect().width;
     const to = shown.getBoundingClientRect().width;
     cell.style.transition = 'none';
@@ -98,10 +124,10 @@ export default function AskExamples({
       className={styles.examples}
       style={BEATS}
       onClick={() => onAsk(shown)}
-      onPointerEnter={() => setPaused(true)}
-      onPointerLeave={() => setPaused(false)}
-      onFocus={() => setPaused(true)}
-      onBlur={() => setPaused(false)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     >
       <span className={styles.mark} aria-hidden="true" />
       <span>Ask for</span>

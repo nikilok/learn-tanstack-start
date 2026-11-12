@@ -93,14 +93,23 @@
 }
 
 /*
- * The examples share one cell, each anchored to its left and kept to one line
- * (every example fits a phone's), so the one erased and the one typing never
- * reflow; the component glides the cell's width between them over the erase.
+ * The examples share one cell, each anchored to its left and kept to one line,
+ * so the one erased and the one typing never reflow; the component glides the
+ * cell's width between them over the erase. A screen narrower than the longest
+ * example's line wraps the phrase at a space instead, and nothing glides there.
  */
 .phrase {
   display: inline-grid;
   color: var(--sea-ink);
   white-space: nowrap;
+}
+
+@media (max-width: 22.25rem) {
+  .phrase {
+    white-space: normal;
+    /* Room for the arrow beside it, so a wrapped example keeps the arrow on its line. */
+    max-width: calc(100% - 1.75em);
+  }
 }
 
 .shown,
@@ -109,10 +118,14 @@
   justify-self: start;
 }
 
-/* One letter: a box of its own so it can rise, and a space stays a space. */
+/* A word is one box, so a line breaks only between words; a letter is one too, so it can rise. */
+.word,
 .letter {
   display: inline-block;
-  white-space: pre;
+}
+
+.word {
+  white-space: nowrap;
 }
 
 /* Typing: each letter rises in on its beat, once the example's wait is over. */

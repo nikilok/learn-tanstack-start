@@ -13,6 +13,7 @@ import { useVirtualTextLayout } from 'virtual-text-layout';
 import type { HmrcRow } from '../api/hmrc';
 import { restoresScroll, wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
+import { clearApplied } from '../lib/ask/applied-store';
 import type { AskHint } from '../lib/ask/session';
 import {
   nextSceneLast,
@@ -616,6 +617,7 @@ function ResetFilters({ search }: { search: string }) {
       type="button"
       onClick={() => {
         storeFilters({});
+        clearApplied();
         void router.navigate({ to: '/', search: { search } }).then(() => {
           // Land in the normal starting state (see /filters' apply).
           window.scrollTo(0, 0);

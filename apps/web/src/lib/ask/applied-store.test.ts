@@ -125,6 +125,15 @@ describe('applied store', () => {
     expect(loadApplied()).toBeNull();
   });
 
+  test('a record whose base is missing or no set at all is corrupt, so clearing its question never restores an empty set in place of the hand-set one', () => {
+    const { base: _base, ...withoutBase } = applied;
+    expect(parseApplied(withoutBase)).toBeNull();
+    expect(parseApplied({ ...applied, base: null })).toBeNull();
+    expect(parseApplied({ ...applied, base: 'sicSection=K' })).toBeNull();
+    expect(parseApplied({ ...applied, base: ['K'] })).toBeNull();
+    expect(parseApplied({ ...applied, base: {} })).not.toBeNull();
+  });
+
   test('the base is re-validated through the registry', () => {
     store['ss-ask'] = JSON.stringify({
       ...applied,

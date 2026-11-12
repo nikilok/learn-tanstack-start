@@ -48,13 +48,16 @@ function parseRanking(value: unknown): AskRanking | null {
   return { span: v.span, sector, tranches, next };
 }
 
-/** A value as a plan, the base re-validated through the registry: null when it is not one of ours. */
+/** A value as a plan, the base a set of its own re-validated through the registry: null when it is not one of ours. */
 export function parseApplied(value: unknown): AppliedAsk | null {
   if (value === null || typeof value !== 'object') return null;
   const v = value as Partial<AppliedAsk>;
   if (
     typeof v.text !== 'string' ||
     typeof v.mergedKey !== 'string' ||
+    v.base === null ||
+    typeof v.base !== 'object' ||
+    Array.isArray(v.base) ||
     !Array.isArray(v.chips) ||
     !v.chips.every((chip) => typeof chip === 'string')
   )

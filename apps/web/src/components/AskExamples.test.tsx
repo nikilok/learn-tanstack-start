@@ -11,8 +11,10 @@ describe('AskExamples', () => {
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('type="button"');
     expect(html).toContain('>Ask for<');
-    // One letter per beat, the example whole once, and one example only: no count for one erased.
-    expect(html.match(/--i:/g)).toHaveLength(letters(ASK_EXAMPLES[0]).length);
+    // One letter per beat (a space is a beat with no letter), the example whole once, and one example only: no count for one erased.
+    expect(html.match(/--i:/g)).toHaveLength(
+      letters(ASK_EXAMPLES[0]).filter((letter) => letter !== ' ').length,
+    );
     expect(html).toContain(`>${ASK_EXAMPLES[0]}<`);
     expect(html.match(/--n:/g)).toHaveLength(1);
   });

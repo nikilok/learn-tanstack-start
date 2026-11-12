@@ -26,7 +26,7 @@ import {
 } from '../lib/ask/ask-loader';
 import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
 import { applyPlan } from '../lib/ask/overlay';
-import { isSector } from '../lib/ask/sector';
+import { isSector, placeSector } from '../lib/ask/sector';
 import { isTrancheOffset, nextTrancheOffset } from '../lib/ask/tranches';
 import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
@@ -188,9 +188,10 @@ const planSearch = createServerFn({ method: 'POST' })
           // fixed fields before it stay where a reader expects them.
           ` q=${JSON.stringify(data.text)} about=${JSON.stringify(planned.plan.span)}`,
       );
-      // Nothing to rank leaves the sector the filter it was.
-      if (sector !== null && !ranking?.shortlist.length)
-        filters.sicSection = sector;
+      // Nothing to rank (a failed rerank, an empty shortlist) leaves the
+      // sector the filter it was (lib/ask/sector).
+      const placed = placeSector(sector, ranking?.shortlist.length ?? 0);
+      if (placed.filter !== null) filters.sicSection = placed.filter;
       // A ranking nobody made is no ranking: the filters alone answer, and
       // with none of those either, the question matched nothing we have read.
       const filtered = Object.keys(filters).length > 0;
@@ -205,7 +206,7 @@ const planSearch = createServerFn({ method: 'POST' })
           ranked && ranking && planned.plan.span
             ? {
                 span: planned.plan.span,
-                sector,
+                sector: placed.preference,
                 tranches: [ranked],
                 next: nextTrancheOffset(0, ranking.shortlist.length),
               }

@@ -122,7 +122,7 @@ describe('describeFilters', () => {
         status: 'voluntary-arrangement',
         companyType: 'uk-establishment',
       }),
-    ).toEqual(['Voluntary arrangement', 'Uk establishment']);
+    ).toEqual(['Voluntary arrangement', 'UK establishment']);
     expect(describeFilters({})).toEqual([]);
   });
 });

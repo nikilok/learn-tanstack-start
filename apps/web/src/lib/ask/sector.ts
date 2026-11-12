@@ -10,3 +10,14 @@ export function isSector(value: unknown): value is string {
     canonicalSearchParams({ sicSection: value }).sicSection === value
   );
 }
+
+/** Where the sector a question named ends up once its first slice was judged: carried by the ranking as a preference while something was there to rank, else the filter it was, so a question nothing was read for still lists its sector. No sector places nothing. */
+export function placeSector(
+  sector: string | null,
+  shortlisted: number,
+): { preference: string | null; filter: string | null } {
+  if (sector === null) return { preference: null, filter: null };
+  return shortlisted > 0
+    ? { preference: sector, filter: null }
+    : { preference: null, filter: sector };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { enterIntent, settleEnterIntent } from './enter';
+import { enterIntent, offerStands, settleEnterIntent } from './enter';
 
 const TEXT = 'care homes in leeds';
 
@@ -61,5 +61,18 @@ describe('settleEnterIntent', () => {
         loading: false,
       }),
     ).toBe('drop');
+  });
+});
+
+describe('offerStands', () => {
+  test('the offer stands for the committed text only: text typed since waits for its own search', () => {
+    expect(offerStands(TEXT, { search: TEXT, eligible: true })).toBe(true);
+    expect(offerStands(`${TEXT} `, { search: TEXT, eligible: true })).toBe(
+      true,
+    );
+    expect(offerStands(`${TEXT} today`, { search: TEXT, eligible: true })).toBe(
+      false,
+    );
+    expect(offerStands(TEXT, { search: TEXT, eligible: false })).toBe(false);
   });
 });

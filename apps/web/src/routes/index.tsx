@@ -51,7 +51,7 @@ import {
   MAX_QUESTION_CHARS,
   MIN_ASK_WORDS,
 } from '../lib/ask/eligibility';
-import { enterIntent, settleEnterIntent } from '../lib/ask/enter';
+import { enterIntent, offerStands, settleEnterIntent } from '../lib/ask/enter';
 import {
   applyPlan,
   describeFilters,
@@ -640,11 +640,12 @@ function Home() {
   const enterIntentRef = useRef<string | null>(null);
   /** Enter in the box: asks while the box offers to; otherwise remembers the press while the text's search is still to settle (lib/ask/enter). */
   const onEnter = () => {
-    if (eligible) {
+    const typed = inputRef.current?.value ?? '';
+    if (offerStands(typed, { search, eligible })) {
       onAsk();
       return;
     }
-    enterIntentRef.current = enterIntent(inputRef.current?.value ?? '', {
+    enterIntentRef.current = enterIntent(typed, {
       search,
       loading: prefixHeld,
       asking: askProgress.status === 'pending',

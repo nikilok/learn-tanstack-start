@@ -31,3 +31,11 @@ export function settleEnterIntent(
   if (eligible) return 'ask';
   return loading ? 'hold' : 'drop';
 }
+
+/** Whether the offer stands for the text in the box: the box offers for the committed text, whose name search settled empty, so text typed since waits for its own search (enterIntent). */
+export function offerStands(
+  typed: string,
+  { search, eligible }: { search: string; eligible: boolean },
+): boolean {
+  return eligible && typed.trim() === search.trim();
+}

@@ -47,6 +47,7 @@ const COMPANY_TYPE_LABELS: Record<string, string> = {
     'Charitable incorporated organisation',
   'private-limited-guarant-nsc': 'Limited by guarantee',
   'royal-charter': 'Royal charter body',
+  'uk-establishment': 'UK establishment',
 };
 
 const FLAG_LABELS: Record<string, [yes: string, no: string]> = {

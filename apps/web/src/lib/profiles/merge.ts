@@ -23,13 +23,18 @@ export type MergedAnswer =
 /** Union cap so one runaway response cannot bloat an answer row. */
 export const MAX_LIST_ITEMS = 50;
 
+/** True when a path segment opens with the word ('/about-us'), not when an article slug mentions it. */
+function segmentStartsWith(path: string, word: string): boolean {
+  return path.split('/').some((segment) => segment.startsWith(word));
+}
+
 /**
  * Where a prose answer is most likely to be the company's own account of
  * itself: about > home > services > everything else. Ties keep caller order.
  */
 function pagePriority(path: string): number {
   const key = path.toLowerCase();
-  if (key.includes('about')) return 0;
+  if (segmentStartsWith(key, 'about')) return 0;
   if (key === '') return 1;
   if (key.includes('service') || key.includes('what-we-do')) return 2;
   return 3;

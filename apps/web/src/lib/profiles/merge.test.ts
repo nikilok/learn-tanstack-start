@@ -42,6 +42,33 @@ describe('mergeAnswers', () => {
     });
   });
 
+  test('about pages under a section or without a hyphen still lead', () => {
+    for (const path of ['/company/about', '/aboutus', '/en/about-acme']) {
+      const merged = mergeAnswers(QUESTIONS, [
+        page('', { what_does: 'From home.', offerings: [] }),
+        page(path, { what_does: 'From about.', offerings: [] }),
+      ]);
+      expect(merged.what_does).toMatchObject({ answer: 'From about.' });
+    }
+  });
+
+  // 2026-11-12: a news slug ending '-about-the-market' outranked the homepage, so the answer was just the company name.
+  test('an article slug that mentions about does not outrank the homepage', () => {
+    const merged = mergeAnswers(QUESTIONS, [
+      page('/insights/our-ceo-speaks-about-the-market', {
+        what_does: 'Acme Group',
+        offerings: [],
+      }),
+      page('', { what_does: 'From home.', offerings: [] }),
+    ]);
+    expect(merged.what_does).toEqual({
+      kind: 'prose',
+      status: 'ok',
+      answer: 'From home.',
+      sourceUrls: ['https://example.co.uk/'],
+    });
+  });
+
   test('prose falls through pages that did not say', () => {
     const merged = mergeAnswers(QUESTIONS, [
       page('/about-us', { what_does: null, offerings: [] }),

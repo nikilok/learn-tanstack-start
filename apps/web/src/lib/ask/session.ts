@@ -91,8 +91,8 @@ export function listedRanking({
  * as the entry's state). `discard` the tab's record on any other filter URL:
  * a plan superseded while this page was away (a set applied from /filters)
  * must not come back under a hand-set set that happens to equal it. A bare
- * URL leaves the record alone: the rehydrate re-applies the store or the
- * record next.
+ * URL leaves the record alone: the rehydrate re-applies the record of a
+ * question listed on it, or else the store, next.
  */
 export type ReconcileAction = 'keep' | 'end' | 'restore' | 'discard';
 

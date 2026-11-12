@@ -186,8 +186,19 @@ export const Route = createFileRoute('/')({
 function Home() {
   // Read from the router's location, the store a history entry's state is
   // read from, so the URL and the entry never disagree within one render:
-  // the route's own search follows a tick later, with the match.
-  const rawSearch = useLocation({ select: (l) => l.search });
+  // the route's own search follows a tick later, with the match. That store
+  // moves to the destination as a navigation starts, while this route is
+  // still mounted, so while it points away the last location that was this
+  // route's is held: a company page loading must not read as the URL leaving
+  // the plan's filters, or the plan would end and the stored set re-apply
+  // under the click, cancelling it.
+  const leaving = useLocation({ select: (l) => l.pathname !== '/' });
+  const liveSearch = useLocation({ select: (l) => l.search });
+  const liveState = useLocation({ select: (l) => l.state });
+  const heldRef = useRef({ search: liveSearch, state: liveState });
+  if (!leaving) heldRef.current = { search: liveSearch, state: liveState };
+  const rawSearch = heldRef.current.search;
+  const entryState = heldRef.current.state;
   const { search, ...urlFilters } = useMemo(
     () => validateHomeSearch(rawSearch as Record<string, unknown>),
     [rawSearch],
@@ -260,7 +271,6 @@ function Home() {
   }, []);
   // This history entry's state: an entry the ask produced carries its plan
   // (lib/ask/session). One object per entry, so it is a stable dependency.
-  const entryState = useLocation({ select: (l) => l.state });
   const [applied, setApplied] = useState<AppliedAsk | null>(null);
   // Read at the moment a debounced commit fires: a plan can land between the
   // keystroke and its timer, and the commit must then end it, not type on it.
@@ -698,16 +708,24 @@ function Home() {
   // Navs that only carry the name term (a company page's back link, the
   // header logo) get the stored set re-applied, with the tab's record riding
   // along when the set is its plan's; a question that only ranked has no set,
-  // so its record alone comes back the same way. The only way OUT of filter
-  // mode is /filters' Reset, which empties the store. A question's own entry
-  // on a bare URL carries it already, and the stored set waits.
+  // so its record comes back first, and the stored set waits, as it did while
+  // the question ran. The only way OUT of filter mode is /filters' Reset,
+  // which empties the store. A question's own entry on a bare URL carries it
+  // already.
   useEffect(() => {
     if (hasFilters) return;
     const entry = askEntry(entryState);
     if (entry?.ranking && entry.mergedKey === urlParamsKey) return;
     const stored = loadStoredFilters();
     const record = loadApplied();
-    if (stored) {
+    if (record?.ranking && record.mergedKey === urlParamsKey) {
+      navigate({
+        to: '/',
+        search: { search },
+        replace: true,
+        state: askEntryState(record),
+      });
+    } else if (stored) {
       navigate({
         to: '/',
         search: { search, ...stored },
@@ -715,13 +733,6 @@ function Home() {
         ...(record !== null && record.mergedKey === paramsKey(stored)
           ? { state: askEntryState(record) }
           : {}),
-      });
-    } else if (record?.ranking && record.mergedKey === urlParamsKey) {
-      navigate({
-        to: '/',
-        search: { search },
-        replace: true,
-        state: askEntryState(record),
       });
     } else {
       // Nothing to rehydrate (e.g. cleared in another tab) — release the

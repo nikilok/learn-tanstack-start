@@ -81,7 +81,12 @@ describe('reconcileApplied', () => {
       base: {},
       mergedKey: bareKey,
       chips: [],
-      ranking: { span: 'care homes', tranches: [['00000001']], next: null },
+      ranking: {
+        span: 'care homes',
+        sector: null,
+        tranches: [['00000001']],
+        next: null,
+      },
     };
     expect(
       reconcileApplied({
@@ -165,7 +170,12 @@ describe('reconcileApplied', () => {
       base: {},
       mergedKey: bareKey,
       chips: [],
-      ranking: { span: 'care homes', tranches: [['00000001']], next: null },
+      ranking: {
+        span: 'care homes',
+        sector: null,
+        tranches: [['00000001']],
+        next: null,
+      },
     };
     expect(
       reconcileApplied({
@@ -315,6 +325,7 @@ describe('nextEmptyPrefix', () => {
 describe('listedRanking', () => {
   const ranking = {
     span: 'care homes',
+    sector: null,
     tranches: [['00000001']],
     next: null,
   };

@@ -29,7 +29,7 @@ function harness(
 ) {
   const mints: string[] = [];
   const plans: [string, string, string][] = [];
-  const mores: [string, string, string, number][] = [];
+  const mores: [string, string, string, number, string | null][] = [];
   const loader = createAskLoader(
     async (key) => {
       mints.push(key);
@@ -43,8 +43,8 @@ function harness(
       if (next === undefined) throw new Error('no answer queued');
       return next;
     },
-    async (span, key, token, _params, offset) => {
-      mores.push([span, key, token, offset]);
+    async (span, key, token, _params, offset, sector) => {
+      mores.push([span, key, token, offset, sector]);
       const next = slices.shift();
       if (next === undefined) throw new Error('no slice queued');
       return next;
@@ -122,13 +122,13 @@ describe('createAskLoader', () => {
       [MORE_DENIED, MORE_OK],
     );
     expect(await ask('care homes in leeds', KEY)).toEqual(OK);
-    expect(await more('care homes', KEY, { location: 'Leeds' }, 400)).toEqual(
-      MORE_OK,
-    );
+    expect(
+      await more('care homes', KEY, { location: 'Leeds' }, 400, 'Q'),
+    ).toEqual(MORE_OK);
     expect(mints).toEqual([KEY, KEY]);
     expect(mores).toEqual([
-      ['care homes', KEY, 't1', 400],
-      ['care homes', KEY, 't2', 400],
+      ['care homes', KEY, 't1', 400, 'Q'],
+      ['care homes', KEY, 't2', 400, 'Q'],
     ]);
   });
 
@@ -139,10 +139,13 @@ describe('createAskLoader', () => {
         KEY,
         {},
         400,
+        null,
       ),
     ).toEqual({ status: 'off' });
     const { more, mores } = harness(['t1'], [], [{ status: 'unavailable' }]);
-    expect(await more('x', KEY, {}, 400)).toEqual({ status: 'unavailable' });
+    expect(await more('x', KEY, {}, 400, null)).toEqual({
+      status: 'unavailable',
+    });
     expect(mores).toHaveLength(1);
   });
 

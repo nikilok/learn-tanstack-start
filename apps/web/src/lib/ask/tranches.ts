@@ -61,6 +61,7 @@ export function extendRanking(
   return {
     ranking: {
       span: ranking.span,
+      sector: ranking.sector,
       tranches: fresh.length ? [...ranking.tranches, fresh] : ranking.tranches,
       next: run >= EMPTY_TRANCHES_MAX ? null : more.next,
     },

@@ -129,20 +129,8 @@ export function buildFilterConditions(filters: SearchFilters): SQL[] {
     }
   }
   if (filters.sicSection?.length) {
-    const divisions = [
-      ...new Set(
-        filters.sicSection.flatMap(
-          (section) => SIC_SECTIONS[section]?.divisions ?? [],
-        ),
-      ),
-    ];
-    if (divisions.length) {
-      // Sections resolve through the SIC-2007 lookup only; profiles holding
-      // legacy 4-digit SIC-2003 codes are reachable via sic=, not sections.
-      sicParts.push(
-        sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(${textArray(divisions)}) AND sc.code NOT IN (${inList(SECTION_EXCLUDED_CODES)}))`,
-      );
-    }
+    const sector = sectorCondition(filters.sicSection);
+    if (sector) sicParts.push(sector);
   }
   if (filters.industry) {
     const words = industryWords(filters.industry);
@@ -231,4 +219,15 @@ export function combineFilterConditions(
   const conds = buildFilterConditions(filters);
   if (!conds.length) return undefined;
   return conds.length === 1 ? conds[0] : sql.join(conds, sql` AND `);
+}
+
+/** The register's sector test for `sections`: a company holding a SIC code in any of their divisions. Sections resolve through the SIC-2007 lookup only (profiles holding legacy 4-digit SIC-2003 codes are reachable via sic=, not sections), so null when none names a division. */
+export function sectorCondition(sections: string[]): SQL | null {
+  const divisions = [
+    ...new Set(
+      sections.flatMap((section) => SIC_SECTIONS[section]?.divisions ?? []),
+    ),
+  ];
+  if (!divisions.length) return null;
+  return sql`c.sic_codes && (SELECT coalesce(array_agg(sc.code::text), '{}'::text[]) FROM sic_codes sc WHERE left(sc.code, 2) = ANY(${textArray(divisions)}) AND sc.code NOT IN (${inList(SECTION_EXCLUDED_CODES)}))`;
 }

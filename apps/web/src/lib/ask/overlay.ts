@@ -79,6 +79,17 @@ const MONTH_NAMES = [
   'Dec',
 ];
 
+/** The base with the plan laid over it (applyOverlay), the plan's sector replacing a hand-set one the way its other keys do: by leaving, since it ranks now and cuts nothing (lib/ask/sector), and clearing the question brings the base back. */
+export function applyPlan(
+  base: SearchUrlParams,
+  filters: SearchUrlParams,
+  sector: string | null,
+): SearchUrlParams {
+  const merged = applyOverlay(base, filters);
+  if (sector !== null) delete merged.sicSection;
+  return merged;
+}
+
 /** A bound as a chip reads it: the year alone at a year's edge, the month at a month's edge, the day otherwise. */
 function dateLabel(iso: string, edge: 'from' | 'to'): string {
   const [y, m, d] = iso.split('-').map(Number);
@@ -136,4 +147,14 @@ export function describeFilters(params: SearchUrlParams): string[] {
     );
   }
   return chips;
+}
+
+/** The sector a question named, as chips: ranked first, never required (lib/ask/sector); none when it named none. */
+export function describeSector(sector: string | null): string[] {
+  if (sector === null) return [];
+  return sector
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => `${SIC_SECTIONS[s]?.label ?? s} first`);
 }

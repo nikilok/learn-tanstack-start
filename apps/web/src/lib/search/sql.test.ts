@@ -4,7 +4,11 @@ import { ADDRESS_COLUMNS } from '@ss/db/constants';
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 
-import { buildFilterConditions, combineFilterConditions } from './sql';
+import {
+  buildFilterConditions,
+  combineFilterConditions,
+  sectorCondition,
+} from './sql';
 
 const dialect = new PgDialect();
 
@@ -245,5 +249,16 @@ describe('combineFilterConditions', () => {
       'h.route IN ($1) AND c.company_status IN ($2) AND cardinality(c.previous_company_names) > 0',
     );
     expect(params).toEqual(['Skilled Worker', 'active']);
+  });
+});
+
+describe('sectorCondition', () => {
+  test('is the test the section filter applies, on its own; a section naming no division is nothing', () => {
+    const filter = renderOne({ sicSection: ['J'] });
+    const alone = sectorCondition(['J']);
+    expect(alone).not.toBeNull();
+    expect(render(alone as SQL)).toEqual(filter);
+    expect(sectorCondition(['ZZ'])).toBeNull();
+    expect(sectorCondition([])).toBeNull();
   });
 });

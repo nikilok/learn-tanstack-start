@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyOverlay, describeFilters } from './overlay';
+import {
+  applyOverlay,
+  applyPlan,
+  describeFilters,
+  describeSector,
+} from './overlay';
 
 describe('applyOverlay', () => {
   test('the plan wins per key and the base keeps everything else', () => {
@@ -119,5 +124,32 @@ describe('describeFilters', () => {
       }),
     ).toEqual(['Voluntary arrangement', 'Uk establishment']);
     expect(describeFilters({})).toEqual([]);
+  });
+});
+
+describe('describeSector', () => {
+  test('the sector reads as ranked first, one chip per section; none is no chips', () => {
+    expect(describeSector('K')).toEqual([
+      'Financial and insurance activities first',
+    ]);
+    expect(describeSector('K,J')).toEqual([
+      'Financial and insurance activities first',
+      'Information and communication first',
+    ]);
+    expect(describeSector(null)).toEqual([]);
+  });
+});
+
+describe('applyPlan', () => {
+  test('the plan lays over the base, and a sector the plan named replaces a hand-set one by leaving; without one the hand-set sector stays', () => {
+    expect(
+      applyPlan({ sicSection: 'Q', rating: 'A' }, { location: 'Leeds' }, 'K'),
+    ).toEqual({ rating: 'A', location: 'Leeds' });
+    expect(applyPlan({ sicSection: 'Q' }, { location: 'Leeds' }, null)).toEqual(
+      { sicSection: 'Q', location: 'Leeds' },
+    );
+    expect(applyPlan({ sicSection: 'Q' }, { sicSection: 'K' }, null)).toEqual({
+      sicSection: 'K',
+    });
   });
 });

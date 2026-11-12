@@ -25,13 +25,14 @@ import {
   createAskLoader,
 } from '../lib/ask/ask-loader';
 import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
-import { applyOverlay } from '../lib/ask/overlay';
+import { applyPlan } from '../lib/ask/overlay';
+import { isSector } from '../lib/ask/sector';
 import { isTrancheOffset, nextTrancheOffset } from '../lib/ask/tranches';
 import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
 import { isSuspended } from '../lib/device/suspended.server';
 import { issueToken, tokenMatches } from '../lib/device/token.server';
-import { buildFilterConditions } from '../lib/search/sql';
+import { buildFilterConditions, sectorCondition } from '../lib/search/sql';
 import { describeError } from '../lib/server-fn-errors';
 import { expireOwnerHint } from '../owner.server';
 import { setRpcCacheControl } from './cache-headers';
@@ -80,6 +81,16 @@ const issueAskToken = createServerFn({ method: 'POST' })
     return { token };
   });
 
+/** The sector a question named as the shortlist's preference: the listing's own sector test, ranking the companies the register places there first and cutting none (the engine's `prefer`). */
+function sectorPreference(sector: string | null) {
+  if (sector === null) return undefined;
+  return (
+    sectorCondition(
+      parseSearchFilters({ sicSection: sector }).filters.sicSection ?? [],
+    ) ?? undefined
+  );
+}
+
 /**
  * Server fn planning one typed search for a device key carrying a live
  * token. A request without the credential that may ask is `denied` before
@@ -89,7 +100,9 @@ const issueAskToken = createServerFn({ method: 'POST' })
  * failing, or no key to reach it with, is `unavailable`: the box falls back
  * to the name search it already ran. When the text says what the
  * organisations do, pathway B ranks the companies whose accounts say it,
- * under the plan's filters laid over the hand-set `base`. POST and never
+ * under the plan's filters laid over the hand-set `base`, the sector the
+ * text named ranking the shortlist rather than cutting it (lib/ask/sector)
+ * unless nothing was there to rank. POST and never
  * cached; the text is never logged, only what it became. The ranking is the
  * first slice of the span's shortlist, naming the next for `rankMore`
  * (lib/ask/tranches).
@@ -136,6 +149,11 @@ const planSearch = createServerFn({ method: 'POST' })
         towns: await rosterReady.catch(() => towns()),
       });
       const filters = filtersToSearchParams(planned.filters);
+      // With a span, the sector the text named ranks the shortlist and cuts
+      // nothing: the register's code is a prior on a line of work, the
+      // account the authority. Without one it is a filter like any other.
+      const sector = planned.plan.span ? (filters.sicSection ?? null) : null;
+      if (sector !== null) delete filters.sicSection;
       // Judged under the filters the listing will apply: the plan's over the
       // base. A rerank that fails loses the ranking, not the plan: the filters
       // still answer, and only a plan with nothing else to show is unavailable.
@@ -146,10 +164,11 @@ const planSearch = createServerFn({ method: 'POST' })
           ranking = await rankSpan(
             planned.plan.span,
             buildFilterConditions(
-              parseSearchFilters(applyOverlay(data.base, filters)).filters,
+              parseSearchFilters(applyPlan(data.base, filters, sector)).filters,
             ),
             apiKey,
             { execute: (statement) => db.execute(statement) },
+            { prefer: sectorPreference(sector) },
           );
         } catch (error) {
           rankingFailed = true;
@@ -159,11 +178,14 @@ const planSearch = createServerFn({ method: 'POST' })
       console.log(
         `[ask] keys=${Object.keys(planned.filters).join(',') || 'none'} name=${planned.plan.namesCompany.toFixed(2)} beyond=${planned.plan.beyondFilters.toFixed(2)} ms=${planned.ms} tokens=${planned.reading.inputTokens}` +
           (ranking
-            ? ` span=yes shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`
+            ? ` span=yes sector=${sector ?? 'none'} shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`
             : rankingFailed
               ? ' span=failed'
               : ' span=no'),
       );
+      // Nothing to rank leaves the sector the filter it was.
+      if (sector !== null && !ranking?.shortlist.length)
+        filters.sicSection = sector;
       // A ranking nobody made is no ranking: the filters alone answer, and
       // with none of those either, the question matched nothing we have read.
       const filtered = Object.keys(filters).length > 0;
@@ -178,6 +200,7 @@ const planSearch = createServerFn({ method: 'POST' })
           ranked && ranking && planned.plan.span
             ? {
                 span: planned.plan.span,
+                sector,
                 tranches: [ranked],
                 next: nextTrancheOffset(0, ranking.shortlist.length),
               }
@@ -193,7 +216,8 @@ const planSearch = createServerFn({ method: 'POST' })
  * Server fn judging the next slice of a question's shortlist, for a listing
  * that has shown the slices so far (lib/ask/tranches): the same span under
  * the listing's filters, SHORTLIST_MAX companies from `offset` into the
- * shortlist's order, judged as the first slice was, naming the slice after.
+ * shortlist's order, the sector the question named ranking it as it did the
+ * first, judged as the first slice was, naming the slice after.
  * Admitted as planSearch admits an ask, `unavailable` on the same failures.
  * POST and never cached; the span is never logged, only what the slice came
  * to.
@@ -201,7 +225,11 @@ const planSearch = createServerFn({ method: 'POST' })
 const rankMore = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
     const key = deviceKey(input);
-    const { span, token, params, offset } = input as Record<string, unknown>;
+    const { span, token, params, offset, sector } = input as Record<
+      string,
+      unknown
+    >;
+    const named = sector ?? null;
     if (
       typeof span !== 'string' ||
       !span.trim() ||
@@ -209,12 +237,20 @@ const rankMore = createServerFn({ method: 'POST' })
       [...span].length > MAX_QUESTION_CHARS ||
       typeof token !== 'string' ||
       token.length > TOKEN_MAX_LENGTH ||
-      !isTrancheOffset(offset)
+      !isTrancheOffset(offset) ||
+      (named !== null && !isSector(named))
     ) {
       throw new Error('Invalid input');
     }
     // The listing's filters, re-validated through the registry like any URL.
-    return { key, span, token, params: canonicalSearchParams(params), offset };
+    return {
+      key,
+      span,
+      token,
+      params: canonicalSearchParams(params),
+      offset,
+      sector: named,
+    };
   })
   .handler(async ({ data }): Promise<AskMoreResponse> => {
     setRpcCacheControl('private, no-store');
@@ -233,10 +269,10 @@ const rankMore = createServerFn({ method: 'POST' })
         buildFilterConditions(parseSearchFilters(data.params).filters),
         apiKey,
         { execute: (statement) => db.execute(statement) },
-        { offset: data.offset },
+        { offset: data.offset, prefer: sectorPreference(data.sector) },
       );
       console.log(
-        `[ask] more offset=${data.offset} shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`,
+        `[ask] more offset=${data.offset} sector=${data.sector ?? 'none'} shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`,
       );
       return {
         status: 'ok',
@@ -252,8 +288,8 @@ const rankMore = createServerFn({ method: 'POST' })
 const loader = createAskLoader(
   async (key) => (await issueAskToken({ data: { key } })).token,
   (text, key, token, base) => planSearch({ data: { text, key, token, base } }),
-  (span, key, token, params, offset) =>
-    rankMore({ data: { span, key, token, params, offset } }),
+  (span, key, token, params, offset, sector) =>
+    rankMore({ data: { span, key, token, params, offset, sector } }),
 );
 
 /** Whether this document may ask: mints its token the first time the offer would show, so the offer never shows where it cannot be taken. */

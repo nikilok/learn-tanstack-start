@@ -7,9 +7,10 @@ import type { SearchUrlParams } from '@ss/search-filters';
 /** Why a plan is empty when it is, as the engine reports it: the wire contract, restated here so the browser never depends on the engine's types. */
 export type EmptyReason = 'none' | 'name' | 'beyond' | 'unmatched';
 
-/** What pathway B found for the span: the companies at or over the closest band, by id in rank order, matches first, as the slices they were judged in (lib/ask/tranches), and the offset of the slice to judge next, null once the shortlist ran out. Ids only: no names, no probabilities, no counts. */
+/** What pathway B found for the span: the companies at or over the closest band, by id in rank order, matches first, as the slices they were judged in (lib/ask/tranches), the sector the question named (ranking every slice's order and cutting none; null when none, lib/ask/sector), and the offset of the slice to judge next, null once the shortlist ran out. Ids only: no names, no probabilities, no counts. */
 export type AskRanking = {
   span: string;
+  sector: string | null;
   tranches: string[][];
   next: number | null;
 };
@@ -58,6 +59,7 @@ type Rank = (
   token: string,
   params: SearchUrlParams,
   offset: number,
+  sector: string | null,
 ) => Promise<AskMoreResponse>;
 
 type Refusable = { status: string };
@@ -120,8 +122,9 @@ export function createAskLoader(mint: Mint, plan: Plan, rank: Rank) {
     key: string,
     params: SearchUrlParams,
     offset: number,
+    sector: string | null,
   ): Promise<AskMoreOutcome> =>
-    withToken(key, (token) => rank(span, key, token, params, offset));
+    withToken(key, (token) => rank(span, key, token, params, offset, sector));
 
   return { prepare, ask, more };
 }

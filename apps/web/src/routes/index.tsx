@@ -51,7 +51,12 @@ import {
   MAX_QUESTION_CHARS,
   MIN_ASK_WORDS,
 } from '../lib/ask/eligibility';
-import { applyOverlay, describeFilters, paramsKey } from '../lib/ask/overlay';
+import {
+  applyPlan,
+  describeFilters,
+  describeSector,
+  paramsKey,
+} from '../lib/ask/overlay';
 import {
   type AskAccess,
   askBoxMode,
@@ -464,7 +469,7 @@ function Home() {
         // Keyed and navigated in the registry's canonical form: the URL the
         // plan lands on is what the router validates, not the raw merge.
         const merged = canonicalSearchParams(
-          applyOverlay(base, outcome.filters),
+          applyPlan(base, outcome.filters, ranking?.sector ?? null),
         );
         const plan: AppliedAsk = {
           text,
@@ -522,6 +527,7 @@ function Home() {
       readiness.key,
       urlFilters as SearchUrlParams,
       offset,
+      walk.sector,
     ).then(
       (outcome) => {
         walkingRef.current = null;
@@ -608,20 +614,32 @@ function Home() {
     else queuedAskRef.current = text;
   };
 
-  /** Drops the question's what-they-do part: the listing becomes its filters alone, on the same entry; with no filters left, the question is cleared. */
+  /** Drops the question's what-they-do part: the listing becomes its filters alone, on the same entry, the sector it named now one of them (it only ranked while there was a ranking); with nothing left, the question is cleared. */
   const dropRanking = () => {
     const live = appliedRef.current;
     if (!live?.ranking) return;
-    if (!live.chips.length) {
+    const sector = live.ranking.sector;
+    if (!live.chips.length && sector === null) {
       clearAsk();
       return;
     }
-    const next: AppliedAsk = { ...live, ranking: null };
+    const merged = canonicalSearchParams(
+      sector === null ? urlFilters : { ...urlFilters, sicSection: sector },
+    );
+    const next: AppliedAsk = {
+      ...live,
+      mergedKey: paramsKey(merged),
+      chips:
+        sector === null
+          ? live.chips
+          : [...live.chips, ...describeFilters({ sicSection: sector })],
+      ranking: null,
+    };
     saveApplied(next);
     setApplied(next);
     void navigate({
       to: '/',
-      search: { search: '', ...urlFilters },
+      search: { search: '', ...merged },
       replace: true,
       state: askEntryState(next),
     });
@@ -812,6 +830,15 @@ function Home() {
                 </span>
               </span>
             )}
+            {applied.ranking?.sector &&
+              describeSector(applied.ranking.sector).map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full border border-dashed border-(--sea-ink-soft)/40 px-2.5 py-0.5 text-(--sea-ink)"
+                >
+                  {chip}
+                </span>
+              ))}
             {applied.chips.map((chip, i) => (
               <span
                 key={`${i}-${chip}`}

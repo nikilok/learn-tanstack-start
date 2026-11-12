@@ -53,6 +53,7 @@ describe('isTrancheOffset', () => {
 describe('extendRanking', () => {
   const ranking: AskRanking = {
     span: 'care homes',
+    sector: 'Q',
     tranches: [['00000001', '00000002']],
     next: RANKED_MAX,
   };
@@ -67,6 +68,7 @@ describe('extendRanking', () => {
     ).toEqual({
       ranking: {
         span: 'care homes',
+        sector: 'Q',
         tranches: [
           ['00000001', '00000002'],
           ['00000003', '00000004'],

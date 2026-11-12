@@ -50,6 +50,7 @@ const applied: AppliedAsk = {
 };
 const ranking = {
   span: 'care homes',
+  sector: null,
   tranches: [['00000001', '00000002']],
   next: null,
 };
@@ -95,6 +96,24 @@ describe('applied store', () => {
         ranking: { span: 'care homes', ranked: ['00000001'] },
       }),
     ).toBeNull();
+  });
+
+  test('the sector the question named round-trips; one the registry does not know is corrupt; a record from before it names none', () => {
+    const named = { ...ranking, sector: 'K' };
+    saveApplied({ ...applied, ranking: named });
+    expect(loadApplied()).toEqual({ ...applied, ranking: named });
+    expect(
+      parseApplied({ ...applied, ranking: { ...ranking, sector: 'ZZ' } }),
+    ).toBeNull();
+    const before = {
+      span: ranking.span,
+      tranches: ranking.tranches,
+      next: ranking.next,
+    };
+    expect(parseApplied({ ...applied, ranking: before })).toEqual({
+      ...applied,
+      ranking,
+    });
   });
 
   test('a corrupt or foreign record is null', () => {

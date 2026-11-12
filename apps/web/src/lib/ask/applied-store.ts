@@ -10,6 +10,7 @@ import {
 
 import type { AskRanking } from './ask-loader';
 import { rankedIds } from './ranked-ids';
+import { isSector } from './sector';
 import { isTrancheOffset, TRANCHES_MAX } from './tranches';
 
 const STORAGE_KEY = 'ss-ask';
@@ -23,7 +24,7 @@ export type AppliedAsk = {
   ranking: AskRanking | null;
 };
 
-/** A value as a ranking: a span, its judged slices as company ids in rank order, each as the listing accepts them, and the walk's next offset or null (lib/ask/tranches); null when it is not one. */
+/** A value as a ranking: a span, its judged slices as company ids in rank order, each as the listing accepts them, the sector it named or null (a record from before the sector named none), and the walk's next offset or null (lib/ask/tranches); null when it is not one. */
 function parseRanking(value: unknown): AskRanking | null {
   if (value === null || typeof value !== 'object') return null;
   const v = value as Partial<AskRanking>;
@@ -42,7 +43,9 @@ function parseRanking(value: unknown): AskRanking | null {
   }
   const next = v.next ?? null;
   if (next !== null && !isTrancheOffset(next)) return null;
-  return { span: v.span, tranches, next };
+  const sector = v.sector ?? null;
+  if (sector !== null && !isSector(sector)) return null;
+  return { span: v.span, sector, tranches, next };
 }
 
 /** A value as a plan, the base re-validated through the registry: null when it is not one of ours. */

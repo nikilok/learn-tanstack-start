@@ -150,6 +150,28 @@ describe('applied store', () => {
       expect(parseApplied(bad)).toBeNull();
   });
 
+  test('a replacement that cannot be written drops the record it would have replaced, so a stale plan never comes back', () => {
+    const store = new Map<string, string>([
+      ['ss-ask', JSON.stringify(applied)],
+    ]);
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: () => {
+          throw new Error('full');
+        },
+        removeItem: (key: string) => {
+          store.delete(key);
+        },
+      },
+    });
+    expect(() =>
+      saveApplied({ ...applied, text: 'law firms in leeds' }),
+    ).not.toThrow();
+    expect(loadApplied()).toBeNull();
+  });
+
   test('storage that throws keeps nothing and breaks nothing', () => {
     Object.defineProperty(globalThis, 'sessionStorage', {
       configurable: true,

@@ -81,12 +81,14 @@ export function loadApplied(): AppliedAsk | null {
   }
 }
 
-/** Keeps a plan for this tab; storage that is unavailable keeps nothing, and the listing still works from the URL. */
+/** Keeps a plan for this tab; storage that is unavailable or full keeps nothing, and the listing still works from the URL. */
 export function saveApplied(applied: AppliedAsk): void {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(applied));
   } catch {
-    /* unavailable: the question is simply not restored on return */
+    // The question is simply not restored on return, and no record this one
+    // would have replaced comes back in its place.
+    clearApplied();
   }
 }
 

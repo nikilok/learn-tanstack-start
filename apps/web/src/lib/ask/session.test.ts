@@ -81,7 +81,7 @@ describe('reconcileApplied', () => {
       base: {},
       mergedKey: bareKey,
       chips: [],
-      ranking: { span: 'care homes', ranked: ['00000001'] },
+      ranking: { span: 'care homes', tranches: [['00000001']], next: null },
     };
     expect(
       reconcileApplied({
@@ -165,7 +165,7 @@ describe('reconcileApplied', () => {
       base: {},
       mergedKey: bareKey,
       chips: [],
-      ranking: { span: 'care homes', ranked: [] },
+      ranking: { span: 'care homes', tranches: [['00000001']], next: null },
     };
     expect(
       reconcileApplied({
@@ -313,7 +313,11 @@ describe('nextEmptyPrefix', () => {
 });
 
 describe('listedRanking', () => {
-  const ranking = { span: 'care homes', ranked: ['00000001'] };
+  const ranking = {
+    span: 'care homes',
+    tranches: [['00000001']],
+    next: null,
+  };
   const live = { ...plan, ranking };
 
   test('the applied plan’s ranking while the URL holds its filters, else nothing', () => {
@@ -395,6 +399,23 @@ describe('askBoxMode', () => {
       askBoxMode({
         applied: false,
         progress: { status: 'empty', reason: 'name' },
+      }),
+    ).toBe('off');
+  });
+
+  test('a further slice being judged turns the ring on an applied plan, and means nothing without one', () => {
+    expect(
+      askBoxMode({
+        applied: true,
+        progress: { status: 'idle' },
+        judging: true,
+      }),
+    ).toBe('pending');
+    expect(
+      askBoxMode({
+        applied: false,
+        progress: { status: 'idle' },
+        judging: true,
       }),
     ).toBe('off');
   });

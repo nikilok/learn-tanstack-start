@@ -24,7 +24,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
-import { askSearch, prepareAsk } from '../api/ask';
+import { askMore, askSearch, prepareAsk } from '../api/ask';
 import { searchFiltered } from '../api/filterSearch';
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
@@ -34,6 +34,7 @@ import SkeletonCards from '../components/SkeletonCards';
 import { useFilterSearch } from '../hooks/useFilterSearch';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
+import { useRankedSearch } from '../hooks/useRankedSearch';
 import { useSearchPill } from '../hooks/useSearchPill';
 import { hasOwnerHint } from '../lib/ask/access-hint';
 import { markAskAccess as markAskAccessOnServer } from '../lib/ask/access-hint.server';
@@ -63,6 +64,7 @@ import {
   nextEmptyPrefix,
   reconcileApplied,
 } from '../lib/ask/session';
+import { extendRanking, walkedListing } from '../lib/ask/tranches';
 import { readinessSnapshot, subscribeReadiness } from '../lib/device/beacons';
 import { WAITING } from '../lib/device/readiness';
 import { hydrationDone } from '../lib/hydration';
@@ -287,12 +289,30 @@ function Home() {
     { ...urlFilters, q: search.length >= 3 ? search : undefined },
     { enabled: hasFilters && !rankedMode },
   );
-  const rankedListing = useFilterSearch(urlFilters, {
+  const rankedListing = useRankedSearch(urlFilters, ranking?.tranches ?? [], {
     enabled: rankedMode,
-    ranked: ranking?.ranked ?? [],
   });
+  // The walk past the first slice (lib/ask/tranches): a slice with the judge
+  // shows as rows on their way, one that could not be judged as a next page
+  // that failed, and the slice still to judge keeps the list open. The list
+  // asks for more as it does for any page; past the slices shown, that
+  // judges the next.
+  const [judging, setJudging] = useState(false);
+  const [walkFailed, setWalkFailed] = useState(false);
+  const emptyRunRef = useRef(0);
+  // The offset with the judge, so a scroll never asks for one slice twice.
+  const walkingRef = useRef<number | null>(null);
+  const rankedWalked = {
+    ...walkedListing(rankedListing, {
+      next: ranking?.next ?? null,
+      judging,
+      failed: walkFailed,
+    }),
+    fetchMore: () =>
+      rankedListing.hasMore ? rankedListing.fetchMore() : judgeNextTranche(),
+  };
   const resultsData = rankedMode
-    ? rankedListing
+    ? rankedWalked
     : hasFilters
       ? filtered
       : pendingStoredFilters
@@ -320,6 +340,8 @@ function Home() {
     setApplied(null);
     clearApplied();
     askRunRef.current++;
+    emptyRunRef.current = 0;
+    setWalkFailed(false);
     const stored = loadStoredFilters();
     if (stored && paramsKey(stored) === live.mergedKey) storeFilters(live.base);
     return live.base;
@@ -402,10 +424,12 @@ function Home() {
     shortcut: askKey,
   });
   // The ring the box wears (lib/ask/session): turning while a question
-  // runs, steady while its plan is applied, gone otherwise.
+  // runs or a further slice of its answer is judged, steady while its plan
+  // is otherwise applied, gone otherwise.
   const askMode = askBoxMode({
     applied: applied !== null,
     progress: askProgress,
+    judging,
   });
   // A running ask holds the prefix as a load does: the text may move on
   // before it answers, and the offer must hold through that text's search.
@@ -465,6 +489,81 @@ function Home() {
       },
       () => {
         if (run === askRunRef.current) setAskProgress(ASK_UNAVAILABLE);
+      },
+    );
+  };
+  /**
+   * Judges the next slice of the applied question's shortlist, once the
+   * listing has shown every slice so far (lib/ask/tranches): the walk's next
+   * offset goes with the span and the listing's filters, and what comes back
+   * is appended to the plan on this same entry, so a reload or Back brings
+   * the longer ranking back. One slice at a time; a slice that cannot be
+   * judged is a next page that failed, asked for again only by the visitor.
+   * Nothing moves the page: the visitor is at the bottom of the list.
+   */
+  const judgeNextTranche = () => {
+    const live = appliedRef.current;
+    const walk = live?.ranking;
+    if (!live || !walk || walk.next === null || walkingRef.current !== null)
+      return;
+    // A page still deriving its device key is asked again by the next
+    // scroll; one that will never have it stops here.
+    if (readiness.status !== 'ready') {
+      if (readiness.status === 'off') setWalkFailed(true);
+      return;
+    }
+    const offset = walk.next;
+    const run = askRunRef.current;
+    walkingRef.current = offset;
+    setWalkFailed(false);
+    setJudging(true);
+    askMore(
+      walk.span,
+      readiness.key,
+      urlFilters as SearchUrlParams,
+      offset,
+    ).then(
+      (outcome) => {
+        walkingRef.current = null;
+        setJudging(false);
+        // The plan ended, or moved on, while the slice was judged.
+        const current = appliedRef.current;
+        if (
+          run !== askRunRef.current ||
+          !current?.ranking ||
+          current.ranking.next !== offset
+        )
+          return;
+        if (outcome.status === 'off') {
+          setAskAccess('off');
+          setWalkFailed(true);
+          return;
+        }
+        if (outcome.status === 'unavailable') {
+          setWalkFailed(true);
+          return;
+        }
+        const extended = extendRanking(
+          current.ranking,
+          outcome,
+          emptyRunRef.current,
+        );
+        emptyRunRef.current = extended.emptyRun;
+        const next: AppliedAsk = { ...current, ranking: extended.ranking };
+        saveApplied(next);
+        setApplied(next);
+        void navigate({
+          to: '/',
+          search: { search: '', ...urlFilters },
+          replace: true,
+          resetScroll: false,
+          state: askEntryState(next),
+        });
+      },
+      () => {
+        walkingRef.current = null;
+        setJudging(false);
+        if (run === askRunRef.current) setWalkFailed(true);
       },
     );
   };

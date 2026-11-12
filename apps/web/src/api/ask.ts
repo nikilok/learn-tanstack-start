@@ -19,9 +19,14 @@ import { sql } from 'drizzle-orm';
 
 import { db } from '../db.server';
 import { mayAsk } from '../lib/ask/access.server';
-import { type AskPlanResponse, createAskLoader } from '../lib/ask/ask-loader';
+import {
+  type AskMoreResponse,
+  type AskPlanResponse,
+  createAskLoader,
+} from '../lib/ask/ask-loader';
 import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
 import { applyOverlay } from '../lib/ask/overlay';
+import { isTrancheOffset, nextTrancheOffset } from '../lib/ask/tranches';
 import { ownerOrBrowser } from '../lib/device/browser-check.server';
 import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
 import { isSuspended } from '../lib/device/suspended.server';
@@ -85,7 +90,9 @@ const issueAskToken = createServerFn({ method: 'POST' })
  * to the name search it already ran. When the text says what the
  * organisations do, pathway B ranks the companies whose accounts say it,
  * under the plan's filters laid over the hand-set `base`. POST and never
- * cached; the text is never logged, only what it became.
+ * cached; the text is never logged, only what it became. The ranking is the
+ * first slice of the span's shortlist, naming the next for `rankMore`
+ * (lib/ask/tranches).
  */
 const planSearch = createServerFn({ method: 'POST' })
   .validator((input: unknown) => {
@@ -168,8 +175,12 @@ const planSearch = createServerFn({ method: 'POST' })
         reason:
           ranking && !ranked && !filtered ? 'unmatched' : planned.plan.reason,
         ranking:
-          ranked && planned.plan.span
-            ? { span: planned.plan.span, ranked }
+          ranked && ranking && planned.plan.span
+            ? {
+                span: planned.plan.span,
+                tranches: [ranked],
+                next: nextTrancheOffset(0, ranking.shortlist.length),
+              }
             : null,
       };
     } catch (error) {
@@ -178,9 +189,71 @@ const planSearch = createServerFn({ method: 'POST' })
     }
   });
 
+/**
+ * Server fn judging the next slice of a question's shortlist, for a listing
+ * that has shown the slices so far (lib/ask/tranches): the same span under
+ * the listing's filters, SHORTLIST_MAX companies from `offset` into the
+ * shortlist's order, judged as the first slice was, naming the slice after.
+ * Admitted as planSearch admits an ask, `unavailable` on the same failures.
+ * POST and never cached; the span is never logged, only what the slice came
+ * to.
+ */
+const rankMore = createServerFn({ method: 'POST' })
+  .validator((input: unknown) => {
+    const key = deviceKey(input);
+    const { span, token, params, offset } = input as Record<string, unknown>;
+    if (
+      typeof span !== 'string' ||
+      !span.trim() ||
+      span.length > 2 * MAX_QUESTION_CHARS ||
+      [...span].length > MAX_QUESTION_CHARS ||
+      typeof token !== 'string' ||
+      token.length > TOKEN_MAX_LENGTH ||
+      !isTrancheOffset(offset)
+    ) {
+      throw new Error('Invalid input');
+    }
+    // The listing's filters, re-validated through the registry like any URL.
+    return { key, span, token, params: canonicalSearchParams(params), offset };
+  })
+  .handler(async ({ data }): Promise<AskMoreResponse> => {
+    setRpcCacheControl('private, no-store');
+    if (!(await mayAsk())) return { status: 'denied' };
+    if (!tokenMatches(data.token, data.key)) return { status: 'denied' };
+    if (await isSuspended(data.key)) return { status: 'denied' };
+    if (!(await ownerOrBrowser('ask'))) return { status: 'denied' };
+    const apiKey = process.env.TYPESAFE_API_KEY;
+    if (!apiKey) {
+      console.error('[ask] TYPESAFE_API_KEY not set');
+      return { status: 'unavailable' };
+    }
+    try {
+      const ranking = await rankSpan(
+        data.span,
+        buildFilterConditions(parseSearchFilters(data.params).filters),
+        apiKey,
+        { execute: (statement) => db.execute(statement) },
+        { offset: data.offset },
+      );
+      console.log(
+        `[ask] more offset=${data.offset} shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`,
+      );
+      return {
+        status: 'ok',
+        ranked: ranking.ranked,
+        next: nextTrancheOffset(data.offset, ranking.shortlist.length),
+      };
+    } catch (error) {
+      console.error(failureLine('[ask] more failed', error));
+      return { status: 'unavailable' };
+    }
+  });
+
 const loader = createAskLoader(
   async (key) => (await issueAskToken({ data: { key } })).token,
   (text, key, token, base) => planSearch({ data: { text, key, token, base } }),
+  (span, key, token, params, offset) =>
+    rankMore({ data: { span, key, token, params, offset } }),
 );
 
 /** Whether this document may ask: mints its token the first time the offer would show, so the offer never shows where it cannot be taken. */
@@ -188,3 +261,6 @@ export const prepareAsk = loader.prepare;
 
 /** Asks for a device key with the document's token, minted on the first ask and replaced once if refused. */
 export const askSearch = loader.ask;
+
+/** Judges the next slice of an asked question's shortlist with the same token (lib/ask/tranches). */
+export const askMore = loader.more;

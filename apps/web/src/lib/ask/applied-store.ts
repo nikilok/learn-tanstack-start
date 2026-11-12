@@ -10,6 +10,7 @@ import {
 
 import type { AskRanking } from './ask-loader';
 import { rankedIds } from './ranked-ids';
+import { isTrancheOffset, TRANCHES_MAX } from './tranches';
 
 const STORAGE_KEY = 'ss-ask';
 
@@ -22,12 +23,26 @@ export type AppliedAsk = {
   ranking: AskRanking | null;
 };
 
-/** A value as a ranking: a span and company ids in rank order, as the listing accepts them; null when it is not one. */
+/** A value as a ranking: a span, its judged slices as company ids in rank order, each as the listing accepts them, and the walk's next offset or null (lib/ask/tranches); null when it is not one. */
 function parseRanking(value: unknown): AskRanking | null {
   if (value === null || typeof value !== 'object') return null;
   const v = value as Partial<AskRanking>;
-  const ranked = rankedIds(v.ranked);
-  return typeof v.span === 'string' && ranked ? { span: v.span, ranked } : null;
+  if (
+    typeof v.span !== 'string' ||
+    !Array.isArray(v.tranches) ||
+    !v.tranches.length ||
+    v.tranches.length > TRANCHES_MAX
+  )
+    return null;
+  const tranches: string[][] = [];
+  for (const tranche of v.tranches) {
+    const ids = rankedIds(tranche);
+    if (!ids) return null;
+    tranches.push(ids);
+  }
+  const next = v.next ?? null;
+  if (next !== null && !isTrancheOffset(next)) return null;
+  return { span: v.span, tranches, next };
 }
 
 /** A value as a plan, the base re-validated through the registry: null when it is not one of ours. */

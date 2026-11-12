@@ -143,15 +143,17 @@ export function deriveAskHint({
   return { eligible, hint: eligible ? { status: 'eligible', shortcut } : null };
 }
 
-/** The mode the box shows: on while a plan is applied, pending while a question runs, else off. */
+/** The mode the box shows: pending while a question runs, or a further slice of an applied plan's answer is judged; on while its plan is otherwise applied; else off. */
 export function askBoxMode({
   applied,
   progress,
+  judging = false,
 }: {
   applied: boolean;
   progress: AskProgress;
+  judging?: boolean;
 }): AskBoxMode {
-  if (applied) return 'on';
+  if (applied) return judging ? 'pending' : 'on';
   return progress.status === 'pending' ? 'pending' : 'off';
 }
 

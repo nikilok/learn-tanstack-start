@@ -48,7 +48,11 @@ const applied: AppliedAsk = {
   chips: ['In Leeds', 'Human health and social work activities'],
   ranking: null,
 };
-const ranking = { span: 'care homes', ranked: ['00000001', '00000002'] };
+const ranking = {
+  span: 'care homes',
+  tranches: [['00000001', '00000002']],
+  next: null,
+};
 
 describe('applied store', () => {
   test('round-trips a plan for the tab', () => {
@@ -65,10 +69,32 @@ describe('applied store', () => {
     expect(
       parseApplied({
         ...applied,
-        ranking: { ...ranking, ranked: [1] },
+        ranking: { ...ranking, tranches: [[1]] },
       }),
     ).toBeNull();
     expect(parseApplied({ ...applied, ranking: undefined })).toEqual(applied);
+  });
+
+  test('a walk still going round-trips with its next slice; a next that is no slice’s, no slices, or a record from before the slices is corrupt', () => {
+    const walking = {
+      ...ranking,
+      tranches: [['00000001'], ['00000002', '00000003']],
+      next: 800,
+    };
+    saveApplied({ ...applied, ranking: walking });
+    expect(loadApplied()).toEqual({ ...applied, ranking: walking });
+    expect(
+      parseApplied({ ...applied, ranking: { ...ranking, next: 123 } }),
+    ).toBeNull();
+    expect(
+      parseApplied({ ...applied, ranking: { ...ranking, tranches: [] } }),
+    ).toBeNull();
+    expect(
+      parseApplied({
+        ...applied,
+        ranking: { span: 'care homes', ranked: ['00000001'] },
+      }),
+    ).toBeNull();
   });
 
   test('a corrupt or foreign record is null', () => {

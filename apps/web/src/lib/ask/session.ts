@@ -17,10 +17,10 @@ export type AskProgress =
   | { status: 'unavailable' }
   | { status: 'empty'; reason: EmptyReason };
 
-/** What the no-results message says about asking the text as a question: the offer, the wait, or why nothing came. The shortcut is the modifier the offer names beside Enter; null on a touch device, which taps the arrow. */
+/** What the no-results message says about asking the text as a question: the offer, the wait, or why nothing came. `keyboard` says the offer can name Enter; a touch device taps the arrow. */
 export type AskHint =
-  | { status: 'eligible' | 'pending' | 'unavailable'; shortcut: string | null }
-  | { status: 'empty'; reason: EmptyReason; shortcut: string | null };
+  | { status: 'eligible' | 'pending' | 'unavailable'; keyboard: boolean }
+  | { status: 'empty'; reason: EmptyReason; keyboard: boolean };
 
 /** What the box shows of the ask: a running question, an applied plan, or nothing. */
 export type AskBoxMode = 'off' | 'pending' | 'on';
@@ -128,19 +128,19 @@ export function deriveAskHint({
   access,
   progress,
   couldAsk,
-  shortcut,
+  keyboard,
 }: {
   applied: boolean;
   access: AskAccess;
   progress: AskProgress;
   couldAsk: boolean;
-  shortcut: string | null;
+  keyboard: boolean;
 }): { eligible: boolean; hint: AskHint | null } {
   if (applied || access !== 'open') return { eligible: false, hint: null };
   const eligible = progress.status !== 'pending' && couldAsk;
   if (progress.status !== 'idle')
-    return { eligible, hint: { ...progress, shortcut } };
-  return { eligible, hint: eligible ? { status: 'eligible', shortcut } : null };
+    return { eligible, hint: { ...progress, keyboard } };
+  return { eligible, hint: eligible ? { status: 'eligible', keyboard } : null };
 }
 
 /** The mode the box shows: pending while a question runs, or a further slice of an applied plan's answer is judged; on while its plan is otherwise applied; else off. */

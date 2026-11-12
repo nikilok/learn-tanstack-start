@@ -218,13 +218,13 @@ describe('deriveAskHint', () => {
     access: 'open' as const,
     progress: { status: 'idle' } as const,
     couldAsk: true,
-    shortcut: '⌘',
+    keyboard: true,
   };
 
   test('offers only while open, unapplied and askable', () => {
     expect(deriveAskHint(base)).toEqual({
       eligible: true,
-      hint: { status: 'eligible', shortcut: '⌘' },
+      hint: { status: 'eligible', keyboard: true },
     });
     expect(deriveAskHint({ ...base, couldAsk: false })).toEqual({
       eligible: false,
@@ -241,7 +241,7 @@ describe('deriveAskHint', () => {
     expect(deriveAskHint({ ...base, progress: { status: 'pending' } })).toEqual(
       {
         eligible: false,
-        hint: { status: 'pending', shortcut: '⌘' },
+        hint: { status: 'pending', keyboard: true },
       },
     );
   });
@@ -254,20 +254,20 @@ describe('deriveAskHint', () => {
       }),
     ).toEqual({
       eligible: true,
-      hint: { status: 'empty', reason: 'name', shortcut: '⌘' },
+      hint: { status: 'empty', reason: 'name', keyboard: true },
     });
     expect(
       deriveAskHint({ ...base, progress: { status: 'unavailable' } }),
     ).toEqual({
       eligible: true,
-      hint: { status: 'unavailable', shortcut: '⌘' },
+      hint: { status: 'unavailable', keyboard: true },
     });
   });
 
-  test('a touch device has no shortcut to name', () => {
-    expect(deriveAskHint({ ...base, shortcut: null }).hint).toEqual({
+  test('a touch device has no key to name', () => {
+    expect(deriveAskHint({ ...base, keyboard: false }).hint).toEqual({
       status: 'eligible',
-      shortcut: null,
+      keyboard: false,
     });
   });
 });

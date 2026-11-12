@@ -11,10 +11,11 @@ import styles from './SearchInput.module.css';
  * plus imperative DOM sync so parent-driven re-renders don't disrupt in-flight
  * typing; `defaultValue` only re-syncs when the input isn't focused so external
  * search-param updates apply without clobbering the user. `autoFocus` fires
- * once, while `focus` re-focuses on every truthy transition. While `askEnabled`,
- * ⌘/Ctrl+Enter and an arrow beside the clear button hand the text to `onAsk`.
- * `askMode` wears the spectrum ring: turning while a question runs, steady
- * while its plan is applied.
+ * once, while `focus` re-focuses on every truthy transition. Enter hands the
+ * press to `onEnter` (the parent asks while it offers to, or remembers the
+ * press until it does); while `askEnabled`, an arrow beside the clear button
+ * hands the text to `onAsk`. `askMode` wears the spectrum ring: turning while
+ * a question runs, steady while its plan is applied.
  */
 export default memo(function SearchInput({
   inputRef,
@@ -27,6 +28,7 @@ export default memo(function SearchInput({
   askEnabled = false,
   askMode = 'off',
   onAsk,
+  onEnter,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   defaultValue: string;
@@ -38,6 +40,7 @@ export default memo(function SearchInput({
   askEnabled?: boolean;
   askMode?: AskBoxMode;
   onAsk?: () => void;
+  onEnter?: () => void;
 }) {
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
@@ -45,6 +48,8 @@ export default memo(function SearchInput({
   onChangeRef.current = onChange;
   const onAskRef = useRef(onAsk);
   onAskRef.current = askEnabled ? onAsk : undefined;
+  const onEnterRef = useRef(onEnter);
+  onEnterRef.current = onEnter;
   const hasAutoFocused = useRef(false);
 
   const syncClearButton = () => {
@@ -112,16 +117,11 @@ export default memo(function SearchInput({
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') inputRef.current?.blur();
-          else if (
-            e.key === 'Enter' &&
-            (e.metaKey || e.ctrlKey) &&
-            onAskRef.current
-          ) {
-            // Plain Enter keeps opening the highlighted result; the modifier
-            // is what /filters applies on too.
-            e.preventDefault();
-            onAskRef.current();
-          }
+          // The listing's own handler opens a highlighted row on the same
+          // key; the parent asks only while nothing is listed. Not during
+          // IME composition, where Enter commits the candidate.
+          else if (e.key === 'Enter' && !e.nativeEvent.isComposing)
+            onEnterRef.current?.();
         }}
         onBlur={onBlur}
         placeholder={placeholder}

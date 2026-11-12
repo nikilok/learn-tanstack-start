@@ -51,6 +51,7 @@ import {
   MAX_QUESTION_CHARS,
   MIN_ASK_WORDS,
 } from '../lib/ask/eligibility';
+import { enterIntent, settleEnterIntent } from '../lib/ask/enter';
 import {
   applyPlan,
   describeFilters,
@@ -412,13 +413,9 @@ function Home() {
       stale = true;
     };
   }, [couldAsk, readiness, search]);
-  // The key the offer names: the modifier /filters applies on too, so plain
-  // Enter keeps opening the highlighted result; a touch device taps the arrow.
-  const askKey = platformInfo.isMobile
-    ? null
-    : platformInfo.platform === 'mac'
-      ? '⌘'
-      : 'Ctrl';
+  // A keyboard presses Enter, which the listing only takes for a highlighted
+  // row; a touch device taps the arrow.
+  const askKeyboard = !platformInfo.isMobile;
   // Without access this is today's flow exactly: the no-results scene shows as
   // it always has, and nothing here says otherwise.
   const { eligible, hint: askHint } = deriveAskHint({
@@ -426,7 +423,7 @@ function Home() {
     access: askAccess,
     progress: askProgress,
     couldAsk,
-    shortcut: askKey,
+    keyboard: askKeyboard,
   });
   // The ring the box wears (lib/ask/session): turning while a question
   // runs or a further slice of its answer is judged, steady while its plan
@@ -586,8 +583,8 @@ function Home() {
   }, [readiness]);
 
   /**
-   * Asks the text the box holds, as the modifier plus Enter and the arrow
-   * do: commits it to the URL first, debounce or not, so the URL and the
+   * Asks the text the box holds, as Enter and the arrow do: commits it to
+   * the URL first, debounce or not, so the URL and the
    * answer agree on what was asked, then runs the ask, or queues it until
    * the device key arrives. Below the word floor or over the length cap
    * nothing happens, as the offer says.
@@ -613,6 +610,37 @@ function Home() {
     else if (readiness.status === 'off') setAskProgress(ASK_UNAVAILABLE);
     else queuedAskRef.current = text;
   };
+
+  // Enter pressed before the offer: asked once the text's name search
+  // settles empty, as the offer would have; dropped when it does not.
+  const enterIntentRef = useRef<string | null>(null);
+  /** Enter in the box: asks while the box offers to; otherwise remembers the press while the text's search is still to settle (lib/ask/enter). */
+  const onEnter = () => {
+    if (eligible) {
+      onAsk();
+      return;
+    }
+    enterIntentRef.current = enterIntent(inputRef.current?.value ?? '', {
+      search,
+      loading: prefixHeld,
+      asking: askProgress.status === 'pending',
+    });
+  };
+  useEffect(() => {
+    const intent = enterIntentRef.current;
+    if (intent === null) return;
+    const verdict = settleEnterIntent(intent, {
+      typed: inputRef.current?.value ?? '',
+      search,
+      eligible,
+      loading: prefixHeld,
+    });
+    if (verdict === 'hold') return;
+    enterIntentRef.current = null;
+    if (verdict === 'ask') onAsk();
+    // onAsk reads the render-time values the press was made against.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible, prefixHeld, search]);
 
   /** Drops the question's what-they-do part: the listing becomes its filters alone, on the same entry, the sector it named now one of them (it only ranked while there was a ranking); with nothing left, the question is cleared. */
   const dropRanking = () => {
@@ -738,9 +766,9 @@ function Home() {
               {' · '}
               <kbd>↑</kbd> <kbd>↓</kbd> to navigate
               {' · '}
-              {eligible && askKey ? (
+              {eligible ? (
                 <>
-                  <kbd>{askKey}</kbd> <kbd>↵</kbd> to ask
+                  <kbd>↵</kbd> to ask
                 </>
               ) : (
                 <>
@@ -806,6 +834,7 @@ function Home() {
             askEnabled={eligible}
             askMode={askMode}
             onAsk={onAsk}
+            onEnter={onEnter}
           />
         </div>
 

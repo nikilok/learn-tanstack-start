@@ -455,10 +455,9 @@ export default function HmrcResults({
               className="text-center text-sm text-(--sea-ink-soft)"
               aria-live="polite"
             >
-              {ask?.shortcut ? (
+              {ask?.keyboard ? (
                 <>
-                  Press <kbd>{ask.shortcut}</kbd> <kbd>↵</kbd> to ask this as a
-                  question
+                  Press <kbd>↵</kbd> to ask this as a question
                 </>
               ) : (
                 'Tap the arrow to ask this as a question'

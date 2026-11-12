@@ -41,6 +41,7 @@ export default function SearchBar({
   askEnabled = false,
   askMode = 'off',
   onAsk,
+  onEnter,
 }: {
   search: string;
   isStuck: boolean;
@@ -56,6 +57,7 @@ export default function SearchBar({
   askEnabled?: boolean;
   askMode?: AskBoxMode;
   onAsk?: () => void;
+  onEnter?: () => void;
 }) {
   const showPill = isStuck && !pillClicked && (!!search || filtersActive);
   // Read the store rather than trusting `filtersActive`: on the hydration mount
@@ -124,6 +126,7 @@ export default function SearchBar({
           askEnabled={askEnabled}
           askMode={askMode}
           onAsk={onAsk}
+          onEnter={onEnter}
         />
       </div>
 

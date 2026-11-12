@@ -103,7 +103,9 @@ function sectorPreference(sector: string | null) {
  * under the plan's filters laid over the hand-set `base`, the sector the
  * text named ranking the shortlist rather than cutting it (lib/ask/sector)
  * unless nothing was there to rank. POST and never
- * cached; the text is never logged, only what it became. The ranking is the
+ * cached. The text is logged beside what it became, as the box's name
+ * searches are (privacy: search queries, not linked to identity), so what
+ * people ask can be read; the device key never joins it. The ranking is the
  * first slice of the span's shortlist, naming the next for `rankMore`
  * (lib/ask/tranches).
  */
@@ -181,7 +183,10 @@ const planSearch = createServerFn({ method: 'POST' })
             ? ` span=yes sector=${sector ?? 'none'} shortlisted=${ranking.shortlist.length} ranked=${ranking.ranked.length} matched=${ranking.matched} rerank_ms=${ranking.ms} rerank_tokens=${ranking.inputTokens} requests=${ranking.requests}`
             : rankingFailed
               ? ' span=failed'
-              : ' span=no'),
+              : ' span=no') +
+          // Last, JSON-quoted: one line however the text runs, and the
+          // fixed fields before it stay where a reader expects them.
+          ` q=${JSON.stringify(data.text)} about=${JSON.stringify(planned.plan.span)}`,
       );
       // Nothing to rank leaves the sector the filter it was.
       if (sector !== null && !ranking?.shortlist.length)

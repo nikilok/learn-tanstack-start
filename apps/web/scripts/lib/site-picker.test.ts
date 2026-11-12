@@ -66,9 +66,9 @@ describe('loadPicker', () => {
 
   test('stops when the probe is answered outside the contract', async () => {
     const pickSite = async () => ({ pick: null, reason: 'picked', tokens: 0 });
-    await expect(
-      loadPicker(KEY, async () => ({ pickSite })),
-    ).rejects.toThrow('outside its contract');
+    await expect(loadPicker(KEY, async () => ({ pickSite }))).rejects.toThrow(
+      'outside its contract',
+    );
   });
 
   test('throws on an answer outside the contract, rather than reading it', async () => {

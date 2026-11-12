@@ -25,6 +25,7 @@ import {
   createAskLoader,
 } from '../lib/ask/ask-loader';
 import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
+import { askOutcome } from '../lib/ask/outcome';
 import { applyPlan } from '../lib/ask/overlay';
 import { isSector, placeSector } from '../lib/ask/sector';
 import { isTrancheOffset, nextTrancheOffset } from '../lib/ask/tranches';
@@ -192,26 +193,18 @@ const planSearch = createServerFn({ method: 'POST' })
       // sector the filter it was (lib/ask/sector).
       const placed = placeSector(sector, ranking?.shortlist.length ?? 0);
       if (placed.filter !== null) filters.sicSection = placed.filter;
-      // A ranking nobody made is no ranking: the filters alone answer, and
-      // with none of those either, the question matched nothing we have read.
-      const filtered = Object.keys(filters).length > 0;
-      const ranked = ranking && ranking.ranked.length ? ranking.ranked : null;
-      if (rankingFailed && !filtered) return { status: 'unavailable' };
-      return {
-        status: 'ok',
+      // What the plan answers with (lib/ask/outcome): a span judged that
+      // kept nothing is the answer, filters or not.
+      return askOutcome({
         filters,
-        reason:
-          ranking && !ranked && !filtered ? 'unmatched' : planned.plan.reason,
-        ranking:
-          ranked && ranking && planned.plan.span
-            ? {
-                span: planned.plan.span,
-                sector: placed.preference,
-                tranches: [ranked],
-                next: nextTrancheOffset(0, ranking.shortlist.length),
-              }
-            : null,
-      };
+        reason: planned.plan.reason,
+        span: planned.plan.span,
+        sector: placed.preference,
+        slice: ranking
+          ? { ranked: ranking.ranked, shortlisted: ranking.shortlist.length }
+          : null,
+        failed: rankingFailed,
+      });
     } catch (error) {
       console.error(failureLine('[ask] failed', error));
       return { status: 'unavailable' };

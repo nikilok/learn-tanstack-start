@@ -94,6 +94,20 @@ describe('createAskLoader', () => {
     expect(plans.map((p) => p[2])).toEqual(['t1']);
   });
 
+  test('overlapping callers refused together share one replacement mint, and each retries with it', async () => {
+    const { ask, mints, plans } = harness(
+      ['t1', 't2'],
+      [DENIED, DENIED, OK, OK],
+    );
+    const [a, b] = await Promise.all([
+      ask('care homes in leeds', KEY),
+      ask('plcs in york', KEY),
+    ]);
+    expect([a, b]).toEqual([OK, OK]);
+    expect(mints).toEqual([KEY, KEY]);
+    expect(plans.map((p) => p[2])).toEqual(['t1', 't1', 't2', 't2']);
+  });
+
   test('mints once and keeps the token across asks', async () => {
     const { ask, mints, plans } = harness(['t1'], [OK, OK]);
     expect(await ask('care homes in leeds', KEY)).toEqual(OK);

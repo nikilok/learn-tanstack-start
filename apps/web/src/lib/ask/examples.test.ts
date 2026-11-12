@@ -12,6 +12,7 @@ import {
   exampleWaitMs,
   FIRST_EXAMPLE,
   letters,
+  visibleExample,
 } from './examples';
 
 /** The longest example worth typing out, in characters: past this a phone wraps it and the typing drags. */
@@ -113,5 +114,24 @@ describe('exampleWaitMs and exampleDwellMs', () => {
       ...ASK_EXAMPLES.map((text) => letters(text).length),
     );
     expect(EXAMPLE_ERASE_MS).toBeLessThan(shortest * EXAMPLE_TYPE_MS);
+  });
+});
+
+describe('visibleExample', () => {
+  const examples = ['care homes in Leeds', 'video game studios in Guildford'];
+
+  test('the one shown, once nothing is being erased', () => {
+    expect(visibleExample({ shown: 0, leaving: null }, false, examples)).toBe(
+      'care homes in Leeds',
+    );
+    expect(visibleExample({ shown: 1, leaving: 0 }, true, examples)).toBe(
+      'video game studios in Guildford',
+    );
+  });
+
+  test('the one still being erased while it is: a click then asks what was read', () => {
+    expect(visibleExample({ shown: 1, leaving: 0 }, false, examples)).toBe(
+      'care homes in Leeds',
+    );
   });
 });

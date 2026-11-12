@@ -10,6 +10,7 @@ import {
   deriveAskHint,
   nextEmptyPrefix,
   reconcileApplied,
+  runRetired,
 } from './session';
 
 const merged = { location: 'Leeds', sicSection: 'Q' };
@@ -434,5 +435,31 @@ describe('askBoxMode', () => {
         judging: true,
       }),
     ).toBe('off');
+  });
+});
+
+describe('runRetired', () => {
+  const run = { text: 'care homes in leeds', urlKey: planKey };
+
+  test('a run stands while the URL holds its text and the filters it was asked under', () => {
+    expect(
+      runRetired({ search: 'care homes in leeds', urlKey: planKey }, run),
+    ).toBe(false);
+  });
+
+  test('the text moving off the one asked retires it, as the plan landing does', () => {
+    expect(runRetired({ search: 'care homes', urlKey: planKey }, run)).toBe(
+      true,
+    );
+    expect(runRetired({ search: '', urlKey: planKey }, run)).toBe(true);
+  });
+
+  test('the filters moving off the set it was asked under retires it: a Back under the run', () => {
+    expect(
+      runRetired({ search: 'care homes in leeds', urlKey: otherKey }, run),
+    ).toBe(true);
+    expect(
+      runRetired({ search: 'care homes in leeds', urlKey: bareKey }, run),
+    ).toBe(true);
   });
 });

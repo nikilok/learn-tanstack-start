@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef } from 'react';
 
 import type { AskBoxMode } from '../lib/ask/session';
 import SearchIcon from './SearchIcon';
@@ -45,11 +45,14 @@ export default memo(function SearchInput({
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-  const onAskRef = useRef(onAsk);
-  onAskRef.current = askEnabled ? onAsk : undefined;
+  const onAskRef = useRef(askEnabled ? onAsk : undefined);
   const onEnterRef = useRef(onEnter);
-  onEnterRef.current = onEnter;
+  // Synced after each commit, as React asks of a ref: a render it discards never reaches the input's handlers.
+  useLayoutEffect(() => {
+    onChangeRef.current = onChange;
+    onAskRef.current = askEnabled ? onAsk : undefined;
+    onEnterRef.current = onEnter;
+  });
   const hasAutoFocused = useRef(false);
 
   const syncClearButton = () => {

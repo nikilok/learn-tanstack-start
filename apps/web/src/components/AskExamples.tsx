@@ -16,6 +16,7 @@ import {
   exampleWaitMs,
   FIRST_EXAMPLE,
   letters,
+  visibleExample,
 } from '../lib/ask/examples';
 
 import styles from './AskExamples.module.css';
@@ -123,7 +124,7 @@ export default function AskExamples({
       type="button"
       className={styles.examples}
       style={BEATS}
-      onClick={() => onAsk(shown)}
+      onClick={() => onAsk(visibleExample(rotation, erased))}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       onFocus={() => setFocused(true)}

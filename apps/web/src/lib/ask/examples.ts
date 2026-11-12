@@ -70,3 +70,14 @@ export function exampleDwellMs(
     EXAMPLE_HOLD_MS
   );
 }
+
+/** The example a click asks: the one shown, unless the one it replaced is still being erased, which is what was read. */
+export function visibleExample(
+  rotation: ExampleRotation,
+  erased: boolean,
+  examples: readonly string[] = ASK_EXAMPLES,
+): string {
+  return rotation.leaving !== null && !erased
+    ? examples[rotation.leaving]
+    : examples[rotation.shown];
+}

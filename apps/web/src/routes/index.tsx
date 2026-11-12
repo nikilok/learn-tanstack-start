@@ -68,6 +68,7 @@ import {
   deriveAskHint,
   nextEmptyPrefix,
   reconcileApplied,
+  runRetired,
 } from '../lib/ask/session';
 import { extendRanking, walkedListing } from '../lib/ask/tranches';
 import { readinessSnapshot, subscribeReadiness } from '../lib/device/beacons';
@@ -205,10 +206,13 @@ function Home() {
   const leaving = useLocation({ select: (l) => l.pathname !== '/' });
   const liveSearch = useLocation({ select: (l) => l.search });
   const liveState = useLocation({ select: (l) => l.state });
-  const heldRef = useRef({ search: liveSearch, state: liveState });
-  if (!leaving) heldRef.current = { search: liveSearch, state: liveState };
-  const rawSearch = heldRef.current.search;
-  const entryState = heldRef.current.state;
+  // Held as state set during the render, as React adjusts state to props, so
+  // a render it discards leaves nothing behind; read only while leaving.
+  const [held, setHeld] = useState({ search: liveSearch, state: liveState });
+  if (!leaving && (held.search !== liveSearch || held.state !== liveState))
+    setHeld({ search: liveSearch, state: liveState });
+  const rawSearch = leaving ? held.search : liveSearch;
+  const entryState = leaving ? held.state : liveState;
   const { search, ...urlFilters } = useMemo(
     () => validateHomeSearch(rawSearch as Record<string, unknown>),
     [rawSearch],
@@ -289,8 +293,13 @@ function Home() {
   // Read at the moment a debounced commit fires: a plan can land between the
   // keystroke and its timer, and the commit must then end it, not type on it.
   const appliedRef = useRef<AppliedAsk | null>(null);
-  appliedRef.current = applied;
+  // Synced after the commit, as React asks of a ref: a render it discards never reaches the timer.
+  useLayoutEffect(() => {
+    appliedRef.current = applied;
+  }, [applied]);
   const askedRef = useRef('');
+  // The filter key the ask was made under: the URL moving off it (a Back under the run) retires the run.
+  const askKeyRef = useRef('');
   const queuedAskRef = useRef<string | null>(null);
   // The shortest text the offer has stood on: a text that only adds to it
   // keeps the offer up while its own search runs, instead of flickering
@@ -359,15 +368,21 @@ function Home() {
     setAskProgress(ASK_IDLE);
   }, [leaving]);
   // A new text is a new chance to ask; the text being asked is not. A run
-  // still in flight for the old text is retired, so its plan never lands on
-  // what was typed since.
+  // still in flight for the old text, or for a filter set the URL has moved
+  // off (a Back under the run), is retired, so its plan never lands on what
+  // was typed since, nor on filters built from a base no longer shown.
   useEffect(() => {
-    if (search !== askedRef.current) {
+    if (
+      runRetired(
+        { search, urlKey: urlParamsKey },
+        { text: askedRef.current, urlKey: askKeyRef.current },
+      )
+    ) {
       askRunRef.current++;
       queuedAskRef.current = null;
       setAskProgress(ASK_IDLE);
     }
-  }, [search]);
+  }, [search, urlParamsKey]);
   /**
    * Ends the plan: forgets the tab's record and retires any run. The durable
    * store follows the URL (the effect below), so a store still holding the
@@ -643,6 +658,7 @@ function Home() {
       });
     }
     askedRef.current = text;
+    askKeyRef.current = urlParamsKey;
     setAskProgress(ASK_PENDING);
     if (readiness.status === 'ready') runAsk(text, readiness.key);
     else if (readiness.status === 'off') setAskProgress(ASK_UNAVAILABLE);

@@ -172,3 +172,11 @@ export function nextEmptyPrefix(
     return prefix !== null && search.startsWith(prefix) ? prefix : search;
   return loading ? prefix : null;
 }
+
+/** Whether a run still in flight is retired by where the URL stands: its text moved off the one asked, or its filters off the set it was asked under (a Back under the run). */
+export function runRetired(
+  now: { search: string; urlKey: string },
+  run: { text: string; urlKey: string },
+): boolean {
+  return now.search !== run.text || now.urlKey !== run.urlKey;
+}

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
+import type { SearchUrlParams } from '@ss/search-filters';
+
 import {
   type AskMoreResponse,
   type AskPlanResponse,
@@ -28,8 +30,15 @@ function harness(
   slices: AskMoreResponse[] = [],
 ) {
   const mints: string[] = [];
-  const plans: [string, string, string][] = [];
-  const mores: [string, string, string, number, string | null][] = [];
+  const plans: [string, string, string, SearchUrlParams][] = [];
+  const mores: [
+    string,
+    string,
+    string,
+    SearchUrlParams,
+    number,
+    string | null,
+  ][] = [];
   const loader = createAskLoader(
     async (key) => {
       mints.push(key);
@@ -37,14 +46,14 @@ function harness(
       if (next === undefined) throw new Error('no token queued');
       return next;
     },
-    async (text, key, token) => {
-      plans.push([text, key, token]);
+    async (text, key, token, base) => {
+      plans.push([text, key, token, base]);
       const next = answers.shift();
       if (next === undefined) throw new Error('no answer queued');
       return next;
     },
-    async (span, key, token, _params, offset, sector) => {
-      mores.push([span, key, token, offset, sector]);
+    async (span, key, token, params, offset, sector) => {
+      mores.push([span, key, token, params, offset, sector]);
       const next = slices.shift();
       if (next === undefined) throw new Error('no slice queued');
       return next;
@@ -116,19 +125,20 @@ describe('createAskLoader', () => {
   });
 
   test('more judges the next slice with the token the ask used, replacing a refused one once', async () => {
-    const { ask, more, mints, mores } = harness(
+    const { ask, more, mints, plans, mores } = harness(
       ['t1', 't2'],
       [OK],
       [MORE_DENIED, MORE_OK],
     );
-    expect(await ask('care homes in leeds', KEY)).toEqual(OK);
+    expect(await ask('care homes in leeds', KEY, { rating: 'A' })).toEqual(OK);
+    expect(plans.map((p) => p[3])).toEqual([{ rating: 'A' }]);
     expect(
       await more('care homes', KEY, { location: 'Leeds' }, 400, 'Q'),
     ).toEqual(MORE_OK);
     expect(mints).toEqual([KEY, KEY]);
     expect(mores).toEqual([
-      ['care homes', KEY, 't1', 400, 'Q'],
-      ['care homes', KEY, 't2', 400, 'Q'],
+      ['care homes', KEY, 't1', { location: 'Leeds' }, 400, 'Q'],
+      ['care homes', KEY, 't2', { location: 'Leeds' }, 400, 'Q'],
     ]);
   });
 

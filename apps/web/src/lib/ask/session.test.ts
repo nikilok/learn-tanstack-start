@@ -331,7 +331,7 @@ describe('listedRanking', () => {
   };
   const live = { ...plan, ranking };
 
-  test('the applied plan’s ranking while the URL holds its filters, else nothing', () => {
+  test('the applied plan’s ranking while the URL holds its filters, else the entry’s for the URL, else nothing', () => {
     expect(
       listedRanking({
         applied: live,
@@ -348,6 +348,19 @@ describe('listedRanking', () => {
         hydrated: true,
       }),
     ).toBeNull();
+    const onto = {
+      ...live,
+      mergedKey: otherKey,
+      ranking: { ...ranking, span: 'law firms' },
+    };
+    expect(
+      listedRanking({
+        applied: live,
+        entry: onto,
+        urlKey: otherKey,
+        hydrated: true,
+      }),
+    ).toBe(onto.ranking);
   });
 
   test('before the plan is applied, the entry’s ranking once the URL holds its filters', () => {

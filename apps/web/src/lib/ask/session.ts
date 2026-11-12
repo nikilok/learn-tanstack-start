@@ -57,10 +57,11 @@ const samePlan = (a: AppliedAsk, b: AppliedAsk): boolean =>
 
 /**
  * The ranking the listing is restricted to: the applied plan's while the URL
- * holds its filters, else the one this entry carries while the plan is being
- * restored onto it, so the unrestricted listing never runs under a
- * question's own URL. Nothing before hydration: the server never had the
- * entry, and the first client render must match its HTML.
+ * holds its filters, else the one this entry carries, while a plan is being
+ * restored onto it or the live one is ended for it, so the unrestricted
+ * listing never runs under a question's own URL. Nothing before hydration:
+ * the server never had the entry, and the first client render must match
+ * its HTML.
  */
 export function listedRanking({
   applied,
@@ -74,7 +75,7 @@ export function listedRanking({
   hydrated: boolean;
 }): AskRanking | null {
   if (!hydrated) return null;
-  if (applied) return applied.mergedKey === urlKey ? applied.ranking : null;
+  if (applied && applied.mergedKey === urlKey) return applied.ranking;
   return entry && entry.mergedKey === urlKey ? entry.ranking : null;
 }
 

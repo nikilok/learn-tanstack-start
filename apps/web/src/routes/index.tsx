@@ -334,6 +334,16 @@ function Home() {
       : pendingStoredFilters
         ? PENDING_FILTER_DATA
         : classic;
+  // Leaving the route (a company page loading) retires a pending ask and
+  // drops a pending commit: either would navigate under the click and cancel
+  // it. The unmount cleanup above covers the leave once it commits.
+  useEffect(() => {
+    if (!leaving) return;
+    if (navTimerRef.current) clearTimeout(navTimerRef.current);
+    askRunRef.current++;
+    queuedAskRef.current = null;
+    setAskProgress(ASK_IDLE);
+  }, [leaving]);
   // A new text is a new chance to ask; the text being asked is not. A run
   // still in flight for the old text is retired, so its plan never lands on
   // what was typed since.
@@ -386,8 +396,12 @@ function Home() {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [applied, hasFilters, urlParamsKey, entryState]);
   const queryActive = hasFilters || search.length >= 3;
+  // A search that failed settled nothing: it is not empty, as HmrcResults reads it.
   const confirmedEmpty =
-    !resultsData.isLoading && queryActive && resultsData.results.length === 0;
+    !resultsData.isLoading &&
+    !resultsData.failed &&
+    queryActive &&
+    resultsData.results.length === 0;
   // A text that only adds to the one the offer stood on keeps the offer up
   // while its own search runs: it reads as askable before it settles.
   const holding =
@@ -813,6 +827,17 @@ function Home() {
             onSearch={(value) => {
               setLiveQuery(value);
               if (navTimerRef.current) clearTimeout(navTimerRef.current);
+              // A keystroke off the text being asked retires its run now, not
+              // at the commit: a plan landing inside the debounce would land
+              // on what was typed since.
+              if (
+                askProgress.status === 'pending' &&
+                value.trim() !== askedRef.current
+              ) {
+                askRunRef.current++;
+                queuedAskRef.current = null;
+                setAskProgress(ASK_IDLE);
+              }
               // Editing or clearing the question ends the ask: the base set
               // by hand comes back under the new text. Decided when the commit
               // fires, so a plan that lands between the keystroke and its

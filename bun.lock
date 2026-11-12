@@ -49,7 +49,7 @@
         "@fingerprintjs/fingerprintjs": "5.2.0",
         "@flags-sdk/vercel": "1.3.0",
         "@mcp-b/global": "^2.3.2",
-        "@nikilok/thoth-engine": "0.3.0",
+        "@nikilok/thoth-engine": "0.4.0",
         "@ss/db": "workspace:*",
         "@ss/search-filters": "workspace:*",
         "@ss/skyline": "workspace:*",
@@ -366,7 +366,7 @@
 
     "@next/env": ["@next/env@16.0.10", "", {}, "sha512-8tuaQkyDVgeONQ1MeT9Mkk8pQmZapMKFh5B+OrFUlG3rVmYTXcXlBetBgTurKXGaIZvkoqRT9JL5K3phXcgang=="],
 
-    "@nikilok/thoth-engine": ["@nikilok/thoth-engine@0.3.0", "https://npm.pkg.github.com/download/@nikilok/thoth-engine/0.3.0/c9caa5979c22c7ab4dccc44d4df47b174ff9fad7", { "peerDependencies": { "@ss/search-filters": "*", "drizzle-orm": "^0.45.2" } }, "sha512-wqsgkv2KjlAnNRYp2OU/Mw3dSe8Xvlmnn5YMoARp0gzZnysNB0TEJxfYrKrb/tg0WwhznipP6ypfYXZatbOULw=="],
+    "@nikilok/thoth-engine": ["@nikilok/thoth-engine@0.4.0", "https://npm.pkg.github.com/download/@nikilok/thoth-engine/0.4.0/a4d54d54ea3cee2c51cdd885d8a2c3b72bc18c3f", { "peerDependencies": { "@ss/search-filters": "*", "drizzle-orm": "^0.45.2" } }, "sha512-zwi4vuzBzAn0feonjDxOBIUlgHT+EA5p0xp3IOP8ahZVF9Ai7vbbZdecmnH8Gvm1dfE9++cxhy0hA44ByR6Y0A=="],
 
     "@noble/hashes": ["@noble/hashes@2.2.0", "", {}, "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="],
 

@@ -96,8 +96,8 @@ function sectorPreference(sector: string | null) {
  * token. A request without the credential that may ask is `denied` before
  * anything else is read; so is a refused token, a suspended key, or, unless
  * it is the owner's own, a request not from a browser a person is using, and
- * none of those is an error. Jev
- * failing, or no key to reach it with, is `unavailable`: the box falls back
+ * none of those is an error. The
+ * judge failing, or no key to reach it with, is `unavailable`: the box falls back
  * to the name search it already ran. When the text says what the
  * organisations do, pathway B ranks the companies whose accounts say it,
  * under the plan's filters laid over the hand-set `base`, the sector the
@@ -138,9 +138,9 @@ const planSearch = createServerFn({ method: 'POST' })
     rosterReady.catch(() => {});
     if (await isSuspended(data.key)) return { status: 'denied' };
     if (!(await ownerOrBrowser('ask'))) return { status: 'denied' };
-    const apiKey = process.env.TYPESAFE_API_KEY;
+    const apiKey = process.env.ASK_API_KEY;
     if (!apiKey) {
-      console.error('[ask] TYPESAFE_API_KEY not set');
+      console.error('[ask] ASK_API_KEY not set');
       return { status: 'unavailable' };
     }
     try {
@@ -263,9 +263,9 @@ const rankMore = createServerFn({ method: 'POST' })
     if (!tokenMatches(data.token, data.key)) return { status: 'denied' };
     if (await isSuspended(data.key)) return { status: 'denied' };
     if (!(await ownerOrBrowser('ask'))) return { status: 'denied' };
-    const apiKey = process.env.TYPESAFE_API_KEY;
+    const apiKey = process.env.ASK_API_KEY;
     if (!apiKey) {
-      console.error('[ask] TYPESAFE_API_KEY not set');
+      console.error('[ask] ASK_API_KEY not set');
       return { status: 'unavailable' };
     }
     try {

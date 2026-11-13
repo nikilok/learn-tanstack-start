@@ -214,7 +214,7 @@ export default function HmrcResults({
       }
     }
     moveHighlight(initial);
-  }, [results, search, moveHighlight]);
+  }, [results, search, listingKey, moveHighlight]);
 
   // Mirror the router's intent-preload for keyboard nav: <Link> only fires
   // intent on hover/focus, which arrow-key nav never triggers. Debounce by

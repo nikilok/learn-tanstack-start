@@ -337,9 +337,14 @@ function Home() {
     { ...urlFilters, q: search.length >= 3 ? search : undefined },
     { enabled: hasFilters && !rankedMode },
   );
-  const rankedListing = useRankedSearch(urlFilters, ranking?.tranches ?? [], {
-    enabled: rankedMode,
-  });
+  const rankedListing = useRankedSearch(
+    urlFilters,
+    ranking?.span ?? '',
+    ranking?.tranches ?? [],
+    {
+      enabled: rankedMode,
+    },
+  );
   // The walk past the first slice (lib/ask/tranches): a slice with the judge
   // shows as rows on their way, one that could not be judged as a next page
   // that failed, and the slice still to judge keeps the list open. The list
@@ -558,7 +563,15 @@ function Home() {
   const judgeNextTranche = () => {
     const live = appliedRef.current;
     const walk = live?.ranking;
-    if (!live || !walk || walk.next === null || walkingRef.current !== null)
+    // Not while the route is leaving: a slice landing then would navigate
+    // under the company page loading.
+    if (
+      leaving ||
+      !live ||
+      !walk ||
+      walk.next === null ||
+      walkingRef.current !== null
+    )
       return;
     // A page still deriving its device key is asked again by the next
     // scroll; one that will never have it stops here.
@@ -733,10 +746,12 @@ function Home() {
   // brings its listing back from a company page. Declared after the plan's
   // reconciliation above, and it must stay there: on a URL that moved off a
   // plan, that effect reads the store before this one rewrites it.
+  // Written again when the entry changes under the same set: ending the plan
+  // the last entry carried wrote its base back, and the set shown must win.
   useEffect(() => {
     if (hasFilters)
       storeFilters(JSON.parse(urlParamsKey) as Record<string, unknown>);
-  }, [hasFilters, urlParamsKey]);
+  }, [hasFilters, urlParamsKey, entry]);
   // Navs that only carry the name term (a company page's back link, the
   // header logo) get the stored set re-applied, with the tab's record riding
   // along when the set is its plan's; a question that only ranked has no set,

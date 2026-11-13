@@ -12,13 +12,14 @@ type RankedPageData = Awaited<ReturnType<typeof searchRanked>>;
  * The filtered listing restricted to a question's ranking (lib/ask), tranche
  * by tranche: each judged slice is paged through `searchRanked` with its own
  * ids, in rank order, and the next slice's rows follow once a slice's run
- * out. Keyed by the filters and the first slice alone, so a slice appended
- * while the visitor reads keeps the pages already shown; the next page is
- * decided from the latest slices, so an appended one is paged at once. The
- * shape is `useFilterSearch`'s, for the results list.
+ * out. Keyed by the filters, the question's span and the first slice alone,
+ * so a slice appended while the visitor reads keeps the pages already shown;
+ * the next page is decided from the latest slices, so an appended one is
+ * paged at once. The shape is `useFilterSearch`'s, for the results list.
  */
 export function useRankedSearch(
   params: Record<string, unknown>,
+  span: string,
   tranches: string[][],
   { enabled = true }: { enabled?: boolean } = {},
 ) {
@@ -26,7 +27,7 @@ export function useRankedSearch(
   const live = enabled && tranches.length > 0;
   const key = filterSearchKey(filters);
   const query = useInfiniteQuery({
-    queryKey: ['filter-search', key, tranches[0]?.join(',') ?? ''],
+    queryKey: ['filter-search', key, span, tranches[0]?.join(',') ?? ''],
     queryFn: ({ pageParam }): Promise<RankedPageData> => {
       const ids = tranches[pageParam.tranche];
       return ids

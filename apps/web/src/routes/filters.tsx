@@ -1,4 +1,17 @@
 import {
+  COMPANY_STATUSES,
+  COMPANY_TYPES,
+  filtersToSearchParams,
+  KNOWN_CITIES,
+  KNOWN_ROUTES,
+  parseSearchFilters,
+  RATINGS,
+  type SearchFilters,
+  searchTermInput,
+  SIC_SECTIONS,
+  WORKER_TYPES,
+} from '@ss/search-filters';
+import {
   createFileRoute,
   useCanGoBack,
   useNavigate,
@@ -13,19 +26,7 @@ import Checkbox from '../components/Checkbox';
 import DatePicker from '../components/DatePicker';
 import Select from '../components/Select';
 import { parsePlatform } from '../hooks/usePlatform';
-import {
-  COMPANY_STATUSES,
-  COMPANY_TYPES,
-  filtersToSearchParams,
-  KNOWN_CITIES,
-  KNOWN_ROUTES,
-  parseSearchFilters,
-  RATINGS,
-  type SearchFilters,
-  searchTermInput,
-  SIC_SECTIONS,
-  WORKER_TYPES,
-} from '../lib/search/params';
+import { clearApplied } from '../lib/ask/applied-store';
 import { loadStoredFilters, storeFilters } from '../lib/search/persist';
 import { FILTER_SECTIONS } from '../lib/search/sections';
 import { humanizeEnum, prefersReducedMotion } from '../utils';
@@ -409,6 +410,7 @@ function FiltersPage() {
   // One-tap exit: empty the store and land on the classic home immediately.
   const clearAll = () => {
     storeFilters({});
+    clearApplied();
     void navigate({ to: '/', search: { search: term } }).then(landAtTop);
   };
 

@@ -27,17 +27,11 @@
   --status-red: #b91c1c;
   --status-grey: #374151;
 
-  /* Rainbow spectrum shared by the search guide-rail and the timeline rail.
-     Loops back to the start colour at 100% so a vertical repeat is seamless. */
-  --rail-spectrum: linear-gradient(
-    180deg,
-    #2954d6 0%,
-    #7b3fe4 20%,
-    #e23b86 40%,
-    #e2820e 60%,
-    #18a06d 80%,
-    #2954d6 100%
-  );
+  /* Rainbow spectrum shared by the search guide-rail, the timeline rail and the
+     search box's ask ring. Loops back to the start colour so a vertical repeat,
+     or a ring, is seamless. */
+  --spectrum-stops: #2954d6, #7b3fe4, #e23b86, #e2820e, #18a06d, #2954d6;
+  --rail-spectrum: linear-gradient(180deg, var(--spectrum-stops));
 
   /* Mapped tokens for components */
   --sea-ink: #171717;
@@ -106,15 +100,8 @@
   --status-grey: #9ca3af;
 
   /* Brighter stops pop on the dark page; the deeper light stops would muddy. */
-  --rail-spectrum: linear-gradient(
-    180deg,
-    #4f7cff 0%,
-    #9a5cff 20%,
-    #ff6fae 40%,
-    #ffb347 60%,
-    #5fd0a0 80%,
-    #4f7cff 100%
-  );
+  --spectrum-stops: #4f7cff, #9a5cff, #ff6fae, #ffb347, #5fd0a0, #4f7cff;
+  --rail-spectrum: linear-gradient(180deg, var(--spectrum-stops));
 
   --sea-ink: #ededed;
   --sea-ink-soft: #a0a0a0;

@@ -68,7 +68,8 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   it fires on empty↔non-empty transitions, not every length change)
   `removeItem`s `hmrc-scroll-y`
   unless `queryActive && (isLoading || results.length > 0)` — and, since filters,
-  only when `loadStoredFilters()` is empty: a stored filter set means the bare
+  only when `rehydratePending()` is false: a stored filter set, or a question's
+  record with a ranking alone (lib/search/persist), means the bare
   mount is about to rehydrate into filter mode (index.tsx), whose listing will
   consume the key, so discarding would lose the back-nav scroll. This closes the
   permanent-hide where *any* truthy stale value lands on the empty/short/zero-result
@@ -119,7 +120,7 @@ the results the user came to read.
 That gate cannot read `filtersActive` alone. On the hydration mount the prop is false by
 construction (SSR parity — see `pendingStoredFilters` in `routes/index.tsx`) and the
 rehydrate navigate lands an effect later, while SearchInput's focus effect — a child's —
-runs first. So SearchBar reads `loadStoredFilters()` itself in a lazy `useState`
+runs first. So SearchBar reads `rehydratePending()` itself in a lazy `useState`
 (once per mount, never on the keystroke path) and ORs it in. Keep that read separate
 from the `filtersActive` prop: widening the prop to include it would change the markup
 `HmrcResults` renders on the hydration mount and reintroduce a mismatch.
@@ -193,8 +194,9 @@ AND present** (inline ≥sm costs nothing); rating and chip are always present a
      items truncate, never wrap). If you ever let the name or a metadata field wrap, you
      must convert it back into a measured `fields[]` entry (real text, real font) AND
      remove its fixed contribution from `fixedHeight` — the two move together.
-2. **`HmrcResults.tsx`** — the hidden measurement div's `className="px-4"` (loading
-   branch) must match the real results container's horizontal padding class.
+2. **`HmrcResults.tsx`** — `LIST_GUTTER` is the results container's horizontal padding
+   class, and the `WidthProbe` every list-less branch renders carries it, so the width
+   measurement always matches the real list. Change the class there only.
 
 ### How the readiness gating works
 
@@ -205,7 +207,12 @@ Items only render when three conditions are met:
 3. **Width** — container content-box width measured via `useLayoutEffect` on a hidden div
 
 Until all three are ready, `<SkeletonCards />` stays visible. This prevents layout shifts
-from fallback font measurements or missing width data.
+from fallback font measurements or missing width data. Two exceptions, by design (both in
+lib/search/empty-state): while the ask's offer holds (`quiet` in HmrcResults), the load of a
+text that only adds to the one the offer stood on renders the offer, not skeletons, so a word
+added to an empty text never flickers through them; and a refine-load from the no-results
+scene keeps the WebGPU hole mounted rather than replaying its zoom. Every other load, the
+ask's own included, is skeletons.
 
 ### Scroll restoration depends on `ready`
 
@@ -423,6 +430,13 @@ built-ins), whose names `owner.server.ts` and `flags.server.ts` import rather th
 spell. It reads `FLAGS_SECRET` as Node's Buffer does under the `flags` package,
 skipping stray characters, or a secret re-entered with quotes would still open
 /download and nothing else.
+`isOwnerRequest` also leaves a readable, non-httpOnly `ss-owner-hint=1` beside it
+(lib/ask/access-hint.ts): not a credential, it only lets the home page know at mount that
+asking is open, so an owner's offer never waits on a mint and nobody else mints to find out.
+The home document's `beforeLoad` sets it the same way (lib/ask/access-hint.server), and a
+request that may not ask has it expired there and by the ask's mint, so a rotated secret
+closes the offer on the next document. A forged or stale hint shows an offer the mint then
+refuses; the server decides every request.
 
 - **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
   (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie
@@ -527,7 +541,10 @@ crawler ranges, no address, no secret), when it passes.
   GET, the edge checking the session ahead of the cache (the filter listing is
   edge-cached for 5 minutes; the name search sets no caching). They carry no
   browser check of their own, as the check stands in front of POST calls only;
-  the session's fetch sends a GET `s-` call as it is. The home loader streams a
+  the session's fetch sends a GET `s-` call as it is. The ask's ranked listing
+  (`searchRanked`) is the one POST among them, by design: its ids are one
+  visitor's answer and never enter a URL, so the check's hold applies to it as
+  to every POST call, though no handler of it asks the check. The home loader streams a
   search's first page with the document only where a company page is served in
   full (the owner, a crawler), or for everyone while `DOCUMENT_MODE` is not
   `enforce` (`rendersListing`, `lib/session/listing.server.ts`; which search it
@@ -640,7 +657,7 @@ crawler ranges, no address, no secret), when it passes.
   data lands.
 - **Data calls without a session are refused at the edge**, before any
   function runs. `SESSION_CALLS` (`getCompanyPage`, `getCompanyExtras`,
-  `searchHmrc`, `searchFiltered`) get `s-` ids (`call-ids.ts`);
+  `searchHmrc`, `searchFiltered`, `searchRanked`) get `s-` ids (`call-ids.ts`);
   `calls.test.ts` fails if one moves, or if a
   server function is placed in neither list. The browser's fetch (`start.ts`)
   holds an `s-` call made with no session until the page's first ask lands, so

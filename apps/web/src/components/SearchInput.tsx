@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
 
+import type { AskBoxMode } from '../lib/ask/session';
 import SearchIcon from './SearchIcon';
 
 import styles from './SearchInput.module.css';
@@ -10,7 +11,11 @@ import styles from './SearchInput.module.css';
  * plus imperative DOM sync so parent-driven re-renders don't disrupt in-flight
  * typing; `defaultValue` only re-syncs when the input isn't focused so external
  * search-param updates apply without clobbering the user. `autoFocus` fires
- * once, while `focus` re-focuses on every truthy transition.
+ * once, while `focus` re-focuses on every truthy transition. Enter hands the
+ * press to `onEnter` (the parent asks while it offers to, or remembers the
+ * press until it does); while `askEnabled`, an arrow beside the clear button
+ * hands the text to `onAsk`. `askMode` wears the spectrum ring: turning while
+ * a question runs, steady while its plan is applied.
  */
 export default memo(function SearchInput({
   inputRef,
@@ -20,6 +25,10 @@ export default memo(function SearchInput({
   placeholder,
   autoFocus,
   focus,
+  askEnabled = false,
+  askMode = 'off',
+  onAsk,
+  onEnter,
 }: {
   inputRef: RefObject<HTMLInputElement | null>;
   defaultValue: string;
@@ -28,11 +37,13 @@ export default memo(function SearchInput({
   placeholder?: string;
   autoFocus?: boolean;
   focus?: boolean;
+  askEnabled?: boolean;
+  askMode?: AskBoxMode;
+  onAsk?: () => void;
+  onEnter?: () => void;
 }) {
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
   const hasAutoFocused = useRef(false);
 
   const syncClearButton = () => {
@@ -96,15 +107,44 @@ export default memo(function SearchInput({
         onInput={() => {
           syncClearButton();
           syncSearchButton();
-          onChangeRef.current(inputRef.current?.value ?? '');
+          onChange(inputRef.current?.value ?? '');
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') inputRef.current?.blur();
+          // The listing's own handler opens a highlighted row on the same
+          // key; the parent asks only while nothing is listed. Not during
+          // IME composition, where Enter commits the candidate.
+          else if (e.key === 'Enter' && !e.nativeEvent.isComposing) onEnter?.();
         }}
         onBlur={onBlur}
         placeholder={placeholder}
-        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 pr-10 text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
+        className={`relative w-full rounded-lg border border-(--sea-ink-soft)/20 bg-(--bg-base) px-4 py-3 ${askEnabled ? 'pr-[4.5rem]' : 'pr-10'} text-lg text-(--sea-ink) placeholder:text-(--sea-ink-soft)/50 focus:border-(--sea-ink-soft)/40 focus:ring-0 focus:outline-none ${styles.input}`}
       />
+      {/* Ask ring: turns while the question runs, holds while its plan is applied */}
+      <span
+        aria-hidden="true"
+        className={styles.ring}
+        data-ask={askMode === 'off' ? undefined : askMode}
+      />
+      {/* Ask button — beside the clear button while the text can be asked */}
+      {askEnabled && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onAsk?.()}
+          aria-label="Ask this as a question"
+          className="absolute top-1/2 right-10 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+        >
+          <svg
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+            className="h-5 w-5"
+          >
+            <path d="M10 16a.75.75 0 01-.75-.75V6.56L5.03 10.78a.75.75 0 01-1.06-1.06l5.5-5.5a.75.75 0 011.06 0l5.5 5.5a.75.75 0 11-1.06 1.06L10.75 6.56v8.69A.75.75 0 0110 16z" />
+          </svg>
+        </button>
+      )}
       {/* Clear button — visible when text exists */}
       <button
         ref={clearRef}
@@ -113,7 +153,7 @@ export default memo(function SearchInput({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (inputRef.current) inputRef.current.value = '';
-          onChangeRef.current('');
+          onChange('');
           syncClearButton();
           syncSearchButton();
           inputRef.current?.focus();

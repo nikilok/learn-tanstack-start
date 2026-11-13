@@ -116,7 +116,7 @@ export async function fromBrowser(
  * only while `enforce` holds (`BROWSER_CHECK_ENFORCE` unless a caller narrows it).
  */
 export async function ownerOrBrowser(
-  tag: 'extras' | 'page',
+  tag: 'extras' | 'page' | 'ask',
   deps: {
     owner?: () => Promise<boolean>;
     check?: BrowserCheck;

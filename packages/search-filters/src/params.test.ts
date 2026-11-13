@@ -11,6 +11,8 @@ import {
   TYPE_RATING_ROWS,
   typeRatingsFor,
   WORKER_TYPES,
+  listingOrder,
+  orderAsked,
 } from './params';
 
 describe('parseSearchFilters', () => {
@@ -443,5 +445,39 @@ describe('ratingPriorityFirst', () => {
     const input = ['Worker (B rating)', 'Worker (A rating)'];
     ratingPriorityFirst(input);
     expect(input).toEqual(['Worker (B rating)', 'Worker (A rating)']);
+  });
+});
+
+describe('listingOrder', () => {
+  test('relevance with a term and name without, ascending, when nothing was asked', () => {
+    expect(listingOrder({ q: 'care' })).toEqual({
+      sort: 'relevance',
+      order: 'asc',
+    });
+    expect(listingOrder({})).toEqual({ sort: 'name', order: 'asc' });
+  });
+
+  test('incorporation runs newest first unless a direction was asked; any other sort ascending', () => {
+    expect(listingOrder({ sort: 'incorporated' })).toEqual({
+      sort: 'incorporated',
+      order: 'desc',
+    });
+    expect(listingOrder({ sort: 'incorporated', order: 'asc' })).toEqual({
+      sort: 'incorporated',
+      order: 'asc',
+    });
+    expect(listingOrder({ sort: 'name', order: 'desc' })).toEqual({
+      sort: 'name',
+      order: 'desc',
+    });
+  });
+});
+
+describe('orderAsked', () => {
+  test('a sort, or a direction alone, is an order asked for; a term or nothing is not', () => {
+    expect(orderAsked({ sort: 'name' })).toBe(true);
+    expect(orderAsked({ order: 'desc' })).toBe(true);
+    expect(orderAsked({ sort: 'incorporated', order: 'asc' })).toBe(true);
+    expect(orderAsked({})).toBe(false);
   });
 });

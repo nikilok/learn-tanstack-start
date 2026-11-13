@@ -61,6 +61,8 @@ jobs:
         shell: bash
         working-directory: apps/web
         run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
 
       - name: Import registry websites
         shell: bash

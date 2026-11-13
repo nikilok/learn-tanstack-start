@@ -1,5 +1,6 @@
 import { type RefObject, useEffect, useState } from 'react';
 
+import { setInputValue } from '../lib/dom/input-value';
 import { cleanTitle, prefersReducedMotion } from '../utils';
 import { APP_TITLE } from '../utils/app-meta';
 
@@ -64,17 +65,6 @@ async function poll<T>(
 }
 
 /** Sets the input's value through its own realm's native setter so React's change tracker registers the input event. */
-function setInputValue(input: HTMLInputElement, value: string): void {
-  const win = input.ownerDocument.defaultView;
-  if (!win) return;
-  const setter = Object.getOwnPropertyDescriptor(
-    win.HTMLInputElement.prototype,
-    'value',
-  )?.set;
-  setter?.call(input, value);
-  input.dispatchEvent(new win.Event('input', { bubbles: true }));
-}
-
 /** Fires a plain left-click that TanStack Router's `<Link>` intercepts for SPA navigation. */
 function clickLink(el: HTMLElement): void {
   const win = el.ownerDocument.defaultView;

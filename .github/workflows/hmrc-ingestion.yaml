@@ -65,6 +65,8 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
         working-directory: apps/web
 
       - name: Install Playwright Chromium
@@ -136,6 +138,8 @@ jobs:
         # no dependency on the Anthropic account for a hand-fed URL.
         if: github.event.inputs.csv-url == ''
         uses: ./.github/actions/run-playwright-script
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
         with:
           script-command: bun scripts/find-hmrc-csv-url.ts
           extra-env: |
@@ -190,6 +194,8 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
         working-directory: apps/web
 
       - name: Run ingestion

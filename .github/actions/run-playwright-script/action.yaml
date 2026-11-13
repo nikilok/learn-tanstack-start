@@ -63,6 +63,7 @@ runs:
           -w /work \
           -e CI=true \
           -e GITHUB_ACTIONS=true \
+          -e GITHUB_PACKAGES_TOKEN \
           -e SCRIPT_COMMAND="${SCRIPT_COMMAND}" \
           --env-file "${EXTRA_ENV_FILE}" \
           "${RESOLVED_IMAGE}" \

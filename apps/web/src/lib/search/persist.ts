@@ -1,8 +1,10 @@
 import {
-  filtersToSearchParams,
-  parseSearchFilters,
+  canonicalSearchParams,
   type SearchUrlParams,
-} from './params';
+} from '@ss/search-filters';
+
+import { loadApplied } from '../ask/applied-store';
+import { restoresBare } from '../ask/session';
 
 const STORAGE_KEY = 'ss-filters';
 
@@ -15,9 +17,7 @@ export function loadStoredFilters(): SearchUrlParams | null {
     // neither.
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const params = filtersToSearchParams(
-      parseSearchFilters(JSON.parse(raw)).filters,
-    );
+    const params = canonicalSearchParams(JSON.parse(raw));
     return Object.keys(params).length ? params : null;
   } catch {
     return null;
@@ -27,7 +27,7 @@ export function loadStoredFilters(): SearchUrlParams | null {
 /** Persist an applied filter set; an empty set clears the store. */
 export function storeFilters(params: Record<string, unknown>): void {
   try {
-    const clean = filtersToSearchParams(parseSearchFilters(params).filters);
+    const clean = canonicalSearchParams(params);
     if (Object.keys(clean).length) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
     } else {
@@ -36,4 +36,9 @@ export function storeFilters(params: Record<string, unknown>): void {
   } catch {
     /* storage unavailable (private mode) — filters just don't persist */
   }
+}
+
+/** Whether a bare mount is about to rehydrate into a listing (routes/index): a stored filter set, or a question's record with a ranking alone. Read wherever the transient render must not pass for an empty page: the pending frame, the stranded-scroll discard, the hero's autofocus. */
+export function rehydratePending(): boolean {
+  return loadStoredFilters() != null || restoresBare(loadApplied());
 }

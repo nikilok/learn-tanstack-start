@@ -12,7 +12,24 @@ import {
   companySearchName,
   formatRelative,
   skilledWorkerFirst,
+  titleCase,
 } from './utils.ts';
+
+describe('titleCase', () => {
+  test('capitalises each word and forces the known acronyms', () => {
+    expect(titleCase('london uk')).toBe('London UK');
+    expect(titleCase('acme holdings plc')).toBe('Acme Holdings PLC');
+    expect(titleCase('stoke-on-trent')).toBe('Stoke-On-Trent');
+    expect(titleCase(null)).toBe('');
+  });
+
+  test('a possessive after an apostrophe is not a word start, but a name after one is', () => {
+    expect(titleCase("BISHOP'S STORTFORD")).toBe("Bishop's Stortford");
+    expect(titleCase('mcdonald’s restaurants')).toBe('Mcdonald’s Restaurants');
+    expect(titleCase("o'neill & sons")).toBe("O'Neill & Sons");
+    expect(titleCase("o'sullivan")).toBe("O'Sullivan");
+  });
+});
 
 // These cases MUST stay in lockstep with apps/desktop/src/main/site.test.ts —
 // the two cleanTitle copies mirror each other, and drift breaks the desktop preview title.

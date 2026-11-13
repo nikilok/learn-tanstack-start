@@ -1,14 +1,9 @@
+import { filterSearchKey, parseSearchFilters } from '@ss/search-filters';
 import { useInfiniteQuery } from '@tanstack/react-query';
 
 import { searchFiltered } from '../api/filterSearch';
-import { parseSearchFilters, type SearchFilters } from '../lib/search/params';
 import { retrySessionCall } from '../lib/session/client';
 import { listingState } from './listing-state';
-
-/** Stable cache-key serialization of a canonical filter set (keys sorted). */
-export function filterSearchKey(filters: SearchFilters): string {
-  return JSON.stringify(filters, Object.keys(filters).sort());
-}
 
 /**
  * Hook wrapping `searchFiltered` in an infinite query. Takes raw URL-form
@@ -16,15 +11,17 @@ export function filterSearchKey(filters: SearchFilters): string {
  * filters for a stable cache key, and sends the canonical form. An empty
  * filter set is the browse-everything directory. Exposes the server's
  * `issues` echo from page 0, `failed` and `moreFailed` (`listingState`), and
- * `retry` for the first page.
+ * `retry` for the first page. A question's ranking lists through
+ * `useRankedSearch`, which shares the shape.
  */
 export function useFilterSearch(
   params: Record<string, unknown>,
   { enabled = true }: { enabled?: boolean } = {},
 ) {
   const { filters } = parseSearchFilters(params);
+  const key = filterSearchKey(filters);
   const query = useInfiniteQuery({
-    queryKey: ['filter-search', filterSearchKey(filters)],
+    queryKey: ['filter-search', key],
     queryFn: ({ pageParam = 0 }) =>
       searchFiltered({ data: { params: filters, offset: pageParam } }),
     initialPageParam: 0,

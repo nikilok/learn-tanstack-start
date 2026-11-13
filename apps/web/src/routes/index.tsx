@@ -1,40 +1,102 @@
+import {
+  canonicalSearchParams,
+  filterParamsOf,
+  filterSearchKey,
+  searchTermInput,
+  type SearchUrlParams,
+} from '@ss/search-filters';
 import { useQuery } from '@tanstack/react-query';
 import {
   createFileRoute,
   stripSearchParams,
+  useLocation,
   useNavigate,
 } from '@tanstack/react-router';
 import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
+import { askMore, askSearch, prepareAsk } from '../api/ask';
 import { searchFiltered } from '../api/filterSearch';
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
 import HmrcResults from '../components/HmrcResults';
 import SearchBar from '../components/SearchBar';
 import SkeletonCards from '../components/SkeletonCards';
-import { filterSearchKey, useFilterSearch } from '../hooks/useFilterSearch';
+import { useFilterSearch } from '../hooks/useFilterSearch';
 import { useHmrcSearch } from '../hooks/useHmrcSearch';
 import { parsePlatform } from '../hooks/usePlatform';
+import { useRankedSearch } from '../hooks/useRankedSearch';
 import { useSearchPill } from '../hooks/useSearchPill';
-import { hydrationDone } from '../lib/hydration';
+import { hasOwnerHint } from '../lib/ask/access-hint';
+import { markAskAccess as markAskAccessOnServer } from '../lib/ask/access-hint.server';
+import {
+  type AppliedAsk,
+  clearApplied,
+  loadApplied,
+  saveApplied,
+} from '../lib/ask/applied-store';
+import {
+  askEligible,
+  askWordCount,
+  extendsEmptyPrefix,
+  MAX_QUESTION_CHARS,
+  MIN_ASK_WORDS,
+} from '../lib/ask/eligibility';
+import { enterIntent, offerStands, settleEnterIntent } from '../lib/ask/enter';
+import {
+  applyPlan,
+  describeFilters,
+  describeSector,
+  paramsKey,
+} from '../lib/ask/overlay';
+import {
+  type AskAccess,
+  askBoxMode,
+  askEntry,
+  askEntryState,
+  type AskProgress,
+  listedRanking,
+  deriveAskHint,
+  nextEmptyPrefix,
+  reconcileApplied,
+  runRetired,
+  droppedRanking,
+} from '../lib/ask/session';
+import { extendRanking, walkedListing } from '../lib/ask/tranches';
+import { readinessSnapshot, subscribeReadiness } from '../lib/device/beacons';
+import { WAITING } from '../lib/device/readiness';
+import { setInputValue } from '../lib/dom/input-value';
 import { startListing } from '../lib/search/listing-prefetch';
 import {
-  filterParamsOf,
-  filtersToSearchParams,
-  parseSearchFilters,
-  searchTermInput,
-} from '../lib/search/params';
-import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+  loadStoredFilters,
+  rehydratePending,
+  storeFilters,
+} from '../lib/search/persist';
 import { listingRenderedHere } from '../lib/session/listing';
 import { buildCanonical } from '../utils/canonical';
+import { isDesktopPreview } from '../utils/desktop-preview';
 import { buildWebsiteJsonLd } from '../utils/jsonld';
 import { jsonLdMeta } from '../utils/seo';
 
 const getPlatformInfo = createIsomorphicFn()
   .client(() => parsePlatform(navigator.userAgent))
   .server(() => parsePlatform(getRequestHeader('user-agent') ?? ''));
+
+// The document's own response leaves the owner hint beside the owner cookie,
+// or takes a stale one off (lib/ask/access-hint.server). The client never
+// asks the server whether it may ask, so a client navigation does nothing.
+const markAskAccess = createIsomorphicFn()
+  .client(async () => {})
+  .server(markAskAccessOnServer);
 
 // Home-only head bits, static so they build once: the canonical URL plus the WebSite name/alias schema search engines read site identity from.
 const HOME_CANONICAL = buildCanonical('/');
@@ -54,16 +116,23 @@ const PENDING_FILTER_DATA = {
   fetchMore: () => {},
 };
 
+/** The server snapshot of device readiness: nothing is ready before hydration. */
+const serverSnapshot = () => WAITING;
+
+// Stable snapshots of the ask's progress, so setting one again is no render.
+const ASK_IDLE: AskProgress = { status: 'idle' };
+const ASK_PENDING: AskProgress = { status: 'pending' };
+const ASK_UNAVAILABLE: AskProgress = { status: 'unavailable' };
+
+/** The home route's search as the registry validates it: the name term plus the filter params alone (`filterParamsOf`: a param that filters nothing never puts the page into filter mode). */
+function validateHomeSearch(search: Record<string, unknown>) {
+  return { search: searchTermInput(search.search), ...filterParamsOf(search) };
+}
+
 export const Route = createFileRoute('/')({
   // The name term (`search`) plus the URL-form filter params from /filters.
   // `q` is stripped: on this surface the name term only comes from `search`.
-  validateSearch: (search: Record<string, unknown>) => {
-    const { filters } = parseSearchFilters({ ...search, q: undefined });
-    return {
-      search: searchTermInput(search.search),
-      ...filtersToSearchParams(filters),
-    };
-  },
+  validateSearch: validateHomeSearch,
   search: {
     // Value-strip of a REQUIRED key: runtime-supported (and long-standing
     // behavior here), but PickOptional-typed to optional keys only — the
@@ -74,7 +143,10 @@ export const Route = createFileRoute('/')({
     meta: WEBSITE_JSONLD_META,
     links: [{ rel: 'canonical', href: HOME_CANONICAL }],
   }),
-  beforeLoad: () => ({ platformInfo: getPlatformInfo() }),
+  beforeLoad: async () => {
+    await markAskAccess();
+    return { platformInfo: getPlatformInfo() };
+  },
   loaderDeps: ({ search }) => ({ search }),
   loader: async ({ context: { queryClient }, deps }) => {
     if (typeof window !== 'undefined') return;
@@ -117,8 +189,28 @@ export const Route = createFileRoute('/')({
  * `navigate({ replace: true })` so history isn't spammed on each keystroke.
  */
 function Home() {
-  const { search, ...params } = Route.useSearch();
-  const urlFilters = filterParamsOf(params);
+  // Read from the router's location, the store a history entry's state is
+  // read from, so the URL and the entry never disagree within one render:
+  // the route's own search follows a tick later, with the match. That store
+  // moves to the destination as a navigation starts, while this route is
+  // still mounted, so while it points away the last location that was this
+  // route's is held: a company page loading must not read as the URL leaving
+  // the plan's filters, or the plan would end and the stored set re-apply
+  // under the click, cancelling it.
+  const leaving = useLocation({ select: (l) => l.pathname !== '/' });
+  const liveSearch = useLocation({ select: (l) => l.search });
+  const liveState = useLocation({ select: (l) => l.state });
+  // Held as state set during the render, as React adjusts state to props, so
+  // a render it discards leaves nothing behind; read only while leaving.
+  const [held, setHeld] = useState({ search: liveSearch, state: liveState });
+  if (!leaving && (held.search !== liveSearch || held.state !== liveState))
+    setHeld({ search: liveSearch, state: liveState });
+  const rawSearch = leaving ? held.search : liveSearch;
+  const entryState = leaving ? held.state : liveState;
+  const { search, ...urlFilters } = useMemo(
+    () => validateHomeSearch(rawSearch as Record<string, unknown>),
+    [rawSearch],
+  );
   const hasFilters = Object.values(urlFilters).some(
     (value) => value !== undefined,
   );
@@ -137,10 +229,14 @@ function Home() {
   const { platformInfo } = Route.useRouteContext();
   const navigate = useNavigate();
   const navTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Drop a pending debounce on unmount: it navigates with `replace: true`, so firing after a nav away replaces THAT entry.
+  const askRunRef = useRef(0);
+  // Drop a pending debounce on unmount: it navigates with `replace: true`, so
+  // firing after a nav away replaces THAT entry. A pending ask is retired the
+  // same way, or its plan would land on whatever page came next.
   useEffect(
     () => () => {
       if (navTimerRef.current) clearTimeout(navTimerRef.current);
+      askRunRef.current++;
     },
     [],
   );
@@ -149,51 +245,550 @@ function Home() {
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
 
-  // A bare-URL SPA mount (details back-link, header logo) with a stored
-  // filter set is about to rehydrate into filter mode — known synchronously,
-  // so the transient render never runs the classic search. False on the
-  // hydration mount by construction (hydrationDone), so server HTML matches.
-  const [pendingStoredFilters, setPendingStoredFilters] = useState(
-    () => hydrationDone() && !hasFilters && loadStoredFilters() != null,
-  );
+  // A bare-URL mount (details back-link, header logo, a reload) with a stored
+  // filter set, or a question's record with a ranking alone, is about to
+  // rehydrate into a listing. False on every first render, so a hydration
+  // render matches the server's hero (the route hydrates after the root's
+  // effects, so hydrationDone() cannot tell the two apart); the layout effect
+  // flips it before the first paint, so the hero never shows and the
+  // transient render never runs the classic search.
+  const [pendingStoredFilters, setPendingStoredFilters] = useState(false);
+  useLayoutEffect(() => {
+    if (!hasFilters && rehydratePending()) setPendingStoredFilters(true);
+    // The mount alone: a later bare URL is a navigation the effects below handle.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Both data sources stay mounted; only one is live. No filters → the
+  // Ask (lib/ask): a description that found nothing by name can be asked as
+  // a question on Enter, and the plan's filters overlay whatever was set by
+  // hand. The filters then live in the URL and the durable store like any
+  // applied set; the question, its chips and the base to restore are kept for
+  // the tab (applied-store), so a company page's back link brings the whole
+  // listing back. Editing or clearing the text restores the base. The state
+  // rules live in lib/ask/session; this is their wiring.
+  const readiness = useSyncExternalStore(
+    subscribeReadiness,
+    readinessSnapshot,
+    serverSnapshot,
+  );
+  const [askProgress, setAskProgress] = useState<AskProgress>(ASK_IDLE);
+  // Known at mount from the owner hint the document's own response left
+  // (lib/ask/access-hint.server), so an owner's offer never waits on a mint
+  // and nobody else mints at all. Off on every first render, so a hydration
+  // render matches the server: the route hydrates in its own Suspense
+  // boundary after the root's effects, so `hydrationDone()` is already true
+  // there. The layout effect opens it before the first paint, and costs a
+  // document without the hint nothing.
+  const [askAccess, setAskAccess] = useState<AskAccess>('off');
+  // False on the first render only, for the same reason: what the entry
+  // carries (its ranking) is read from the second on.
+  const [mounted, setMounted] = useState(false);
+  useLayoutEffect(() => {
+    setMounted(true);
+    if (hasOwnerHint()) setAskAccess('open');
+  }, []);
+  // This history entry's state: an entry the ask produced carries its plan
+  // (lib/ask/session). One object per entry, so it is a stable dependency.
+  const [applied, setApplied] = useState<AppliedAsk | null>(null);
+  // Read at the moment a debounced commit fires: a plan can land between the
+  // keystroke and its timer, and the commit must then end it, not type on it.
+  const appliedRef = useRef<AppliedAsk | null>(null);
+  // Synced after the commit, as React asks of a ref: a render it discards never reaches the timer.
+  useLayoutEffect(() => {
+    appliedRef.current = applied;
+  }, [applied]);
+  // The run in flight: its text and the filter key it was asked under, for
+  // the URL moving off either retires it; null while none stands.
+  const askedRef = useRef<{ text: string; urlKey: string } | null>(null);
+  const queuedAskRef = useRef<string | null>(null);
+  /** Retires the run in flight: its result is dropped, a queued ask forgotten, the progress idle. */
+  const retireRun = () => {
+    askRunRef.current++;
+    askedRef.current = null;
+    queuedAskRef.current = null;
+    setAskProgress(ASK_IDLE);
+  };
+  // The shortest text the offer has stood on: a text that only adds to it
+  // keeps the offer up while its own search runs, instead of flickering
+  // through skeletons for every word added to an empty text.
+  const [emptyPrefix, setEmptyPrefix] = useState<string | null>(null);
+
+  const urlParamsKey = paramsKey(urlFilters as SearchUrlParams);
+  // The ranking the listing is restricted to (lib/ask/session): the applied
+  // plan's while the URL holds its filters, else the entry's while the plan
+  // is being restored onto it, and nothing on the hydration render.
+  // One object per entry (the router's), so parsed once per entry.
+  const entry = useMemo(() => askEntry(entryState), [entryState]);
+  const ranking = listedRanking({
+    applied,
+    entry,
+    urlKey: urlParamsKey,
+    hydrated: mounted,
+  });
+  const rankedMode = ranking !== null;
+  const listingMode = hasFilters || pendingStoredFilters || rankedMode;
+  // The data sources stay mounted; only one is live. No filters → the
   // classic name search exactly as before ('' disables it via the >=3 gate).
   // Any filter → the filter endpoint serves the listing, with the typed term
-  // passed through as `q` once it reaches 3 chars.
-  const classic = useHmrcSearch(
-    hasFilters || pendingStoredFilters ? '' : search,
-  );
+  // passed through as `q` once it reaches 3 chars. A question that said what
+  // the organisations do → the same listing restricted to its ranking.
+  const classic = useHmrcSearch(listingMode ? '' : search);
   const filtered = useFilterSearch(
     { ...urlFilters, q: search.length >= 3 ? search : undefined },
-    { enabled: hasFilters },
+    { enabled: hasFilters && !rankedMode },
   );
-  const resultsData = hasFilters
-    ? filtered
-    : pendingStoredFilters
-      ? PENDING_FILTER_DATA
-      : classic;
-
-  // Applied filters are durable: the URL is authoritative when it carries
-  // them (and refreshes the store), but navs that only carry the name term —
-  // details back-links, the header logo — get the stored set re-applied.
-  // The only way OUT of filter mode is /filters' Reset, which empties the
-  // store.
-  const urlFiltersKey = JSON.stringify(urlFilters);
+  const rankedListing = useRankedSearch(
+    urlFilters,
+    ranking?.span ?? '',
+    ranking?.tranches ?? [],
+    {
+      enabled: rankedMode,
+    },
+  );
+  // The walk past the first slice (lib/ask/tranches): a slice with the judge
+  // shows as rows on their way, one that could not be judged as a next page
+  // that failed, and the slice still to judge keeps the list open. The list
+  // asks for more as it does for any page; past the slices shown, that
+  // judges the next.
+  const [judging, setJudging] = useState(false);
+  const [walkFailed, setWalkFailed] = useState(false);
+  const emptyRunRef = useRef(0);
+  // The offset with the judge, so a scroll never asks for one slice twice.
+  const walkingRef = useRef<number | null>(null);
+  const rankedWalked = {
+    ...walkedListing(rankedListing, {
+      next: ranking?.next ?? null,
+      judging,
+      failed: walkFailed,
+    }),
+    fetchMore: () =>
+      rankedListing.hasMore ? rankedListing.fetchMore() : judgeNextTranche(),
+  };
+  const resultsData = rankedMode
+    ? rankedWalked
+    : hasFilters
+      ? filtered
+      : pendingStoredFilters
+        ? PENDING_FILTER_DATA
+        : classic;
+  // Leaving the route (a company page loading) retires a pending ask and
+  // drops a pending commit: either would navigate under the click and cancel
+  // it. The unmount cleanup above covers the leave once it commits.
   useEffect(() => {
-    if (hasFilters) {
-      storeFilters(JSON.parse(urlFiltersKey) as Record<string, unknown>);
+    if (!leaving) return;
+    if (navTimerRef.current) clearTimeout(navTimerRef.current);
+    retireRun();
+    // retireRun writes refs and a stable setter only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaving]);
+  // A new text is a new chance to ask; the text being asked is not. A run
+  // still in flight for the old text, or for a filter set the URL has moved
+  // off (a Back under the run), is retired, so its plan never lands on what
+  // was typed since, nor on filters built from a base no longer shown.
+  useEffect(() => {
+    const run = askedRef.current;
+    if (run && runRetired({ search, urlKey: urlParamsKey }, run)) retireRun();
+    // retireRun writes refs and a stable setter only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, urlParamsKey]);
+  /**
+   * Ends the plan: forgets the tab's record and retires any run. The durable
+   * store follows the URL (the effect below), so a store still holding the
+   * plan's filters gets the hand-set base written back, and nothing
+   * re-applies the plan's filters as if set by hand; a store a Reset emptied
+   * stays empty. The plan's own history entry still carries it, so Forward
+   * or Back onto that entry brings the chips back. Returns the base.
+   */
+  const endAsk = (live: AppliedAsk): SearchUrlParams => {
+    setApplied(null);
+    clearApplied();
+    retireRun();
+    emptyRunRef.current = 0;
+    setWalkFailed(false);
+    const stored = loadStoredFilters();
+    if (stored && paramsKey(stored) === live.mergedKey) storeFilters(live.base);
+    return live.base;
+  };
+  // What the URL arriving somewhere means for the plan (lib/ask/session):
+  // moving off its filters ends it; an entry the ask produced (its landing,
+  // Forward or Back onto it, a reload, the stored set re-applied after a
+  // company page) restores the plan it carries; any other filter URL
+  // discards a record a plan left behind while this page was away.
+  useEffect(() => {
+    const action = reconcileApplied({
+      applied,
+      hasFilters,
+      urlKey: urlParamsKey,
+      entry,
+      record: loadApplied(),
+    });
+    if (action === 'end' && applied) endAsk(applied);
+    else if (action === 'restore' && entry) {
+      setApplied(entry);
+      // Live again, so a company page's back link brings it back too.
+      saveApplied(entry);
+    } else if (action === 'discard') clearApplied();
+    // endAsk reads nothing the deps do not carry.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [applied, hasFilters, urlParamsKey, entry]);
+  const queryActive = hasFilters || search.length >= 3;
+  // A search that failed settled nothing: it is not empty, as HmrcResults reads it.
+  const confirmedEmpty =
+    !resultsData.isLoading &&
+    !resultsData.failed &&
+    queryActive &&
+    resultsData.results.length === 0;
+  // A text that only adds to the one the offer stood on keeps the offer up
+  // while its own search runs: it reads as askable before it settles.
+  const holding =
+    applied === null &&
+    askAccess === 'open' &&
+    resultsData.isLoading &&
+    extendsEmptyPrefix(search, emptyPrefix);
+  const preview = isDesktopPreview();
+  // Open access is enough to offer: the device key the ask needs can arrive
+  // seconds after the search settles, and the offer must not wait on it, or
+  // the scene would claim "not found" first. A document that can never have
+  // one is not offered.
+  const couldAsk = askEligible({
+    confirmedEmpty: confirmedEmpty || holding,
+    text: search,
+    ready: askAccess === 'open' && readiness.status !== 'off',
+    preview,
+  });
+  // The token is minted the first time the offer would show, so Enter has it
+  // ready. The loader shares one mint per document, so re-runs cost nothing;
+  // a mint that fails leaves access as it was and is tried again on the next
+  // text, and a refused one closes the document: the hint is no credential.
+  useEffect(() => {
+    if (!couldAsk || readiness.status !== 'ready') return;
+    let stale = false;
+    prepareAsk(readiness.key).then(
+      (open) => {
+        if (!stale) setAskAccess(open ? 'open' : 'off');
+      },
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [couldAsk, readiness, search]);
+  // A keyboard presses Enter, which the listing only takes for a highlighted
+  // row; a touch device taps the arrow.
+  const askKeyboard = !platformInfo.isMobile;
+  // Without access this is today's flow exactly: the no-results scene shows as
+  // it always has, and nothing here says otherwise.
+  const { eligible, hint: askHint } = deriveAskHint({
+    applied: applied !== null,
+    access: askAccess,
+    progress: askProgress,
+    couldAsk,
+    keyboard: askKeyboard,
+  });
+  // The ring the box wears (lib/ask/session): turning while a question
+  // runs or a further slice of its answer is judged, steady while its plan
+  // is otherwise applied, gone otherwise.
+  const askMode = askBoxMode({
+    applied: applied !== null,
+    progress: askProgress,
+    judging,
+  });
+  // A running ask holds the prefix as a load does: the text may move on
+  // before it answers, and the offer must hold through that text's search.
+  const prefixHeld = resultsData.isLoading || askProgress.status === 'pending';
+  useEffect(() => {
+    setEmptyPrefix((prefix) =>
+      nextEmptyPrefix(prefix, { eligible, loading: prefixHeld, search }),
+    );
+  }, [eligible, prefixHeld, search]);
+
+  /** Runs one ask for `text` with the device key: the plan's filters land in the URL over the hand-set base, on an entry marked as the ask's own. */
+  const runAsk = (text: string, key: string) => {
+    const base = urlFilters as SearchUrlParams;
+    const run = ++askRunRef.current;
+    askSearch(text, key, base).then(
+      (outcome) => {
+        if (run !== askRunRef.current) return;
+        if (outcome.status === 'off') {
+          setAskAccess('off');
+          setAskProgress(ASK_IDLE);
+          return;
+        }
+        if (outcome.status === 'unavailable') {
+          setAskProgress(ASK_UNAVAILABLE);
+          return;
+        }
+        const ranking = outcome.ranking;
+        if (!Object.keys(outcome.filters).length && !ranking) {
+          setAskProgress({ status: 'empty', reason: outcome.reason });
+          return;
+        }
+        // Keyed and navigated in the registry's canonical form: the URL the
+        // plan lands on is what the router validates, not the raw merge.
+        const merged = canonicalSearchParams(
+          applyPlan(base, outcome.filters, ranking?.sector ?? null),
+        );
+        const plan: AppliedAsk = {
+          text,
+          base,
+          mergedKey: paramsKey(merged),
+          chips: describeFilters(outcome.filters),
+          ranking,
+        };
+        // The entry carries the plan: the effect above applies it on arrival
+        // and keeps it for the tab, so nothing is set here that a later
+        // arrival could not have decided. The filters replace the name term:
+        // the question is not a name, and the text moving off the asked one
+        // retires this run.
+        void navigate({
+          to: '/',
+          search: { search: '', ...merged },
+          state: askEntryState(plan),
+        });
+      },
+      () => {
+        if (run === askRunRef.current) setAskProgress(ASK_UNAVAILABLE);
+      },
+    );
+  };
+  /**
+   * Judges the next slice of the applied question's shortlist, once the
+   * listing has shown every slice so far (lib/ask/tranches): the walk's next
+   * offset goes with the span and the listing's filters, and what comes back
+   * is appended to the plan on this same entry, so a reload or Back brings
+   * the longer ranking back. One slice at a time; a slice that cannot be
+   * judged is a next page that failed, asked for again only by the visitor.
+   * Nothing moves the page: the visitor is at the bottom of the list.
+   */
+  const judgeNextTranche = () => {
+    const live = appliedRef.current;
+    const walk = live?.ranking;
+    // Not while the route is leaving: a slice landing then would navigate
+    // under the company page loading.
+    if (
+      leaving ||
+      !live ||
+      !walk ||
+      walk.next === null ||
+      walkingRef.current !== null
+    )
+      return;
+    // A page still deriving its device key is asked again by the next
+    // scroll; one that will never have it stops here.
+    if (readiness.status !== 'ready') {
+      if (readiness.status === 'off') setWalkFailed(true);
       return;
     }
+    const offset = walk.next;
+    const run = askRunRef.current;
+    walkingRef.current = offset;
+    setWalkFailed(false);
+    setJudging(true);
+    askMore(
+      walk.span,
+      readiness.key,
+      urlFilters as SearchUrlParams,
+      offset,
+      walk.sector,
+    ).then(
+      (outcome) => {
+        walkingRef.current = null;
+        setJudging(false);
+        // The plan ended, or moved on, while the slice was judged.
+        const current = appliedRef.current;
+        if (
+          run !== askRunRef.current ||
+          !current?.ranking ||
+          current.ranking.next !== offset
+        )
+          return;
+        if (outcome.status === 'off') {
+          setAskAccess('off');
+          setWalkFailed(true);
+          return;
+        }
+        if (outcome.status === 'unavailable') {
+          setWalkFailed(true);
+          return;
+        }
+        const extended = extendRanking(
+          current.ranking,
+          outcome,
+          emptyRunRef.current,
+        );
+        emptyRunRef.current = extended.emptyRun;
+        const next: AppliedAsk = { ...current, ranking: extended.ranking };
+        saveApplied(next);
+        setApplied(next);
+        void navigate({
+          to: '/',
+          search: { search: '', ...urlFilters },
+          replace: true,
+          resetScroll: false,
+          state: askEntryState(next),
+        });
+      },
+      () => {
+        walkingRef.current = null;
+        setJudging(false);
+        if (run === askRunRef.current) setWalkFailed(true);
+      },
+    );
+  };
+  // An ask made before the device key exists waits for it, as pending, and
+  // learns with it when none will come.
+  useEffect(() => {
+    const text = queuedAskRef.current;
+    if (readiness.status === 'waiting' || text === null) return;
+    queuedAskRef.current = null;
+    if (readiness.status === 'ready') runAsk(text, readiness.key);
+    else setAskProgress(ASK_UNAVAILABLE);
+    // runAsk reads render-time values the ask was made against.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [readiness]);
+
+  /**
+   * Asks the text the box holds, as Enter and the arrow do: commits it to
+   * the URL first, debounce or not, so the URL and the
+   * answer agree on what was asked, then runs the ask, or queues it until
+   * the device key arrives. Below the word floor or over the length cap
+   * nothing happens, as the offer says.
+   */
+  const onAsk = () => {
+    // Not while the route is leaving: an ask landing then would navigate
+    // under the company page loading, as a slice judged then would.
+    if (leaving) return;
+    const text = (inputRef.current?.value ?? search).trim();
+    if (
+      askWordCount(text) < MIN_ASK_WORDS ||
+      [...text].length > MAX_QUESTION_CHARS
+    )
+      return;
+    if (navTimerRef.current) clearTimeout(navTimerRef.current);
+    if (text !== search) {
+      void navigate({
+        to: '/',
+        search: (prev) => ({ ...prev, search: text }),
+        replace: true,
+      });
+    }
+    askedRef.current = { text, urlKey: urlParamsKey };
+    setAskProgress(ASK_PENDING);
+    if (readiness.status === 'ready') runAsk(text, readiness.key);
+    else if (readiness.status === 'off') setAskProgress(ASK_UNAVAILABLE);
+    else queuedAskRef.current = text;
+  };
+
+  /** Asks one of the hero's example questions: the text enters the box as typed, then is asked as the arrow asks it. */
+  const askExample = (text: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    setInputValue(el, text);
+    onAsk();
+  };
+
+  // Enter pressed before the offer: asked once the text's name search
+  // settles empty, as the offer would have; dropped when it does not.
+  const enterIntentRef = useRef<string | null>(null);
+  /** Enter in the box: asks while the box offers to; otherwise remembers the press while the text's search is still to settle (lib/ask/enter). */
+  const onEnter = () => {
+    const typed = inputRef.current?.value ?? '';
+    if (offerStands(typed, { search, eligible })) {
+      onAsk();
+      return;
+    }
+    enterIntentRef.current = enterIntent(typed, {
+      search,
+      loading: prefixHeld,
+      asking: askProgress.status === 'pending',
+    });
+  };
+  useEffect(() => {
+    const intent = enterIntentRef.current;
+    if (intent === null) return;
+    const verdict = settleEnterIntent(intent, {
+      typed: inputRef.current?.value ?? '',
+      search,
+      eligible,
+      loading: prefixHeld,
+    });
+    if (verdict === 'hold') return;
+    enterIntentRef.current = null;
+    if (verdict === 'ask') onAsk();
+    // onAsk reads the render-time values the press was made against.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible, prefixHeld, search]);
+
+  /** Drops the question's what-they-do part: the listing becomes its filters alone, on the same entry, the sector it named now one of them (it only ranked while there was a ranking); with nothing left, the question is cleared. */
+  const dropRanking = () => {
+    const live = appliedRef.current;
+    if (!live?.ranking) return;
+    const dropped = droppedRanking(live, urlFilters);
+    if (!dropped) {
+      clearAsk();
+      return;
+    }
+    saveApplied(dropped.plan);
+    setApplied(dropped.plan);
+    void navigate({
+      to: '/',
+      search: { search: '', ...dropped.merged },
+      replace: true,
+      state: askEntryState(dropped.plan),
+    });
+  };
+
+  /** Clears the question through the input's own clear path, which ends the ask and restores the base filters. */
+  const clearAsk = () => {
+    const el = inputRef.current;
+    if (el) setInputValue(el, '');
+  };
+
+  // Applied filters are durable: the URL is authoritative when it carries
+  // them. A question's filters are stored like any others: that is what
+  // brings its listing back from a company page. Declared after the plan's
+  // reconciliation above, and it must stay there: on a URL that moved off a
+  // plan, that effect reads the store before this one rewrites it.
+  // Written again when the entry changes under the same set: ending the plan
+  // the last entry carried wrote its base back, and the set shown must win.
+  useEffect(() => {
+    if (hasFilters)
+      storeFilters(JSON.parse(urlParamsKey) as Record<string, unknown>);
+  }, [hasFilters, urlParamsKey, entry]);
+  // Navs that only carry the name term (a company page's back link, the
+  // header logo) get the stored set re-applied, with the tab's record riding
+  // along when the set is its plan's; a question that only ranked has no set,
+  // so its record comes back first, and the stored set waits, as it did while
+  // the question ran. The only way OUT of filter mode is /filters' Reset,
+  // which empties the store. A question's own entry on a bare URL carries it
+  // already.
+  useEffect(() => {
+    if (hasFilters) return;
+    if (entry?.ranking && entry.mergedKey === urlParamsKey) return;
     const stored = loadStoredFilters();
-    if (stored) {
-      navigate({ to: '/', search: { search, ...stored }, replace: true });
+    const record = loadApplied();
+    if (record?.ranking && record.mergedKey === urlParamsKey) {
+      navigate({
+        to: '/',
+        search: { search },
+        replace: true,
+        state: askEntryState(record),
+      });
+    } else if (stored) {
+      navigate({
+        to: '/',
+        search: { search, ...stored },
+        replace: true,
+        ...(record !== null && record.mergedKey === paramsKey(stored)
+          ? { state: askEntryState(record) }
+          : {}),
+      });
     } else {
       // Nothing to rehydrate (e.g. cleared in another tab) — release the
       // pending frame so the classic path takes over.
       setPendingStoredFilters(false);
     }
-  }, [hasFilters, urlFiltersKey, search, navigate]);
+  }, [hasFilters, urlParamsKey, search, navigate, entry]);
 
   // Empty state: the hero is shown and the search bar scrolls away with the
   // page (not sticky). It only sticks once a query or filter set exists.
@@ -201,11 +796,13 @@ function Home() {
     liveQuery.length === 0 &&
     search.length === 0 &&
     !hasFilters &&
-    !pendingStoredFilters;
+    !pendingStoredFilters &&
+    !rankedMode;
   // data-search-pinned gates SearchInput's translateZ cursor fix and must
   // track a typed query ONLY: stamped with an empty input (nameless filter
   // mode) it garbles the rotating placeholder on iOS Safari (see CLAUDE.md).
-  const hasQueryText = liveQuery.length > 0 || search.length > 0;
+  const hasQueryText =
+    liveQuery.length > 0 || search.length > 0 || applied !== null;
 
   return (
     <main className="page-wrap min-h-[50vh] px-4 py-16">
@@ -229,7 +826,15 @@ function Home() {
               {' · '}
               <kbd>↑</kbd> <kbd>↓</kbd> to navigate
               {' · '}
-              <kbd>↵</kbd> to view
+              {eligible ? (
+                <>
+                  <kbd>↵</kbd> to ask
+                </>
+              ) : (
+                <>
+                  <kbd>↵</kbd> to view
+                </>
+              )}
             </span>
           )}
         </p>
@@ -246,41 +851,130 @@ function Home() {
           }`}
         >
           <SearchBar
-            search={search}
+            search={applied?.text ?? search}
             isStuck={isStuck}
             ready={ready}
             pillClicked={pillClicked}
-            filtersActive={hasFilters || pendingStoredFilters}
+            filtersActive={listingMode}
             inputRef={inputRef}
             platform={platformInfo.platform}
             isMobile={platformInfo.isMobile}
             onSearch={(value) => {
               setLiveQuery(value);
               if (navTimerRef.current) clearTimeout(navTimerRef.current);
-              navTimerRef.current = setTimeout(() => {
-                navigate({
+              // A keystroke off the text being asked retires its run now, not
+              // at the commit: a plan landing inside the debounce would land
+              // on what was typed since.
+              if (
+                askProgress.status === 'pending' &&
+                value.trim() !== askedRef.current?.text
+              )
+                retireRun();
+              // Editing or clearing the question ends the ask: the base set
+              // by hand comes back under the new text. Decided when the commit
+              // fires, so a plan that lands between the keystroke and its
+              // timer is ended too, never typed on top of.
+              const commit = () => {
+                const live = appliedRef.current;
+                if (live) {
+                  const base = endAsk(live);
+                  void navigate({
+                    to: '/',
+                    search: { search: value, ...base },
+                    replace: true,
+                  });
+                  return;
+                }
+                void navigate({
                   to: '/',
                   // Functional update: typing must not wipe active filters.
                   search: (prev) => ({ ...prev, search: value }),
                   replace: true,
                 });
-              }, 450);
+              };
+              // A landed plan is ended at once: no debounce for its rows to
+              // outlive the chips, and no later keystroke to lose the base to.
+              if (applied) commit();
+              else navTimerRef.current = setTimeout(commit, 450);
             }}
             onPillClick={onPillClick}
             onBlur={onPillDismiss}
+            askEnabled={eligible}
+            askMode={askMode}
+            onAsk={onAsk}
+            onEnter={onEnter}
           />
         </div>
 
+        {applied && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-(--sea-ink-soft)">From your question:</span>
+            {applied.ranking && (
+              <span
+                className="rounded-full p-px"
+                style={{ backgroundImage: 'var(--rail-spectrum)' }}
+              >
+                <span className="flex items-center gap-1 rounded-full bg-(--surface) px-2.5 py-0.5 text-(--sea-ink)">
+                  about: {applied.ranking.span}
+                  <button
+                    type="button"
+                    aria-label="Remove what they do from the question"
+                    onClick={dropRanking}
+                    className="cursor-pointer border-none bg-transparent px-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
+                  >
+                    ×
+                  </button>
+                </span>
+              </span>
+            )}
+            {applied.ranking?.sector &&
+              describeSector(applied.ranking.sector).map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-full border border-dashed border-(--sea-ink-soft)/40 px-2.5 py-0.5 text-(--sea-ink)"
+                >
+                  {chip}
+                </span>
+              ))}
+            {applied.chips.map((chip, i) => (
+              <span
+                key={`${i}-${chip}`}
+                className="rounded-full border border-(--sea-ink-soft)/30 px-2.5 py-0.5 text-(--sea-ink)"
+              >
+                {chip}
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={clearAsk}
+              className="cursor-pointer rounded-full border-none bg-transparent px-2 py-0.5 text-(--sea-ink-soft) underline-offset-2 transition hover:text-(--sea-ink) hover:underline"
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
         {/* Hero shows only when input AND debounced search are both empty, so it
             appears only after the results grid has fully cleared. */}
-        {heroVisible && <HeroText count={sponsorCount} />}
+        {heroVisible && (
+          <HeroText
+            count={sponsorCount}
+            onAsk={askAccess === 'open' && !preview ? askExample : undefined}
+          />
+        )}
 
         <div className="page-flip-listing">
           <Suspense fallback={<SkeletonCards />}>
             <HmrcResults
               search={search}
-              filtersActive={hasFilters || pendingStoredFilters}
+              filtersActive={listingMode}
               data={resultsData}
+              ask={askHint}
+              listingKey={
+                ranking
+                  ? `${urlParamsKey}|${ranking.span}|${ranking.tranches[0]?.[0] ?? ''}`
+                  : ''
+              }
             />
           </Suspense>
         </div>

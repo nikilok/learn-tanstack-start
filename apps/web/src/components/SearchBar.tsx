@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom';
 
 import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
+import type { AskBoxMode } from '../lib/ask/session';
 import { shouldAutoFocusSearch } from '../lib/search/autofocus';
-import { loadStoredFilters } from '../lib/search/persist';
+import { rehydratePending } from '../lib/search/persist';
 import { isDesktopPreview } from '../utils/desktop-preview';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
@@ -22,6 +23,8 @@ import styles from './SearchBar.module.css';
  * blinking I-beam, so a phrase can still be typed on top of the filters
  * (classic mode never reaches stuck-while-empty: that state is the hero page).
  * Autofocus is the hero's alone — `shouldAutoFocusSearch` holds the rules.
+ * While a question runs or its plan is applied (`askMode`), the input wears
+ * the ask ring and the pill its rim.
  */
 export default function SearchBar({
   search,
@@ -35,6 +38,10 @@ export default function SearchBar({
   onSearch,
   onPillClick,
   onBlur,
+  askEnabled = false,
+  askMode = 'off',
+  onAsk,
+  onEnter,
 }: {
   search: string;
   isStuck: boolean;
@@ -47,12 +54,17 @@ export default function SearchBar({
   onSearch: (value: string) => void;
   onPillClick: () => void;
   onBlur: () => void;
+  askEnabled?: boolean;
+  askMode?: AskBoxMode;
+  onAsk?: () => void;
+  onEnter?: () => void;
 }) {
   const showPill = isStuck && !pillClicked && (!!search || filtersActive);
-  // Read the store rather than trusting `filtersActive`: on the hydration mount
-  // that prop is false for SSR parity and the rehydrate navigate lands one
-  // effect too late — SearchInput's focus effect has already run by then.
-  const [storedFilterMode] = useState(() => loadStoredFilters() != null);
+  // Read the stores rather than trusting `filtersActive`: on the hydration
+  // mount that prop is false for SSR parity, and the rehydrate navigate (a
+  // stored set, or a question's record with a ranking alone) lands one effect
+  // too late — SearchInput's focus effect has already run by then.
+  const [storedFilterMode] = useState(() => rehydratePending());
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
   const placeholder = useRotatingPlaceholder(shortcut, !!search);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
@@ -112,6 +124,10 @@ export default function SearchBar({
           onChange={onSearch}
           onBlur={isStuck ? onBlur : undefined}
           placeholder={placeholder}
+          askEnabled={askEnabled}
+          askMode={askMode}
+          onAsk={onAsk}
+          onEnter={onEnter}
         />
       </div>
 
@@ -134,7 +150,7 @@ export default function SearchBar({
                   ? `Edit search for ${search}`
                   : 'Search within the filtered list'
               }
-              className="inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3.5 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none"
+              className={`inline-flex max-w-full items-center gap-2 rounded-full bg-(--sea-ink) px-3.5 py-1.5 text-sm text-(--surface) transition hover:opacity-85 focus:outline-none${askMode === 'off' ? '' : ` ${styles.askPill}`}`}
             >
               {search ? (
                 <span className="truncate">{search}</span>

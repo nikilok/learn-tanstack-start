@@ -9,8 +9,8 @@
  *   bun apps/web/scripts/fallback-websites.ts --dry-run --max-rows=50
  *   bun apps/web/scripts/fallback-websites.ts --shard=3/8 --max-rows=500
  *
- * Env: POSTGRES_URL; PICKER_MODULE, the installed picker's entry; and
- * PICKER_API_KEY, its key.
+ * Env: POSTGRES_URL, and PICKER_API_KEY, the picker's key. The picker itself
+ * is the engine package's `site-pick` subpath (scripts/lib/site-picker.ts).
  */
 
 import { neon } from '@ss/db/client';
@@ -64,10 +64,7 @@ const maxRows = parseStrictInt(flag('max-rows') ?? '500', 'max-rows');
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
 
 // Loaded before any row is read: a missing or broken picker stops the run here.
-const pick = await loadPicker(
-  process.env.PICKER_MODULE,
-  process.env.PICKER_API_KEY,
-);
+const pick = await loadPicker(process.env.PICKER_API_KEY);
 
 /** A fetch result as the fallback reads it. */
 const asPage = (result: PageFetch): FallbackPage =>

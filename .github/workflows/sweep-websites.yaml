@@ -79,6 +79,8 @@ jobs:
         shell: bash
         working-directory: apps/web
         run: bun install --frozen-lockfile
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.PICKER_PACKAGES_TOKEN }}
 
       - name: Install Playwright Chromium
         # Optional here: the sweep runs without a browser, as it does when one will not start.

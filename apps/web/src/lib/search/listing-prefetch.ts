@@ -2,7 +2,7 @@ import {
   filterParamsOf,
   parseSearchFilters,
   type SearchFilters,
-} from './params';
+} from '@ss/search-filters';
 
 /** The first page of results a home page's document can carry: a filter listing's, or a name search's. */
 export type ListingToStart =

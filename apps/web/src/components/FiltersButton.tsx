@@ -1,14 +1,14 @@
+import {
+  filtersToSearchParams,
+  parseSearchFilters,
+  type SearchUrlParams,
+} from '@ss/search-filters';
 import { Link, useLocation, useNavigate } from '@tanstack/react-router';
 import { SlidersHorizontal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { useIsMac } from '../hooks/useIsMac';
 import { useShortcut } from '../hooks/useShortcut';
-import {
-  filtersToSearchParams,
-  parseSearchFilters,
-  type SearchUrlParams,
-} from '../lib/search/params';
 import { loadStoredFilters } from '../lib/search/persist';
 import { HEADER_CONTROL_CLASS, HEADER_ICON_CLASS } from './headerControls';
 import { ariaKeyShortcuts } from './headerShortcuts';

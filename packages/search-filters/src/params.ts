@@ -4,7 +4,7 @@
 // Enum values verified against prod 2026-07-22 — refresh after ingestion
 // introduces new ones.
 
-import { type HmrcRoute, ROUTE_TYPE_COMPAT } from '../phase5/route-type-compat';
+import { type HmrcRoute, ROUTE_TYPE_COMPAT } from './route-type-compat';
 
 // Route vocabulary derives from the phase5 compat registry so /search and the
 // mapping pipeline can't drift apart.
@@ -212,6 +212,27 @@ export type SortKey = (typeof SORT_KEYS)[number];
 
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 export type SortOrder = (typeof SORT_ORDERS)[number];
+
+/** Whether an order was asked for at all: a sort, or a direction alone, which the listing runs by name. One rule for the ranked listing, which keeps rank order only when none was, and for the walk, which a sorted answer pins to its first slice. */
+export function orderAsked(filters: {
+  sort?: string;
+  order?: string;
+}): boolean {
+  return filters.sort !== undefined || filters.order !== undefined;
+}
+
+/** The order a listing runs in: the sort asked for, else relevance with a term and name without; and the direction asked for, else newest first by incorporation and ascending otherwise. One rule for the query and for whatever describes it. */
+export function listingOrder(filters: {
+  q?: string;
+  sort?: SortKey;
+  order?: SortOrder;
+}): { sort: SortKey; order: SortOrder } {
+  const sort = filters.sort ?? (filters.q ? 'relevance' : 'name');
+  return {
+    sort,
+    order: filters.order ?? (sort === 'incorporated' ? 'desc' : 'asc'),
+  };
+}
 
 export type SearchFilters = {
   q?: string;
@@ -722,4 +743,16 @@ export function parseSearchFilters(input: unknown): ParsedSearchFilters {
   }
 
   return { filters, issues };
+}
+
+/** Any raw filter input as the URL carries it once validated: parsed leniently, then serialised. The one form every store, key and comparison uses. */
+export function canonicalSearchParams(input: unknown): SearchUrlParams {
+  return filtersToSearchParams(parseSearchFilters(input).filters);
+}
+
+/** A filter set as a comparable string, whatever order its keys arrived in: the filter query's cache key. */
+export function filterSearchKey(
+  filters: SearchFilters | SearchUrlParams,
+): string {
+  return JSON.stringify(filters, Object.keys(filters).sort());
 }

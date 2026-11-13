@@ -6,6 +6,7 @@ import { RANKED_MAX } from './ranked-ids';
 
 const base = {
   filters: { location: 'Oxford' },
+  base: {},
   reason: 'none' as const,
   span: 'semi-conductor business',
   sector: 'C',
@@ -33,6 +34,23 @@ describe('askOutcome', () => {
     expect(
       askOutcome({ ...base, slice: { ranked: ['00000001'], shortlisted: 2 } }),
     ).toMatchObject({ ranking: { next: null } });
+  });
+
+  test('a sort the question or the base asks for pins the ranking to its first slice: no next slice, however full the shortlist', () => {
+    const full = { ranked: ['00000001'], shortlisted: RANKED_MAX };
+    expect(
+      askOutcome({
+        ...base,
+        filters: { location: 'Oxford', sort: 'incorporated', order: 'desc' },
+        slice: full,
+      }),
+    ).toMatchObject({ ranking: { next: null } });
+    expect(
+      askOutcome({ ...base, base: { sort: 'name' }, slice: full }),
+    ).toMatchObject({ ranking: { next: null } });
+    expect(askOutcome({ ...base, slice: full })).toMatchObject({
+      ranking: { next: RANKED_MAX },
+    });
   });
 
   test('a slice judged that kept none, or nothing to judge under the filters, is unmatched with no filters: the filters alone would pass for the answer', () => {

@@ -197,6 +197,7 @@ const planSearch = createServerFn({ method: 'POST' })
       // kept nothing is the answer, filters or not.
       return askOutcome({
         filters,
+        base: data.base,
         reason: planned.plan.reason,
         span: planned.plan.span,
         sector: placed.preference,

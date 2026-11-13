@@ -109,8 +109,10 @@ async function runFilteredSearch(
   // relevance ranks by score, so it alone demotes previous-name wins
   // (the home search's `prev_won` key); name/incorporated are reachable with
   // a term too, and there previous-name hits just interleave by their column.
-  // A sort the question or the base asked for orders the ranked rows too;
-  // the rank order stands in only when none was.
+  // A sort the question or the base asked for orders the ranked rows too,
+  // and pins the walk to its first slice (lib/ask/outcome), so the order
+  // never restarts at a slice boundary; the rank order stands in only when
+  // none was.
   const orderBy =
     restriction && filters.sort === undefined
       ? restriction.orderBy

@@ -177,7 +177,7 @@ export default function AskExamples({
           <span aria-hidden="true">
             <Letters text={shown} />
           </span>
-          <span className="sr-only">{shown}</span>
+          <span className="sr-only">{visibleExample(rotation, erased)}</span>
         </span>
       </span>
       <svg

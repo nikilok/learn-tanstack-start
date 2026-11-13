@@ -1,14 +1,18 @@
 FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6
 WORKDIR /app
 
-COPY package.json bun.lock ./
+COPY package.json bun.lock bunfig.toml ./
 COPY packages/db/package.json packages/db/package.json
 COPY packages/gemma/package.json packages/gemma/package.json
+COPY packages/search-filters/package.json packages/search-filters/package.json
 COPY packages/skyline/package.json packages/skyline/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/ch-stream/package.json apps/ch-stream/package.json
 COPY apps/desktop/package.json apps/desktop/package.json
 
+# The web app's engine comes from the registry bunfig names; its read-only
+# token is a Railway variable, which reaches the build only through an ARG.
+ARG GITHUB_PACKAGES_TOKEN
 RUN bun install --frozen-lockfile
 
 COPY packages/db packages/db

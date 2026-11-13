@@ -3,9 +3,15 @@
 // offers, and the prefix the offer stands on. The route only wires these to
 // React, so the rules are tested rather than read.
 
+import {
+  canonicalSearchParams,
+  type SearchUrlParams,
+} from '@ss/search-filters';
+
 import { type AppliedAsk, parseApplied } from './applied-store';
 import type { AskRanking } from './ask-loader';
 import type { EmptyReason } from './ask-loader';
+import { describeFilters, paramsKey } from './overlay';
 
 /** Whether this document may ask: known at mount from the owner hint the server sets (lib/ask/access-hint). */
 export type AskAccess = 'open' | 'off';
@@ -179,4 +185,33 @@ export function runRetired(
   run: { text: string; urlKey: string },
 ): boolean {
   return now.search !== run.text || now.urlKey !== run.urlKey;
+}
+
+/** Whether a tab's record is a question that only ranked, which a bare URL re-applies (routes/index): a ranking under no filters, so its key is the empty set's. */
+export function restoresBare(record: AppliedAsk | null): boolean {
+  return record?.ranking != null && record.mergedKey === paramsKey({});
+}
+
+/** The plan with its what-they-do part dropped: its filters alone, the sector it named now one of them (it only ranked while there was a ranking), with the set to navigate to; null when nothing would be left to list, so the question is cleared instead. */
+export function droppedRanking(
+  live: AppliedAsk,
+  urlFilters: SearchUrlParams,
+): { plan: AppliedAsk; merged: SearchUrlParams } | null {
+  const sector = live.ranking?.sector ?? null;
+  if (!live.chips.length && sector === null) return null;
+  const merged = canonicalSearchParams(
+    sector === null ? urlFilters : { ...urlFilters, sicSection: sector },
+  );
+  return {
+    plan: {
+      ...live,
+      mergedKey: paramsKey(merged),
+      chips:
+        sector === null
+          ? live.chips
+          : [...live.chips, ...describeFilters({ sicSection: sector })],
+      ranking: null,
+    },
+    merged,
+  };
 }

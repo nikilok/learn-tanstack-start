@@ -69,13 +69,18 @@ import {
   nextEmptyPrefix,
   reconcileApplied,
   runRetired,
+  droppedRanking,
 } from '../lib/ask/session';
 import { extendRanking, walkedListing } from '../lib/ask/tranches';
 import { readinessSnapshot, subscribeReadiness } from '../lib/device/beacons';
 import { WAITING } from '../lib/device/readiness';
-import { hydrationDone } from '../lib/hydration';
+import { setInputValue } from '../lib/dom/input-value';
 import { startListing } from '../lib/search/listing-prefetch';
-import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+import {
+  loadStoredFilters,
+  rehydratePending,
+  storeFilters,
+} from '../lib/search/persist';
 import { listingRenderedHere } from '../lib/session/listing';
 import { buildCanonical } from '../utils/canonical';
 import { isDesktopPreview } from '../utils/desktop-preview';
@@ -110,17 +115,6 @@ const PENDING_FILTER_DATA = {
   loadingMore: false,
   fetchMore: () => {},
 };
-
-/** Writes `value` into the search box through its own input path, as typed: the native setter keeps React's value tracker in step, whichever event the input binds. */
-function writeBox(el: HTMLInputElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    'value',
-  )?.set;
-  if (setter) setter.call(el, value);
-  else el.value = value;
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}
 
 /** The server snapshot of device readiness: nothing is ready before hydration. */
 const serverSnapshot = () => WAITING;
@@ -251,13 +245,19 @@ function Home() {
   const { isStuck, ready, pillClicked, onPillClick, onPillDismiss } =
     useSearchPill(inputRef, sentinelRef);
 
-  // A bare-URL SPA mount (details back-link, header logo) with a stored
-  // filter set is about to rehydrate into filter mode — known synchronously,
-  // so the transient render never runs the classic search. False on the
-  // hydration mount by construction (hydrationDone), so server HTML matches.
-  const [pendingStoredFilters, setPendingStoredFilters] = useState(
-    () => hydrationDone() && !hasFilters && loadStoredFilters() != null,
-  );
+  // A bare-URL mount (details back-link, header logo, a reload) with a stored
+  // filter set, or a question's record with a ranking alone, is about to
+  // rehydrate into a listing. False on every first render, so a hydration
+  // render matches the server's hero (the route hydrates after the root's
+  // effects, so hydrationDone() cannot tell the two apart); the layout effect
+  // flips it before the first paint, so the hero never shows and the
+  // transient render never runs the classic search.
+  const [pendingStoredFilters, setPendingStoredFilters] = useState(false);
+  useLayoutEffect(() => {
+    if (!hasFilters && rehydratePending()) setPendingStoredFilters(true);
+    // The mount alone: a later bare URL is a navigation the effects below handle.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Ask (lib/ask): a description that found nothing by name can be asked as
   // a question on Enter, and the plan's filters overlay whatever was set by
@@ -297,10 +297,17 @@ function Home() {
   useLayoutEffect(() => {
     appliedRef.current = applied;
   }, [applied]);
-  const askedRef = useRef('');
-  // The filter key the ask was made under: the URL moving off it (a Back under the run) retires the run.
-  const askKeyRef = useRef('');
+  // The run in flight: its text and the filter key it was asked under, for
+  // the URL moving off either retires it; null while none stands.
+  const askedRef = useRef<{ text: string; urlKey: string } | null>(null);
   const queuedAskRef = useRef<string | null>(null);
+  /** Retires the run in flight: its result is dropped, a queued ask forgotten, the progress idle. */
+  const retireRun = () => {
+    askRunRef.current++;
+    askedRef.current = null;
+    queuedAskRef.current = null;
+    setAskProgress(ASK_IDLE);
+  };
   // The shortest text the offer has stood on: a text that only adds to it
   // keeps the offer up while its own search runs, instead of flickering
   // through skeletons for every word added to an empty text.
@@ -310,9 +317,11 @@ function Home() {
   // The ranking the listing is restricted to (lib/ask/session): the applied
   // plan's while the URL holds its filters, else the entry's while the plan
   // is being restored onto it, and nothing on the hydration render.
+  // One object per entry (the router's), so parsed once per entry.
+  const entry = useMemo(() => askEntry(entryState), [entryState]);
   const ranking = listedRanking({
     applied,
-    entry: askEntry(entryState),
+    entry,
     urlKey: urlParamsKey,
     hydrated: mounted,
   });
@@ -363,25 +372,19 @@ function Home() {
   useEffect(() => {
     if (!leaving) return;
     if (navTimerRef.current) clearTimeout(navTimerRef.current);
-    askRunRef.current++;
-    queuedAskRef.current = null;
-    setAskProgress(ASK_IDLE);
+    retireRun();
+    // retireRun writes refs and a stable setter only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [leaving]);
   // A new text is a new chance to ask; the text being asked is not. A run
   // still in flight for the old text, or for a filter set the URL has moved
   // off (a Back under the run), is retired, so its plan never lands on what
   // was typed since, nor on filters built from a base no longer shown.
   useEffect(() => {
-    if (
-      runRetired(
-        { search, urlKey: urlParamsKey },
-        { text: askedRef.current, urlKey: askKeyRef.current },
-      )
-    ) {
-      askRunRef.current++;
-      queuedAskRef.current = null;
-      setAskProgress(ASK_IDLE);
-    }
+    const run = askedRef.current;
+    if (run && runRetired({ search, urlKey: urlParamsKey }, run)) retireRun();
+    // retireRun writes refs and a stable setter only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [search, urlParamsKey]);
   /**
    * Ends the plan: forgets the tab's record and retires any run. The durable
@@ -394,7 +397,7 @@ function Home() {
   const endAsk = (live: AppliedAsk): SearchUrlParams => {
     setApplied(null);
     clearApplied();
-    askRunRef.current++;
+    retireRun();
     emptyRunRef.current = 0;
     setWalkFailed(false);
     const stored = loadStoredFilters();
@@ -407,7 +410,6 @@ function Home() {
   // company page) restores the plan it carries; any other filter URL
   // discards a record a plan left behind while this page was away.
   useEffect(() => {
-    const entry = askEntry(entryState);
     const action = reconcileApplied({
       applied,
       hasFilters,
@@ -423,7 +425,7 @@ function Home() {
     } else if (action === 'discard') clearApplied();
     // endAsk reads nothing the deps do not carry.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [applied, hasFilters, urlParamsKey, entryState]);
+  }, [applied, hasFilters, urlParamsKey, entry]);
   const queryActive = hasFilters || search.length >= 3;
   // A search that failed settled nothing: it is not empty, as HmrcResults reads it.
   const confirmedEmpty =
@@ -528,19 +530,16 @@ function Home() {
           chips: describeFilters(outcome.filters),
           ranking,
         };
-        // Kept for the tab before the move, so a company page's back link
-        // brings it back; the entry itself carries it too (the effect above
-        // restores it on arrival), and it is set here as well for a tab
-        // whose storage refused the record.
-        saveApplied(plan);
-        // The filters replace the name term: the question is not a name. The
-        // text moving off the asked one retires this run and resets the
-        // progress, so nothing here depends on the run any more.
+        // The entry carries the plan: the effect above applies it on arrival
+        // and keeps it for the tab, so nothing is set here that a later
+        // arrival could not have decided. The filters replace the name term:
+        // the question is not a name, and the text moving off the asked one
+        // retires this run.
         void navigate({
           to: '/',
           search: { search: '', ...merged },
           state: askEntryState(plan),
-        }).then(() => setApplied(plan));
+        });
       },
       () => {
         if (run === askRunRef.current) setAskProgress(ASK_UNAVAILABLE);
@@ -657,8 +656,7 @@ function Home() {
         replace: true,
       });
     }
-    askedRef.current = text;
-    askKeyRef.current = urlParamsKey;
+    askedRef.current = { text, urlKey: urlParamsKey };
     setAskProgress(ASK_PENDING);
     if (readiness.status === 'ready') runAsk(text, readiness.key);
     else if (readiness.status === 'off') setAskProgress(ASK_UNAVAILABLE);
@@ -669,7 +667,7 @@ function Home() {
   const askExample = (text: string) => {
     const el = inputRef.current;
     if (!el) return;
-    writeBox(el, text);
+    setInputValue(el, text);
     onAsk();
   };
 
@@ -709,37 +707,25 @@ function Home() {
   const dropRanking = () => {
     const live = appliedRef.current;
     if (!live?.ranking) return;
-    const sector = live.ranking.sector;
-    if (!live.chips.length && sector === null) {
+    const dropped = droppedRanking(live, urlFilters);
+    if (!dropped) {
       clearAsk();
       return;
     }
-    const merged = canonicalSearchParams(
-      sector === null ? urlFilters : { ...urlFilters, sicSection: sector },
-    );
-    const next: AppliedAsk = {
-      ...live,
-      mergedKey: paramsKey(merged),
-      chips:
-        sector === null
-          ? live.chips
-          : [...live.chips, ...describeFilters({ sicSection: sector })],
-      ranking: null,
-    };
-    saveApplied(next);
-    setApplied(next);
+    saveApplied(dropped.plan);
+    setApplied(dropped.plan);
     void navigate({
       to: '/',
-      search: { search: '', ...merged },
+      search: { search: '', ...dropped.merged },
       replace: true,
-      state: askEntryState(next),
+      state: askEntryState(dropped.plan),
     });
   };
 
   /** Clears the question through the input's own clear path, which ends the ask and restores the base filters. */
   const clearAsk = () => {
     const el = inputRef.current;
-    if (el) writeBox(el, '');
+    if (el) setInputValue(el, '');
   };
 
   // Applied filters are durable: the URL is authoritative when it carries
@@ -760,7 +746,6 @@ function Home() {
   // already.
   useEffect(() => {
     if (hasFilters) return;
-    const entry = askEntry(entryState);
     if (entry?.ranking && entry.mergedKey === urlParamsKey) return;
     const stored = loadStoredFilters();
     const record = loadApplied();
@@ -785,7 +770,7 @@ function Home() {
       // pending frame so the classic path takes over.
       setPendingStoredFilters(false);
     }
-  }, [hasFilters, urlParamsKey, search, navigate, entryState]);
+  }, [hasFilters, urlParamsKey, search, navigate, entry]);
 
   // Empty state: the hero is shown and the search bar scrolls away with the
   // page (not sticky). It only sticks once a query or filter set exists.
@@ -864,12 +849,9 @@ function Home() {
               // on what was typed since.
               if (
                 askProgress.status === 'pending' &&
-                value.trim() !== askedRef.current
-              ) {
-                askRunRef.current++;
-                queuedAskRef.current = null;
-                setAskProgress(ASK_IDLE);
-              }
+                value.trim() !== askedRef.current?.text
+              )
+                retireRun();
               // Editing or clearing the question ends the ask: the base set
               // by hand comes back under the new text. Decided when the commit
               // fires, so a plan that lands between the keystroke and its
@@ -970,6 +952,11 @@ function Home() {
               filtersActive={listingMode}
               data={resultsData}
               ask={askHint}
+              listingKey={
+                ranking
+                  ? `${ranking.span}|${ranking.tranches[0]?.[0] ?? ''}`
+                  : ''
+              }
             />
           </Suspense>
         </div>

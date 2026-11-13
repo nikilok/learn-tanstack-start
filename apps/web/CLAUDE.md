@@ -68,7 +68,8 @@ with `!important` (needed to beat React's inline opacity). This lets React defau
   it fires on empty↔non-empty transitions, not every length change)
   `removeItem`s `hmrc-scroll-y`
   unless `queryActive && (isLoading || results.length > 0)` — and, since filters,
-  only when `loadStoredFilters()` is empty: a stored filter set means the bare
+  only when `rehydratePending()` is false: a stored filter set, or a question's
+  record with a ranking alone (lib/search/persist), means the bare
   mount is about to rehydrate into filter mode (index.tsx), whose listing will
   consume the key, so discarding would lose the back-nav scroll. This closes the
   permanent-hide where *any* truthy stale value lands on the empty/short/zero-result
@@ -119,7 +120,7 @@ the results the user came to read.
 That gate cannot read `filtersActive` alone. On the hydration mount the prop is false by
 construction (SSR parity — see `pendingStoredFilters` in `routes/index.tsx`) and the
 rehydrate navigate lands an effect later, while SearchInput's focus effect — a child's —
-runs first. So SearchBar reads `loadStoredFilters()` itself in a lazy `useState`
+runs first. So SearchBar reads `rehydratePending()` itself in a lazy `useState`
 (once per mount, never on the keystroke path) and ORs it in. Keep that read separate
 from the `filtersActive` prop: widening the prop to include it would change the markup
 `HmrcResults` renders on the hydration mount and reintroduce a mismatch.

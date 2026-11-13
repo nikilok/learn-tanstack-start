@@ -11,7 +11,7 @@ export function isSector(value: unknown): value is string {
   );
 }
 
-/** Where the sector a question named ends up once its first slice was judged: carried by the ranking as a preference while something was there to rank, else the filter it was, so a question nothing was read for still lists its sector. No sector places nothing. */
+/** Where the sector a question named ends up once its first slice was judged: carried by the ranking as a preference while something was there to rank, else the filter it was, which a failed rerank still lists under (an empty shortlist answers unmatched instead, lib/ask/outcome). No sector places nothing. */
 export function placeSector(
   sector: string | null,
   shortlisted: number,

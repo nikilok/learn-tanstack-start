@@ -189,8 +189,8 @@ const planSearch = createServerFn({ method: 'POST' })
           // fixed fields before it stay where a reader expects them.
           ` q=${JSON.stringify(data.text)} about=${JSON.stringify(planned.plan.span)}`,
       );
-      // Nothing to rank (a failed rerank, an empty shortlist) leaves the
-      // sector the filter it was (lib/ask/sector).
+      // Nothing to rank leaves the sector the filter it was (lib/ask/sector):
+      // a failed rerank lists under it, an empty shortlist answers unmatched.
       const placed = placeSector(sector, ranking?.shortlist.length ?? 0);
       if (placed.filter !== null) filters.sicSection = placed.filter;
       // What the plan answers with (lib/ask/outcome): a span judged that

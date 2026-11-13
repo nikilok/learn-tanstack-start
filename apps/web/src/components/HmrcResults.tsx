@@ -20,7 +20,7 @@ import {
   quietListing,
   sceneShown,
 } from '../lib/search/empty-state';
-import { loadStoredFilters, storeFilters } from '../lib/search/persist';
+import { rehydratePending, storeFilters } from '../lib/search/persist';
 import {
   formatLocation,
   hasWebGpu,
@@ -71,12 +71,15 @@ export default function HmrcResults({
   filtersActive = false,
   data,
   ask = null,
+  listingKey = '',
 }: {
   search: string;
   filtersActive?: boolean;
   data: SponsorResultsData;
   /** What the no-results message says about asking the text (lib/ask/session), when the parent has something to say. */
   ask?: AskHint | null;
+  /** What tells one listing from another under the same search text (a question's answer), so a new one resets the highlight. */
+  listingKey?: string;
 }) {
   const {
     results,
@@ -184,15 +187,16 @@ export default function HmrcResults({
   // data — virtual indices aren't stable when the virtualizer rerenders or
   // results refetch, so we save the row's stable slugId on click and find it
   // again here.
-  const lastRestoredSearchRef = useRef<string | null>(null);
+  const lastRestoredKeyRef = useRef<string | null>(null);
   // useLayoutEffect (not useEffect) so the highlight is committed before the
   // browser paints / view-transition snapshots — otherwise the back-nav
   // transition captures a frame with highlight=-1 and the lens never appears
   // until after the animation, often imperceptibly.
   useLayoutEffect(() => {
     if (results.length === 0) return;
-    if (lastRestoredSearchRef.current === search) return;
-    lastRestoredSearchRef.current = search;
+    const key = `${search}\n${listingKey}`;
+    if (lastRestoredKeyRef.current === key) return;
+    lastRestoredKeyRef.current = key;
     let initial = 0;
     const saved = sessionStorage.getItem('hmrc-highlight');
     if (saved) {
@@ -270,9 +274,10 @@ export default function HmrcResults({
   // the restore effect above stays its sole consumer and the back-nav race holds.
   useEffect(() => {
     const canRestore = queryActive && (isLoading || hasRows);
-    // A stored filter set means a bare full-load mount is about to rehydrate
-    // into filter mode (index.tsx) — its restore is pending, not stranded.
-    if (!canRestore && !loadStoredFilters()) {
+    // A stored filter set, or a question's record with a ranking alone, means
+    // a bare mount is about to rehydrate into a listing (index.tsx): its
+    // restore is pending, not stranded.
+    if (!canRestore && !rehydratePending()) {
       sessionStorage.removeItem('hmrc-scroll-y');
     }
   }, [queryActive, isLoading, hasRows]);

@@ -161,12 +161,7 @@ export default function AskExamples({
         <span
           key={`in-${rotation.shown}`}
           className={styles.shown}
-          style={
-            {
-              '--wait': `${exampleWaitMs(rotation)}ms`,
-              '--n': letters(shown).length,
-            } as CSSProperties
-          }
+          style={{ '--wait': `${exampleWaitMs(rotation)}ms` } as CSSProperties}
         >
           <span aria-hidden="true">
             <Letters text={shown} />

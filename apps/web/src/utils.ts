@@ -22,9 +22,12 @@ export function titleCase(str: string | null) {
       .toLowerCase()
       // A possessive 's after an apostrophe is not a word start: Bishop's,
       // not Bishop'S. O'Neill still capitalises, since what follows is not s.
+      // No lookbehind: Safari gained it in 16.4, and the client bundle ships
+      // the literal as written.
       .replace(
-        /(?<!['’](?=s\b))\b(\d*)([a-z])/g,
-        (_, digits, letter) => digits + letter.toUpperCase(),
+        /(['’]s\b)|\b(\d*)([a-z])/g,
+        (match, possessive, digits, letter) =>
+          possessive ? match : digits + letter.toUpperCase(),
       )
       .replace(/\b\w+\b/g, (word) =>
         UPPERCASE_WORDS.has(word.toLowerCase()) ? word.toUpperCase() : word,

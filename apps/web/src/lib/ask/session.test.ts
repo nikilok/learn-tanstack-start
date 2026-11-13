@@ -9,7 +9,9 @@ import {
   listedRanking,
   deriveAskHint,
   nextEmptyPrefix,
+  droppedRanking,
   reconcileApplied,
+  restoresBare,
   runRetired,
 } from './session';
 
@@ -461,5 +463,79 @@ describe('runRetired', () => {
     expect(
       runRetired({ search: 'care homes in leeds', urlKey: bareKey }, run),
     ).toBe(true);
+  });
+});
+
+describe('restoresBare', () => {
+  const ranking = {
+    span: 'care homes',
+    sector: null,
+    tranches: [['00000001']],
+    next: null,
+  };
+
+  test('a record with a ranking under no filters: a bare URL re-applies it', () => {
+    expect(
+      restoresBare({
+        ...plan,
+        base: {},
+        mergedKey: bareKey,
+        chips: [],
+        ranking,
+      }),
+    ).toBe(true);
+  });
+
+  test('a record whose filters the URL would carry, one without a ranking, or none at all is not one', () => {
+    expect(restoresBare({ ...plan, ranking })).toBe(false);
+    expect(
+      restoresBare({ ...plan, base: {}, mergedKey: bareKey, chips: [] }),
+    ).toBe(false);
+    expect(restoresBare(null)).toBe(false);
+  });
+});
+
+describe('droppedRanking', () => {
+  const ranked = {
+    ...plan,
+    ranking: {
+      span: 'care homes',
+      sector: 'Q',
+      tranches: [['00000001']],
+      next: null,
+    },
+  };
+
+  test('the sector the question named becomes one of its filters, named last among the chips, with no ranking left', () => {
+    const dropped = droppedRanking(
+      { ...ranked, chips: ['In Leeds'] },
+      { location: 'Leeds' },
+    );
+    expect(dropped?.merged).toEqual({ location: 'Leeds', sicSection: 'Q' });
+    expect(dropped?.plan).toEqual({
+      ...ranked,
+      chips: ['In Leeds', 'Human health and social work activities'],
+      mergedKey: paramsKey({ location: 'Leeds', sicSection: 'Q' }),
+      ranking: null,
+    });
+  });
+
+  test("without a sector the filters stand as they are, in the registry's form", () => {
+    const dropped = droppedRanking(
+      { ...ranked, ranking: { ...ranked.ranking, sector: null } },
+      { sicSection: 'Q', location: 'Leeds' },
+    );
+    expect(dropped?.merged).toEqual({ location: 'Leeds', sicSection: 'Q' });
+    expect(dropped?.plan.chips).toEqual(plan.chips);
+    expect(dropped?.plan.ranking).toBeNull();
+  });
+
+  test('a question that only ranked, naming no sector, has nothing left to list', () => {
+    expect(
+      droppedRanking(
+        { ...ranked, chips: [], ranking: { ...ranked.ranking, sector: null } },
+        {},
+      ),
+    ).toBeNull();
   });
 });

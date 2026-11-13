@@ -5,7 +5,7 @@ import { getShortcutLabel, type Platform } from '../hooks/usePlatform';
 import { useRotatingPlaceholder } from '../hooks/useRotatingPlaceholder';
 import type { AskBoxMode } from '../lib/ask/session';
 import { shouldAutoFocusSearch } from '../lib/search/autofocus';
-import { loadStoredFilters } from '../lib/search/persist';
+import { rehydratePending } from '../lib/search/persist';
 import { isDesktopPreview } from '../utils/desktop-preview';
 import SearchIcon from './SearchIcon';
 import SearchInput from './SearchInput';
@@ -60,10 +60,11 @@ export default function SearchBar({
   onEnter?: () => void;
 }) {
   const showPill = isStuck && !pillClicked && (!!search || filtersActive);
-  // Read the store rather than trusting `filtersActive`: on the hydration mount
-  // that prop is false for SSR parity and the rehydrate navigate lands one
-  // effect too late — SearchInput's focus effect has already run by then.
-  const [storedFilterMode] = useState(() => loadStoredFilters() != null);
+  // Read the stores rather than trusting `filtersActive`: on the hydration
+  // mount that prop is false for SSR parity, and the rehydrate navigate (a
+  // stored set, or a question's record with a ranking alone) lands one effect
+  // too late — SearchInput's focus effect has already run by then.
+  const [storedFilterMode] = useState(() => rehydratePending());
   const shortcut = isMobile ? '' : getShortcutLabel(platform);
   const placeholder = useRotatingPlaceholder(shortcut, !!search);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);

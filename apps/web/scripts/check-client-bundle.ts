@@ -12,9 +12,11 @@ import { fileURLToPath } from 'node:url';
 import { Glob } from 'bun';
 
 const SENTINEL = '@nikilok/thoth-engine is server-only';
+// The client output follows the preset: Vercel's builder, which sets VERCEL,
+// writes .vercel/output/static; any other build writes .output/public.
 const CLIENT_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../.vercel/output/static',
+  process.env.VERCEL ? '../.vercel/output/static' : '../.output/public',
 );
 
 let scanned = 0;

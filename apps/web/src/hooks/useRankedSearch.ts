@@ -40,16 +40,12 @@ export function useRankedSearch(
         : Promise.resolve({ rows: [], hasMore: false, issues: [] });
     },
     initialPageParam: { tranche: 0, offset: 0 } as RankedPage,
-    getNextPageParam: (lastPage, allPages, lastParam, allParams) =>
+    // A page's offset is the rows of its slice shown before it, so the rows
+    // shown after it need no sum.
+    getNextPageParam: (lastPage, _pages, lastParam) =>
       nextRankedPage(lastParam, {
         hasMore: lastPage.hasMore,
-        shown: allPages.reduce(
-          (sum, page, i) =>
-            allParams[i]?.tranche === lastParam.tranche
-              ? sum + page.rows.length
-              : sum,
-          0,
-        ),
+        shown: lastParam.offset + lastPage.rows.length,
         tranches: tranches.length,
       }),
     enabled: live,

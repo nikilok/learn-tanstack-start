@@ -3,6 +3,9 @@ import {
   type SearchUrlParams,
 } from '@ss/search-filters';
 
+import { loadApplied } from '../ask/applied-store';
+import { restoresBare } from '../ask/session';
+
 const STORAGE_KEY = 'ss-filters';
 
 /** Persisted filter set re-validated through the registry; null when absent, empty, or corrupt. */
@@ -33,4 +36,9 @@ export function storeFilters(params: Record<string, unknown>): void {
   } catch {
     /* storage unavailable (private mode) — filters just don't persist */
   }
+}
+
+/** Whether a bare mount is about to rehydrate into a listing (routes/index): a stored filter set, or a question's record with a ranking alone. Read wherever the transient render must not pass for an empty page: the pending frame, the stranded-scroll discard, the hero's autofocus. */
+export function rehydratePending(): boolean {
+  return loadStoredFilters() != null || restoresBare(loadApplied());
 }

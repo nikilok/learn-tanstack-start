@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { memo, useEffect, useLayoutEffect, useRef } from 'react';
+import { memo, useEffect, useRef } from 'react';
 
 import type { AskBoxMode } from '../lib/ask/session';
 import SearchIcon from './SearchIcon';
@@ -44,15 +44,6 @@ export default memo(function SearchInput({
 }) {
   const clearRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLButtonElement>(null);
-  const onChangeRef = useRef(onChange);
-  const onAskRef = useRef(askEnabled ? onAsk : undefined);
-  const onEnterRef = useRef(onEnter);
-  // Synced after each commit, as React asks of a ref: a render it discards never reaches the input's handlers.
-  useLayoutEffect(() => {
-    onChangeRef.current = onChange;
-    onAskRef.current = askEnabled ? onAsk : undefined;
-    onEnterRef.current = onEnter;
-  });
   const hasAutoFocused = useRef(false);
 
   const syncClearButton = () => {
@@ -116,15 +107,14 @@ export default memo(function SearchInput({
         onInput={() => {
           syncClearButton();
           syncSearchButton();
-          onChangeRef.current(inputRef.current?.value ?? '');
+          onChange(inputRef.current?.value ?? '');
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') inputRef.current?.blur();
           // The listing's own handler opens a highlighted row on the same
           // key; the parent asks only while nothing is listed. Not during
           // IME composition, where Enter commits the candidate.
-          else if (e.key === 'Enter' && !e.nativeEvent.isComposing)
-            onEnterRef.current?.();
+          else if (e.key === 'Enter' && !e.nativeEvent.isComposing) onEnter?.();
         }}
         onBlur={onBlur}
         placeholder={placeholder}
@@ -141,7 +131,7 @@ export default memo(function SearchInput({
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onAskRef.current?.()}
+          onClick={() => onAsk?.()}
           aria-label="Ask this as a question"
           className="absolute top-1/2 right-10 -translate-y-1/2 rounded-full p-1 text-(--sea-ink-soft) transition hover:text-(--sea-ink)"
         >
@@ -163,7 +153,7 @@ export default memo(function SearchInput({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           if (inputRef.current) inputRef.current.value = '';
-          onChangeRef.current('');
+          onChange('');
           syncClearButton();
           syncSearchButton();
           inputRef.current?.focus();

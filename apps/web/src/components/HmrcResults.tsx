@@ -203,9 +203,16 @@ export default function HmrcResults({
       try {
         const parsed = JSON.parse(saved) as {
           search?: string;
+          listingKey?: string;
           slugId?: string;
         };
-        if (parsed.search === search && parsed.slugId) {
+        // Saved on one listing, restored on that one: a question's answer is
+        // told from another's by its key, both under an empty search text.
+        if (
+          parsed.search === search &&
+          (parsed.listingKey ?? '') === listingKey &&
+          parsed.slugId
+        ) {
           const idx = results.findIndex((r) => r.slugId === parsed.slugId);
           if (idx >= 0) initial = idx;
         }
@@ -554,6 +561,7 @@ export default function HmrcResults({
             <HmrcCard
               row={results[virtualRow.index]}
               search={search}
+              listingKey={listingKey}
               isActive={activeId === results[virtualRow.index].slugId}
               isHighlighted={highlightedIndex === virtualRow.index}
               onActivate={() => {

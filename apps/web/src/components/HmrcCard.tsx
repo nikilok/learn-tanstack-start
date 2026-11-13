@@ -19,12 +19,15 @@ import RatingIcon from './RatingIcon';
 export default function HmrcCard({
   row,
   search,
+  listingKey = '',
   isActive,
   isHighlighted,
   onActivate,
 }: {
   row: HmrcRow;
   search: string;
+  /** What tells one listing from another under the same search text (a question's answer): saved with the highlight, so it restores only on that listing. */
+  listingKey?: string;
   isActive: boolean;
   isHighlighted: boolean;
   onActivate: () => void;
@@ -62,7 +65,7 @@ export default function HmrcCard({
         sessionStorage.setItem('hmrc-active-id', row.slugId);
         sessionStorage.setItem(
           'hmrc-highlight',
-          JSON.stringify({ search, slugId: row.slugId }),
+          JSON.stringify({ search, listingKey, slugId: row.slugId }),
         );
         onActivate();
       }}

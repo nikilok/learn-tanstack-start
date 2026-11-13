@@ -655,6 +655,9 @@ function Home() {
    * nothing happens, as the offer says.
    */
   const onAsk = () => {
+    // Not while the route is leaving: an ask landing then would navigate
+    // under the company page loading, as a slice judged then would.
+    if (leaving) return;
     const text = (inputRef.current?.value ?? search).trim();
     if (
       askWordCount(text) < MIN_ASK_WORDS ||

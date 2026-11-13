@@ -91,6 +91,14 @@ export default function AskExamples({
     return () => media.removeEventListener('change', sync);
   }, []);
 
+  // Reduced motion turning on mid-erase hides the leaving span and cancels its
+  // animation, so no end event comes: the erase is over then too.
+  useEffect(() => {
+    if (still && rotation.leaving !== null && !erased) eraseOver();
+    // eraseOver writes a ref and a stable setter only.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [still, rotation.leaving, erased]);
+
   useEffect(() => {
     if (paused || still) return;
     const timer = setTimeout(() => {
@@ -119,6 +127,15 @@ export default function AskExamples({
   }, [rotation]);
 
   const shown = ASK_EXAMPLES[rotation.shown];
+  /** The erase is over: the leaving span goes, and the cell is sized by the shown one again. */
+  const eraseOver = () => {
+    const cell = cellRef.current;
+    if (cell) {
+      cell.style.width = '';
+      cell.style.transition = '';
+    }
+    setErased(true);
+  };
   return (
     <button
       type="button"
@@ -144,15 +161,9 @@ export default function AskExamples({
                 '--n': letters(ASK_EXAMPLES[rotation.leaving]).length,
               } as CSSProperties
             }
-            // Its own animation ends with the erase, the last letter gone: the cell is the shown one's to size.
+            // Its own animation ending is the erase over; the letters' own end too, and are not it.
             onAnimationEnd={(e) => {
-              if (e.target !== e.currentTarget) return;
-              const cell = cellRef.current;
-              if (cell) {
-                cell.style.width = '';
-                cell.style.transition = '';
-              }
-              setErased(true);
+              if (e.target === e.currentTarget) eraseOver();
             }}
           >
             <Letters text={ASK_EXAMPLES[rotation.leaving]} />

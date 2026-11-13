@@ -385,6 +385,30 @@ describe('listedRanking', () => {
     ).toBeNull();
   });
 
+  test("another question's own entry under the same key outranks the applied plan's ranking: the reconcile ends that plan next", () => {
+    const other = {
+      ...live,
+      text: 'nursing homes in leeds',
+      ranking: { ...ranking, span: 'nursing homes' },
+    };
+    expect(
+      listedRanking({
+        applied: live,
+        entry: other,
+        urlKey: planKey,
+        hydrated: true,
+      }),
+    ).toBe(other.ranking);
+    expect(
+      listedRanking({
+        applied: live,
+        entry: { ...other, ranking: null },
+        urlKey: planKey,
+        hydrated: true,
+      }),
+    ).toBeNull();
+  });
+
   test('nothing on the hydration render, whatever the entry carries', () => {
     expect(
       listedRanking({

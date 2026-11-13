@@ -972,7 +972,7 @@ function Home() {
               ask={askHint}
               listingKey={
                 ranking
-                  ? `${ranking.span}|${ranking.tranches[0]?.[0] ?? ''}`
+                  ? `${urlParamsKey}|${ranking.span}|${ranking.tranches[0]?.[0] ?? ''}`
                   : ''
               }
             />

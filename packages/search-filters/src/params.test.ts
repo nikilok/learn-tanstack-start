@@ -12,6 +12,7 @@ import {
   typeRatingsFor,
   WORKER_TYPES,
   listingOrder,
+  orderAsked,
 } from './params';
 
 describe('parseSearchFilters', () => {
@@ -469,5 +470,14 @@ describe('listingOrder', () => {
       sort: 'name',
       order: 'desc',
     });
+  });
+});
+
+describe('orderAsked', () => {
+  test('a sort, or a direction alone, is an order asked for; a term or nothing is not', () => {
+    expect(orderAsked({ sort: 'name' })).toBe(true);
+    expect(orderAsked({ order: 'desc' })).toBe(true);
+    expect(orderAsked({ sort: 'incorporated', order: 'asc' })).toBe(true);
+    expect(orderAsked({})).toBe(false);
   });
 });

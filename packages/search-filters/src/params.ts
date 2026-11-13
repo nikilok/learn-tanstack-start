@@ -213,6 +213,14 @@ export type SortKey = (typeof SORT_KEYS)[number];
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 export type SortOrder = (typeof SORT_ORDERS)[number];
 
+/** Whether an order was asked for at all: a sort, or a direction alone, which the listing runs by name. One rule for the ranked listing, which keeps rank order only when none was, and for the walk, which a sorted answer pins to its first slice. */
+export function orderAsked(filters: {
+  sort?: string;
+  order?: string;
+}): boolean {
+  return filters.sort !== undefined || filters.order !== undefined;
+}
+
 /** The order a listing runs in: the sort asked for, else relevance with a term and name without; and the direction asked for, else newest first by incorporation and ascending otherwise. One rule for the query and for whatever describes it. */
 export function listingOrder(filters: {
   q?: string;

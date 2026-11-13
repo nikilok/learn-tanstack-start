@@ -1,5 +1,9 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
-import { listingOrder, parseSearchFilters } from '@ss/search-filters';
+import {
+  listingOrder,
+  orderAsked,
+  parseSearchFilters,
+} from '@ss/search-filters';
 import { createServerFn } from '@tanstack/react-start';
 import { sql } from 'drizzle-orm';
 
@@ -114,7 +118,7 @@ async function runFilteredSearch(
   // never restarts at a slice boundary; the rank order stands in only when
   // none was.
   const orderBy =
-    restriction && filters.sort === undefined
+    restriction && !orderAsked(filters)
       ? restriction.orderBy
       : sortKey === 'relevance'
         ? sql`score DESC, ${name.prevWon} ASC, min(h.organisation_name) ASC, min(h.hash) ASC`

@@ -48,6 +48,10 @@ describe('askOutcome', () => {
     expect(
       askOutcome({ ...base, base: { sort: 'name' }, slice: full }),
     ).toMatchObject({ ranking: { next: null } });
+    // A direction alone is an order asked for: the listing runs it by name.
+    expect(
+      askOutcome({ ...base, base: { order: 'desc' }, slice: full }),
+    ).toMatchObject({ ranking: { next: null } });
     expect(askOutcome({ ...base, slice: full })).toMatchObject({
       ranking: { next: RANKED_MAX },
     });

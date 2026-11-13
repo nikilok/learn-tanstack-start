@@ -1,7 +1,7 @@
 // What a planned ask answers with once its span's first slice was judged,
 // or could not be. Pure, so the decision is tested apart from the server fn.
 
-import type { SearchUrlParams } from '@ss/search-filters';
+import { orderAsked, type SearchUrlParams } from '@ss/search-filters';
 
 import type { AskPlanResponse, EmptyReason } from './ask-loader';
 import { nextTrancheOffset } from './tranches';
@@ -36,7 +36,7 @@ export function askOutcome({
   if (slice && span) {
     if (!slice.ranked.length)
       return { status: 'ok', filters: {}, reason: 'unmatched', ranking: null };
-    const sorted = filters.sort !== undefined || base.sort !== undefined;
+    const sorted = orderAsked(filters) || orderAsked(base);
     return {
       status: 'ok',
       filters,

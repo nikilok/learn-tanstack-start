@@ -75,6 +75,16 @@ describe('applyOverlay', () => {
 });
 
 describe('describeFilters', () => {
+  test('a sort with no direction asked is described as the listing runs it: newest first by incorporation, else ascending', () => {
+    expect(describeFilters({ sort: 'incorporated' })).toEqual([
+      'Incorporated, newest first',
+    ]);
+    expect(describeFilters({ sort: 'incorporated', order: 'asc' })).toEqual([
+      'Incorporated, oldest first',
+    ]);
+    expect(describeFilters({ sort: 'name' })).toEqual(['By name']);
+  });
+
   test('names each filter in plain words, in registry order', () => {
     expect(
       describeFilters({

@@ -213,6 +213,19 @@ export type SortKey = (typeof SORT_KEYS)[number];
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 export type SortOrder = (typeof SORT_ORDERS)[number];
 
+/** The order a listing runs in: the sort asked for, else relevance with a term and name without; and the direction asked for, else newest first by incorporation and ascending otherwise. One rule for the query and for whatever describes it. */
+export function listingOrder(filters: {
+  q?: string;
+  sort?: SortKey;
+  order?: SortOrder;
+}): { sort: SortKey; order: SortOrder } {
+  const sort = filters.sort ?? (filters.q ? 'relevance' : 'name');
+  return {
+    sort,
+    order: filters.order ?? (sort === 'incorporated' ? 'desc' : 'asc'),
+  };
+}
+
 export type SearchFilters = {
   q?: string;
   route?: string[];

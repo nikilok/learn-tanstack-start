@@ -4,6 +4,8 @@
 
 import {
   filterSearchKey,
+  listingOrder,
+  parseSearchFilters,
   type SearchUrlParams,
   SIC_SECTIONS,
 } from '@ss/search-filters';
@@ -140,7 +142,11 @@ export function describeFilters(params: SearchUrlParams): string[] {
     else if (value === false) chips.push(no);
   }
   if (params.sort) {
-    const order = params.order === 'desc' ? 'newest first' : 'oldest first';
+    // The direction the listing runs in when none was asked is the registry's (listingOrder), not a guess of its own.
+    const order =
+      listingOrder(parseSearchFilters(params).filters).order === 'desc'
+        ? 'newest first'
+        : 'oldest first';
     chips.push(
       params.sort === 'incorporated'
         ? `Incorporated, ${order}`

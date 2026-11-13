@@ -1,5 +1,5 @@
 import { companiesHouseProfiles, hmrcCompanyMapping, sicCodes } from '@ss/db';
-import { parseSearchFilters, type SortKey } from '@ss/search-filters';
+import { listingOrder, parseSearchFilters } from '@ss/search-filters';
 import { createServerFn } from '@tanstack/react-start';
 import { sql } from 'drizzle-orm';
 
@@ -100,9 +100,9 @@ async function runFilteredSearch(
     ? sql`WHERE ${sql.join(conds, sql` AND `)}`
     : sql``;
 
-  // relevance is only reachable with q (parse drops it otherwise).
-  const sortKey: SortKey = filters.sort ?? (filters.q ? 'relevance' : 'name');
-  const order = filters.order ?? (sortKey === 'incorporated' ? 'desc' : 'asc');
+  // relevance is only reachable with q (parse drops it otherwise); the
+  // defaults are the registry's, shared with the chips that describe them.
+  const { sort: sortKey, order } = listingOrder(filters);
   const dir = order === 'desc' ? sql`DESC` : sql`ASC`;
   // Aggregated now that rows group by name_slug: a bare organisation_name is
   // no longer grouped. min(h.hash) tail keeps OFFSET pages stable. Only

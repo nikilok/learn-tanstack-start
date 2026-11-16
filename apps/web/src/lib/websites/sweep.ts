@@ -145,7 +145,7 @@ export type SweepSummary = {
    *  large "promoted" figure is a silent unpublish wearing the job's
    *  healthiest-looking metric. */
   demoted: number;
-  /** Rows held back from rendering: parked, for sale, a directory, or an `assessed` row on a holding page or another host. */
+  /** Rows held back from rendering: parked, for sale or a directory, as fetched or as a browser showed the homepage, or an `assessed` row on a holding page or another host. */
   noSiteThere: number;
   /** `name_and_place` rows whose name or place was gone from every page read, and those not read well enough to tell. */
   nameAndPlaceGone: number;
@@ -263,21 +263,36 @@ function notThere(
 /** Which proof a re-check reads: a `name_and_place` row's rule, or what confirms a registry row beyond its homepage postcode. */
 type ProofKind = 'name_and_place' | 'confirmation';
 
-/** What a re-check read: whether the proof holds and on which page, and the page stating the company's own number when one it read does. */
+/** What a browser's read of a homepage landed on in place of the site. */
+type Landing = 'directory' | 'parked';
+
+/** What a re-check read: whether the proof holds and on which page, the page stating the company's own number when one it read does, and what the browser landed on when that was no site. */
 type Recheck = {
   check: NameAndPlaceCheck;
   proofAt: string | null;
   numberAt: string | null;
+  landedOn: Landing | null;
 };
 
 /** The proof read again on a page, or held by the rule with none to name. */
 function proofHolds(proofAt: string | null): Recheck {
-  return { check: 'holds', proofAt, numberAt: null };
+  return { check: 'holds', proofAt, numberAt: null, landedOn: null };
 }
 
 /** The company's own number on a page read: it outranks the proof being re-read. */
 function numberStated(at: string): Recheck {
-  return { check: 'holds', proofAt: at, numberAt: at };
+  return { check: 'holds', proofAt: at, numberAt: at, landedOn: null };
+}
+
+/** The browser landed on no site: the proof is unread, and nothing on that page is. */
+function noSiteShown(landedOn: Landing): Recheck {
+  return { check: 'unknown', proofAt: null, numberAt: null, landedOn };
+}
+
+/** What a browser's read of a homepage landed on when that is no site: a listed directory, as the sweep judges a fetch's host, or a parked page. */
+function landingOf(servedUrl: string, parked: boolean): Landing | null {
+  if (isAggregatorHost(hostOf(servedUrl))) return 'directory';
+  return parked ? 'parked' : null;
 }
 
 /** Origin of a URL, or null when it will not parse. */
@@ -299,7 +314,8 @@ function originOf(url: string): string | null {
  * registered postcode on a page naming the company, reads the rule on the
  * host that served the homepage, as the re-walk that found it did, and walks
  * that host's fixed paths ahead of the stored host's. The company's number on
- * any page read ends the re-check.
+ * any page read ends the re-check. So does a browser landing on a directory
+ * or a parked page: nothing there is read, and the sweep holds the row.
  */
 async function recheckProof(
   kind: ProofKind,
@@ -343,8 +359,11 @@ async function recheckProof(
         shown.html,
         NO_CROWDED,
       );
-      // A render that landed on a directory or a holding page reads nothing.
-      if (!seen.onAggregator && !seen.parked) {
+      // A directory or a parked page is no site: the sweep holds the row, with nothing on that page read.
+      const landedOn = landingOf(shown.url, seen.parked);
+      if (landedOn) return noSiteShown(landedOn);
+      // A platform's page reads nothing either, and holds nothing.
+      if (!seen.onAggregator) {
         home = seen;
         homeText = visibleText(shown.html);
         servedHome = shown.url;
@@ -432,7 +451,45 @@ async function recheckProof(
   if (verdict.kind === 'proved') return proofHolds(verdict.evidenceUrl);
   // Still asking for officers: they could not be read, so neither could the proof.
   if (verdict.kind === 'needs_officers') unread = true;
-  return { check: unread ? 'unknown' : 'gone', proofAt: null, numberAt: null };
+  return {
+    check: unread ? 'unknown' : 'gone',
+    proofAt: null,
+    numberAt: null,
+    landedOn: null,
+  };
+}
+
+/** The proof the sweep re-reads for a row, if any: a `name_and_place` row's rule, or a confirmed registry row's proof when its homepage shows no postcode. */
+function proofToRecheck(
+  evidence: WebsiteEvidence,
+  postcodeConfirms: boolean,
+): ProofKind | null {
+  if (evidence === 'name_and_place') return 'name_and_place';
+  // The homepage postcode confirms it by itself; only without one is the rest re-read.
+  return evidence === 'registry_confirmed' && !postcodeConfirms
+    ? 'confirmation'
+    : null;
+}
+
+/** Count what a re-check found: a landing on no site as a row held back, else a proof gone or unread under its kind. */
+function countRecheck(
+  summary: SweepSummary,
+  kind: ProofKind,
+  recheck: Recheck,
+): void {
+  if (recheck.landedOn) {
+    summary.noSiteThere++;
+    return;
+  }
+  const confirms = kind === 'confirmation';
+  if (recheck.check === 'gone') {
+    if (confirms) summary.confirmationGone++;
+    else summary.nameAndPlaceGone++;
+  }
+  if (recheck.check === 'unknown') {
+    if (confirms) summary.confirmationUnread++;
+    else summary.nameAndPlaceUnread++;
+  }
 }
 
 /**
@@ -547,14 +604,13 @@ export async function sweepWebsites(
         postcodeFoundAt = found.postcodeFoundAt;
 
         // A number promotes it and a directory or holding page holds it anyway.
-        if (
-          row.evidence === 'name_and_place' &&
-          !crnFoundAt &&
-          !onAggregator &&
-          !looksParkedPage
-        ) {
+        const kind =
+          crnFoundAt || onAggregator || looksParkedPage
+            ? null
+            : proofToRecheck(row.evidence, postcodeConfirms);
+        if (kind) {
           const recheck = await recheckProof(
-            'name_and_place',
+            kind,
             row,
             {
               url: fetched.attemptedUrl,
@@ -565,38 +621,18 @@ export async function sweepWebsites(
             deps,
             summary,
           );
-          nameAndPlace = recheck.check;
-          nameAndPlaceAt = recheck.proofAt;
           crnFoundAt = recheck.numberAt;
-          if (nameAndPlace === 'gone') summary.nameAndPlaceGone++;
-          if (nameAndPlace === 'unknown') summary.nameAndPlaceUnread++;
-        }
-
-        // The homepage postcode confirms it by itself; only without one is the rest re-read.
-        if (
-          row.evidence === 'registry_confirmed' &&
-          !postcodeConfirms &&
-          !crnFoundAt &&
-          !onAggregator &&
-          !looksParkedPage
-        ) {
-          const recheck = await recheckProof(
-            'confirmation',
-            row,
-            {
-              url: fetched.attemptedUrl,
-              servedUrl: fetched.url,
-              html: fetched.html,
-            },
-            config,
-            deps,
-            summary,
-          );
-          confirmation = recheck.check;
-          confirmationAt = recheck.proofAt;
-          crnFoundAt = recheck.numberAt;
-          if (confirmation === 'gone') summary.confirmationGone++;
-          if (confirmation === 'unknown') summary.confirmationUnread++;
+          // Where the browser landed is the homepage's shape, as where the fetch landed is.
+          if (recheck.landedOn === 'directory') onAggregator = true;
+          if (recheck.landedOn === 'parked') looksParkedPage = true;
+          if (kind === 'confirmation') {
+            confirmation = recheck.check;
+            confirmationAt = recheck.proofAt;
+          } else {
+            nameAndPlace = recheck.check;
+            nameAndPlaceAt = recheck.proofAt;
+          }
+          countRecheck(summary, kind, recheck);
         }
       }
 

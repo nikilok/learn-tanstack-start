@@ -76,14 +76,8 @@ async function answer(route: Route): Promise<void> {
   );
 }
 
-/** Load one page and read it once its scripts settle, keeping the page so the caller can close it. */
-async function load(
-  context: BrowserContext,
-  url: string,
-  opened: { page?: Page },
-): Promise<SiteFetch> {
-  const page = await context.newPage();
-  opened.page = page;
+/** Navigate a page already made, and read it once its scripts settle. */
+async function load(page: Page, url: string): Promise<SiteFetch> {
   const response = await page.goto(url, {
     waitUntil: 'domcontentloaded',
     timeout: LOAD_MS,
@@ -109,14 +103,25 @@ async function load(
   };
 }
 
-/** One page rendered under the time limit, the page closed whatever happens. */
-async function renderIn(
-  context: BrowserContext,
+/**
+ * One page rendered under the time limit, the page closed whatever happens.
+ * The page is made first and its turn at its address taken last, so it
+ * navigates on its turn; the wait for the turn is no part of the limit.
+ */
+export async function renderIn(
+  context: Pick<BrowserContext, 'newPage'>,
   url: string,
+  limitMs = RENDER_MS,
 ): Promise<SiteFetch> {
   const opened: { page?: Page } = {};
   try {
-    return await within(load(context, url, opened), RENDER_MS);
+    const started = Date.now();
+    const page = await within(context.newPage(), limitMs);
+    opened.page = page;
+    const left = limitMs - (Date.now() - started);
+    const blocked = await awaitTurn(url);
+    if (blocked) return failed(url, blocked);
+    return await within(load(page, url), left);
   } catch (error) {
     const timedOut = /time|limit/i.test(
       error instanceof Error ? error.message : '',
@@ -140,6 +145,44 @@ export type Renderer = {
   visit(): RenderVisit;
   close(): Promise<void>;
 };
+
+/** One visit's pages, in a context made on the first of them in whatever browser `running` gives. */
+export function visitIn(
+  running: () => Promise<Pick<Browser, 'newContext'>>,
+): RenderVisit {
+  let context: Promise<BrowserContext> | null = null;
+  /** The visit's context, made on its first page. */
+  const opened = () => {
+    context ??= (async () => {
+      const made = await (
+        await running()
+      ).newContext({
+        userAgent: USER_AGENT,
+        serviceWorkers: 'block',
+        acceptDownloads: false,
+      });
+      // On the context, so a popup a page opens is held to the same rule.
+      await made.route('**/*', answer);
+      return made;
+    })();
+    return context;
+  };
+  return {
+    async render(url) {
+      // Checked before a context is opened for it; its turn is taken in renderIn.
+      const blocked = await checkFetchable(url);
+      if (blocked) return failed(url, blocked);
+      return renderIn(await opened(), url);
+    },
+    async close() {
+      if (!context) return;
+      await within(
+        context.then((made) => made.close()),
+        CLOSE_MS,
+      ).catch(() => {});
+    },
+  };
+}
 
 /** Chromium behind the guard proxy, launched for renders until closed. */
 export async function launchRenderer(): Promise<Renderer> {
@@ -177,40 +220,7 @@ export async function launchRenderer(): Promise<Renderer> {
     return reopening;
   };
   return {
-    visit() {
-      let context: Promise<BrowserContext> | null = null;
-      /** The visit's context, made on its first page. */
-      const opened = () => {
-        context ??= (async () => {
-          const made = await (
-            await running()
-          ).newContext({
-            userAgent: USER_AGENT,
-            serviceWorkers: 'block',
-            acceptDownloads: false,
-          });
-          // On the context, so a popup a page opens is held to the same rule.
-          await made.route('**/*', answer);
-          return made;
-        })();
-        return context;
-      };
-      return {
-        async render(url) {
-          // A page opened in the browser takes a turn at its address, as one fetched does.
-          const blocked = await awaitTurn(url);
-          if (blocked) return failed(url, blocked);
-          return renderIn(await opened(), url);
-        },
-        async close() {
-          if (!context) return;
-          await within(
-            context.then((made) => made.close()),
-            CLOSE_MS,
-          ).catch(() => {});
-        },
-      };
-    },
+    visit: () => visitIn(running),
     async close() {
       await browser.close().catch(() => {});
       await proxy.close();

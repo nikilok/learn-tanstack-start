@@ -444,6 +444,56 @@ describe('sweepWebsites — a request held back at a paused address', () => {
     expect(h.applied).toEqual([]);
     expect(h.logs).toEqual(['  ERROR row 1: boom']);
   });
+
+  test('a homepage that answered shows our egress works even when its row then fails, held request or not', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    /** One short of the stop, a row whose homepage answers and whose pages then go wrong, and more unreachable rows. */
+    const run = async (
+      pages: (url: string, hold: () => FetchedPage) => Promise<FetchedPage>,
+    ) => {
+      const h = holding({
+        rows: [
+          ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+          row({ companyNumber: '00000100', url: ANSWERS }),
+          ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+        ],
+      });
+      h.deps.fetchPage = (url) => pages(url, () => h.hold(url));
+      return {
+        summary: await sweepWebsites(config({ maxRows: 60 }), h.deps),
+        applied: h.applied.length,
+      };
+    };
+
+    // A page held back, then the next one throwing.
+    let asked = 0;
+    const held = await run(async (_url, hold) => {
+      asked += 1;
+      if (asked === 1) return hold();
+      throw new Error('boom');
+    });
+    expect(held.summary).toMatchObject({
+      leftUnread: 1,
+      errored: 0,
+      systemicAbort: false,
+    });
+    expect(held.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+
+    // Nothing held: the row simply throws after its homepage answered.
+    const thrown = await run(async () => {
+      throw new Error('boom');
+    });
+    expect(thrown.summary).toMatchObject({
+      leftUnread: 0,
+      errored: 1,
+      systemicAbort: false,
+    });
+    expect(thrown.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
 });
 
 describe('sweepWebsites — dry run parity', () => {

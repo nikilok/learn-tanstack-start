@@ -486,7 +486,7 @@ export async function sweepWebsites(
     systemicAbort: false,
   };
   let failureStreak = 0;
-  // Homepages that answered, their rows judged or left unread: what the stop for broken egress reads.
+  // Homepages that answered, whatever became of their rows: what the stop for broken egress reads.
   let homepagesAnswered = 0;
 
   const rows = await deps.selectRows(config.maxRows);
@@ -497,6 +497,11 @@ export async function sweepWebsites(
     const heldBefore = deps.heldRequests?.() ?? 0;
     try {
       const fetched = await deps.fetchSite(row.url);
+      // An answered homepage shows our egress works, whatever later steps do to the row.
+      if (fetched.ok) {
+        homepagesAnswered++;
+        failureStreak = 0;
+      }
 
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
@@ -611,11 +616,6 @@ export async function sweepWebsites(
       // Not fully read, so not judged: the row is left as it was for the next pass.
       if ((deps.heldRequests?.() ?? 0) > heldBefore) {
         summary.leftUnread++;
-        // Its homepage answering still shows our egress works.
-        if (fetched.ok) {
-          homepagesAnswered++;
-          failureStreak = 0;
-        }
         continue;
       }
 
@@ -644,8 +644,6 @@ export async function sweepWebsites(
 
       if (fetched.ok) {
         summary.live++;
-        homepagesAnswered++;
-        failureStreak = 0;
       } else if (result.hostAnswered) {
         // A host that refused us is still a host that answered, so it says
         // nothing about our egress. Counting these tripped the breaker on the

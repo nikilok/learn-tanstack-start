@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir, userInfo } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** Each address and when it is next free, in epoch milliseconds. */
@@ -66,7 +66,7 @@ export type FileLedgerOptions = {
 
 /** Where this user's walks keep the ledger they share. */
 export function sharedLedgerDir(): string {
-  return join(tmpdir(), `sponsorsearch-walk-${userInfo().uid}`);
+  return join(tmpdir(), `sponsorsearch-walk-${process.getuid?.() ?? 0}`);
 }
 
 /** The error code of a failed file call, or its name. */

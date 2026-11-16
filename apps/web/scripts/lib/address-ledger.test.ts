@@ -246,4 +246,17 @@ describe('sharedLedgerDir', () => {
       sharedLedgerDir().startsWith(join(tmpdir(), 'sponsorsearch-walk-')),
     ).toBe(true);
   });
+
+  test('is a different place for each user', () => {
+    const mine = sharedLedgerDir();
+    const uid = spyOn(process, 'getuid').mockReturnValue(
+      (process.getuid?.() ?? 0) + 1,
+    );
+    try {
+      expect(sharedLedgerDir()).not.toBe(mine);
+    } finally {
+      uid.mockRestore();
+    }
+    expect(sharedLedgerDir()).toBe(mine);
+  });
 });

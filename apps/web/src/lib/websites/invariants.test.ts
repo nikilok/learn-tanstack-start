@@ -642,6 +642,32 @@ describe("state machine invariants — a confirmation's re-check", () => {
       status: 'verified',
     });
   });
+
+  /** I25. A homepage too thin to show an address protects a confirmation only from a pass that could not tell: a re-check that read the site as gone decides exactly as it would on a full page. */
+  test('I25 — a thin homepage never overrules a re-check that read the site as gone', () => {
+    const overruled: string[] = [];
+    const unprotected: string[] = [];
+    for (const c of CASES) {
+      const { input } = c;
+      const thin = revalidate({ ...input, pageTooThin: true });
+      if (input.confirmation === 'gone') {
+        if (JSON.stringify(thin) !== JSON.stringify(revalidate(input))) {
+          overruled.push(`${c.label} -> ${thin.evidence}`);
+        }
+        continue;
+      }
+      if (
+        input.evidence === 'registry_confirmed' &&
+        input.outcome.ok &&
+        !input.onAggregator &&
+        evidenceRank(thin.evidence) < evidenceRank('registry_confirmed')
+      ) {
+        unprotected.push(`${c.label} -> ${thin.evidence}`);
+      }
+    }
+    expect(overruled.slice(0, 10)).toEqual([]);
+    expect(unprotected.slice(0, 10)).toEqual([]);
+  });
 });
 
 describe('state machine invariants — the name_and_place re-check', () => {

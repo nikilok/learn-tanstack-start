@@ -199,19 +199,92 @@ describe('makeRewalkRemaining', () => {
     })();
     expect(left).toEqual({ none: 0, postcode: 0, registry: 7 });
     const text = flat(calls[0].text);
-    expect(text).toContain("source <> 'search' AND evidence = 'registry'");
-    expect(text).toContain('walked_at < $');
-    expect(calls[0].params).toEqual(
-      expect.arrayContaining(['registry', '2026-11-16 00:00:00']),
-    );
-    // Asked for nothing in particular: the registry arm stays shut.
+    expect(text).toContain("w.source <> 'search' AND w.evidence = 'registry'");
+    expect(text).toMatch(/SELECT \$\d+::timestamp AS cutoff\) reread/);
+    expect(text).toContain('w.walked_at < reread.cutoff');
+    expect(calls[0].params).toEqual(['2026-11-16 00:00:00']);
+    // Asked for nothing in particular: no registry row is counted.
     const plain = makeFakeSql([{ none: 3, postcode: 2 }]);
     expect(await makeRewalkRemaining(plain.sql)()).toEqual({
       none: 3,
       postcode: 2,
       registry: 0,
     });
-    expect(plain.calls[0].params).not.toContain('registry');
+    expect(flat(plain.calls[0].text)).not.toContain(
+      "w.evidence = 'registry' AND",
+    );
+    expect(plain.calls[0].params).toEqual([null]);
+  });
+});
+
+describe('one declaration of which rows are walked', () => {
+  /** The condition between a query's last `from` and the `to` that follows it. */
+  const between = (text: string, from: string, to: string) => {
+    const end = text.indexOf(to);
+    return text.slice(text.lastIndexOf(from, end) + from.length, end).trim();
+  };
+  const SELECTIONS = [
+    undefined,
+    'none',
+    'postcode_on_page',
+    'registry',
+  ] as const;
+
+  test('the resumable selector, the seeded sample and the count take the same settled rows', async () => {
+    for (const evidence of SELECTIONS) {
+      const seeded = makeFakeSql();
+      await makeSelectRewalk(seeded.sql, { evidence, seed: 's' })(10);
+      const settled = between(
+        flat(seeded.calls[0].text),
+        ' WHERE ',
+        ' ORDER BY md5(',
+      );
+      expect(settled).toMatch(/^\(\(w\.source/);
+      const resumable = makeFakeSql();
+      await makeSelectRewalk(resumable.sql, { evidence })(10);
+      expect(flat(resumable.calls[0].text)).toContain(`WHERE ${settled} AND`);
+      const count = makeFakeSql([{}]);
+      await makeRewalkRemaining(count.sql, { evidence })();
+      expect(flat(count.calls[0].text)).toEndWith(`AND ${settled} `);
+    }
+  });
+
+  test('each selection names its own kinds and no other', async () => {
+    const kindsOf = async (evidence: (typeof SELECTIONS)[number]) => {
+      const { sql, calls } = makeFakeSql();
+      await makeSelectRewalk(sql, { evidence })(10);
+      return [...flat(calls[0].text).matchAll(/w\.evidence = '(\w+)'/g)].map(
+        (match) => match[1],
+      );
+    };
+    expect(await kindsOf(undefined)).toEqual(['none', 'postcode_on_page']);
+    expect(await kindsOf('none')).toEqual(['none']);
+    expect(await kindsOf('postcode_on_page')).toEqual(['postcode_on_page']);
+    expect(await kindsOf('registry')).toEqual(['registry']);
+  });
+
+  test('the selector and the count read the walk marker and the cutoff the same way', async () => {
+    const marker = (text: string) =>
+      /\(w\.walk_version IS NULL[^)]*\)/.exec(flat(text))?.[0];
+    const resumable = makeFakeSql();
+    await makeSelectRewalk(resumable.sql, {
+      rereadBefore: '2026-11-16 00:00:00',
+    })(10);
+    const count = makeFakeSql([{}]);
+    await makeRewalkRemaining(count.sql, {
+      rereadBefore: '2026-11-16 00:00:00',
+    })();
+    expect(marker(resumable.calls[0].text)).toBe(
+      `(w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION} OR w.walked_at < reread.cutoff)`,
+    );
+    expect(marker(count.calls[0].text)).toBe(marker(resumable.calls[0].text));
+    for (const { calls } of [resumable, count]) {
+      // Each binds the cutoff the marker compares against, as a value.
+      expect(flat(calls[0].text)).toMatch(
+        /CROSS JOIN \(SELECT \$\d+::timestamp AS cutoff\) reread/,
+      );
+      expect(calls[0].params).toContain('2026-11-16 00:00:00');
+    }
   });
 });
 
@@ -220,13 +293,14 @@ describe('makeSelectRewalk', () => {
     const { sql, calls } = makeFakeSql();
     await makeSelectRewalk(sql, { shard: { index: 2, count: 8 } })(100);
     const text = flat(calls[0].text);
-    expect(text).toContain('walk_version IS NULL OR w.walk_version <');
+    expect(text).toContain(
+      `w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION}`,
+    );
     expect(text).toMatch(
       /mod\( \('x' \|\| left\(md5\(w\.company_number\), 7\)\)::bit\(28\)::int/,
     );
-    expect(calls[0].params).toEqual(
-      expect.arrayContaining([CURRENT_WALK_VERSION, 8, 2, 100]),
-    );
+    // The cutoff, unset; then the slice and the limit.
+    expect(calls[0].params).toEqual([null, 8, 2, 100]);
   });
 
   test('reads how many attempts a row has spent, so the network gate counts first attempts', async () => {
@@ -308,27 +382,27 @@ describe('makeSelectRewalk', () => {
     const { sql, calls } = makeFakeSql([{ none: 0, postcode: 0 }]);
     await makeRewalkRemaining(sql)();
     expect(flat(calls[0].text)).toContain(
-      "evidence = 'none' AND status = 'none' AND url IS NULL",
+      "w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL",
     );
   });
 
   test('takes registry rows only when asked for, and only those no page has confirmed', async () => {
+    const REGISTRY =
+      "(w.source <> 'search' AND w.evidence = 'registry' AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL)";
     for (const selection of [{}, { seed: 's' }]) {
       const plain = makeFakeSql();
       await makeSelectRewalk(plain.sql, selection)(10);
-      const text = flat(plain.calls[0].text);
-      expect(text).toContain(
-        "w.source <> 'search' AND w.evidence = 'registry' AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL",
-      );
-      // The arm compares the selection to 'registry', so an unset one shuts it.
-      expect(text).toMatch(/AND \$\d+::text = 'registry'\)/);
-      expect(plain.calls[0].params).not.toContain('registry');
+      // Unasked, no registry row is named at all.
+      expect(flat(plain.calls[0].text)).not.toContain('registry');
       const asked = makeFakeSql();
       await makeSelectRewalk(asked.sql, {
         ...selection,
         evidence: 'registry',
       })(10);
-      expect(asked.calls[0].params).toContain('registry');
+      const text = flat(asked.calls[0].text);
+      expect(text).toContain(`WHERE (${REGISTRY})`);
+      // And nothing else is: a search row is never walked as a registry row.
+      expect(text).not.toContain("w.source = 'search'");
     }
   });
 
@@ -346,8 +420,9 @@ describe('makeSelectRewalk', () => {
     const { sql, calls } = makeFakeSql();
     await makeSelectRewalk(sql, { rereadBefore: '2026-11-16 00:00:00' })(10);
     const text = flat(calls[0].text);
-    expect(text).toMatch(
-      /w\.walk_version IS NULL OR w\.walk_version < \$\d+ OR w\.walked_at < \$\d+::timestamp/,
+    expect(text).toMatch(/SELECT \$\d+::timestamp AS cutoff\) reread/);
+    expect(text).toContain(
+      `w.walk_version < ${CURRENT_WALK_VERSION} OR w.walked_at < reread.cutoff`,
     );
     expect(calls[0].params).toContain('2026-11-16 00:00:00');
     // Without a cutoff the comparison is against NULL, which takes no row.
@@ -359,9 +434,15 @@ describe('makeSelectRewalk', () => {
 
   test('a seeded sample ignores the marker, so it can run before the migration', async () => {
     const { sql, calls } = makeFakeSql();
-    await makeSelectRewalk(sql, { seed: 'rewalk-2026-10-20' })(150);
+    await makeSelectRewalk(sql, {
+      seed: 'rewalk-2026-10-20',
+      rereadBefore: '2026-11-16 00:00:00',
+    })(150);
     const text = flat(calls[0].text);
     expect(text).not.toContain('walk_version');
+    // Nor a cutoff: without one bound, the marker could not be applied to it.
+    expect(text).not.toContain('reread');
+    expect(calls[0].params).toEqual(['rewalk-2026-10-20', 150]);
     expect(text).toContain('ORDER BY md5(w.company_number ||');
   });
 });

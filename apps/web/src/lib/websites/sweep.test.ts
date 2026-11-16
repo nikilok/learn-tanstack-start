@@ -942,6 +942,51 @@ describe("a name_and_place row's re-check", () => {
     expect(fetched).toEqual([]);
   });
 
+  test('its number on a page the re-check reads promotes it too', async () => {
+    // The name left the proof page, which now states the number instead.
+    const { result, summary, fetched } = await sweepOf(
+      {},
+      html(`${filler} Harrogate`),
+      {
+        [PROOF]: live(PROOF, html(`Company number 09990117. ${filler}`)),
+      },
+    );
+    expect(result).toMatchObject({
+      status: 'verified',
+      evidence: 'crn_on_page',
+      confidence: '0.990',
+    });
+    expect(summary).toMatchObject({ promoted: 1, nameAndPlaceGone: 0 });
+    expect(fetched).toEqual([PROOF]);
+  });
+
+  test('its walk stays on the stored host, whichever host serves the homepage', async () => {
+    const fetched: string[] = [];
+    const h = harness({
+      rows: [proved],
+      officers: async () => [],
+      fetchSite: async (url) => ({
+        ok: true,
+        url: 'https://www.quillmere-group.co.uk/',
+        attemptedUrl: url,
+        html: html(`${filler} Harrogate`),
+      }),
+      fetchPage: async (url) => {
+        fetched.push(url);
+        return {
+          ok: false,
+          reason: 'http_error',
+          status: 404,
+          attemptedUrl: url,
+        };
+      },
+    });
+    await sweepWebsites(config(), h.deps);
+    // The proof page, then the nine fixed paths, bar the proof page itself.
+    expect(fetched).toHaveLength(9);
+    expect(fetched.every((url) => url.startsWith(SITE))).toBe(true);
+  });
+
   test('other tiers are never re-checked', async () => {
     const { fetched } = await sweepOf(
       { evidence: 'postcode_on_page', confidence: '0.850' },
@@ -1164,6 +1209,251 @@ describe("a registry row's confirmation, re-read when the homepage shows no post
       confirmationRendered: 1,
       nameAndPlaceRendered: 0,
       confirmationGone: 0,
+    });
+  });
+
+  describe('a homepage only a browser can read', () => {
+    const shell = '<html><body><div id="app"></div></body></html>';
+    const notThere = (url: string): FetchedPage => ({
+      ok: false,
+      reason: 'http_error',
+      status: 404,
+      attemptedUrl: url,
+    });
+
+    test('read there as showing nothing, with every other page gone: withdrawn', async () => {
+      // The plain fetch is too thin to say; the browser read the site, and it is not there.
+      const { result, summary } = await sweepOf(
+        {},
+        shell,
+        {},
+        {
+          renderPage: async (url) =>
+            url === SITE ? live(url, html(filler)) : notThere(url),
+        },
+      );
+      expect(result).toMatchObject({
+        evidence: 'registry',
+        confidence: '0.950',
+      });
+      expect(summary).toMatchObject({
+        confirmationRendered: 1,
+        confirmationGone: 1,
+        confirmationUnread: 0,
+        demoted: 1,
+      });
+    });
+
+    test('a browser that cannot read it either withdraws nothing', async () => {
+      const { result, summary } = await sweepOf(
+        {},
+        shell,
+        {},
+        {
+          renderPage: async (url) => ({
+            ok: false,
+            reason: 'timeout',
+            attemptedUrl: url,
+          }),
+        },
+      );
+      expect(result.evidence).toBe('registry_confirmed');
+      expect(summary).toMatchObject({
+        confirmationGone: 0,
+        confirmationUnread: 1,
+        demoted: 0,
+      });
+    });
+
+    test('its number shown there promotes the row, on the address the row stores', async () => {
+      const { result, summary } = await sweepOf(
+        {},
+        shell,
+        {},
+        {
+          renderPage: async (url) =>
+            url === SITE
+              ? {
+                  ok: true,
+                  // The browser landed on the site's own welcome page.
+                  url: `${SITE}/welcome`,
+                  attemptedUrl: url,
+                  html: html(`Company number 09990117. ${filler}`),
+                }
+              : notThere(url),
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'crn_on_page',
+        confidence: '0.990',
+        evidenceUrl: SITE,
+      });
+      expect(summary).toMatchObject({ promoted: 1, confirmationGone: 0 });
+    });
+  });
+
+  describe("the company's own number on a page the re-read reaches", () => {
+    const NUMBER = 'Registered in England, company number 09990117.';
+
+    test('outranks a confirmation that still holds there', async () => {
+      const { result, summary } = await sweepOf({}, html(filler), {
+        [PROOF]: live(PROOF, html(`${ADDRESS} ${NUMBER} ${filler}`)),
+      });
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'crn_on_page',
+        confidence: '0.990',
+        evidenceUrl: PROOF,
+      });
+      expect(summary).toMatchObject({ promoted: 1, demoted: 0 });
+    });
+
+    test('keeps a row whose confirmation is gone from being withdrawn', async () => {
+      // The address left the site; a later page of the walk states the number.
+      const terms = `${SITE}/terms`;
+      const { result, summary } = await sweepOf({}, html(filler), {
+        [PROOF]: live(PROOF, html(filler)),
+        [terms]: live(terms, html(`${NUMBER} ${filler}`)),
+      });
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'crn_on_page',
+        evidenceUrl: terms,
+      });
+      expect(summary).toMatchObject({
+        promoted: 1,
+        demoted: 0,
+        confirmationGone: 0,
+        confirmationUnread: 0,
+      });
+    });
+
+    test('a path that lands on a directory states nothing', async () => {
+      // A register's page about the company carries its number; it is not the site naming itself.
+      const listing =
+        'https://find-and-update.company-information.service.gov.uk/company/09990117';
+      const { result } = await sweepOf(
+        {},
+        html(filler),
+        {
+          [PROOF]: {
+            ok: true,
+            url: listing,
+            attemptedUrl: PROOF,
+            html: html(`${NUMBER} ${filler}`),
+          },
+        },
+        // The shipped check, which reads the number on that page.
+        { hasCompanyNumber: pageShowsCompanyNumber },
+      );
+      expect(result.evidence).toBe('registry');
+    });
+  });
+
+  describe('a stored address that another host serves', () => {
+    const OLD = 'https://www.oldbrand.co.uk';
+    /** The stored host forwards its homepage to the company's own site; `pages` answer, the rest are not there. */
+    const forwarded = async (pages: Record<string, FetchedPage>) => {
+      const fetched: string[] = [];
+      const h = harness({
+        rows: [{ ...confirmed, url: OLD, evidenceUrl: null }],
+        officers: async () => [],
+        fetchSite: async (url) => ({
+          ok: true,
+          url: `${SITE}/`,
+          attemptedUrl: url,
+          html: html(filler),
+        }),
+        fetchPage: async (url) => {
+          fetched.push(url);
+          return (
+            pages[url] ?? {
+              ok: false,
+              reason: 'http_error',
+              status: 404,
+              attemptedUrl: url,
+            }
+          );
+        },
+      });
+      const summary = await sweepWebsites(config(), h.deps);
+      const result = h.applied[0].result as {
+        evidence: string;
+        evidenceUrl: string | null;
+      };
+      return { summary, result, fetched };
+    };
+
+    test("is read on that host's own pages before anything is withdrawn", async () => {
+      // The stored host answers none of its own paths; the address is on the served site's contact page.
+      const { result, summary, fetched } = await forwarded({
+        [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)),
+      });
+      expect(result).toMatchObject({
+        evidence: 'registry_confirmed',
+        evidenceUrl: PROOF,
+      });
+      expect(summary).toMatchObject({ confirmationGone: 0, demoted: 0 });
+      expect(fetched.every((url) => url.startsWith(SITE))).toBe(true);
+    });
+
+    test("and on the stored host's paths too, which may map them elsewhere", async () => {
+      const moved = `${SITE}/get-in-touch`;
+      const { result } = await forwarded({
+        [`${OLD}/contact`]: {
+          ok: true,
+          url: moved,
+          attemptedUrl: `${OLD}/contact`,
+          html: html(`${ADDRESS} ${filler}`),
+        },
+      });
+      expect(result).toMatchObject({
+        evidence: 'registry_confirmed',
+        evidenceUrl: moved,
+      });
+    });
+
+    test('gone from both hosts: withdrawn, each fixed path asked for on each', async () => {
+      const { result, summary, fetched } = await forwarded({});
+      expect(result.evidence).toBe('registry');
+      expect(summary).toMatchObject({ confirmationGone: 1, demoted: 1 });
+      expect(fetched).toHaveLength(18);
+      expect(fetched.slice(0, 9).every((url) => url.startsWith(SITE))).toBe(
+        true,
+      );
+      expect(fetched.slice(9).every((url) => url.startsWith(OLD))).toBe(true);
+    });
+
+    test('a host that differs only by www is one site, read once', async () => {
+      const fetched: string[] = [];
+      const h = harness({
+        rows: [
+          {
+            ...confirmed,
+            url: 'https://quillmere.co.uk',
+            evidenceUrl: null,
+          },
+        ],
+        officers: async () => [],
+        fetchSite: async (url) => ({
+          ok: true,
+          url: `${SITE}/`,
+          attemptedUrl: url,
+          html: html(filler),
+        }),
+        fetchPage: async (url) => {
+          fetched.push(url);
+          return {
+            ok: false,
+            reason: 'http_error',
+            status: 404,
+            attemptedUrl: url,
+          };
+        },
+      });
+      await sweepWebsites(config(), h.deps);
+      expect(fetched).toHaveLength(9);
     });
   });
 });

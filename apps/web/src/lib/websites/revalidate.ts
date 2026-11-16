@@ -74,7 +74,8 @@ export type RevalidateInput = {
    * Absence of the postcode on such a page is not evidence the site stopped
    * publishing it, so it must not withdraw a confirmation. Without this a
    * single interstitial unpublishes the link and the next clean pass restores
-   * it, which reads to a visitor as a company website that flickers.
+   * it, which reads to a visitor as a company website that flickers. A
+   * `confirmation` read as gone still withdraws: that re-check read the site.
    */
   pageTooThin?: boolean;
   /** The page is a holding page (looksPlaceholder): read for `assessed` rows, which it holds back. */
@@ -329,7 +330,8 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     note = 'live; what confirmed the register is still on the site';
   } else if (
     evidence === 'registry_confirmed' &&
-    !input.pageTooThin &&
+    // A thin homepage shows no address either way; a re-check that read the site as gone decides it.
+    (!input.pageTooThin || input.confirmation === 'gone') &&
     // Unread is not gone: a page that would not load withdraws nothing.
     input.confirmation !== 'unknown'
   ) {

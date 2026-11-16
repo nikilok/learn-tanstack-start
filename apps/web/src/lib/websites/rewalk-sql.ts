@@ -30,6 +30,31 @@ export type RewalkSelection = {
   rereadBefore?: string;
 };
 
+/** The settled rows of each kind the re-walk reads. Constant SQL text, interpolated raw; the row is `w`. */
+const SETTLED: Record<NonNullable<RewalkSelection['evidence']>, string> = {
+  none: `(w.source = 'search' AND w.evidence = 'none' AND w.status = 'none'
+    AND w.url IS NULL AND jsonb_typeof(w.candidates) = 'array')`,
+  postcode_on_page: `(w.source = 'search' AND w.evidence = 'postcode_on_page'
+    AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL)`,
+  registry: `(w.source <> 'search' AND w.evidence = 'registry'
+    AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL)`,
+};
+
+/** The rows a selection takes: the kind asked for, else the two search kinds, so registry rows only when asked for. One declaration for both selectors and the count. */
+function settledRows(evidence?: RewalkSelection['evidence']): string {
+  const kinds = evidence ? [evidence] : (['none', 'postcode_on_page'] as const);
+  return `(${kinds.map((kind) => SETTLED[kind]).join(' OR ')})`;
+}
+
+/**
+ * A row the current walk has not read, or last read before the cutoff. One
+ * declaration for the resumable selector and the count; a seeded sample binds
+ * no cutoff, so it cannot take the marker. Constant SQL text, interpolated
+ * raw; the row is `w`, the cutoff `reread.cutoff`.
+ */
+const UNREAD = `(w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION}
+  OR w.walked_at < reread.cutoff)`;
+
 /** Rows from the database, typed. */
 function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
   return rows.map((r) => ({
@@ -55,7 +80,7 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
  */
 export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
   const shard = selection.shard ?? WHOLE_SET;
-  const evidence = selection.evidence ?? null;
+  const settled = settledRows(selection.evidence);
   const rereadBefore = selection.rereadBefore ?? null;
   return async (maxRows: number): Promise<RewalkRow[]> => {
     if (selection.seed) {
@@ -70,19 +95,7 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
-          WHERE (
-              (w.source = 'search'
-                AND w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
-                AND jsonb_typeof(w.candidates) = 'array'
-                AND (${evidence}::text IS NULL OR ${evidence}::text = 'none'))
-              OR (w.source = 'search' AND w.evidence = 'postcode_on_page'
-                AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-                AND (${evidence}::text IS NULL
-                  OR ${evidence}::text = 'postcode_on_page'))
-              OR (w.source <> 'search' AND w.evidence = 'registry'
-                AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-                AND ${evidence}::text = 'registry')
-            )
+          WHERE ${sql.unsafe(settled)}
           ORDER BY md5(w.company_number || ${selection.seed}::text), w.company_number
           LIMIT ${maxRows}
         `,
@@ -98,21 +111,9 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)
-        WHERE (
-            (w.source = 'search'
-              AND w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
-              AND jsonb_typeof(w.candidates) = 'array'
-              AND (${evidence}::text IS NULL OR ${evidence}::text = 'none'))
-            OR (w.source = 'search' AND w.evidence = 'postcode_on_page'
-              AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-              AND (${evidence}::text IS NULL
-                OR ${evidence}::text = 'postcode_on_page'))
-            OR (w.source <> 'search' AND w.evidence = 'registry'
-              AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-              AND ${evidence}::text = 'registry')
-          )
-          AND (w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION}
-            OR w.walked_at < ${rereadBefore}::timestamp)
+        CROSS JOIN (SELECT ${rereadBefore}::timestamp AS cutoff) reread
+        WHERE ${sql.unsafe(settled)}
+          AND ${sql.unsafe(UNREAD)}
           AND mod(
             ('x' || left(md5(w.company_number), 7))::bit(28)::int,
             ${shard.count}::int
@@ -255,7 +256,7 @@ export function makeRewalkRemaining(
   sql: Sql,
   selection: Pick<RewalkSelection, 'evidence' | 'rereadBefore'> = {},
 ) {
-  const evidence = selection.evidence ?? null;
+  const settled = settledRows(selection.evidence);
   const rereadBefore = selection.rereadBefore ?? null;
   return async (): Promise<{
     none: number;
@@ -264,28 +265,16 @@ export function makeRewalkRemaining(
   }> => {
     const [r] = await sql`
       SELECT
-        count(*) FILTER (WHERE evidence = 'none')::int AS none,
-        count(*) FILTER (WHERE evidence = 'postcode_on_page')::int AS postcode,
-        count(*) FILTER (WHERE evidence = 'registry')::int AS registry
+        count(*) FILTER (WHERE w.evidence = 'none')::int AS none,
+        count(*) FILTER (WHERE w.evidence = 'postcode_on_page')::int AS postcode,
+        count(*) FILTER (WHERE w.evidence = 'registry')::int AS registry
       FROM company_websites w
+      CROSS JOIN (SELECT ${rereadBefore}::timestamp AS cutoff) reread
       -- The selector joins the profile, so only rows it can return count.
       WHERE EXISTS (SELECT 1 FROM companies_house_profiles p
           WHERE p.company_number = w.company_number)
-        AND (walk_version IS NULL OR walk_version < ${CURRENT_WALK_VERSION}
-          OR walked_at < ${rereadBefore}::timestamp)
-        AND (
-          (source = 'search'
-            AND evidence = 'none' AND status = 'none' AND url IS NULL
-            AND jsonb_typeof(candidates) = 'array'
-            AND (${evidence}::text IS NULL OR ${evidence}::text = 'none'))
-          OR (source = 'search' AND evidence = 'postcode_on_page'
-            AND status IN ('verified', 'unreachable') AND url IS NOT NULL
-            AND (${evidence}::text IS NULL
-              OR ${evidence}::text = 'postcode_on_page'))
-          OR (source <> 'search' AND evidence = 'registry'
-            AND status IN ('verified', 'unreachable') AND url IS NOT NULL
-            AND ${evidence}::text = 'registry')
-        )
+        AND ${sql.unsafe(UNREAD)}
+        AND ${sql.unsafe(settled)}
     `;
     return {
       none: Number(r.none ?? 0),

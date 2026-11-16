@@ -440,6 +440,23 @@ describe('a confirmation found beyond the homepage is re-read, not assumed', () 
     expect(result.evidenceUrl).toBeNull();
   });
 
+  test('a thin homepage withholds a withdrawal only while the site went unread', () => {
+    // The plain fetch got a script shell; the re-check read the site in a browser.
+    const gone = confirmed({ pageTooThin: true, confirmation: 'gone' });
+    expect(gone.evidence).toBe('registry');
+    expect(gone.confidence).toBe('0.950');
+    expect(gone.note).toContain(
+      'nothing on the site confirms the register any more',
+    );
+    expect(
+      confirmed({ pageTooThin: true, confirmation: 'unknown' }).evidence,
+    ).toBe('registry_confirmed');
+    // No re-check at all: the thin page alone says nothing.
+    expect(confirmed({ pageTooThin: true }).evidence).toBe(
+      'registry_confirmed',
+    );
+  });
+
   test('the homepage address still wins, and keeps its own proof page', () => {
     const result = confirmed({
       postcodeConfirms: true,

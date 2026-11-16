@@ -101,6 +101,64 @@ describe('makeAddressGate: turns', () => {
     expect(await gate.enter([A])).toBe(true);
     expect(waits).toEqual([]);
   });
+
+  test('two walks woken together, one of them late for its turn: the late one takes a new turn, and they never go together', async () => {
+    let clock = 0;
+    const ledger = memoryLedger();
+    const asleep: (() => void)[] = [];
+    /** Wake every request now waiting. */
+    const wake = () => {
+      for (const resume of asleep.splice(0)) resume();
+    };
+    /** A walk on the shared ledger whose waits end only when the test wakes them. */
+    const walk = () =>
+      makeAddressGate({
+        gapMs: 1000,
+        ledger,
+        now: () => clock,
+        sleep: () => new Promise<void>((resolve) => asleep.push(resolve)),
+      });
+    const one = walk();
+    const two = walk();
+    await one.enter([A]);
+    const sent: string[] = [];
+    // Turns at 1000 and 2000.
+    const first = one.enter([A]).then(() => sent.push(`one at ${clock}`));
+    const second = two.enter([A]).then(() => sent.push(`two at ${clock}`));
+    // The machine slept: both wake at 2000, the first a second late.
+    clock = 2000;
+    wake();
+    await second;
+    expect(sent).toEqual(['two at 2000']);
+    clock = 3000;
+    wake();
+    await first;
+    expect(sent).toEqual(['two at 2000', 'one at 3000']);
+  });
+
+  test('a request up to half a gap late still goes; any later and it takes a new turn', async () => {
+    /** When the second of two requests is let through, having woken `late` ms after its turn. */
+    const sentAt = async (late: number) => {
+      let clock = 0;
+      let oversleep = late;
+      const gate = makeAddressGate({
+        gapMs: 1000,
+        ledger: memoryLedger(),
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms + oversleep;
+          oversleep = 0;
+        },
+      });
+      await gate.enter([A]);
+      await gate.enter([A]);
+      return clock;
+    };
+    expect(await sentAt(0)).toBe(1000);
+    expect(await sentAt(500)).toBe(1500);
+    // Too late: it asks again, and is given the turn a gap after the one it missed.
+    expect(await sentAt(501)).toBe(2000);
+  });
 });
 
 describe('makeAddressGate: an address that stops answering', () => {

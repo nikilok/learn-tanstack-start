@@ -118,6 +118,12 @@ export function lostNetwork(summary: RewalkSummary): boolean {
   );
 }
 
+/** Count a row left exactly as it was, a request of its held back: not judged, and not an attempt. */
+function leaveUnread(summary: RewalkSummary, firstAttempt: boolean): void {
+  summary.leftUnread += 1;
+  if (firstAttempt) summary.firstAttempts -= 1;
+}
+
 /** Heartbeat interval. Counts only, never a company or a URL. */
 const HEARTBEAT_ROWS = 25;
 
@@ -312,8 +318,7 @@ export async function rewalkWebsites(
 
       // Not fully read, so not judged: the row keeps its answer and its attempts for the next run.
       if ((deps.heldRequests?.() ?? 0) > heldBefore) {
-        summary.leftUnread += 1;
-        if (firstAttempt) summary.firstAttempts -= 1;
+        leaveUnread(summary, firstAttempt);
         continue;
       }
 
@@ -351,10 +356,15 @@ export async function rewalkWebsites(
       }
     } catch (error) {
       // Reason only, never the company or the URL.
-      summary.errored += 1;
       deps.log(
         `  row failed: ${error instanceof Error ? error.name : 'unknown'}`,
       );
+      // Whatever else went wrong, a row with a request held back keeps its attempts.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) {
+        leaveUnread(summary, firstAttempt);
+        continue;
+      }
+      summary.errored += 1;
       // Spend an attempt, so a row that always throws cannot lead every slice;
       // best effort, as a database outage is already counted above.
       if (!config.dryRun) await deps.markUnreadable(row).catch(() => {});

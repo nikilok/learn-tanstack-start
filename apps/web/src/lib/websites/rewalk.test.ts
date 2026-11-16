@@ -814,6 +814,29 @@ describe('rewalkWebsites: a request held back at a paused address', () => {
     expect(summary.firstAttemptsUnreadable).toBe(26);
     expect(lostNetwork(summary)).toBe(true);
   });
+
+  test('a held row that then fails some other way is still left unread: logged, no attempt spent, not an error', async () => {
+    const logs: string[] = [];
+    const h = holding(
+      ['https://paused.example'],
+      {
+        rows: [noneRow({ candidates: ['https://paused.example'] })],
+        recordStated: async () => {
+          throw new Error('database down');
+        },
+        log: (message) => logs.push(message),
+      },
+      (url) => probe({ url, stated: [stated('paused.example', '03135910')] }),
+    );
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({
+      leftUnread: 1,
+      errored: 0,
+      firstAttempts: 0,
+    });
+    expect(h.unreadable).toEqual([]);
+    expect(logs).toEqual(['  row failed: Error']);
+  });
 });
 
 describe('lostNetwork', () => {

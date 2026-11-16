@@ -1,9 +1,10 @@
-import { afterAll, afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { afterAll, afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { AddressGate, Outcome } from './address-gate.ts';
+import { currentTurns } from './address-ledger.ts';
 import {
   awaitTurn,
   checkFetchable,
@@ -12,6 +13,7 @@ import {
   fetchPage,
   fetchSite,
   paceByAddress,
+  USER_AGENT,
 } from './web-fetch.ts';
 
 // Documentation addresses and reserved names: nobody's.
@@ -37,6 +39,8 @@ const moved = (location: string) =>
   new Response(null, { status: 301, headers: { location } });
 
 let restore: (() => void) | undefined;
+/** How each request of the newest fixture was sent. */
+let sent: RequestInit[] = [];
 afterEach(() => {
   restore?.();
   restore = undefined;
@@ -68,14 +72,18 @@ function network(
     heldRequests: () => 0,
     paused: () => 0,
   };
+  // One fixture at a time: the last one's undo puts back what was there before any.
+  restore?.();
+  sent = [];
   restore = configureFetch({
     lookup: async (hostname) => {
       const addresses = HOSTS[hostname];
       if (!addresses) throw new Error('ENOTFOUND');
       return addresses.map((address) => ({ address }));
     },
-    fetch: async (url) => {
+    fetch: async (url, init) => {
       events.push(`fetch ${url}`);
+      sent.push(init);
       const reply = replies[url] ?? page('', 404);
       if (reply instanceof Error) throw reply;
       return reply;
@@ -104,6 +112,39 @@ describe('fetchPage at the address gate', () => {
       'fetch https://one.example/',
       `answered one.example ${ONE}`,
     ]);
+    // Sent as ever: under our name, with a time limit, and redirects left for the fetcher to follow by hand.
+    expect(sent.map((init) => init.headers)).toEqual([
+      { 'user-agent': USER_AGENT },
+      { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' },
+    ]);
+    expect(sent.map((init) => init.redirect)).toEqual(['manual', 'manual']);
+    expect(sent.every((init) => init.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  test("a request's time limit starts when its turn comes, not while it waits for one", async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    let events = network({ 'https://one.example/': page('<p>Hello</p>') });
+    const limit = spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      events.push(`limit ${ms}`);
+      return real(ms);
+    });
+    try {
+      await fetchPage('https://one.example/');
+      expect(events.filter((event) => !event.startsWith('answered'))).toEqual([
+        `turn ${ONE}`,
+        'limit 8000',
+        'fetch https://one.example/robots.txt',
+        `turn ${ONE}`,
+        'limit 12000',
+        'fetch https://one.example/',
+      ]);
+      // A turn that is refused starts no limit at all.
+      events = network({}, { refuse: 1 });
+      await fetchPage('https://one.example/');
+      expect(events).toEqual([`refused ${ONE}`]);
+    } finally {
+      limit.mockRestore();
+    }
   });
 
   test("a redirect to another host takes its turn at that host's addresses", async () => {
@@ -283,6 +324,30 @@ describe('a page opened some other way', () => {
 });
 
 describe('configureFetch', () => {
+  test('a test that installs several fixtures leaves none of them behind', async () => {
+    const before: string[] = [];
+    const undo = configureFetch({
+      lookup: async () => [{ address: '192.0.2.10' }],
+      fetch: async (url) => {
+        before.push(url);
+        return page('');
+      },
+      gate: null,
+    });
+    try {
+      const first = network({});
+      const second = network({});
+      restore?.();
+      restore = undefined;
+      await fetchPage('https://one.example/');
+      expect(first).toEqual([]);
+      expect(second).toEqual([]);
+      expect(before).toHaveLength(2);
+    } finally {
+      undo();
+    }
+  });
+
   test('gives back what undoes it, to whatever was installed before', async () => {
     const outer = network({});
     const undo = configureFetch({
@@ -312,9 +377,7 @@ describe('paceByAddress', () => {
     const gate = paceByAddress(60_000, () => {}, dir);
     await fetchPage('https://two.example/');
     expect(events).toHaveLength(3);
-    const turns: Record<string, number> = JSON.parse(
-      readFileSync(join(dir, 'turns.json'), 'utf8'),
-    );
+    const turns = currentTurns(dir);
     expect(Object.keys(turns)).toEqual(['2001:db8::20']);
     expect(turns['2001:db8::20']).toBeGreaterThanOrEqual(before + 60_000);
     expect(gate.heldRequests()).toBe(0);

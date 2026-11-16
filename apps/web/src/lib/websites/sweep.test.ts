@@ -408,6 +408,42 @@ describe('sweepWebsites — a request held back at a paused address', () => {
     expect(ran.systemicAbort).toBe(false);
     expect(short.applied).toHaveLength(SYSTEMIC_FAILURE_STREAK - 3);
   });
+
+  test('a homepage that answered still shows our egress works, though its row is left unread', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    // One short of the stop, then a homepage that answers with a later page of its row held, then more unreachable rows.
+    const h = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+        row({ companyNumber: '00000100', url: ANSWERS }),
+        ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+      ],
+    });
+    h.deps.fetchPage = async (url) => h.hold(url);
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(0);
+    expect(summary.systemicAbort).toBe(false);
+    expect(h.applied).toHaveLength(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
+
+  test('a held row that then fails some other way is still left unread: logged, not an error', async () => {
+    const h = holding();
+    let asked = 0;
+    h.deps.fetchPage = async (url) => {
+      asked += 1;
+      if (asked === 1) return h.hold(url);
+      throw new Error('boom');
+    };
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary).toMatchObject({ leftUnread: 1, errored: 0, updated: 0 });
+    expect(h.applied).toEqual([]);
+    expect(h.logs).toEqual(['  ERROR row 1: boom']);
+  });
 });
 
 describe('sweepWebsites — dry run parity', () => {

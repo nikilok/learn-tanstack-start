@@ -63,10 +63,12 @@ export function makeAddressGate(options: AddressGateOptions): AddressGate {
         held += 1;
         return false;
       }
-      if (options.gapMs > 0) {
+      while (options.gapMs > 0) {
         const turn = options.ledger.reserve(addresses, options.gapMs, now());
         const wait = turn - now();
         if (wait > 0) await sleep(wait);
+        // Woken over half a gap late, it takes a new turn: the request after it may be going already.
+        if (now() - turn <= options.gapMs / 2) break;
       }
       // Paused while this request waited its turn.
       if (anyPaused(addresses)) {

@@ -486,6 +486,8 @@ export async function sweepWebsites(
     systemicAbort: false,
   };
   let failureStreak = 0;
+  // Homepages that answered, their rows judged or left unread: what the stop for broken egress reads.
+  let homepagesAnswered = 0;
 
   const rows = await deps.selectRows(config.maxRows);
   summary.selected = rows.length;
@@ -609,6 +611,11 @@ export async function sweepWebsites(
       // Not fully read, so not judged: the row is left as it was for the next pass.
       if ((deps.heldRequests?.() ?? 0) > heldBefore) {
         summary.leftUnread++;
+        // Its homepage answering still shows our egress works.
+        if (fetched.ok) {
+          homepagesAnswered++;
+          failureStreak = 0;
+        }
         continue;
       }
 
@@ -637,6 +644,7 @@ export async function sweepWebsites(
 
       if (fetched.ok) {
         summary.live++;
+        homepagesAnswered++;
         failureStreak = 0;
       } else if (result.hostAnswered) {
         // A host that refused us is still a host that answered, so it says
@@ -669,14 +677,14 @@ export async function sweepWebsites(
       // same behaviour a real run would have — including stopping early. Behind
       // the `continue` it never fired at all, and a dry run against a broken
       // runner burned the whole slice's fetches proving nothing.
-      // The `live === 0` half is load-bearing and was wrong to drop. Rows are
+      // The nothing-has-answered half is load-bearing and was wrong to drop. Rows are
       // swept in checked_at order and CQC's file is alphabetical by provider,
       // so a defunct group can put 15 genuinely dead domains next to each
       // other — aborting there skips the rest of a slice that is working fine
       // and red-fails the job nightly. Requiring that NOTHING has succeeded
       // costs nothing against real broken egress, where nothing does.
       const abort =
-        summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
+        homepagesAnswered === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
       if (abort) {
         summary.systemicAbort = true;
         deps.log(
@@ -706,7 +714,9 @@ export async function sweepWebsites(
       // Stop BEFORE committing another 800 demotions, not after.
       if (abort) break;
     } catch (err) {
-      summary.errored++;
+      // Whatever else went wrong, a row with a request held back was left unread, not failed.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) summary.leftUnread++;
+      else summary.errored++;
       const raw = err instanceof Error ? err.message : String(err);
       // The error path needs the same gate as the success path — it was
       // unconditional, so one thrown fetch published a company/URL pair however

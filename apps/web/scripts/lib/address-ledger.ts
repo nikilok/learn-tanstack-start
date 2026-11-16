@@ -1,15 +1,18 @@
 /**
- * When each hosting address is next free. Kept in a file every walk on this
+ * When each hosting address is next free. Kept in files every walk on this
  * machine shares, so slices run side by side take turns at an address rather
- * than each pacing alone.
+ * than each pacing alone. Every change is a new numbered file, and only one
+ * process can make the next number, so there is no lock to be left behind or
+ * taken from a process that is only slow.
  */
 
 import {
+  linkSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
-  rmdirSync,
-  statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,9 +43,9 @@ export function takeTurn(
   return { turn, turns: next };
 }
 
-/** A ledger one process keeps to itself. */
-export function memoryLedger(): Ledger {
-  let turns: Turns = {};
+/** A ledger one process keeps to itself, starting from the turns it is given. */
+export function memoryLedger(known: Readonly<Turns> = {}): Ledger {
+  let turns: Turns = { ...known };
   return {
     reserve(addresses, gapMs, now) {
       const taken = takeTurn(turns, addresses, gapMs, now);
@@ -52,16 +55,18 @@ export function memoryLedger(): Ledger {
   };
 }
 
-/** How long a lock may be held before it counts as left behind. */
-const STALE_LOCK_MS = 2_000;
-/** How long to wait for the lock before pacing alone. */
-const LOCK_WAIT_MS = 5_000;
+/** Times in a row a process may lose the race for the next number before it paces alone. */
+const MAX_ATTEMPTS = 200;
+
+/** Numbered files kept behind the newest. A number is only ever free again once it is this far behind, which tells a process that fell behind from one another built on at once. */
+export const KEPT = 16;
 
 export type FileLedgerOptions = {
-  /** Told once, when the file cannot be used and this process paces alone. */
+  /** Told once, when the files cannot be used and this process paces alone. */
   warn?: (message: string) => void;
-  staleLockMs?: number;
-  lockWaitMs?: number;
+  /** Called once the turns are read, and once the next file is made: how a test lets another process in between. */
+  between?: (stage: 'read' | 'made') => void;
+  maxAttempts?: number;
 };
 
 /** Where this user's walks keep the ledger they share. */
@@ -88,41 +93,29 @@ function claim(dir: string): void {
   }
 }
 
-/** Take the lock, waiting out another process's hold on it; one left behind by a process that died is cleared. */
-function acquire(lock: string, staleMs: number, waitMs: number): void {
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    try {
-      mkdirSync(lock);
-      return;
-    } catch (error) {
-      if (codeOf(error) !== 'EEXIST') throw error;
-    }
-    try {
-      // Two processes clearing one stale lock can both get in once: a turn given twice, nothing worse.
-      if (Date.now() - statSync(lock).mtimeMs > staleMs) rmdirSync(lock);
-    } catch {
-      // Released meanwhile.
-    }
-    if (Date.now() >= deadline) {
-      throw Object.assign(new Error('ledger lock is held'), {
-        code: 'ELOCKED',
-      });
-    }
-    Bun.sleepSync(1);
-  }
+/** The path of the turns file with this number. */
+function numbered(dir: string, number: number): string {
+  return join(dir, `turns.${number}.json`);
 }
 
-/** Give the lock back; one another process cleared as stale is already gone. */
-function release(lock: string): void {
+/** The numbers of the turns files in the directory. */
+function numbers(dir: string): number[] {
+  return readdirSync(dir).flatMap((name) => {
+    const match = /^turns\.(\d{1,15})\.json$/.exec(name);
+    return match ? [Number(match[1])] : [];
+  });
+}
+
+/** Remove a file that may already be gone. */
+function remove(file: string): void {
   try {
-    rmdirSync(lock);
+    unlinkSync(file);
   } catch {
-    // Cleared by another process.
+    // Tidied by another process.
   }
 }
 
-/** The turns on file; none when it is missing or will not parse. */
+/** The turns in a file; none when it is missing or will not parse. */
 function read(file: string): Turns {
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
@@ -139,39 +132,81 @@ function read(file: string): Turns {
   }
 }
 
-/** A ledger in `dir`, shared by every process of this user that opens it; one that cannot use its file, or whose directory is not this user's alone, paces this process alone and says so once. */
+/** The newest turns in a ledger directory. */
+export function currentTurns(dir: string): Turns {
+  const newest = Math.max(0, ...numbers(dir));
+  return newest === 0 ? {} : read(numbered(dir, newest));
+}
+
+let drafts = 0;
+
+/** Publish these turns as the file with this number, which only one process can do; false when another got there first, or when the number was only free because this process had fallen far behind. */
+function publish(
+  dir: string,
+  number: number,
+  turns: Turns,
+  made?: () => void,
+): boolean {
+  const draft = join(dir, `draft.${process.pid}.${drafts++}`);
+  writeFileSync(draft, JSON.stringify(turns), { mode: 0o600 });
+  try {
+    // A link never replaces a file, so the next number goes to whoever makes it first.
+    linkSync(draft, numbered(dir, number));
+  } catch (error) {
+    if (codeOf(error) !== 'EEXIST') throw error;
+    return false;
+  } finally {
+    remove(draft);
+  }
+  made?.();
+  const present = numbers(dir);
+  // KEPT or more behind the newest: its file had been tidied away, so it was never the next.
+  if (Math.max(...present) - number >= KEPT) return false;
+  for (const older of present) {
+    if (older <= number - KEPT) remove(numbered(dir, older));
+  }
+  return true;
+}
+
+/** A ledger in `dir`, shared by every process of this user that opens it; one that cannot use its files, or whose directory is not this user's alone, paces this process alone from the turns it last knew, and says so once. */
 export function fileLedger(
   dir: string,
   options: FileLedgerOptions = {},
 ): Ledger {
-  const lock = join(dir, 'lock');
-  const file = join(dir, 'turns.json');
-  const staleMs = options.staleLockMs ?? STALE_LOCK_MS;
-  const waitMs = options.lockWaitMs ?? LOCK_WAIT_MS;
-  let made = false;
+  const attempts = options.maxAttempts ?? MAX_ATTEMPTS;
+  let claimed = false;
+  let known: Turns = {};
   let alone: Ledger | null = null;
   return {
     reserve(addresses, gapMs, now) {
       if (alone) return alone.reserve(addresses, gapMs, now);
       try {
-        if (!made) {
+        if (!claimed) {
           claim(dir);
-          made = true;
+          claimed = true;
         }
-        acquire(lock, staleMs, waitMs);
-        try {
-          const taken = takeTurn(read(file), addresses, gapMs, now);
-          writeFileSync(file, JSON.stringify(taken.turns), { mode: 0o600 });
-          return taken.turn;
-        } finally {
-          release(lock);
+        for (let attempt = 0; attempt < attempts; attempt++) {
+          const newest = Math.max(0, ...numbers(dir));
+          known = newest === 0 ? {} : read(numbered(dir, newest));
+          const taken = takeTurn(known, addresses, gapMs, now);
+          options.between?.('read');
+          const made = () => options.between?.('made');
+          if (publish(dir, newest + 1, taken.turns, made)) {
+            known = taken.turns;
+            return taken.turn;
+          }
         }
+        // Beaten every time: what beat it last is the most this process can know.
+        known = currentTurns(dir);
+        throw Object.assign(new Error('ledger is contended'), {
+          code: 'ECONTENDED',
+        });
       } catch (error) {
         // Reason only: a path would name the machine's user.
         options.warn?.(
           `  address ledger unavailable (${codeOf(error)}): this process paces alone`,
         );
-        alone = memoryLedger();
+        alone = memoryLedger(known);
         return alone.reserve(addresses, gapMs, now);
       }
     },

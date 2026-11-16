@@ -107,16 +107,21 @@ function classify(err: unknown): FetchFailure {
   return 'dns_or_refused';
 }
 
-/** One request, sent in its turn at its host's addresses and reported to the gate; null when one of them is paused and nothing was sent. */
+/** One request, sent in its turn at its host's addresses and reported to the gate; null when one of them is paused and nothing was sent. Its time limit starts as it is sent, never while it waits its turn. */
 async function send(
   target: URL,
   addresses: readonly string[],
-  init: RequestInit,
+  headers: Record<string, string>,
+  timeoutMs: number,
 ): Promise<Response | null> {
   const { gate } = io;
   if (gate && !(await gate.enter(addresses))) return null;
   try {
-    const res = await io.fetch(target.href, init);
+    const res = await io.fetch(target.href, {
+      headers,
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'manual',
+    });
     gate?.settle(target.hostname, addresses, 'answered');
     return res;
   } catch (err) {
@@ -158,11 +163,12 @@ async function robotsFor(origin: string): Promise<RobotsRules | null> {
     for (let hop = 0; hop <= ROBOTS_REDIRECTS; hop++) {
       const resolved = await resolveHost(current.hostname);
       if (resolved.reach !== 'public') break;
-      const res = await send(current, resolved.addresses, {
-        headers: { 'user-agent': USER_AGENT },
-        signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
-        redirect: 'manual',
-      });
+      const res = await send(
+        current,
+        resolved.addresses,
+        { 'user-agent': USER_AGENT },
+        ROBOTS_TIMEOUT_MS,
+      );
       // Not asked for is not unreadable: nothing is assumed, and nothing cached.
       if (!res) return null;
       const location = res.headers.get('location');
@@ -322,14 +328,15 @@ export async function fetchPage(url: string): Promise<PageFetch> {
     if (typeof checked === 'string') return { ok: false, reason: checked };
 
     try {
-      const res = await send(current, checked, {
-        headers: {
+      const res = await send(
+        current,
+        checked,
+        {
           'user-agent': USER_AGENT,
           accept: 'text/html,application/xhtml+xml',
         },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        redirect: 'manual',
-      });
+        REQUEST_TIMEOUT_MS,
+      );
       if (!res) return { ok: false, reason: 'address_paused' };
 
       const location = res.headers.get('location');

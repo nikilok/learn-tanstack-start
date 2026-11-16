@@ -1,8 +1,9 @@
 /**
- * Re-walking rows search discovery has already settled, at zero search credits:
- * a `none` row's banked results go through discovery's own settle step, a
- * postcode row's stored site is walked for its registration number. Upgrades
- * only, and every statutory number the pages state is recorded. No I/O.
+ * Re-walking rows that are already settled, at zero search credits: a `none`
+ * row's banked results go through discovery's own settle step, a postcode
+ * row's stored site is walked for its registration number, and a registry
+ * row's for the number or what confirms the register. Upgrades only, and
+ * every statutory number the pages state is recorded. No I/O.
  */
 
 import type { DiscoveryOutcome } from './discover';
@@ -12,6 +13,7 @@ import {
   type Settled,
   settleCandidates,
 } from './discover-sweep';
+import { judgeSite } from './name-and-place';
 import { dedupeStated, type StatedOnSite } from './stated-numbers';
 
 /** The walk rows are brought up to: walk 3 reads every fixed path and about links, and walks each candidate the two-signal rule reaches. */
@@ -31,7 +33,9 @@ export type RewalkRow = {
   registerTowns: string[];
   /** The registered office locality. */
   locality: string | null;
-  evidence: 'none' | 'postcode_on_page';
+  evidence: 'none' | 'postcode_on_page' | 'registry';
+  /** Which discoverer wrote the row. */
+  source: string;
   /** The stored site; null on a `none` row. */
   url: string | null;
   /** Banked search results, in rank order. */
@@ -73,6 +77,9 @@ export type RewalkSummary = {
   noneToPostcode: number;
   noneToNameAndPlace: number;
   postcodeToNumber: number;
+  /** Registry rows that gained their number, and those a page confirmed. */
+  registryToNumber: number;
+  registryConfirmed: number;
   /** Read, with nothing to upgrade. */
   unchanged: number;
   unreadable: number;
@@ -175,6 +182,63 @@ async function walkStoredSite(
   );
 }
 
+/** A registry row's stored site, walked for the number, then for what confirms the register: the registered postcode on a page naming the company, or the two-signal rule on the site as served. Null when unreadable. */
+async function walkRegistrySite(
+  row: RewalkRow,
+  deps: RewalkDeps,
+): Promise<Settled> {
+  let officers: Settled['officers'] = 'unasked';
+  let stated: StatedOnSite[] = [];
+  let fetches = 0;
+  const settled = (outcome: DiscoveryOutcome | null): Settled => ({
+    outcome,
+    stated,
+    fetches,
+    officers,
+    rendered: 0,
+    byRender: false,
+  });
+  /** The stored URL itself: a registry row is never moved to another site. */
+  const proved = (
+    evidence: 'crn_on_page' | 'registry_confirmed',
+    evidenceUrl: string | null,
+  ): Settled => settled({ url: row.url, evidenceUrl, evidence, rank: null });
+  if (!row.url) return settled(NOTHING);
+  const view = asDiscoveryRow(row);
+  const probe = await deps.probe(view, row.url);
+  fetches = 1;
+  // A bot challenge is not the site read.
+  if (!probe || probe.challenged) return settled(null);
+  stated = probe.stated ?? [];
+  // Now a directory or a holding page: the sweep's to judge, not an upgrade.
+  if (probe.onAggregator || probe.parked) return settled(NOTHING);
+  const walked = probe.crnFound
+    ? probe
+    : ((await deps.walkDisclosure(view, probe)) ?? probe);
+  stated = walked.stated ?? stated;
+  if (walked.crnFound) return proved('crn_on_page', walked.evidenceUrl);
+  if (walked.postcodeFound && walked.postcodeNamed) {
+    return proved('registry_confirmed', walked.evidenceUrl);
+  }
+  const pages = walked.pages ?? [];
+  // Judged on the host that served the homepage: a stored URL may redirect.
+  const site = { url: pages[0]?.url ?? row.url, pages };
+  let verdict = judgeSite(row, site);
+  if (verdict.kind === 'needs_officers') {
+    const answer = await deps.officers(row.companyNumber);
+    officers = Array.isArray(answer) ? 'read' : answer;
+    if (!Array.isArray(answer)) return settled(null);
+    verdict = judgeSite(
+      row,
+      site,
+      answer.filter((officer) => officer.current),
+    );
+  }
+  return verdict.kind === 'proved'
+    ? proved('registry_confirmed', verdict.evidenceUrl)
+    : settled(NOTHING);
+}
+
 /** Re-walk a slice of settled rows, upgrading where the new walk proves more. */
 export async function rewalkWebsites(
   config: RewalkConfig,
@@ -188,6 +252,8 @@ export async function rewalkWebsites(
     noneToPostcode: 0,
     noneToNameAndPlace: 0,
     postcodeToNumber: 0,
+    registryToNumber: 0,
+    registryConfirmed: 0,
     unchanged: 0,
     unreadable: 0,
     firstAttempts: 0,
@@ -209,7 +275,7 @@ export async function rewalkWebsites(
     if (firstAttempt) summary.firstAttempts += 1;
     if (summary.processed % HEARTBEAT_ROWS === 0) {
       deps.log(
-        `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber} by number, ${summary.noneToPostcode} by postcode, ${summary.noneToNameAndPlace} by name and place`,
+        `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber + summary.registryToNumber} by number, ${summary.noneToPostcode} by postcode, ${summary.noneToNameAndPlace} by name and place, ${summary.registryConfirmed} registry confirmed`,
       );
     }
     try {
@@ -221,7 +287,9 @@ export async function rewalkWebsites(
               deps,
               config.delayMs,
             )
-          : await walkStoredSite(row, deps);
+          : row.evidence === 'registry'
+            ? await walkRegistrySite(row, deps)
+            : await walkStoredSite(row, deps);
       summary.candidateFetches += settled.fetches;
       summary.rendered += settled.rendered;
       if (settled.officers === 'read' || settled.officers === 'failed') {
@@ -262,6 +330,9 @@ export async function rewalkWebsites(
         else if (outcome.evidence === 'name_and_place') {
           summary.noneToNameAndPlace += 1;
         } else summary.noneToPostcode += 1;
+      } else if (row.evidence === 'registry') {
+        if (outcome.evidence === 'crn_on_page') summary.registryToNumber += 1;
+        else summary.registryConfirmed += 1;
       } else {
         summary.postcodeToNumber += 1;
       }

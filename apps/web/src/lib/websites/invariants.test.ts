@@ -57,6 +57,13 @@ const RECHECKS: RevalidateInput['nameAndPlace'][] = [
   'unknown',
 ];
 
+const CONFIRMATIONS: RevalidateInput['confirmation'][] = [
+  undefined,
+  'holds',
+  'gone',
+  'unknown',
+];
+
 const FAILURES: { reason: RevalidateFailure; status?: number }[] = [
   { reason: 'dns_or_refused' },
   { reason: 'tls' },
@@ -200,25 +207,30 @@ function* allCases(): Generator<Case> {
               for (const recheck of RECHECKS) {
                 // A re-check reads a page too.
                 if (!o.outcome.ok && recheck !== undefined) continue;
-                yield {
-                  label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label} + ${p.label} + recheck:${recheck ?? '-'}`,
-                  input: {
-                    storedUrl: STORED_URL,
-                    evidence,
-                    status,
-                    failureCount,
-                    attemptedUrl: STORED_URL,
-                    outcome: o.outcome,
-                    crnFoundAt: d.crnFoundAt,
-                    postcodeFoundAt: d.postcodeFoundAt,
-                    postcodeConfirms: p.postcodeConfirms,
-                    onAggregator: p.onAggregator,
-                    looksParked: p.looksParked,
-                    placeholder: p.placeholder,
-                    servedElsewhere: p.servedElsewhere,
-                    nameAndPlace: recheck,
-                  },
-                };
+                for (const confirmation of CONFIRMATIONS) {
+                  // As does a confirmation's.
+                  if (!o.outcome.ok && confirmation !== undefined) continue;
+                  yield {
+                    label: `${status}/${evidence}/f${failureCount} + ${o.label} + ${d.label} + ${p.label} + recheck:${recheck ?? '-'} + confirmation:${confirmation ?? '-'}`,
+                    input: {
+                      storedUrl: STORED_URL,
+                      evidence,
+                      status,
+                      failureCount,
+                      attemptedUrl: STORED_URL,
+                      outcome: o.outcome,
+                      crnFoundAt: d.crnFoundAt,
+                      postcodeFoundAt: d.postcodeFoundAt,
+                      postcodeConfirms: p.postcodeConfirms,
+                      onAggregator: p.onAggregator,
+                      looksParked: p.looksParked,
+                      placeholder: p.placeholder,
+                      servedElsewhere: p.servedElsewhere,
+                      nameAndPlace: recheck,
+                      confirmation,
+                    },
+                  };
+                }
               }
             }
           }
@@ -293,7 +305,9 @@ describe('state machine invariants', () => {
       const foundSomething = Boolean(
         c.input.crnFoundAt ||
         c.input.postcodeFoundAt ||
-        c.input.postcodeConfirms,
+        c.input.postcodeConfirms ||
+        // Read off a page this pass fetched, as the other three are.
+        c.input.confirmation === 'holds',
       );
       if (
         !foundSomething &&
@@ -539,6 +553,120 @@ describe('state machine invariants — the revocable rung', () => {
     expect(regained.evidence).toBe('registry_confirmed');
     expect(regained.confidence).toBe('0.970');
     expect(regained.status).toBe('verified');
+  });
+});
+
+describe("state machine invariants — a confirmation's re-check", () => {
+  const registryRung = (evidence: WebsiteEvidence) =>
+    evidence === 'registry' || evidence === 'registry_confirmed';
+
+  /** I21. A confirmation read again, or not read at all, never costs a row its rung: only one read as gone does. */
+  test('I21 — a confirmation that holds or went unread withdraws nothing', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      const { input } = c;
+      if (input.evidence !== 'registry_confirmed' || !input.outcome.ok)
+        continue;
+      if (input.onAggregator) continue;
+      if (input.confirmation !== 'holds' && input.confirmation !== 'unknown') {
+        continue;
+      }
+      const r = revalidate(input);
+      if (evidenceRank(r.evidence) < evidenceRank('registry_confirmed')) {
+        violations.push(`${c.label} -> ${r.evidence}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I22. Read as gone, it is withdrawn exactly as a homepage address that disappeared is. */
+  test('I22 — a confirmation read as gone decides as no re-check would', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (c.input.confirmation !== 'gone') continue;
+      const r = revalidate(c.input);
+      const without = revalidate({ ...c.input, confirmation: undefined });
+      if (
+        r.evidence !== without.evidence ||
+        r.status !== without.status ||
+        r.confidence !== without.confidence ||
+        r.url !== without.url
+      ) {
+        violations.push(`${c.label} -> ${r.evidence}/${r.status}`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I23. It moves the two registry rungs and no other row, whatever it read. */
+  test('I23 — the re-check moves nothing but a registry row', () => {
+    const violations: string[] = [];
+    for (const c of CASES) {
+      if (c.input.confirmation === undefined) continue;
+      if (registryRung(c.input.evidence)) continue;
+      const r = revalidate(c.input);
+      const without = revalidate({ ...c.input, confirmation: undefined });
+      if (JSON.stringify(r) !== JSON.stringify(without)) {
+        violations.push(`${c.label} moved`);
+      }
+    }
+    expect(violations.slice(0, 10)).toEqual([]);
+  });
+
+  /** I24. Withdrawn then read again lands exactly where it was. */
+  test('I24 — a withdrawal then a re-check that reads the confirmation is a round trip', () => {
+    const base = {
+      storedUrl: STORED_URL,
+      status: 'verified' as WebsiteStatus,
+      failureCount: 0,
+      attemptedUrl: STORED_URL,
+      outcome: { ok: true } as const,
+    };
+    const withdrawn = revalidate({
+      ...base,
+      evidence: 'registry_confirmed',
+      confirmation: 'gone',
+    });
+    expect(withdrawn).toMatchObject({
+      evidence: 'registry',
+      confidence: '0.950',
+    });
+    const regained = revalidate({
+      ...base,
+      evidence: withdrawn.evidence,
+      confirmation: 'holds',
+    });
+    expect(regained).toMatchObject({
+      evidence: 'registry_confirmed',
+      confidence: '0.970',
+      status: 'verified',
+    });
+  });
+
+  /** I25. A homepage too thin to show an address protects a confirmation only from a pass that could not tell: a re-check that read the site as gone decides exactly as it would on a full page. */
+  test('I25 — a thin homepage never overrules a re-check that read the site as gone', () => {
+    const overruled: string[] = [];
+    const unprotected: string[] = [];
+    for (const c of CASES) {
+      const { input } = c;
+      const thin = revalidate({ ...input, pageTooThin: true });
+      if (input.confirmation === 'gone') {
+        if (JSON.stringify(thin) !== JSON.stringify(revalidate(input))) {
+          overruled.push(`${c.label} -> ${thin.evidence}`);
+        }
+        continue;
+      }
+      if (
+        input.evidence === 'registry_confirmed' &&
+        input.outcome.ok &&
+        !input.onAggregator &&
+        evidenceRank(thin.evidence) < evidenceRank('registry_confirmed')
+      ) {
+        unprotected.push(`${c.label} -> ${thin.evidence}`);
+      }
+    }
+    expect(overruled.slice(0, 10)).toEqual([]);
+    expect(unprotected.slice(0, 10)).toEqual([]);
   });
 });
 

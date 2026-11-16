@@ -401,6 +401,109 @@ describe('a thin page never withdraws a confirmation', () => {
   });
 });
 
+describe('a confirmation found beyond the homepage is re-read, not assumed', () => {
+  const confirmed = (over: Partial<Parameters<typeof revalidate>[0]> = {}) =>
+    revalidate({
+      storedUrl: 'https://www.brendoncare.org.uk',
+      evidence: 'registry_confirmed',
+      status: 'verified',
+      failureCount: 0,
+      attemptedUrl: 'https://www.brendoncare.org.uk',
+      outcome: { ok: true },
+      postcodeConfirms: false,
+      ...over,
+    });
+
+  test('still on its page: the rung stays, with the page it was read on', () => {
+    const result = confirmed({
+      confirmation: 'holds',
+      confirmationAt: 'https://www.brendoncare.org.uk/contact',
+    });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(result.status).toBe('verified');
+    expect(result.evidenceUrl).toBe('https://www.brendoncare.org.uk/contact');
+    expect(result.confidence).toBe('0.970');
+  });
+
+  test('gone from every page read: withdrawn, as a homepage address is', () => {
+    const result = confirmed({ confirmation: 'gone' });
+    expect(result.evidence).toBe('registry');
+    expect(result.confidence).toBe('0.950');
+    expect(result.note).toContain('confirmation withdrawn');
+  });
+
+  test('not read this pass: nothing is withdrawn on a page that would not load', () => {
+    const result = confirmed({ confirmation: 'unknown' });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(result.status).toBe('verified');
+    // No proof read, so no proof page to record: the stored one is the merge's to keep.
+    expect(result.evidenceUrl).toBeNull();
+  });
+
+  test('a thin homepage withholds a withdrawal only while the site went unread', () => {
+    // The plain fetch got a script shell; the re-check read the site in a browser.
+    const gone = confirmed({ pageTooThin: true, confirmation: 'gone' });
+    expect(gone.evidence).toBe('registry');
+    expect(gone.confidence).toBe('0.950');
+    expect(gone.note).toContain(
+      'nothing on the site confirms the register any more',
+    );
+    expect(
+      confirmed({ pageTooThin: true, confirmation: 'unknown' }).evidence,
+    ).toBe('registry_confirmed');
+    // No re-check at all: the thin page alone says nothing.
+    expect(confirmed({ pageTooThin: true }).evidence).toBe(
+      'registry_confirmed',
+    );
+  });
+
+  test('the homepage address still wins, and keeps its own proof page', () => {
+    const result = confirmed({
+      postcodeConfirms: true,
+      postcodeFoundAt: 'https://www.brendoncare.org.uk',
+      confirmation: 'gone',
+    });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(result.evidenceUrl).toBe('https://www.brendoncare.org.uk');
+  });
+
+  test('a number found this pass still outranks it', () => {
+    const result = confirmed({
+      crnFoundAt: 'https://www.brendoncare.org.uk/terms',
+      confirmation: 'holds',
+    });
+    expect(result.evidence).toBe('crn_on_page');
+  });
+
+  test('a directory or a failed fetch reads no confirmation at all', () => {
+    expect(
+      confirmed({ confirmation: 'holds', onAggregator: true }).evidence,
+    ).toBe('registry');
+    const failed = confirmed({
+      confirmation: 'holds',
+      outcome: { ok: false, reason: 'timeout' },
+    });
+    expect(failed.status).toBe('unreachable');
+    expect(failed.evidence).toBe('registry_confirmed');
+  });
+
+  test('it confirms the two registry rungs and nothing else', () => {
+    expect(
+      confirmed({ evidence: 'registry', confirmation: 'holds' }).evidence,
+    ).toBe('registry_confirmed');
+    for (const evidence of [
+      'registry_unconfirmed',
+      'postcode_on_page',
+      'name_and_place',
+      'assessed',
+    ] as const) {
+      expect(confirmed({ evidence, confirmation: 'holds' }).evidence).toBe(
+        evidence,
+      );
+    }
+  });
+});
+
 describe('a name_and_place row is held while its proof is gone, never demoted', () => {
   const live = (over: Partial<RevalidateInput> = {}) =>
     revalidate(input({ evidence: 'name_and_place', ...over }));

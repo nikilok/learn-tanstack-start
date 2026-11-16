@@ -4,8 +4,10 @@ name: Re-walk Company Websites (Search)
 # (homepage legal links, the nine fixed paths, then about links) behind the
 # crowded-host guard, and the two-signal rule on `none` rows. Zero search
 # credits: `none` rows reuse their banked results, postcode rows walk the site
-# they already hold. Upgrades only, and every statutory company number the
-# pages state is recorded in website_stated_numbers. The rule's officer
+# they already hold. `evidence: registry` walks the registry rows no page has
+# confirmed instead; `all` leaves them out. Upgrades only, and every statutory
+# company number the pages state is recorded in website_stated_numbers. The
+# rule's officer
 # lookups share the phase-5 sweeps' Companies House key, paced to one call
 # every two seconds across the job's workers. A candidate whose homepage shows
 # a plain fetch nothing is read again in headless Chromium. Walking each
@@ -40,6 +42,7 @@ on:
           - all
           - none
           - postcode
+          - registry
         default: all
 
 # Read-only token: the job reads Neon and fetches public pages; it pushes nothing.
@@ -129,9 +132,9 @@ jobs:
           esac
           ARGS+=("--max-rows=${MAX_ROWS:-350}")
           case "$EVIDENCE" in
-            none|postcode) ARGS+=("--evidence=$EVIDENCE") ;;
+            none|postcode|registry) ARGS+=("--evidence=$EVIDENCE") ;;
             all|'') ;;
-            *) echo "evidence must be all, none or postcode"; exit 1 ;;
+            *) echo "evidence must be all, none, postcode or registry"; exit 1 ;;
           esac
           bun apps/web/scripts/rewalk-websites.ts "${ARGS[@]}" | tee /tmp/rewalk-websites.log
 
@@ -156,6 +159,8 @@ jobs:
             echo "| 📮 None → postcode | $(extract none_to_postcode) |"
             echo "| 🧭 None → name and place | $(extract none_to_name_place) |"
             echo "| 🔼 Postcode → number | $(extract postcode_to_number) |"
+            echo "| 🏛️ Registry → number | $(extract registry_to_number) |"
+            echo "| ✅ Registry confirmed | $(extract registry_confirmed) |"
             echo "| ➖ Unchanged | $(extract unchanged) |"
             echo "| 📵 Unreadable | $(extract unreadable) |"
             echo "| 🗃️ Unpersisted | $(extract unpersisted) |"

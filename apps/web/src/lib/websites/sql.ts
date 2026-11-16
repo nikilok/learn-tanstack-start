@@ -18,6 +18,9 @@ type Sql = NeonQueryFunction<false, false>;
 
 type Db = Pick<ReturnType<typeof createClient>, 'execute'>;
 
+/** Which rows a pass takes: unset, every row by age; set, only rows an earlier pass left in that status. */
+export type SweepSelection = { status?: 'unreachable' | 'dead' };
+
 /**
  * One bounded slice, oldest-checked first.
  *
@@ -28,7 +31,8 @@ type Db = Pick<ReturnType<typeof createClient>, 'execute'>;
  * we hold no address for simply skips that check. The names and places are
  * what a `name_and_place` row's re-check reads.
  */
-export function makeSelectRows(sql: Sql) {
+export function makeSelectRows(sql: Sql, selection: SweepSelection = {}) {
+  const status = selection.status ?? null;
   return async (maxRows: number): Promise<SweepRow[]> => {
     const rows = await sql`
       SELECT
@@ -54,6 +58,7 @@ export function makeSelectRows(sql: Sql) {
       LEFT JOIN companies_house_profiles p
         ON p.company_number = w.company_number
       WHERE w.url IS NOT NULL
+        AND (${status}::text IS NULL OR w.status = ${status})
       ORDER BY w.checked_at ASC NULLS FIRST
       LIMIT ${maxRows}
     `;

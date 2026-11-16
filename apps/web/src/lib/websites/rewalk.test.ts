@@ -20,6 +20,7 @@ const noneRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   registerTowns: [],
   locality: null,
   evidence: 'none',
+  source: 'search',
   url: null,
   candidates: ['https://real.co.uk/contact'],
   walkAttempts: 0,
@@ -34,6 +35,7 @@ const postcodeRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
   registerTowns: [],
   locality: null,
   evidence: 'postcode_on_page',
+  source: 'search',
   url: 'https://stored.co.uk',
   candidates: ['https://higher.co.uk', 'https://stored.co.uk'],
   walkAttempts: 0,
@@ -402,6 +404,210 @@ describe('rewalkWebsites: postcode rows', () => {
     const summary = await rewalkWebsites(config(), h.deps);
     expect(summary.unreadable).toBe(1);
     expect(h.unreadable).toEqual(['03260168']);
+  });
+});
+
+describe('rewalkWebsites: registry rows', () => {
+  const registryRow = (over: Partial<RewalkRow> = {}): RewalkRow => ({
+    companyNumber: '09990117',
+    companyName: 'QUILLMERE CARE LIMITED',
+    sponsorNames: [],
+    postcode: 'HG1 9ZQ',
+    registerTowns: ['Harrogate'],
+    locality: 'Harrogate',
+    evidence: 'registry',
+    source: 'cqc',
+    url: 'https://quillmerecare.co.uk',
+    candidates: [],
+    walkAttempts: 0,
+    ...over,
+  });
+  const site = 'https://quillmerecare.co.uk';
+  /** The stored site as probed, its homepage read as `text` from `served`. */
+  const home = (text: string, served = `${site}/`): CandidateProbe =>
+    probe({ url: site, pages: [readPage(served, text, [])] });
+
+  test('walks the stored site only', async () => {
+    const h = harness({ rows: [registryRow()] });
+    await rewalkWebsites(config(), h.deps);
+    expect(h.probed).toEqual([site]);
+    expect(h.walked).toEqual([site]);
+  });
+
+  test('a number on the stored site is the number tier, in place', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      walks: {
+        [site]: probe({
+          url: site,
+          crnFound: true,
+          evidenceUrl: `${site}/terms`,
+        }),
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({
+      registryToNumber: 1,
+      registryConfirmed: 0,
+    });
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: site,
+      evidence: 'crn_on_page',
+      evidenceUrl: `${site}/terms`,
+    });
+  });
+
+  test('the registered postcode on a page naming the company confirms the register', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      walks: {
+        [site]: probe({
+          url: site,
+          postcodeFound: true,
+          postcodeNamed: true,
+          evidenceUrl: `${site}/contact`,
+        }),
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({
+      registryToNumber: 0,
+      registryConfirmed: 1,
+    });
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: site,
+      evidence: 'registry_confirmed',
+      evidenceUrl: `${site}/contact`,
+    });
+  });
+
+  test('a postcode on a page that never names the company confirms nothing', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      walks: { [site]: probe({ url: site, postcodeFound: true }) },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
+    expect(h.upgrades).toEqual([]);
+    expect(h.marked).toEqual(['09990117']);
+  });
+
+  test('the two-signal rule confirms it: the exact name and a place, on a domain naming the company', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      probes: {
+        [site]: home('Quillmere Care Ltd, Station Parade, Harrogate.'),
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.registryConfirmed).toBe(1);
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: site,
+      evidence: 'registry_confirmed',
+      evidenceUrl: `${site}/`,
+    });
+  });
+
+  test('the rule reads the host that served the pages, not the one stored', async () => {
+    const text = 'Quillmere Care Ltd, Station Parade, Harrogate.';
+    // A stored domain that names the company but now serves another business's pages.
+    const sold = harness({
+      rows: [registryRow()],
+      probes: { [site]: home(text, 'https://northgatehomes.co.uk/') },
+    });
+    expect((await rewalkWebsites(config(), sold.deps)).registryConfirmed).toBe(
+      0,
+    );
+    // A stored domain under an old name, serving the company's own new one.
+    const renamed = harness({
+      rows: [registryRow({ url: 'https://oldbrand.co.uk' })],
+      probes: {
+        'https://oldbrand.co.uk': probe({
+          url: 'https://oldbrand.co.uk',
+          pages: [readPage(`${site}/`, text, [])],
+        }),
+      },
+    });
+    const summary = await rewalkWebsites(config(), renamed.deps);
+    expect(summary.registryConfirmed).toBe(1);
+    expect(renamed.upgrades[0].outcome.url).toBe('https://oldbrand.co.uk');
+  });
+
+  test('a current officer named on the site confirms it; a resigned one does not', async () => {
+    const run = async (current: boolean) => {
+      const h = harness({
+        rows: [registryRow()],
+        probes: {
+          [site]: home('Our director Ottilie Fairweather. Harrogate.'),
+        },
+        officers: async () => [
+          { forename: 'OTTILIE', surname: 'FAIRWEATHER', current },
+        ],
+      });
+      const summary = await rewalkWebsites(config(), h.deps);
+      expect(summary.officerLookups).toBe(1);
+      return summary.registryConfirmed;
+    };
+    expect(await run(true)).toBe(1);
+    expect(await run(false)).toBe(0);
+  });
+
+  test('officers that cannot be read: a failed ask spends an attempt, a stopped run leaves the row as it was', async () => {
+    const unread = async (answer: 'failed' | 'stopped') => {
+      const h = harness({
+        rows: [registryRow()],
+        probes: { [site]: home('Quillmere Care, Harrogate.') },
+        officers: async () => answer,
+      });
+      await rewalkWebsites(config(), h.deps);
+      expect(h.upgrades).toEqual([]);
+      expect(h.marked).toEqual([]);
+      return h.unreadable;
+    };
+    expect(await unread('failed')).toEqual(['09990117']);
+    expect(await unread('stopped')).toEqual([]);
+  });
+
+  test('a bot challenge is not the site read: the row keeps its answer and counts the attempt', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      probes: { [site]: probe({ url: site, challenged: true }) },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(1);
+    expect(h.walked).toEqual([]);
+    expect(h.unreadable).toEqual(['09990117']);
+  });
+
+  test('a stored site that is now a directory or a holding page is left for the sweep', async () => {
+    for (const shape of [{ onAggregator: true }, { parked: true }]) {
+      const h = harness({
+        rows: [registryRow()],
+        probes: { [site]: probe({ url: site, ...shape }) },
+      });
+      const summary = await rewalkWebsites(config(), h.deps);
+      expect(summary.unchanged).toBe(1);
+      expect(h.walked).toEqual([]);
+      expect(h.upgrades).toEqual([]);
+    }
+  });
+
+  test('a stored site that will not load keeps its answer', async () => {
+    const h = harness({ rows: [registryRow()], probes: { [site]: null } });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.unreadable).toBe(1);
+    expect(h.unreadable).toEqual(['09990117']);
+  });
+
+  test('nothing on the site: stamped as walked, the registry answer untouched', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      probes: { [site]: home('Welcome to our home care service.') },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({ unchanged: 1, registryConfirmed: 0 });
+    expect(h.upgrades).toEqual([]);
+    expect(h.marked).toEqual(['09990117']);
   });
 });
 

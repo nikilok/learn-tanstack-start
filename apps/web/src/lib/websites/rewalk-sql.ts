@@ -22,11 +22,38 @@ type Sql = NeonQueryFunction<false, false>;
 /** Which settled rows to re-walk. */
 export type RewalkSelection = {
   shard?: Shard;
-  /** Restrict to one kind of row. */
-  evidence?: 'none' | 'postcode_on_page';
+  /** Restrict to one kind of row; registry rows are walked only when asked for. */
+  evidence?: 'none' | 'postcode_on_page' | 'registry';
   /** A seeded random sample instead of the resumable order; for dry-run measurement only. */
   seed?: string;
+  /** Also take rows the current walk last read before this date or time. */
+  rereadBefore?: string;
 };
+
+/** The settled rows of each kind the re-walk reads. Constant SQL text, interpolated raw; the row is `w`. */
+const SETTLED: Record<NonNullable<RewalkSelection['evidence']>, string> = {
+  none: `(w.source = 'search' AND w.evidence = 'none' AND w.status = 'none'
+    AND w.url IS NULL AND jsonb_typeof(w.candidates) = 'array')`,
+  postcode_on_page: `(w.source = 'search' AND w.evidence = 'postcode_on_page'
+    AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL)`,
+  registry: `(w.source <> 'search' AND w.evidence = 'registry'
+    AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL)`,
+};
+
+/** The rows a selection takes: the kind asked for, else the two search kinds, so registry rows only when asked for. One declaration for both selectors and the count. */
+function settledRows(evidence?: RewalkSelection['evidence']): string {
+  const kinds = evidence ? [evidence] : (['none', 'postcode_on_page'] as const);
+  return `(${kinds.map((kind) => SETTLED[kind]).join(' OR ')})`;
+}
+
+/**
+ * A row the current walk has not read, or last read before the cutoff. One
+ * declaration for the resumable selector and the count; a seeded sample binds
+ * no cutoff, so it cannot take the marker. Constant SQL text, interpolated
+ * raw; the row is `w`, the cutoff `reread.cutoff`.
+ */
+const UNREAD = `(w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION}
+  OR w.walked_at < reread.cutoff)`;
 
 /** Rows from the database, typed. */
 function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
@@ -38,6 +65,7 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
     registerTowns: sponsorTownsOf(r),
     locality: (r.locality as string | null) ?? null,
     evidence: r.evidence as RewalkRow['evidence'],
+    source: (r.source as string | null) ?? 'search',
     url: (r.url as string | null) ?? null,
     candidates: Array.isArray(r.candidates) ? (r.candidates as string[]) : [],
     walkAttempts: Number(r.walk_attempts ?? 0),
@@ -45,34 +73,29 @@ function toRows(rows: Record<string, unknown>[]): RewalkRow[] {
 }
 
 /**
- * Settled search rows the current walk has not read: `none` rows with banked
- * results, and postcode rows with a stored site. Resumable by the walk
- * marker, in company-number order, sliced by the same bucket as discovery.
+ * Settled rows the current walk has not read: `none` rows with banked
+ * results, postcode rows with a stored site and, when asked for, registry
+ * rows no page has confirmed. Resumable by the walk marker, in company-number
+ * order, sliced by the same bucket as discovery.
  */
 export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
   const shard = selection.shard ?? WHOLE_SET;
-  const evidence = selection.evidence ?? null;
+  const settled = settledRows(selection.evidence);
+  const rereadBefore = selection.rereadBefore ?? null;
   return async (maxRows: number): Promise<RewalkRow[]> => {
     if (selection.seed) {
       // No marker predicate: a measurement draws from every settled row.
       return toRows(
         await sql`
-          SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+          SELECT w.company_number, w.evidence, w.source, w.url, w.candidates,
+            p.postal_code,
             coalesce(p.company_name, '') AS company_name, p.locality,
             ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
             ${sql.unsafe(SPONSOR_TOWNS_COLUMN)},
             0 AS walk_attempts
           FROM company_websites w
           JOIN companies_house_profiles p USING (company_number)
-          WHERE w.source = 'search'
-            AND (
-              (w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
-                AND jsonb_typeof(w.candidates) = 'array'
-                AND ${evidence}::text IS DISTINCT FROM 'postcode_on_page')
-              OR (w.evidence = 'postcode_on_page'
-                AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-                AND ${evidence}::text IS DISTINCT FROM 'none')
-            )
+          WHERE ${sql.unsafe(settled)}
           ORDER BY md5(w.company_number || ${selection.seed}::text), w.company_number
           LIMIT ${maxRows}
         `,
@@ -80,23 +103,17 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
     }
     return toRows(
       await sql`
-        SELECT w.company_number, w.evidence, w.url, w.candidates, p.postal_code,
+        SELECT w.company_number, w.evidence, w.source, w.url, w.candidates,
+          p.postal_code,
           coalesce(p.company_name, '') AS company_name, p.locality,
           ${sql.unsafe(SPONSOR_NAMES_COLUMN)},
           ${sql.unsafe(SPONSOR_TOWNS_COLUMN)},
           w.walk_attempts
         FROM company_websites w
         JOIN companies_house_profiles p USING (company_number)
-        WHERE w.source = 'search'
-          AND (
-            (w.evidence = 'none' AND w.status = 'none' AND w.url IS NULL
-              AND jsonb_typeof(w.candidates) = 'array'
-              AND ${evidence}::text IS DISTINCT FROM 'postcode_on_page')
-            OR (w.evidence = 'postcode_on_page'
-              AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL
-              AND ${evidence}::text IS DISTINCT FROM 'none')
-          )
-          AND (w.walk_version IS NULL OR w.walk_version < ${CURRENT_WALK_VERSION})
+        CROSS JOIN (SELECT ${rereadBefore}::timestamp AS cutoff) reread
+        WHERE ${sql.unsafe(settled)}
+          AND ${sql.unsafe(UNREAD)}
           AND mod(
             ('x' || left(md5(w.company_number), 7))::bit(28)::int,
             ${shard.count}::int
@@ -110,8 +127,9 @@ export function makeSelectRewalk(sql: Sql, selection: RewalkSelection = {}) {
 
 /**
  * Write what the re-walk proved, as an upgrade only. A `none` row gains its
- * site; a postcode row gains `crn_on_page` on the site it already holds.
- * `checked_at` is cleared so the sweep confirms the row before it renders.
+ * site; a postcode row gains `crn_on_page` on the site it already holds; a
+ * registry row gains its number or its confirmation there. `checked_at` is
+ * cleared so the sweep confirms the row before it renders.
  */
 export function makeUpgrade(sql: Sql) {
   return async (
@@ -120,6 +138,30 @@ export function makeUpgrade(sql: Sql) {
     confidence: number,
   ): Promise<boolean> => {
     if (!outcome.url || outcome.evidence === 'none') return false;
+    if (row.evidence === 'registry') {
+      // The two rungs above `registry` a page can prove; anything else is not an upgrade.
+      if (
+        outcome.evidence !== 'crn_on_page' &&
+        outcome.evidence !== 'registry_confirmed'
+      ) {
+        return false;
+      }
+      const confirmed = await sql`
+        UPDATE company_websites SET
+          evidence      = ${outcome.evidence},
+          evidence_url  = ${outcome.evidenceUrl},
+          confidence    = ${confidence.toFixed(3)}::numeric,
+          checked_at    = NULL,
+          walk_version  = ${CURRENT_WALK_VERSION},
+          walk_attempts = 0,
+          walked_at     = now()
+        WHERE company_number = ${row.companyNumber}
+          AND source = ${row.source} AND evidence = 'registry'
+          AND url = ${row.url} AND status IN ('verified', 'unreachable')
+        RETURNING company_number
+      `;
+      return confirmed.length > 0;
+    }
     const updated =
       row.evidence === 'none'
         ? await sql`
@@ -165,7 +207,7 @@ export function makeMarkWalked(sql: Sql) {
         walk_version  = ${CURRENT_WALK_VERSION},
         walk_attempts = 0,
         walked_at     = now()
-      WHERE company_number = ${row.companyNumber} AND source = 'search'
+      WHERE company_number = ${row.companyNumber} AND source = ${row.source}
         AND evidence = ${row.evidence} AND url IS NOT DISTINCT FROM ${row.url}
     `;
   };
@@ -182,7 +224,7 @@ export function makeMarkUnreadable(sql: Sql) {
           THEN now() ELSE walked_at END,
         walk_attempts = CASE WHEN walk_attempts + 1 >= ${MAX_WALK_ATTEMPTS}
           THEN 0 ELSE walk_attempts + 1 END
-      WHERE company_number = ${row.companyNumber} AND source = 'search'
+      WHERE company_number = ${row.companyNumber} AND source = ${row.source}
         AND evidence = ${row.evidence} AND url IS NOT DISTINCT FROM ${row.url}
     `;
   };
@@ -209,26 +251,35 @@ export function makeRecordStated(sql: Sql) {
   };
 }
 
-/** Settled rows the current walk has still to read, by kind, for the run summary. */
-export function makeRewalkRemaining(sql: Sql) {
-  return async (): Promise<{ none: number; postcode: number }> => {
+/** Settled rows a run with this selection has still to read, by kind, for the run summary. */
+export function makeRewalkRemaining(
+  sql: Sql,
+  selection: Pick<RewalkSelection, 'evidence' | 'rereadBefore'> = {},
+) {
+  const settled = settledRows(selection.evidence);
+  const rereadBefore = selection.rereadBefore ?? null;
+  return async (): Promise<{
+    none: number;
+    postcode: number;
+    registry: number;
+  }> => {
     const [r] = await sql`
       SELECT
-        count(*) FILTER (WHERE evidence = 'none')::int AS none,
-        count(*) FILTER (WHERE evidence = 'postcode_on_page')::int AS postcode
+        count(*) FILTER (WHERE w.evidence = 'none')::int AS none,
+        count(*) FILTER (WHERE w.evidence = 'postcode_on_page')::int AS postcode,
+        count(*) FILTER (WHERE w.evidence = 'registry')::int AS registry
       FROM company_websites w
-      WHERE source = 'search'
-        -- The selector joins the profile, so only rows it can return count.
-        AND EXISTS (SELECT 1 FROM companies_house_profiles p
+      CROSS JOIN (SELECT ${rereadBefore}::timestamp AS cutoff) reread
+      -- The selector joins the profile, so only rows it can return count.
+      WHERE EXISTS (SELECT 1 FROM companies_house_profiles p
           WHERE p.company_number = w.company_number)
-        AND (walk_version IS NULL OR walk_version < ${CURRENT_WALK_VERSION})
-        AND (
-          (evidence = 'none' AND status = 'none' AND url IS NULL
-            AND jsonb_typeof(candidates) = 'array')
-          OR (evidence = 'postcode_on_page'
-            AND status IN ('verified', 'unreachable') AND url IS NOT NULL)
-        )
+        AND ${sql.unsafe(UNREAD)}
+        AND ${sql.unsafe(settled)}
     `;
-    return { none: Number(r.none), postcode: Number(r.postcode) };
+    return {
+      none: Number(r.none ?? 0),
+      postcode: Number(r.postcode ?? 0),
+      registry: Number(r.registry ?? 0),
+    };
   };
 }

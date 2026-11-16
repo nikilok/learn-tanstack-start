@@ -1,18 +1,21 @@
 /**
- * Re-walk the search rows discovery has already settled, at zero search
- * credits: `none` rows from their banked results, two-signal rule included,
- * postcode rows on their stored site. Upgrades only; every statutory company
- * number the pages state is recorded in website_stated_numbers. Changed rows
- * wait for the sweep before they render. A candidate whose homepage shows a
- * plain fetch nothing is read again in headless Chromium; `--no-render` skips
- * that.
+ * Re-walk the rows already settled, at zero search credits: `none` rows from
+ * their banked results, two-signal rule included, postcode rows on their
+ * stored site, and registry rows on theirs when asked for. Upgrades only;
+ * every statutory company number the pages state is recorded in
+ * website_stated_numbers. Changed rows wait for the sweep before they render.
+ * A candidate whose homepage shows a plain fetch nothing is read again in
+ * headless Chromium; `--no-render` skips that.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/rewalk-websites.ts --dry-run --max-rows=50
  *   bun apps/web/scripts/rewalk-websites.ts --shard=3/8 --max-rows=1500
  *   bun apps/web/scripts/rewalk-websites.ts --sample=150 --seed=rewalk-2026-10-20 --evidence=none
+ *   bun apps/web/scripts/rewalk-websites.ts --evidence=registry --max-rows=500
+ *   bun apps/web/scripts/rewalk-websites.ts --evidence=none --reread-before=2026-11-16
  *
  * `--sample` draws a seeded random sample and is always a dry run.
+ * `--reread-before` also takes rows this walk last read before that date.
  *
  * Env: POSTGRES_URL, COMPANIES_HOUSE_SEED_API_KEY.
  */
@@ -23,6 +26,7 @@ import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import { evidenceConfidence } from '../src/lib/websites/decide.ts';
 import { makeCrowdedHosts } from '../src/lib/websites/discover-sql.ts';
 import { DISCLOSURE_PATHS } from '../src/lib/websites/fetch-policy.ts';
+import { rereadCutoff } from '../src/lib/websites/reread.ts';
 import {
   makeMarkUnreadable,
   makeMarkWalked,
@@ -55,7 +59,7 @@ const flag = (name: string) =>
 
 /** Every argument this script reads; anything else stops the run. */
 const KNOWN_ARG =
-  /^--(?:dry-run|no-render|(?:shard|max-rows|delay|max-disclosure|sample|seed|evidence)=.*)$/;
+  /^--(?:dry-run|no-render|(?:shard|max-rows|delay|max-disclosure|sample|seed|evidence|reread-before)=.*)$/;
 const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
 if (unknownArgs.length > 0) {
   console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
@@ -69,14 +73,21 @@ if (sample && !seed) {
   process.exit(1);
 }
 const evidenceFlag = flag('evidence');
-if (evidenceFlag && !['none', 'postcode'].includes(evidenceFlag)) {
-  console.error('  --evidence must be none or postcode');
+if (evidenceFlag && !['none', 'postcode', 'registry'].includes(evidenceFlag)) {
+  console.error('  --evidence must be none, postcode or registry');
   process.exit(1);
 }
 const evidence =
   evidenceFlag === 'postcode'
     ? 'postcode_on_page'
-    : (evidenceFlag as 'none' | undefined);
+    : (evidenceFlag as 'none' | 'registry' | undefined);
+const rereadFlag = flag('reread-before');
+if (rereadFlag !== undefined && sample) {
+  console.error('  --reread-before does not apply to a --sample');
+  process.exit(1);
+}
+const rereadBefore =
+  rereadFlag === undefined ? undefined : rereadCutoff(rereadFlag, new Date());
 const dryRun = args.includes('--dry-run') || Boolean(sample);
 const shard = parseShard(flag('shard'));
 const maxRows = parseStrictInt(sample ?? flag('max-rows') ?? '350', 'max-rows');
@@ -100,12 +111,13 @@ console.log(
   `Website re-walk — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(
-  `  shard: ${shard.index}/${shard.count}  max-rows: ${maxRows}  delay: ${delayMs}ms${sample ? '  seeded sample' : ''}${evidence ? `  evidence: ${evidence}` : ''}`,
+  `  shard: ${shard.index}/${shard.count}  max-rows: ${maxRows}  delay: ${delayMs}ms${sample ? '  seeded sample' : ''}${evidence ? `  evidence: ${evidence}` : ''}${rereadBefore ? `  re-reading rows walked before ${rereadBefore}` : ''}`,
 );
+const remaining = makeRewalkRemaining(sql, { evidence, rereadBefore });
 if (!sample) {
-  const left = await makeRewalkRemaining(sql)();
+  const left = await remaining();
   console.log(
-    `  before: ${left.none} none rows, ${left.postcode} postcode rows to walk`,
+    `  before: ${left.none} none rows, ${left.postcode} postcode rows, ${left.registry} registry rows to walk`,
   );
 }
 const crowdedHosts = await makeCrowdedHosts(sql)();
@@ -121,6 +133,7 @@ const summary = await rewalkWebsites(
       shard,
       evidence,
       seed: sample ? seed : undefined,
+      rereadBefore,
     }),
     crowdedHosts,
     probe: (row, url) => probeOrigin(row, url, crowdedHosts),
@@ -159,6 +172,8 @@ console.log(`  none_to_number      : ${summary.noneToNumber}`);
 console.log(`  none_to_postcode    : ${summary.noneToPostcode}`);
 console.log(`  none_to_name_place  : ${summary.noneToNameAndPlace}`);
 console.log(`  postcode_to_number  : ${summary.postcodeToNumber}`);
+console.log(`  registry_to_number  : ${summary.registryToNumber}`);
+console.log(`  registry_confirmed  : ${summary.registryConfirmed}`);
 console.log(`  unchanged           : ${summary.unchanged}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
 console.log(`  unpersisted         : ${summary.unpersisted}`);
@@ -173,11 +188,11 @@ console.log(`  upgraded_by_render  : ${summary.upgradedByRender}`);
 console.log(`  stated_numbers      : ${summary.statedNumbers}`);
 console.log(`  minutes             : ${minutes.toFixed(1)}`);
 if (!sample) {
-  const left = await makeRewalkRemaining(sql)();
+  const left = await remaining();
   console.log(
-    `  left                : ${left.none} none, ${left.postcode} postcode`,
+    `  left                : ${left.none} none, ${left.postcode} postcode, ${left.registry} registry`,
   );
-  setGitHubOutput('left', String(left.none + left.postcode));
+  setGitHubOutput('left', String(left.none + left.postcode + left.registry));
 }
 setGitHubOutput(
   'upgraded',
@@ -185,7 +200,9 @@ setGitHubOutput(
     summary.noneToNumber +
       summary.noneToPostcode +
       summary.noneToNameAndPlace +
-      summary.postcodeToNumber,
+      summary.postcodeToNumber +
+      summary.registryToNumber +
+      summary.registryConfirmed,
   ),
 );
 

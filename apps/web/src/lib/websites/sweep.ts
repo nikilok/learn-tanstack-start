@@ -94,7 +94,7 @@ export type SweepDeps = {
   hasPostcode(html: string, postcode: string): boolean;
   /** The company's officers, resigned ones included, or why they could not be read. Absent, the officer arm is never re-read. */
   officers?(companyNumber: string): Promise<OfficerLookup>;
-  /** Read one exact URL in a browser. Absent, a `name_and_place` homepage that shows a plain fetch nothing is not read. */
+  /** Read one exact URL in a browser. Absent, a homepage whose proof is re-read and that shows a plain fetch nothing is not read. */
   renderPage?(url: string): Promise<FetchedPage>;
   applyResult(row: SweepRow, result: RevalidateResult): Promise<boolean>;
   sleep(ms: number): Promise<void>;
@@ -152,6 +152,10 @@ export type SweepSummary = {
   nameAndPlaceUnread: number;
   /** `name_and_place` homepages read again in a browser. */
   nameAndPlaceRendered: number;
+  /** `registry_confirmed` rows with no postcode on the homepage whose confirmation was gone from every page read, those not read well enough to tell, and their homepages read again in a browser. */
+  confirmationGone: number;
+  confirmationUnread: number;
+  confirmationRendered: number;
   updated: number;
   lockMissed: number;
   errored: number;
@@ -256,21 +260,56 @@ function notThere(
   );
 }
 
+/** Which proof a re-check reads: a `name_and_place` row's rule, or what confirms a registry row beyond its homepage postcode. */
+type ProofKind = 'name_and_place' | 'confirmation';
+
+/** What a re-check read: whether the proof holds and on which page, and the page stating the company's own number when one it read does. */
+type Recheck = {
+  check: NameAndPlaceCheck;
+  proofAt: string | null;
+  numberAt: string | null;
+};
+
+/** The proof read again on a page, or held by the rule with none to name. */
+function proofHolds(proofAt: string | null): Recheck {
+  return { check: 'holds', proofAt, numberAt: null };
+}
+
+/** The company's own number on a page read: it outranks the proof being re-read. */
+function numberStated(at: string): Recheck {
+  return { check: 'holds', proofAt: at, numberAt: at };
+}
+
+/** Origin of a URL, or null when it will not parse. */
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Re-read a `name_and_place` row's proof: the homepage, its proof page, then
- * the walk's pages until the rule holds again. A homepage that shows a plain
- * fetch nothing is read in a browser, as discovery read it, and so is the
- * walk. Officers are asked for only once the proof page has been tried.
- * `gone` only when every page it tried was read or is not there; resigned
- * officers count, as turnover is not the site changing.
+ * Re-read a row's proof: the homepage, its proof page, then the walk's pages
+ * until the rule holds again. A homepage that shows a plain fetch nothing is
+ * read in a browser, as discovery read it, and so is the walk. Officers are
+ * asked for only once the proof page has been tried. `gone` only when every
+ * page it tried was read or is not there; resigned officers count, as
+ * turnover is not the site changing. A confirmation also holds on the
+ * registered postcode on a page naming the company, reads the rule on the
+ * host that served the homepage, as the re-walk that found it did, and walks
+ * that host's fixed paths ahead of the stored host's. The company's number on
+ * any page read ends the re-check.
  */
-async function recheckNameAndPlace(
+async function recheckProof(
+  kind: ProofKind,
   row: SweepRow,
   homepage: { url: string; servedUrl: string; html: string },
   config: SweepConfig,
   deps: SweepDeps,
   summary: SweepSummary,
-): Promise<{ check: NameAndPlaceCheck; proofAt: string | null }> {
+): Promise<Recheck> {
+  const confirms = kind === 'confirmation';
   const company: NameAndPlaceRow = {
     companyNumber: row.companyNumber,
     companyName: row.companyName,
@@ -287,11 +326,13 @@ async function recheckNameAndPlace(
     NO_CROWDED,
   );
   let homeText = visibleText(homepage.html);
+  let servedHome = homepage.servedUrl;
   let fetchPage = deps.fetchPage;
   let deadline: number | null = null;
   const tried = new Set([pageKey(homepage.url), pageKey(homepage.servedUrl)]);
   if (deps.renderPage && needsRender(home)) {
-    summary.nameAndPlaceRendered++;
+    if (confirms) summary.confirmationRendered++;
+    else summary.nameAndPlaceRendered++;
     const started = Date.now();
     const shown = await deps.renderPage(homepage.url);
     if (shown.ok) {
@@ -306,14 +347,20 @@ async function recheckNameAndPlace(
       if (!seen.onAggregator && !seen.parked) {
         home = seen;
         homeText = visibleText(shown.html);
+        servedHome = shown.url;
         fetchPage = deps.renderPage;
         tried.add(pageKey(shown.url));
         deadline = started + RENDER_VISIT_MS;
       }
     }
   }
+  // Attributed to the URL the row stores, as the sweep's own number check is.
+  if (home.crnFound) return numberStated(homepage.url);
+  if (confirms && home.postcodeFound && home.postcodeNamed) {
+    return proofHolds(home.evidenceUrl);
+  }
   const pages: PageRead[] = [...(home.pages ?? [])];
-  const site = { url: row.url, pages };
+  const site = { url: confirms ? servedHome : row.url, pages };
   // A cookie wall, a script shell, a menu its scripts build or a bot challenge shows nothing either way.
   let unread =
     pageTooThin(homeText) || looksChallenged(homeText) || home.siteLinks === 0;
@@ -330,18 +377,25 @@ async function recheckNameAndPlace(
     return verdict;
   };
   let verdict = await judge();
-  if (verdict.kind === 'proved') {
-    return { check: 'holds', proofAt: verdict.evidenceUrl };
-  }
+  if (verdict.kind === 'proved') return proofHolds(verdict.evidenceUrl);
 
-  const base = `${new URL(homepage.url).origin}${new URL(row.url).pathname.replace(/\/+$/, '')}`;
+  const dir = new URL(row.url).pathname.replace(/\/+$/, '');
+  const storedOrigin = new URL(homepage.url).origin;
+  // A confirmation is read where the site is served, then on the stored host: one that forwards its homepage may answer none of its own paths, or map them elsewhere.
+  const servedOrigin = confirms ? originOf(servedHome) : null;
+  const origins =
+    servedOrigin && servedOrigin !== storedOrigin
+      ? [servedOrigin, storedOrigin]
+      : [storedOrigin];
   const targets = [
     ...(proofPage ? [proofPage] : []),
-    ...walkTargets(
-      base,
-      home.legalLinks ?? [],
-      DISCLOSURE_PATHS.length,
-      home.aboutLinks ?? [],
+    ...origins.flatMap((origin) =>
+      walkTargets(
+        `${origin}${dir}`,
+        home.legalLinks ?? [],
+        DISCLOSURE_PATHS.length,
+        home.aboutLinks ?? [],
+      ),
     ),
   ];
   for (const target of targets) {
@@ -366,21 +420,19 @@ async function recheckNameAndPlace(
     }
     const read = readWalkPage(company, page.url, page.html, NO_CROWDED);
     if (!read) continue;
+    if (read.crnFound) return numberStated(page.url);
+    if (confirms && read.pageNamed) return proofHolds(page.url);
     pages.push(read.read);
     verdict = await judge();
-    if (verdict.kind === 'proved') {
-      return { check: 'holds', proofAt: verdict.evidenceUrl };
-    }
+    if (verdict.kind === 'proved') return proofHolds(verdict.evidenceUrl);
   }
   // Every page read: the officers decide it now if anything does.
   mayAsk = true;
   verdict = await judge();
-  if (verdict.kind === 'proved') {
-    return { check: 'holds', proofAt: verdict.evidenceUrl };
-  }
+  if (verdict.kind === 'proved') return proofHolds(verdict.evidenceUrl);
   // Still asking for officers: they could not be read, so neither could the proof.
   if (verdict.kind === 'needs_officers') unread = true;
-  return { check: unread ? 'unknown' : 'gone', proofAt: null };
+  return { check: unread ? 'unknown' : 'gone', proofAt: null, numberAt: null };
 }
 
 /**
@@ -420,6 +472,9 @@ export async function sweepWebsites(
     nameAndPlaceGone: 0,
     nameAndPlaceUnread: 0,
     nameAndPlaceRendered: 0,
+    confirmationGone: 0,
+    confirmationUnread: 0,
+    confirmationRendered: 0,
     updated: 0,
     lockMissed: 0,
     errored: 0,
@@ -445,6 +500,8 @@ export async function sweepWebsites(
       let thinPage = false;
       let nameAndPlace: NameAndPlaceCheck | undefined;
       let nameAndPlaceAt: string | null = null;
+      let confirmation: NameAndPlaceCheck | undefined;
+      let confirmationAt: string | null = null;
       if (fetched.ok) {
         // Read off the homepage we already have — no extra request.
         //
@@ -496,7 +553,8 @@ export async function sweepWebsites(
           !onAggregator &&
           !looksParkedPage
         ) {
-          const recheck = await recheckNameAndPlace(
+          const recheck = await recheckProof(
+            'name_and_place',
             row,
             {
               url: fetched.attemptedUrl,
@@ -509,8 +567,36 @@ export async function sweepWebsites(
           );
           nameAndPlace = recheck.check;
           nameAndPlaceAt = recheck.proofAt;
+          crnFoundAt = recheck.numberAt;
           if (nameAndPlace === 'gone') summary.nameAndPlaceGone++;
           if (nameAndPlace === 'unknown') summary.nameAndPlaceUnread++;
+        }
+
+        // The homepage postcode confirms it by itself; only without one is the rest re-read.
+        if (
+          row.evidence === 'registry_confirmed' &&
+          !postcodeConfirms &&
+          !crnFoundAt &&
+          !onAggregator &&
+          !looksParkedPage
+        ) {
+          const recheck = await recheckProof(
+            'confirmation',
+            row,
+            {
+              url: fetched.attemptedUrl,
+              servedUrl: fetched.url,
+              html: fetched.html,
+            },
+            config,
+            deps,
+            summary,
+          );
+          confirmation = recheck.check;
+          confirmationAt = recheck.proofAt;
+          crnFoundAt = recheck.numberAt;
+          if (confirmation === 'gone') summary.confirmationGone++;
+          if (confirmation === 'unknown') summary.confirmationUnread++;
         }
       }
 
@@ -533,6 +619,8 @@ export async function sweepWebsites(
         pageTooThin: thinPage,
         nameAndPlace,
         nameAndPlaceAt,
+        confirmation,
+        confirmationAt,
       });
 
       if (fetched.ok) {

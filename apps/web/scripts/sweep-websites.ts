@@ -17,12 +17,18 @@
  *   bun apps/web/scripts/sweep-websites.ts --dry-run --max-rows=20 --verbose
  *   bun apps/web/scripts/sweep-websites.ts --max-rows=500
  *   bun apps/web/scripts/sweep-websites.ts            # full slice (CI)
+ *   bun apps/web/scripts/sweep-websites.ts --status=unreachable --max-rows=1500
+ *
+ * `--status=unreachable` or `--status=dead` takes only rows an earlier pass
+ * left in that status, oldest-checked first. An argument the script does not
+ * know stops the run.
  *
  * Env: POSTGRES_URL. WEBSITE_SWEEP_DELAY_MS overrides the pacing.
  * COMPANIES_HOUSE_SEED_API_KEY lets a `name_and_place` row's officer be re-read.
- * A `name_and_place` homepage that shows a plain fetch nothing is read in
- * headless Chromium; `--no-render` skips that, as does a browser that will not
- * start, which leaves such a row as it was.
+ * A homepage whose proof is re-read (a `name_and_place` row's, a confirmed
+ * registry row's) and that shows a plain fetch nothing is read in headless
+ * Chromium; `--no-render` skips that, as does a browser that will not start,
+ * which leaves such a row as it was.
  */
 
 import { createClient, neon } from '@ss/db/client';
@@ -39,6 +45,7 @@ import {
   loadScriptEnv,
   parseStrictInt,
 } from './lib/script-utils.ts';
+import { parseSweepArgs, type SweepArgs } from './lib/sweep-args.ts';
 import { makeSweepDeps } from './lib/sweep-deps.ts';
 import { launchRenderer, type Renderer } from './lib/web-render.ts';
 
@@ -60,14 +67,16 @@ const DEFAULT_DELAY_MS = 250;
  *  away, or effectively absent. */
 const MAX_DISCLOSURE_PATHS = 2;
 
-const args = process.argv.slice(2);
-const dryRun = args.includes('--dry-run');
-/** Per-row detail, for a human at a terminal. Never set by the workflow. */
-const verbose = args.includes('--verbose');
-const maxRowsArg = args.find((a) => a.startsWith('--max-rows='))?.split('=')[1];
-const maxRows = maxRowsArg
-  ? parseStrictInt(maxRowsArg, '--max-rows')
-  : DEFAULT_MAX_ROWS;
+let parsed: SweepArgs;
+try {
+  parsed = parseSweepArgs(process.argv.slice(2));
+} catch (err) {
+  console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
+// `verbose` is per-row detail, for a human at a terminal. Never set by the workflow.
+const { dryRun, verbose, status: statusArg } = parsed;
+const maxRows = parsed.maxRows ?? DEFAULT_MAX_ROWS;
 const delayMs = process.env.WEBSITE_SWEEP_DELAY_MS
   ? parseStrictInt(process.env.WEBSITE_SWEEP_DELAY_MS, 'WEBSITE_SWEEP_DELAY_MS')
   : DEFAULT_DELAY_MS;
@@ -86,10 +95,12 @@ const startedAt = Date.now();
 console.log(
   `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
-console.log(`  max-rows: ${maxRows}  delay: ${delayMs}ms`);
+console.log(
+  `  max-rows: ${maxRows}  delay: ${delayMs}ms${statusArg ? `  status: ${statusArg}` : ''}`,
+);
 if (!chKey) console.log('  officer re-check: off, no Companies House key');
 let renderer: Renderer | null = null;
-if (!args.includes('--no-render')) {
+if (parsed.render) {
   try {
     renderer = await launchRenderer();
   } catch (err) {
@@ -121,6 +132,7 @@ const summary = await sweepWebsites(
     (message) => console.log(message),
     chKey ? makeOfficerLookup({ apiKey: chKey, workers: 1 }) : undefined,
     renderer ?? undefined,
+    { status: statusArg },
   ),
 ).finally(() => renderer?.close());
 
@@ -159,6 +171,9 @@ console.log(`  no_site_there       : ${summary.noSiteThere}`);
 console.log(`  name_place_gone     : ${summary.nameAndPlaceGone}`);
 console.log(`  name_place_unread   : ${summary.nameAndPlaceUnread}`);
 console.log(`  name_place_rendered : ${summary.nameAndPlaceRendered}`);
+console.log(`  confirmation_gone   : ${summary.confirmationGone}`);
+console.log(`  confirmation_unread : ${summary.confirmationUnread}`);
+console.log(`  confirmation_render : ${summary.confirmationRendered}`);
 console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);

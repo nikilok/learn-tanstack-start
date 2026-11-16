@@ -65,6 +65,17 @@ describe('makeSweepDeps', () => {
     expect(calls).toEqual([]);
   });
 
+  test('a selection reaches the row query; without one the pass takes every row', async () => {
+    const narrowed = makeFakeSql();
+    await makeSweepDeps(narrowed.sql, () => {}, undefined, undefined, {
+      status: 'unreachable',
+    }).selectRows(5);
+    expect(narrowed.calls[0].params).toContain('unreachable');
+    const whole = makeFakeSql();
+    await makeSweepDeps(whole.sql, () => {}).selectRows(5);
+    expect(whole.calls[0].params).not.toContain('unreachable');
+  });
+
   test('the postcode check matches the registered office', () => {
     expect(
       deps.hasPostcode('<p>Unit 4, Winchester SO22 5AZ</p>', 'SO22 5AZ'),

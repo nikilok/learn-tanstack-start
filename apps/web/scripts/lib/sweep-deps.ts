@@ -8,6 +8,7 @@ import {
   makeApplyResult,
   makeSelectRows,
   makeSleep,
+  type SweepSelection,
 } from '../../src/lib/websites/sql.ts';
 import { pageShowsCompanyNumber } from '../../src/lib/websites/stated-numbers.ts';
 import type { FetchedPage, SweepDeps } from '../../src/lib/websites/sweep.ts';
@@ -33,15 +34,16 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
   };
 }
 
-/** The sweep's dependencies against this database, logging through `log`; without `officers` the officer arm is never re-read, and without `renderer` no page is read in a browser. */
+/** The sweep's dependencies against this database, logging through `log`; without `officers` the officer arm is never re-read, without `renderer` no page is read in a browser, and `selection` narrows which rows a pass takes. */
 export function makeSweepDeps(
   sql: Parameters<typeof makeSelectRows>[0],
   log: (message: string) => void,
   officers?: SweepDeps['officers'],
   renderer?: Pick<Renderer, 'visit'>,
+  selection?: SweepSelection,
 ): SweepDeps {
   return {
-    selectRows: makeSelectRows(sql),
+    selectRows: makeSelectRows(sql, selection),
     fetchSite: async (url) => toFetchedPage(await fetchSite(url), url),
     fetchPage: async (url) =>
       toFetchedPage(

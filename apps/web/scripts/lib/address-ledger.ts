@@ -58,8 +58,8 @@ export function memoryLedger(known: Readonly<Turns> = {}): Ledger {
 /** Times in a row a process may lose the race for the next number before it paces alone. */
 const MAX_ATTEMPTS = 200;
 
-/** Numbered files kept behind the newest. A number is only ever free again once it is this far behind, which tells a process that fell behind from one another built on at once. */
-export const KEPT = 16;
+/** Numbered files kept behind the newest. A number is only ever free again once it is this far behind, which tells a process that fell behind from one others have since built on. */
+export const KEPT = 64;
 
 export type FileLedgerOptions = {
   /** Told once, when the files cannot be used and this process paces alone. */
@@ -140,7 +140,7 @@ export function currentTurns(dir: string): Turns {
 
 let drafts = 0;
 
-/** Publish these turns as the file with this number, which only one process can do; false when another got there first, or when the number was only free because this process had fallen far behind. */
+/** Publish these turns as the file with this number, which only one process can do; false when another got there first, or when the number is so far behind the newest that it may only have been free because its file was tidied away. A false is never a shared turn: the caller reads again and takes another. */
 function publish(
   dir: string,
   number: number,
@@ -160,7 +160,7 @@ function publish(
   }
   made?.();
   const present = numbers(dir);
-  // KEPT or more behind the newest: its file had been tidied away, so it was never the next.
+  // KEPT or more behind the newest: it cannot be told from a number freed by tidying, so it is not trusted.
   if (Math.max(...present) - number >= KEPT) return false;
   for (const older of present) {
     if (older <= number - KEPT) remove(numbered(dir, older));

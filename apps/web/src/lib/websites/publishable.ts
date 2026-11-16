@@ -45,6 +45,18 @@
  * This rung is REVOCABLE, so the list is not a one-way door — the sweep lowers
  * it back when a page stops showing the address.
  *
+ * The re-walk confirms a registry row the homepage check leaves unconfirmed
+ * on two more things (rewalk.ts): the registered postcode on another page of
+ * the site that names the company, and the two-signal rule read on the host
+ * that serves the site. Neither is in the sample above. Measured 2026-11-16
+ * on a seeded draw of 400 such rows (300 CQC, 100 Wikidata), walked locally
+ * without a browser: 31 gained their number and 143 a confirmation. 44 of the
+ * 143 were read by eye on their proof page: 43 right, 1 would not load. The
+ * labels are Claude's; the owner has not audited them.
+ * The sweep re-reads the confirmation on each pass that finds no postcode on
+ * the homepage, and withdraws the rung once it reads the site and finds
+ * nothing left.
+ *
  * `postcode_on_page` is NOT in the list: the tier publishes only in part,
  * through its own arm of the gate. A search-found row qualifies when its
  * company's registered postcode is shared by at most POSTCODE_SHARE_LIMIT

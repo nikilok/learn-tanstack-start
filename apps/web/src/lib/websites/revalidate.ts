@@ -85,6 +85,10 @@ export type RevalidateInput = {
   nameAndPlace?: NameAndPlaceCheck;
   /** The page the re-check read the proof on, when it holds. */
   nameAndPlaceAt?: string | null;
+  /** A `registry_confirmed` row's re-check when its homepage shows no postcode: what confirmed it still read on another page, gone from pages that read, or not known this pass. */
+  confirmation?: NameAndPlaceCheck;
+  /** The page that re-check read it on, when it holds. */
+  confirmationAt?: string | null;
 };
 
 /** What re-reading a `name_and_place` row's proof found. */
@@ -319,7 +323,16 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     evidence = 'registry_confirmed';
     evidenceUrl = input.postcodeFoundAt ?? null;
     note = 'live; registered office postcode found on the site';
-  } else if (evidence === 'registry_confirmed' && !input.pageTooThin) {
+  } else if (input.confirmation === 'holds' && CONFIRMABLE.has(evidence)) {
+    evidence = 'registry_confirmed';
+    evidenceUrl = input.confirmationAt ?? null;
+    note = 'live; what confirmed the register is still on the site';
+  } else if (
+    evidence === 'registry_confirmed' &&
+    !input.pageTooThin &&
+    // Unread is not gone: a page that would not load withdraws nothing.
+    input.confirmation !== 'unknown'
+  ) {
     evidenceUrl = input.postcodeFoundAt ?? null;
     // The address was there and is not any more: the site was rebuilt, the
     // domain changed hands, or the company moved. Upgrade-only applies
@@ -328,7 +341,9 @@ export function revalidate(input: RevalidateInput): RevalidateResult {
     // names the company — the exact decay this tier exists to catch.
     evidence = 'registry';
     note =
-      'live; registered office postcode no longer on the site, confirmation withdrawn';
+      input.confirmation === 'gone'
+        ? 'live; nothing on the site confirms the register any more, confirmation withdrawn'
+        : 'live; registered office postcode no longer on the site, confirmation withdrawn';
   } else if (evidence === 'name_and_place') {
     // Its proof is the re-check's: a postcode alone moves nothing, nor its proof page.
     if (input.nameAndPlace === 'holds') {

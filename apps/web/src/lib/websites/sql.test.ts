@@ -50,6 +50,27 @@ describe('makeSelectRows', () => {
   });
 });
 
+describe('makeSelectRows: one status', () => {
+  const flat = (text: string) => text.replace(/\s+/g, ' ');
+
+  test('unset, the pass takes every row by age', async () => {
+    const { sql, calls } = makeFakeSql();
+    await makeSelectRows(sql)(10);
+    expect(flat(calls[0].text)).toMatch(
+      /WHERE w\.url IS NOT NULL AND \(\$(\d+)::text IS NULL OR w\.status = \$\d+\) ORDER BY w\.checked_at ASC NULLS FIRST/,
+    );
+    expect(calls[0].params).toEqual([null, null, 10]);
+  });
+
+  test('set, only rows an earlier pass left in that status, still oldest-checked first', async () => {
+    for (const status of ['unreachable', 'dead'] as const) {
+      const { sql, calls } = makeFakeSql();
+      await makeSelectRows(sql, { status })(25);
+      expect(calls[0].params).toEqual([status, status, 25]);
+    }
+  });
+});
+
 describe('makeCoverage', () => {
   test('counts renderable rows through the page gate itself', async () => {
     // It used to bind PUBLISHABLE_EVIDENCE in hand-written SQL, which would

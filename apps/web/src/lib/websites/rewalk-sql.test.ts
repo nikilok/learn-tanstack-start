@@ -29,6 +29,7 @@ const noneRow: RewalkRow = {
   registerTowns: [],
   locality: null,
   evidence: 'none',
+  source: 'search',
   url: null,
   candidates: [],
   walkAttempts: 0,
@@ -38,12 +39,24 @@ const postcodeRow: RewalkRow = {
   evidence: 'postcode_on_page',
   url: 'https://stored.co.uk',
 };
+const registryRow: RewalkRow = {
+  ...noneRow,
+  evidence: 'registry',
+  source: 'cqc',
+  url: 'https://stored.co.uk',
+};
 const byNumber: DiscoveryOutcome = {
   url: 'https://stored.co.uk',
   evidenceUrl: 'https://stored.co.uk/legal',
   evidence: 'crn_on_page',
   rank: null,
 };
+
+/** The SET and WHERE halves of an UPDATE. */
+const halves = (text: string) => ({
+  set: text.slice(text.indexOf(' SET '), text.indexOf(' WHERE ')),
+  where: text.slice(text.indexOf(' WHERE ')),
+});
 
 describe('makeUpgrade', () => {
   test('a none row gains its site only while it is still an empty search row', async () => {
@@ -72,6 +85,43 @@ describe('makeUpgrade', () => {
     expect(text).toContain("status IN ('verified', 'unreachable')");
   });
 
+  test('a registry row is confirmed on the site it holds, by the importer that wrote it', async () => {
+    const { sql, calls } = makeFakeSql([{ company_number: '03260168' }]);
+    const confirmed: DiscoveryOutcome = {
+      ...byNumber,
+      evidence: 'registry_confirmed',
+      evidenceUrl: 'https://stored.co.uk/contact',
+    };
+    expect(await makeUpgrade(sql)(registryRow, confirmed, 0.97)).toBe(true);
+    const { set, where } = halves(flat(calls[0].text));
+    expect(where).toContain("evidence = 'registry' AND url = $");
+    expect(where).toContain("status IN ('verified', 'unreachable')");
+    expect(where).toContain('source = $');
+    // Never moved, never re-published by the write itself: the sweep confirms it.
+    expect(set).not.toMatch(/\b(url|status|source)\s*=/);
+    expect(set).toContain('checked_at = NULL');
+    expect(calls[0].params).toEqual(
+      expect.arrayContaining([
+        'registry_confirmed',
+        'https://stored.co.uk/contact',
+        'cqc',
+        'https://stored.co.uk',
+      ]),
+    );
+  });
+
+  test('a registry row takes only its number or its confirmation', async () => {
+    for (const evidence of ['postcode_on_page', 'name_and_place'] as const) {
+      const { sql, calls } = makeFakeSql();
+      const lower: DiscoveryOutcome = { ...byNumber, evidence };
+      expect(await makeUpgrade(sql)(registryRow, lower, 0.9)).toBe(false);
+      expect(calls).toHaveLength(0);
+    }
+    const { sql, calls } = makeFakeSql([{ company_number: '03260168' }]);
+    expect(await makeUpgrade(sql)(registryRow, byNumber, 0.99)).toBe(true);
+    expect(calls[0].params).toContain('crn_on_page');
+  });
+
   test('a row another job changed meanwhile reports false', async () => {
     const { sql } = makeFakeSql([]);
     expect(await makeUpgrade(sql)(noneRow, byNumber, 0.99)).toBe(false);
@@ -90,12 +140,6 @@ describe('makeUpgrade', () => {
   });
 });
 
-/** The SET and WHERE halves of an UPDATE. */
-const halves = (text: string) => ({
-  set: text.slice(text.indexOf(' SET '), text.indexOf(' WHERE ')),
-  where: text.slice(text.indexOf(' WHERE ')),
-});
-
 describe('markers', () => {
   test('a walked row is stamped, its answer untouched, only while it holds what was read', async () => {
     const { sql, calls } = makeFakeSql();
@@ -108,6 +152,20 @@ describe('markers', () => {
     expect(calls[0].params).toEqual(
       expect.arrayContaining(['postcode_on_page', 'https://stored.co.uk']),
     );
+  });
+
+  test("a registry row is stamped under its own importer's name", async () => {
+    // Guarded on `search`, neither marker would land and the row would lead every slice.
+    for (const mark of [makeMarkWalked, makeMarkUnreadable]) {
+      const { sql, calls } = makeFakeSql();
+      await mark(sql)(registryRow);
+      const { where } = halves(flat(calls[0].text));
+      expect(where).toContain('source = $');
+      expect(where).not.toContain("source = 'search'");
+      expect(calls[0].params).toEqual(
+        expect.arrayContaining(['cqc', 'registry', 'https://stored.co.uk']),
+      );
+    }
   });
 
   test('an unreadable row only counts the attempt, on the content it failed to read', async () => {
@@ -131,6 +189,29 @@ describe('makeRewalkRemaining', () => {
     expect(flat(calls[0].text)).toMatch(
       /EXISTS \( ?SELECT 1 FROM companies_house_profiles/,
     );
+  });
+
+  test('counts what the same selection would walk, registry rows and re-reads included', async () => {
+    const { sql, calls } = makeFakeSql([{ none: 0, postcode: 0, registry: 7 }]);
+    const left = await makeRewalkRemaining(sql, {
+      evidence: 'registry',
+      rereadBefore: '2026-11-16 00:00:00',
+    })();
+    expect(left).toEqual({ none: 0, postcode: 0, registry: 7 });
+    const text = flat(calls[0].text);
+    expect(text).toContain("source <> 'search' AND evidence = 'registry'");
+    expect(text).toContain('walked_at < $');
+    expect(calls[0].params).toEqual(
+      expect.arrayContaining(['registry', '2026-11-16 00:00:00']),
+    );
+    // Asked for nothing in particular: the registry arm stays shut.
+    const plain = makeFakeSql([{ none: 3, postcode: 2 }]);
+    expect(await makeRewalkRemaining(plain.sql)()).toEqual({
+      none: 3,
+      postcode: 2,
+      registry: 0,
+    });
+    expect(plain.calls[0].params).not.toContain('registry');
   });
 });
 
@@ -229,6 +310,51 @@ describe('makeSelectRewalk', () => {
     expect(flat(calls[0].text)).toContain(
       "evidence = 'none' AND status = 'none' AND url IS NULL",
     );
+  });
+
+  test('takes registry rows only when asked for, and only those no page has confirmed', async () => {
+    for (const selection of [{}, { seed: 's' }]) {
+      const plain = makeFakeSql();
+      await makeSelectRewalk(plain.sql, selection)(10);
+      const text = flat(plain.calls[0].text);
+      expect(text).toContain(
+        "w.source <> 'search' AND w.evidence = 'registry' AND w.status IN ('verified', 'unreachable') AND w.url IS NOT NULL",
+      );
+      // The arm compares the selection to 'registry', so an unset one shuts it.
+      expect(text).toMatch(/AND \$\d+::text = 'registry'\)/);
+      expect(plain.calls[0].params).not.toContain('registry');
+      const asked = makeFakeSql();
+      await makeSelectRewalk(asked.sql, {
+        ...selection,
+        evidence: 'registry',
+      })(10);
+      expect(asked.calls[0].params).toContain('registry');
+    }
+  });
+
+  test('a row keeps the source it was read under, search unless the row says otherwise', async () => {
+    const { sql, calls } = makeFakeSql([
+      { company_number: '03260168', evidence: 'registry', source: 'wikidata' },
+      { company_number: '03260169', evidence: 'none' },
+    ]);
+    const rows = await makeSelectRewalk(sql, { evidence: 'registry' })(10);
+    expect(flat(calls[0].text)).toContain('w.source,');
+    expect(rows.map((r) => r.source)).toEqual(['wikidata', 'search']);
+  });
+
+  test('a re-read also takes rows this walk last read before the cutoff', async () => {
+    const { sql, calls } = makeFakeSql();
+    await makeSelectRewalk(sql, { rereadBefore: '2026-11-16 00:00:00' })(10);
+    const text = flat(calls[0].text);
+    expect(text).toMatch(
+      /w\.walk_version IS NULL OR w\.walk_version < \$\d+ OR w\.walked_at < \$\d+::timestamp/,
+    );
+    expect(calls[0].params).toContain('2026-11-16 00:00:00');
+    // Without a cutoff the comparison is against NULL, which takes no row.
+    const plain = makeFakeSql();
+    await makeSelectRewalk(plain.sql)(10);
+    expect(plain.calls[0].params).toContain(null);
+    expect(plain.calls[0].params).not.toContain('2026-11-16 00:00:00');
   });
 
   test('a seeded sample ignores the marker, so it can run before the migration', async () => {

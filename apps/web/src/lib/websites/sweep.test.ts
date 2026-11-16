@@ -517,8 +517,9 @@ describe('the sweep computes its signals from the right inputs', () => {
     // The page has to be SUBSTANTIAL for a withdrawal to happen at all: a
     // cookie wall or a JS shell says nothing about whether the site still
     // publishes the address, and unpublishing off one would make the link
-    // flicker. That guard is what the padding here is defeating.
-    const realPage = `<html><body>${'Home About us Our care Careers Contact. '.repeat(60)}</body></html>`;
+    // flicker. That guard is what the padding here is defeating. And the rest
+    // of the site has to have been read: here every other page is not there.
+    const realPage = `<html><body><nav><a href="/care">Our care</a></nav>${'Home About us Our care Careers Contact. '.repeat(60)}</body></html>`;
     const h = harness({
       rows: [row({ evidence: 'registry_confirmed', confidence: '0.970' })],
       fetchSite: async (url) => ({
@@ -526,6 +527,12 @@ describe('the sweep computes its signals from the right inputs', () => {
         url,
         attemptedUrl: url,
         html: realPage,
+      }),
+      fetchPage: async (url) => ({
+        ok: false,
+        reason: 'http_error',
+        status: 404,
+        attemptedUrl: url,
       }),
       hasPostcode: () => false,
     });
@@ -942,6 +949,222 @@ describe("a name_and_place row's re-check", () => {
       {},
     );
     expect(fetched).toEqual([]);
+  });
+});
+
+describe("a registry row's confirmation, re-read when the homepage shows no postcode", () => {
+  const SITE = 'https://www.quillmere.co.uk';
+  const PROOF = `${SITE}/contact`;
+  const filler = 'Home care across the north of England. '.repeat(40);
+  const html = (text: string) =>
+    `<html><body><nav><a href="/services">Services</a></nav><p>${text}</p></body></html>`;
+  const confirmed = row({
+    companyNumber: '09990117',
+    url: SITE,
+    evidence: 'registry_confirmed',
+    evidenceUrl: PROOF,
+    confidence: '0.970',
+    everChecked: true,
+    postcode: 'HG1 9ZQ',
+    companyName: 'QUILLMERE CARE LIMITED',
+    registerTowns: ['Harrogate'],
+    locality: 'Harrogate',
+  });
+  const ADDRESS = 'Quillmere Care, 4 Station Parade, HG1 9ZQ.';
+  const NAME = 'This site is run by Quillmere Care Ltd.';
+
+  /** A sweep of one row: the homepage and pages given, every other page not there. */
+  const sweepOf = async (
+    over: Partial<SweepRow>,
+    homepage: string,
+    pages: Record<string, FetchedPage>,
+    deps: Partial<SweepDeps> = {},
+  ) => {
+    const fetched: string[] = [];
+    const h = harness({
+      rows: [{ ...confirmed, ...over }],
+      officers: async () => [],
+      fetchSite: async (url) => live(url, homepage),
+      fetchPage: async (url) => {
+        fetched.push(url);
+        return (
+          pages[url] ?? {
+            ok: false,
+            reason: 'http_error',
+            status: 404,
+            attemptedUrl: url,
+          }
+        );
+      },
+      ...deps,
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    const result = h.applied[0].result as {
+      status: string;
+      evidence: string;
+      confidence: string;
+      evidenceUrl: string | null;
+    };
+    return { summary, result, fetched };
+  };
+
+  test('the postcode still on its page, which names the company: confirmed, reading only that page', async () => {
+    const { result, fetched, summary } = await sweepOf({}, html(filler), {
+      [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)),
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      evidence: 'registry_confirmed',
+      confidence: '0.970',
+      evidenceUrl: PROOF,
+    });
+    expect(fetched).toEqual([PROOF]);
+    expect(summary).toMatchObject({ demoted: 0, confirmationGone: 0 });
+  });
+
+  test('the postcode on a page that names another business confirms nothing', async () => {
+    // A neighbour at the same address: the postcode alone is an address, not the company.
+    const { result } = await sweepOf(
+      { url: 'https://www.northgate-homes.co.uk', evidenceUrl: null },
+      html(filler),
+      {
+        'https://www.northgate-homes.co.uk/contact': live(
+          'https://www.northgate-homes.co.uk/contact',
+          html(`Northgate Homes, 4 Station Parade, HG1 9ZQ. ${filler}`),
+        ),
+      },
+    );
+    expect(result.evidence).toBe('registry');
+  });
+
+  test('the two-signal rule still read on the site keeps it confirmed', async () => {
+    const { result } = await sweepOf({}, html(`${filler} Harrogate`), {
+      [PROOF]: live(PROOF, html(`${NAME} ${filler}`)),
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      evidence: 'registry_confirmed',
+      evidenceUrl: PROOF,
+    });
+  });
+
+  test('the rule is read on the host that served the homepage, as the re-walk read it', async () => {
+    // Stored under an old domain that names nobody; it serves the company's own.
+    const old = 'https://www.oldbrand.co.uk';
+    const served = async (homepage: string, servedUrl: string) => {
+      const h = harness({
+        rows: [{ ...confirmed, url: old, evidenceUrl: null }],
+        officers: async () => [],
+        fetchSite: async (url) => ({
+          ok: true,
+          url: servedUrl,
+          attemptedUrl: url,
+          html: homepage,
+        }),
+        fetchPage: async (url) => ({
+          ok: false,
+          reason: 'http_error',
+          status: 404,
+          attemptedUrl: url,
+        }),
+      });
+      await sweepWebsites(config(), h.deps);
+      return (h.applied[0].result as { evidence: string }).evidence;
+    };
+    const page = html(`${NAME} ${filler} Harrogate`);
+    expect(await served(page, `${SITE}/`)).toBe('registry_confirmed');
+    expect(await served(page, 'https://www.northgate-homes.co.uk/')).toBe(
+      'registry',
+    );
+  });
+
+  test('gone from every page read: withdrawn, and counted as a demotion', async () => {
+    const { result, summary, fetched } = await sweepOf({}, html(filler), {
+      [PROOF]: live(PROOF, html(filler)),
+    });
+    expect(result).toMatchObject({
+      status: 'verified',
+      evidence: 'registry',
+      confidence: '0.950',
+    });
+    expect(summary).toMatchObject({ confirmationGone: 1, demoted: 1 });
+    // The proof page, then the walk's nine fixed paths, bar the proof page itself.
+    expect(fetched).toHaveLength(9);
+  });
+
+  test('a page that would not answer is not evidence of absence', async () => {
+    const { result, summary } = await sweepOf({}, html(filler), {
+      [PROOF]: { ok: false, reason: 'timeout', attemptedUrl: PROOF },
+    });
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(summary).toMatchObject({ confirmationUnread: 1, demoted: 0 });
+  });
+
+  test('a homepage the postcode check confirms is confirmed there, and nothing else is read', async () => {
+    const { result, fetched } = await sweepOf(
+      {},
+      html(filler),
+      {},
+      {
+        hasPostcode: () => true,
+      },
+    );
+    expect(result.evidence).toBe('registry_confirmed');
+    expect(fetched).toEqual([]);
+  });
+
+  test('a registry row no page has confirmed is not re-read: the re-walk does that', async () => {
+    const { result, fetched } = await sweepOf(
+      { evidence: 'registry', confidence: '0.950' },
+      html(`${NAME} ${filler} Harrogate`),
+      { [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)) },
+    );
+    expect(result.evidence).toBe('registry');
+    expect(fetched).toEqual([]);
+  });
+
+  test('a number found this pass outranks it and skips the re-read', async () => {
+    const { result, fetched } = await sweepOf(
+      {},
+      html(filler),
+      {},
+      {
+        hasCompanyNumber: () => true,
+      },
+    );
+    expect(result.evidence).toBe('crn_on_page');
+    expect(fetched).toEqual([]);
+  });
+
+  test('a homepage a plain fetch shows nothing of is read in a browser, counted apart', async () => {
+    const shell = '<html><body><div id="app"></div></body></html>';
+    const { result, summary } = await sweepOf(
+      {},
+      shell,
+      {},
+      {
+        // The rendered homepage carries it; no other page is there.
+        renderPage: async (url) =>
+          url === SITE
+            ? live(url, html(`${ADDRESS} ${filler}`))
+            : {
+                ok: false,
+                reason: 'http_error',
+                status: 404,
+                attemptedUrl: url,
+              },
+      },
+    );
+    // Read as holding on the rendered homepage, not merely kept because the plain one was thin.
+    expect(result).toMatchObject({
+      evidence: 'registry_confirmed',
+      evidenceUrl: SITE,
+    });
+    expect(summary).toMatchObject({
+      confirmationRendered: 1,
+      nameAndPlaceRendered: 0,
+      confirmationGone: 0,
+    });
   });
 });
 

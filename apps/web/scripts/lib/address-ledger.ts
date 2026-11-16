@@ -5,6 +5,7 @@
  */
 
 import {
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmdirSync,
@@ -74,6 +75,19 @@ function codeOf(error: unknown): string {
   return (error as NodeJS.ErrnoException).code ?? error.name;
 }
 
+/** Make the ledger's directory, or refuse one that is not this user's alone: whoever can write there can write the turns. */
+function claim(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const found = lstatSync(dir);
+  const mine = found.uid === process.getuid?.();
+  // A link in its place, another user's directory, or one others may write to.
+  if (!found.isDirectory() || !mine || (found.mode & 0o022) !== 0) {
+    throw Object.assign(new Error('ledger directory is not ours alone'), {
+      code: 'EUNTRUSTED',
+    });
+  }
+}
+
 /** Take the lock, waiting out another process's hold on it; one left behind by a process that died is cleared. */
 function acquire(lock: string, staleMs: number, waitMs: number): void {
   const deadline = Date.now() + waitMs;
@@ -125,7 +139,7 @@ function read(file: string): Turns {
   }
 }
 
-/** A ledger in `dir`, shared by every process that opens it; one that cannot use its file paces this process alone, and says so once. */
+/** A ledger in `dir`, shared by every process of this user that opens it; one that cannot use its file, or whose directory is not this user's alone, paces this process alone and says so once. */
 export function fileLedger(
   dir: string,
   options: FileLedgerOptions = {},
@@ -141,13 +155,13 @@ export function fileLedger(
       if (alone) return alone.reserve(addresses, gapMs, now);
       try {
         if (!made) {
-          mkdirSync(dir, { recursive: true, mode: 0o700 });
+          claim(dir);
           made = true;
         }
         acquire(lock, staleMs, waitMs);
         try {
           const taken = takeTurn(read(file), addresses, gapMs, now);
-          writeFileSync(file, JSON.stringify(taken.turns));
+          writeFileSync(file, JSON.stringify(taken.turns), { mode: 0o600 });
           return taken.turn;
         } finally {
           release(lock);

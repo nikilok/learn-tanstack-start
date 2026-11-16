@@ -1,10 +1,13 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -153,6 +156,55 @@ describe('fileLedger', () => {
     expect(ledger.reserve([A], 1000, 0)).toBe(1000);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/^ {2}address ledger unavailable \(E[A-Z]+\)/);
+  });
+
+  test("a directory it makes, and the file in it, are this user's alone", () => {
+    const dir = join(scratch(), 'made');
+    fileLedger(dir).reserve([A], 1000, 0);
+    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    expect(statSync(join(dir, 'turns.json')).mode & 0o777).toBe(0o600);
+  });
+
+  /** A ledger on a directory it must not trust: it paces alone, says why, and writes nothing there. */
+  const refused = (dir: string, written = dir) => {
+    const warnings: string[] = [];
+    const ledger = fileLedger(dir, { warn: (m) => warnings.push(m) });
+    expect(ledger.reserve([A], 1000, 0)).toBe(0);
+    expect(ledger.reserve([A], 1000, 0)).toBe(1000);
+    expect(warnings).toEqual([
+      '  address ledger unavailable (EUNTRUSTED): this process paces alone',
+    ]);
+    expect(existsSync(join(written, 'turns.json'))).toBe(false);
+    expect(existsSync(join(written, 'lock'))).toBe(false);
+  };
+
+  test('a directory other users can write to is not used', () => {
+    const dir = join(scratch(), 'open');
+    mkdirSync(dir);
+    chmodSync(dir, 0o777);
+    refused(dir);
+    chmodSync(dir, 0o770);
+    refused(dir);
+  });
+
+  test('a link standing in for the directory is not followed', () => {
+    const real = scratch();
+    const link = join(scratch(), 'link');
+    symlinkSync(real, link);
+    refused(link, real);
+  });
+
+  test("another user's directory is not used", () => {
+    const dir = scratch();
+    const uid = spyOn(process, 'getuid').mockReturnValue(statSync(dir).uid + 1);
+    try {
+      refused(dir);
+    } finally {
+      uid.mockRestore();
+    }
+    // The same directory, once it is ours again.
+    expect(fileLedger(dir).reserve([A], 1000, 0)).toBe(0);
+    expect(existsSync(join(dir, 'turns.json'))).toBe(true);
   });
 
   test('separate processes never share a turn', async () => {

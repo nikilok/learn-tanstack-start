@@ -76,6 +76,21 @@ describe('makeSweepDeps', () => {
     expect(whole.calls[0].params).not.toContain('unreachable');
   });
 
+  test('without a held-request count no row is ever left unread; with one, the sweep reads it', () => {
+    expect(deps.heldRequests).toBeUndefined();
+    const heldRequests = () => 2;
+    expect(
+      makeSweepDeps(
+        sql,
+        () => {},
+        undefined,
+        undefined,
+        undefined,
+        heldRequests,
+      ).heldRequests,
+    ).toBe(heldRequests);
+  });
+
   test('the postcode check matches the registered office', () => {
     expect(
       deps.hasPostcode('<p>Unit 4, Winchester SO22 5AZ</p>', 'SO22 5AZ'),

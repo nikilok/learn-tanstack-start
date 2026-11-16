@@ -8,7 +8,8 @@ import type { SweepSelection } from '../../src/lib/websites/sql.ts';
 import { parseStrictInt } from './script-utils.ts';
 
 /** Every argument the sweep reads. */
-const KNOWN_ARG = /^--(?:dry-run|verbose|no-render|(?:max-rows|status)=.*)$/;
+const KNOWN_ARG =
+  /^--(?:dry-run|verbose|no-render|(?:max-rows|status|address-delay)=.*)$/;
 
 /** What a run of the sweep was asked for. */
 export type SweepArgs = {
@@ -20,6 +21,8 @@ export type SweepArgs = {
   /** Rows this run takes; undefined leaves the script its default. */
   maxRows?: number;
   status?: SweepSelection['status'];
+  /** Least milliseconds between two requests to one hosting address; undefined leaves the script its default. */
+  addressDelayMs?: number;
 };
 
 /** The value of a `--name=value` argument, or undefined when it was not passed. */
@@ -28,7 +31,7 @@ function valueOf(args: readonly string[], name: string): string | undefined {
   return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length);
 }
 
-/** Read the sweep's arguments; throws on one it does not know, a row count that is not one, or a status it cannot take. */
+/** Read the sweep's arguments; throws on one it does not know, a row count or delay that is not a whole number, or a status it cannot take. */
 export function parseSweepArgs(args: readonly string[]): SweepArgs {
   const unknown = args.filter((arg) => !KNOWN_ARG.test(arg));
   if (unknown.length > 0) {
@@ -36,6 +39,7 @@ export function parseSweepArgs(args: readonly string[]): SweepArgs {
   }
   const maxRows = valueOf(args, 'max-rows');
   const status = valueOf(args, 'status');
+  const addressDelay = valueOf(args, 'address-delay');
   if (status !== undefined && status !== 'unreachable' && status !== 'dead') {
     throw new Error('--status must be unreachable or dead');
   }
@@ -46,5 +50,9 @@ export function parseSweepArgs(args: readonly string[]): SweepArgs {
     maxRows:
       maxRows === undefined ? undefined : parseStrictInt(maxRows, '--max-rows'),
     status,
+    addressDelayMs:
+      addressDelay === undefined
+        ? undefined
+        : parseStrictInt(addressDelay, '--address-delay'),
   };
 }

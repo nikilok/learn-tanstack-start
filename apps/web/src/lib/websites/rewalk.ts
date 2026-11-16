@@ -62,6 +62,8 @@ export type RewalkDeps = Pick<
   /** Count a re-walk that could not read the row, leaving its answer alone. */
   markUnreadable(row: RewalkRow): Promise<void>;
   recordStated(entries: StatedOnSite[]): Promise<void>;
+  /** Requests so far that were not sent because their address had stopped answering. Absent, none are held. */
+  heldRequests?(): number;
 };
 
 export type RewalkConfig = {
@@ -83,7 +85,9 @@ export type RewalkSummary = {
   /** Read, with nothing to upgrade. */
   unchanged: number;
   unreadable: number;
-  /** Rows on their first attempt, and how many of those could not be read. */
+  /** Rows left exactly as they were, a request of theirs held: nothing judged, no attempt spent. */
+  leftUnread: number;
+  /** Rows on their first attempt, and how many of those could not be read; a row left unread is in neither. */
   firstAttempts: number;
   firstAttemptsUnreadable: number;
   /** Upgrades the database refused: the row changed after it was read. */
@@ -256,6 +260,7 @@ export async function rewalkWebsites(
     registryConfirmed: 0,
     unchanged: 0,
     unreadable: 0,
+    leftUnread: 0,
     firstAttempts: 0,
     firstAttemptsUnreadable: 0,
     unpersisted: 0,
@@ -278,6 +283,7 @@ export async function rewalkWebsites(
         `  ${summary.processed}/${rows.length} — ${summary.noneToNumber + summary.postcodeToNumber + summary.registryToNumber} by number, ${summary.noneToPostcode} by postcode, ${summary.noneToNameAndPlace} by name and place, ${summary.registryConfirmed} registry confirmed`,
       );
     }
+    const heldBefore = deps.heldRequests?.() ?? 0;
     try {
       const settled =
         row.evidence === 'none'
@@ -302,6 +308,13 @@ export async function rewalkWebsites(
       summary.statedNumbers += stated.length;
       if (!config.dryRun && stated.length > 0) {
         await deps.recordStated(stated);
+      }
+
+      // Not fully read, so not judged: the row keeps its answer and its attempts for the next run.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) {
+        summary.leftUnread += 1;
+        if (firstAttempt) summary.firstAttempts -= 1;
+        continue;
       }
 
       const outcome = settled.outcome;

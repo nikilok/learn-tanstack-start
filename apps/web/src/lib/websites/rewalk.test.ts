@@ -707,6 +707,115 @@ describe('rewalkWebsites: what it records and writes', () => {
   });
 });
 
+describe('rewalkWebsites: a request held back at a paused address', () => {
+  /** A site that cannot be read, with nothing held back. */
+  const DEAD = 'https://dead.example';
+
+  /** A harness whose probe holds a request back for the listed sites, as a paused address does: the count moves, and the site reads as it is told to. */
+  const holding = (
+    sites: string[],
+    over: Parameters<typeof harness>[0] = {},
+    read: (url: string) => CandidateProbe | null = () => null,
+  ) => {
+    let held = 0;
+    return harness({
+      heldRequests: () => held,
+      probe: async (_row, url) => {
+        if (url === DEAD) return null;
+        if (!sites.includes(url)) return probe({ url });
+        held += 1;
+        return read(url);
+      },
+      ...over,
+    });
+  };
+
+  test('the row is left exactly as it was: nothing written, no attempt spent, and the rows either side judged as usual', async () => {
+    const h = holding(['https://paused.example'], {
+      rows: [
+        noneRow({ companyNumber: '00000001' }),
+        noneRow({
+          companyNumber: '00000002',
+          candidates: ['https://paused.example'],
+        }),
+        noneRow({ companyNumber: '00000003' }),
+      ],
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.unreadable).toBe(0);
+    expect(summary.unchanged).toBe(2);
+    expect(h.unreadable).toEqual([]);
+    expect(h.marked).toEqual(['00000001', '00000003']);
+    expect(h.upgrades).toEqual([]);
+  });
+
+  test('every kind of row is left the same way', async () => {
+    const h = holding(['https://paused.example'], {
+      rows: [
+        noneRow({ candidates: ['https://paused.example'] }),
+        postcodeRow({ url: 'https://paused.example' }),
+        postcodeRow({
+          evidence: 'registry',
+          source: 'cqc',
+          url: 'https://paused.example',
+        }),
+      ],
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(3);
+    expect(h.unreadable).toEqual([]);
+    expect(h.marked).toEqual([]);
+  });
+
+  test('not fully read is not judged: neither an upgrade nor a read-and-nothing is written', async () => {
+    const proved = holding(
+      ['https://paused.example'],
+      { rows: [noneRow({ candidates: ['https://paused.example'] })] },
+      (url) => probe({ url, crnFound: true, evidenceUrl: `${url}/terms` }),
+    );
+    const upgraded = await rewalkWebsites(config(), proved.deps);
+    expect(upgraded.leftUnread).toBe(1);
+    expect(upgraded.noneToNumber).toBe(0);
+    expect(proved.upgrades).toEqual([]);
+
+    const silent = holding(
+      ['https://paused.example'],
+      { rows: [noneRow({ candidates: ['https://paused.example'] })] },
+      (url) => probe({ url }),
+    );
+    const nothing = await rewalkWebsites(config(), silent.deps);
+    expect(nothing.leftUnread).toBe(1);
+    expect(nothing.unchanged).toBe(0);
+    expect(silent.marked).toEqual([]);
+  });
+
+  test('what the pages it did read stated is still recorded', async () => {
+    const h = holding(
+      ['https://paused.example'],
+      { rows: [noneRow({ candidates: ['https://paused.example'] })] },
+      (url) => probe({ url, stated: [stated('paused.example', '03135910')] }),
+    );
+    await rewalkWebsites(config(), h.deps);
+    expect(h.recorded).toHaveLength(1);
+  });
+
+  test('it is no attempt, so it cannot hide a lost network behind rows that were never asked', async () => {
+    const rows = Array.from({ length: 36 }, (_, i) =>
+      noneRow({
+        companyNumber: String(i + 1).padStart(8, '0'),
+        candidates: [i < 10 ? 'https://paused.example' : DEAD],
+      }),
+    );
+    const h = holding(['https://paused.example'], { rows });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(10);
+    expect(summary.firstAttempts).toBe(26);
+    expect(summary.firstAttemptsUnreadable).toBe(26);
+    expect(lostNetwork(summary)).toBe(true);
+  });
+});
+
 describe('lostNetwork', () => {
   const slice = (walkAttempts: number) =>
     Array.from({ length: 30 }, (_, i) =>

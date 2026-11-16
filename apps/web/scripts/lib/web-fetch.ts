@@ -5,7 +5,8 @@
  * arbitrary hosts we do not control, from a job that runs with database
  * credentials in its environment. So it identifies itself, honours robots.txt,
  * refuses to resolve into private address space, caps how much it will read,
- * and gives up quickly.
+ * and gives up quickly. A walk also paces it by hosting address
+ * (address-gate.ts).
  *
  * The policy decisions live in src/lib/websites/fetch-policy.ts so they can be
  * tested without a network; this module is the I/O around them.
@@ -20,6 +21,8 @@ import {
   type RobotsRules,
   urlVariants,
 } from '../../src/lib/websites/fetch-policy.ts';
+import { type AddressGate, makeAddressGate } from './address-gate.ts';
+import { fileLedger, sharedLedgerDir } from './address-ledger.ts';
 
 /** Named so an operator seeing it in their logs can find out who we are. */
 export const USER_AGENT =
@@ -48,11 +51,51 @@ export type FetchFailure =
   | 'blocked_by_robots'
   | 'private_address'
   | 'not_html'
-  | 'too_large';
+  | 'too_large'
+  // Not sent: the address had stopped answering this run (address-gate.ts).
+  | 'address_paused';
 
 export type PageFetch =
   | { ok: true; url: string; status: number; html: string }
   | { ok: false; reason: FetchFailure; status?: number };
+
+/** What the fetcher resolves and requests with, and the gate its requests wait at. */
+export type FetchIo = {
+  /** Every address a host resolves to. */
+  lookup(hostname: string): Promise<{ address: string }[]>;
+  fetch(url: string, init: RequestInit): Promise<Response>;
+  /** Null paces nothing, which is how every caller but a walk runs. */
+  gate: AddressGate | null;
+};
+
+let io: FetchIo = {
+  lookup: (hostname) => lookup(hostname, { all: true }),
+  fetch: (url, init) => fetch(url, init),
+  gate: null,
+};
+
+/** Replace part of the fetcher's I/O for this process: a walk installs its address gate, a test its resolver and fetch. Returns what puts the previous I/O back. */
+export function configureFetch(overrides: Partial<FetchIo>): () => void {
+  const previous = io;
+  io = { ...io, ...overrides };
+  return () => {
+    io = previous;
+  };
+}
+
+/** Pace every request this process sends by its hosting address, taking turns with every other walk that shares `ledgerDir`. Returns the gate, for its counts. */
+export function paceByAddress(
+  gapMs: number,
+  log: (message: string) => void,
+  ledgerDir = sharedLedgerDir(),
+): AddressGate {
+  const gate = makeAddressGate({
+    gapMs,
+    ledger: fileLedger(ledgerDir, { warn: log }),
+  });
+  configureFetch({ gate });
+  return gate;
+}
 
 /** Classify a thrown fetch error, so a TLS name mismatch (which a host variant
  *  may fix) is distinguishable from a dead domain (which nothing will). */
@@ -63,11 +106,34 @@ function classify(err: unknown): FetchFailure {
   return 'dns_or_refused';
 }
 
+/** One request, sent in its turn at its host's addresses and reported to the gate; null when one of them is paused and nothing was sent. */
+async function send(
+  target: URL,
+  addresses: readonly string[],
+  init: RequestInit,
+): Promise<Response | null> {
+  const { gate } = io;
+  if (gate && !(await gate.enter(addresses))) return null;
+  try {
+    const res = await io.fetch(target.href, init);
+    gate?.settle(target.hostname, addresses, 'answered');
+    return res;
+  } catch (err) {
+    gate?.settle(
+      target.hostname,
+      addresses,
+      classify(err) === 'timeout' ? 'silent' : 'other',
+    );
+    throw err;
+  }
+}
+
 const robotsCache = new Map<string, RobotsRules>();
 
 /** Fetch and cache one origin's robots.txt. A missing or unreadable file means
- *  no restrictions, which is what the standard says to assume. */
-async function robotsFor(origin: string): Promise<RobotsRules> {
+ *  no restrictions, which is what the standard says to assume. Null, and
+ *  nothing cached, when a paused address kept it from being asked for. */
+async function robotsFor(origin: string): Promise<RobotsRules | null> {
   const cached = robotsCache.get(origin);
   if (cached) return cached;
 
@@ -78,7 +144,7 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
     // a host answering /robots.txt with `302 Location: http://169.254.169.254/…`
     // would otherwise be followed before any guard saw the new target, and an
     // unbounded res.text() would buffer a "robots.txt" of any size at all.
-    if ((await resolveHost(target.hostname)) !== 'public') {
+    if ((await resolveHost(target.hostname)).reach !== 'public') {
       robotsCache.set(origin, rules);
       return rules;
     }
@@ -89,12 +155,15 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
     let current = target;
     let body: string | null = null;
     for (let hop = 0; hop <= ROBOTS_REDIRECTS; hop++) {
-      if ((await resolveHost(current.hostname)) !== 'public') break;
-      const res = await fetch(current.href, {
+      const resolved = await resolveHost(current.hostname);
+      if (resolved.reach !== 'public') break;
+      const res = await send(current, resolved.addresses, {
         headers: { 'user-agent': USER_AGENT },
         signal: AbortSignal.timeout(ROBOTS_TIMEOUT_MS),
         redirect: 'manual',
       });
+      // Not asked for is not unreadable: nothing is assumed, and nothing cached.
+      if (!res) return null;
       const location = res.headers.get('location');
       if (res.status >= 300 && res.status < 400 && location) {
         await res.body?.cancel();
@@ -125,6 +194,12 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
   return rules;
 }
 
+/** Where a host points: the public addresses it resolves to, or why it has none we may ask. */
+type Resolution =
+  | { reach: 'public'; addresses: string[] }
+  | { reach: 'private' }
+  | { reach: 'unresolvable' };
+
 /**
  * Resolve the host, distinguishing "points somewhere we must not go" from
  * "does not resolve at all".
@@ -135,17 +210,15 @@ async function robotsFor(origin: string): Promise<RobotsRules> {
  * On a 120-site sample that mislabelled 9.2% of rows and silently skipped the
  * retry they needed.
  */
-async function resolveHost(
-  hostname: string,
-): Promise<'public' | 'private' | 'unresolvable'> {
+async function resolveHost(hostname: string): Promise<Resolution> {
   try {
-    const addresses = await lookup(hostname, { all: true });
-    if (addresses.length === 0) return 'unresolvable';
+    const addresses = await io.lookup(hostname);
+    if (addresses.length === 0) return { reach: 'unresolvable' };
     return addresses.some((a) => isPrivateAddress(a.address))
-      ? 'private'
-      : 'public';
+      ? { reach: 'private' }
+      : { reach: 'public', addresses: addresses.map((a) => a.address) };
   } catch {
-    return 'unresolvable';
+    return { reach: 'unresolvable' };
   }
 }
 
@@ -192,22 +265,36 @@ export async function checkFetchable(
   url: string,
 ): Promise<FetchFailure | null> {
   try {
-    return await guard(new URL(url));
+    const checked = await guard(new URL(url));
+    return typeof checked === 'string' ? checked : null;
   } catch {
     return 'dns_or_refused';
   }
 }
 
-/** Every guard that must hold before we are allowed to request a URL. */
-async function guard(target: URL): Promise<FetchFailure | null> {
-  const resolution = await resolveHost(target.hostname);
-  if (resolution === 'private') return 'private_address';
-  if (resolution === 'unresolvable') return 'dns_or_refused';
+/** checkFetchable for a page about to be opened some other way: it also waits the page's turn at its address, and is refused at a paused one. */
+export async function awaitTurn(url: string): Promise<FetchFailure | null> {
+  try {
+    const checked = await guard(new URL(url));
+    if (typeof checked === 'string') return checked;
+    if (io.gate && !(await io.gate.enter(checked))) return 'address_paused';
+    return null;
+  } catch {
+    return 'dns_or_refused';
+  }
+}
+
+/** Every guard that must hold before we are allowed to request a URL: why it may not be, else the addresses its host resolved to. */
+async function guard(target: URL): Promise<FetchFailure | string[]> {
+  const resolved = await resolveHost(target.hostname);
+  if (resolved.reach === 'private') return 'private_address';
+  if (resolved.reach === 'unresolvable') return 'dns_or_refused';
   const rules = await robotsFor(target.origin);
+  if (!rules) return 'address_paused';
   if (!isAllowedByRobots(rules, target.pathname || '/')) {
     return 'blocked_by_robots';
   }
-  return null;
+  return resolved.addresses;
 }
 
 /**
@@ -230,11 +317,11 @@ export async function fetchPage(url: string): Promise<PageFetch> {
   }
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const blocked = await guard(current);
-    if (blocked) return { ok: false, reason: blocked };
+    const checked = await guard(current);
+    if (typeof checked === 'string') return { ok: false, reason: checked };
 
     try {
-      const res = await fetch(current.href, {
+      const res = await send(current, checked, {
         headers: {
           'user-agent': USER_AGENT,
           accept: 'text/html,application/xhtml+xml',
@@ -242,6 +329,7 @@ export async function fetchPage(url: string): Promise<PageFetch> {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         redirect: 'manual',
       });
+      if (!res) return { ok: false, reason: 'address_paused' };
 
       const location = res.headers.get('location');
       if (res.status >= 300 && res.status < 400 && location) {

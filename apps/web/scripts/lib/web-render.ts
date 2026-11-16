@@ -11,6 +11,7 @@ import type { Browser, BrowserContext, Page, Route } from 'playwright';
 
 import { startGuardProxy } from './guard-proxy.ts';
 import {
+  awaitTurn,
   checkFetchable,
   type FetchFailure,
   type SiteFetch,
@@ -196,7 +197,8 @@ export async function launchRenderer(): Promise<Renderer> {
       };
       return {
         async render(url) {
-          const blocked = await checkFetchable(url);
+          // A page opened in the browser takes a turn at its address, as one fetched does.
+          const blocked = await awaitTurn(url);
           if (blocked) return failed(url, blocked);
           return renderIn(await opened(), url);
         },

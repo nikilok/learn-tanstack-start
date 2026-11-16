@@ -96,6 +96,8 @@ export type SweepDeps = {
   officers?(companyNumber: string): Promise<OfficerLookup>;
   /** Read one exact URL in a browser. Absent, a homepage whose proof is re-read and that shows a plain fetch nothing is not read. */
   renderPage?(url: string): Promise<FetchedPage>;
+  /** Requests so far that were not sent because their address had stopped answering. Absent, none are held. */
+  heldRequests?(): number;
   applyResult(row: SweepRow, result: RevalidateResult): Promise<boolean>;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
@@ -158,6 +160,8 @@ export type SweepSummary = {
   confirmationRendered: number;
   updated: number;
   lockMissed: number;
+  /** Rows left exactly as they were, a request of theirs held: nothing judged, nothing written. */
+  leftUnread: number;
   errored: number;
   /** Set when the run stopped early because nothing was reachable. */
   systemicAbort: boolean;
@@ -477,6 +481,7 @@ export async function sweepWebsites(
     confirmationRendered: 0,
     updated: 0,
     lockMissed: 0,
+    leftUnread: 0,
     errored: 0,
     systemicAbort: false,
   };
@@ -487,6 +492,7 @@ export async function sweepWebsites(
 
   for (const [index, row] of rows.entries()) {
     if (index > 0) await deps.sleep(config.delayMs);
+    const heldBefore = deps.heldRequests?.() ?? 0;
     try {
       const fetched = await deps.fetchSite(row.url);
 
@@ -598,6 +604,12 @@ export async function sweepWebsites(
           if (confirmation === 'gone') summary.confirmationGone++;
           if (confirmation === 'unknown') summary.confirmationUnread++;
         }
+      }
+
+      // Not fully read, so not judged: the row is left as it was for the next pass.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) {
+        summary.leftUnread++;
+        continue;
       }
 
       const result = revalidate({

@@ -163,6 +163,8 @@ jobs:
             echo "| ✅ Registry confirmed | $(extract registry_confirmed) |"
             echo "| ➖ Unchanged | $(extract unchanged) |"
             echo "| 📵 Unreadable | $(extract unreadable) |"
+            echo "| ⏸️ Left unread | $(extract left_unread) |"
+            echo "| 🔇 Addresses paused | $(extract addresses_paused) |"
             echo "| 🗃️ Unpersisted | $(extract unpersisted) |"
             echo "| ❌ Errored | $(extract errored) |"
             echo "| 📄 Candidate fetches | $(extract candidate_fetches) |"

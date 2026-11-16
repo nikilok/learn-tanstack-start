@@ -74,6 +74,8 @@ describe('makeRejectSite', () => {
     ]);
     // The walk marker stays, so the row is not walked again under this version.
     expect(text).not.toContain('walk_version');
+    // A row with no address has none pinned: a site found later is no choice of the owner's.
+    expect(text).toContain('url_pinned_at = NULL');
   });
 
   test('a row already reset only loses the site from its candidates, under the same guard', async () => {

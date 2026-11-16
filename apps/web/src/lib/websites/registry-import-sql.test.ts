@@ -4,8 +4,10 @@ import { companyWebsites } from '@ss/db/schema';
 import { drizzle } from 'drizzle-orm/pg-proxy';
 
 import { upgradeOnlyPredicateSql } from './decide';
+import { makeFakeSql } from './fake-sql';
 import type { RegistryWrite } from './registry-import';
-import { makeWriteRegistryRows } from './registry-import-sql';
+import { makeReadStored, makeWriteRegistryRows } from './registry-import-sql';
+import { URL_BOUND } from './url-bound';
 
 type Db = Parameters<typeof makeWriteRegistryRows>[0];
 
@@ -83,6 +85,10 @@ describe('makeWriteRegistryRows', () => {
         `CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN ${reset} ELSE company_websites.${name} END`,
       );
     }
+    // The list every writer that moves a row shares names these columns, and no other.
+    expect(Object.entries<string>(URL_BOUND).sort()).toEqual(
+      resets.map(([{ name }, reset]): [string, string] => [name, reset]).sort(),
+    );
   });
 
   test('assigns no other column, so nothing else of the row is touched', async () => {
@@ -129,5 +135,73 @@ describe('makeWriteRegistryRows', () => {
     const { db, statements } = recordingDb();
     expect(await makeWriteRegistryRows(db)([])).toBe(0);
     expect(statements).toEqual([]);
+  });
+});
+
+describe('makeReadStored', () => {
+  test("reads each row with whether the owner pinned its address, which the decision can't see otherwise", async () => {
+    const { sql, calls } = makeFakeSql([
+      {
+        company_number: '09990117',
+        url: 'https://www.quillmere.co.uk',
+        status: 'verified',
+        evidence: 'registry',
+        source: 'cqc',
+        pinned: true,
+      },
+      {
+        company_number: '09990118',
+        url: null,
+        status: 'none',
+        evidence: 'none',
+        source: 'search',
+        pinned: false,
+      },
+    ]);
+    const stored = await makeReadStored(sql)(['09990117', '09990118']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text.replace(/\s+/g, ' ')).toContain(
+      'SELECT company_number, url, status, evidence, source, url_pinned_at IS NOT NULL AS pinned FROM company_websites WHERE company_number = ANY($1::text[])',
+    );
+    expect(calls[0].params).toEqual([['09990117', '09990118']]);
+    expect([...stored]).toEqual([
+      [
+        '09990117',
+        {
+          url: 'https://www.quillmere.co.uk',
+          status: 'verified',
+          evidence: 'registry',
+          source: 'cqc',
+          pinned: true,
+        },
+      ],
+      [
+        '09990118',
+        {
+          url: null,
+          status: 'none',
+          evidence: 'none',
+          source: 'search',
+          pinned: false,
+        },
+      ],
+    ]);
+  });
+
+  test('asks in chunks, so a full register never binds one oversized array', async () => {
+    const { sql, calls } = makeFakeSql([]);
+    const numbers = Array.from({ length: 5001 }, (_, i) =>
+      String(i).padStart(8, '0'),
+    );
+    await makeReadStored(sql)(numbers);
+    expect(calls.map((call) => (call.params[0] as string[]).length)).toEqual([
+      5000, 1,
+    ]);
+  });
+
+  test('no company numbers asks nothing', async () => {
+    const { sql, calls } = makeFakeSql();
+    expect((await makeReadStored(sql)([])).size).toBe(0);
+    expect(calls).toEqual([]);
   });
 });

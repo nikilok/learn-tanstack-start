@@ -7,6 +7,7 @@ import {
   decideWebsite,
   type ExistingWebsite,
   evidenceConfidence,
+  isPinnedElsewhere,
   statusForEvidence,
   type WebsiteEvidence,
   type WebsiteStatus,
@@ -50,6 +51,8 @@ export type RegistryDecision = {
   unconfirmed: boolean;
   /** The register lists a staging copy of the site the row holds, read as that site. */
   stagingCopy: boolean;
+  /** The register names another site than the one the owner pinned the row to, so the row is left as it is. */
+  pinned: boolean;
 } & (
   | { action: 'keep' }
   | { action: 'conflict' }
@@ -67,8 +70,9 @@ const SWEEP_VERDICTS: ReadonlySet<WebsiteStatus> = new Set([
  * Decide one register finding. The ladder is read against the row as the run
  * has left it: what a stronger source wrote earlier, else what is stored. What
  * the sweep found is read off the stored row alone, as only that row has been
- * swept. The join is on the number; the name only decides how far up the
- * ladder the row lands.
+ * swept, and so is the owner's pin: a pinned row is left as it is by a finding
+ * about another site. The join is on the number; the name only decides how
+ * far up the ladder the row lands.
  */
 export function decideRegistryFinding(
   finding: RegistryFinding,
@@ -88,10 +92,19 @@ export function decideRegistryFinding(
     [pending?.url, stored?.url].find((site) =>
       isStagingCopyOf(finding.url, site ?? null),
     ) ?? null;
-  const url = held ?? finding.url;
-  const counted = { unconfirmed: !compatible, stagingCopy: held !== null };
+  // A pinned row is written at its address exactly as stored, which is all the database takes.
+  const own =
+    stored?.pinned && isSameSite(stored.url, finding.url) ? stored.url : null;
+  const url = held ?? own ?? finding.url;
+  const counted = {
+    unconfirmed: !compatible,
+    stagingCopy: held !== null,
+    pinned: isPinnedElsewhere(stored, url),
+  };
 
-  const { action } = decideWebsite(pending ?? stored, {
+  // The row as the run has left it, still pinned if the stored row is.
+  const prior = pending ? { ...pending, pinned: stored?.pinned } : stored;
+  const { action } = decideWebsite(prior, {
     url,
     evidence,
     source: finding.source,

@@ -25,7 +25,9 @@
  *
  * A register address that is a preview, dev or staging copy of the site a row
  * already holds is read as that site (lib/websites/staging-copy.ts), so an
- * import never moves a row from its main domain back onto a copy.
+ * import never moves a row from its main domain back onto a copy. A row whose
+ * address the owner pinned (scripts/repoint-websites.ts) is never moved at
+ * all: a finding about another site leaves it as it is.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/import-registry-websites.ts --dry-run
@@ -45,14 +47,12 @@ import { sql as raw } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
-import type {
-  ExistingWebsite,
-  WebsiteEvidence,
-  WebsiteStatus,
-} from '../src/lib/websites/decide.ts';
 import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
 import { publishableWebsiteGate } from '../src/lib/websites/publishable.ts';
-import { makeWriteRegistryRows } from '../src/lib/websites/registry-import-sql.ts';
+import {
+  makeReadStored,
+  makeWriteRegistryRows,
+} from '../src/lib/websites/registry-import-sql.ts';
 import {
   decideRegistryFinding,
   type RegistryFinding,
@@ -265,35 +265,6 @@ async function loadKnownCompanies(
   return out;
 }
 
-async function loadExisting(
-  numbers: string[],
-): Promise<Map<string, ExistingWebsite>> {
-  const out = new Map<string, ExistingWebsite>();
-  for (let i = 0; i < numbers.length; i += 5000) {
-    const slice = numbers.slice(i, i + 5000);
-    const rows = (await sql`
-      SELECT company_number, url, status, evidence, source
-      FROM company_websites
-      WHERE company_number = ANY(${slice}::text[])
-    `) as {
-      company_number: string;
-      url: string | null;
-      status: WebsiteStatus;
-      evidence: WebsiteEvidence;
-      source: string | null;
-    }[];
-    for (const r of rows) {
-      out.set(r.company_number, {
-        url: r.url,
-        status: r.status,
-        evidence: r.evidence,
-        source: r.source,
-      });
-    }
-  }
-  return out;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Run
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,7 +316,7 @@ findings.sort((a, b) =>
 const numbers = [...new Set(findings.map((f) => f.companyNumber))];
 console.log(`\nResolving ${numbers.length} distinct company numbers …`);
 const known = await loadKnownCompanies(numbers);
-const existing = await loadExisting(numbers);
+const existing = await makeReadStored(sql)(numbers);
 console.log(
   `  ${known.size} are companies we hold a Companies House profile for`,
 );
@@ -357,6 +328,7 @@ let kept = 0;
 let conflicts = 0;
 let unconfirmed = 0;
 let stagingCopies = 0;
+let pinnedKept = 0;
 
 for (const finding of findings) {
   const company = known.get(finding.companyNumber);
@@ -376,6 +348,7 @@ for (const finding of findings) {
   );
   if (decision.unconfirmed) unconfirmed++;
   if (decision.stagingCopy) stagingCopies++;
+  if (decision.pinned) pinnedKept++;
 
   if (decision.action === 'keep') {
     kept++;
@@ -466,6 +439,7 @@ console.log(`  findings            : ${findings.length}`);
 console.log(`  unknown_company     : ${unknownCompany}`);
 console.log(`  name_unconfirmed    : ${unconfirmed}`);
 console.log(`  staging_copy        : ${stagingCopies}`);
+console.log(`  pinned_address      : ${pinnedKept}`);
 console.log(`  unchanged           : ${kept}`);
 console.log(`  conflicts           : ${conflicts}`);
 console.log(`  would_write         : ${pending.length}`);

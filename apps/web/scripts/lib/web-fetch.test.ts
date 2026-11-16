@@ -20,6 +20,10 @@ const HOSTS: Record<string, string[]> = {
   'www.one.example': ['192.0.2.10', '192.0.2.11'],
   'two.example': ['2001:db8::20'],
   'inside.example': ['10.0.0.8'],
+  // Three more sites behind the first of one.example's addresses.
+  'three.example': ['192.0.2.10'],
+  'four.example': ['192.0.2.10'],
+  'five.example': ['192.0.2.10'],
 };
 
 type Reply = Response | Error;
@@ -315,5 +319,47 @@ describe('paceByAddress', () => {
     expect(turns['2001:db8::20']).toBeGreaterThanOrEqual(before + 60_000);
     expect(gate.heldRequests()).toBe(0);
     expect(gate.paused()).toBe(0);
+  });
+
+  test('the fetcher and the gate together: an address that stops answering is paused, announced by count, and its sites are then not asked', async () => {
+    const silence = new Error('The operation timed out.');
+    const down = Object.fromEntries(
+      ['three', 'four', 'five'].flatMap((site) => [
+        [`https://${site}.example/robots.txt`, silence],
+        [`https://${site}.example/`, silence],
+      ]),
+    );
+    const events = network(
+      { 'https://one.example/': page('<p>Hello</p>'), ...down },
+      { gated: false },
+    );
+    const logs: string[] = [];
+    const gate = paceByAddress(0, (message) => logs.push(message), dir);
+    expect((await fetchPage('https://one.example/')).ok).toBe(true);
+    for (const site of ['three', 'four']) {
+      expect(await fetchPage(`https://${site}.example/`)).toEqual({
+        ok: false,
+        reason: 'timeout',
+      });
+    }
+    expect(gate.paused()).toBe(0);
+    // The third site's robots.txt goes unanswered, so its page is never asked for.
+    expect(await fetchPage('https://five.example/')).toEqual({
+      ok: false,
+      reason: 'address_paused',
+    });
+    expect(gate.paused()).toBe(1);
+    expect(logs).toEqual([
+      '  a hosting address stopped answering and is left alone for the rest of this run (1 so far)',
+    ]);
+    const sent = events.length;
+    expect(await fetchSite('https://one.example', () => {})).toMatchObject({
+      ok: false,
+      reason: 'address_paused',
+      attempts: 1,
+    });
+    expect(events).toHaveLength(sent);
+    expect((await fetchPage('https://two.example/')).ok).toBe(false);
+    expect(events.length).toBeGreaterThan(sent);
   });
 });

@@ -92,6 +92,7 @@ export function paceByAddress(
   const gate = makeAddressGate({
     gapMs,
     ledger: fileLedger(ledgerDir, { warn: log }),
+    log,
   });
   configureFetch({ gate });
   return gate;

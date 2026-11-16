@@ -19,9 +19,11 @@ function gateWith(
 ) {
   let clock = 0;
   const waits: number[] = [];
+  const logs: string[] = [];
   const gate = makeAddressGate({
     gapMs,
     ledger,
+    log: (message) => logs.push(message),
     now: () => clock,
     sleep: async (ms) => {
       waits.push(ms);
@@ -32,6 +34,7 @@ function gateWith(
   return {
     gate,
     waits,
+    logs,
     at: () => clock,
     /** Time passing between requests. */
     pass: (ms: number) => {
@@ -123,6 +126,32 @@ describe('makeAddressGate: an address that stops answering', () => {
     await gate.enter([A]);
     await gate.enter([A]);
     expect(gate.heldRequests()).toBe(3);
+  });
+
+  test('says so once as each address is paused, by count and never by address or site', async () => {
+    const { gate, logs } = answering();
+    gate.settle('first.example', [B], 'answered');
+    for (const host of ['one.example', 'two.example']) {
+      gate.settle(host, [A], 'silent');
+      gate.settle(host, [B], 'silent');
+    }
+    expect(logs).toEqual([]);
+    gate.settle('three.example', [A], 'silent');
+    await gate.enter([A]);
+    gate.settle('three.example', [B], 'silent');
+    await gate.enter([B]);
+    const announced = [
+      '  a hosting address stopped answering and is left alone for the rest of this run (1 so far)',
+      '  a hosting address stopped answering and is left alone for the rest of this run (2 so far)',
+    ];
+    expect(logs).toEqual(announced);
+    // Nothing reported afterwards pauses anything, so nothing more is said or counted.
+    const held = gate.heldRequests();
+    gate.settle('four.example', [A], 'silent');
+    gate.settle('four.example', [A, B], 'answered');
+    gate.settle('five.example', ['192.0.2.12'], 'silent');
+    expect(logs).toEqual(announced);
+    expect(gate.heldRequests()).toBe(held);
   });
 
   test('an answer in between starts the count again', async () => {

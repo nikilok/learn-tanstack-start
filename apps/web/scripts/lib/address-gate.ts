@@ -31,6 +31,8 @@ export type AddressGateOptions = {
   /** Least time between two requests to one address; 0 paces nothing. */
   gapMs: number;
   ledger: Ledger;
+  /** Told when an address is paused: a count, never the address. */
+  log?: (message: string) => void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 };
@@ -93,7 +95,11 @@ export function makeAddressGate(options: AddressGateOptions): AddressGate {
           pausedNow = true;
         }
       }
-      if (pausedNow) held += 1;
+      if (!pausedNow) return;
+      held += 1;
+      options.log?.(
+        `  a hosting address stopped answering and is left alone for the rest of this run (${pausedAt.size} so far)`,
+      );
     },
     heldRequests: () => held,
     paused: () => pausedAt.size,

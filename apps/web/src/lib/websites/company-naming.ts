@@ -5,7 +5,9 @@
  * office, a neighbour in the same business centre and another company
  * registered at the same office all show it. So a postcode only proves a site
  * when the page showing it names the company, by its host or in its text:
- * by its registered name, or a name the sponsor register lists for it.
+ * by its registered name, or a name the sponsor register lists for it. A
+ * register-listed site needs the name in full: in the text, or as the whole
+ * of the host.
  */
 
 import { parseHmrcName } from '../hmrc-ch/pipeline';
@@ -372,23 +374,44 @@ export function hostNamer(names: CompanyNames): (host: string) => boolean {
   };
 }
 
+/** How a fetched page names the company: `in_full` in its text or by a serving host that is its whole name, `by_host` by a host carrying only part of the name. */
+export type Naming = 'in_full' | 'by_host';
+
+/** How a fetched page names the company, by its registered name or a name the sponsor register lists; null when neither its host nor its text does. */
+export function namingOf(
+  servedHost: string,
+  text: string,
+  names: CompanyNames,
+): Naming | null {
+  const register = registerNamesOf(names);
+  // The serving host, not the one asked for: a named domain that redirects
+  // to another business serves that business's page. Hosts first: they cost
+  // nothing next to reading the page.
+  if (
+    [names.companyName, ...register].some((name) =>
+      hostIsWholeName(servedHost, name),
+    )
+  ) {
+    return 'in_full';
+  }
+  const page = phrasePage(text);
+  if (
+    pageNamesCompany(page, names.companyName) ||
+    carriesWholeName(page, names.companyName) ||
+    register.some((name) => pageCarriesRegisterName(page, name))
+  ) {
+    return 'in_full';
+  }
+  return hostNames(servedHost, names, register) ? 'by_host' : null;
+}
+
 /** Whether a fetched page names the company: by the host that served it, or in its text. */
 export function namesCompany(
   servedHost: string,
   text: string,
   names: CompanyNames,
 ): boolean {
-  const register = registerNamesOf(names);
-  // The serving host, not the one asked for: a named domain that redirects
-  // to another business serves that business's page. Hosts first: they cost
-  // nothing next to reading the page.
-  if (hostNames(servedHost, names, register)) return true;
-  const page = phrasePage(text);
-  return (
-    pageNamesCompany(page, names.companyName) ||
-    carriesWholeName(page, names.companyName) ||
-    register.some((name) => pageCarriesRegisterName(page, name))
-  );
+  return namingOf(servedHost, text, names) !== null;
 }
 
 /** Slack, in words, for what a page puts between a name's words: "Acme & Co Widgets". */

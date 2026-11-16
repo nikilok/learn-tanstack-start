@@ -42,6 +42,8 @@ export type CandidateProbe = {
   postcodeFound: boolean;
   /** The postcode was read on a page that names the company as its own: by the host that served it, or in its text, never as a listing's entry. */
   postcodeNamed?: boolean;
+  /** The first page read that shows the postcode and names the company in full: in its text, or by a host that is its whole name. What confirms a register-listed site. */
+  namedInFullAt?: string | null;
   /** A directory or profile listing rather than a company's site. */
   onAggregator: boolean;
   /** Parked, for sale, or a holding page. */

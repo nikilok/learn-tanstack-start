@@ -296,7 +296,7 @@ function originOf(url: string): string | null {
  * asked for only once the proof page has been tried. `gone` only when every
  * page it tried was read or is not there; resigned officers count, as
  * turnover is not the site changing. A confirmation also holds on the
- * registered postcode on a page naming the company, reads the rule on the
+ * registered postcode on a page naming the company in full, reads the rule on the
  * host that served the homepage, as the re-walk that found it did, and walks
  * that host's fixed paths ahead of the stored host's. The company's number on
  * any page read ends the re-check.
@@ -356,9 +356,7 @@ async function recheckProof(
   }
   // Attributed to the URL the row stores, as the sweep's own number check is.
   if (home.crnFound) return numberStated(homepage.url);
-  if (confirms && home.postcodeFound && home.postcodeNamed) {
-    return proofHolds(home.evidenceUrl);
-  }
+  if (confirms && home.namedInFullAt) return proofHolds(home.namedInFullAt);
   const pages: PageRead[] = [...(home.pages ?? [])];
   const site = { url: confirms ? servedHome : row.url, pages };
   // A cookie wall, a script shell, a menu its scripts build or a bot challenge shows nothing either way.
@@ -421,7 +419,7 @@ async function recheckProof(
     const read = readWalkPage(company, page.url, page.html, NO_CROWDED);
     if (!read) continue;
     if (read.crnFound) return numberStated(page.url);
-    if (confirms && read.pageNamed) return proofHolds(page.url);
+    if (confirms && read.namedInFull) return proofHolds(page.url);
     pages.push(read.read);
     verdict = await judge();
     if (verdict.kind === 'proved') return proofHolds(verdict.evidenceUrl);

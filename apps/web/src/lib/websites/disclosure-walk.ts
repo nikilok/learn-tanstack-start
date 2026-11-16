@@ -7,7 +7,7 @@
  * guesses.
  */
 
-import { type CompanyNames, namesCompany } from './company-naming';
+import { type CompanyNames, type Naming, namingOf } from './company-naming';
 import { isDiscoveryAggregator } from './crowded-hosts';
 import type { CandidateProbe } from './discover';
 import { pageHasPostcode, visibleText } from './extract';
@@ -190,12 +190,16 @@ type ProbeRow = CompanyNames & {
   postcode: string | null;
 };
 
-/** Whether a page showing the postcode names the company as its own: named, and not as one entry of a listing. */
-function namedAsItself(host: string, text: string, row: ProbeRow): boolean {
-  return (
-    namesCompany(host, text, row) &&
-    !isListingEntry(host, text, row.postcode ?? '', row)
-  );
+/** How a page showing the postcode names the company as its own; null when it does not, or names it as one entry of a listing. */
+function namedAsItself(
+  host: string,
+  text: string,
+  row: ProbeRow,
+): Naming | null {
+  const naming = namingOf(host, text, row);
+  return naming && !isListingEntry(host, text, row.postcode ?? '', row)
+    ? naming
+    : null;
 }
 
 /** What a candidate's homepage proves, read off the page its URL served. */
@@ -221,6 +225,9 @@ export function readHomepage(
   const postcodeFound = row.postcode
     ? pageHasPostcode(html, row.postcode)
     : false;
+  // Named by the serving host too: a named domain that redirects to another
+  // business serves that business's page.
+  const naming = postcodeFound ? namedAsItself(host, text, row) : null;
   return {
     // The URL we ASKED for, not the post-redirect one: that is what a visitor
     // clicks and what the sweep revalidates. The HOST is judged post-redirect,
@@ -231,9 +238,8 @@ export function readHomepage(
     evidenceUrl: crnFound || postcodeFound ? servedUrl : null,
     crnFound,
     postcodeFound,
-    // Named by the serving host too: a named domain that redirects to another
-    // business serves that business's page.
-    postcodeNamed: postcodeFound && namedAsItself(host, text, row),
+    postcodeNamed: naming !== null,
+    namedInFullAt: naming === 'in_full' ? servedUrl : null,
     onAggregator,
     parked: looksParked(text),
     challenged: looksChallenged(text),
@@ -252,6 +258,8 @@ export type WalkPage = {
   postcodeFound: boolean;
   /** The page shows the postcode and names the company as its own: by the host that served it, or in its text, never as a listing's entry. */
   pageNamed: boolean;
+  /** It names the company in full there: in its text, or by a host that is its whole name. */
+  namedInFull: boolean;
   stated: StatedOnSite[];
   /** The page as the two-signal rule reads it. */
   read: PageRead;
@@ -278,28 +286,34 @@ export function readWalkPage(
     ? pageHasPostcode(html, row.postcode)
     : false;
   const text = visibleText(html);
+  // Judged on this page's own host: a walked path can redirect off the site.
+  const naming = postcodeFound ? namedAsItself(host, text, row) : null;
   return {
     crnFound: pageShowsCompanyNumber(html, row.companyNumber, stated),
     postcodeFound,
-    // Judged on this page's own host: a walked path can redirect off the site.
-    pageNamed: postcodeFound && namedAsItself(host, text, row),
+    pageNamed: naming !== null,
+    namedInFull: naming === 'in_full',
     stated,
     read: readPage(pageUrl, text, stated),
   };
 }
 
-/** A walked page folded into its candidate: a number wins, and a named postcode beats an unnamed one. */
+/** A walked page folded into its candidate: a number wins, a named postcode beats an unnamed one, and the first page naming the company in full is kept apart. */
 export function foldWalkPage(
   probe: CandidateProbe,
   pageUrl: string,
   page: WalkPage,
 ): CandidateProbe {
   if (page.crnFound) return { ...probe, crnFound: true, evidenceUrl: pageUrl };
-  if (!page.postcodeFound || probe.postcodeNamed) return probe;
+  const folded =
+    page.namedInFull && !probe.namedInFullAt
+      ? { ...probe, namedInFullAt: pageUrl }
+      : probe;
+  if (!page.postcodeFound || folded.postcodeNamed) return folded;
   const named = page.pageNamed;
-  if (probe.postcodeFound && !named) return probe;
+  if (folded.postcodeFound && !named) return folded;
   return {
-    ...probe,
+    ...folded,
     postcodeFound: true,
     postcodeNamed: named,
     evidenceUrl: pageUrl,

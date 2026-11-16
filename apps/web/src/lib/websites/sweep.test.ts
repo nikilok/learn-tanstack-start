@@ -1082,6 +1082,93 @@ describe("a registry row's confirmation, re-read when the homepage shows no post
     expect(result.evidence).toBe('registry');
   });
 
+  describe("a register entry listing another body's site at the registered address", () => {
+    // A care company a council owns, registered at the council's offices.
+    const COUNCIL = 'https://www.dunmarrow.gov.uk';
+    const CONTACT = `${COUNCIL}/contact-us`;
+    const owned: Partial<SweepRow> = {
+      companyNumber: '09990119',
+      url: COUNCIL,
+      evidenceUrl: CONTACT,
+      postcode: 'DM1 4QH',
+      companyName: 'DUNMARROW CARELINE LIMITED',
+      sponsorNames: ['Dunmarrow Careline Limited'],
+      registerTowns: ['Dunmarrow'],
+      locality: 'Dunmarrow',
+    };
+    const OFFICES =
+      "The council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.";
+
+    test("the council's address on its own contact page confirms nothing for a care company it owns: withdrawn", async () => {
+      const { result, summary } = await sweepOf(owned, html(filler), {
+        [CONTACT]: live(CONTACT, html(`${OFFICES} ${filler}`)),
+      });
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'registry',
+        confidence: '0.950',
+      });
+      expect(summary).toMatchObject({ confirmationGone: 1, demoted: 1 });
+    });
+
+    test('the same address beside the company named in the text keeps it confirmed', async () => {
+      const { result, fetched } = await sweepOf(owned, html(filler), {
+        [CONTACT]: live(
+          CONTACT,
+          html(`${OFFICES} Dunmarrow Careline is based here too. ${filler}`),
+        ),
+      });
+      expect(result).toMatchObject({
+        evidence: 'registry_confirmed',
+        evidenceUrl: CONTACT,
+      });
+      expect(fetched).toEqual([CONTACT]);
+    });
+
+    test("a medical centre's homepage, read in a browser, confirms nothing for a dental company at its address: withdrawn", async () => {
+      const CENTRE = 'https://www.harrowfen.co.uk';
+      const { result, summary } = await sweepOf(
+        {
+          companyNumber: '09990118',
+          url: CENTRE,
+          evidenceUrl: null,
+          postcode: 'HF2 3HP',
+          companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
+          sponsorNames: [],
+          registerTowns: [],
+          locality: 'Harrowfen',
+        },
+        '<html><body><div id="app"></div></body></html>',
+        {},
+        {
+          renderPage: async (url) =>
+            url === CENTRE
+              ? live(
+                  url,
+                  html(
+                    `Harrowfen Medical Centre - 6 Harrowfen Road, HF2 3HP. ${filler}`,
+                  ),
+                )
+              : {
+                  ok: false,
+                  reason: 'http_error',
+                  status: 404,
+                  attemptedUrl: url,
+                },
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'verified',
+        evidence: 'registry',
+      });
+      expect(summary).toMatchObject({
+        confirmationRendered: 1,
+        confirmationGone: 1,
+        demoted: 1,
+      });
+    });
+  });
+
   test('the two-signal rule still read on the site keeps it confirmed', async () => {
     const { result } = await sweepOf({}, html(`${filler} Harrogate`), {
       [PROOF]: live(PROOF, html(`${NAME} ${filler}`)),

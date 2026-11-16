@@ -7,6 +7,7 @@ import {
   nameInitials,
   namesCompany,
   nameWords,
+  namingOf,
   pageHasWholeName,
   pageNamesCompany,
   registerNames,
@@ -346,6 +347,89 @@ describe('namesCompany', () => {
         sponsorNames: ['Acme Widgets Ltd T/A Acme Dental'],
       }),
     ).toBe(false);
+  });
+});
+
+describe('namingOf', () => {
+  const names = { companyName: 'ACME WIDGETS LIMITED', sponsorNames: [] };
+  const silent = 'Our offices: SO22 5AZ';
+
+  test('a page whose text names the company names it in full, whatever host served it', () => {
+    const text = 'Acme Widgets, Unit 4, SO22 5AZ';
+    expect(namingOf('contractor.co.uk', text, names)).toBe('in_full');
+    expect(namingOf('www.acme.co.uk', text, names)).toBe('in_full');
+  });
+
+  test('so does a host that is its whole name, whatever the page says', () => {
+    expect(namingOf('www.acmewidgets.co.uk', silent, names)).toBe('in_full');
+    expect(namingOf('acme-widgets-ltd.com', silent, names)).toBe('in_full');
+  });
+
+  test('a host carrying only part of the name names it by host alone', () => {
+    expect(namingOf('www.acme.co.uk', silent, names)).toBe('by_host');
+    expect(namingOf('acmegroup.com', silent, names)).toBe('by_host');
+  });
+
+  test('neither host nor text: not named', () => {
+    expect(namingOf('contractor.co.uk', silent, names)).toBeNull();
+  });
+
+  test('a register name counts as the registered one does: whole in the host, or as a phrase in the text', () => {
+    const trading = {
+      companyName: 'FENWICK CHIROPRACTIC LTD',
+      sponsorNames: [
+        'Fenwick Chiropractic Ltd T/A Elmbank Chiropractic Clinic',
+      ],
+    };
+    expect(
+      namingOf('www.elmbankchiropracticclinic.co.uk', silent, trading),
+    ).toBe('in_full');
+    expect(
+      namingOf(
+        'bookings.example.co.uk',
+        'Elmbank Chiropractic Clinic, SO22 5AZ',
+        trading,
+      ),
+    ).toBe('in_full');
+    // The trading name's opening words alone are part of it.
+    expect(namingOf('www.elmbankchiropractic.co.uk', silent, trading)).toBe(
+      'by_host',
+    );
+  });
+
+  // A care company a council owns, registered at the council's offices: the register lists the council's own site.
+  test("a council's contact page names a company the council owns by host alone", () => {
+    const owned = {
+      companyName: 'DUNMARROW CARELINE LIMITED',
+      sponsorNames: ['Dunmarrow Careline Limited'],
+    };
+    const contact =
+      'Contact us. Dunmarrow County Council, County Hall, Market Road, DM1 4QH. Open 9am to 5pm.';
+    expect(namingOf('www.dunmarrow.gov.uk', contact, owned)).toBe('by_host');
+    expect(
+      namingOf(
+        'www.dunmarrow.gov.uk',
+        `${contact} Dunmarrow Careline is our care company.`,
+        owned,
+      ),
+    ).toBe('in_full');
+  });
+
+  // A dental company formed at a medical centre's address: the register lists the medical centre's site.
+  test("a medical centre's homepage names a dental company at its address by host alone", () => {
+    const dental = {
+      companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
+      sponsorNames: [],
+    };
+    const home =
+      'Harrowfen Medical Centre - 6 Harrowfen Road, HF2 3HP. Appointments, prescriptions and our doctors.';
+    expect(namingOf('www.harrowfen.co.uk', home, dental)).toBe('by_host');
+  });
+
+  test('namesCompany is true exactly where the page is named either way', () => {
+    expect(namesCompany('www.acme.co.uk', silent, names)).toBe(true);
+    expect(namesCompany('www.acmewidgets.co.uk', silent, names)).toBe(true);
+    expect(namesCompany('contractor.co.uk', silent, names)).toBe(false);
   });
 });
 

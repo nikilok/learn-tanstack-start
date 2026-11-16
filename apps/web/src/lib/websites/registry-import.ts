@@ -38,6 +38,12 @@ export type RegistryWrite = {
   verifiedAt: Date | null;
 };
 
+/** The rows a finding is decided against: the one stored, and the one a stronger source wrote earlier in the run. */
+export type RegistryRows = {
+  stored: ExistingWebsite | null;
+  pending: RegistryWrite | null;
+};
+
 /** The decision for one finding, with what the run summary counts. */
 export type RegistryDecision = {
   /** The register's name for the company is not recognisably its registered one. */
@@ -58,14 +64,16 @@ const SWEEP_VERDICTS: ReadonlySet<WebsiteStatus> = new Set([
 ]);
 
 /**
- * Decide one register finding against the row it would change: the stored
- * one, or one a stronger source wrote earlier in the run. The join is on the
- * number; the name only decides how far up the ladder the row lands.
+ * Decide one register finding. The ladder is read against the row as the run
+ * has left it: what a stronger source wrote earlier, else what is stored. What
+ * the sweep found is read off the stored row alone, as only that row has been
+ * swept. The join is on the number; the name only decides how far up the
+ * ladder the row lands.
  */
 export function decideRegistryFinding(
   finding: RegistryFinding,
   companyName: string,
-  prior: ExistingWebsite | null,
+  { stored, pending }: RegistryRows,
   now: Date,
 ): RegistryDecision {
   // Only CQC's name is the registered one; Wikidata's label is the brand.
@@ -75,23 +83,25 @@ export function decideRegistryFinding(
   const evidence: WebsiteEvidence = compatible
     ? 'registry'
     : 'registry_unconfirmed';
-  // A staging copy of the site the row holds is that site, so no import moves a row back onto its copy.
-  const held = prior?.url ?? null;
-  const stagingCopy = isStagingCopyOf(finding.url, held);
-  const url = stagingCopy && held ? held : finding.url;
-  const counted = { unconfirmed: !compatible, stagingCopy };
+  // A staging copy of the site the row holds, as written this run or as stored, is that site: no import moves a row onto its copy.
+  const held =
+    [pending?.url, stored?.url].find((site) =>
+      isStagingCopyOf(finding.url, site ?? null),
+    ) ?? null;
+  const url = held ?? finding.url;
+  const counted = { unconfirmed: !compatible, stagingCopy: held !== null };
 
-  const { action } = decideWebsite(prior, {
+  const { action } = decideWebsite(pending ?? stored, {
     url,
     evidence,
     source: finding.source,
   });
   if (action !== 'update') return { ...counted, action };
 
-  // The sweep's verdict on the page survives an upgrade on the same site, or a link it found broken is republished.
+  // The sweep's verdict on the stored page survives an upgrade on that site, or a link it found broken is republished.
   const verdict =
-    prior && SWEEP_VERDICTS.has(prior.status) && isSameSite(prior.url, url)
-      ? prior.status
+    stored && SWEEP_VERDICTS.has(stored.status) && isSameSite(stored.url, url)
+      ? stored.status
       : null;
   const status = verdict ?? statusForEvidence(evidence);
   return {

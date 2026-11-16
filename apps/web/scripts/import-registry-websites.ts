@@ -365,15 +365,13 @@ for (const finding of findings) {
     continue;
   }
 
-  // Decided against the row a stronger source wrote this run, else the stored one.
-  const prior =
-    writes.get(finding.companyNumber) ??
-    existing.get(finding.companyNumber) ??
-    null;
+  // Both rows: what a stronger source wrote earlier this run, and what is stored.
+  const earlier = writes.get(finding.companyNumber) ?? null;
+  const stored = existing.get(finding.companyNumber) ?? null;
   const decision = decideRegistryFinding(
     finding,
     company.companyName,
-    prior,
+    { stored, pending: earlier },
     now,
   );
   if (decision.unconfirmed) unconfirmed++;
@@ -385,8 +383,9 @@ for (const finding of findings) {
   }
   if (decision.action === 'conflict') {
     conflicts++;
+    const standing = earlier ?? stored;
     console.log(
-      `  conflict ${finding.companyNumber}: kept ${prior?.source ?? prior?.evidence} over ${finding.source}`,
+      `  conflict ${finding.companyNumber}: kept ${standing?.source ?? standing?.evidence} over ${finding.source}`,
     );
     continue;
   }

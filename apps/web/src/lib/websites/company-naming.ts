@@ -7,7 +7,7 @@
  * when the page showing it names the company, by its host or in its text:
  * by its registered name, or a name the sponsor register lists for it. A
  * register-listed site needs the name in full: in the text, or as the whole
- * of the host.
+ * of the host, never by one word of it shared with another body.
  */
 
 import { parseHmrcName } from '../hmrc-ch/pipeline';
@@ -374,8 +374,16 @@ export function hostNamer(names: CompanyNames): (host: string) => boolean {
   };
 }
 
-/** How a fetched page names the company: `in_full` in its text or by a serving host that is its whole name, `by_host` by a host carrying only part of the name. */
-export type Naming = 'in_full' | 'by_host';
+/** How a fetched page names the company: `in_full` in its text or by a serving host that is its whole name, `in_part` by a host carrying part of the name or a text with only the one word that says which company it is. */
+export type Naming = 'in_full' | 'in_part';
+
+/** Whether a page carrying every word that says which company it is has the registered name in full: always with two such words or more; with one, only where the page writes the name out, as one phrase. */
+function wordsAreFullName(page: string, companyName: string): boolean {
+  const words = nameWords(companyName);
+  if (words.length !== 1) return true;
+  const written = writtenName(companyName);
+  return written.includes(words[0]) && hasPhrase(page, written);
+}
 
 /** How a fetched page names the company, by its registered name or a name the sponsor register lists; null when neither its host nor its text does. */
 export function namingOf(
@@ -385,8 +393,8 @@ export function namingOf(
 ): Naming | null {
   const register = registerNamesOf(names);
   // The serving host, not the one asked for: a named domain that redirects
-  // to another business serves that business's page. Hosts first: they cost
-  // nothing next to reading the page.
+  // to another business serves that business's page. A whole-name host
+  // first: it costs nothing next to reading the page.
   if (
     [names.companyName, ...register].some((name) =>
       hostIsWholeName(servedHost, name),
@@ -395,14 +403,15 @@ export function namingOf(
     return 'in_full';
   }
   const page = phrasePage(text);
+  const worded = pageNamesCompany(page, names.companyName);
   if (
-    pageNamesCompany(page, names.companyName) ||
     carriesWholeName(page, names.companyName) ||
+    (worded && wordsAreFullName(page, names.companyName)) ||
     register.some((name) => pageCarriesRegisterName(page, name))
   ) {
     return 'in_full';
   }
-  return hostNames(servedHost, names, register) ? 'by_host' : null;
+  return worded || hostNames(servedHost, names, register) ? 'in_part' : null;
 }
 
 /** Whether a fetched page names the company: by the host that served it, or in its text. */

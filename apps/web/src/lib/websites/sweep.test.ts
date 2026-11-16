@@ -1097,18 +1097,26 @@ describe("a registry row's confirmation, re-read when the homepage shows no post
       locality: 'Dunmarrow',
     };
     const OFFICES =
-      "The council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.";
+      "Dunmarrow County Council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.";
 
     test("the council's address on its own contact page confirms nothing for a care company it owns: withdrawn", async () => {
-      const { result, summary } = await sweepOf(owned, html(filler), {
-        [CONTACT]: live(CONTACT, html(`${OFFICES} ${filler}`)),
-      });
-      expect(result).toMatchObject({
-        status: 'verified',
-        evidence: 'registry',
-        confidence: '0.950',
-      });
-      expect(summary).toMatchObject({ confirmationGone: 1, demoted: 1 });
+      // Named by the host for one, and for the other by the one word the council's own name has.
+      for (const companyName of [
+        'DUNMARROW CARELINE LIMITED',
+        'DUNMARROW CARE LIMITED',
+      ]) {
+        const { result, summary } = await sweepOf(
+          { ...owned, companyName, sponsorNames: [] },
+          html(filler),
+          { [CONTACT]: live(CONTACT, html(`${OFFICES} ${filler}`)) },
+        );
+        expect(result).toMatchObject({
+          status: 'verified',
+          evidence: 'registry',
+          confidence: '0.950',
+        });
+        expect(summary).toMatchObject({ confirmationGone: 1, demoted: 1 });
+      }
     });
 
     test('the same address beside the company named in the text keeps it confirmed', async () => {

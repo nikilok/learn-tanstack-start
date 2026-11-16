@@ -548,13 +548,19 @@ describe('rewalkWebsites: registry rows', () => {
       "<h1>Contact us</h1><p>The council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.</p>";
 
     test("the council's own site, for a care company it owns: its address confirms nothing", async () => {
-      const { summary, upgrades } = await walkOf(
-        owned,
-        councilHome,
-        councilContact,
-      );
-      expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
-      expect(upgrades).toEqual([]);
+      // Named by the host for one, and for the other by the one word the council's own name has.
+      for (const companyName of [
+        'DUNMARROW CARELINE LIMITED',
+        'DUNMARROW CARE LIMITED',
+      ]) {
+        const { summary, upgrades } = await walkOf(
+          { ...owned, companyName, sponsorNames: [] },
+          councilHome,
+          councilContact,
+        );
+        expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
+        expect(upgrades).toEqual([]);
+      }
     });
 
     test('the same address beside the company named in the text confirms it', async () => {

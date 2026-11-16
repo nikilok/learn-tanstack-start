@@ -360,14 +360,24 @@ describe('namingOf', () => {
     expect(namingOf('www.acme.co.uk', text, names)).toBe('in_full');
   });
 
+  test('two words that say which company it is, together, are the name in full without its generic words', () => {
+    const longer = {
+      companyName: 'ACME WIDGETS ENGINEERING LIMITED',
+      sponsorNames: [],
+    };
+    expect(
+      namingOf('contractor.co.uk', 'Acme Widgets, Unit 4, SO22 5AZ', longer),
+    ).toBe('in_full');
+  });
+
   test('so does a host that is its whole name, whatever the page says', () => {
     expect(namingOf('www.acmewidgets.co.uk', silent, names)).toBe('in_full');
     expect(namingOf('acme-widgets-ltd.com', silent, names)).toBe('in_full');
   });
 
-  test('a host carrying only part of the name names it by host alone', () => {
-    expect(namingOf('www.acme.co.uk', silent, names)).toBe('by_host');
-    expect(namingOf('acmegroup.com', silent, names)).toBe('by_host');
+  test('a host carrying only part of the name names it in part', () => {
+    expect(namingOf('www.acme.co.uk', silent, names)).toBe('in_part');
+    expect(namingOf('acmegroup.com', silent, names)).toBe('in_part');
   });
 
   test('neither host nor text: not named', () => {
@@ -393,19 +403,19 @@ describe('namingOf', () => {
     ).toBe('in_full');
     // The trading name's opening words alone are part of it.
     expect(namingOf('www.elmbankchiropractic.co.uk', silent, trading)).toBe(
-      'by_host',
+      'in_part',
     );
   });
 
   // A care company a council owns, registered at the council's offices: the register lists the council's own site.
-  test("a council's contact page names a company the council owns by host alone", () => {
+  test("a council's contact page names a company the council owns in part, by its host", () => {
     const owned = {
       companyName: 'DUNMARROW CARELINE LIMITED',
       sponsorNames: ['Dunmarrow Careline Limited'],
     };
     const contact =
       'Contact us. Dunmarrow County Council, County Hall, Market Road, DM1 4QH. Open 9am to 5pm.';
-    expect(namingOf('www.dunmarrow.gov.uk', contact, owned)).toBe('by_host');
+    expect(namingOf('www.dunmarrow.gov.uk', contact, owned)).toBe('in_part');
     expect(
       namingOf(
         'www.dunmarrow.gov.uk',
@@ -416,14 +426,68 @@ describe('namingOf', () => {
   });
 
   // A dental company formed at a medical centre's address: the register lists the medical centre's site.
-  test("a medical centre's homepage names a dental company at its address by host alone", () => {
+  test("a medical centre's homepage names a dental company at its address in part, by its host", () => {
     const dental = {
       companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
       sponsorNames: [],
     };
     const home =
       'Harrowfen Medical Centre - 6 Harrowfen Road, HF2 3HP. Appointments, prescriptions and our doctors.';
-    expect(namingOf('www.harrowfen.co.uk', home, dental)).toBe('by_host');
+    expect(namingOf('www.harrowfen.co.uk', home, dental)).toBe('in_part');
+  });
+
+  describe('a name with one word that says which company it is', () => {
+    // A care company named for its county: the word is the county council's too.
+    const owned = { companyName: 'DUNMARROW CARE LIMITED', sponsorNames: [] };
+    const council =
+      'Contact us. Dunmarrow County Council, County Hall, Market Road, DM1 4QH.';
+
+    test('is named in part by that word alone, whatever host served the page', () => {
+      expect(namingOf('www.dunmarrow.gov.uk', council, owned)).toBe('in_part');
+      expect(namingOf('www.example.org', council, owned)).toBe('in_part');
+      // The words apart are not the name.
+      expect(
+        namingOf('www.example.org', `${council} Care in Dunmarrow.`, owned),
+      ).toBe('in_part');
+      expect(namesCompany('www.example.org', council, owned)).toBe(true);
+    });
+
+    test('is named in full where the page writes the name out, or closes it with its legal form', () => {
+      expect(
+        namingOf(
+          'www.example.org',
+          `${council} Dunmarrow Care is our care company.`,
+          owned,
+        ),
+      ).toBe('in_full');
+      expect(
+        namingOf(
+          'www.example.org',
+          `${council} Run by Dunmarrow Care Ltd.`,
+          owned,
+        ),
+      ).toBe('in_full');
+    });
+
+    test('a name that is only that word is written out by it', () => {
+      for (const companyName of ['QUILLMERE LIMITED', 'QUILLMERE (UK) LTD']) {
+        expect(
+          namingOf('www.example.org', 'Quillmere, 4 Station Parade', {
+            companyName,
+            sponsorNames: [],
+          }),
+        ).toBe('in_full');
+      }
+    });
+
+    test('a word in a bracketed qualifier never writes the name out', () => {
+      expect(
+        namingOf('www.example.org', 'Care solutions across Dunmarrow.', {
+          companyName: 'CARE SOLUTIONS (DUNMARROW) LTD',
+          sponsorNames: [],
+        }),
+      ).toBe('in_part');
+    });
   });
 
   test('namesCompany is true exactly where the page is named either way', () => {

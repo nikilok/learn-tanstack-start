@@ -293,7 +293,7 @@ describe('readHomepage', () => {
   });
 
   // A dental company formed at a medical centre's address: the register lists the medical centre's site.
-  test("a medical centre's homepage names a dental company at its address by host alone, never in full", () => {
+  test("a medical centre's homepage names a dental company at its address in part, never in full", () => {
     const dental = {
       companyNumber: '09990118',
       companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
@@ -485,25 +485,44 @@ describe('readWalkPage', () => {
   });
 
   // A care company a council owns, registered at the council's offices: the register lists the council's own site.
-  test("a council's contact page names a company the council owns by host alone, never in full", () => {
-    const owned = {
-      companyNumber: '09990119',
-      companyName: 'DUNMARROW CARELINE LIMITED',
-      sponsorNames: ['Dunmarrow Careline Limited'],
-      postcode: 'DM1 4QH',
-    };
+  test("a council's contact page names a company the council owns in part, never in full", () => {
+    const contact =
+      "<h1>Contact us</h1><p>Dunmarrow County Council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.</p>";
+    // By its host for one name; for the other, by the one word of it the council's own name has.
+    for (const companyName of [
+      'DUNMARROW CARELINE LIMITED',
+      'DUNMARROW CARE LIMITED',
+    ]) {
+      const owned = {
+        companyNumber: '09990119',
+        companyName,
+        sponsorNames: [] as string[],
+        postcode: 'DM1 4QH',
+      };
+      const read = (url: string, html: string) =>
+        readWalkPage(owned, url, html, new Set());
+      expect(
+        read('https://www.dunmarrow.gov.uk/contact-us', contact),
+      ).toMatchObject({
+        postcodeFound: true,
+        pageNamed: true,
+        namedInFull: false,
+      });
+    }
+    // The one-word name written out on the same page is the company named in full.
     expect(
       readWalkPage(
-        owned,
+        {
+          companyNumber: '09990119',
+          companyName: 'DUNMARROW CARE LIMITED',
+          sponsorNames: [],
+          postcode: 'DM1 4QH',
+        },
         'https://www.dunmarrow.gov.uk/contact-us',
-        "<h1>Contact us</h1><p>The council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.</p>",
+        `${contact}<p>Dunmarrow Care, our care company, is based here too.</p>`,
         new Set(),
       ),
-    ).toMatchObject({
-      postcodeFound: true,
-      pageNamed: true,
-      namedInFull: false,
-    });
+    ).toMatchObject({ pageNamed: true, namedInFull: true });
   });
 
   test('a page without the postcode names nothing, whoever it names', () => {

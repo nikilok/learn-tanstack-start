@@ -75,10 +75,11 @@ describe('makeRepoint', () => {
     );
   });
 
-  test('a new address the owner read and found live keeps its place in the render gate', async () => {
+  test('a new address the owner read keeps the last check the row has, and is never given one', async () => {
     const { sql, calls } = makeFakeSql(written);
     await makeRepoint(sql)(snapshot, move({ keepLive: true }));
     const text = flat(calls[0].text);
+    // Left as stored either way: a row that renders goes on rendering, and one the sweep has not read still waits for it.
     expect(assignedColumns(text)).not.toContain('checked_at');
     expect(text).toContain(
       'failure_count = 0, walk_version = NULL, walk_attempts = 0, walked_at = NULL',

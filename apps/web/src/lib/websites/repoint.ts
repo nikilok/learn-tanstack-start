@@ -21,7 +21,7 @@ export type RepointEntry = {
   newUrl: string;
   /** The page of the new site its proof is on, when there is one. */
   newEvidenceUrl: string | null;
-  /** The owner read the new address and it carries the proof: the row keeps rendering without waiting for the sweep. */
+  /** The owner read the new address and it carries the proof: the row keeps the last check it has, so one that renders goes on rendering. It never stamps a check: a row the sweep has not read waits for it either way. */
   keepLive: boolean;
 };
 
@@ -64,10 +64,12 @@ export function repointRow(
   };
 }
 
-/** The site a URL is on, compared www-insensitively; null when it is not a URL. */
+/** The site a web address is on, compared www-insensitively; null when it is not an http or https URL. */
 function siteAt(url: string): string | null {
   try {
-    return siteOf(new URL(url).hostname);
+    const { protocol, hostname } = new URL(url);
+    // Any scheme parses to a host; only a web page is a page of the site.
+    return /^https?:$/.test(protocol) ? siteOf(hostname) : null;
   } catch {
     return null;
   }

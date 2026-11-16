@@ -165,4 +165,20 @@ describe('parseRepoints', () => {
       ]),
     ).toEqual([entry({ newEvidenceUrl: 'https://quillmere.co.uk/contact' })]);
   });
+
+  test('refuses a proof address on the new site that is not a web page', () => {
+    // The host is the site's, so a check of the host alone passed these.
+    for (const scheme of ['ftp', 'ws', 'file']) {
+      expect(
+        parseRepoints([
+          entry({ newEvidenceUrl: `${scheme}://www.quillmere.co.uk/contact` }),
+        ]),
+      ).toBe('entry 1: newEvidenceUrl must be a page of the new site');
+    }
+    // A page the site serves without https is still one of its pages.
+    const plain = 'http://www.quillmere.co.uk/contact';
+    expect(parseRepoints([entry({ newEvidenceUrl: plain })])).toEqual([
+      entry({ newEvidenceUrl: plain }),
+    ]);
+  });
 });

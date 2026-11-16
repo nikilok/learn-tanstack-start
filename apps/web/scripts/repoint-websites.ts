@@ -3,9 +3,12 @@
  * there so no later import moves it. A row already on the new address is only
  * pinned. What was learned about the old address goes with it: the row is
  * fetched and walked again at the new one, and does not render until the
- * sweep has read it, unless the list says the owner already has. Every listed
- * row is backed up exactly as stored before anything is written, and every
- * write holds only for the row still as it was backed up. Prints counts only.
+ * sweep has read it. `keepLive` keeps the last check a row has, for an
+ * address the owner already read, so a row that renders goes on rendering;
+ * it never stamps one, so a row the sweep has not read still waits for it.
+ * Every listed row is backed up exactly as stored before anything is written,
+ * and every write holds only for the row still as it was backed up. Prints
+ * counts only.
  *
  * Run from monorepo root:
  *   bun apps/web/scripts/repoint-websites.ts --list=repoints.json

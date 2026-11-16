@@ -21,7 +21,7 @@ export type RepointSnapshot = {
 /** What a repoint did to one row. */
 export type RepointOutcome = 'repointed' | 'pinned' | 'changed';
 
-/** What a moved row forgets of its old address: every column that describes one, but the proof page, which the move sets, and the last check when the owner read the new address. Constant SQL text. */
+/** What a moved row forgets of its old address: every column that describes one, but the proof page, which the move sets, and the last check when the owner read the new address. That check is kept as it is, never stamped: only the sweep stamps one. Constant SQL text. */
 function forgotten(keepLive: boolean): string {
   const kept: UrlBoundColumn[] = keepLive
     ? ['evidence_url', 'checked_at']

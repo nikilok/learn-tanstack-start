@@ -23,6 +23,10 @@
  * resolves, and only 74% of these do (measured over 150, 2026-07-29). Leaving
  * checked_at NULL is what stops an unfetched registry URL reaching a page.
  *
+ * A register address that is a preview, dev or staging copy of the site a row
+ * already holds is read as that site (lib/websites/staging-copy.ts), so an
+ * import never moves a row from its main domain back onto a copy.
+ *
  * Run from monorepo root:
  *   bun apps/web/scripts/import-registry-websites.ts --dry-run
  *   bun apps/web/scripts/import-registry-websites.ts --source=wikidata
@@ -37,30 +41,25 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { neon } from '@ss/db/client';
-import { companyWebsites } from '@ss/db/schema';
 import { sql as raw } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/neon-http';
 
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import type {
+  ExistingWebsite,
   WebsiteEvidence,
   WebsiteStatus,
 } from '../src/lib/websites/decide.ts';
-import {
-  decideWebsite,
-  evidenceConfidence,
-  statusForEvidence,
-  upgradeOnlyPredicateSql,
-} from '../src/lib/websites/decide.ts';
-import {
-  isSameSite,
-  normaliseWebsiteUrl,
-} from '../src/lib/websites/normalise-url.ts';
+import { normaliseWebsiteUrl } from '../src/lib/websites/normalise-url.ts';
 import { publishableWebsiteGate } from '../src/lib/websites/publishable.ts';
+import { makeWriteRegistryRows } from '../src/lib/websites/registry-import-sql.ts';
 import {
-  namesAreCompatible,
-  normaliseCompanyNumber,
-} from '../src/lib/websites/registry-rows.ts';
+  decideRegistryFinding,
+  type RegistryFinding,
+  type RegistrySource,
+  type RegistryWrite,
+} from '../src/lib/websites/registry-import.ts';
+import { normaliseCompanyNumber } from '../src/lib/websites/registry-rows.ts';
 import { setGitHubOutput } from './ci-utils.ts';
 import { newestCqcOdsUrl } from './lib/cqc-directory.ts';
 import { readOdsRows } from './lib/ods-table.ts';
@@ -104,15 +103,6 @@ const MIN_MATCHED_COMPANIES: Record<RegistrySource, number> = {
   wikidata: 400,
 };
 
-type RegistrySource = 'cqc' | 'wikidata';
-
-type Finding = {
-  companyNumber: string;
-  url: string;
-  registryName: string;
-  source: RegistrySource;
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Args
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,7 +143,7 @@ async function discoverCqcOdsUrl(): Promise<string> {
   return url;
 }
 
-async function readCqc(workDir: string): Promise<Finding[]> {
+async function readCqc(workDir: string): Promise<RegistryFinding[]> {
   let odsPath = cqcFileArg;
   if (!odsPath) {
     const url = await discoverCqcOdsUrl();
@@ -174,7 +164,7 @@ async function readCqc(workDir: string): Promise<Finding[]> {
     }
   }
 
-  const findings = new Map<string, Finding>();
+  const findings = new Map<string, RegistryFinding>();
   let rows = 0;
   for await (const row of readOdsRows(odsPath, {
     requiredColumns: [CQC_COLUMN_CRN, CQC_COLUMN_WEB, CQC_COLUMN_NAME],
@@ -203,7 +193,7 @@ async function readCqc(workDir: string): Promise<Finding[]> {
   return [...findings.values()];
 }
 
-async function readWikidata(): Promise<Finding[]> {
+async function readWikidata(): Promise<RegistryFinding[]> {
   const url = `${WIKIDATA_ENDPOINT}?query=${encodeURIComponent(WIKIDATA_QUERY)}`;
   const res = await fetch(url, {
     headers: {
@@ -222,7 +212,7 @@ async function readWikidata(): Promise<Finding[]> {
     };
   };
 
-  const findings = new Map<string, Finding>();
+  const findings = new Map<string, RegistryFinding>();
   for (const b of body.results.bindings) {
     const companyNumber = normaliseCompanyNumber(b.crn.value);
     const url = normaliseWebsiteUrl(b.site.value);
@@ -253,13 +243,6 @@ const sql = neon(process.env.POSTGRES_URL as string);
 const db = drizzle({ client: sql });
 
 type KnownCompany = { companyNumber: string; companyName: string };
-type ExistingRow = {
-  companyNumber: string;
-  url: string | null;
-  status: string;
-  evidence: string;
-  source: string | null;
-};
 
 async function loadKnownCompanies(
   numbers: string[],
@@ -284,8 +267,8 @@ async function loadKnownCompanies(
 
 async function loadExisting(
   numbers: string[],
-): Promise<Map<string, ExistingRow>> {
-  const out = new Map<string, ExistingRow>();
+): Promise<Map<string, ExistingWebsite>> {
+  const out = new Map<string, ExistingWebsite>();
   for (let i = 0; i < numbers.length; i += 5000) {
     const slice = numbers.slice(i, i + 5000);
     const rows = (await sql`
@@ -295,13 +278,12 @@ async function loadExisting(
     `) as {
       company_number: string;
       url: string | null;
-      status: string;
-      evidence: string;
+      status: WebsiteStatus;
+      evidence: WebsiteEvidence;
       source: string | null;
     }[];
     for (const r of rows) {
       out.set(r.company_number, {
-        companyNumber: r.company_number,
         url: r.url,
         status: r.status,
         evidence: r.evidence,
@@ -323,7 +305,7 @@ console.log(
 console.log(`  sources: ${sources.join(', ')}`);
 
 const workDir = mkdtempSync(join(tmpdir(), 'registry-websites-'));
-let findings: Finding[] = [];
+let findings: RegistryFinding[] = [];
 let errored = 0;
 /** Sources that actually produced rows. The matched-company floor is summed
  *  over THESE, not over the requested list: if CQC fails and Wikidata succeeds,
@@ -368,22 +350,13 @@ console.log(
   `  ${known.size} are companies we hold a Companies House profile for`,
 );
 
-type PendingWrite = {
-  companyNumber: string;
-  url: string;
-  status: string;
-  evidence: WebsiteEvidence;
-  confidence: string;
-  source: RegistrySource;
-  verifiedAt: Date | null;
-};
-
-const writes = new Map<string, PendingWrite>();
+const writes = new Map<string, RegistryWrite>();
 const now = new Date();
 let unknownCompany = 0;
 let kept = 0;
 let conflicts = 0;
 let unconfirmed = 0;
+let stagingCopies = 0;
 
 for (const finding of findings) {
   const company = known.get(finding.companyNumber);
@@ -392,40 +365,19 @@ for (const finding of findings) {
     continue;
   }
 
-  // The join is on the number; the name only decides how far up the ladder the
-  // row lands. A mismatch is usually a post-administration rename, so it stays
-  // as a candidate rather than being discarded.
-  //
-  // Only CQC is scored this way. The check compares a registry's name for a
-  // company against its registered name, which holds for CQC (Provider Name IS
-  // the registered name) but not for Wikidata, whose itemLabel is the brand:
-  // 'BBC' vs 'BRITISH BROADCASTING CORPORATION' and 'Bupa' vs 'THE BRITISH
-  // UNITED PROVIDENT ASSOCIATION LIMITED' both score zero overlap. Measured on
-  // the first live run it demoted 6.2% of Wikidata rows against 0.23% of CQC's
-  // — and Wikidata is in this pipeline precisely for globally-branded
-  // companies, so the check was rejecting the population it was added to cover.
-  const nameChecked = finding.source === 'cqc';
-  const compatible =
-    !nameChecked ||
-    namesAreCompatible(finding.registryName, company.companyName);
-  const evidence: WebsiteEvidence = compatible
-    ? 'registry'
-    : 'registry_unconfirmed';
-  if (!compatible) unconfirmed++;
-
+  // Decided against the row a stronger source wrote this run, else the stored one.
   const prior =
-    writes.get(finding.companyNumber) ?? existing.get(finding.companyNumber);
-  const decision = decideWebsite(
-    prior
-      ? {
-          url: prior.url,
-          status: prior.status as WebsiteStatus,
-          evidence: prior.evidence as WebsiteEvidence,
-          source: prior.source,
-        }
-      : null,
-    { url: finding.url, evidence, source: finding.source },
+    writes.get(finding.companyNumber) ??
+    existing.get(finding.companyNumber) ??
+    null;
+  const decision = decideRegistryFinding(
+    finding,
+    company.companyName,
+    prior,
+    now,
   );
+  if (decision.unconfirmed) unconfirmed++;
+  if (decision.stagingCopy) stagingCopies++;
 
   if (decision.action === 'keep') {
     kept++;
@@ -438,36 +390,7 @@ for (const finding of findings) {
     );
     continue;
   }
-
-  // A verdict the SWEEP reached about the page survives an identity upgrade on
-  // the SAME url. Without this, a row the sweep proved unreachable was silently
-  // restored to 'verified' by an evidence promotion — and because checked_at is
-  // only cleared when the url changes, it satisfied the render gate immediately
-  // and republished a link the sweep had just established does not work.
-  //
-  // `candidate` is in this list because the sweep now uses it for a page that
-  // answered but is a directory listing or a holding page. That is a fact about
-  // the page, which an evidence promotion says nothing about, and recomputing
-  // status from evidence alone would republish the listing. Before the sweep
-  // could set it, `candidate` was purely a function of evidence and recomputing
-  // it was correct.
-  const SWEEP_VERDICTS: WebsiteStatus[] = ['unreachable', 'dead', 'candidate'];
-  const priorLiveness =
-    prior &&
-    SWEEP_VERDICTS.includes(prior.status as WebsiteStatus) &&
-    isSameSite(prior.url, finding.url)
-      ? (prior.status as WebsiteStatus)
-      : null;
-  const status = priorLiveness ?? statusForEvidence(evidence);
-  writes.set(finding.companyNumber, {
-    companyNumber: finding.companyNumber,
-    url: finding.url,
-    status,
-    evidence,
-    confidence: evidenceConfidence(evidence).toFixed(3),
-    source: finding.source,
-    verifiedAt: status === 'verified' ? now : null,
-  });
+  writes.set(finding.companyNumber, decision.write);
 }
 
 const pending = [...writes.values()];
@@ -494,42 +417,10 @@ if (known.size < matchedFloor) {
 
 let written = 0;
 if (!dryRun && pending.length > 0) {
+  const writeRows = makeWriteRegistryRows(db);
   for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-    const batch = pending.slice(i, i + BATCH_SIZE);
-    const applied = await db
-      .insert(companyWebsites)
-      .values(batch)
-      .onConflictDoUpdate({
-        target: companyWebsites.companyNumber,
-        set: {
-          url: raw`excluded.url`,
-          status: raw`excluded.status`,
-          evidence: raw`excluded.evidence`,
-          confidence: raw`excluded.confidence`,
-          source: raw`excluded.source`,
-          verifiedAt: raw`excluded.verified_at`,
-          // Liveness belongs to the URL, not the row. When the URL changes,
-          // the previous one's verification state is meaningless — carrying a
-          // checked_at over would let a never-fetched address satisfy the
-          // render gate (`verified AND checked_at IS NOT NULL`) immediately,
-          // and sort the row to the back of the sweep cursor so nothing
-          // revisits it. Only ~74% of registry URLs resolve, so that is a live
-          // broken link, not a theoretical one.
-          checkedAt: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN NULL ELSE company_websites.checked_at END`,
-          failureCount: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN 0 ELSE company_websites.failure_count END`,
-          evidenceUrl: raw`CASE WHEN company_websites.url IS DISTINCT FROM excluded.url THEN NULL ELSE company_websites.evidence_url END`,
-        },
-        // Upgrade-only in SQL as well as in decideWebsite, so a concurrent
-        // writer (the phase-2 sweep) cannot be clobbered between our read and
-        // our write. Emitted from decide.ts rather than written out here: a
-        // hand-copied predicate silently diverged from decideWebsite once
-        // already and made same-source corrections a no-op.
-        setWhere: raw.raw(upgradeOnlyPredicateSql()),
-      })
-      .returning({ companyNumber: companyWebsites.companyNumber });
-    // Count what the guard actually applied, not what we submitted — a no-op
-    // from setWhere is the only signal the upgrade guard ever rejects anything.
-    written += applied.length;
+    // What the guard applied, not what was sent: a no-op is its only signal.
+    written += await writeRows(pending.slice(i, i + BATCH_SIZE));
   }
 }
 if (!dryRun && written < pending.length) {
@@ -575,6 +466,7 @@ console.log('\n─── summary ───');
 console.log(`  findings            : ${findings.length}`);
 console.log(`  unknown_company     : ${unknownCompany}`);
 console.log(`  name_unconfirmed    : ${unconfirmed}`);
+console.log(`  staging_copy        : ${stagingCopies}`);
 console.log(`  unchanged           : ${kept}`);
 console.log(`  conflicts           : ${conflicts}`);
 console.log(`  would_write         : ${pending.length}`);

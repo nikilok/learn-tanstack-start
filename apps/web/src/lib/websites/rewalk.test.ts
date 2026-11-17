@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { foldWalkPage, readHomepage, readWalkPage } from './disclosure-walk';
 import type { CandidateProbe, DiscoveryOutcome } from './discover';
 import { readPage } from './name-and-place';
 import {
@@ -457,7 +458,33 @@ describe('rewalkWebsites: registry rows', () => {
     });
   });
 
-  test('the registered postcode on a page naming the company confirms the register', async () => {
+  test('the registered postcode on a page naming the company in full confirms the register, on that page', async () => {
+    const h = harness({
+      rows: [registryRow()],
+      walks: {
+        [site]: probe({
+          url: site,
+          postcodeFound: true,
+          postcodeNamed: true,
+          // An earlier page showed the postcode and named the company by host alone.
+          evidenceUrl: `${site}/contact`,
+          namedInFullAt: `${site}/privacy`,
+        }),
+      },
+    });
+    const summary = await rewalkWebsites(config(), h.deps);
+    expect(summary).toMatchObject({
+      registryToNumber: 0,
+      registryConfirmed: 1,
+    });
+    expect(h.upgrades[0].outcome).toMatchObject({
+      url: site,
+      evidence: 'registry_confirmed',
+      evidenceUrl: `${site}/privacy`,
+    });
+  });
+
+  test('a postcode on a page naming the company by host alone confirms nothing', async () => {
     const h = harness({
       rows: [registryRow()],
       walks: {
@@ -470,14 +497,120 @@ describe('rewalkWebsites: registry rows', () => {
       },
     });
     const summary = await rewalkWebsites(config(), h.deps);
-    expect(summary).toMatchObject({
-      registryToNumber: 0,
-      registryConfirmed: 1,
+    expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
+    expect(h.upgrades).toEqual([]);
+    expect(h.marked).toEqual(['09990117']);
+  });
+
+  describe("a register entry listing another body's site at the registered address", () => {
+    const menu = '<nav><a href="/contact-us">Contact us</a></nav>';
+    /** The walk of one row, read by the real page readers: its homepage, then its contact page. */
+    const walkOf = async (
+      row: RewalkRow,
+      homepage: string,
+      contact: string,
+    ) => {
+      const stored = row.url as string;
+      const home = readHomepage(row, stored, `${stored}/`, homepage, new Set());
+      const page = readWalkPage(
+        row,
+        `${stored}/contact-us`,
+        contact,
+        new Set(),
+      );
+      if (!page) throw new Error('the contact page was not read');
+      const h = harness({
+        rows: [row],
+        probes: { [stored]: home },
+        walks: {
+          [stored]: {
+            ...foldWalkPage(home, `${stored}/contact-us`, page),
+            pages: [...(home.pages ?? []), page.read],
+          },
+        },
+      });
+      const summary = await rewalkWebsites(config(), h.deps);
+      return { summary, upgrades: h.upgrades };
+    };
+
+    // A care company a council owns, registered at the council's offices.
+    const owned = registryRow({
+      companyNumber: '09990119',
+      companyName: 'DUNMARROW CARELINE LIMITED',
+      sponsorNames: ['Dunmarrow Careline Limited'],
+      postcode: 'DM1 4QH',
+      registerTowns: ['Dunmarrow'],
+      locality: 'Dunmarrow',
+      url: 'https://www.dunmarrow.gov.uk',
     });
-    expect(h.upgrades[0].outcome).toMatchObject({
-      url: site,
-      evidence: 'registry_confirmed',
-      evidenceUrl: `${site}/contact`,
+    const councilHome = `${menu}<h1>Dunmarrow County Council</h1><p>Bins, schools, roads and social care.</p>`;
+    const councilContact =
+      "<h1>Contact us</h1><p>The council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.</p>";
+
+    test("the council's own site, for a care company it owns: its address confirms nothing", async () => {
+      // Named by the host for one, and for the other by the one word the council's own name has.
+      for (const companyName of [
+        'DUNMARROW CARELINE LIMITED',
+        'DUNMARROW CARE LIMITED',
+      ]) {
+        const { summary, upgrades } = await walkOf(
+          { ...owned, companyName, sponsorNames: [] },
+          councilHome,
+          councilContact,
+        );
+        expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
+        expect(upgrades).toEqual([]);
+      }
+    });
+
+    test('the same address beside the company named in the text confirms it', async () => {
+      const { summary, upgrades } = await walkOf(
+        owned,
+        councilHome,
+        `${councilContact}<p>Dunmarrow Careline, our care company, is based here too.</p>`,
+      );
+      expect(summary.registryConfirmed).toBe(1);
+      expect(upgrades[0].outcome).toMatchObject({
+        evidence: 'registry_confirmed',
+        evidenceUrl: 'https://www.dunmarrow.gov.uk/contact-us',
+      });
+    });
+
+    // A dental company formed at a medical centre's address.
+    const dental = registryRow({
+      companyNumber: '09990118',
+      companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
+      sponsorNames: [],
+      postcode: 'HF2 3HP',
+      registerTowns: [],
+      locality: 'Harrowfen',
+      url: 'https://www.harrowfen.co.uk',
+    });
+    const centreHome = `${menu}<h1>Harrowfen Medical Centre - 6 Harrowfen Road, HF2 3HP</h1><p>Appointments, prescriptions and our doctors.</p>`;
+    const centreContact =
+      '<h1>Contact us</h1><p>Harrowfen Medical Centre, 6 Harrowfen Road, HF2 3HP.</p>';
+
+    test("the medical centre's site, for a dental company at its address: its homepage postcode confirms nothing", async () => {
+      const { summary, upgrades } = await walkOf(
+        dental,
+        centreHome,
+        centreContact,
+      );
+      expect(summary).toMatchObject({ registryConfirmed: 0, unchanged: 1 });
+      expect(upgrades).toEqual([]);
+    });
+
+    test("the company's own domain showing the same address confirms it", async () => {
+      const { summary, upgrades } = await walkOf(
+        { ...dental, url: 'https://www.harrowfendentalstudio.co.uk' },
+        `${menu}<h1>Welcome</h1><p>6 Harrowfen Road, HF2 3HP</p>`,
+        '<h1>Contact us</h1><p>6 Harrowfen Road, HF2 3HP.</p>',
+      );
+      expect(summary.registryConfirmed).toBe(1);
+      expect(upgrades[0].outcome).toMatchObject({
+        evidence: 'registry_confirmed',
+        evidenceUrl: 'https://www.harrowfendentalstudio.co.uk/',
+      });
     });
   });
 

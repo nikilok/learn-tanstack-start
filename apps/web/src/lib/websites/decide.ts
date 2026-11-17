@@ -18,7 +18,7 @@ export type WebsiteEvidence =
   | 'crn_on_page'
   /** A registry URL the site itself confirms: its homepage carries the
    *  company's REGISTERED OFFICE POSTCODE, or the re-walk read that postcode
-   *  on a page naming the company, or the two-signal rule on the site.
+   *  on a page naming the company in full, or the two-signal rule on the site.
    *  Published — see publishable.ts, which records both the measurement and
    *  the fact that it shipped on a product judgement rather than on clearing
    *  the scorer's bar. Do not quote a precision figure for this tier from

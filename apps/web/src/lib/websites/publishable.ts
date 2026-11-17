@@ -47,12 +47,22 @@
  *
  * The re-walk confirms a registry row the homepage check leaves unconfirmed
  * on two more things (rewalk.ts): the registered postcode on another page of
- * the site that names the company, and the two-signal rule read on the host
- * that serves the site. Neither is in the sample above. Measured 2026-11-16
- * on a seeded draw of 400 such rows (300 CQC, 100 Wikidata), walked locally
- * without a browser: 31 gained their number and 143 a confirmation. 44 of the
- * 143 were read by eye on their proof page: 43 right, 1 would not load. The
- * labels are Claude's; the owner has not audited them.
+ * the site that names the company in full, and the two-signal rule read on
+ * the host that serves the site. Neither is in the sample above. Measured
+ * 2026-11-16 on a seeded draw of 400 such rows (300 CQC, 100 Wikidata), walked
+ * locally without a browser: 31 gained their number and 143 a confirmation.
+ * 44 of the 143 were read by eye on their proof page: 43 right, 1 would not
+ * load. The labels are Claude's; the owner has not audited them.
+ * The first full walk then confirmed 848 rows, each read by eye, the labels
+ * Claude's again: 845 right, 1 a staging copy of the right site, and 2
+ * another body's site at the registered address, on a host carrying one word
+ * of the company's name. The postcode page must now name the company in
+ * full (company-naming.ts): by a host that is its whole name, or in its text
+ * by every word that says which company it is, a name with one such word
+ * written out. Read again once each, 845 of the 848 proof pages loaded; 432
+ * showed the postcode, and that test drops both wrong rows and 40 of the 430
+ * right ones (25 named by part of the host alone, 15 by one word of the
+ * text), before the two-signal rule is asked.
  * The sweep re-reads the confirmation on each pass that finds no postcode on
  * the homepage, and withdraws the rung once it reads the site and finds
  * nothing left.

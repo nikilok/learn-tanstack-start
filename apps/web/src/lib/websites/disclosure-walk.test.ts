@@ -266,7 +266,53 @@ describe('readHomepage', () => {
         address,
         new Set(),
       ),
-    ).toMatchObject({ postcodeFound: true, postcodeNamed: false });
+    ).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: false,
+      namedInFullAt: null,
+    });
+  });
+
+  test('names the company in full where its text does, or its host is the whole name: the page served is kept', () => {
+    const read = (served: string, html: string) =>
+      readHomepage(row, 'https://stored.co.uk', served, html, new Set())
+        .namedInFullAt;
+    expect(read('https://www.acmewidgets.co.uk/', address)).toBe(
+      'https://www.acmewidgets.co.uk/',
+    );
+    expect(
+      read(
+        'https://www.acme.co.uk/',
+        '<p>Acme Widgets, Unit 4, Winchester SO22 5AZ</p>',
+      ),
+    ).toBe('https://www.acme.co.uk/');
+    // Without the postcode a page proves no address, whoever it names.
+    expect(
+      read('https://www.acmewidgets.co.uk/', '<p>Acme Widgets Ltd</p>'),
+    ).toBeNull();
+  });
+
+  // A dental company formed at a medical centre's address: the register lists the medical centre's site.
+  test("a medical centre's homepage names a dental company at its address in part, never in full", () => {
+    const dental = {
+      companyNumber: '09990118',
+      companyName: 'HARROWFEN DENTAL STUDIO LIMITED',
+      sponsorNames: [] as string[],
+      postcode: 'HF2 3HP',
+    };
+    expect(
+      readHomepage(
+        dental,
+        'https://www.harrowfen.co.uk',
+        'https://www.harrowfen.co.uk/',
+        '<h1>Harrowfen Medical Centre - 6 Harrowfen Road, HF2 3HP</h1><p>Appointments, prescriptions and our doctors.</p>',
+        new Set(),
+      ),
+    ).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: true,
+      namedInFullAt: null,
+    });
   });
 
   test("a brand homepage linking each branch to its what3words page is the company's own", () => {
@@ -374,6 +420,16 @@ describe('readWalkPage', () => {
   const footer =
     '<footer>Acme Widgets Ltd. Company No. 03260168, SO22 5AZ</footer>';
   const address = '<p>Our offices: Unit 4, Winchester SO22 5AZ</p>';
+  // An exhibitor list: the company named beside its postcode, with its own site, among five others.
+  const exhibitors = [
+    '<h1>Exhibitors</h1>',
+    '<p>Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk</p>',
+    '<p>Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu</p>',
+    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
+    '<p>Delta Grain, Market Rasen LN8 3AA. W: deltagrain.com</p>',
+    '<p>Epsilon Eggs, Driffield YO25 6AB. W: epsiloneggs.co.uk</p>',
+    '<p>Zeta Vets, Malton YO17 7AB. W: zetavets.org.uk</p>',
+  ].join('');
 
   test("a walked page in the sponsor register's trading name names the company", () => {
     const trading = {
@@ -401,6 +457,72 @@ describe('readWalkPage', () => {
         new Set(),
       ),
     ).toMatchObject({ postcodeFound: true, pageNamed: true });
+  });
+
+  test('in full only where the host is the whole name, or the text names the company', () => {
+    const inFull = (url: string, html: string, r = row) =>
+      readWalkPage(r, url, html, new Set())?.namedInFull;
+    expect(inFull('https://www.acmewidgets.co.uk/contact', address)).toBe(true);
+    // One word of the name in the host is part of it.
+    expect(inFull('https://www.acme.co.uk/contact', address)).toBe(false);
+    expect(
+      inFull(
+        'https://www.acme.co.uk/contact',
+        '<p>Acme Widgets, Unit 4, Winchester SO22 5AZ</p>',
+      ),
+    ).toBe(true);
+    // Named in full, but as a listing's entry.
+    expect(
+      inFull('https://www.poultry-conference.co.uk/exhibitors', exhibitors),
+    ).toBe(false);
+    // Without the postcode a page proves no address, whoever it names.
+    expect(
+      inFull(
+        'https://www.acmewidgets.co.uk/privacy',
+        '<p>Acme Widgets Ltd privacy policy</p>',
+      ),
+    ).toBe(false);
+  });
+
+  // A care company a council owns, registered at the council's offices: the register lists the council's own site.
+  test("a council's contact page names a company the council owns in part, never in full", () => {
+    const contact =
+      "<h1>Contact us</h1><p>Dunmarrow County Council's main office is County Hall, Market Road, Dunmarrow DM1 4QH.</p>";
+    // By its host for one name; for the other, by the one word of it the council's own name has.
+    for (const companyName of [
+      'DUNMARROW CARELINE LIMITED',
+      'DUNMARROW CARE LIMITED',
+    ]) {
+      const owned = {
+        companyNumber: '09990119',
+        companyName,
+        sponsorNames: [] as string[],
+        postcode: 'DM1 4QH',
+      };
+      const read = (url: string, html: string) =>
+        readWalkPage(owned, url, html, new Set());
+      expect(
+        read('https://www.dunmarrow.gov.uk/contact-us', contact),
+      ).toMatchObject({
+        postcodeFound: true,
+        pageNamed: true,
+        namedInFull: false,
+      });
+    }
+    // The one-word name written out on the same page is the company named in full.
+    expect(
+      readWalkPage(
+        {
+          companyNumber: '09990119',
+          companyName: 'DUNMARROW CARE LIMITED',
+          sponsorNames: [],
+          postcode: 'DM1 4QH',
+        },
+        'https://www.dunmarrow.gov.uk/contact-us',
+        `${contact}<p>Dunmarrow Care, our care company, is based here too.</p>`,
+        new Set(),
+      ),
+    ).toMatchObject({ pageNamed: true, namedInFull: true });
   });
 
   test('a page without the postcode names nothing, whoever it names', () => {
@@ -470,17 +592,6 @@ describe('readWalkPage', () => {
     expect(page).toMatchObject({ postcodeFound: true, pageNamed: false });
   });
 
-  // An exhibitor list: the company named beside its postcode, with its own site, among five others.
-  const exhibitors = [
-    '<h1>Exhibitors</h1>',
-    '<p>Beta Feeds Ltd, Mill Lane, Ashbourne DE6 1HA. W: betafeeds.co.uk</p>',
-    '<p>Gamma Hatcheries, Rugeley WS15 1RD. W: gammahatch.eu</p>',
-    '<p>Acme Widgets Ltd, Unit 4, Winchester SO22 5AZ. W: acmewidgets.co.uk</p>',
-    '<p>Delta Grain, Market Rasen LN8 3AA. W: deltagrain.com</p>',
-    '<p>Epsilon Eggs, Driffield YO25 6AB. W: epsiloneggs.co.uk</p>',
-    '<p>Zeta Vets, Malton YO17 7AB. W: zetavets.org.uk</p>',
-  ].join('');
-
   test('a listing that gives the company its own site elsewhere does not name it as its own', () => {
     const url = 'https://www.poultry-conference.co.uk/exhibitors';
     expect(readWalkPage(row, url, exhibitors, new Set())).toMatchObject({
@@ -547,6 +658,7 @@ describe('foldWalkPage', () => {
     crnFound: false,
     postcodeFound: false,
     pageNamed: false,
+    namedInFull: false,
     stated: [],
     read: {
       url: 'https://acme.co.uk/terms',
@@ -625,6 +737,45 @@ describe('foldWalkPage', () => {
         walked({ postcodeFound: true, pageNamed: true }),
       ),
     ).toBe(named);
+  });
+
+  test('a page naming the company in full is kept apart, though an earlier page already named it by host', () => {
+    const byHost = {
+      ...base,
+      postcodeFound: true,
+      postcodeNamed: true,
+      evidenceUrl: 'https://acme.co.uk/contact',
+    };
+    const inFull = walked({
+      postcodeFound: true,
+      pageNamed: true,
+      namedInFull: true,
+    });
+    const folded = foldWalkPage(byHost, 'https://acme.co.uk/privacy', inFull);
+    expect(folded).toMatchObject({
+      postcodeNamed: true,
+      evidenceUrl: 'https://acme.co.uk/contact',
+      namedInFullAt: 'https://acme.co.uk/privacy',
+    });
+    // The first such page is kept.
+    expect(foldWalkPage(folded, 'https://acme.co.uk/terms', inFull)).toBe(
+      folded,
+    );
+  });
+
+  test('a first named postcode that is also in full is both proofs', () => {
+    expect(
+      foldWalkPage(
+        base,
+        'https://acme.co.uk/contact',
+        walked({ postcodeFound: true, pageNamed: true, namedInFull: true }),
+      ),
+    ).toMatchObject({
+      postcodeFound: true,
+      postcodeNamed: true,
+      evidenceUrl: 'https://acme.co.uk/contact',
+      namedInFullAt: 'https://acme.co.uk/contact',
+    });
   });
 });
 

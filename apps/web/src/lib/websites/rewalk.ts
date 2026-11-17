@@ -192,7 +192,7 @@ async function walkStoredSite(
   );
 }
 
-/** A registry row's stored site, walked for the number, then for what confirms the register: the registered postcode on a page naming the company, or the two-signal rule on the site as served. Null when unreadable. */
+/** A registry row's stored site, walked for the number, then for what confirms the register: the registered postcode on a page naming the company in full, or the two-signal rule on the site as served. Null when unreadable. */
 async function walkRegistrySite(
   row: RewalkRow,
   deps: RewalkDeps,
@@ -227,8 +227,8 @@ async function walkRegistrySite(
     : ((await deps.walkDisclosure(view, probe)) ?? probe);
   stated = walked.stated ?? stated;
   if (walked.crnFound) return proved('crn_on_page', walked.evidenceUrl);
-  if (walked.postcodeFound && walked.postcodeNamed) {
-    return proved('registry_confirmed', walked.evidenceUrl);
+  if (walked.namedInFullAt) {
+    return proved('registry_confirmed', walked.namedInFullAt);
   }
   const pages = walked.pages ?? [];
   // Judged on the host that served the homepage: a stored URL may redirect.

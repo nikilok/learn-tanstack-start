@@ -5,7 +5,9 @@
  * office, a neighbour in the same business centre and another company
  * registered at the same office all show it. So a postcode only proves a site
  * when the page showing it names the company, by its host or in its text:
- * by its registered name, or a name the sponsor register lists for it.
+ * by its registered name, or a name the sponsor register lists for it. A
+ * register-listed site needs the name in full: in the text, or as the whole
+ * of the host, never by one word of it shared with another body.
  */
 
 import { parseHmrcName } from '../hmrc-ch/pipeline';
@@ -136,11 +138,14 @@ function identifying(word: string): boolean {
   return !LEGAL.has(word) && !GENERIC.has(word);
 }
 
+/** Whether a word says which company it is: three letters or more, neither legal nor generic. */
+function isNameWord(word: string): boolean {
+  return word.length >= 3 && identifying(word);
+}
+
 /** The words that say which company it is: three letters or more, neither legal nor generic. */
 export function nameWords(companyName: string): string[] {
-  return tokens(companyName).filter(
-    (word) => word.length >= 3 && identifying(word),
-  );
+  return tokens(companyName).filter(isNameWord);
 }
 
 /** First letters of every word but the legal ones: P.L. BLAKE LIMITED is PLB. */
@@ -292,7 +297,6 @@ function hostCarriesRegisterName(host: string, name: string): boolean {
   // Never by one word or by initials: premierdental is not PREMIER, and
   // clinic4u is not ELMBANK CHIROPRACTIC CLINIC.
   const words = writtenName(name);
-  const isNameWord = (word: string) => word.length >= 3 && identifying(word);
   const first = words.findIndex(isNameWord);
   const second =
     first < 0
@@ -339,10 +343,12 @@ function isLegalName(name: string): boolean {
   return LEGAL_FORMS.includes(tokens(name).at(-1) ?? '');
 }
 
-/** Whether a page writes a register name whole: a legal name closed by its form, or two words that say which company it is, as one phrase. */
-function pageCarriesRegisterName(page: string, name: string): boolean {
-  if (isLegalName(name) && carriesWholeName(page, name)) return true;
-  return nameWords(name).length >= 2 && hasPhrase(page, writtenName(name));
+/** How a page writes a register name: in full as a legal name closed by its form, or as a phrase with two words that say which company it is; in part where the second of those words is in a bracketed qualifier the phrase leaves out. */
+function registerNaming(page: string, name: string): Naming | null {
+  if (isLegalName(name) && carriesWholeName(page, name)) return 'in_full';
+  const written = writtenName(name);
+  if (nameWords(name).length < 2 || !hasPhrase(page, written)) return null;
+  return written.filter(isNameWord).length >= 2 ? 'in_full' : 'in_part';
 }
 
 /** Whether a host names the company, given the register's names for it. */
@@ -372,23 +378,59 @@ export function hostNamer(names: CompanyNames): (host: string) => boolean {
   };
 }
 
+/** How a fetched page names the company: `in_full` in its text or by a serving host that is its whole name, `in_part` by a host carrying part of the name or a text with only the one word that says which company it is. */
+export type Naming = 'in_full' | 'in_part';
+
+/** Whether a page carrying every word that says which company it is has the registered name in full: always with two different such words or more; with one, said once or more, only where the page writes the name out, as one phrase. */
+function wordsAreFullName(page: string, companyName: string): boolean {
+  const words = new Set(nameWords(companyName));
+  if (words.size !== 1) return true;
+  const [word] = words;
+  const written = writtenName(companyName);
+  return written.includes(word) && hasPhrase(page, written);
+}
+
+/** How a fetched page names the company, by its registered name or a name the sponsor register lists; null when neither its host nor its text does. */
+export function namingOf(
+  servedHost: string,
+  text: string,
+  names: CompanyNames,
+): Naming | null {
+  const register = registerNamesOf(names);
+  // The serving host, not the one asked for: a named domain that redirects
+  // to another business serves that business's page. A whole-name host
+  // first: it costs nothing next to reading the page.
+  if (
+    [names.companyName, ...register].some((name) =>
+      hostIsWholeName(servedHost, name),
+    )
+  ) {
+    return 'in_full';
+  }
+  const page = phrasePage(text);
+  const worded = pageNamesCompany(page, names.companyName);
+  const byRegister = register.map((name) => registerNaming(page, name));
+  if (
+    carriesWholeName(page, names.companyName) ||
+    (worded && wordsAreFullName(page, names.companyName)) ||
+    byRegister.includes('in_full')
+  ) {
+    return 'in_full';
+  }
+  return worded ||
+    byRegister.includes('in_part') ||
+    hostNames(servedHost, names, register)
+    ? 'in_part'
+    : null;
+}
+
 /** Whether a fetched page names the company: by the host that served it, or in its text. */
 export function namesCompany(
   servedHost: string,
   text: string,
   names: CompanyNames,
 ): boolean {
-  const register = registerNamesOf(names);
-  // The serving host, not the one asked for: a named domain that redirects
-  // to another business serves that business's page. Hosts first: they cost
-  // nothing next to reading the page.
-  if (hostNames(servedHost, names, register)) return true;
-  const page = phrasePage(text);
-  return (
-    pageNamesCompany(page, names.companyName) ||
-    carriesWholeName(page, names.companyName) ||
-    register.some((name) => pageCarriesRegisterName(page, name))
-  );
+  return namingOf(servedHost, text, names) !== null;
 }
 
 /** Slack, in words, for what a page puts between a name's words: "Acme & Co Widgets". */

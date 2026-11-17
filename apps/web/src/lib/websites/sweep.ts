@@ -96,6 +96,8 @@ export type SweepDeps = {
   officers?(companyNumber: string): Promise<OfficerLookup>;
   /** Read one exact URL in a browser. Absent, a homepage whose proof is re-read and that shows a plain fetch nothing is not read. */
   renderPage?(url: string): Promise<FetchedPage>;
+  /** Requests so far that were not sent because their address had stopped answering. Absent, none are held. */
+  heldRequests?(): number;
   applyResult(row: SweepRow, result: RevalidateResult): Promise<boolean>;
   sleep(ms: number): Promise<void>;
   log(message: string): void;
@@ -158,6 +160,8 @@ export type SweepSummary = {
   confirmationRendered: number;
   updated: number;
   lockMissed: number;
+  /** Rows left exactly as they were, a request of theirs held: nothing judged, nothing written. */
+  leftUnread: number;
   errored: number;
   /** Set when the run stopped early because nothing was reachable. */
   systemicAbort: boolean;
@@ -477,18 +481,27 @@ export async function sweepWebsites(
     confirmationRendered: 0,
     updated: 0,
     lockMissed: 0,
+    leftUnread: 0,
     errored: 0,
     systemicAbort: false,
   };
   let failureStreak = 0;
+  // Homepages that answered, whatever became of their rows: what the stop for broken egress reads.
+  let homepagesAnswered = 0;
 
   const rows = await deps.selectRows(config.maxRows);
   summary.selected = rows.length;
 
   for (const [index, row] of rows.entries()) {
     if (index > 0) await deps.sleep(config.delayMs);
+    const heldBefore = deps.heldRequests?.() ?? 0;
     try {
       const fetched = await deps.fetchSite(row.url);
+      // An answered homepage shows our egress works, whatever later steps do to the row.
+      if (fetched.ok) {
+        homepagesAnswered++;
+        failureStreak = 0;
+      }
 
       let crnFoundAt: string | null = null;
       let postcodeFoundAt: string | null = null;
@@ -600,6 +613,12 @@ export async function sweepWebsites(
         }
       }
 
+      // Not fully read, so not judged: the row is left as it was for the next pass.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) {
+        summary.leftUnread++;
+        continue;
+      }
+
       const result = revalidate({
         storedUrl: row.url,
         evidence: row.evidence,
@@ -625,7 +644,6 @@ export async function sweepWebsites(
 
       if (fetched.ok) {
         summary.live++;
-        failureStreak = 0;
       } else if (result.hostAnswered) {
         // A host that refused us is still a host that answered, so it says
         // nothing about our egress. Counting these tripped the breaker on the
@@ -657,14 +675,14 @@ export async function sweepWebsites(
       // same behaviour a real run would have — including stopping early. Behind
       // the `continue` it never fired at all, and a dry run against a broken
       // runner burned the whole slice's fetches proving nothing.
-      // The `live === 0` half is load-bearing and was wrong to drop. Rows are
+      // The nothing-has-answered half is load-bearing and was wrong to drop. Rows are
       // swept in checked_at order and CQC's file is alphabetical by provider,
       // so a defunct group can put 15 genuinely dead domains next to each
       // other — aborting there skips the rest of a slice that is working fine
       // and red-fails the job nightly. Requiring that NOTHING has succeeded
       // costs nothing against real broken egress, where nothing does.
       const abort =
-        summary.live === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
+        homepagesAnswered === 0 && failureStreak >= SYSTEMIC_FAILURE_STREAK;
       if (abort) {
         summary.systemicAbort = true;
         deps.log(
@@ -694,7 +712,9 @@ export async function sweepWebsites(
       // Stop BEFORE committing another 800 demotions, not after.
       if (abort) break;
     } catch (err) {
-      summary.errored++;
+      // Whatever else went wrong, a row with a request held back was left unread, not failed.
+      if ((deps.heldRequests?.() ?? 0) > heldBefore) summary.leftUnread++;
+      else summary.errored++;
       const raw = err instanceof Error ? err.message : String(err);
       // The error path needs the same gate as the success path — it was
       // unconditional, so one thrown fetch published a company/URL pair however

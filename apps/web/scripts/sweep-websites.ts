@@ -20,8 +20,10 @@
  *   bun apps/web/scripts/sweep-websites.ts --status=unreachable --max-rows=1500
  *
  * `--status=unreachable` or `--status=dead` takes only rows an earlier pass
- * left in that status, oldest-checked first. An argument the script does not
- * know stops the run.
+ * left in that status, oldest-checked first. `--address-delay` is the least
+ * time, in milliseconds, between two requests to one hosting address, shared
+ * by every walk on this machine (default 1000). An argument the script does
+ * not know stops the run.
  *
  * Env: POSTGRES_URL. WEBSITE_SWEEP_DELAY_MS overrides the pacing.
  * COMPANIES_HOUSE_SEED_API_KEY lets a `name_and_place` row's officer be re-read.
@@ -39,6 +41,7 @@ import { makeRefreshPostcodeShares } from '../src/lib/websites/postcode-share.ts
 import { makeCoverage } from '../src/lib/websites/sql.ts';
 import { sweepWebsites } from '../src/lib/websites/sweep.ts';
 import { setGitHubOutput } from './ci-utils.ts';
+import { ADDRESS_GAP_MS } from './lib/address-gate.ts';
 import { makeOfficerLookup } from './lib/ch-officers.ts';
 import {
   ERROR_RATE_THRESHOLD,
@@ -47,6 +50,7 @@ import {
 } from './lib/script-utils.ts';
 import { parseSweepArgs, type SweepArgs } from './lib/sweep-args.ts';
 import { makeSweepDeps } from './lib/sweep-deps.ts';
+import { paceByAddress } from './lib/web-fetch.ts';
 import { launchRenderer, type Renderer } from './lib/web-render.ts';
 
 loadScriptEnv(import.meta.url);
@@ -80,6 +84,9 @@ const maxRows = parsed.maxRows ?? DEFAULT_MAX_ROWS;
 const delayMs = process.env.WEBSITE_SWEEP_DELAY_MS
   ? parseStrictInt(process.env.WEBSITE_SWEEP_DELAY_MS, 'WEBSITE_SWEEP_DELAY_MS')
   : DEFAULT_DELAY_MS;
+const addressDelayMs = parsed.addressDelayMs ?? ADDRESS_GAP_MS;
+// Before any page is asked for: every request waits its turn at its address.
+const gate = paceByAddress(addressDelayMs, (message) => console.log(message));
 
 const sql = neon(process.env.POSTGRES_URL as string);
 const coverage = makeCoverage(createClient(process.env.POSTGRES_URL as string));
@@ -96,7 +103,7 @@ console.log(
   `Website revalidation sweep — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(
-  `  max-rows: ${maxRows}  delay: ${delayMs}ms${statusArg ? `  status: ${statusArg}` : ''}`,
+  `  max-rows: ${maxRows}  delay: ${delayMs}ms  address-delay: ${addressDelayMs}ms${statusArg ? `  status: ${statusArg}` : ''}`,
 );
 if (!chKey) console.log('  officer re-check: off, no Companies House key');
 let renderer: Renderer | null = null;
@@ -133,6 +140,7 @@ const summary = await sweepWebsites(
     chKey ? makeOfficerLookup({ apiKey: chKey, workers: 1 }) : undefined,
     renderer ?? undefined,
     { status: statusArg },
+    gate.heldRequests,
   ),
 ).finally(() => renderer?.close());
 
@@ -176,6 +184,8 @@ console.log(`  confirmation_unread : ${summary.confirmationUnread}`);
 console.log(`  confirmation_render : ${summary.confirmationRendered}`);
 console.log(`  updated             : ${summary.updated}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
+console.log(`  left_unread         : ${summary.leftUnread}`);
+console.log(`  addresses_paused    : ${gate.paused()}`);
 console.log(`  errored             : ${summary.errored}`);
 console.log(`  systemic_abort      : ${summary.systemicAbort}`);
 console.log(`  postcode_shares     : ${sharesMoved ?? 'failed'}`);
@@ -189,6 +199,13 @@ console.log(`  duration            : ${durationSec}s`);
 
 setGitHubOutput('renderable-sponsors', String(after.renderable));
 setGitHubOutput('never-checked', String(after.neverChecked));
+
+// Counts only, never the address: a run that was cut off somewhere says so.
+if (gate.paused() > 0) {
+  console.error(
+    `\n  ${gate.paused()} hosting address(es) stopped answering and were left alone; ${summary.leftUnread} rows are left as they were for the next pass.`,
+  );
+}
 
 // Loud failure, same posture as the phase5 sweeps: a rate computed over what
 // actually happened, so an early abort cannot dilute it below the threshold.

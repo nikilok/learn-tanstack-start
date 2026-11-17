@@ -72,6 +72,7 @@ const FAILURES: { reason: RevalidateFailure; status?: number }[] = [
   { reason: 'blocked_by_robots' },
   { reason: 'not_html' },
   { reason: 'too_large' },
+  { reason: 'address_paused' },
   { reason: 'http_error', status: 403 },
   { reason: 'http_error', status: 404 },
   { reason: 'http_error', status: 410 },

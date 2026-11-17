@@ -29,7 +29,9 @@ export type RevalidateFailure =
   | 'blocked_by_robots'
   | 'private_address'
   | 'not_html'
-  | 'too_large';
+  | 'too_large'
+  // The sweep leaves such a row unjudged; one that reached here is a failed fetch.
+  | 'address_paused';
 
 export type RevalidateInput = {
   storedUrl: string;

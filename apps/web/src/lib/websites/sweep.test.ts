@@ -310,6 +310,192 @@ describe('sweepWebsites — hardening', () => {
   });
 });
 
+describe('sweepWebsites — a request held back at a paused address', () => {
+  const PAUSED = 'https://paused.example';
+  const DEAD = 'https://dead.example';
+
+  /** A harness where a request to the paused site is held back, as at a paused address: the count moves and the fetch fails; the dead site just fails. */
+  const holding = (over: Parameters<typeof harness>[0] = {}) => {
+    let held = 0;
+    /** One request held back. */
+    const hold = (url: string): FetchedPage => {
+      held += 1;
+      return { ok: false, reason: 'address_paused', attemptedUrl: url };
+    };
+    const h = harness({
+      heldRequests: () => held,
+      fetchSite: async (url) => {
+        if (url === PAUSED) return hold(url);
+        if (url === DEAD) {
+          return { ok: false, reason: 'timeout', attemptedUrl: url };
+        }
+        return live(url);
+      },
+      ...over,
+    });
+    return { ...h, hold };
+  };
+
+  test('the row is left exactly as it was: nothing written, not a failure, and the rows either side swept as usual', async () => {
+    const h = holding({
+      rows: [
+        row({ companyNumber: '00000001' }),
+        row({ companyNumber: '00000002', url: PAUSED }),
+        row({ companyNumber: '00000003' }),
+      ],
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(h.applied.map((a) => a.row.companyNumber)).toEqual([
+      '00000001',
+      '00000003',
+    ]);
+    expect(summary).toMatchObject({ live: 2, dead: 0, updated: 2, errored: 0 });
+  });
+
+  test('a page held back after the homepage answered leaves the row unjudged too', async () => {
+    const h = holding();
+    h.deps.fetchPage = async (url) => h.hold(url);
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(0);
+    expect(h.applied).toEqual([]);
+  });
+
+  test('a dry run counts it the same way', async () => {
+    const h = holding({ rows: [row({ url: PAUSED }), row()] });
+    const summary = await sweepWebsites(config({ dryRun: true }), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(1);
+    expect(h.applied).toEqual([]);
+  });
+
+  test('it says nothing about our own egress: it neither counts toward the stop nor clears it', async () => {
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    // More held rows than the stop takes, and nothing else: the run goes on.
+    const onlyHeld = holding({
+      rows: numbered(SYSTEMIC_FAILURE_STREAK + 5, PAUSED, 0),
+    });
+    const quiet = await sweepWebsites(config({ maxRows: 60 }), onlyHeld.deps);
+    expect(quiet.systemicAbort).toBe(false);
+    expect(quiet.leftUnread).toBe(SYSTEMIC_FAILURE_STREAK + 5);
+
+    // Held rows in the middle of a run of unreachable ones do not start the count again.
+    const broken = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+        ...numbered(3, PAUSED, 100),
+        ...numbered(5, DEAD, 200),
+      ],
+    });
+    const stopped = await sweepWebsites(config({ maxRows: 60 }), broken.deps);
+    expect(stopped.systemicAbort).toBe(true);
+    expect(stopped.leftUnread).toBe(3);
+    expect(broken.applied).toHaveLength(SYSTEMIC_FAILURE_STREAK);
+
+    // Nor do they add to it: too few unreachable rows stay too few.
+    const short = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 5, DEAD, 0),
+        ...numbered(10, PAUSED, 100),
+        ...numbered(2, DEAD, 200),
+      ],
+    });
+    const ran = await sweepWebsites(config({ maxRows: 60 }), short.deps);
+    expect(ran.systemicAbort).toBe(false);
+    expect(short.applied).toHaveLength(SYSTEMIC_FAILURE_STREAK - 3);
+  });
+
+  test('a homepage that answered still shows our egress works, though its row is left unread', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    // One short of the stop, then a homepage that answers with a later page of its row held, then more unreachable rows.
+    const h = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+        row({ companyNumber: '00000100', url: ANSWERS }),
+        ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+      ],
+    });
+    h.deps.fetchPage = async (url) => h.hold(url);
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(0);
+    expect(summary.systemicAbort).toBe(false);
+    expect(h.applied).toHaveLength(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
+
+  test('a held row that then fails some other way is still left unread: logged, not an error', async () => {
+    const h = holding();
+    let asked = 0;
+    h.deps.fetchPage = async (url) => {
+      asked += 1;
+      if (asked === 1) return h.hold(url);
+      throw new Error('boom');
+    };
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary).toMatchObject({ leftUnread: 1, errored: 0, updated: 0 });
+    expect(h.applied).toEqual([]);
+    expect(h.logs).toEqual(['  ERROR row 1: boom']);
+  });
+
+  test('a homepage that answered shows our egress works even when its row then fails, held request or not', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    /** One short of the stop, a row whose homepage answers and whose pages then go wrong, and more unreachable rows. */
+    const run = async (
+      pages: (url: string, hold: () => FetchedPage) => Promise<FetchedPage>,
+    ) => {
+      const h = holding({
+        rows: [
+          ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+          row({ companyNumber: '00000100', url: ANSWERS }),
+          ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+        ],
+      });
+      h.deps.fetchPage = (url) => pages(url, () => h.hold(url));
+      return {
+        summary: await sweepWebsites(config({ maxRows: 60 }), h.deps),
+        applied: h.applied.length,
+      };
+    };
+
+    // A page held back, then the next one throwing.
+    let asked = 0;
+    const held = await run(async (_url, hold) => {
+      asked += 1;
+      if (asked === 1) return hold();
+      throw new Error('boom');
+    });
+    expect(held.summary).toMatchObject({
+      leftUnread: 1,
+      errored: 0,
+      systemicAbort: false,
+    });
+    expect(held.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+
+    // Nothing held: the row simply throws after its homepage answered.
+    const thrown = await run(async () => {
+      throw new Error('boom');
+    });
+    expect(thrown.summary).toMatchObject({
+      leftUnread: 0,
+      errored: 1,
+      systemicAbort: false,
+    });
+    expect(thrown.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
+});
+
 describe('sweepWebsites — dry run parity', () => {
   test('a dry run aborts on broken egress exactly as a real run would', async () => {
     // The abort check sat behind the dry-run `continue`, so --dry-run burned

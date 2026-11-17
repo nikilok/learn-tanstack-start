@@ -64,8 +64,8 @@ export const KEPT = 64;
 export type FileLedgerOptions = {
   /** Told once, when the files cannot be used and this process paces alone. */
   warn?: (message: string) => void;
-  /** Called once the turns are read, and once the next file is made: how a test lets another process in between. */
-  between?: (stage: 'read' | 'made') => void;
+  /** Called once the newest file is listed, once its turns are read, and once the next file is made: how a test lets another process in between. */
+  between?: (stage: 'listed' | 'read' | 'made') => void;
   maxAttempts?: number;
 };
 
@@ -115,10 +115,19 @@ function remove(file: string): void {
   }
 }
 
-/** The turns in a file; none when it is missing or will not parse. */
-function read(file: string): Turns {
+/** The turns in a file: null when it is gone, none when it will not parse. It throws when it cannot be read at all. */
+function read(file: string): Turns | null {
+  let text: string;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    text = readFileSync(file, 'utf8');
+  } catch (error) {
+    // Tidied since it was listed.
+    if (codeOf(error) === 'ENOENT') return null;
+    // Turns that cannot be read are not turns that are free.
+    throw error;
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
     if (typeof parsed !== 'object' || parsed === null) return {};
     const turns: Turns = {};
     for (const [address, free] of Object.entries(parsed)) {
@@ -128,14 +137,26 @@ function read(file: string): Turns {
     }
     return turns;
   } catch {
+    // A file is published whole or not at all: one that will not parse is what a crash left.
     return {};
   }
 }
 
+/** The newest numbered file and its turns, number 0 with no turns before any is published; null when it was tidied as it was read. */
+function newest(
+  dir: string,
+  listed?: () => void,
+): { number: number; turns: Turns } | null {
+  const number = Math.max(0, ...numbers(dir));
+  listed?.();
+  if (number === 0) return { number, turns: {} };
+  const turns = read(numbered(dir, number));
+  return turns && { number, turns };
+}
+
 /** The newest turns in a ledger directory. */
 export function currentTurns(dir: string): Turns {
-  const newest = Math.max(0, ...numbers(dir));
-  return newest === 0 ? {} : read(numbered(dir, newest));
+  return newest(dir)?.turns ?? {};
 }
 
 let drafts = 0;
@@ -186,18 +207,20 @@ export function fileLedger(
           claimed = true;
         }
         for (let attempt = 0; attempt < attempts; attempt++) {
-          const newest = Math.max(0, ...numbers(dir));
-          known = newest === 0 ? {} : read(numbered(dir, newest));
+          const onFile = newest(dir, () => options.between?.('listed'));
+          // Tidied as it was read: look again.
+          if (!onFile) continue;
+          known = onFile.turns;
           const taken = takeTurn(known, addresses, gapMs, now);
           options.between?.('read');
           const made = () => options.between?.('made');
-          if (publish(dir, newest + 1, taken.turns, made)) {
+          if (publish(dir, onFile.number + 1, taken.turns, made)) {
             known = taken.turns;
             return taken.turn;
           }
         }
         // Beaten every time: what beat it last is the most this process can know.
-        known = currentTurns(dir);
+        known = newest(dir)?.turns ?? known;
         throw Object.assign(new Error('ledger is contended'), {
           code: 'ECONTENDED',
         });

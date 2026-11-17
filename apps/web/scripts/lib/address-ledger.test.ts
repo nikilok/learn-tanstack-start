@@ -253,6 +253,81 @@ describe('fileLedger', () => {
     expect(warnings[0]).toMatch(/^ {2}address ledger unavailable \(E[A-Z]+\)/);
   });
 
+  test('files that stop working once the turns are read: this process paces alone from what it read', () => {
+    const dir = join(scratch(), 'ledger');
+    expect(fileLedger(dir).reserve([A], 5000, 0)).toBe(0);
+    const warnings: string[] = [];
+    let broken = false;
+    const ledger = fileLedger(dir, {
+      warn: (m) => warnings.push(m),
+      between: (stage) => {
+        if (stage !== 'read' || broken) return;
+        broken = true;
+        // The directory is gone, and a file stands where it was.
+        rmSync(dir, { recursive: true });
+        writeFileSync(dir, '');
+      },
+    });
+    expect(ledger.reserve([A], 1000, 100)).toBe(5000);
+    expect(warnings).toHaveLength(1);
+  });
+
+  test('turns that cannot be read are not free turns: this process paces alone from the turns it had, and publishes nothing', () => {
+    const dir = scratch();
+    const warnings: string[] = [];
+    const ledger = fileLedger(dir, { warn: (m) => warnings.push(m) });
+    expect(ledger.reserve([A], 2000, 0)).toBe(0);
+    // The newest number is there and cannot be read, in a directory that can still be written.
+    mkdirSync(join(dir, 'turns.2.json'));
+    expect(ledger.reserve([A], 2000, 100)).toBe(2000);
+    expect(warnings).toEqual([
+      '  address ledger unavailable (EISDIR): this process paces alone',
+    ]);
+    // A process that never read them has no turn to keep, and publishes nothing either.
+    expect(fileLedger(dir).reserve([A], 2000, 100)).toBe(100);
+    expect(numbersIn(dir)).toEqual([1, 2]);
+  });
+
+  test('a file tidied between being listed and being read is no failure: the process looks again', () => {
+    const dir = scratch();
+    const two = fileLedger(dir);
+    expect(two.reserve([A], 1000, 0)).toBe(0);
+    const warnings: string[] = [];
+    let listings = 0;
+    const one = fileLedger(dir, {
+      warn: (m) => warnings.push(m),
+      between: (stage) => {
+        if (stage !== 'listed') return;
+        listings += 1;
+        if (listings > 1) return;
+        // It has listed file 1; the others go on until that file is tidied away.
+        for (let i = 1; i <= KEPT; i++) two.reserve([A], 1000, 0);
+        expect(numbersIn(dir)[0]).toBe(2);
+      },
+    });
+    expect(one.reserve([A], 1000, 0)).toBe((KEPT + 1) * 1000);
+    expect(listings).toBe(2);
+    expect(warnings).toEqual([]);
+    expect(Math.max(...numbersIn(dir))).toBe(KEPT + 2);
+  });
+
+  test('a listed file that is never there to read is not read as an idle ledger', () => {
+    const dir = scratch();
+    const warnings: string[] = [];
+    const ledger = fileLedger(dir, {
+      warn: (m) => warnings.push(m),
+      maxAttempts: 3,
+    });
+    expect(ledger.reserve([A], 2000, 0)).toBe(0);
+    // A name with nothing behind it: listed every time, never there to read.
+    symlinkSync(join(dir, 'nowhere'), join(dir, 'turns.2.json'));
+    expect(ledger.reserve([A], 2000, 100)).toBe(2000);
+    expect(warnings).toEqual([
+      '  address ledger unavailable (ECONTENDED): this process paces alone',
+    ]);
+    expect(numbersIn(dir)).toEqual([1, 2]);
+  });
+
   test('a directory that cannot be made: this process paces alone', () => {
     const dir = scratch();
     writeFileSync(join(dir, 'file'), '');

@@ -76,7 +76,7 @@ async function answer(route: Route): Promise<void> {
   );
 }
 
-/** Navigate a page already made, and read it once its scripts settle. */
+/** Navigate a page already made, and read it once its scripts settle; where it landed is the caller's to guard. */
 async function load(page: Page, url: string): Promise<SiteFetch> {
   const response = await page.goto(url, {
     waitUntil: 'domcontentloaded',
@@ -89,13 +89,9 @@ async function load(page: Page, url: string): Promise<SiteFetch> {
   await page
     .waitForLoadState('networkidle', { timeout: SETTLE_MS })
     .catch(() => {});
-  // The page it landed on passes the same guards as the one it asked for.
-  const landed = page.url();
-  const blocked = await checkFetchable(landed);
-  if (blocked) return failed(url, blocked);
   return {
     ok: true,
-    url: landed,
+    url: page.url(),
     status: response.status(),
     html: (await page.content()).slice(0, MAX_HTML_CHARS),
     attempts: 1,
@@ -106,7 +102,8 @@ async function load(page: Page, url: string): Promise<SiteFetch> {
 /**
  * One page rendered under the time limit, the page closed whatever happens.
  * The page is made first and its turn at its address taken last, so it
- * navigates on its turn; the wait for the turn is no part of the limit.
+ * navigates on its turn. No wait for a turn is part of the limit: not the
+ * page's own, and not one the guards on the page it landed on wait for.
  */
 export async function renderIn(
   context: Pick<BrowserContext, 'newPage'>,
@@ -121,7 +118,11 @@ export async function renderIn(
     const left = limitMs - (Date.now() - started);
     const blocked = await awaitTurn(url);
     if (blocked) return failed(url, blocked);
-    return await within(load(page, url), left);
+    const loaded = await within(load(page, url), left);
+    if (!loaded.ok) return loaded;
+    // The page it landed on passes the same guards as the one it asked for.
+    const refused = await checkFetchable(loaded.url);
+    return refused ? failed(url, refused) : loaded;
   } catch (error) {
     const timedOut = /time|limit/i.test(
       error instanceof Error ? error.message : '',

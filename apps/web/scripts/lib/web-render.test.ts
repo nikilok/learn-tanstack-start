@@ -41,6 +41,7 @@ describe('requestVerdict', () => {
 // Documentation addresses and reserved names: nobody's.
 const HOSTS: Record<string, string> = {
   'site.example': '192.0.2.10',
+  'elsewhere.example': '192.0.2.20',
   'inside.example': '10.0.0.8',
 };
 const PAGE = 'https://site.example/team';
@@ -264,6 +265,37 @@ describe('renderIn', () => {
 
     expect(result).toMatchObject({ ok: false, reason: 'private_address' });
     expect(events.at(-1)).toBe('page closed');
+  });
+
+  test('a turn the landed page waits for, to have its robots.txt read, is no part of the time limit', async () => {
+    const events: string[] = [];
+    let turns = 0;
+    // The page's own turn comes at once; the one for robots.txt where it landed takes longer than the limit.
+    const gate: AddressGate = {
+      ...gateOf(events),
+      enter: async (addresses) => {
+        events.push(`turn ${addresses.join(',')}`);
+        turns += 1;
+        if (turns > 1) await sleep(260);
+        return true;
+      },
+    };
+    await network(gate);
+    const landed = 'https://elsewhere.example/home';
+    const result = await renderIn(
+      contextOf(events, pageOf(events, { gotoMs: 20, landed })),
+      PAGE,
+      200,
+    );
+
+    expect(result).toMatchObject({ ok: true, url: landed });
+    expect(events).toEqual([
+      'page asked for',
+      'turn 192.0.2.10',
+      `goto ${PAGE}`,
+      'turn 192.0.2.20',
+      'page closed',
+    ]);
   });
 });
 

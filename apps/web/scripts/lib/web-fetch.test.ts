@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +13,7 @@ import {
   configureFetch,
   fetchPage,
   fetchSite,
+  forgetAnsweredAddresses,
   paceByAddress,
   USER_AGENT,
 } from './web-fetch.ts';
@@ -26,9 +28,12 @@ const HOSTS: Record<string, string[]> = {
   'three.example': ['192.0.2.10'],
   'four.example': ['192.0.2.10'],
   'five.example': ['192.0.2.10'],
+  // A name with the letters a TLS failure is told by.
+  'ssl.example': ['192.0.2.30'],
 };
 
-type Reply = Response | Error;
+/** What a URL answers with: a reply, or one made from the URL the request was sent to. */
+type Reply = Response | Error | ((sentTo: string) => Response | Error);
 
 /** A reply with a body and a status. */
 const page = (body: string, status = 200, type = 'text/html') =>
@@ -40,22 +45,65 @@ const moved = (location: string) =>
 
 let restore: (() => void) | undefined;
 /** How each request of the newest fixture was sent. */
-let sent: RequestInit[] = [];
+let sent: BunFetchRequestInit[] = [];
+/** The URL each request of the newest fixture was sent to. */
+let sentTo: string[] = [];
+/** Each address the newest fixture dialled, with its port. */
+let dialled: string[] = [];
 afterEach(() => {
   restore?.();
   restore = undefined;
   clearRobotsCache();
+  forgetAnsweredAddresses();
 });
 
 /**
- * The fetcher on a fake network: hosts resolve from HOSTS, each URL answers
- * from `replies` (a 404 otherwise), and everything that happens is recorded in
- * order. `refuse` makes the gate refuse that many requests, then let the rest
- * through; without `gated` no gate is installed at all.
+ * The page a request is for: the URL it was sent to, with the Host header it
+ * carried in place of the address. A request sent by name, or to an address
+ * its host does not resolve to, fails here, whatever the test is about.
+ */
+function askedFor(
+  url: string,
+  init: BunFetchRequestInit,
+  hosts: Record<string, string[]>,
+): string {
+  const to = new URL(url);
+  const address = to.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(address) === 0) throw new Error(`sent by name: ${url}`);
+  const { host } = init.headers as Record<string, string | undefined>;
+  if (!host) throw new Error(`sent without a Host header: ${url}`);
+  const asked = new URL(`${to.protocol}//${host}${to.pathname}${to.search}`);
+  if (!hosts[asked.hostname]?.includes(address)) {
+    throw new Error(`sent to an address ${asked.hostname} is not at: ${url}`);
+  }
+  return asked.href;
+}
+
+/**
+ * The fetcher on a fake network: hosts resolve from HOSTS (or `hosts`), every
+ * address accepts a connection unless it is in `refusing` or `unanswering`,
+ * each URL answers from `replies` (a 404 otherwise), and everything that
+ * happens is recorded in order, a dial only with `dials`. `refuse` makes the
+ * gate refuse that many requests, then let the rest through; without `gated`
+ * no gate is installed at all.
  */
 function network(
   replies: Record<string, Reply>,
-  { gated = true, refuse = 0 }: { gated?: boolean; refuse?: number } = {},
+  {
+    gated = true,
+    refuse = 0,
+    hosts = HOSTS,
+    refusing = [],
+    unanswering = [],
+    dials = false,
+  }: {
+    gated?: boolean;
+    refuse?: number;
+    hosts?: Record<string, string[]>;
+    refusing?: string[];
+    unanswering?: string[];
+    dials?: boolean;
+  } = {},
 ) {
   const events: string[] = [];
   let refusals = refuse;
@@ -75,18 +123,36 @@ function network(
   // One fixture at a time: the last one's undo puts back what was there before any.
   restore?.();
   sent = [];
+  sentTo = [];
+  dialled = [];
   restore = configureFetch({
     lookup: async (hostname) => {
-      const addresses = HOSTS[hostname];
+      const addresses = hosts[hostname];
       if (!addresses) throw new Error('ENOTFOUND');
       return addresses.map((address) => ({ address }));
     },
+    connect: (address, port, signal) => {
+      dialled.push(`${address}:${port}`);
+      if (dials) events.push(`dial ${address}:${port}`);
+      if (refusing.includes(address)) {
+        return Promise.reject(new Error('ECONNREFUSED'));
+      }
+      if (!unanswering.includes(address)) return Promise.resolve();
+      // Open until the request's time limit, or an address that accepted, ends it.
+      return new Promise<void>((_, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        signal.addEventListener('abort', () => reject(signal.reason));
+      });
+    },
     fetch: async (url, init) => {
-      events.push(`fetch ${url}`);
+      const asked = askedFor(url, init, hosts);
+      events.push(`fetch ${asked}`);
       sent.push(init);
-      const reply = replies[url] ?? page('', 404);
-      if (reply instanceof Error) throw reply;
-      return reply;
+      sentTo.push(url);
+      const reply = replies[asked] ?? page('', 404);
+      const made = typeof reply === 'function' ? reply(url) : reply;
+      if (made instanceof Error) throw made;
+      return made;
     },
     gate: gated ? gate : null,
   });
@@ -114,8 +180,12 @@ describe('fetchPage at the address gate', () => {
     ]);
     // Sent as ever: under our name, with a time limit, and redirects left for the fetcher to follow by hand.
     expect(sent.map((init) => init.headers)).toEqual([
-      { 'user-agent': USER_AGENT },
-      { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' },
+      { 'user-agent': USER_AGENT, host: 'one.example' },
+      {
+        'user-agent': USER_AGENT,
+        accept: 'text/html,application/xhtml+xml',
+        host: 'one.example',
+      },
     ]);
     expect(sent.map((init) => init.redirect)).toEqual(['manual', 'manual']);
     expect(sent.every((init) => init.signal instanceof AbortSignal)).toBe(true);
@@ -227,6 +297,223 @@ describe('fetchPage at the address gate', () => {
     expect(events).toEqual([
       'fetch https://one.example/robots.txt',
       'fetch https://one.example/',
+    ]);
+  });
+});
+
+describe('a request is sent to an address its host resolved to', () => {
+  test('robots.txt and the page go to that address, under the name of the host', async () => {
+    network({ 'https://three.example/team?page=2': page('<p>Team</p>') });
+    expect(await fetchPage('https://three.example/team?page=2')).toEqual({
+      ok: true,
+      url: 'https://three.example/team?page=2',
+      status: 200,
+      html: '<p>Team</p>',
+    });
+    expect(sentTo).toEqual([
+      'https://192.0.2.10/robots.txt',
+      'https://192.0.2.10/team?page=2',
+    ]);
+    expect(sent.map((init) => init.tls)).toEqual([
+      { serverName: 'three.example' },
+      { serverName: 'three.example' },
+    ]);
+    // One address: there is nothing to choose between, so nothing is dialled.
+    expect(dialled).toEqual([]);
+  });
+
+  test('an IPv6 address is one too', async () => {
+    network({ 'https://two.example/': page('<p>Six</p>') });
+    expect((await fetchPage('https://two.example/')).ok).toBe(true);
+    expect(sentTo).toEqual([
+      'https://[2001:db8::20]/robots.txt',
+      'https://[2001:db8::20]/',
+    ]);
+  });
+
+  test('plain HTTP on a port of its own keeps the port, in the URL and in the Host header, and has no TLS name', async () => {
+    network({ 'http://three.example:8080/a': page('<p>Plain</p>') });
+    expect((await fetchPage('http://three.example:8080/a')).ok).toBe(true);
+    expect(sentTo).toEqual([
+      'http://192.0.2.10:8080/robots.txt',
+      'http://192.0.2.10:8080/a',
+    ]);
+    expect(
+      sent.map((init) => (init.headers as Record<string, string>).host),
+    ).toEqual(['three.example:8080', 'three.example:8080']);
+    expect(sent.map((init) => 'tls' in init)).toEqual([false, false]);
+  });
+
+  test('each hop of a redirect goes to an address of the host that hop names', async () => {
+    network({
+      'https://three.example/': moved('https://two.example/home'),
+      'https://two.example/home': page('<p>Moved</p>'),
+    });
+    expect(await fetchPage('https://three.example/')).toMatchObject({
+      ok: true,
+      url: 'https://two.example/home',
+    });
+    expect(sentTo).toEqual([
+      'https://192.0.2.10/robots.txt',
+      'https://192.0.2.10/',
+      'https://[2001:db8::20]/robots.txt',
+      'https://[2001:db8::20]/home',
+    ]);
+    expect(sent.map((init) => init.tls)).toEqual([
+      { serverName: 'three.example' },
+      { serverName: 'three.example' },
+      { serverName: 'two.example' },
+      { serverName: 'two.example' },
+    ]);
+  });
+
+  test('a failure that names the URL it was sent to is read as one that names the page, as a request by name was', async () => {
+    network({
+      'https://ssl.example/': (to) =>
+        new Error(`SomeFailure fetching "${to}". For more information`),
+    });
+    // Read from the page's URL, whose host has the letters a TLS failure is told by.
+    expect(await fetchPage('https://ssl.example/')).toEqual({
+      ok: false,
+      reason: 'tls',
+    });
+    expect(sentTo).toEqual([
+      'https://192.0.2.30/robots.txt',
+      'https://192.0.2.30/',
+    ]);
+  });
+});
+
+describe('a host on several addresses', () => {
+  test('is dialled within the time limit of its request, the next address when one refuses, and asked at the first to accept', async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const events = network(
+      { 'http://one.example:8080/': page('<p>Hello</p>') },
+      { dials: true, refusing: ['192.0.2.10'] },
+    );
+    const limit = spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      events.push(`limit ${ms}`);
+      return real(ms);
+    });
+    try {
+      expect((await fetchPage('http://one.example:8080/')).ok).toBe(true);
+    } finally {
+      limit.mockRestore();
+    }
+    expect(events.filter((event) => !event.startsWith('answered'))).toEqual([
+      `turn ${ONE}`,
+      'limit 8000',
+      'dial 192.0.2.10:8080',
+      'dial 192.0.2.11:8080',
+      'fetch http://one.example:8080/robots.txt',
+      `turn ${ONE}`,
+      'limit 12000',
+      'fetch http://one.example:8080/',
+    ]);
+    expect(sentTo).toEqual([
+      'http://192.0.2.11:8080/robots.txt',
+      'http://192.0.2.11:8080/',
+    ]);
+  });
+
+  test('is asked again at the address it last answered at, without another dial', async () => {
+    network({ 'https://one.example/': page('<p>Hello</p>') });
+    await fetchPage('https://one.example/');
+    await fetchPage('https://one.example/about');
+    // Its first address accepted, so the second was never dialled.
+    expect(dialled).toEqual(['192.0.2.10:443']);
+    expect(sentTo).toEqual([
+      'https://192.0.2.10/robots.txt',
+      'https://192.0.2.10/',
+      'https://192.0.2.10/about',
+    ]);
+  });
+
+  test('is dialled afresh for another origin of the same host', async () => {
+    network({});
+    await fetchPage('https://one.example/');
+    await fetchPage('http://one.example/');
+    expect(dialled).toEqual(['192.0.2.10:443', '192.0.2.10:80']);
+  });
+
+  test('is dialled again once a request to it has failed', async () => {
+    network({
+      'https://one.example/': page('<p>Hello</p>'),
+      'https://one.example/gone': new Error('ECONNRESET'),
+    });
+    await fetchPage('https://one.example/');
+    expect(dialled).toHaveLength(1);
+    expect(await fetchPage('https://one.example/gone')).toEqual({
+      ok: false,
+      reason: 'dns_or_refused',
+    });
+    expect(dialled).toHaveLength(1);
+    await fetchPage('https://one.example/');
+    expect(dialled).toHaveLength(2);
+  });
+
+  test('is dialled again when it no longer resolves to the address it answered at', async () => {
+    network({});
+    await fetchPage('https://one.example/');
+    expect(sentTo.at(-1)).toBe('https://192.0.2.10/');
+    network({}, { hosts: { 'one.example': ['192.0.2.11', '192.0.2.12'] } });
+    await fetchPage('https://one.example/about');
+    expect(dialled).toEqual(['192.0.2.11:443']);
+    expect(sentTo).toEqual(['https://192.0.2.11/about']);
+  });
+
+  test('when none of them accepts a connection, nothing is sent, and it fails as a refused connection does', async () => {
+    const events = network(
+      { 'https://one.example/': page('<p>Hello</p>') },
+      { refusing: ['192.0.2.10', '192.0.2.11'] },
+    );
+    expect(await fetchPage('https://one.example/')).toEqual({
+      ok: false,
+      reason: 'dns_or_refused',
+    });
+    expect(events).toEqual([
+      `turn ${ONE}`,
+      `other one.example ${ONE}`,
+      `turn ${ONE}`,
+      `other one.example ${ONE}`,
+    ]);
+  });
+
+  test('when none of them accepts within the time limit, nothing is sent, and it is the silence a timeout is', async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const events = network(
+      { 'https://one.example/': page('<p>Hello</p>') },
+      { unanswering: ['192.0.2.10', '192.0.2.11'] },
+    );
+    const limit = spyOn(AbortSignal, 'timeout').mockImplementation(() =>
+      real(20),
+    );
+    try {
+      expect(await fetchPage('https://one.example/')).toEqual({
+        ok: false,
+        reason: 'timeout',
+      });
+    } finally {
+      limit.mockRestore();
+    }
+    expect(events).toEqual([
+      `turn ${ONE}`,
+      `silent one.example ${ONE}`,
+      `turn ${ONE}`,
+      `silent one.example ${ONE}`,
+    ]);
+  });
+
+  test('one that does not answer costs a moment, not the request, while another accepts', async () => {
+    network(
+      { 'https://one.example/': page('<p>Hello</p>') },
+      { unanswering: ['192.0.2.10'] },
+    );
+    expect((await fetchPage('https://one.example/')).ok).toBe(true);
+    expect(dialled).toEqual(['192.0.2.10:443', '192.0.2.11:443']);
+    expect(sentTo).toEqual([
+      'https://192.0.2.11/robots.txt',
+      'https://192.0.2.11/',
     ]);
   });
 });

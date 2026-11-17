@@ -4,9 +4,9 @@
  * Unlike ch-client.ts, which talks to one API we have a key for, this reaches
  * arbitrary hosts we do not control, from a job that runs with database
  * credentials in its environment. So it identifies itself, honours robots.txt,
- * refuses to resolve into private address space, caps how much it will read,
- * and gives up quickly. A walk also paces it by hosting address
- * (address-gate.ts).
+ * refuses to resolve into private address space, sends each request to an
+ * address it resolved (address-binding.ts), caps how much it will read, and
+ * gives up quickly. A walk also paces it by hosting address (address-gate.ts).
  *
  * The policy decisions live in src/lib/websites/fetch-policy.ts so they can be
  * tested without a network; this module is the I/O around them.
@@ -21,6 +21,14 @@ import {
   type RobotsRules,
   urlVariants,
 } from '../../src/lib/websites/fetch-policy.ts';
+import {
+  accepts,
+  asAsked,
+  bindTo,
+  type Dial,
+  firstToAccept,
+  portOf,
+} from './address-binding.ts';
 import { type AddressGate, makeAddressGate } from './address-gate.ts';
 import { fileLedger, sharedLedgerDir } from './address-ledger.ts';
 
@@ -59,17 +67,20 @@ export type PageFetch =
   | { ok: true; url: string; status: number; html: string }
   | { ok: false; reason: FetchFailure; status?: number };
 
-/** What the fetcher resolves and requests with, and the gate its requests wait at. */
+/** What the fetcher resolves, dials and requests with, and the gate its requests wait at. */
 export type FetchIo = {
   /** Every address a host resolves to. */
   lookup(hostname: string): Promise<{ address: string }[]>;
-  fetch(url: string, init: RequestInit): Promise<Response>;
+  /** Whether an address accepts a connection: how a host on several is chosen an address. */
+  connect: Dial;
+  fetch(url: string, init: BunFetchRequestInit): Promise<Response>;
   /** Null paces nothing, which is how every caller but a walk runs. */
   gate: AddressGate | null;
 };
 
 let io: FetchIo = {
   lookup: (hostname) => lookup(hostname, { all: true }),
+  connect: accepts,
   fetch: (url, init) => fetch(url, init),
   gate: null,
 };
@@ -107,6 +118,45 @@ function classify(err: unknown): FetchFailure {
   return 'dns_or_refused';
 }
 
+/** The address each origin last answered at: where its host is on several, it is asked there again without another dial. */
+const answeredAt = new Map<string, string>();
+
+/** The address a request is sent to: its host's only one, the one its origin last answered at, else the first of them to accept a connection. */
+async function addressFor(
+  target: URL,
+  addresses: readonly string[],
+  limit: AbortSignal,
+): Promise<string> {
+  if (addresses.length === 1) return addresses[0];
+  const last = answeredAt.get(target.origin);
+  if (last && addresses.includes(last)) return last;
+  return firstToAccept(addresses, portOf(target), limit, io.connect);
+}
+
+/** One request, sent to one of the addresses its host resolved to, under the host's own name. */
+async function ask(
+  target: URL,
+  addresses: readonly string[],
+  headers: Record<string, string>,
+  limit: AbortSignal,
+): Promise<Response> {
+  const address = await addressFor(target, addresses, limit);
+  const bound = bindTo(target, address);
+  try {
+    const res = await io.fetch(bound.url, {
+      headers: { ...headers, host: bound.host },
+      signal: limit,
+      redirect: 'manual',
+      ...(bound.serverName && { tls: { serverName: bound.serverName } }),
+    });
+    answeredAt.set(target.origin, address);
+    return res;
+  } catch (err) {
+    answeredAt.delete(target.origin);
+    throw asAsked(err, bound.url, target.href);
+  }
+}
+
 /** One request, sent in its turn at its host's addresses and reported to the gate; null when one of them is paused and nothing was sent. Its time limit starts as it is sent, never while it waits its turn. */
 async function send(
   target: URL,
@@ -117,11 +167,12 @@ async function send(
   const { gate } = io;
   if (gate && !(await gate.enter(addresses))) return null;
   try {
-    const res = await io.fetch(target.href, {
+    const res = await ask(
+      target,
+      addresses,
       headers,
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: 'manual',
-    });
+      AbortSignal.timeout(timeoutMs),
+    );
     gate?.settle(target.hostname, addresses, 'answered');
     return res;
   } catch (err) {
@@ -429,4 +480,9 @@ export async function fetchSite(
 /** Drop every cached robots.txt. Exposed for tests and long-lived processes. */
 export function clearRobotsCache(): void {
   robotsCache.clear();
+}
+
+/** Forget which address each origin last answered at. Exposed for tests and long-lived processes. */
+export function forgetAnsweredAddresses(): void {
+  answeredAt.clear();
 }

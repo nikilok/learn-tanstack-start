@@ -9,6 +9,10 @@
  * Revalidation (demoting a live `verified` row to `dead`) is deliberately NOT
  * routed through here — it is a liveness check, not a discovery, and it is the
  * one legitimate way a row moves down the ladder.
+ *
+ * An address the owner pinned sits outside the ladder: a finding about
+ * another site never moves the row, whatever its tier. Its tier is untouched,
+ * so a finding about the pinned site itself is still decided on the ladder.
  */
 
 import { isSameSite } from './normalise-url';
@@ -62,6 +66,8 @@ export type ExistingWebsite = {
   evidence: WebsiteEvidence;
   /** Which discoverer wrote this row; a source may revise its own answer. */
   source: string | null;
+  /** The owner chose this address by hand: no discoverer moves the row off it. */
+  pinned?: boolean;
 };
 
 export type ProposedWebsite = {
@@ -166,10 +172,11 @@ export function statusForEvidence(evidence: WebsiteEvidence): WebsiteStatus {
  * silently discarded by the database. This is the `slugifiedSqlText` pattern
  * from @ss/db — one declaration, two consumers, no agreement test to forget.
  *
- * Mirrors decideWebsite clause for clause: `manual` is terminal; a stronger
- * tier wins; an equal tier wins only when it is the same source revising its
- * own answer (a bare `=` leaves a NULL stored source non-matching, exactly as
- * the `existing.source &&` guard does in process).
+ * Mirrors decideWebsite clause for clause: `manual` is terminal; a pinned row
+ * keeps its address; a stronger tier wins; an equal tier wins only when it is
+ * the same source revising its own answer (a bare `=` leaves a NULL stored
+ * source non-matching, exactly as the `existing.source &&` guard does in
+ * process).
  */
 export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
   // The confidence of the rung `registry_confirmed` collapses to, so the SQL
@@ -184,7 +191,12 @@ export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
     ` THEN ${evidenceConfidence('registry')}::numeric` +
     ` ELSE ${table}.confidence END`;
   return (
-    `${table}.evidence <> 'manual' AND (` +
+    `${table}.evidence <> 'manual'` +
+    // Mirrors the pin, more strictly: a pinned row is written only at the
+    // exact address it holds, so a writer that read it before it was pinned
+    // cannot move it. A pin on a row with no address pins nothing.
+    ` AND (${table}.url_pinned_at IS NULL OR ${table}.url IS NULL OR ${table}.url = excluded.url)` +
+    ` AND (` +
     `${table}.confidence IS NULL` +
     ` OR ${collapsed} < excluded.confidence` +
     ` OR (${collapsed} = excluded.confidence AND ${table}.source = excluded.source)` +
@@ -197,6 +209,18 @@ export function upgradeOnlyPredicateSql(table = 'company_websites'): string {
   );
 }
 
+/** Whether a row is pinned to an address and a URL names another site, so the owner's choice stands. A pin on a row with no address pins nothing. */
+export function isPinnedElsewhere(
+  existing: ExistingWebsite | null,
+  url: string | null,
+): boolean {
+  return (
+    existing?.pinned === true &&
+    existing.url !== null &&
+    !isSameSite(existing.url, url)
+  );
+}
+
 /** Apply the upgrade-only policy to one company. */
 export function decideWebsite(
   existing: ExistingWebsite | null,
@@ -204,6 +228,10 @@ export function decideWebsite(
 ): DecideWebsiteResult {
   if (proposed.evidence === 'none' || !proposed.url) return { action: 'keep' };
   if (!existing) return { action: 'update' };
+
+  // An address the owner pinned is theirs alone to move: a finding about
+  // another site is not news, whatever its tier, and not a conflict to report.
+  if (isPinnedElsewhere(existing, proposed.url)) return { action: 'keep' };
 
   // Terminal: an owner-set website is never replaced by a discoverer, and a
   // discoverer agreeing with it is not news.

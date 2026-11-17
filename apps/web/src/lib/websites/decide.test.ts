@@ -470,3 +470,78 @@ describe('upgradeOnlyPredicateSql agrees with decideWebsite', () => {
     ).toEqual({ action: 'keep' });
   });
 });
+
+describe('an address the owner pinned', () => {
+  const ELSEWHERE = 'https://elsewhere.co.uk';
+  const pinned = (over: Partial<ExistingWebsite> = {}) =>
+    existing({ pinned: true, ...over });
+
+  test('is not moved by its own register revising its address', () => {
+    // The register lists what it always listed; the owner moved the row since.
+    expect(decideWebsite(pinned(), proposed({ url: ELSEWHERE }))).toEqual({
+      action: 'keep',
+    });
+    // Without the pin, the same proposal is the register correcting itself.
+    expect(decideWebsite(existing(), proposed({ url: ELSEWHERE }))).toEqual({
+      action: 'update',
+    });
+  });
+
+  test('nor by a stronger tier found at another site', () => {
+    expect(
+      decideWebsite(
+        pinned({ evidence: 'registry_unconfirmed', status: 'candidate' }),
+        proposed({ url: ELSEWHERE, evidence: 'crn_on_page' }),
+      ),
+    ).toEqual({ action: 'keep' });
+  });
+
+  test('nor once it has gone dead', () => {
+    expect(
+      decideWebsite(pinned({ status: 'dead' }), proposed({ url: ELSEWHERE })),
+    ).toEqual({ action: 'keep' });
+  });
+
+  test('is no conflict to report: a second register naming another site is kept out quietly', () => {
+    expect(
+      decideWebsite(pinned(), proposed({ url: ELSEWHERE, source: 'wikidata' })),
+    ).toEqual({ action: 'keep' });
+    expect(
+      decideWebsite(
+        pinned({ evidence: 'manual' }),
+        proposed({ url: ELSEWHERE }),
+      ),
+    ).toEqual({ action: 'keep' });
+  });
+
+  test('still takes a finding about its own site through the ladder', () => {
+    const unconfirmed = pinned({
+      evidence: 'registry_unconfirmed',
+      status: 'candidate',
+    });
+    expect(decideWebsite(unconfirmed, proposed())).toEqual({
+      action: 'update',
+    });
+    // The same site without its www is the same site.
+    expect(
+      decideWebsite(unconfirmed, proposed({ url: 'https://example.co.uk' })),
+    ).toEqual({ action: 'update' });
+    expect(decideWebsite(pinned(), proposed())).toEqual({ action: 'keep' });
+  });
+
+  test('a pin on a row that holds no address pins nothing', () => {
+    expect(
+      decideWebsite(
+        pinned({ url: null, status: 'none', evidence: 'none' }),
+        proposed({ url: ELSEWHERE }),
+      ),
+    ).toEqual({ action: 'update' });
+  });
+
+  test('the SQL guard takes a write to a pinned row only at the address it holds', () => {
+    // Stricter than the decision: the exact stored address, which is what the importer sends.
+    expect(upgradeOnlyPredicateSql()).toContain(
+      ' AND (company_websites.url_pinned_at IS NULL OR company_websites.url IS NULL OR company_websites.url = excluded.url) AND (',
+    );
+  });
+});

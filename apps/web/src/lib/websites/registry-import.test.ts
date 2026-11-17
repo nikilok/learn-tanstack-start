@@ -55,6 +55,7 @@ describe('decideRegistryFinding', () => {
       action: 'write',
       unconfirmed: false,
       stagingCopy: false,
+      pinned: false,
       write: {
         companyNumber: '09990117',
         url: MAIN,
@@ -155,6 +156,7 @@ describe('decideRegistryFinding', () => {
         action: 'keep',
         unconfirmed: false,
         stagingCopy: true,
+        pinned: false,
       });
     });
 
@@ -211,6 +213,102 @@ describe('decideRegistryFinding', () => {
       action: 'write',
       stagingCopy: false,
       write: { url: other },
+    });
+  });
+
+  describe('a row whose address the owner pinned', () => {
+    const pinned = (over: Partial<ExistingWebsite> = {}) =>
+      stored({ pinned: true, ...over });
+
+    test('keeps it when its register still lists the address it was moved off', () => {
+      // An owner moved the row to the company's new domain; the register lists the old one.
+      expect(decide(finding({ url: OTHER }), pinned())).toEqual({
+        action: 'keep',
+        unconfirmed: false,
+        stagingCopy: false,
+        pinned: true,
+      });
+      // Unpinned, the same finding is the register correcting its own address.
+      expect(decide(finding({ url: OTHER }), stored())).toMatchObject({
+        action: 'write',
+        pinned: false,
+        write: { url: OTHER },
+      });
+    });
+
+    test('whatever tier the finding carries, and whether or not the address still answers', () => {
+      for (const row of [
+        pinned({ status: 'candidate', evidence: 'registry_unconfirmed' }),
+        pinned({ status: 'dead' }),
+        pinned({ status: 'unreachable', evidence: 'postcode_on_page' }),
+      ]) {
+        expect(decide(finding({ url: OTHER }), row)).toMatchObject({
+          action: 'keep',
+          pinned: true,
+        });
+      }
+    });
+
+    test('a second register naming another site is kept out quietly, not as a conflict', () => {
+      expect(
+        decide(finding({ source: 'wikidata', url: OTHER }), pinned()),
+      ).toMatchObject({ action: 'keep', pinned: true });
+    });
+
+    test('still gains a tier from a finding about its own site, at the address exactly as stored', () => {
+      // Stored without www; the register lists the same site with it.
+      const bare = 'https://quillmere.co.uk';
+      const row = {
+        status: 'candidate',
+        evidence: 'registry_unconfirmed',
+      } as const;
+      expect(decide(finding(), pinned({ url: bare, ...row }))).toMatchObject({
+        action: 'write',
+        pinned: false,
+        write: { url: bare, evidence: 'registry', status: 'candidate' },
+      });
+      // Unpinned, the write carries the register's spelling.
+      expect(decide(finding(), stored({ url: bare, ...row }))).toMatchObject({
+        write: { url: MAIN },
+      });
+    });
+
+    test('a staging copy of the pinned site is that site, not another one', () => {
+      expect(decide(finding({ url: STAGING }), pinned())).toMatchObject({
+        action: 'keep',
+        stagingCopy: true,
+        pinned: false,
+      });
+    });
+
+    test('holds through the run: a second register cannot move it off what the first wrote there', () => {
+      // CQC raises the tier at the pinned address; Wikidata then names another site at a higher tier.
+      const { decisions, write } = run(
+        pinned({
+          status: 'candidate',
+          evidence: 'domain_similarity',
+          source: 'search',
+        }),
+        finding({ registryName: 'Northgate Homes Limited' }),
+        finding({ source: 'wikidata', url: OTHER }),
+      );
+      expect(decisions.map((d) => [d.action, d.pinned])).toEqual([
+        ['write', false],
+        ['keep', true],
+      ]);
+      expect(write).toMatchObject({
+        url: MAIN,
+        evidence: 'registry_unconfirmed',
+      });
+    });
+
+    test('a pin on a row with no address pins nothing', () => {
+      expect(
+        decide(
+          finding(),
+          pinned({ url: null, status: 'none', evidence: 'none' }),
+        ),
+      ).toMatchObject({ action: 'write', pinned: false, write: { url: MAIN } });
     });
   });
 
@@ -285,6 +383,7 @@ describe('decideRegistryFinding', () => {
         action: 'keep',
         unconfirmed: false,
         stagingCopy: true,
+        pinned: false,
       });
     });
 

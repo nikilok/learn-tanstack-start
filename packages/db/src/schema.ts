@@ -481,6 +481,9 @@ export const companyWebsites = pgTable(
     // site's UK section. url stays the origin every check compares, and the
     // link is read only while it is on url's site (lib/websites/link-url.ts).
     linkUrl: text('link_url'),
+    // When the owner chose url by hand; NULL when a discoverer did. A pinned
+    // row is moved off its address by the owner alone (lib/websites/decide.ts).
+    urlPinnedAt: timestamp('url_pinned_at'),
   },
   (table) => [
     index('idx_company_websites_cursor').on(table.checkedAt.asc().nullsFirst()),

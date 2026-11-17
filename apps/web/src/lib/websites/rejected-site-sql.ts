@@ -76,7 +76,7 @@ export function makeRejectSite(sql: Sql) {
       return same.length === 0 ? 'moved' : 'unchanged';
     }
     const candidates = asJson(change.candidates);
-    // The walk marker stays: the row was read, and the site is gone from all a walk reads.
+    // The walk marker stays: the row was read, and the site is gone from all a walk reads. A pin goes with the address it pinned.
     const updated = change.reset
       ? await sql`
           UPDATE company_websites SET
@@ -89,6 +89,7 @@ export function makeRejectSite(sql: Sql) {
             verified_at   = NULL,
             failure_count = 0,
             walk_attempts = 0,
+            url_pinned_at = NULL,
             candidates    = ${candidates}::jsonb
           WHERE company_number = ${row.companyNumber}
             AND md5(company_websites::text) = ${row.rowHash}

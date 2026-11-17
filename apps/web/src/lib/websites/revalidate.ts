@@ -29,7 +29,9 @@ export type RevalidateFailure =
   | 'blocked_by_robots'
   | 'private_address'
   | 'not_html'
-  | 'too_large';
+  | 'too_large'
+  // The sweep leaves such a row unjudged; one that reached here is a failed fetch.
+  | 'address_paused';
 
 export type RevalidateInput = {
   storedUrl: string;
@@ -58,13 +60,15 @@ export type RevalidateInput = {
   /**
    * The final host is a known directory or profile site. A CERTAIN fact about
    * the host, not a guess about the page, which is why it is separate from
-   * `looksParked` and why nothing is exempt from it.
+   * `looksParked` and why nothing is exempt from it. The host is the fetch's,
+   * or the one a browser landed on when a re-check read the homepage there.
    */
   onAggregator?: boolean;
   /**
    * The page looks parked, for sale, or under construction. A HEURISTIC over
    * page text, so `manual` and `crn_on_page` are exempt: an ordinary one-page
-   * site announcing "our new wing is coming soon" trips it.
+   * site announcing "our new wing is coming soon" trips it. The page is the
+   * fetch's, or the one a browser showed when a re-check read the homepage.
    */
   looksParked?: boolean;
   /**

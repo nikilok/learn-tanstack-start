@@ -26,7 +26,7 @@ export type RewalkSelection = {
   evidence?: 'none' | 'postcode_on_page' | 'registry';
   /** A seeded random sample instead of the resumable order; for dry-run measurement only. */
   seed?: string;
-  /** Also take rows the current walk last read before this date or time. */
+  /** Also take rows the current walk last read before this date or time: UTC, as `walked_at` is stored, so the two compare on one clock. */
   rereadBefore?: string;
 };
 

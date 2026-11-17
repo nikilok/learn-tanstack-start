@@ -310,6 +310,192 @@ describe('sweepWebsites — hardening', () => {
   });
 });
 
+describe('sweepWebsites — a request held back at a paused address', () => {
+  const PAUSED = 'https://paused.example';
+  const DEAD = 'https://dead.example';
+
+  /** A harness where a request to the paused site is held back, as at a paused address: the count moves and the fetch fails; the dead site just fails. */
+  const holding = (over: Parameters<typeof harness>[0] = {}) => {
+    let held = 0;
+    /** One request held back. */
+    const hold = (url: string): FetchedPage => {
+      held += 1;
+      return { ok: false, reason: 'address_paused', attemptedUrl: url };
+    };
+    const h = harness({
+      heldRequests: () => held,
+      fetchSite: async (url) => {
+        if (url === PAUSED) return hold(url);
+        if (url === DEAD) {
+          return { ok: false, reason: 'timeout', attemptedUrl: url };
+        }
+        return live(url);
+      },
+      ...over,
+    });
+    return { ...h, hold };
+  };
+
+  test('the row is left exactly as it was: nothing written, not a failure, and the rows either side swept as usual', async () => {
+    const h = holding({
+      rows: [
+        row({ companyNumber: '00000001' }),
+        row({ companyNumber: '00000002', url: PAUSED }),
+        row({ companyNumber: '00000003' }),
+      ],
+    });
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(h.applied.map((a) => a.row.companyNumber)).toEqual([
+      '00000001',
+      '00000003',
+    ]);
+    expect(summary).toMatchObject({ live: 2, dead: 0, updated: 2, errored: 0 });
+  });
+
+  test('a page held back after the homepage answered leaves the row unjudged too', async () => {
+    const h = holding();
+    h.deps.fetchPage = async (url) => h.hold(url);
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(0);
+    expect(h.applied).toEqual([]);
+  });
+
+  test('a dry run counts it the same way', async () => {
+    const h = holding({ rows: [row({ url: PAUSED }), row()] });
+    const summary = await sweepWebsites(config({ dryRun: true }), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(1);
+    expect(h.applied).toEqual([]);
+  });
+
+  test('it says nothing about our own egress: it neither counts toward the stop nor clears it', async () => {
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    // More held rows than the stop takes, and nothing else: the run goes on.
+    const onlyHeld = holding({
+      rows: numbered(SYSTEMIC_FAILURE_STREAK + 5, PAUSED, 0),
+    });
+    const quiet = await sweepWebsites(config({ maxRows: 60 }), onlyHeld.deps);
+    expect(quiet.systemicAbort).toBe(false);
+    expect(quiet.leftUnread).toBe(SYSTEMIC_FAILURE_STREAK + 5);
+
+    // Held rows in the middle of a run of unreachable ones do not start the count again.
+    const broken = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+        ...numbered(3, PAUSED, 100),
+        ...numbered(5, DEAD, 200),
+      ],
+    });
+    const stopped = await sweepWebsites(config({ maxRows: 60 }), broken.deps);
+    expect(stopped.systemicAbort).toBe(true);
+    expect(stopped.leftUnread).toBe(3);
+    expect(broken.applied).toHaveLength(SYSTEMIC_FAILURE_STREAK);
+
+    // Nor do they add to it: too few unreachable rows stay too few.
+    const short = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 5, DEAD, 0),
+        ...numbered(10, PAUSED, 100),
+        ...numbered(2, DEAD, 200),
+      ],
+    });
+    const ran = await sweepWebsites(config({ maxRows: 60 }), short.deps);
+    expect(ran.systemicAbort).toBe(false);
+    expect(short.applied).toHaveLength(SYSTEMIC_FAILURE_STREAK - 3);
+  });
+
+  test('a homepage that answered still shows our egress works, though its row is left unread', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    // One short of the stop, then a homepage that answers with a later page of its row held, then more unreachable rows.
+    const h = holding({
+      rows: [
+        ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+        row({ companyNumber: '00000100', url: ANSWERS }),
+        ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+      ],
+    });
+    h.deps.fetchPage = async (url) => h.hold(url);
+    const summary = await sweepWebsites(config({ maxRows: 60 }), h.deps);
+    expect(summary.leftUnread).toBe(1);
+    expect(summary.live).toBe(0);
+    expect(summary.systemicAbort).toBe(false);
+    expect(h.applied).toHaveLength(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
+
+  test('a held row that then fails some other way is still left unread: logged, not an error', async () => {
+    const h = holding();
+    let asked = 0;
+    h.deps.fetchPage = async (url) => {
+      asked += 1;
+      if (asked === 1) return h.hold(url);
+      throw new Error('boom');
+    };
+    const summary = await sweepWebsites(config(), h.deps);
+    expect(summary).toMatchObject({ leftUnread: 1, errored: 0, updated: 0 });
+    expect(h.applied).toEqual([]);
+    expect(h.logs).toEqual(['  ERROR row 1: boom']);
+  });
+
+  test('a homepage that answered shows our egress works even when its row then fails, held request or not', async () => {
+    const ANSWERS = 'https://answers.example';
+    const numbered = (count: number, url: string, from: number) =>
+      Array.from({ length: count }, (_, i) =>
+        row({ companyNumber: String(from + i).padStart(8, '0'), url }),
+      );
+    /** One short of the stop, a row whose homepage answers and whose pages then go wrong, and more unreachable rows. */
+    const run = async (
+      pages: (url: string, hold: () => FetchedPage) => Promise<FetchedPage>,
+    ) => {
+      const h = holding({
+        rows: [
+          ...numbered(SYSTEMIC_FAILURE_STREAK - 1, DEAD, 0),
+          row({ companyNumber: '00000100', url: ANSWERS }),
+          ...numbered(SYSTEMIC_FAILURE_STREAK + 5, DEAD, 200),
+        ],
+      });
+      h.deps.fetchPage = (url) => pages(url, () => h.hold(url));
+      return {
+        summary: await sweepWebsites(config({ maxRows: 60 }), h.deps),
+        applied: h.applied.length,
+      };
+    };
+
+    // A page held back, then the next one throwing.
+    let asked = 0;
+    const held = await run(async (_url, hold) => {
+      asked += 1;
+      if (asked === 1) return hold();
+      throw new Error('boom');
+    });
+    expect(held.summary).toMatchObject({
+      leftUnread: 1,
+      errored: 0,
+      systemicAbort: false,
+    });
+    expect(held.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+
+    // Nothing held: the row simply throws after its homepage answered.
+    const thrown = await run(async () => {
+      throw new Error('boom');
+    });
+    expect(thrown.summary).toMatchObject({
+      leftUnread: 0,
+      errored: 1,
+      systemicAbort: false,
+    });
+    expect(thrown.applied).toBe(2 * SYSTEMIC_FAILURE_STREAK + 4);
+  });
+});
+
 describe('sweepWebsites — dry run parity', () => {
   test('a dry run aborts on broken egress exactly as a real run would', async () => {
     // The abort check sat behind the dry-run `continue`, so --dry-run burned
@@ -734,26 +920,110 @@ describe("a name_and_place row's re-check", () => {
       expect(result.status).toBe('verified');
     });
 
-    test('a render that fails, or lands on a directory, reads nothing: the row stays as it was', async () => {
-      for (const shown of [
-        { ok: false, reason: 'timeout', attemptedUrl: SITE } as FetchedPage,
-        live(
-          'https://www.yell.com/biz/quillmere',
-          html(`${NAME} ${filler} Harrogate`),
-        ),
-      ]) {
+    test('a render that fails reads nothing: the row stays as it was', async () => {
+      for (const status of ['candidate', 'verified'] as const) {
         const { result, summary } = await sweepOf(
-          { status: 'candidate' },
+          { status },
           shell,
           {},
-          { renderPage: async () => shown },
+          {
+            renderPage: async () => ({
+              ok: false,
+              reason: 'timeout',
+              attemptedUrl: SITE,
+            }),
+          },
         );
-        expect(result.status).toBe('candidate');
+        expect(result.status).toBe(status);
         expect(summary).toMatchObject({
           nameAndPlaceRendered: 1,
           nameAndPlaceUnread: 1,
+          noSiteThere: 0,
         });
       }
+    });
+
+    test('a render that lands on a directory holds a published row back, and nothing on the listing is read', async () => {
+      // The listing prints the name, the place and the number: none of it is the site naming itself.
+      const listing = html(
+        `${NAME} ${filler} Harrogate. Company number 09990117.`,
+      );
+      const rendered: string[] = [];
+      const { result, summary, fetched } = await sweepOf(
+        {},
+        shell,
+        // Still on its proof page, which a held row has no use for.
+        { [PROOF]: live(PROOF, html(`${NAME} ${filler}`)) },
+        {
+          renderPage: async (url) => {
+            rendered.push(url);
+            return {
+              ok: true,
+              url: 'https://www.yell.com/biz/quillmere',
+              attemptedUrl: url,
+              html: listing,
+            };
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'candidate',
+        evidence: 'name_and_place',
+        confidence: '0.900',
+      });
+      expect(summary).toMatchObject({
+        nameAndPlaceRendered: 1,
+        noSiteThere: 1,
+        nameAndPlaceUnread: 0,
+        nameAndPlaceGone: 0,
+        promoted: 0,
+      });
+      expect(rendered).toEqual([SITE]);
+      expect(fetched).toEqual([]);
+    });
+
+    test('a render that lands on a parked page holds it back too', async () => {
+      const { result, summary, fetched } = await sweepOf(
+        {},
+        shell,
+        { [PROOF]: live(PROOF, html(`${NAME} ${filler}`)) },
+        {
+          renderPage: async (url) =>
+            live(url, '<html><body>This domain is for sale.</body></html>'),
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'candidate',
+        evidence: 'name_and_place',
+      });
+      expect(summary).toMatchObject({
+        noSiteThere: 1,
+        nameAndPlaceUnread: 0,
+        nameAndPlaceGone: 0,
+      });
+      expect(fetched).toEqual([]);
+    });
+
+    test("a render that lands on a platform's page reads nothing and holds nothing, as a fetch landing there holds nothing", async () => {
+      const { result, summary } = await sweepOf(
+        {},
+        shell,
+        {},
+        {
+          renderPage: async (url) => ({
+            ok: true,
+            url: 'https://quillmere.wixsite.com/home',
+            attemptedUrl: url,
+            html: html(`${NAME} ${filler} Harrogate`),
+          }),
+        },
+      );
+      expect(result.status).toBe('verified');
+      expect(summary).toMatchObject({
+        nameAndPlaceRendered: 1,
+        nameAndPlaceUnread: 1,
+        noSiteThere: 0,
+      });
     });
 
     test('a site too slow for its visit is unread, never gone', async () => {
@@ -958,6 +1228,31 @@ describe("a name_and_place row's re-check", () => {
     });
     expect(summary).toMatchObject({ promoted: 1, nameAndPlaceGone: 0 });
     expect(fetched).toEqual([PROOF]);
+  });
+
+  test('a fetch that lands on a directory or a parked page holds the row, with no re-check', async () => {
+    const proof = { [PROOF]: live(PROOF, html(`${NAME} ${filler}`)) };
+    const listed = await sweepOf({}, '', proof, {
+      fetchSite: async (url) => ({
+        ok: true,
+        url: 'https://www.yell.com/biz/quillmere',
+        attemptedUrl: url,
+        html: html(`${NAME} ${filler} Harrogate`),
+      }),
+    });
+    const parked = await sweepOf(
+      {},
+      '<html><body>This domain is for sale.</body></html>',
+      proof,
+    );
+    for (const { result, summary, fetched } of [listed, parked]) {
+      expect(result).toMatchObject({
+        status: 'candidate',
+        evidence: 'name_and_place',
+      });
+      expect(summary).toMatchObject({ noSiteThere: 1, nameAndPlaceUnread: 0 });
+      expect(fetched).toEqual([]);
+    }
   });
 
   test('its walk stays on the stored host, whichever host serves the homepage', async () => {
@@ -1276,6 +1571,36 @@ describe("a registry row's confirmation, re-read when the homepage shows no post
     expect(fetched).toEqual([]);
   });
 
+  test('a fetch that lands on a directory or a parked page holds the row, with no re-read', async () => {
+    const proof = { [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)) };
+    const listed = await sweepOf({}, '', proof, {
+      fetchSite: async (url) => ({
+        ok: true,
+        url: 'https://www.yell.com/biz/quillmere-care',
+        attemptedUrl: url,
+        html: html(filler),
+      }),
+    });
+    // A directory withdraws the rung; a parked page says nothing about it.
+    expect(listed.result).toMatchObject({
+      status: 'candidate',
+      evidence: 'registry',
+    });
+    const parked = await sweepOf(
+      {},
+      '<html><body>Website coming soon.</body></html>',
+      proof,
+    );
+    expect(parked.result).toMatchObject({
+      status: 'candidate',
+      evidence: 'registry_confirmed',
+    });
+    for (const { summary, fetched } of [listed, parked]) {
+      expect(summary).toMatchObject({ noSiteThere: 1, confirmationUnread: 0 });
+      expect(fetched).toEqual([]);
+    }
+  });
+
   test('a homepage a plain fetch shows nothing of is read in a browser, counted apart', async () => {
     const shell = '<html><body><div id="app"></div></body></html>';
     const { result, summary } = await sweepOf(
@@ -1385,6 +1710,74 @@ describe("a registry row's confirmation, re-read when the homepage shows no post
         evidenceUrl: SITE,
       });
       expect(summary).toMatchObject({ promoted: 1, confirmationGone: 0 });
+    });
+
+    test('landing on a directory there: the confirmation is withdrawn and the row held, nothing on the listing read', async () => {
+      // The listing prints the address and the number: a register's page about the company.
+      const listing = html(
+        `${ADDRESS} Registered in England, company number 09990117. ${filler}`,
+      );
+      const rendered: string[] = [];
+      const { result, summary, fetched } = await sweepOf(
+        {},
+        shell,
+        // Still on its proof page, which a held row has no use for.
+        { [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)) },
+        {
+          renderPage: async (url) => {
+            rendered.push(url);
+            return {
+              ok: true,
+              url: 'https://www.yell.com/biz/quillmere-care',
+              attemptedUrl: url,
+              html: listing,
+            };
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        status: 'candidate',
+        evidence: 'registry',
+        confidence: '0.950',
+      });
+      expect(summary).toMatchObject({
+        confirmationRendered: 1,
+        noSiteThere: 1,
+        demoted: 1,
+        promoted: 0,
+        confirmationUnread: 0,
+        confirmationGone: 0,
+      });
+      expect(rendered).toEqual([SITE]);
+      expect(fetched).toEqual([]);
+    });
+
+    test('landing on a parked page there: held, and nothing withdrawn on a page that says nothing', async () => {
+      // No links but plenty of text: without the browser's read, a homepage that would withdraw the rung.
+      const wordy = `<html><body><p>${filler}</p></body></html>`;
+      for (const homepage of [shell, wordy]) {
+        const { result, summary, fetched } = await sweepOf(
+          {},
+          homepage,
+          { [PROOF]: live(PROOF, html(`${ADDRESS} ${filler}`)) },
+          {
+            renderPage: async (url) =>
+              live(url, '<html><body>Website coming soon.</body></html>'),
+          },
+        );
+        expect(result).toMatchObject({
+          status: 'candidate',
+          evidence: 'registry_confirmed',
+          confidence: '0.970',
+        });
+        expect(summary).toMatchObject({
+          noSiteThere: 1,
+          demoted: 0,
+          confirmationUnread: 0,
+          confirmationGone: 0,
+        });
+        expect(fetched).toEqual([]);
+      }
     });
   });
 

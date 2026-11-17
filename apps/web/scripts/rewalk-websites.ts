@@ -16,6 +16,8 @@
  *
  * `--sample` draws a seeded random sample and is always a dry run.
  * `--reread-before` also takes rows this walk last read before that date.
+ * `--address-delay` is the least time, in milliseconds, between two requests
+ * to one hosting address, shared by every walk on this machine (default 1000).
  *
  * Env: POSTGRES_URL, COMPANIES_HOUSE_SEED_API_KEY.
  */
@@ -38,8 +40,10 @@ import {
 import { lostNetwork, rewalkWebsites } from '../src/lib/websites/rewalk.ts';
 import { parseShard } from '../src/lib/websites/shard.ts';
 import { setGitHubOutput } from './ci-utils.ts';
+import { ADDRESS_GAP_MS } from './lib/address-gate.ts';
 import { makeOfficerLookup, OFFICER_BREAKER } from './lib/ch-officers.ts';
 import { loadScriptEnv, parseStrictInt } from './lib/script-utils.ts';
+import { paceByAddress } from './lib/web-fetch.ts';
 import { launchRenderer } from './lib/web-render.ts';
 import {
   probeOrigin,
@@ -59,7 +63,7 @@ const flag = (name: string) =>
 
 /** Every argument this script reads; anything else stops the run. */
 const KNOWN_ARG =
-  /^--(?:dry-run|no-render|(?:shard|max-rows|delay|max-disclosure|sample|seed|evidence|reread-before)=.*)$/;
+  /^--(?:dry-run|no-render|(?:shard|max-rows|delay|address-delay|max-disclosure|sample|seed|evidence|reread-before)=.*)$/;
 const unknownArgs = args.filter((a) => !KNOWN_ARG.test(a));
 if (unknownArgs.length > 0) {
   console.error(`  Unknown arguments: ${unknownArgs.join(' ')}`);
@@ -92,6 +96,10 @@ const dryRun = args.includes('--dry-run') || Boolean(sample);
 const shard = parseShard(flag('shard'));
 const maxRows = parseStrictInt(sample ?? flag('max-rows') ?? '350', 'max-rows');
 const delayMs = parseStrictInt(flag('delay') ?? '400', 'delay');
+const addressDelayMs = parseStrictInt(
+  flag('address-delay') ?? String(ADDRESS_GAP_MS),
+  'address-delay',
+);
 const maxPaths = parseStrictInt(
   flag('max-disclosure') ?? String(DISCLOSURE_PATHS.length),
   'max-disclosure',
@@ -103,6 +111,8 @@ if (!chKey) {
 }
 let disclosureFetches = 0;
 let renderFetches = 0;
+// Before any page is asked for: every request waits its turn at its address.
+const gate = paceByAddress(addressDelayMs, (message) => console.log(message));
 // Started before any row is read: a browser that will not start stops the run here.
 const renderer = args.includes('--no-render') ? null : await launchRenderer();
 
@@ -111,7 +121,7 @@ console.log(
   `Website re-walk — db ${dbFingerprint(process.env.POSTGRES_URL)}${dryRun ? ' (DRY RUN)' : ''}`,
 );
 console.log(
-  `  shard: ${shard.index}/${shard.count}  max-rows: ${maxRows}  delay: ${delayMs}ms${sample ? '  seeded sample' : ''}${evidence ? `  evidence: ${evidence}` : ''}${rereadBefore ? `  re-reading rows walked before ${rereadBefore}` : ''}`,
+  `  shard: ${shard.index}/${shard.count}  max-rows: ${maxRows}  delay: ${delayMs}ms  address-delay: ${addressDelayMs}ms${sample ? '  seeded sample' : ''}${evidence ? `  evidence: ${evidence}` : ''}${rereadBefore ? `  re-reading rows walked before ${rereadBefore}` : ''}`,
 );
 const remaining = makeRewalkRemaining(sql, { evidence, rereadBefore });
 if (!sample) {
@@ -159,6 +169,7 @@ const summary = await rewalkWebsites(
     markWalked: makeMarkWalked(sql),
     markUnreadable: makeMarkUnreadable(sql),
     recordStated: makeRecordStated(sql),
+    heldRequests: gate.heldRequests,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     log: (message) => console.log(message),
   },
@@ -176,6 +187,8 @@ console.log(`  registry_to_number  : ${summary.registryToNumber}`);
 console.log(`  registry_confirmed  : ${summary.registryConfirmed}`);
 console.log(`  unchanged           : ${summary.unchanged}`);
 console.log(`  unreadable          : ${summary.unreadable}`);
+console.log(`  left_unread         : ${summary.leftUnread}`);
+console.log(`  addresses_paused    : ${gate.paused()}`);
 console.log(`  unpersisted         : ${summary.unpersisted}`);
 console.log(`  errored             : ${summary.errored}`);
 console.log(`  candidate_fetches   : ${summary.candidateFetches}`);
@@ -205,6 +218,13 @@ setGitHubOutput(
       summary.registryConfirmed,
   ),
 );
+
+// Counts only, never the address: a run that was cut off somewhere says so.
+if (gate.paused() > 0) {
+  console.error(
+    `\n  ${gate.paused()} hosting address(es) stopped answering and were left alone; ${summary.leftUnread} rows are left as they were for the next run.`,
+  );
+}
 
 /** Rows below which a failure rate is too small a sample to act on. */
 const MIN_GATE_SAMPLE = 25;

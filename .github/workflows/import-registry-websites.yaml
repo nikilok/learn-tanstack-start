@@ -101,6 +101,7 @@ jobs:
             echo "| 🔎 Registry findings | $(extract findings) |"
             echo "| 🏢 Not a company we hold | $(extract unknown_company) |"
             echo "| ⚠️ Name unconfirmed | $(extract name_unconfirmed) |"
+            echo "| 🚧 Staging copy of the held site | $(extract staging_copy) |"
             echo "| 😴 Unchanged | $(extract unchanged) |"
             echo "| ⚔️ Conflicts | $(extract conflicts) |"
             echo "| 🧪 Would write | $(extract would_write) |"

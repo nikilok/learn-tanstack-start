@@ -407,6 +407,32 @@ describe('namingOf', () => {
     );
   });
 
+  test('a register name is counted as it is written: with its second word in brackets, the first alone names the company in part', () => {
+    const bracketed = {
+      companyName: 'QUILLMERE NORTHWEST LIMITED',
+      sponsorNames: ['Quillmere (Northwest) Ltd'],
+    };
+    const council = 'Quillmere County Council, County Hall, QM1 4QH.';
+    expect(namingOf('www.example.org', council, bracketed)).toBe('in_part');
+    expect(namesCompany('www.example.org', council, bracketed)).toBe(true);
+    // Closed by its legal form it is the register's legal name.
+    expect(
+      namingOf('www.example.org', `${council} Quillmere Ltd.`, bracketed),
+    ).toBe('in_full');
+  });
+
+  test('a register name that says its one word twice is carried only as the whole phrase', () => {
+    const twice = {
+      companyName: 'QUILLMERE HOLDINGS LIMITED',
+      sponsorNames: ['Quillmere Holdings Ltd T/A Quillmere and Quillmere'],
+    };
+    const council = 'Quillmere County Council, County Hall, QM1 4QH.';
+    expect(namingOf('www.example.org', council, twice)).toBe('in_part');
+    expect(
+      namingOf('www.example.org', `${council} Quillmere & Quillmere.`, twice),
+    ).toBe('in_full');
+  });
+
   // A care company a council owns, registered at the council's offices: the register lists the council's own site.
   test("a council's contact page names a company the council owns in part, by its host", () => {
     const owned = {
@@ -487,6 +513,32 @@ describe('namingOf', () => {
           sponsorNames: [],
         }),
       ).toBe('in_part');
+    });
+
+    test('the word said twice in the name is still the one word', () => {
+      const twice = {
+        companyName: 'DUNMARROW AND DUNMARROW CARE LIMITED',
+        sponsorNames: [],
+      };
+      expect(namingOf('www.example.org', council, twice)).toBe('in_part');
+      expect(
+        namingOf(
+          'www.example.org',
+          `${council} Dunmarrow & Dunmarrow Care is our care company.`,
+          twice,
+        ),
+      ).toBe('in_full');
+    });
+
+    test('said twice beside another word that says which company it is, the name has two', () => {
+      const two = {
+        companyName: 'DUNMARROW AND DUNMARROW CARELINE LIMITED',
+        sponsorNames: [],
+      };
+      expect(namingOf('www.example.org', council, two)).toBeNull();
+      expect(
+        namingOf('www.example.org', `${council} Dunmarrow Careline.`, two),
+      ).toBe('in_full');
     });
   });
 

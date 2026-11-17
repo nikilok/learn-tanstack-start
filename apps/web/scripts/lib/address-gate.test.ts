@@ -159,6 +159,50 @@ describe('makeAddressGate: turns', () => {
     // Too late: it asks again, and is given the turn a gap after the one it missed.
     expect(await sentAt(501)).toBe(2000);
   });
+
+  test('a ledger slower than the gap cannot hold a request for ever: late again after two new turns, it goes', async () => {
+    let clock = 0;
+    let reserved = 0;
+    const gate = makeAddressGate({
+      gapMs: 1000,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+      ledger: {
+        reserve: (_addresses, gapMs, now) => {
+          reserved += 1;
+          // A loop that never lets go ends the test here, not the test run.
+          if (reserved > 20) throw new Error('still taking turns');
+          // Every reservation takes a whole gap: its turn is past as it is handed back.
+          clock += gapMs;
+          return now;
+        },
+      },
+    });
+    expect(await gate.enter([A])).toBe(true);
+    expect(reserved).toBe(3);
+    expect(await gate.enter([A])).toBe(true);
+    expect(reserved).toBe(6);
+  });
+
+  test('a request that wakes late twice running still takes a new turn each time', async () => {
+    let clock = 0;
+    let oversleeps = 2;
+    const gate = makeAddressGate({
+      gapMs: 1000,
+      ledger: memoryLedger(),
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms + (oversleeps > 0 ? 600 : 0);
+        oversleeps -= 1;
+      },
+    });
+    await gate.enter([A]);
+    // Turn at 1000, woken at 1600; a new one at 2000, woken at 2600; the third, at 3000, on time.
+    await gate.enter([A]);
+    expect(clock).toBe(3000);
+  });
 });
 
 describe('makeAddressGate: an address that stops answering', () => {

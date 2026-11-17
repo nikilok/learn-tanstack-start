@@ -13,6 +13,9 @@ export const ADDRESS_GAP_MS = 1_000;
 /** Different sites that must go unanswered in a row, at an address that had been answering, before it is paused. */
 export const PAUSE_AFTER_SITES = 3;
 
+/** New turns a request takes for coming late to the one it had, before it goes on the turn it has. */
+const LATE_RETAKES = 2;
+
 /** What a request came to: any response at all, none in time, or a failure that says neither. */
 export type Outcome = 'answered' | 'silent' | 'other';
 
@@ -63,12 +66,14 @@ export function makeAddressGate(options: AddressGateOptions): AddressGate {
         held += 1;
         return false;
       }
-      while (options.gapMs > 0) {
+      for (let retakes = 0; options.gapMs > 0; retakes++) {
         const turn = options.ledger.reserve(addresses, options.gapMs, now());
         const wait = turn - now();
         if (wait > 0) await sleep(wait);
-        // Woken over half a gap late, it takes a new turn: the request after it may be going already.
+        // Over half a gap late, it takes a new turn: the request after it may be going already.
         if (now() - turn <= options.gapMs / 2) break;
+        // Late every time, the ledger is slower than the gap: it goes on the turn it has.
+        if (retakes >= LATE_RETAKES) break;
       }
       // Paused while this request waited its turn.
       if (anyPaused(addresses)) {

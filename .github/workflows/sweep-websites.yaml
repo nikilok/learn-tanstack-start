@@ -182,6 +182,8 @@ jobs:
             echo "| 🌫️ Confirmation unread | $(extract confirmation_unread) |"
             echo "| 🖥️ Confirmation rendered | $(extract confirmation_render) |"
             echo "| 💾 Updated | $(extract updated) |"
+            echo "| ⏸️ Left unread | $(extract left_unread) |"
+            echo "| 🔇 Addresses paused | $(extract addresses_paused) |"
             echo "| 📮 Postcode shares moved | $(extract postcode_shares) |"
             echo "| 🏷️ Named urls moved | $(extract named_urls) |"
             echo "| ❌ Errored | $(extract errored) |"

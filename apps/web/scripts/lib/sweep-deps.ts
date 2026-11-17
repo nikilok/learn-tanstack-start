@@ -34,13 +34,14 @@ function toFetchedPage(result: SiteFetch, requested: string): FetchedPage {
   };
 }
 
-/** The sweep's dependencies against this database, logging through `log`; without `officers` the officer arm is never re-read, without `renderer` no page is read in a browser, and `selection` narrows which rows a pass takes. */
+/** The sweep's dependencies against this database, logging through `log`; without `officers` the officer arm is never re-read, without `renderer` no page is read in a browser, `selection` narrows which rows a pass takes, and `heldRequests` counts the requests a paused address kept back. */
 export function makeSweepDeps(
   sql: Parameters<typeof makeSelectRows>[0],
   log: (message: string) => void,
   officers?: SweepDeps['officers'],
   renderer?: Pick<Renderer, 'visit'>,
   selection?: SweepSelection,
+  heldRequests?: SweepDeps['heldRequests'],
 ): SweepDeps {
   return {
     selectRows: makeSelectRows(sql, selection),
@@ -64,6 +65,7 @@ export function makeSweepDeps(
           }
         }
       : undefined,
+    heldRequests,
     applyResult: makeApplyResult(sql),
     sleep: makeSleep(),
     log,

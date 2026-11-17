@@ -10,7 +10,21 @@ describe('parseSweepArgs', () => {
       render: true,
       maxRows: undefined,
       status: undefined,
+      addressDelayMs: undefined,
     });
+  });
+
+  test('reads the address delay, in milliseconds; one that is not a whole number stops the run', () => {
+    expect(parseSweepArgs(['--address-delay=2500']).addressDelayMs).toBe(2500);
+    expect(parseSweepArgs(['--address-delay=0']).addressDelayMs).toBe(0);
+    for (const delay of ['', '2s', '1.5', '-1']) {
+      expect(() => parseSweepArgs([`--address-delay=${delay}`])).toThrow(
+        'Invalid --address-delay',
+      );
+    }
+    expect(() => parseSweepArgs(['--address-delay', '2500'])).toThrow(
+      'Unknown arguments',
+    );
   });
 
   test('reads what the workflow and an operator pass', () => {

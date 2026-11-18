@@ -210,11 +210,14 @@ describe('applyCorrections', () => {
     } = {},
   ) {
     const log: string[] = [];
+    const backedUp: Record<string, unknown>[][] = [];
     return {
       log,
+      backedUp,
       changedBy: 'owner',
       backup: async (stored: Record<string, unknown>[]) => {
         log.push(`backup:${stored.length}`);
+        backedUp.push(stored);
       },
       commit: async (input: CommitPromotionInput) => {
         log.push(`commit:${input.organisationName}:${input.newCompanyNumber}`);
@@ -261,6 +264,15 @@ describe('applyCorrections', () => {
       'fetch:00000002',
       'store:00000002',
       'commit:B:00000002',
+    ]);
+    // Every listed row that exists, exactly as stored, in one backup.
+    expect(w.backedUp).toEqual([
+      [
+        { organisation_name: 'A', company_number: '00000001' },
+        { organisation_name: 'B', company_number: '00000001' },
+        { organisation_name: 'C', company_number: null },
+        { organisation_name: 'D', company_number: '00000009' },
+      ],
     ]);
     expect(result).toEqual({
       applied: { ...none, held: 1, repointed: 1, left: 3 },
@@ -338,7 +350,7 @@ describe('applyCorrections', () => {
       'store:00000002',
     ]);
     expect(result.applied).toEqual({ ...none, held: 1, errored: 1, left: 3 });
-    expect(result.failure).toContain('first error: TypeError');
+    expect(result.failure).toContain('first error: profile_store: TypeError');
     expect(result.failure).not.toContain('Northgate');
   });
 
@@ -359,22 +371,41 @@ describe('applyCorrections', () => {
     expect(result.failure).toContain('7 planned rows were not written');
   });
 
-  test('an error between good writes does not stop the run', async () => {
-    const names = ['A', 'B', 'C'];
+  test('a good write between errors starts the count of errors again', async () => {
+    const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const good = new Set(['E', 'J']);
     const many = names.map(hold);
     const plan = await planCorrections(many, async () =>
       names.map((n) => listed(n, '00000001')),
     );
+    const w = writes({
+      commit: async (input) => {
+        if (!good.has(input.organisationName)) throw new Error('blip');
+        return {};
+      },
+    });
+    const result = await applyCorrections(many, plan, w);
+    // Four errors, a good write, four more errors: the last row is still tried.
+    expect(w.log.filter((l) => l.startsWith('commit:'))).toHaveLength(10);
+    expect(result.applied).toEqual({ ...none, held: 2, errored: 8 });
+    expect(result.failure).toContain('first error: mapping_update: Error');
+  });
+
+  test('a Companies House failure is reported by its stage and status', async () => {
+    const plan = await planCorrections(entries, read);
     const result = await applyCorrections(
-      many,
+      entries,
       plan,
       writes({
-        commit: async (input) => {
-          if (input.organisationName === 'B') throw new Error('blip');
-          return {};
+        fetchProfile: async () => {
+          const refused = new Error('the key for Northgate was refused');
+          refused.name = 'HTTP 401';
+          throw refused;
         },
       }),
     );
-    expect(result.applied).toEqual({ ...none, held: 2, errored: 1 });
+    expect(result.applied).toEqual({ ...none, held: 1, errored: 1, left: 3 });
+    expect(result.failure).toContain('first error: companies_house: HTTP 401');
+    expect(result.failure).not.toContain('Northgate');
   });
 });

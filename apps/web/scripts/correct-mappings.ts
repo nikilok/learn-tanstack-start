@@ -24,10 +24,7 @@ import { neon } from '@ss/db/client';
 import { companiesHouseProfiles } from '@ss/db/schema';
 import { drizzle } from 'drizzle-orm/neon-http';
 
-import {
-  fetchChApi,
-  fetchMappedProfile,
-} from '../src/lib/hmrc-ch/ch-lookup.ts';
+import { fetchChApi } from '../src/lib/hmrc-ch/ch-lookup.ts';
 import { makeReadMappings } from '../src/lib/hmrc-ch/mapping-correction-sql.ts';
 import {
   applyCorrections,
@@ -80,18 +77,23 @@ if (plan.planned.repoint > 0 && !chKey) {
 
 const db = drizzle({ client: sql });
 
-/** A company's profile from Companies House, paced; null when it has none, and a throw when it cannot say. */
+/** A Companies House call that failed without saying anything about the company, named by its status. */
+class ChStatus extends Error {
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = `HTTP ${status}`;
+  }
+}
+
+/** A company's profile from Companies House, paced; null when it has none (a 404), and a throw when it cannot say. */
 async function fetchProfile(
   companyNumber: string,
 ): Promise<CHFullProfile | null> {
   await Bun.sleep(CH_PAUSE_MS);
-  const found = await fetchMappedProfile(companyNumber, (path) =>
-    fetchChApi(path, chKey as string),
-  );
-  if (found.verdict === 'unavailable') {
-    throw new Error('Companies House unavailable');
-  }
-  return found.verdict === 'found' ? (found.profile as CHFullProfile) : null;
+  const res = await fetchChApi(`/company/${companyNumber}`, chKey as string);
+  if (res.ok) return res.data as CHFullProfile;
+  if (res.status === 404) return null;
+  throw new ChStatus(res.status);
 }
 
 /** Store a company's profile, over any copy already held. */

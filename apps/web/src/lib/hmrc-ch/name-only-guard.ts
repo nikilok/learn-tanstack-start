@@ -11,29 +11,11 @@ export const NAME_ONLY_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 const SUFFIX_END =
-  /\b(?:LIMITED|LTD|L\.T\.D|LLP|L\.L\.P|LIMITED\s+LIABILITY\s+PARTNERSHIP|PLC|P\.L\.C|PUBLIC\s+LIMITED\s+COMPANY|CIC|C\.I\.C|COMMUNITY\s+INTEREST\s+COMPANY|CYF|CYFYNGEDIG|CCC|UNLIMITED|LP)[.,\s]*\)?[.,\s]*$/i;
+  /\b(?:LIMITED|LTD|L\.T\.D|LLP|L\.L\.P|LIMITED\s+LIABILITY\s+PARTNERSHIP|LIMITED\s+PARTNERSHIP|PLC|P\.L\.C|PUBLIC\s+LIMITED\s+COMPANY|CIC|C\.I\.C|COMMUNITY\s+INTEREST\s+COMPANY|CYF|CYFYNGEDIG|CCC|UNLIMITED|LP)[.,\s]*\)?[.,\s]*$/i;
 const COMBINING_MARKS = /[\u0300-\u036f]/g;
 const NON_ALNUM_RUN = /[^A-Z0-9]+/g;
+/** A place shorter than this must be a whole part of the office to count. */
 const MIN_PLACE_LENGTH = 3;
-/** Words that make the name before them a street's. */
-const STREET_WORDS: ReadonlySet<string> = new Set([
-  'ROAD',
-  'RD',
-  'STREET',
-  'LANE',
-  'AVENUE',
-  'WAY',
-  'DRIVE',
-  'CLOSE',
-  'SQUARE',
-  'PLACE',
-  'CRESCENT',
-  'TERRACE',
-  'GROVE',
-  'GARDENS',
-  'ROW',
-  'WALK',
-]);
 
 /** A registered office as Companies House returns it. */
 export type RegisteredOffice = {
@@ -70,18 +52,17 @@ function phraseText(value: string): string {
   return ` ${folded} `;
 }
 
-/** Whether a part of the office names the place, other than as a street's name ("London Road"). */
+/**
+ * Whether a part of the office is the place, or ends with it. A town sits at
+ * the end of an address part: one that only begins a part names a street
+ * ("London Road") or another town ("Newport Pagnell").
+ */
 function partNamesPlace(part: string, place: string): boolean {
-  let at = part.indexOf(place);
-  while (at >= 0) {
-    const next = part.slice(at + place.length).split(' ', 1)[0];
-    if (!STREET_WORDS.has(next)) return true;
-    at = part.indexOf(place, at + 1);
-  }
-  return false;
+  if (part === place) return true;
+  return place.length - 2 >= MIN_PLACE_LENGTH && part.endsWith(place);
 }
 
-/** Whether any place in a register field is named whole within one part of the office. */
+/** Whether any place in a register field is named by one part of the office. */
 function namesPlace(
   office: readonly string[],
   field: string | null | undefined,
@@ -91,7 +72,7 @@ function namesPlace(
     .map(phraseText)
     .some(
       (place) =>
-        place.length - 2 >= MIN_PLACE_LENGTH &&
+        place.trim() !== '' &&
         office.some((part) => partNamesPlace(part, place)),
     );
 }

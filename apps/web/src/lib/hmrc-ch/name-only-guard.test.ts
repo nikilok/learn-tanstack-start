@@ -97,6 +97,7 @@ describe('isUnsupportedNameOnlyMatch', () => {
     'NORTHGATE BAKERY PUBLIC LIMITED COMPANY',
     'NORTHGATE BAKERY L.L.P.',
     'NORTHGATE BAKERY LIMITED LIABILITY PARTNERSHIP',
+    'NORTHGATE BAKERY LIMITED PARTNERSHIP',
   ])('a bare name on %s in another town is unsupported', (companyName) => {
     expect(isUnsupportedNameOnlyMatch(match({ companyName }))).toBe(true);
   });
@@ -121,10 +122,27 @@ describe('isUnsupportedNameOnlyMatch', () => {
     { locality: 'Exeter' },
     { address_line_1: '2 King Street, Exeter' },
     { address_line_2: 'EXETER' },
-    { premises: 'Exeter House' },
+    { premises: 'Unit 2, Exeter' },
     { region: 'exeter' },
-  ])('the town anywhere in the office supports it: %o', (office) => {
-    expect(isUnsupportedNameOnlyMatch(match({ office }))).toBe(false);
+    { locality: 'Topsham Exeter' },
+  ])(
+    'the town at the end of any part of the office supports it: %o',
+    (office) => {
+      expect(isUnsupportedNameOnlyMatch(match({ office }))).toBe(false);
+    },
+  );
+
+  test('a town that only begins a part of the office is not the town', () => {
+    const held = (townCity: string, office: NameOnlyMatch['office']) =>
+      isUnsupportedNameOnlyMatch(match({ townCity, office }));
+    expect(held('Newport', { locality: 'Newport Pagnell' })).toBe(true);
+    expect(
+      held('Exeter', { premises: 'Exeter House', locality: 'Leeds' }),
+    ).toBe(true);
+    expect(held('London', { address_line_1: '12 London St., Sheffield' })).toBe(
+      true,
+    );
+    expect(held('Newport', { locality: 'Newport' })).toBe(false);
   });
 
   test("the town as a street's name is not the town", () => {
@@ -173,12 +191,12 @@ describe('isUnsupportedNameOnlyMatch', () => {
     ).toBe(false);
   });
 
-  test('a place of fewer than three characters is ignored', () => {
-    expect(
-      isUnsupportedNameOnlyMatch(
-        match({ townCity: 'Ae', office: { address_line_1: 'Ae Forest' } }),
-      ),
-    ).toBe(true);
+  test('a short place counts only as a whole part of the office', () => {
+    const held = (office: NameOnlyMatch['office']) =>
+      isUnsupportedNameOnlyMatch(match({ townCity: 'Ae', office }));
+    expect(held({ locality: 'Ae' })).toBe(false);
+    expect(held({ address_line_1: 'Ae Forest' })).toBe(true);
+    expect(held({ address_line_1: '3 Mill Road, Ae' })).toBe(true);
   });
 
   test('the county supports an active company', () => {

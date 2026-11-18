@@ -144,6 +144,22 @@ export type CorrectionWrites = {
   storeProfile: (profile: CHFullProfile) => Promise<void>;
 };
 
+/** A write that failed, named by its stage and the kind of error only: the cause itself may quote the row. */
+class StageError extends Error {
+  constructor(stage: string, cause: unknown) {
+    super(`${stage}: ${cause instanceof Error ? cause.name : 'error'}`);
+  }
+}
+
+/** Run one stage of a write, naming the stage in whatever it throws. */
+async function staged<T>(stage: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw new StageError(stage, error);
+  }
+}
+
 /** Write one correction. A move stores the company's own profile first, so a failed write leaves the join as it was. */
 async function writeCorrection(
   row: ListedMapping,
@@ -152,13 +168,15 @@ async function writeCorrection(
   writes: CorrectionWrites,
 ): Promise<CorrectionOutcome> {
   if (newCompanyNumber !== null) {
-    const profile = await writes.fetchProfile(newCompanyNumber);
+    const profile = await staged('companies_house', () =>
+      writes.fetchProfile(newCompanyNumber),
+    );
     // A profile for any other number is not this company's.
     if (profile?.company_number !== newCompanyNumber) return 'no_profile';
-    await writes.storeProfile(profile);
+    await staged('profile_store', () => writes.storeProfile(profile));
   }
-  const done = await writes.commit(
-    correctionInput(row, newCompanyNumber, changedBy),
+  const done = await staged('mapping_update', () =>
+    writes.commit(correctionInput(row, newCompanyNumber, changedBy)),
   );
   if (!done) return 'changed';
   return newCompanyNumber === null ? 'held' : 'repointed';
@@ -244,8 +262,7 @@ export async function applyCorrections(
     } catch (error) {
       applied.errored += 1;
       errorsInARow += 1;
-      // The kind of error only: its message may quote the row.
-      firstError ??= error instanceof Error ? error.name : 'error';
+      firstError ??= error instanceof StageError ? error.message : 'error';
     }
   }
   // A row planned and not written must not be taken as done by what runs next.

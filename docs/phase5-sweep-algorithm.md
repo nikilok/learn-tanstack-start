@@ -112,6 +112,10 @@ Rank ladder for ordinary states:
 `public_body` and `manual` sit outside the ladder — terminal peers
 that never auto-trade with a ranked state.
 
+A `manual` row is an owner's correction (`scripts/correct-mappings.ts`): a
+company the owner chose, or no company at all where a join made on the name
+alone was held. No sweep tier selects `manual`, so it stays as set.
+
 ```pseudo
 decide(existing, proposed):
   # 1. sweep never assigns human_review

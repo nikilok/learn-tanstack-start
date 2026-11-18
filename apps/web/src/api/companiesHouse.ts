@@ -284,7 +284,8 @@ export const companyProfile = createServerOnlyFn(
       }
 
       if (result.verdict === 'no_match' || result.verdict === 'human_review') {
-        // human_review (multiple tied candidates) is cached as no_match for the
+        // human_review (tied candidates, or a name-only match with nothing of
+        // the sponsor's place behind it) is cached as no_match for the
         // on-demand path: re-running the 5-call pipeline on every visit would
         // be expensive and the verdict won't change without ch-stream data
         // updates. Phase 5 re-verification can revisit later.

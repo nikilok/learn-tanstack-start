@@ -48,6 +48,10 @@ import {
   snapshotRowToCompany,
 } from '../src/lib/bulk-match/snapshot-row.ts';
 import {
+  isUnsupportedNameOnlyMatch,
+  type RegisteredOffice,
+} from '../src/lib/hmrc-ch/name-only-guard.ts';
+import {
   type CHCandidate,
   matchesHmrcLocality,
   matchTierA,
@@ -473,6 +477,7 @@ console.log(
 let attempted = 0;
 let verifiedConfirmed = 0;
 let verifyMismatch = 0;
+let heldForReview = 0;
 let committed = 0;
 let wouldCommit = 0;
 let decideSkipped = 0;
@@ -518,6 +523,25 @@ for (let i = 0; i < toVerify.length; i += 1) {
       continue;
     }
     verifiedConfirmed += 1;
+
+    if (
+      isUnsupportedNameOnlyMatch({
+        legalName: pick.entry.legal,
+        registerNumber: parseHmrcName(org).companyNumberHint,
+        matchMethod: verdict.matchMethod,
+        companyNumber: profile.company_number,
+        companyName: profile.company_name,
+        companyStatus: profile.company_status,
+        office: profile.registered_office_address as
+          | RegisteredOffice
+          | undefined,
+        townCity: pick.entry.townCity,
+        county: pick.entry.county,
+      })
+    ) {
+      heldForReview += 1;
+      continue;
+    }
 
     const existing = await fetchExisting(org);
     if (!existing) {
@@ -579,6 +603,7 @@ console.log(`  selected_to_verify  : ${toVerify.length}`);
 console.log(`  capped_out          : ${cappedOut}`);
 console.log(`  verified_confirmed  : ${verifiedConfirmed}`);
 console.log(`  verify_mismatch     : ${verifyMismatch}`);
+console.log(`  held_for_review     : ${heldForReview}`);
 console.log(`  committed           : ${committed}`);
 console.log(`  dry_run_would_commit: ${wouldCommit}`);
 console.log(`  decide_skipped      : ${decideSkipped}`);

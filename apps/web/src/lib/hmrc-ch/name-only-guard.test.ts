@@ -124,9 +124,9 @@ describe('isUnsupportedNameOnlyMatch', () => {
     { address_line_2: 'EXETER' },
     { premises: 'Unit 2, Exeter' },
     { region: 'exeter' },
-    { locality: 'Topsham Exeter' },
+    { locality: 'Topsham, Exeter' },
   ])(
-    'the town at the end of any part of the office supports it: %o',
+    'the town as the locality or region, or ending an address line, supports it: %o',
     (office) => {
       expect(isUnsupportedNameOnlyMatch(match({ office }))).toBe(false);
     },
@@ -143,6 +143,15 @@ describe('isUnsupportedNameOnlyMatch', () => {
       true,
     );
     expect(held('Newport', { locality: 'Newport' })).toBe(false);
+  });
+
+  test('a locality or region must be the town, not only end with it', () => {
+    const held = (townCity: string, office: NameOnlyMatch['office']) =>
+      isUnsupportedNameOnlyMatch(match({ townCity, office }));
+    expect(held('Stratford', { locality: 'Old Stratford' })).toBe(true);
+    expect(held('Yarmouth', { region: 'Great Yarmouth' })).toBe(true);
+    expect(held('Stratford', { locality: 'Stratford' })).toBe(false);
+    expect(held('Stratford', { locality: 'Stratford, London' })).toBe(false);
   });
 
   test("the town as a street's name is not the town", () => {
@@ -191,7 +200,7 @@ describe('isUnsupportedNameOnlyMatch', () => {
     ).toBe(false);
   });
 
-  test('a short place counts only as a whole part of the office', () => {
+  test('a short place counts only as a whole field of the office', () => {
     const held = (office: NameOnlyMatch['office']) =>
       isUnsupportedNameOnlyMatch(match({ townCity: 'Ae', office }));
     expect(held({ locality: 'Ae' })).toBe(false);

@@ -407,3 +407,127 @@ describe('resolveOneSponsor — Companies House gaps', () => {
     ).toEqual({ verdict: 'unavailable' });
   });
 });
+
+describe('resolveOneSponsor — name-only matches need the place', () => {
+  /** One exact namesake of a bare register name, with the given status and office. */
+  function namesake(status: string, office: Record<string, string>) {
+    return makeFetch([
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: '00000042',
+              title: 'NORTHGATE BAKERY LIMITED',
+              company_status: status,
+            },
+          ],
+        },
+      ],
+      [
+        '/company/00000042',
+        {
+          company_number: '00000042',
+          company_name: 'NORTHGATE BAKERY LIMITED',
+          company_status: status,
+          registered_office_address: office,
+        },
+      ],
+    ]);
+  }
+  const exeter = { townCity: 'Exeter', county: 'Devon' };
+
+  test('a bare name on a namesake in another town goes to review', async () => {
+    const { fetchApi } = namesake('active', {
+      address_line_1: '4 Mill Lane',
+      locality: 'Leeds',
+      region: 'West Yorkshire',
+    });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('human_review');
+    if (result.verdict !== 'human_review') return;
+    expect(result.contenders.map((c) => c.candidate.company_number)).toEqual([
+      '00000042',
+    ]);
+  });
+
+  test('the same namesake in the sponsor town verifies', async () => {
+    const { fetchApi } = namesake('active', {
+      address_line_1: '4 Mill Lane',
+      locality: 'Exeter',
+    });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('verified');
+    if (result.verdict !== 'verified') return;
+    expect(result.companyNumber).toBe('00000042');
+    expect(result.matchMethod).toBe('exact');
+  });
+
+  test('an active namesake in the sponsor county verifies', async () => {
+    const { fetchApi } = namesake('active', {
+      locality: 'Tiverton',
+      region: 'Devon',
+    });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('verified');
+  });
+
+  test('a dissolved namesake in the sponsor county goes to review', async () => {
+    const { fetchApi } = namesake('dissolved', {
+      locality: 'Tiverton',
+      region: 'Devon',
+    });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('human_review');
+  });
+
+  test('a register name with its own suffix verifies wherever the office is', async () => {
+    const { fetchApi } = namesake('active', { locality: 'Leeds' });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery Ltd',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('verified');
+  });
+
+  test("a register name that carries the company's number verifies wherever the office is", async () => {
+    const { fetchApi } = namesake('active', { locality: 'Leeds' });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery (Co Reg: 00000042)',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('verified');
+    if (result.verdict !== 'verified') return;
+    expect(result.companyNumber).toBe('00000042');
+  });
+
+  test("another company's number in the register name does not vouch for the namesake", async () => {
+    const { fetchApi } = namesake('active', { locality: 'Leeds' });
+    const result = await resolveOneSponsor(
+      'Northgate Bakery (Co Reg: 00000077)',
+      exeter,
+      fetchApi,
+    );
+    expect(result.verdict).toBe('human_review');
+    if (result.verdict !== 'human_review') return;
+    expect(result.queryUsed).not.toContain('00000077');
+  });
+});

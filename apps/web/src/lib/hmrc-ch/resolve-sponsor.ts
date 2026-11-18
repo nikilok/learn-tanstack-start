@@ -26,7 +26,9 @@
  *   8. If nothing active yet: Tier D (squashed edit distance ≤ 1-2) — ACTIVE
  *      candidates with corroborating locality only, no inactive fallback
  *   9. Locality tiebreak when multiple candidates pass at the same tier
- *  10. Fail closed if no verified match
+ *  10. A name-only winner with nothing of the sponsor's place behind it goes
+ *      to human_review (see name-only-guard.ts)
+ *  11. Fail closed if no verified match
  */
 
 import {
@@ -34,6 +36,7 @@ import {
   isTransientChFailure,
   type Unavailable,
 } from './ch-lookup';
+import { isUnsupportedNameOnlyMatch } from './name-only-guard';
 import {
   type CHCandidate,
   matchesHmrcLocality,
@@ -69,6 +72,7 @@ type CHFullProfile = {
   type?: string;
   date_of_creation?: string;
   registered_office_address?: {
+    premises?: string;
     address_line_1?: string;
     address_line_2?: string;
     locality?: string;
@@ -405,19 +409,42 @@ async function resolveFrom(
     verifiedProfile = fetched;
   }
 
+  const matchMethod =
+    picked.tier === 'A'
+      ? 'exact'
+      : picked.tier === 'A2'
+        ? 'exact_squash'
+        : picked.tier === 'B'
+          ? 'previous_name'
+          : picked.tier === 'D'
+            ? 'fuzzy_edit'
+            : 'token_sim';
+
+  if (
+    isUnsupportedNameOnlyMatch({
+      legalName: legal,
+      registerNumber: parsed.companyNumberHint,
+      matchMethod,
+      companyNumber: verifiedNumber,
+      companyName: verifiedProfile.company_name,
+      companyStatus: verifiedProfile.company_status,
+      office: verifiedProfile.registered_office_address,
+      townCity: hmrcLocation.townCity,
+      county: hmrcLocation.county,
+    })
+  ) {
+    return {
+      verdict: 'human_review',
+      queryUsed: searchQuery,
+      contenders: [picked],
+      topResults,
+    };
+  }
+
   return {
     verdict: 'verified',
     companyNumber: verifiedNumber,
-    matchMethod:
-      picked.tier === 'A'
-        ? 'exact'
-        : picked.tier === 'A2'
-          ? 'exact_squash'
-          : picked.tier === 'B'
-            ? 'previous_name'
-            : picked.tier === 'D'
-              ? 'fuzzy_edit'
-              : 'token_sim',
+    matchMethod,
     matchScore: picked.score,
     queryUsed: searchQuery,
     profile: verifiedProfile,

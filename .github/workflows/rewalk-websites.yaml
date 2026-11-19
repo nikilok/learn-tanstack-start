@@ -79,7 +79,8 @@ jobs:
   rewalk:
     needs: plan
     name: rewalk ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.60 cannot install Chromium on ubuntu-26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 355
     strategy:
       fail-fast: false

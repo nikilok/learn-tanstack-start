@@ -110,7 +110,8 @@ jobs:
   discover:
     needs: plan
     name: discover ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.60 cannot install Chromium on ubuntu-26.04.
+    runs-on: ubuntu-24.04
     # Scheduled runs keep the window their cadence was sized for; a manual run
     # gets nearly the hosted runner's six-hour limit.
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 355 || 120 }}

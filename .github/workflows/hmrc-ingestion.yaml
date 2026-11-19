@@ -241,7 +241,19 @@ jobs:
           git commit -m "chore: regenerate sitemaps after ingestion"
           git push -u origin "$BRANCH"
           PR_URL=$(gh pr create --title "chore: regenerate sitemaps after ingestion" --body "Automated sitemap update from HMRC ingestion workflow." --base main)
-          # Try auto-merge (queues behind required checks); fall back to direct
-          # merge when the PR is already clean and GitHub refuses to enable auto.
-          gh pr merge "$PR_URL" --squash --delete-branch --auto \
-            || gh pr merge "$PR_URL" --squash --delete-branch
+          # main requires no checks, so merge directly instead of through
+          # auto-merge, whose request can be accepted and then never acted on,
+          # leaving the PR open with nothing to wake it. Retry while GitHub
+          # works out whether the new PR can merge, judge by the PR's state
+          # rather than the exit code, and fail loudly if it never lands
+          # (same approach as desktop-release.yml). No auto-merge request is
+          # left behind, so a stale PR cannot later land over a newer one.
+          # Branch deletion is the repo's delete_branch_on_merge.
+          is_merged() { [ "$(gh pr view "$PR_URL" --json state --jq .state)" = "MERGED" ]; }
+          for _ in $(seq 1 36); do
+            gh pr merge "$PR_URL" --squash || true
+            if is_merged; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Sitemap PR $PR_URL never merged; merge it by hand"
+          exit 1

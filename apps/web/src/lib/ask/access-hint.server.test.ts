@@ -23,7 +23,7 @@ describe('markAskAccess', () => {
     expect(await marked(null)).toEqual(['expire']);
   });
 
-  test('a visitor’s document while asking is public is left as it is: no cookie is set on the public', async () => {
-    expect(await marked('public')).toEqual([]);
+  test('while asking is public a visitor’s document gains no hint, and one left from a credential that has lapsed is taken off', async () => {
+    expect(await marked('public')).toEqual(['expire']);
   });
 });

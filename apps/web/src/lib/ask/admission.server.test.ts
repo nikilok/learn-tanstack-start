@@ -10,6 +10,8 @@ const TOKEN = 'a-live-token';
 const UNTIL = 1_800_000_000_000;
 const BUDGET = 1_000_000;
 const LEAST = minimumCharge(BUDGET);
+// The start of a window, as the database says it.
+const OPENED = '2026-11-21 14:05:00.123456+00';
 
 type Setup = {
   standing?: AskStanding;
@@ -21,15 +23,16 @@ type Setup = {
   verdict?: BrowserVerdict | 'unchecked';
 };
 
-/** The steps as fakes, each recording that it was read, in order, and what was settled. */
+/** The steps as fakes, each recording that it was read, in order, what was settled and in which window. */
 function deps(setup: Setup = {}) {
   const read: string[] = [];
   const settled: number[] = [];
+  const windows: string[] = [];
   const {
     standing = 'public',
     listed = false,
     cooling = null,
-    hold = { admitted: true },
+    hold = { admitted: true, opened: OPENED },
     verdict = 'person',
   } = setup;
   const budget = 'budget' in setup ? setup.budget : BUDGET;
@@ -60,17 +63,18 @@ function deps(setup: Setup = {}) {
       if (hold instanceof Error) throw hold;
       return hold;
     },
-    settle: async (_key, charge) => {
+    settle: async (_key, opened, charge) => {
       read.push('settle');
       if (setup.settle) throw setup.settle;
       settled.push(charge);
+      windows.push(opened);
     },
     verdict: async () => {
       read.push('verdict');
       return verdict;
     },
   };
-  return { fakes, read, settled };
+  return { fakes, read, settled, windows };
 }
 
 let logged: ReturnType<typeof spyOn> | undefined;
@@ -107,6 +111,21 @@ describe('admitAsk', () => {
     if (admission.status !== 'admitted') throw new Error('not admitted');
     await admission.charge(140_000);
     expect(settled).toEqual([140_000]);
+  });
+
+  test('every settlement of an ask is made in the window its hold was set in', async () => {
+    const hold: Held = { admitted: true, opened: '2026-11-20 09:00:00+00' };
+    const charged = deps({ hold });
+    const admission = await admitAsk(KEY, TOKEN, charged.fakes);
+    if (admission.status !== 'admitted') throw new Error('not admitted');
+    await admission.charge(140_000);
+    expect(charged.windows).toEqual([hold.opened]);
+    // The hold given back whole, and the one a turned-away client is charged for.
+    for (const verdict of ['unchecked', 'automated'] as const) {
+      const { fakes, windows } = deps({ hold, verdict });
+      await admitAsk(KEY, TOKEN, fakes);
+      expect(windows).toEqual([hold.opened]);
+    }
   });
 
   test('an ask that used little, or nothing, is charged the least an ask costs', async () => {

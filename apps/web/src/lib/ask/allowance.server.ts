@@ -51,7 +51,8 @@ const SPENT = sql`(u.cooldown_until IS NOT NULL OR u.window_started_at <= now() 
  * total found there starts the cooldown. One statement decides and writes, so
  * asks sent together cannot each pass a check the other has not yet written.
  * No row comes back for a device already waiting; otherwise `admitted` is 1
- * for an ask admitted and 0 for one that found the budget reached.
+ * for an ask admitted and 0 for one that found the budget reached, and
+ * `opened` is the start of the window the row is now in.
  */
 export function holdStatement(key: string, budget: number): SQL {
   return sql`
@@ -69,17 +70,20 @@ export function holdStatement(key: string, budget: number): SQL {
         ELSE now() + ${SPAN}
       END
     WHERE u.cooldown_until IS NULL OR u.cooldown_until <= now()
-    RETURNING (u.cooldown_until IS NULL)::int AS admitted
+    RETURNING (u.cooldown_until IS NULL)::int AS admitted, u.window_started_at::text AS opened
   `;
 }
 
 /**
  * Replaces an ask's hold with what it is charged, and starts the cooldown
  * when that brings the device's total to its budget. A cooldown already
- * running is left where it is; a total never goes below nothing.
+ * running is left where it is; a total never goes below nothing. It writes
+ * only the window the hold was set in (`opened`): the total of a window
+ * begun since holds no hold of this ask's to replace.
  */
 export function settleStatement(
   key: string,
+  opened: string,
   charge: number,
   budget: number,
 ): SQL {
@@ -92,7 +96,7 @@ export function settleStatement(
         WHEN ${settled} >= ${budget}::int THEN now() + ${SPAN}
         ELSE u.cooldown_until
       END
-    WHERE u.device_key = ${key}
+    WHERE u.device_key = ${key} AND u.window_started_at = ${opened}::timestamptz
   `;
 }
 
@@ -126,8 +130,10 @@ export async function coolingUntil(
   return row && Number.isFinite(until) ? until : null;
 }
 
-/** What asking for a hold came to: admitted, or the time the device may ask again. */
-export type Held = { admitted: true } | { admitted: false; until: number };
+/** What asking for a hold came to: admitted, with the start of the window the hold was set in as the database says it, or the time the device may ask again. */
+export type Held =
+  | { admitted: true; opened: string }
+  | { admitted: false; until: number };
 
 /**
  * Admits one ask against a device's budget on a hold, or says when the device
@@ -143,22 +149,30 @@ export async function holdAsk(
   for (let attempt = 0; attempt < 2; attempt++) {
     const [row] = (await run(holdStatement(key, budget))).rows as {
       admitted?: unknown;
+      opened?: unknown;
     }[];
-    if (row && Number(row.admitted) === 1) return { admitted: true };
+    if (row && Number(row.admitted) === 1) {
+      // A hold with no window to settle it in is left standing, and the ask unanswered.
+      if (typeof row.opened !== 'string' || row.opened === '') break;
+      return { admitted: true, opened: row.opened };
+    }
     const until = await coolingUntil(key, run);
     if (until !== null) return { admitted: false, until };
   }
   throw new Error('an ask could not be counted');
 }
 
-/** Settles an admitted ask's hold at `charge` tokens: what it used, or what an ask that used nothing is charged. */
+/** Settles an admitted ask's hold at `charge` tokens, in the window it was set in (`opened`): what it used, or what an ask that used nothing is charged. */
 export async function settleAsk(
   key: string,
+  opened: string,
   charge: number,
   budget: number,
   run: Run,
 ): Promise<void> {
-  await run(settleStatement(key, Math.max(0, Math.round(charge)), budget));
+  await run(
+    settleStatement(key, opened, Math.max(0, Math.round(charge)), budget),
+  );
 }
 
 /**

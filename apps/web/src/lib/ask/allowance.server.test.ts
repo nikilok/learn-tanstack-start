@@ -23,6 +23,8 @@ import { COOLDOWN_SECONDS } from './cooldown';
 const KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 const UNTIL = 1_800_000_000_000;
 const BUDGET = 1_000_000;
+// The start of a window, as the database says it.
+const OPENED = '2026-11-21 14:05:00.123456+00';
 const dialect = new PgDialect();
 
 /** A statement as the driver would send it. */
@@ -59,9 +61,21 @@ describe('tokenBudget', () => {
     expect(tokenBudget('999999999')).toBe(999_999_999);
   });
 
-  test('unset, empty or anything else is none: asking is never opened on a value nobody meant', () => {
+  test('unset is none, whatever the machine running the tests has set', () => {
+    const found = process.env.ASK_DAILY_TOKENS;
+    try {
+      delete process.env.ASK_DAILY_TOKENS;
+      expect(tokenBudget()).toBeNull();
+      process.env.ASK_DAILY_TOKENS = '750000';
+      expect(tokenBudget()).toBe(750_000);
+    } finally {
+      if (found === undefined) delete process.env.ASK_DAILY_TOKENS;
+      else process.env.ASK_DAILY_TOKENS = found;
+    }
+  });
+
+  test('empty or anything else is none: asking is never opened on a value nobody meant', () => {
     for (const value of [
-      undefined,
       '',
       '0',
       '-5',
@@ -97,12 +111,12 @@ describe('minimumCharge', () => {
 });
 
 describe('the statements', () => {
-  test('the key, the hold, the budget and the charge are bound, never spliced', () => {
+  test('the key, the hold, the budget, the charge and the window are bound, never spliced', () => {
     const hold = sent(holdStatement(KEY, BUDGET));
     expect(hold.params).toEqual([KEY, HOLD_TOKENS, BUDGET, BUDGET]);
     expect(hold.sql).not.toContain(KEY);
     expect(hold.sql).not.toContain(String(BUDGET));
-    const settle = sent(settleStatement(KEY, 41_000, BUDGET));
+    const settle = sent(settleStatement(KEY, OPENED, 41_000, BUDGET));
     expect(settle.params).toEqual([
       HOLD_TOKENS,
       41_000,
@@ -110,8 +124,10 @@ describe('the statements', () => {
       41_000,
       BUDGET,
       KEY,
+      OPENED,
     ]);
     expect(settle.sql).not.toContain(KEY);
+    expect(settle.sql).not.toContain(OPENED);
     const cooling = sent(coolingStatement(KEY));
     expect(cooling.params).toEqual([KEY]);
     expect(cooling.sql).not.toContain(KEY);
@@ -121,7 +137,7 @@ describe('the statements', () => {
   test('the window and the cooldown run the one length the browser is told', () => {
     const span = `interval '${COOLDOWN_SECONDS} seconds'`;
     expect(sent(holdStatement(KEY, BUDGET)).sql).toContain(span);
-    expect(sent(settleStatement(KEY, 1, BUDGET)).sql).toContain(span);
+    expect(sent(settleStatement(KEY, OPENED, 1, BUDGET)).sql).toContain(span);
     expect(sent(pruneStatement()).sql).toContain(span);
   });
 
@@ -133,18 +149,35 @@ describe('the statements', () => {
     );
   });
 
-  test('a settle writes one device’s row and no other', () => {
-    const settle = sent(settleStatement(KEY, 1, BUDGET)).sql.replace(
+  test('the hold says which window it was set in, to the microsecond the database keeps', () => {
+    const hold = sent(holdStatement(KEY, BUDGET)).sql.replace(/\s+/g, ' ');
+    expect(
+      hold
+        .trim()
+        .endsWith(
+          'RETURNING (u.cooldown_until IS NULL)::int AS admitted, u.window_started_at::text AS opened',
+        ),
+    ).toBe(true);
+  });
+
+  test('a settle writes one device’s row, in the window its hold was set in, and no other', () => {
+    const settle = sent(settleStatement(KEY, OPENED, 1, BUDGET)).sql.replace(
       /\s+/g,
       ' ',
     );
-    expect(settle.trim().endsWith('WHERE u.device_key = $6')).toBe(true);
+    expect(
+      settle
+        .trim()
+        .endsWith(
+          'WHERE u.device_key = $6 AND u.window_started_at = $7::timestamptz',
+        ),
+    ).toBe(true);
   });
 
   test('no statement carries a comment, which a statement sent on one line would be cut at', () => {
     for (const statement of [
       holdStatement(KEY, BUDGET),
-      settleStatement(KEY, 1, BUDGET),
+      settleStatement(KEY, OPENED, 1, BUDGET),
       coolingStatement(KEY),
       pruneStatement(),
     ])
@@ -171,10 +204,25 @@ describe('coolingUntil', () => {
 });
 
 describe('holdAsk', () => {
-  test('an ask the statement admitted is admitted, in one statement', async () => {
-    const { run, ran } = store({ INSERT: [[{ admitted: 1 }]] });
-    expect(await holdAsk(KEY, BUDGET, run)).toEqual({ admitted: true });
+  test('an ask the statement admitted is admitted, in one statement, with the window its hold was set in', async () => {
+    const { run, ran } = store({
+      INSERT: [[{ admitted: 1, opened: OPENED }]],
+    });
+    expect(await holdAsk(KEY, BUDGET, run)).toEqual({
+      admitted: true,
+      opened: OPENED,
+    });
     expect(ran).toEqual(['INSERT']);
+  });
+
+  test('an ask admitted with no window to settle it in is a failure, never an admission, and is not asked for again', async () => {
+    for (const row of [{ admitted: 1 }, { admitted: 1, opened: '' }]) {
+      const { run, ran } = store({ INSERT: [[row]] });
+      await expect(holdAsk(KEY, BUDGET, run)).rejects.toThrow(
+        'an ask could not be counted',
+      );
+      expect(ran).toEqual(['INSERT']);
+    }
   });
 
   test('a device already waiting gets no row back: it is told when it may ask again', async () => {
@@ -203,10 +251,13 @@ describe('holdAsk', () => {
 
   test('a cooldown that ended between the hold and the read is asked for again', async () => {
     const { run, ran } = store({
-      INSERT: [[], [{ admitted: 1 }]],
+      INSERT: [[], [{ admitted: 1, opened: OPENED }]],
       SELECT: [[]],
     });
-    expect(await holdAsk(KEY, BUDGET, run)).toEqual({ admitted: true });
+    expect(await holdAsk(KEY, BUDGET, run)).toEqual({
+      admitted: true,
+      opened: OPENED,
+    });
     expect(ran).toEqual(['INSERT', 'SELECT', 'INSERT']);
   });
 
@@ -227,18 +278,19 @@ describe('holdAsk', () => {
 });
 
 describe('settleAsk', () => {
-  test('writes the charge it is given, as a whole number of tokens and never less than nothing', async () => {
+  test('writes the charge it is given, as a whole number of tokens and never less than nothing, in the window it is given', async () => {
     const { run, ran, params } = store({ UPDATE: [[], [], []] });
-    await settleAsk(KEY, 41_200.6, BUDGET, run);
-    await settleAsk(KEY, 0, BUDGET, run);
-    await settleAsk(KEY, -5, BUDGET, run);
+    await settleAsk(KEY, OPENED, 41_200.6, BUDGET, run);
+    await settleAsk(KEY, OPENED, 0, BUDGET, run);
+    await settleAsk(KEY, OPENED, -5, BUDGET, run);
     expect(ran).toEqual(['UPDATE', 'UPDATE', 'UPDATE']);
     expect(params.map((p) => p[1])).toEqual([41_201, 0, 0]);
+    expect(params.map((p) => p.at(-1))).toEqual([OPENED, OPENED, OPENED]);
   });
 
   test('a settle that fails throws: its caller says so', async () => {
     const { run } = store({ UPDATE: [new Error('network down')] });
-    await expect(settleAsk(KEY, 1, BUDGET, run)).rejects.toThrow(
+    await expect(settleAsk(KEY, OPENED, 1, BUDGET, run)).rejects.toThrow(
       'network down',
     );
   });

@@ -13,7 +13,7 @@ export default function AskAgain({ until }: { until: number }) {
   return (
     <p className={styles.again} role="status">
       <span className={`${examples.mark} ${styles.rest}`} aria-hidden="true" />
-      You can ask again after {askAgainWhen(until, Date.now())}
+      You can ask again after {askAgainWhen(until)}
     </p>
   );
 }

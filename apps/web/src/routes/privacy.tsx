@@ -47,9 +47,10 @@ function PrivacyPolicy() {
           your identity. So that asking stays available to everyone, we keep a
           running total of how much processing the questions asked from your
           browser&apos;s technical identifier (see Site protection below) have
-          used, with no record of what was asked, and remove it soon after its
-          limit resets. If the limit is reached, the time you can ask again is
-          kept in your browser&apos;s local storage.
+          used, with no record of what was asked. After its limit resets, it is
+          deleted as questions are next asked on the site. If the limit is
+          reached, the time you can ask again is kept in your browser&apos;s
+          local storage.
         </li>
         <li>
           <strong>Basic request data.</strong> Our hosting provider (Vercel)
@@ -121,8 +122,8 @@ function PrivacyPolicy() {
         Server logs including search queries are automatically deleted after a
         short retention period (up to 30 days). We do not store search queries
         or questions in our own database; the usage total kept against a
-        browser&apos;s identifier holds no text, and is removed soon after its
-        limit resets.
+        browser&apos;s identifier holds no text, and after its limit resets it
+        is deleted as questions are next asked on the site.
       </p>
 
       <h2>Your rights</h2>

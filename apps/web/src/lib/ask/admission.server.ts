@@ -22,8 +22,13 @@ export type AdmissionDeps = {
   cooling: (key: string) => Promise<number | null>;
   /** Admits one ask on a hold against the device's budget, or says when it may ask again. */
   hold: (key: string, budget: number) => Promise<Held>;
-  /** Replaces an admitted ask's hold with the tokens it is charged. */
-  settle: (key: string, charge: number, budget: number) => Promise<void>;
+  /** Replaces an admitted ask's hold with the tokens it is charged, in the window the hold was set in (`opened`). */
+  settle: (
+    key: string,
+    opened: string,
+    charge: number,
+    budget: number,
+  ) => Promise<void>;
   /** The browser check's verdict on the request (lib/device/browser-check.server). */
   verdict: () => Promise<BrowserVerdict | 'unchecked'>;
 };
@@ -74,6 +79,7 @@ function budgetFor(
 /** Settles one hold at a charge, the first time it is called; a charge that cannot be written is said and left. */
 function settling(
   key: string,
+  opened: string,
   budget: number,
   deps: AdmissionDeps,
 ): (charge: number) => Promise<void> {
@@ -82,7 +88,7 @@ function settling(
     if (settled) return;
     settled = true;
     try {
-      await deps.settle(key, charge, budget);
+      await deps.settle(key, opened, charge, budget);
     } catch (error) {
       console.error(
         '[ask] usage could not be settled:',
@@ -172,7 +178,7 @@ export async function admitAsk(
     return UNAVAILABLE;
   }
   if (!held.admitted) return { status: 'cooldown', until: held.until };
-  const settle = settling(key, budget, deps);
+  const settle = settling(key, held.opened, budget, deps);
   const least = minimumCharge(budget);
   const verdict = await deps.verdict();
   if (verdict === 'unchecked') {

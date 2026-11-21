@@ -50,56 +50,35 @@ export function clearCooldown(): void {
   }
 }
 
-/** The calendar day a time falls on in a zone, as a count of days. */
-function dayOf(time: number, timeZone: string | undefined): number {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone,
-  }).format(time);
-  return Math.round(Date.parse(parts) / 86_400_000);
-}
+type When = { locale?: string; timeZone?: string };
 
 /**
  * When asking opens again, as a visitor reads it: the clock time in their own
- * locale and zone, and which day that is ("14:05 tomorrow").
+ * locale and zone, and the day it falls on there ("14:05 on Sunday"). The day
+ * is named, never counted from now, so a page left open still reads true.
  */
 export function askAgainWhen(
   until: number,
-  now: number,
-  { locale, timeZone }: { locale?: string; timeZone?: string } = {},
+  { locale, timeZone }: When = {},
 ): string {
   const time = new Intl.DateTimeFormat(locale, {
     timeStyle: 'short',
     timeZone,
   }).format(until);
-  const days = dayOf(until, timeZone) - dayOf(now, timeZone);
-  if (days <= 0) return `${time} today`;
-  if (days === 1) return `${time} tomorrow`;
-  const weekday = new Intl.DateTimeFormat(locale, {
+  // The sentence around it is English, so its weekday is too.
+  const weekday = new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
     timeZone,
   }).format(until);
   return `${time} on ${weekday}`;
 }
 
-type When = { locale?: string; timeZone?: string };
-
 /** What a visitor is told where an ask would have gone, while their device waits out a cooldown. */
-export function cooldownNotice(
-  until: number,
-  now = Date.now(),
-  when: When = {},
-): string {
-  return `You’ve reached the limit for questions for now. You can ask again after ${askAgainWhen(until, now, when)}.`;
+export function cooldownNotice(until: number, when: When = {}): string {
+  return `You’ve reached the limit for questions for now. You can ask again after ${askAgainWhen(until, when)}.`;
 }
 
 /** What the end of a question's listing says while the rest of its answer waits on a cooldown. */
-export function cooldownHold(
-  until: number,
-  now = Date.now(),
-  when: When = {},
-): string {
-  return `You’ve reached the limit for questions for now. More matches can load after ${askAgainWhen(until, now, when)}.`;
+export function cooldownHold(until: number, when: When = {}): string {
+  return `You’ve reached the limit for questions for now. More matches can load after ${askAgainWhen(until, when)}.`;
 }

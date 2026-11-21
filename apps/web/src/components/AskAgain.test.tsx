@@ -10,9 +10,7 @@ describe('AskAgain', () => {
     const until = Date.now() + 60 * 60 * 1000;
     const html = renderToStaticMarkup(<AskAgain until={until} />);
     expect(html).toContain('role="status"');
-    expect(html).toContain(
-      `You can ask again after ${askAgainWhen(until, Date.now())}`,
-    );
+    expect(html).toContain(`You can ask again after ${askAgainWhen(until)}`);
     expect(html.match(/aria-hidden="true"/g)).toHaveLength(1);
     expect(html).not.toContain('<button');
   });

@@ -506,6 +506,11 @@ the mint, the plan and each further slice pass.
   take a hold off that was never set. The hold must stay about the most one
   call can use, or asks sent together run past the budget before any is
   charged.
+- **A settle writes only the window its hold was set in.** The hold returns
+  the window's start as the database says it (`opened`, text, so nothing is
+  rounded on the way), and `settleStatement` matches on it: an ask that
+  settles after the device's window has begun again writes nothing, where it
+  would have taken a later ask's hold off the new total.
 - **Every ask is charged at least `minimumCharge`**, whatever it used, and so
   is one the browser check turns away. Only a check that could not run gives
   its hold back whole.
@@ -520,7 +525,8 @@ the mint, the plan and each further slice pass.
   never settled cannot leave a device refused with no end in sight. The unit
   tests render the statements; they do not run them. After changing one, run
   it on a real Postgres (the admission's order and the statements' window,
-  hold, settle, cooldown and prune cases are the checks worth repeating).
+  hold, settle, late settle, cooldown and prune cases are the checks worth
+  repeating).
 - **The browser check decides the ask whatever `BROWSER_CHECK_ENFORCE` says**:
   the mint refuses a client it names automated, and a plan or a slice goes on
   only for one it names a person. That switch is the extras' and the

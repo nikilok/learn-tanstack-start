@@ -503,7 +503,8 @@ the mint, the plan and each further slice pass.
   network's, the site's. Each is a row of `ask_usage` with its own budget,
   window and cooldown, written by the same statements. A hold refused at one
   gives back the holds already taken (a settle of 0 in each one's own window)
-  and tells that total's time; every total is charged the same amount. More
+  and tells that total's time; an admitted ask is charged the same amount on
+  every total. More
   than one total can be waiting at once, so the browser keeps the later of
   the times it is told (`laterCooldown`), never the one told last.
 - **A network's and the site's rows are keyed apart from any device's**
@@ -538,9 +539,16 @@ the mint, the plan and each further slice pass.
   rounded on the way), and `settleStatement` matches on it: an ask that
   settles after the device's window has begun again writes nothing, where it
   would have taken a later ask's hold off the new total.
-- **Every ask is charged at least `minimumCharge`**, whatever it used, and so
-  is one the browser check turns away. Only a check that could not run gives
-  its hold back whole.
+- **Every ask is charged at least `minimumCharge`**, whatever it used. One the
+  browser check turns away is charged it on its device's and its network's
+  totals only: the site's hold is given back whole, as the site's total counts
+  admitted asks alone. A check that could not run gives every hold back whole.
+- **A visitor's mint is charged to its network** (`chargeMint` in
+  `lib/ask/admission.server.ts`): a share of the least an ask costs
+  (`mintCharge`), before the browser check is asked, so the tokens issued to
+  one network are bounded by its budget as its asks are. The device's and the
+  site's totals are only read at a mint, and read first: a mint either tells
+  to wait is charged nothing.
 - **A further slice is an ask** (`rankMore`): it reaches the judge as a
   question does, so it is admitted and charged exactly as `planSearch` is.
   `searchRanked` is not: it reads the rows of an answer already given, and a

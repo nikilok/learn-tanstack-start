@@ -28,6 +28,20 @@ export function laterCooldown(known: number | null, told: number): number {
   return known === null ? told : Math.max(known, told);
 }
 
+/** The wait to show when a call names one: the latest of the one shown, the one kept for the device and the one told. */
+export function latestCooldown(
+  shown: number | null,
+  stored: number | null,
+  told: number,
+): number {
+  return laterCooldown(shown, laterCooldown(stored, told));
+}
+
+/** The wait still to keep once one has ended: a later one stored since, as another tab may have been told one; null when none is ahead. */
+export function waitAfter(ended: number, stored: number | null): number | null {
+  return stored !== null && stored > ended ? stored : null;
+}
+
 /** The time this device may ask again, as last told; null when it is not waiting. Never throws: no storage, no cooldown known. */
 export function loadCooldown(now = Date.now()): number | null {
   try {
@@ -44,6 +58,11 @@ export function saveCooldown(until: number): void {
   } catch {
     // No storage: the server says so again on the next ask.
   }
+}
+
+/** Keeps a wait for the device unless a later one is kept already, as another tab may have been told one. Never throws. */
+export function keepCooldown(until: number, now = Date.now()): void {
+  saveCooldown(laterCooldown(loadCooldown(now), until));
 }
 
 /** Forgets the cooldown, once it has passed. Never throws. */

@@ -5,8 +5,16 @@ import {
   type Admission,
   type AdmissionDeps,
   admitAsk,
+  admitMint,
+  type MintAdmission,
 } from './admission.server';
-import { type Budgets, type Held, minimumCharge } from './allowance.server';
+import {
+  type Budgets,
+  type Held,
+  minimumCharge,
+  mintCharge,
+  reserveFor,
+} from './allowance.server';
 import { COOLDOWN_SECONDS } from './cooldown';
 
 const SPAN_MS = COOLDOWN_SECONDS * 1000;
@@ -113,13 +121,14 @@ function steps(
   store: Store,
   budgets: Budgets,
   verdict: () => Promise<Verdict>,
+  network = NETWORK,
 ): AdmissionDeps {
   return {
     standing: async () => 'public',
     tokenMatches: () => true,
     listed: async () => false,
     budgets: () => budgets,
-    network: () => NETWORK,
+    network: () => network,
     site: () => SITE,
     cooling: store.cooling,
     hold: store.hold,
@@ -134,6 +143,7 @@ function inFlight(
   budgets: Budgets,
   keys: readonly string[],
   verdict: Verdict,
+  network = NETWORK,
 ) {
   let release = () => {};
   const gate = new Promise<void>((resolve) => {
@@ -155,12 +165,17 @@ function inFlight(
       return admitAsk(
         key,
         TOKEN,
-        steps(store, budgets, async () => {
-          atCheck = true;
-          reach();
-          await gate;
-          return verdict;
-        }),
+        steps(
+          store,
+          budgets,
+          async () => {
+            atCheck = true;
+            reach();
+            await gate;
+            return verdict;
+          },
+          network,
+        ),
       ).then((admission) => {
         // An ask answered before the check took every hold it could.
         if (!atCheck) reach();
@@ -200,7 +215,7 @@ function further(store: Store, budgets: Budgets): Promise<Admission> {
 }
 
 describe('asks in flight together', () => {
-  test('eleven asks from one network named automated: ten are denied and charged the least, one finds the network busy, and none waits', async () => {
+  test('eleven asks from one network named automated: ten are denied and charged the least on their devices and the network but nothing on the site, one finds the network busy, and none waits', async () => {
     const store = usageStore();
     const flight = inFlight(store, BUDGETS, ELEVEN, 'automated');
     await flight.allHeld;
@@ -211,7 +226,10 @@ describe('asks in flight together', () => {
     expect(tally(answers)).toEqual({ denied: 10, unavailable: 1 });
     expect(heldBy(store)).toEqual(Array(store.rows.size).fill(0));
     expect(store.rows.get(NETWORK)?.tokens).toBe(10 * LEAST);
-    expect(store.rows.get(SITE)?.tokens).toBe(10 * LEAST);
+    expect(store.rows.get(SITE)?.tokens).toBe(0);
+    const devices = DEVICES.map((key) => store.rows.get(key)?.tokens ?? 0);
+    expect(devices.every((tokens) => tokens % LEAST === 0)).toBe(true);
+    expect(devices.reduce((sum, tokens) => sum + tokens, 0)).toBe(10 * LEAST);
     expect(waiting(store)).toEqual([]);
     expect((await further(store, BUDGETS)).status).toBe('admitted');
   });
@@ -273,5 +291,117 @@ describe('asks in flight together', () => {
     const device = store.rows.get(DEVICES[0]);
     expect(device?.tokens).toBe(40_000_000);
     expect(device?.held).toBe(0);
+    expect(store.rows.get(NETWORK)?.tokens).toBe(40_000_000);
+    expect(store.rows.get(SITE)?.tokens).toBe(0);
+    expect(store.rows.get(SITE)?.held).toBe(0);
+  });
+
+  test('a total admits while what is used and held is under its budget, so the last ask admitted can carry it past by at most what one ask sets aside', async () => {
+    const budgets = {
+      device: 40_000_001,
+      network: 200_000_000,
+      site: 900_000_000,
+    } satisfies Budgets;
+    const reserve = reserveFor(minimumCharge(budgets.device));
+    expect(reserve).toBe(400_001);
+    const store = usageStore();
+    const flight = inFlight(
+      store,
+      budgets,
+      Array(130).fill(DEVICES[0]),
+      'automated',
+    );
+    await flight.allHeld;
+    expect(store.rows.get(DEVICES[0])?.held).toBe(100 * reserve);
+    flight.release();
+    expect(tally(await flight.answers)).toEqual({
+      denied: 100,
+      unavailable: 30,
+    });
+    const device = store.rows.get(DEVICES[0]);
+    expect(device?.tokens).toBe(40_000_100);
+    expect(device?.held).toBe(0);
+    const past = (device?.tokens ?? 0) - budgets.device;
+    expect(past).toBeGreaterThan(0);
+    expect(past).toBeLessThanOrEqual(reserve);
+    expect(store.rows.get(SITE)?.tokens).toBe(0);
+  });
+
+  test('turned-away asks from many networks cost the site nothing: it holds nothing, uses nothing and does not wait, and a person from another network is admitted', async () => {
+    const store = usageStore();
+    for (let n = 0; n < 30; n++) {
+      const network = `net:${n.toString(16).padStart(32, '0')}`;
+      const keys = Array.from({ length: 10 }, (_, i) =>
+        (n * 10 + i).toString(16).padStart(32, '0'),
+      );
+      const flight = inFlight(store, BUDGETS, keys, 'automated', network);
+      await flight.allHeld;
+      flight.release();
+      expect(tally(await flight.answers)).toEqual({ denied: 10 });
+      expect(store.rows.get(network)?.tokens).toBe(10 * LEAST);
+    }
+    const site = store.rows.get(SITE);
+    expect(site?.tokens).toBe(0);
+    expect(site?.held).toBe(0);
+    expect(await store.cooling(SITE)).toBeNull();
+    const person = await admitAsk(
+      OTHER_DEVICE,
+      TOKEN,
+      steps(
+        store,
+        BUDGETS,
+        async () => 'person',
+        'net:5f60718293a4b5c6d7e8f90a1b2c3d4e',
+      ),
+    );
+    expect(person.status).toBe('admitted');
+  });
+});
+
+describe('mints one after another', () => {
+  test('mints from one network are bounded by its budget: the network waits once their charges reach it, and later mints are told its time', async () => {
+    const charge = mintCharge(LEAST);
+    expect([LEAST, charge]).toEqual([10_000, 1_000]);
+    const store = usageStore();
+    const answers: MintAdmission[] = [];
+    const answersOf = (status: string) =>
+      answers.filter((answer) => answer.status === status).length;
+    let reachedAt: number | null = null;
+    for (let i = 1; i <= 2_100; i++) {
+      const device = i.toString(16).padStart(32, '0');
+      answers.push(
+        await admitMint(
+          device,
+          steps(store, BUDGETS, async () => 'person'),
+        ),
+      );
+      const network = store.rows.get(NETWORK);
+      if (reachedAt === null && (network?.tokens ?? 0) >= BUDGETS.network)
+        reachedAt = i;
+    }
+    expect(answersOf('issue')).toBe(2_000);
+    expect(
+      answers.slice(0, 2_000).every(({ status }) => status === 'issue'),
+    ).toBe(true);
+    expect(reachedAt).toBe(2_000);
+    expect(store.rows.get(NETWORK)?.tokens).toBe(BUDGETS.network);
+    expect(store.rows.get(NETWORK)?.held).toBe(0);
+    const until = await store.cooling(NETWORK);
+    if (until === null) throw new Error('the network is not waiting');
+    expect(answers.slice(2_000)).toEqual(
+      Array(100).fill({ status: 'cooldown', until }),
+    );
+    // No device's row and no site row: a mint reads them and writes neither.
+    expect([...store.rows.keys()]).toEqual([NETWORK]);
+    const elsewhere = await admitMint(
+      OTHER_DEVICE,
+      steps(
+        store,
+        BUDGETS,
+        async () => 'person',
+        'net:5f60718293a4b5c6d7e8f90a1b2c3d4e',
+      ),
+    );
+    expect(elsewhere).toEqual({ status: 'issue' });
   });
 });

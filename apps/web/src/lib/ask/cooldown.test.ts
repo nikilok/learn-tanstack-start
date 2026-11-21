@@ -6,10 +6,13 @@ import {
   COOLDOWN_SECONDS,
   cooldownHold,
   cooldownNotice,
+  keepCooldown,
   laterCooldown,
+  latestCooldown,
   loadCooldown,
   saveCooldown,
   storedCooldown,
+  waitAfter,
 } from './cooldown';
 
 const HOUR = 60 * 60 * 1000;
@@ -67,6 +70,53 @@ describe('laterCooldown', () => {
   });
 });
 
+describe('latestCooldown', () => {
+  test('a wait already shown that is later than the stored and the told one stands', () => {
+    expect(latestCooldown(NOW + 3 * HOUR, NOW + 2 * HOUR, NOW + HOUR)).toBe(
+      NOW + 3 * HOUR,
+    );
+  });
+
+  test('with nothing stored, the later of the shown and the told one is kept', () => {
+    expect(latestCooldown(NOW + 2 * HOUR, null, NOW + HOUR)).toBe(
+      NOW + 2 * HOUR,
+    );
+    expect(latestCooldown(null, null, NOW + HOUR)).toBe(NOW + HOUR);
+  });
+
+  test('a told wait later than the shown and the stored one is kept', () => {
+    expect(latestCooldown(NOW + HOUR, NOW + 2 * HOUR, NOW + 3 * HOUR)).toBe(
+      NOW + 3 * HOUR,
+    );
+  });
+
+  test('a stored wait later than the shown and the told one is kept', () => {
+    expect(latestCooldown(NOW + HOUR, NOW + 3 * HOUR, NOW + 2 * HOUR)).toBe(
+      NOW + 3 * HOUR,
+    );
+    expect(latestCooldown(null, NOW + 3 * HOUR, NOW + 2 * HOUR)).toBe(
+      NOW + 3 * HOUR,
+    );
+  });
+});
+
+describe('waitAfter', () => {
+  const ENDED = NOW + HOUR;
+
+  test('with nothing stored, no wait is left', () => {
+    expect(waitAfter(ENDED, null)).toBeNull();
+  });
+
+  test('a stored wait that is not later than the one that ended is not kept', () => {
+    expect(waitAfter(ENDED, ENDED - 1)).toBeNull();
+    expect(waitAfter(ENDED, ENDED)).toBeNull();
+  });
+
+  test('a later stored wait is the one still to keep', () => {
+    expect(waitAfter(ENDED, ENDED + HOUR)).toBe(ENDED + HOUR);
+  });
+});
+
 describe('the device’s record', () => {
   // Every test file shares one global: the property goes back exactly as it was found, or a file
   // that assigns its own storage afterwards finds it read-only.
@@ -103,6 +153,24 @@ describe('the device’s record', () => {
     expect(loadCooldown(NOW)).toBeNull();
   });
 
+  test('a wait is kept unless a later one is kept already', () => {
+    keepCooldown(NOW + 2 * HOUR, NOW);
+    expect(loadCooldown(NOW)).toBe(NOW + 2 * HOUR);
+    keepCooldown(NOW + HOUR, NOW);
+    expect(loadCooldown(NOW)).toBe(NOW + 2 * HOUR);
+    keepCooldown(NOW + 3 * HOUR, NOW);
+    expect(loadCooldown(NOW)).toBe(NOW + 3 * HOUR);
+  });
+
+  test('a kept wait that has ended, or one nobody wrote, gives way to the next one kept', () => {
+    saveCooldown(NOW - 1);
+    keepCooldown(NOW + HOUR, NOW);
+    expect(loadCooldown(NOW)).toBe(NOW + HOUR);
+    saveCooldown(NOW + 3 * COOLDOWN);
+    keepCooldown(NOW + 2 * HOUR, NOW);
+    expect(loadCooldown(NOW)).toBe(NOW + 2 * HOUR);
+  });
+
   test('storage that throws is no cooldown known, and nothing is thrown on', () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -112,6 +180,7 @@ describe('the device’s record', () => {
     });
     expect(loadCooldown(NOW)).toBeNull();
     expect(() => saveCooldown(NOW + HOUR)).not.toThrow();
+    expect(() => keepCooldown(NOW + HOUR, NOW)).not.toThrow();
     expect(() => clearCooldown()).not.toThrow();
   });
 });

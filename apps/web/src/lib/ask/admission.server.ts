@@ -10,6 +10,7 @@ import {
   type Budgets,
   type Held,
   minimumCharge,
+  mintCharge,
   reserveFor,
   statementFailure,
 } from './allowance.server';
@@ -72,8 +73,12 @@ const UNAVAILABLE: Admission = { status: 'unavailable' };
 /** The charge of an ask no total is kept for: the owner's, or a local run's with no budget set. */
 const UNCHARGED: Charge = async () => {};
 
-/** One total an ask is counted against: the key of its row, and the tokens it may reach in a window. */
-type Counted = { key: string; budget: number };
+/** One total an ask is counted against: which it is, the key of its row, and the tokens it may reach in a window. */
+type Counted = {
+  of: 'device' | 'network' | 'site';
+  key: string;
+  budget: number;
+};
 
 /** A hold an ask has on one total: what it set aside, and the window it was set in. */
 type Hold = Counted & { opened: string; reserve: number };
@@ -92,13 +97,13 @@ function countedFor(
 ): Counted[] | 'missing' {
   const budgets = deps.budgets();
   const network = deps.network();
-  const totals: [string, string | null, number | null][] = [
-    ['ASK_DAILY_TOKENS', key, budgets.device],
-    ['ASK_DAILY_TOKENS_NETWORK', network, budgets.network],
-    ['ASK_DAILY_TOKENS_SITE', deps.site(), budgets.site],
+  const totals: [Counted['of'], string, string | null, number | null][] = [
+    ['device', 'ASK_DAILY_TOKENS', key, budgets.device],
+    ['network', 'ASK_DAILY_TOKENS_NETWORK', network, budgets.network],
+    ['site', 'ASK_DAILY_TOKENS_SITE', deps.site(), budgets.site],
   ];
   if (standing === 'public') {
-    const unset = totals.flatMap(([name, , budget]) =>
+    const unset = totals.flatMap(([, name, , budget]) =>
       budget === null ? [name] : [],
     );
     if (unset.length > 0) {
@@ -112,8 +117,8 @@ function countedFor(
       return 'missing';
     }
   }
-  return totals.flatMap(([, id, budget]) =>
-    id !== null && budget !== null ? [{ key: id, budget }] : [],
+  return totals.flatMap(([of, , id, budget]) =>
+    id !== null && budget !== null ? [{ of, key: id, budget }] : [],
   );
 }
 
@@ -150,6 +155,40 @@ function settling(
   };
 }
 
+/** When a total waiting out a cooldown opens again; null when it is not waiting. A wait that cannot be read is said and left for the ask's own hold to decide. */
+async function waitOf(
+  total: Counted,
+  deps: AdmissionDeps,
+): Promise<number | null> {
+  try {
+    return await deps.cooling(total.key);
+  } catch (error) {
+    console.error('[ask] usage could not be read:', statementFailure(error));
+    return null;
+  }
+}
+
+/**
+ * Charges a mint against its network's total. Returns when the network
+ * opens again if it is waiting out a cooldown, else null: a network with no
+ * room for the moment, or a charge that cannot be written, is left for the
+ * ask's own hold to decide, the second said.
+ */
+async function chargeMint(
+  network: Counted,
+  charge: number,
+  deps: AdmissionDeps,
+): Promise<number | null> {
+  try {
+    const held = await deps.hold(network.key, network.budget, charge);
+    if (!held.admitted) return 'until' in held ? held.until : null;
+    await deps.settle(network.key, held.opened, charge, network.budget, charge);
+  } catch (error) {
+    console.error('[ask] usage could not be counted:', statementFailure(error));
+  }
+  return null;
+}
+
 /**
  * Whether a device key is issued a token. A request that may not ask is
  * `nobody` before anything else is read. A listed key is refused, the
@@ -158,7 +197,10 @@ function settling(
  * that cannot be read is left for the ask's own hold to decide. A client the
  * check names automated is refused whatever `BROWSER_CHECK_ENFORCE` says; a
  * check that could not run still issues, as each ask is checked again. A mint
- * is charged nothing.
+ * is charged a share of the least an ask costs, against its network's total
+ * alone and before the check is asked, so the tokens issued to one network
+ * are bounded as its asks are. The device's and the site's waits are read
+ * before that charge: a mint either of them tells to wait is charged nothing.
  */
 export async function admitMint(
   key: string,
@@ -170,13 +212,20 @@ export async function admitMint(
   if (standing === 'owner') return { status: 'issue' };
   const counted = countedFor(standing, key, deps);
   if (counted === 'missing') return { status: 'refused' };
+  // The device's and the site's waits are read first: a mint told to wait is charged nothing.
   for (const total of counted) {
-    let until: number | null = null;
-    try {
-      until = await deps.cooling(total.key);
-    } catch (error) {
-      console.error('[ask] usage could not be read:', statementFailure(error));
-    }
+    if (total.of === 'network') continue;
+    const until = await waitOf(total, deps);
+    if (until !== null) return { status: 'cooldown', until };
+  }
+  const network = counted.find((total) => total.of === 'network');
+  if (network !== undefined) {
+    // The charge says as much of the network's wait as a read would.
+    const until = await chargeMint(
+      network,
+      mintCharge(minimumCharge(counted[0].budget)),
+      deps,
+    );
     if (until !== null) return { status: 'cooldown', until };
   }
   const verdict = await deps.verdict();
@@ -201,8 +250,9 @@ export async function admitMint(
  * settle. An ask whose hold cannot be written is `unavailable` as well, so
  * none is answered unmetered. Last, only a browser the check names a person's is admitted,
  * whatever `BROWSER_CHECK_ENFORCE` says. A client it names automated is
- * `denied` and charged the least an ask costs; a check that could not run is
- * `unavailable` and charged nothing.
+ * `denied` and charged the least an ask costs on its device's and its
+ * network's totals, never the site's, whose hold is given back; a check that
+ * could not run is `unavailable` and charged nothing.
  *
  * The caller of an admitted ask owes it one `charge`, with the tokens the
  * ask used, however the ask ended; every total is charged the same.
@@ -259,7 +309,19 @@ export async function admitAsk(
     return UNAVAILABLE;
   }
   if (verdict !== 'person') {
-    await settle(least);
+    // Turned away, it has cost the site nothing: the device and the network are charged, the site's hold given back.
+    await Promise.all([
+      settleAll(
+        holds.filter((hold) => hold.of !== 'site'),
+        least,
+        deps,
+      ),
+      settleAll(
+        holds.filter((hold) => hold.of === 'site'),
+        0,
+        deps,
+      ),
+    ]);
     return DENIED;
   }
   return {

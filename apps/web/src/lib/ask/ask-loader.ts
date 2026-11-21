@@ -125,10 +125,16 @@ export function createAskLoader(
       waiting = laterCooldown(waiting, answer.cooldown);
   };
 
+  /** A mint's answer as it may be used: a token that arrives while a known wait is still ahead is held back, as that wait. */
+  const usable = (answer: AskMintResponse): AskMintResponse =>
+    answer.token !== null && waiting !== null && now() < waiting
+      ? { token: null, cooldown: waiting }
+      : answer;
+
   /** The mint this document holds, minted when there is none or when the wait a held one named is over. */
   const held = async (key: string) => {
     const used = current ?? mintToken(key);
-    const answer = await used;
+    const answer = usable(await used);
     noteMinted(answer);
     if (
       answer.token !== null ||
@@ -141,7 +147,7 @@ export function createAskLoader(
       waiting = null;
     }
     const fresh = current ?? mintToken(key);
-    const renewed = await fresh;
+    const renewed = usable(await fresh);
     noteMinted(renewed);
     return { used: fresh, answer: renewed };
   };
@@ -180,7 +186,7 @@ export function createAskLoader(
     if (answer.status !== 'denied') return wait(answer) as Admitted<T>;
     // Another call may already have replaced the refused token.
     if (current === used) current = null;
-    const fresh = await (current ?? mintToken(key));
+    const fresh = usable(await (current ?? mintToken(key)));
     noteMinted(fresh);
     if (fresh.token === null) return refusal(fresh);
     const retried = await call(fresh.token);

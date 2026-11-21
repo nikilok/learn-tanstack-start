@@ -8,6 +8,7 @@ import {
   HOLD_TOKENS,
   type Held,
   minimumCharge,
+  mintCharge,
 } from './allowance.server';
 
 type Total = keyof Budgets;
@@ -31,6 +32,8 @@ const NONE: Budgets = { device: null, network: null, site: null };
 const LEAST = minimumCharge(BUDGETS.device);
 // A budget whose least charge is over HOLD_TOKENS.
 const BIG_DEVICE = 40_000_000;
+// What a visitor's mint is charged on its network, with the usual budgets.
+const MINT = mintCharge(LEAST);
 // When each total opens again.
 const UNTIL = {
   device: 1_800_000_000_000,
@@ -245,7 +248,7 @@ describe('admitAsk', () => {
     if (admission.status !== 'admitted') throw new Error('not admitted');
     await admission.charge(140_000);
     expect(charged.settles.map(({ opened }) => opened)).toEqual(windows);
-    // The holds given back whole, and the ones a turned-away client is charged for.
+    // The holds given back whole, and the ones a turned-away client is charged for or gives back.
     for (const verdict of ['unchecked', 'automated'] as const) {
       const { fakes, settles } = deps({ hold, verdict });
       await admitAsk(KEY, TOKEN, fakes);
@@ -629,14 +632,17 @@ describe('admitAsk', () => {
     );
     const said = quiet();
     await admitAsk(KEY, TOKEN, deps({ hold: every(failure) }).fakes);
-    await admitMint(KEY, deps({ cooling: every(failure) }).fakes);
+    await admitMint(
+      KEY,
+      deps({ cooling: every(failure), hold: every(failure) }).fakes,
+    );
     const charged = await admitAsk(
       KEY,
       TOKEN,
       deps({ settle: every(failure) }).fakes,
     );
     if (charged.status === 'admitted') await charged.charge(1);
-    // One hold tried, three waits read, three totals settled.
+    // One hold tried; the mint's two waits read and its charge; three totals settled.
     expect(said).toHaveBeenCalledTimes(7);
     for (const call of said.mock.calls) {
       expect(call.join(' ')).not.toContain(KEY);
@@ -644,12 +650,56 @@ describe('admitAsk', () => {
     }
   });
 
-  test('a client the check names automated is denied whatever is enforced elsewhere, and every total is charged the least an ask costs', async () => {
+  test('a client the check names automated is denied whatever is enforced elsewhere: the device and the network are charged the least, and the site’s hold is given back whole', async () => {
     for (const verdict of ['automated', 'verified crawler'] as const) {
       const { fakes, settles } = deps({ verdict });
       expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({ status: 'denied' });
-      expect(settles).toEqual(settledAt(LEAST));
+      expect(settles).toEqual([
+        ...settledAt(LEAST, ['device', 'network']),
+        ...settledAt(0, ['site']),
+      ]);
     }
+  });
+
+  test('a turned-away client gives up its reserve on every total, the site’s given back whole', async () => {
+    const least = minimumCharge(BIG_DEVICE);
+    const { fakes, settles } = deps({
+      budgets: { device: BIG_DEVICE },
+      verdict: 'automated',
+    });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({ status: 'denied' });
+    expect(
+      settles.map(({ key, charge, reserve }) => [key, charge, reserve]),
+    ).toEqual([
+      [KEY, least, least],
+      [NETWORK, least, least],
+      [SITE, 0, least],
+    ]);
+  });
+
+  test('a turned-away client on a local run counted against the site alone gives its hold back and is charged nothing', async () => {
+    const { fakes, holds, settles } = deps({
+      standing: 'local',
+      budgets: { device: null, network: null },
+      verdict: 'automated',
+    });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({ status: 'denied' });
+    expect(holds.map(({ key }) => key)).toEqual([SITE]);
+    expect(settles).toEqual(settledAt(0, ['site']));
+  });
+
+  test('a give-back to the site that cannot be written for a turned-away client is said, and the device and the network are still charged', async () => {
+    const said = quiet();
+    const { fakes, settles } = deps({
+      verdict: 'automated',
+      settle: { site: new Error('network down') },
+    });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({ status: 'denied' });
+    expect(settles).toEqual(settledAt(LEAST, ['device', 'network']));
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be settled:',
+    );
   });
 
   test('a check that could not run is unavailable, and every hold is given back whole', async () => {
@@ -778,7 +828,7 @@ describe('admitAsk', () => {
 });
 
 describe('admitMint', () => {
-  test('a visitor is issued a token once the lists, the waits and the check have passed, in that order', async () => {
+  test('a visitor’s mint reads the device’s and the site’s waits, then charges the network, then asks the check, and a token is issued', async () => {
     const { fakes, read } = deps();
     expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
     expect(read).toEqual([
@@ -788,17 +838,28 @@ describe('admitMint', () => {
       'network',
       'site',
       'cooling device',
-      'cooling network',
       'cooling site',
+      'hold network',
+      'settle network',
       'verdict',
     ]);
   });
 
-  test('a mint holds nothing against any budget and is charged nothing', async () => {
-    const { fakes, holds, settles } = deps();
+  test('a mint is charged a tenth of the least an ask costs, held and settled on the network alone, in the window its hold returned', async () => {
+    expect(MINT).toBe(1_000);
+    expect(MINT).not.toBe(LEAST);
+    expect(MINT).not.toBe(HOLD_TOKENS);
+    const opened = '2026-11-20 23:59:59.999999+00';
+    const { fakes, holds, settles } = deps({
+      hold: { network: { admitted: true, opened } },
+    });
     await admitMint(KEY, fakes);
-    expect(holds).toEqual([]);
-    expect(settles).toEqual([]);
+    expect(holds).toEqual([
+      { key: NETWORK, budget: BUDGETS.network, reserve: MINT },
+    ]);
+    expect(settles).toEqual([
+      { key: NETWORK, opened, charge: MINT, reserve: MINT },
+    ]);
   });
 
   test('a request that may not ask is nobody, before anything else is read', async () => {
@@ -827,8 +888,10 @@ describe('admitMint', () => {
     expect(read).toEqual(['standing', 'listed']);
   });
 
-  test('a device waiting out a cooldown is told when it ends, the other totals are not read, and the check is not asked', async () => {
-    const { fakes, read } = deps({ cooling: { device: UNTIL.device } });
+  test('a device waiting out a cooldown is told when it ends before the network is charged, and the check is not asked', async () => {
+    const { fakes, read, holds, settles } = deps({
+      cooling: { device: UNTIL.device },
+    });
     expect(await admitMint(KEY, fakes)).toEqual({
       status: 'cooldown',
       until: UNTIL.device,
@@ -841,59 +904,122 @@ describe('admitMint', () => {
       'site',
       'cooling device',
     ]);
+    expect(holds).toEqual([]);
+    expect(settles).toEqual([]);
   });
 
-  test('a network waiting out a cooldown is told its time once the device has been read, and the site is not read', async () => {
-    const { fakes, read } = deps({ cooling: { network: UNTIL.network } });
+  test('a network waiting out a cooldown refuses the mint’s charge with its time, which the mint is told, and the check is not asked', async () => {
+    const { fakes, read, holds, settles } = deps({
+      hold: refusedAt('network'),
+    });
     expect(await admitMint(KEY, fakes)).toEqual({
       status: 'cooldown',
       until: UNTIL.network,
     });
-    expect(read.slice(5)).toEqual(['cooling device', 'cooling network']);
+    expect(holds.map(({ key }) => key)).toEqual([NETWORK]);
+    expect(settles).toEqual([]);
+    expect(read.slice(5)).toEqual([
+      'cooling device',
+      'cooling site',
+      'hold network',
+    ]);
   });
 
-  test('the site waiting out a cooldown is told last, once the device and the network have been read, and the check is not asked', async () => {
-    const { fakes, read } = deps({ cooling: { site: UNTIL.site } });
+  test('the site waiting out a cooldown is told before the network is charged: nothing is held or settled, and the check is not asked', async () => {
+    const { fakes, read, holds, settles } = deps({
+      cooling: { site: UNTIL.site },
+    });
     expect(await admitMint(KEY, fakes)).toEqual({
       status: 'cooldown',
       until: UNTIL.site,
     });
+    expect(read.slice(5)).toEqual(['cooling device', 'cooling site']);
+    expect(holds).toEqual([]);
+    expect(settles).toEqual([]);
+  });
+
+  test('with the site and the network both waiting, the site’s time is the one told, and the network is not charged', async () => {
+    const { fakes, holds } = deps({
+      cooling: { site: UNTIL.site },
+      hold: refusedAt('network'),
+    });
+    expect(await admitMint(KEY, fakes)).toEqual({
+      status: 'cooldown',
+      until: UNTIL.site,
+    });
+    expect(holds).toEqual([]);
+  });
+
+  test('a busy network takes no charge: nothing is settled, and the mint goes on to the check and issues', async () => {
+    const { fakes, read, settles } = deps({ hold: busyAt('network') });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(settles).toEqual([]);
     expect(read.slice(5)).toEqual([
       'cooling device',
-      'cooling network',
       'cooling site',
+      'hold network',
+      'verdict',
     ]);
   });
 
-  test('a wait that cannot be read for one total is said, and the next total is still read', async () => {
+  test('a charge whose hold cannot be written is said once, and the mint goes on and issues', async () => {
     const said = quiet();
-    for (const [failing, next] of [
-      ['device', 'network'],
-      ['network', 'site'],
-    ] as const) {
-      said.mockClear();
-      const { fakes } = deps({
-        cooling: {
-          [failing]: new Error('relation missing'),
-          [next]: UNTIL[next],
-        },
-      });
-      expect(await admitMint(KEY, fakes)).toEqual({
-        status: 'cooldown',
-        until: UNTIL[next],
-      });
-      expect(said).toHaveBeenCalledTimes(1);
-      expect(String(said.mock.calls[0]?.[0])).toBe(
-        '[ask] usage could not be read:',
-      );
-    }
+    const { fakes, read, settles } = deps({
+      hold: { network: new Error('relation missing') },
+    });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(settles).toEqual([]);
+    expect(read).toContain('verdict');
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be counted:',
+    );
+  });
+
+  test('a charge whose settle cannot be written is said once, and the mint goes on and issues', async () => {
+    const said = quiet();
+    const { fakes, read } = deps({
+      settle: { network: new Error('relation missing') },
+    });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(read.slice(5)).toEqual([
+      'cooling device',
+      'cooling site',
+      'hold network',
+      'settle network',
+      'verdict',
+    ]);
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be counted:',
+    );
+  });
+
+  test('a device’s or the site’s wait that cannot be read is said, and the next total is still handled', async () => {
+    const said = quiet();
+    const device = deps({ cooling: { device: new Error('relation missing') } });
+    expect(await admitMint(KEY, device.fakes)).toEqual({ status: 'issue' });
+    expect(device.settles.map(({ key }) => key)).toEqual([NETWORK]);
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be read:',
+    );
+    said.mockClear();
+    const site = deps({ cooling: { site: new Error('relation missing') } });
+    expect(await admitMint(KEY, site.fakes)).toEqual({ status: 'issue' });
+    expect(site.read.at(-1)).toBe('verdict');
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be read:',
+    );
   });
 
   test('a wait that cannot be read is left for the ask’s own hold: the check decides the token', async () => {
     const said = quiet();
     const { fakes } = deps({ cooling: every(new Error('relation missing')) });
     expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
-    expect(said).toHaveBeenCalledTimes(3);
+    // The device's and the site's: the network is charged, not read.
+    expect(said).toHaveBeenCalledTimes(2);
     expect(
       await admitMint(
         KEY,
@@ -902,14 +1028,72 @@ describe('admitMint', () => {
     ).toEqual({ status: 'refused' });
   });
 
-  test('a client the check names automated is refused whatever is enforced elsewhere; a check that could not run still issues', async () => {
-    for (const verdict of ['automated', 'verified crawler'] as const)
-      expect(await admitMint(KEY, deps({ verdict }).fakes)).toEqual({
-        status: 'refused',
-      });
-    expect(await admitMint(KEY, deps({ verdict: 'unchecked' }).fakes)).toEqual({
-      status: 'issue',
+  test('a client the check names automated is refused and its charge stands; a check that could not run still issues, and its charge stands', async () => {
+    for (const verdict of ['automated', 'verified crawler'] as const) {
+      const { fakes, settles } = deps({ verdict });
+      expect(await admitMint(KEY, fakes)).toEqual({ status: 'refused' });
+      expect(settles.map(({ key, charge }) => [key, charge])).toEqual([
+        [NETWORK, MINT],
+      ]);
+    }
+    const { fakes, settles } = deps({ verdict: 'unchecked' });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(settles.map(({ key, charge }) => [key, charge])).toEqual([
+      [NETWORK, MINT],
+    ]);
+  });
+
+  test('the owner, a listed key, a request that may not ask, and a public visitor missing a budget or a network are charged nothing', async () => {
+    quiet();
+    for (const setup of [
+      { standing: 'owner' },
+      { listed: true },
+      { standing: null },
+      { budgets: { device: null } },
+      { budgets: { network: null } },
+      { budgets: { site: null } },
+      { network: null },
+    ] satisfies Setup[]) {
+      const { fakes, holds, settles } = deps(setup);
+      await admitMint(KEY, fakes);
+      expect(holds).toEqual([]);
+      expect(settles).toEqual([]);
+    }
+  });
+
+  test('a local run with no budgets is charged nothing for a mint', async () => {
+    const { fakes, holds, settles } = deps({
+      standing: 'local',
+      budgets: NONE,
     });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(holds).toEqual([]);
+    expect(settles).toEqual([]);
+  });
+
+  test('a local run with a network budget and a network charges its mint on the first counted total’s least', async () => {
+    const charge = mintCharge(minimumCharge(BUDGETS.network));
+    expect(charge).toBe(2_000);
+    const { fakes, settles } = deps({
+      standing: 'local',
+      budgets: { device: null },
+    });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(settles).toEqual([
+      { key: NETWORK, opened: OPENED.network, charge, reserve: charge },
+    ]);
+  });
+
+  test('a local run with a network budget but no network charges nothing for a mint and is not refused', async () => {
+    const said = quiet();
+    const { fakes, holds, settles } = deps({
+      standing: 'local',
+      network: null,
+    });
+    expect(await admitMint(KEY, fakes)).toEqual({ status: 'issue' });
+    expect(holds).toEqual([]);
+    expect(settles).toEqual([]);
+    expect(said).not.toHaveBeenCalled();
   });
 
   test('a public visitor is refused without a budget set, and it is said; a local run goes without', async () => {

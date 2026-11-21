@@ -48,9 +48,10 @@ import {
 import { askAtMount } from '../lib/ask/at-mount';
 import {
   clearCooldown,
-  laterCooldown,
+  keepCooldown,
+  latestCooldown,
   loadCooldown,
-  saveCooldown,
+  waitAfter,
 } from '../lib/ask/cooldown';
 import {
   askEligible,
@@ -296,9 +297,10 @@ function Home() {
     ASK_PUBLIC ? 'open' : 'off',
   );
   // When this device may ask again while it waits out a cooldown
-  // (lib/ask/cooldown): the time the server last named, kept for the device
-  // and read at mount, so a returning visitor is told at once and nothing is
-  // sent meanwhile. Null on every first render, as the server knows none.
+  // (lib/ask/cooldown): the latest time the server has named, kept for the
+  // device and read at mount, so a returning visitor is told at once and
+  // nothing is sent meanwhile. Null on every first render, as the server
+  // knows none.
   const [cooldown, setCooldown] = useState<number | null>(null);
   // False on the first render only, for the same reason: what the entry
   // carries (its ranking) is read from the second on.
@@ -315,17 +317,25 @@ function Home() {
     setAskAccess(learnt.access);
     setCooldown(learnt.cooldown);
   }, []);
-  /** Notes a cooldown the server named: kept for the device, and shown until it ends. */
+  /** Notes a cooldown the server named: the latest of it, the one shown and the one kept for the device is shown until it ends. */
   const noteCooldown = useCallback((told: number) => {
-    const until = laterCooldown(loadCooldown(), told);
-    saveCooldown(until);
-    setCooldown(until);
+    const stored = loadCooldown();
+    setCooldown((shown) => latestCooldown(shown, stored, told));
   }, []);
-  // The wait over, asking is offered again.
+  // The wait shown is kept for the device, whichever way it was learnt.
+  useEffect(() => {
+    if (cooldown !== null) keepCooldown(cooldown);
+  }, [cooldown]);
+  // The wait over, asking is offered again, unless another tab has kept a later one since.
   useEffect(() => {
     if (cooldown === null) return;
     const timer = setTimeout(
       () => {
+        const later = waitAfter(cooldown, loadCooldown());
+        if (later !== null) {
+          setCooldown(later);
+          return;
+        }
         clearCooldown();
         setCooldown(null);
       },

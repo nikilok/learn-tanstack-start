@@ -48,6 +48,14 @@ export function tokenBudgets(
  */
 export const HOLD_TOKENS = 200_000;
 
+/** The mints the least charge of one ask covers. */
+const MINTS_PER_ASK = 10;
+
+/** What a mint is charged against its network's total: a share of the least an ask is charged, so the tokens issued to one network are bounded as its asks are. */
+export function mintCharge(least: number): number {
+  return Math.ceil(least / MINTS_PER_ASK);
+}
+
 /** What an ask sets aside from each total while it runs: the usual hold, or the least it will be charged where that is more, so asks sent together are never charged past what they set aside between them. */
 export function reserveFor(least: number): number {
   return Math.max(HOLD_TOKENS, least);

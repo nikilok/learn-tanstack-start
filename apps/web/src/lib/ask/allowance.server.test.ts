@@ -11,6 +11,7 @@ import {
   holdAsk,
   holdStatement,
   minimumCharge,
+  mintCharge,
   pruneStatement,
   type Run,
   settleAsk,
@@ -188,6 +189,19 @@ describe('minimumCharge', () => {
     expect(minimumCharge(250)).toBe(3);
     expect(minimumCharge(1)).toBe(1);
     expect(minimumCharge(99)).toBe(1);
+  });
+});
+
+describe('mintCharge', () => {
+  test('is a tenth of the least an ask is charged', () => {
+    expect(mintCharge(10_000)).toBe(1_000);
+    expect(mintCharge(400_000)).toBe(40_000);
+  });
+
+  test('rounds up, and is never nothing', () => {
+    expect(mintCharge(400_001)).toBe(40_001);
+    expect(mintCharge(15)).toBe(2);
+    expect(mintCharge(1)).toBe(1);
   });
 });
 

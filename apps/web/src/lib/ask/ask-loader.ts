@@ -4,7 +4,7 @@
 
 import type { SearchUrlParams } from '@ss/search-filters';
 
-import { laterCooldown } from './cooldown';
+import { laterCooldown, toldCooldown } from './cooldown';
 
 /** Why a plan is empty when it is, as the engine reports it: the wire contract, restated here so the browser never depends on the engine's types. */
 export type EmptyReason = 'none' | 'name' | 'beyond' | 'unmatched';
@@ -92,11 +92,12 @@ const OFF = { status: 'off' } as const;
  * call that throws rejects with the token kept, since the token was not
  * what failed.
  *
- * A device told to wait out a cooldown, by the mint or by a call, is not
- * asked about again until the wait is over: every call in between answers
- * with the cooldown, and the first one after it mints afresh. `holdUntil`
- * holds the document to a wait the page learnt elsewhere, one kept for the
- * device or told another tab, on the same terms.
+ * A device told to wait out a cooldown, by the mint, by a call or by the
+ * page (`holdUntil`: a wait kept for the device, or told another tab), is not
+ * asked about again until the wait is over. One check stands before
+ * everything the document would send or say (`gate`), read in the same turn
+ * as what it guards: every call in between answers with the latest wait
+ * held, and the first one after it mints afresh.
  */
 export function createAskLoader(
   mint: Mint,
@@ -104,9 +105,32 @@ export function createAskLoader(
   rank: Rank,
   now: () => number = Date.now,
 ) {
+  // The mint this document holds: in flight, or answered with a token or with nothing. It goes with every wait held.
   let current: Promise<AskMintResponse> | null = null;
-  // The latest wait a mint, a call or the page has named, until it is over: the one every call is held to.
+  // The latest wait a mint, a call or the page has named: the one every call is held to until it is over.
   let waiting: number | null = null;
+
+  /** The wait held while it is still ahead: one that is over is forgotten as it is read. */
+  const ahead = (): number | null => {
+    if (waiting !== null && now() >= waiting) waiting = null;
+    return waiting;
+  };
+
+  /** What stands before anything this document would send or say: the wait held, while one is ahead. */
+  const gate = (): AskCooldown | null => {
+    const until = ahead();
+    return until === null ? null : { status: 'cooldown', until };
+  };
+
+  /** Holds the document to a wait still ahead, the later of it and one held already. The token goes with it, so the first call after the wait mints afresh. */
+  const hold = (until: number): void => {
+    if (now() >= until) return;
+    waiting = laterCooldown(ahead(), until);
+    current = null;
+  };
+
+  /** Holds the document to a wait the server has just named: never over as it is told, whatever this device's clock says (`toldCooldown`). */
+  const told = (until: number): void => hold(toldCooldown(until, now()));
 
   const mintToken = (key: string) => {
     const minted = mint(key);
@@ -117,73 +141,40 @@ export function createAskLoader(
     return minted;
   };
 
-  /** Holds a wait that is still ahead, the later of it and one held already: one a mint named, or one the page learnt elsewhere (`holdUntil`). */
-  const hold = (until: number): void => {
-    if (now() < until) waiting = laterCooldown(waiting, until);
-  };
-
   /**
-   * A mint's answer as a call may act on it. A wait it names is held; and
-   * while a wait held is still ahead, that wait is the answer, whatever this
-   * one carries: a token, an earlier wait, or nothing at all.
+   * A token to send with and the mint it came from, or why there is none.
+   * While a wait is held no mint is started or joined, and one that throws
+   * during a wait answers the wait. A wait the mint names is held; what a
+   * mint that issued nothing means is its caller's to read through `gate`,
+   * as a wait may be held by then.
    */
-  const settled = (answer: AskMintResponse): AskMintResponse => {
-    if (answer.token === null && answer.cooldown !== undefined)
-      hold(answer.cooldown);
-    return waiting !== null && now() < waiting
-      ? { token: null, cooldown: waiting }
-      : answer;
-  };
-
-  /** The mint to read: the wait held while one is still ahead, with none started or joined; else the mint this document holds, or a new one. */
-  const minting = (key: string): Promise<AskMintResponse> =>
-    waiting !== null && now() < waiting
-      ? Promise.resolve({ token: null, cooldown: waiting })
-      : (current ?? mintToken(key));
-
-  /**
-   * The mint this document holds and what it answered, minted when there is
-   * none and afresh when every wait held is over. The answer is as it came:
-   * its caller reads it through `settled` as it resumes, so a wait told in
-   * between counts.
-   */
-  const held = async (key: string) => {
-    const used = minting(key);
-    const answer = await used;
-    if (
-      answer.token !== null ||
-      answer.cooldown === undefined ||
-      now() < answer.cooldown
-    )
-      return { used, answer };
-    // The wait this answer named is over: it goes, a wait held that is over is forgotten, and the next mint starts afresh unless a later wait is held.
-    if (current === used) current = null;
-    if (waiting !== null && now() >= waiting) waiting = null;
-    const fresh = minting(key);
-    return { used: fresh, answer: await fresh };
-  };
-
-  /** What a mint that issued nothing means: a cooldown to wait out, or off. */
-  const refusal = (answer: AskMintResponse): { status: 'off' } | AskCooldown =>
-    answer.cooldown === undefined
-      ? OFF
-      : { status: 'cooldown', until: answer.cooldown };
-
-  /** Remembers a cooldown a call named, the later of it and one already held, so nothing is sent until it is over. The token goes with it: the next call mints. */
-  const wait = <T extends Refusable>(answer: T): T => {
-    if (answer.status === 'cooldown') {
-      waiting = laterCooldown(
-        waiting,
-        (answer as unknown as AskCooldown).until,
-      );
-      current = Promise.resolve({ token: null, cooldown: waiting });
+  const acquire = async (
+    key: string,
+  ): Promise<
+    | { token: string; from: Promise<AskMintResponse> }
+    | { status: 'off' }
+    | AskCooldown
+  > => {
+    const held = gate();
+    if (held) return held;
+    const from = current ?? mintToken(key);
+    let answer: AskMintResponse;
+    try {
+      answer = await from;
+    } catch (error) {
+      const during = gate();
+      if (during) return during;
+      throw error;
     }
-    return answer;
+    if (answer.token === null && answer.cooldown !== undefined)
+      told(answer.cooldown);
+    return answer.token === null ? OFF : { token: answer.token, from };
   };
 
   const prepare = async (key: string): Promise<AskOffer> => {
-    const answer = settled((await held(key)).answer);
-    return answer.token === null ? refusal(answer) : { status: 'open' };
+    const got = await acquire(key);
+    // Read again as this resumes: a wait told since counts.
+    return gate() ?? ('token' in got ? { status: 'open' } : got);
   };
 
   /** Runs `call` with the document's token, replacing a refused one once; off when nothing is issued or the replacement is refused too. */
@@ -191,18 +182,25 @@ export function createAskLoader(
     key: string,
     call: (token: string) => Promise<T>,
   ): Promise<Admitted<T> | { status: 'off' } | AskCooldown> => {
-    const { used, answer: minted } = await held(key);
-    // Read here, with nothing awaited before the call is sent.
-    const first = settled(minted);
-    if (first.token === null) return refusal(first);
-    const answer = await call(first.token);
-    if (answer.status !== 'denied') return wait(answer) as Admitted<T>;
-    // Another call may already have replaced the refused token. Read as the first was: a wait that has ended since gives way to a new mint.
-    if (current === used) current = null;
-    const fresh = settled((await held(key)).answer);
-    if (fresh.token === null) return refusal(fresh);
-    const retried = await call(fresh.token);
-    return retried.status === 'denied' ? OFF : (wait(retried) as Admitted<T>);
+    for (let replaced = false; ; replaced = true) {
+      const got = await acquire(key);
+      // Read here, with nothing awaited before the call is sent: a wait told since the token was read counts.
+      const held = gate();
+      if (held) return held;
+      if (!('token' in got)) return got;
+      const answer = await call(got.token);
+      if (answer.status === 'cooldown') {
+        told((answer as unknown as AskCooldown).until);
+        return gate() ?? (answer as Admitted<T>);
+      }
+      if (answer.status !== 'denied') return answer as Admitted<T>;
+      // A refused token. A wait told meanwhile is the answer; else it is replaced, once.
+      const during = gate();
+      if (during) return during;
+      if (replaced) return OFF;
+      // Another call may already have replaced it.
+      if (current === got.from) current = null;
+    }
   };
 
   const ask = (

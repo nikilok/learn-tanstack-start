@@ -54,7 +54,6 @@ import {
   latestCooldown,
   loadCooldown,
   onCooldownKept,
-  toldCooldown,
   waitAfter,
 } from '../lib/ask/cooldown';
 import {
@@ -323,11 +322,9 @@ function Home() {
   }, []);
   /** Notes a cooldown the server named: kept for the device at once, whether or not the route is still here to show it, and the latest of it, the one shown and the one kept is shown until it ends. */
   const noteCooldown = useCallback((told: number) => {
-    // Never over as it is told, whatever this device's clock says.
-    const until = toldCooldown(told, Date.now());
-    keepCooldown(until);
+    keepCooldown(told);
     const stored = loadCooldown();
-    setCooldown((shown) => latestCooldown(shown, stored, until));
+    setCooldown((shown) => latestCooldown(shown, stored, told));
   }, []);
   // The wait shown is kept for the device, whichever way it was learnt, and the document's asks are held to it.
   useEffect(() => {

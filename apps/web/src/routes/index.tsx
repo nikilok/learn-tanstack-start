@@ -46,7 +46,12 @@ import {
   saveApplied,
 } from '../lib/ask/applied-store';
 import { askAtMount } from '../lib/ask/at-mount';
-import { clearCooldown, loadCooldown, saveCooldown } from '../lib/ask/cooldown';
+import {
+  clearCooldown,
+  laterCooldown,
+  loadCooldown,
+  saveCooldown,
+} from '../lib/ask/cooldown';
 import {
   askEligible,
   askWordCount,
@@ -311,7 +316,8 @@ function Home() {
     setCooldown(learnt.cooldown);
   }, []);
   /** Notes a cooldown the server named: kept for the device, and shown until it ends. */
-  const noteCooldown = useCallback((until: number) => {
+  const noteCooldown = useCallback((told: number) => {
+    const until = laterCooldown(loadCooldown(), told);
     saveCooldown(until);
     setCooldown(until);
   }, []);

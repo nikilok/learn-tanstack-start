@@ -17,6 +17,7 @@ import {
   settleStatement,
   statementFailure,
   tokenBudget,
+  reserveFor,
   tokenBudgets,
 } from './allowance.server';
 import { COOLDOWN_SECONDS } from './cooldown';
@@ -24,12 +25,22 @@ import { COOLDOWN_SECONDS } from './cooldown';
 const KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 const UNTIL = 1_800_000_000_000;
 const BUDGET = 1_000_000;
+// A reserve other than HOLD_TOKENS, as a large budget's least charge sets.
+const RESERVE = 400_000;
 // The start of a window, as the database says it.
 const OPENED = '2026-11-21 14:05:00.123456+00';
 const dialect = new PgDialect();
 
 /** A statement as the driver would send it. */
 const sent = (statement: SQL) => dialect.sqlToQuery(statement);
+
+/** A statement's text as sent, on one line. */
+const flat = (statement: SQL) =>
+  sent(statement).sql.replace(/\s+/g, ' ').trim();
+
+// The span and the spent-row test as the statements splice them.
+const SPAN = `interval '${COOLDOWN_SECONDS} seconds'`;
+const SPENT = `(u.cooldown_until IS NOT NULL OR u.window_started_at <= now() - ${SPAN})`;
 
 /** Which of the module's statements one is, by its verb. */
 const verb = (statement: SQL) => sent(statement).sql.trim().split(/\s+/)[0];
@@ -180,15 +191,67 @@ describe('minimumCharge', () => {
   });
 });
 
+describe('reserveFor', () => {
+  test('a least charge below the usual hold sets aside the usual hold', () => {
+    expect(reserveFor(10_000)).toBe(HOLD_TOKENS);
+    expect(reserveFor(1)).toBe(HOLD_TOKENS);
+  });
+
+  test('a least charge at the usual hold sets aside exactly that', () => {
+    expect(reserveFor(HOLD_TOKENS)).toBe(HOLD_TOKENS);
+  });
+
+  test('a least charge above the usual hold sets aside the least charge', () => {
+    expect(reserveFor(400_000)).toBe(400_000);
+    expect(reserveFor(HOLD_TOKENS + 1)).toBe(HOLD_TOKENS + 1);
+  });
+});
+
 describe('the statements', () => {
+  test('the hold and the settle bind the reserve they are given, where HOLD_TOKENS would be', () => {
+    expect(sent(holdStatement(KEY, BUDGET, RESERVE)).params).toEqual([
+      KEY,
+      RESERVE,
+      BUDGET,
+      BUDGET,
+      BUDGET,
+      BUDGET,
+    ]);
+    expect(
+      sent(settleStatement(KEY, OPENED, 41_000, BUDGET, RESERVE)).params,
+    ).toEqual([41_000, RESERVE, 41_000, BUDGET, KEY, OPENED]);
+  });
+
+  test('given no reserve, the hold and the settle bind HOLD_TOKENS', () => {
+    expect(sent(holdStatement(KEY, BUDGET)).params[1]).toBe(HOLD_TOKENS);
+    expect(sent(settleStatement(KEY, OPENED, 1, BUDGET)).params[1]).toBe(
+      HOLD_TOKENS,
+    );
+  });
+
+  test('the text of the hold and the settle is the same whatever reserve they bind', () => {
+    expect(sent(holdStatement(KEY, BUDGET, RESERVE)).sql).toBe(
+      sent(holdStatement(KEY, BUDGET)).sql,
+    );
+    expect(sent(settleStatement(KEY, OPENED, 1, BUDGET, RESERVE)).sql).toBe(
+      sent(settleStatement(KEY, OPENED, 1, BUDGET)).sql,
+    );
+  });
+
   test('the key, the hold, the budget, the charge and the window are bound, never spliced', () => {
     const hold = sent(holdStatement(KEY, BUDGET));
-    expect(hold.params).toEqual([KEY, HOLD_TOKENS, BUDGET, BUDGET]);
+    expect(hold.params).toEqual([
+      KEY,
+      HOLD_TOKENS,
+      BUDGET,
+      BUDGET,
+      BUDGET,
+      BUDGET,
+    ]);
     expect(hold.sql).not.toContain(KEY);
     expect(hold.sql).not.toContain(String(BUDGET));
     const settle = sent(settleStatement(KEY, OPENED, 41_000, BUDGET));
     expect(settle.params).toEqual([
-      HOLD_TOKENS,
       41_000,
       HOLD_TOKENS,
       41_000,
@@ -211,11 +274,39 @@ describe('the statements', () => {
     expect(sent(pruneStatement()).sql).toContain(span);
   });
 
-  test('a waiting device’s row is left unwritten and unreturned by the hold', () => {
-    const hold = sent(holdStatement(KEY, BUDGET)).sql.replace(/\s+/g, ' ');
-    expect(hold).toContain('ON CONFLICT (device_key) DO UPDATE SET');
+  test('a new row starts with no tokens used and the ask’s hold set aside', () => {
+    expect(flat(holdStatement(KEY, BUDGET))).toStartWith(
+      'INSERT INTO ask_usage AS u (device_key, window_started_at, tokens, held, cooldown_until) VALUES ($1, now(), 0, $2::int, NULL) ON CONFLICT (device_key) DO UPDATE SET',
+    );
+  });
+
+  test('the hold sets room aside in held, never in the tokens used, and starts a cooldown only on the tokens used', () => {
+    const hold = flat(holdStatement(KEY, BUDGET));
     expect(hold).toContain(
-      'WHERE u.cooldown_until IS NULL OR u.cooldown_until <= now() RETURNING',
+      `tokens = CASE WHEN ${SPENT} THEN 0 ELSE u.tokens END,`,
+    );
+    expect(hold).toContain(
+      `held = CASE WHEN ${SPENT} THEN excluded.held WHEN u.tokens < $3::int THEN u.held + excluded.held ELSE u.held END,`,
+    );
+    expect(hold).toContain(
+      `cooldown_until = CASE WHEN ${SPENT} OR u.tokens < $4::int THEN NULL ELSE now() + ${SPAN} END`,
+    );
+  });
+
+  test('the hold writes no row waiting out a cooldown, nor one whose room is taken up by holds alone', () => {
+    const hold = flat(holdStatement(KEY, BUDGET));
+    const where = hold.slice(
+      hold.indexOf(' WHERE '),
+      hold.indexOf(' RETURNING '),
+    );
+    expect(where).toBe(
+      ` WHERE (u.cooldown_until IS NULL OR u.cooldown_until <= now()) AND (${SPENT} OR u.tokens >= $5::int OR u.tokens + u.held < $6::int)`,
+    );
+  });
+
+  test('a settle gives up its hold, adds its charge to the tokens used, and starts a cooldown on those alone', () => {
+    expect(flat(settleStatement(KEY, OPENED, 1, BUDGET))).toStartWith(
+      `UPDATE ask_usage AS u SET tokens = u.tokens + $1::int, held = greatest(u.held - $2::int, 0), cooldown_until = CASE WHEN u.cooldown_until > now() THEN u.cooldown_until WHEN u.tokens + $3::int >= $4::int THEN now() + ${SPAN} ELSE u.cooldown_until END WHERE`,
     );
   });
 
@@ -239,7 +330,7 @@ describe('the statements', () => {
       settle
         .trim()
         .endsWith(
-          'WHERE u.device_key = $6 AND u.window_started_at = $7::timestamptz',
+          'WHERE u.device_key = $5 AND u.window_started_at = $6::timestamptz',
         ),
     ).toBe(true);
   });
@@ -285,9 +376,11 @@ describe('holdAsk', () => {
     expect(ran).toEqual(['INSERT']);
   });
 
-  test('an ask admitted with no window to settle it in is a failure, never an admission, and is not asked for again', async () => {
+  test('an ask admitted with no window to settle it in is a failure at once, never an admission, and is not asked for again', async () => {
     for (const row of [{ admitted: 1 }, { admitted: 1, opened: '' }]) {
-      const { run, ran } = store({ INSERT: [[row]] });
+      const { run, ran } = store({
+        INSERT: [[row], [{ admitted: 1, opened: OPENED }]],
+      });
       await expect(holdAsk(KEY, BUDGET, run)).rejects.toThrow(
         'an ask could not be counted',
       );
@@ -319,7 +412,7 @@ describe('holdAsk', () => {
     expect(ran).toEqual(['INSERT', 'SELECT']);
   });
 
-  test('a cooldown that ended between the hold and the read is asked for again', async () => {
+  test('a total found without room and not waiting is asked for again, and admitted when room has opened', async () => {
     const { run, ran } = store({
       INSERT: [[], [{ admitted: 1, opened: OPENED }]],
       SELECT: [[]],
@@ -331,11 +424,24 @@ describe('holdAsk', () => {
     expect(ran).toEqual(['INSERT', 'SELECT', 'INSERT']);
   });
 
-  test('an ask that can be neither admitted nor placed is a failure, never an admission', async () => {
+  test('a total whose room is taken up by asks still running, on both tries, is busy and never a throw', async () => {
     const { run, ran } = store({ INSERT: [[], []], SELECT: [[], []] });
-    await expect(holdAsk(KEY, BUDGET, run)).rejects.toThrow(
-      'an ask could not be counted',
-    );
+    expect(await holdAsk(KEY, BUDGET, run)).toEqual({
+      admitted: false,
+      busy: true,
+    });
+    expect(ran).toEqual(['INSERT', 'SELECT', 'INSERT', 'SELECT']);
+  });
+
+  test('a busy total that is found waiting on the second try is told its time', async () => {
+    const { run, ran } = store({
+      INSERT: [[], [{ admitted: 0 }]],
+      SELECT: [[], [{ until: String(UNTIL) }]],
+    });
+    expect(await holdAsk(KEY, BUDGET, run)).toEqual({
+      admitted: false,
+      until: UNTIL,
+    });
     expect(ran).toEqual(['INSERT', 'SELECT', 'INSERT', 'SELECT']);
   });
 
@@ -344,6 +450,22 @@ describe('holdAsk', () => {
       throw new Error('network down');
     };
     await expect(holdAsk(KEY, BUDGET, run)).rejects.toThrow('network down');
+  });
+
+  test('the reserve it is given is what every try sets aside, and HOLD_TOKENS when it is given none', async () => {
+    const given = store({
+      INSERT: [[], [{ admitted: 1, opened: OPENED }]],
+      SELECT: [[]],
+    });
+    await holdAsk(KEY, BUDGET, given.run, RESERVE);
+    expect(given.ran).toEqual(['INSERT', 'SELECT', 'INSERT']);
+    expect([given.params[0]?.[1], given.params[2]?.[1]]).toEqual([
+      RESERVE,
+      RESERVE,
+    ]);
+    const none = store({ INSERT: [[{ admitted: 1, opened: OPENED }]] });
+    await holdAsk(KEY, BUDGET, none.run);
+    expect(none.params[0]?.[1]).toBe(HOLD_TOKENS);
   });
 });
 
@@ -354,8 +476,15 @@ describe('settleAsk', () => {
     await settleAsk(KEY, OPENED, 0, BUDGET, run);
     await settleAsk(KEY, OPENED, -5, BUDGET, run);
     expect(ran).toEqual(['UPDATE', 'UPDATE', 'UPDATE']);
-    expect(params.map((p) => p[1])).toEqual([41_201, 0, 0]);
+    expect(params.map((p) => p[0])).toEqual([41_201, 0, 0]);
     expect(params.map((p) => p.at(-1))).toEqual([OPENED, OPENED, OPENED]);
+  });
+
+  test('gives up the reserve it is given, and HOLD_TOKENS when it is given none', async () => {
+    const { run, params } = store({ UPDATE: [[], []] });
+    await settleAsk(KEY, OPENED, 41_000, BUDGET, run, RESERVE);
+    await settleAsk(KEY, OPENED, 41_000, BUDGET, run);
+    expect(params.map((p) => p[1])).toEqual([RESERVE, HOLD_TOKENS]);
   });
 
   test('a settle that fails throws: its caller says so', async () => {

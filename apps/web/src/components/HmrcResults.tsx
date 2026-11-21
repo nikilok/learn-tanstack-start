@@ -19,6 +19,7 @@ import type { AskHint } from '../lib/ask/session';
 import {
   nextSceneLast,
   quietListing,
+  sceneNote,
   sceneShown,
 } from '../lib/search/empty-state';
 import { rehydratePending, storeFilters } from '../lib/search/persist';
@@ -409,6 +410,7 @@ export default function HmrcResults({
   // zoom plays once, no remount. The message is gated on `confirmedEmpty` (NOT the loading
   // hold) so we never assert "not found" for a refined term that may still return matches.
   if (showScene) {
+    const note = sceneNote(ask, moreHeld);
     return (
       <>
         <BlackHole fullscreen className="z-0" />
@@ -430,32 +432,19 @@ export default function HmrcResults({
                   ? `No organisations found matching “${search}” with your filters`
                   : 'No organisations match these filters'}
             </p>
-            {/* The ask itself had nothing to offer for this text, or the device waits out a cooldown (lib/ask). */}
-            {ask &&
-              (ask.status === 'empty' ||
-                ask.status === 'unavailable' ||
-                ask.status === 'cooldown') && (
-                <p
-                  className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink-soft) shadow-md backdrop-blur-md"
-                  style={{
-                    backgroundColor:
-                      'color-mix(in srgb, var(--surface) 85%, transparent)',
-                  }}
-                  aria-live="polite"
-                >
-                  {ask.status === 'cooldown'
-                    ? cooldownNotice(ask.until)
-                    : ask.status !== 'empty'
-                      ? 'Ask isn’t available right now.'
-                      : ask.reason === 'name'
-                        ? 'That reads as one organisation’s name, and it isn’t on the register.'
-                        : ask.reason === 'beyond'
-                          ? 'That asks for something the register doesn’t hold.'
-                          : ask.reason === 'unmatched'
-                            ? 'Nothing we’ve read on a sponsor’s website describes that.'
-                            : 'Couldn’t turn that into filters.'}
-                </p>
-              )}
+            {/* What the ask had to say of this text, or when the rest of a question's answer can load (lib/search/empty-state). */}
+            {note !== null && (
+              <p
+                className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink-soft) shadow-md backdrop-blur-md"
+                style={{
+                  backgroundColor:
+                    'color-mix(in srgb, var(--surface) 85%, transparent)',
+                }}
+                aria-live="polite"
+              >
+                {note}
+              </p>
+            )}
             {/* Users forget filters are on — offer the exit right where the dead end happens. */}
             {filtersActive && <ResetFilters search={search} />}
           </div>

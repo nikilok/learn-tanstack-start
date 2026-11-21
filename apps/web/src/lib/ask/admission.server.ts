@@ -10,6 +10,7 @@ import {
   type Budgets,
   type Held,
   minimumCharge,
+  reserveFor,
   statementFailure,
 } from './allowance.server';
 
@@ -29,14 +30,15 @@ export type AdmissionDeps = {
   site: () => string;
   /** When a total that is waiting out a cooldown opens again; null when it is not waiting. */
   cooling: (key: string) => Promise<number | null>;
-  /** Admits one ask on a hold against one total's budget, or says when that total opens again. */
-  hold: (key: string, budget: number) => Promise<Held>;
-  /** Replaces an admitted ask's hold on one total with the tokens it is charged, in the window the hold was set in (`opened`). */
+  /** Admits one ask on a hold of `reserve` tokens against one total's budget, says when that total opens again, or says it is busy. */
+  hold: (key: string, budget: number, reserve: number) => Promise<Held>;
+  /** Gives up an admitted ask's hold of `reserve` tokens on one total for the tokens it is charged, in the window the hold was set in (`opened`). */
   settle: (
     key: string,
     opened: string,
     charge: number,
     budget: number,
+    reserve: number,
   ) => Promise<void>;
   /** The browser check's verdict on the request (lib/device/browser-check.server). */
   verdict: () => Promise<BrowserVerdict | 'unchecked'>;
@@ -73,8 +75,8 @@ const UNCHARGED: Charge = async () => {};
 /** One total an ask is counted against: the key of its row, and the tokens it may reach in a window. */
 type Counted = { key: string; budget: number };
 
-/** A hold an ask has on one total, and the window it was set in. */
-type Hold = Counted & { opened: string };
+/** A hold an ask has on one total: what it set aside, and the window it was set in. */
+type Hold = Counted & { opened: string; reserve: number };
 
 /**
  * The totals a visitor's ask is counted against, in the order they are held:
@@ -122,9 +124,9 @@ async function settleAll(
   deps: AdmissionDeps,
 ): Promise<void> {
   await Promise.all(
-    holds.map(async ({ key, opened, budget }) => {
+    holds.map(async ({ key, opened, budget, reserve }) => {
       try {
-        await deps.settle(key, opened, charge, budget);
+        await deps.settle(key, opened, charge, budget, reserve);
       } catch (error) {
         console.error(
           '[ask] usage could not be settled:',
@@ -194,8 +196,10 @@ export async function admitMint(
  * against, its device's first, then its network's, then the site's, all taken
  * before the billed check. A total waiting out a cooldown ends it there: the
  * holds already taken are given back and the visitor is told when it ends.
- * An ask whose hold cannot be written is `unavailable`, so none is answered
- * unmetered. Last, only a browser the check names a person's is admitted,
+ * A total whose room is taken up by asks still running ends it too, as
+ * `unavailable`: no cooldown is told, as there is room again once they
+ * settle. An ask whose hold cannot be written is `unavailable` as well, so
+ * none is answered unmetered. Last, only a browser the check names a person's is admitted,
  * whatever `BROWSER_CHECK_ENFORCE` says. A client it names automated is
  * `denied` and charged the least an ask costs; a check that could not run is
  * `unavailable` and charged nothing.
@@ -222,11 +226,15 @@ export async function admitAsk(
     if (verdict === 'person') return { status: 'admitted', charge: UNCHARGED };
     return verdict === 'unchecked' ? UNAVAILABLE : DENIED;
   }
+  // The least an ask costs is measured on the first total it is counted against: the device's, where one is kept.
+  const least = minimumCharge(counted[0].budget);
+  // What it sets aside on every total while it runs: never less than it will be charged.
+  const reserve = reserveFor(least);
   const holds: Hold[] = [];
   for (const total of counted) {
     let held: Held;
     try {
-      held = await deps.hold(total.key, total.budget);
+      held = await deps.hold(total.key, total.budget, reserve);
     } catch (error) {
       console.error(
         '[ask] usage could not be counted:',
@@ -237,13 +245,14 @@ export async function admitAsk(
     }
     if (!held.admitted) {
       await settleAll(holds, 0, deps);
-      return { status: 'cooldown', until: held.until };
+      // Room taken up by asks still running is no cooldown: there is room again as they settle.
+      return 'until' in held
+        ? { status: 'cooldown', until: held.until }
+        : UNAVAILABLE;
     }
-    holds.push({ ...total, opened: held.opened });
+    holds.push({ ...total, opened: held.opened, reserve });
   }
   const settle = settling(holds, deps);
-  // The least an ask costs is measured on the first total it is counted against: the device's, where one is kept.
-  const least = minimumCharge(counted[0].budget);
   const verdict = await deps.verdict();
   if (verdict === 'unchecked') {
     await settle(0);

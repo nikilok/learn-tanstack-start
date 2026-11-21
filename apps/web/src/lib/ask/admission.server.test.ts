@@ -3,7 +3,12 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import type { BrowserVerdict } from '../device/browser-check.server';
 import type { AskStanding } from './access.server';
 import { type AdmissionDeps, admitAsk, admitMint } from './admission.server';
-import { type Budgets, type Held, minimumCharge } from './allowance.server';
+import {
+  type Budgets,
+  HOLD_TOKENS,
+  type Held,
+  minimumCharge,
+} from './allowance.server';
 
 type Total = keyof Budgets;
 
@@ -24,6 +29,8 @@ const BUDGETS = {
 } satisfies Budgets;
 const NONE: Budgets = { device: null, network: null, site: null };
 const LEAST = minimumCharge(BUDGETS.device);
+// A budget whose least charge is over HOLD_TOKENS.
+const BIG_DEVICE = 40_000_000;
 // When each total opens again.
 const UNTIL = {
   device: 1_800_000_000_000,
@@ -48,11 +55,16 @@ type Setup = {
   verdict?: BrowserVerdict | 'unchecked';
 };
 
-/** The steps as fakes, recording in order each step read, each hold taken, and each settle written with its window. */
+/** The steps as fakes, recording in order each step read, each hold taken with what it set aside, and each settle written with its window and what it gave up. */
 function deps(setup: Setup = {}) {
   const read: string[] = [];
-  const holds: { key: string; budget: number }[] = [];
-  const settles: { key: string; opened: string; charge: number }[] = [];
+  const holds: { key: string; budget: number; reserve: number }[] = [];
+  const settles: {
+    key: string;
+    opened: string;
+    charge: number;
+    reserve: number;
+  }[] = [];
   const { standing = 'public', listed = false, verdict = 'person' } = setup;
   const budgets: Budgets = { ...BUDGETS, ...setup.budgets };
   const network = 'network' in setup ? (setup.network ?? null) : NETWORK;
@@ -95,10 +107,10 @@ function deps(setup: Setup = {}) {
       if (until instanceof Error) throw until;
       return until;
     },
-    hold: async (key, budget) => {
+    hold: async (key, budget, reserve) => {
       const total = totalOf(key);
       read.push(`hold ${total}`);
-      holds.push({ key, budget });
+      holds.push({ key, budget, reserve });
       const held = setup.hold?.[total] ?? {
         admitted: true,
         opened: OPENED[total],
@@ -106,12 +118,12 @@ function deps(setup: Setup = {}) {
       if (held instanceof Error) throw held;
       return held;
     },
-    settle: async (key, opened, charge) => {
+    settle: async (key, opened, charge, _budget, reserve) => {
       const total = totalOf(key);
       read.push(`settle ${total}`);
       const failure = setup.settle?.[total];
       if (failure) throw failure;
-      settles.push({ key, opened, charge });
+      settles.push({ key, opened, charge, reserve });
     },
     verdict: async () => {
       read.push('verdict');
@@ -131,17 +143,31 @@ function refusedAt(total: Total): Partial<Record<Total, Held>> {
   return { [total]: { admitted: false, until: UNTIL[total] } };
 }
 
-/** The holds taken on the named totals, each against its own budget, in order. */
-function heldOn(totals: readonly Total[]) {
-  return totals.map((total) => ({ key: KEYS[total], budget: BUDGETS[total] }));
+/** A hold at a total whose room is taken up by asks still running. */
+function busyAt(total: Total): Partial<Record<Total, Held>> {
+  return { [total]: { admitted: false, busy: true } };
 }
 
-/** The named totals each settled at one charge in its own window, in order. */
-function settledAt(charge: number, totals: readonly Total[] = TOTALS) {
+/** The holds taken on the named totals, each against its own budget and setting aside `reserve`, in order. */
+function heldOn(totals: readonly Total[], reserve = HOLD_TOKENS) {
+  return totals.map((total) => ({
+    key: KEYS[total],
+    budget: BUDGETS[total],
+    reserve,
+  }));
+}
+
+/** The named totals each settled at one charge in its own window, giving up `reserve`, in order. */
+function settledAt(
+  charge: number,
+  totals: readonly Total[] = TOTALS,
+  reserve = HOLD_TOKENS,
+) {
   return totals.map((total) => ({
     key: KEYS[total],
     opened: OPENED[total],
     charge,
+    reserve,
   }));
 }
 
@@ -261,6 +287,81 @@ describe('admitAsk', () => {
     if (admission.status !== 'admitted') throw new Error('not admitted');
     await admission.charge(0);
     expect(settles).toEqual(settledAt(least, ['network', 'site']));
+  });
+
+  test('with the usual budgets every hold sets aside HOLD_TOKENS and every settle gives up the same', async () => {
+    const { fakes, holds, settles } = deps();
+    const admission = await admitAsk(KEY, TOKEN, fakes);
+    if (admission.status !== 'admitted') throw new Error('not admitted');
+    await admission.charge(140_000);
+    expect(holds.map(({ reserve }) => reserve)).toEqual(
+      Array(3).fill(HOLD_TOKENS),
+    );
+    expect(settles.map(({ reserve }) => reserve)).toEqual(
+      Array(3).fill(HOLD_TOKENS),
+    );
+  });
+
+  test('where the least an ask costs is over HOLD_TOKENS, every total sets aside that least and every charge gives it up', async () => {
+    const least = minimumCharge(BIG_DEVICE);
+    expect(least).toBe(400_000);
+    const { fakes, holds, settles } = deps({ budgets: { device: BIG_DEVICE } });
+    const admission = await admitAsk(KEY, TOKEN, fakes);
+    if (admission.status !== 'admitted') throw new Error('not admitted');
+    await admission.charge(0);
+    expect(holds.map(({ key, reserve }) => [key, reserve])).toEqual([
+      [KEY, least],
+      [NETWORK, least],
+      [SITE, least],
+    ]);
+    expect(
+      settles.map(({ key, charge, reserve }) => [key, charge, reserve]),
+    ).toEqual([
+      [KEY, least, least],
+      [NETWORK, least, least],
+      [SITE, least, least],
+    ]);
+  });
+
+  test('every hold given back gives up the same reserve its holds set aside, however the ask ended', async () => {
+    quiet();
+    for (const setup of [
+      { hold: refusedAt('network') },
+      { hold: busyAt('site') },
+      { hold: { site: new Error('relation missing') } },
+      { verdict: 'unchecked' },
+    ] satisfies Setup[]) {
+      const { fakes, holds, settles } = deps({
+        ...setup,
+        budgets: { device: BIG_DEVICE },
+      });
+      await admitAsk(KEY, TOKEN, fakes);
+      expect(settles.length).toBeGreaterThan(0);
+      expect(settles.map(({ charge }) => charge)).toEqual(
+        Array(settles.length).fill(0),
+      );
+      expect(settles.map(({ reserve }) => reserve)).toEqual(
+        Array(settles.length).fill(400_000),
+      );
+      expect(holds.map(({ reserve }) => reserve)).toEqual(
+        Array(holds.length).fill(400_000),
+      );
+    }
+  });
+
+  test('a local run with no device budget measures what it sets aside on the first total it is counted against', async () => {
+    const { fakes, holds, settles } = deps({
+      standing: 'local',
+      budgets: { device: null, network: BIG_DEVICE },
+    });
+    const admission = await admitAsk(KEY, TOKEN, fakes);
+    if (admission.status !== 'admitted') throw new Error('not admitted');
+    await admission.charge(0);
+    expect(holds.map(({ key, reserve }) => [key, reserve])).toEqual([
+      [NETWORK, 400_000],
+      [SITE, 400_000],
+    ]);
+    expect(settles.map(({ reserve }) => reserve)).toEqual([400_000, 400_000]);
   });
 
   test('an ask is charged once on each total, however often its charge is called', async () => {
@@ -402,6 +503,69 @@ describe('admitAsk', () => {
     expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({
       status: 'cooldown',
       until: UNTIL.site,
+    });
+    expect(settles).toEqual(settledAt(0, ['network']));
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]?.[0])).toBe(
+      '[ask] usage could not be settled:',
+    );
+  });
+
+  test('a busy device is unavailable: nothing is given back, nothing else is held, the check is not asked, and nothing is said', async () => {
+    const said = quiet();
+    const { fakes, read, holds, settles } = deps({ hold: busyAt('device') });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({
+      status: 'unavailable',
+    });
+    expect(holds).toEqual(heldOn(['device']));
+    expect(settles).toEqual([]);
+    expect(read).not.toContain('verdict');
+    expect(said).not.toHaveBeenCalled();
+  });
+
+  test('a busy network gives the device’s hold back whole in its own window, holds nothing at the site, and is unavailable with no time told', async () => {
+    const { fakes, read, holds, settles } = deps({ hold: busyAt('network') });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({
+      status: 'unavailable',
+    });
+    expect(holds).toEqual(heldOn(['device', 'network']));
+    expect(settles).toEqual(settledAt(0, ['device']));
+    expect(read).not.toContain('verdict');
+  });
+
+  test('a busy site gives back both earlier holds, each in its own window, and is unavailable', async () => {
+    const { fakes, read, holds, settles } = deps({ hold: busyAt('site') });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({
+      status: 'unavailable',
+    });
+    expect(holds).toEqual(heldOn(['device', 'network', 'site']));
+    expect(settles).toEqual(settledAt(0, ['device', 'network']));
+    expect(read).not.toContain('verdict');
+  });
+
+  test('a busy total is never answered with a cooldown, even with a later total waiting', async () => {
+    for (const [busy, waiting] of [
+      ['device', 'network'],
+      ['device', 'site'],
+      ['network', 'site'],
+    ] as const) {
+      const { fakes, holds } = deps({
+        hold: { ...busyAt(busy), ...refusedAt(waiting) },
+      });
+      const admission = await admitAsk(KEY, TOKEN, fakes);
+      expect(admission).toEqual({ status: 'unavailable' });
+      expect(holds.map(({ key }) => key)).not.toContain(KEYS[waiting]);
+    }
+  });
+
+  test('a hold given back that cannot be written while answering busy is said, and the rest are still given back', async () => {
+    const said = quiet();
+    const { fakes, settles } = deps({
+      hold: busyAt('site'),
+      settle: { device: new Error('network down') },
+    });
+    expect(await admitAsk(KEY, TOKEN, fakes)).toEqual({
+      status: 'unavailable',
     });
     expect(settles).toEqual(settledAt(0, ['network']));
     expect(said).toHaveBeenCalledTimes(1);

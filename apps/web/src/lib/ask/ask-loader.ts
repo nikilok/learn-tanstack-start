@@ -4,6 +4,8 @@
 
 import type { SearchUrlParams } from '@ss/search-filters';
 
+import { laterCooldown } from './cooldown';
+
 /** Why a plan is empty when it is, as the engine reports it: the wire contract, restated here so the browser never depends on the engine's types. */
 export type EmptyReason = 'none' | 'name' | 'beyond' | 'unmatched';
 
@@ -101,6 +103,8 @@ export function createAskLoader(
   now: () => number = Date.now,
 ) {
   let current: Promise<AskMintResponse> | null = null;
+  // The latest wait a mint or a call has named, while it is still held.
+  let waiting: number | null = null;
 
   const mintToken = (key: string) => {
     const minted = mint(key);
@@ -111,19 +115,35 @@ export function createAskLoader(
     return minted;
   };
 
+  /** Keeps a wait a mint named while it is still ahead, the later of it and one already held. */
+  const noteMinted = (answer: AskMintResponse) => {
+    if (
+      answer.token === null &&
+      answer.cooldown !== undefined &&
+      now() < answer.cooldown
+    )
+      waiting = laterCooldown(waiting, answer.cooldown);
+  };
+
   /** The mint this document holds, minted when there is none or when the wait a held one named is over. */
   const held = async (key: string) => {
     const used = current ?? mintToken(key);
     const answer = await used;
+    noteMinted(answer);
     if (
       answer.token !== null ||
       answer.cooldown === undefined ||
       now() < answer.cooldown
     )
       return { used, answer };
-    if (current === used) current = null;
+    if (current === used) {
+      current = null;
+      waiting = null;
+    }
     const fresh = current ?? mintToken(key);
-    return { used: fresh, answer: await fresh };
+    const renewed = await fresh;
+    noteMinted(renewed);
+    return { used: fresh, answer: renewed };
   };
 
   /** What a mint that issued nothing means: a cooldown to wait out, or off. */
@@ -132,13 +152,15 @@ export function createAskLoader(
       ? OFF
       : { status: 'cooldown', until: answer.cooldown };
 
-  /** Remembers a cooldown a call named, so nothing is sent until it is over. The token goes with it: the next call mints. */
+  /** Remembers a cooldown a call named, the later of it and one already held, so nothing is sent until it is over. The token goes with it: the next call mints. */
   const wait = <T extends Refusable>(answer: T): T => {
-    if (answer.status === 'cooldown')
-      current = Promise.resolve({
-        token: null,
-        cooldown: (answer as unknown as AskCooldown).until,
-      });
+    if (answer.status === 'cooldown') {
+      waiting = laterCooldown(
+        waiting,
+        (answer as unknown as AskCooldown).until,
+      );
+      current = Promise.resolve({ token: null, cooldown: waiting });
+    }
     return answer;
   };
 
@@ -159,6 +181,7 @@ export function createAskLoader(
     // Another call may already have replaced the refused token.
     if (current === used) current = null;
     const fresh = await (current ?? mintToken(key));
+    noteMinted(fresh);
     if (fresh.token === null) return refusal(fresh);
     const retried = await call(fresh.token);
     return retried.status === 'denied' ? OFF : (wait(retried) as Admitted<T>);

@@ -6,6 +6,7 @@ import {
   COOLDOWN_SECONDS,
   cooldownHold,
   cooldownNotice,
+  laterCooldown,
   loadCooldown,
   saveCooldown,
   storedCooldown,
@@ -48,6 +49,21 @@ describe('storedCooldown', () => {
       {},
     ])
       expect(storedCooldown(value, NOW)).toBeNull();
+  });
+});
+
+describe('laterCooldown', () => {
+  test('with no wait known, the one told is kept', () => {
+    expect(laterCooldown(null, NOW + HOUR)).toBe(NOW + HOUR);
+  });
+
+  test('the later of the known wait and the one told is kept, whichever came first', () => {
+    expect(laterCooldown(NOW + 2 * HOUR, NOW + HOUR)).toBe(NOW + 2 * HOUR);
+    expect(laterCooldown(NOW + HOUR, NOW + 2 * HOUR)).toBe(NOW + 2 * HOUR);
+  });
+
+  test('a wait told twice is kept as it is', () => {
+    expect(laterCooldown(NOW + HOUR, NOW + HOUR)).toBe(NOW + HOUR);
   });
 });
 

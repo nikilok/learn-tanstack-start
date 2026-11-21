@@ -23,6 +23,11 @@ export function storedCooldown(value: unknown, now: number): number | null {
   return until > now && until - now <= 2 * COOLDOWN_MS ? until : null;
 }
 
+/** The wait to keep when a call names one: the later of the one already known and the one told, as more than one total can be waiting. */
+export function laterCooldown(known: number | null, told: number): number {
+  return known === null ? told : Math.max(known, told);
+}
+
 /** The time this device may ask again, as last told; null when it is not waiting. Never throws: no storage, no cooldown known. */
 export function loadCooldown(now = Date.now()): number | null {
   try {

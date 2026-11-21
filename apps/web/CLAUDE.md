@@ -503,7 +503,9 @@ the mint, the plan and each further slice pass.
   network's, the site's. Each is a row of `ask_usage` with its own budget,
   window and cooldown, written by the same statements. A hold refused at one
   gives back the holds already taken (a settle of 0 in each one's own window)
-  and tells that total's time; every total is charged the same amount.
+  and tells that total's time; every total is charged the same amount. More
+  than one total can be waiting at once, so the browser keeps the later of
+  the times it is told (`laterCooldown`), never the one told last.
 - **A network's and the site's rows are keyed apart from any device's**
   (`lib/ask/subjects.server.ts`): `net:` and a keyed hash of the address's
   scope (`lib/session/address`), never the address, and `all:`. Neither is a
@@ -516,14 +518,21 @@ the mint, the plan and each further slice pass.
   asking at once.
 - **An ask is admitted on a hold and charged afterwards**
   (`lib/ask/allowance.server.ts`): what it uses is known only once the judge
-  has answered, so `holdStatement` sets `HOLD_TOKENS` against the device's
-  total while it runs and `settleStatement` replaces that with what it used.
-  A handler that admits an ask owes it exactly one `charge`, however the ask
-  ends (the `finally` in `planSearch` and `rankMore`): one left out leaves the
-  hold standing, which over-charges the device, and one called twice would
-  take a hold off that was never set. The hold must stay about the most one
-  call can use, or asks sent together run past the budget before any is
-  charged.
+  has answered, so `holdStatement` sets `HOLD_TOKENS` aside in `held` while it
+  runs, and `settleStatement` gives that up and adds what the ask used to
+  `tokens`. A handler that admits an ask owes it exactly one `charge`, however
+  the ask ends (the `finally` in `planSearch` and `rankMore`): one left out
+  leaves the hold set aside until the window ends, which takes room from the
+  budget, and one called twice would give up a hold that was never set. The
+  hold must stay about the most one call can use, or asks sent together run
+  past the budget before any is charged: an ask sets aside the larger of
+  `HOLD_TOKENS` and the least it will be charged (`reserveFor`), the same on
+  every total, and its settle gives up that same amount.
+- **Only tokens used start a cooldown.** A total has room while `tokens` and
+  `held` together are under its budget. Room taken up by holds alone is
+  `busy`: the ask is `unavailable`, no time is told, and there is room again
+  as those asks settle. The cooldown starts in the settle that brings
+  `tokens` to the budget, or in a hold that finds them there.
 - **A settle writes only the window its hold was set in.** The hold returns
   the window's start as the database says it (`opened`, text, so nothing is
   rounded on the way), and `settleStatement` matches on it: an ask that
@@ -536,15 +545,13 @@ the mint, the plan and each further slice pass.
   question does, so it is admitted and charged exactly as `planSearch` is.
   `searchRanked` is not: it reads the rows of an answer already given, and a
   listing must keep paging through a cooldown.
-- **The hold decides and writes in one statement** (`holdStatement`): a
-  waiting device's row is left unwritten, and `admitted` says whether the ask
-  found room. Split into a read and a write, asks sent together each pass. A
-  total found at the budget starts the cooldown there, so a hold that was
-  never settled cannot leave a device refused with no end in sight. The unit
-  tests render the statements; they do not run them. After changing one, run
-  it on a real Postgres (the admission's order and the statements' window,
-  hold, settle, late settle, cooldown and prune cases are the checks worth
-  repeating).
+- **The hold decides and writes in one statement** (`holdStatement`): a row
+  waiting out a cooldown is left unwritten, and so is one with no room, and
+  `admitted` says whether the ask found room. Split into a read and a write,
+  asks sent together each pass. The unit tests render the statements; they do
+  not run them. After changing one, run it on a real Postgres (the admission's
+  order and the statements' window, hold, busy, settle, late settle, cooldown
+  and prune cases are the checks worth repeating).
 - **The browser check decides the ask whatever `BROWSER_CHECK_ENFORCE` says**:
   the mint refuses a client it names automated, and a plan or a slice goes on
   only for one it names a person. That switch is the extras' and the

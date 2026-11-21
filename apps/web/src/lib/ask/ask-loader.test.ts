@@ -26,13 +26,27 @@ const MORE_DENIED: AskMoreResponse = { status: 'denied' };
 const OPEN = { status: 'open' } as const;
 const OFF = { status: 'off' } as const;
 
-/** A mint's answer: a token, none, or none with the time a waiting device may ask again. */
-type Minted = string | null | { cooldown: number };
+/** A mint's answer: a token, none, or none with the time a waiting device may ask again; a token carrying a time as well; or a failure the mint throws. */
+type Minted =
+  | string
+  | null
+  | { cooldown: number }
+  | { token: string; cooldown: number }
+  | Error;
+
+/** A plan's answer held back until the test gives it. */
+function later() {
+  let give: (answer: AskPlanResponse) => void = () => {};
+  const answer = new Promise<AskPlanResponse>((resolve) => {
+    give = resolve;
+  });
+  return { answer, give };
+}
 
 /** A mint, a plan and a judge answering from queues, recording every call; `clock.now` is the time the loader reads. */
 function harness(
   tokens: Minted[],
-  answers: AskPlanResponse[],
+  answers: (AskPlanResponse | Promise<AskPlanResponse>)[],
   slices: AskMoreResponse[] = [],
 ) {
   const mints: string[] = [];
@@ -51,9 +65,12 @@ function harness(
       mints.push(key);
       const next = tokens.shift();
       if (next === undefined) throw new Error('no token queued');
-      return typeof next === 'object' && next !== null
-        ? { token: null, cooldown: next.cooldown }
-        : { token: next };
+      if (next instanceof Error) throw next;
+      if (typeof next === 'object' && next !== null)
+        return 'token' in next
+          ? { token: next.token, cooldown: next.cooldown }
+          : { token: null, cooldown: next.cooldown };
+      return { token: next };
     },
     async (text, key, token, base) => {
       plans.push([text, key, token, base]);
@@ -279,6 +296,174 @@ describe('createAskLoader, a device told to wait out a cooldown', () => {
     expect(await ask('care homes in leeds', KEY)).toEqual(OK);
     expect(mints).toEqual([KEY, KEY]);
     expect(plans.map((p) => p[2])).toEqual(['t1', 't2']);
+  });
+
+  test('two calls in flight told different waits keep the later, whichever is told last', async () => {
+    for (const order of [
+      [9_000, 5_000],
+      [5_000, 9_000],
+    ] as const) {
+      const { ask, prepare, mints, plans, clock } = harness(
+        ['t1', 't2'],
+        order.map((until) => ({ status: 'cooldown', until }) as const),
+      );
+      // Each call is still answered with the wait its own answer named.
+      expect(
+        await Promise.all([
+          ask('care homes in leeds', KEY),
+          ask('plcs in york', KEY),
+        ]),
+      ).toEqual([
+        { status: 'cooldown', until: order[0] },
+        { status: 'cooldown', until: order[1] },
+      ]);
+      for (const at of [5_000, 8_999]) {
+        clock.now = at;
+        expect(await prepare(KEY)).toEqual({
+          status: 'cooldown',
+          until: 9_000,
+        });
+      }
+      expect(mints).toEqual([KEY]);
+      expect(plans).toHaveLength(2);
+      clock.now = 9_000;
+      expect(await prepare(KEY)).toEqual(OPEN);
+      expect(mints).toEqual([KEY, KEY]);
+    }
+  });
+
+  test('a wait a refused token’s re-mint named is not shortened by a call still in flight told an earlier one', async () => {
+    const first = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', { cooldown: 9_000 }, 't3'],
+      [first.answer, DENIED],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    expect(await ask('plcs in york', KEY)).toEqual({
+      status: 'cooldown',
+      until: 9_000,
+    });
+    first.give({ status: 'cooldown', until: 5_000 });
+    expect(await inFlight).toEqual({ status: 'cooldown', until: 5_000 });
+    for (const at of [5_000, 8_999]) {
+      clock.now = at;
+      expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    }
+    expect(mints).toEqual([KEY, KEY]);
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toEqual([KEY, KEY, KEY]);
+  });
+
+  test('a call still in flight told a later wait than a re-mint named keeps the later', async () => {
+    const first = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', { cooldown: 5_000 }, 't3'],
+      [first.answer, DENIED],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    expect(await ask('plcs in york', KEY)).toEqual({
+      status: 'cooldown',
+      until: 5_000,
+    });
+    first.give({ status: 'cooldown', until: 9_000 });
+    expect(await inFlight).toEqual({ status: 'cooldown', until: 9_000 });
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toEqual([KEY, KEY, KEY]);
+  });
+
+  test('a wait the mint named once an earlier wait was over is not shortened by a call still in flight', async () => {
+    const first = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', { cooldown: 9_000 }, 't3'],
+      [first.answer, { status: 'cooldown', until: 3_000 }],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    await ask('plcs in york', KEY);
+    clock.now = 3_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    first.give({ status: 'cooldown', until: 5_000 });
+    await inFlight;
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toEqual([KEY, KEY]);
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+  });
+
+  test('a wait the mint named after a failed mint is not shortened by a call still in flight', async () => {
+    const first = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', new Error('mint failed'), { cooldown: 9_000 }, 't4'],
+      [first.answer, DENIED],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    await expect(ask('plcs in york', KEY)).rejects.toThrow('mint failed');
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    first.give({ status: 'cooldown', until: 5_000 });
+    await inFlight;
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toEqual([KEY, KEY, KEY]);
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+  });
+
+  test('a mint that issued a token is never taken for a wait, whatever time it carries', async () => {
+    const { ask, prepare, mints, clock } = harness(
+      [{ token: 't1', cooldown: 9_000 }, 't2'],
+      [{ status: 'cooldown', until: 5_000 }],
+    );
+    expect(await ask('care homes in leeds', KEY)).toEqual({
+      status: 'cooldown',
+      until: 5_000,
+    });
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toEqual([KEY, KEY]);
+  });
+
+  test('a wait that is over is not kept: a later call’s wait is the one waited for', async () => {
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', 't2', 't3'],
+      [WAIT, { status: 'cooldown', until: 7_000 }],
+    );
+    expect(await ask('care homes in leeds', KEY)).toEqual(WAIT);
+    clock.now = UNTIL;
+    expect(await ask('plcs in york', KEY)).toEqual({
+      status: 'cooldown',
+      until: 7_000,
+    });
+    clock.now = 6_999;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 7_000 });
+    expect(mints).toEqual([KEY, KEY]);
+    clock.now = 7_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toEqual([KEY, KEY, KEY]);
+  });
+
+  test('a wait that is over is forgotten: with the clock put back, only the wait named since is held', async () => {
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', 't2', 't3'],
+      [
+        { status: 'cooldown', until: 9_000 },
+        { status: 'cooldown', until: 7_000 },
+      ],
+    );
+    await ask('care homes in leeds', KEY);
+    clock.now = 9_000;
+    expect(await ask('plcs in york', KEY)).toEqual({
+      status: 'cooldown',
+      until: 7_000,
+    });
+    clock.now = 6_999;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 7_000 });
+    clock.now = 7_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toEqual([KEY, KEY, KEY]);
   });
 
   test('a device still waiting when its wait was thought over is told the new time', async () => {

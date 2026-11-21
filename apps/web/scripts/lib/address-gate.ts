@@ -10,7 +10,7 @@ import type { Ledger } from './address-ledger.ts';
 /** Least time between two requests to one address, from every walk sharing the ledger together. */
 export const ADDRESS_GAP_MS = 1_000;
 
-/** Different sites that must go unanswered in a row, at an address that had been answering, before it is paused. */
+/** Different sites that must go unanswered in a row, at an address and port that had been answering, before the address is paused. */
 export const PAUSE_AFTER_SITES = 3;
 
 /** New turns a request takes for coming late to the one it had, before it goes on the turn it has. */
@@ -22,8 +22,13 @@ export type Outcome = 'answered' | 'silent' | 'other';
 export type AddressGate = {
   /** Wait a request's turn at each of its host's addresses; false when one is paused, and the request must not be sent. */
   enter(addresses: readonly string[]): Promise<boolean>;
-  /** Report what a request sent after `enter` came to. */
-  settle(host: string, addresses: readonly string[], outcome: Outcome): void;
+  /** Report what a request sent after `enter` came to, at each address it went to and on the port it was asked on. */
+  settle(
+    host: string,
+    addresses: readonly string[],
+    port: number,
+    outcome: Outcome,
+  ): void;
   /** Requests a paused address has kept from being sent so far, the one that paused it included. */
   heldRequests(): number;
   /** Addresses paused so far. */
@@ -43,6 +48,11 @@ export type AddressGateOptions = {
 /** A site as the pause counts it: its host, without a leading `www.`. */
 function siteOf(host: string): string {
   return host.toLowerCase().replace(/^www\./, '');
+}
+
+/** An address on one port: what answers, and what goes unanswered. */
+function serviceAt(address: string, port: number): string {
+  return `${address} ${port}`;
 }
 
 /** A gate for one run: turns come from the ledger, pauses are this process's own. */
@@ -82,23 +92,24 @@ export function makeAddressGate(options: AddressGateOptions): AddressGate {
       }
       return true;
     },
-    settle(host, addresses, outcome) {
+    settle(host, addresses, port, outcome) {
       if (outcome === 'other') return;
       let pausedNow = false;
       for (const address of addresses) {
+        const service = serviceAt(address, port);
         if (outcome === 'answered') {
-          answered.add(address);
-          silent.delete(address);
+          answered.add(service);
+          silent.delete(service);
           continue;
         }
-        // An address never heard from is a dead site's own, not one that stopped.
-        if (!answered.has(address) || pausedAt.has(address)) continue;
-        const sites = silent.get(address) ?? new Set<string>();
+        // An address never heard from there is a dead site's own, not one that stopped.
+        if (!answered.has(service) || pausedAt.has(address)) continue;
+        const sites = silent.get(service) ?? new Set<string>();
         sites.add(siteOf(host));
-        silent.set(address, sites);
+        silent.set(service, sites);
         if (sites.size >= PAUSE_AFTER_SITES) {
           pausedAt.add(address);
-          silent.delete(address);
+          silent.delete(service);
           pausedNow = true;
         }
       }

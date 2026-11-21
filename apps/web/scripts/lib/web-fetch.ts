@@ -29,7 +29,11 @@ import {
   firstToAccept,
   portOf,
 } from './address-binding.ts';
-import { type AddressGate, makeAddressGate } from './address-gate.ts';
+import {
+  type AddressGate,
+  makeAddressGate,
+  type Outcome,
+} from './address-gate.ts';
 import { fileLedger, sharedLedgerDir } from './address-ledger.ts';
 
 /** Named so an operator seeing it in their logs can find out who we are. */
@@ -121,26 +125,41 @@ function classify(err: unknown): FetchFailure {
 /** The address each origin last answered at: where its host is on several, it is asked there again without another dial. */
 const answeredAt = new Map<string, string>();
 
-/** The address a request is sent to: its host's only one, the one its origin last answered at, else the first of them to accept a connection. */
+/**
+ * The address a request is sent to: its host's only one, the one its origin
+ * last answered at, else the first of them to accept a connection. When none
+ * accepts, `unanswered` holds each one dialled that did not refuse either.
+ */
 async function addressFor(
   target: URL,
   addresses: readonly string[],
   limit: AbortSignal,
+  unanswered: string[],
 ): Promise<string> {
   if (addresses.length === 1) return addresses[0];
   const last = answeredAt.get(target.origin);
   if (last && addresses.includes(last)) return last;
-  return firstToAccept(addresses, portOf(target), limit, io.connect);
+  /** A dial that notes its address, and forgets one that refuses. */
+  const dial: Dial = async (address, port, signal) => {
+    unanswered.push(address);
+    try {
+      await io.connect(address, port, signal);
+    } catch (err) {
+      // Ended by the time limit, it never answered either way.
+      if (!signal.aborted) unanswered.splice(unanswered.indexOf(address), 1);
+      throw err;
+    }
+  };
+  return firstToAccept(addresses, portOf(target), limit, dial);
 }
 
-/** One request, sent to one of the addresses its host resolved to, under the host's own name. */
+/** One request, sent to one address its host resolved to, under the host's own name. */
 async function ask(
   target: URL,
-  addresses: readonly string[],
+  address: string,
   headers: Record<string, string>,
   limit: AbortSignal,
 ): Promise<Response> {
-  const address = await addressFor(target, addresses, limit);
   const bound = bindTo(target, address);
   try {
     const res = await io.fetch(bound.url, {
@@ -157,7 +176,13 @@ async function ask(
   }
 }
 
-/** One request, sent in its turn at its host's addresses and reported to the gate; null when one of them is paused and nothing was sent. Its time limit starts as it is sent, never while it waits its turn. */
+/**
+ * One request, sent in its turn at its host's addresses; null when one of them
+ * is paused and nothing was sent. What it came to is reported to the gate for
+ * the address it was sent to, or, when none accepted a connection in time, for
+ * each one dialled and left unanswered. Its time limit starts as it is sent,
+ * never while it waits its turn.
+ */
 async function send(
   target: URL,
   addresses: readonly string[],
@@ -166,21 +191,22 @@ async function send(
 ): Promise<Response | null> {
   const { gate } = io;
   if (gate && !(await gate.enter(addresses))) return null;
+  const limit = AbortSignal.timeout(timeoutMs);
+  const unanswered: string[] = [];
+  let asked: string | undefined;
+  /** Tell the gate what the request came to, at each address it went to. */
+  const report = (outcome: Outcome) => {
+    const went = asked === undefined ? unanswered : [asked];
+    if (went.length === 0) return;
+    gate?.settle(target.hostname, went, portOf(target), outcome);
+  };
   try {
-    const res = await ask(
-      target,
-      addresses,
-      headers,
-      AbortSignal.timeout(timeoutMs),
-    );
-    gate?.settle(target.hostname, addresses, 'answered');
+    asked = await addressFor(target, addresses, limit, unanswered);
+    const res = await ask(target, asked, headers, limit);
+    report('answered');
     return res;
   } catch (err) {
-    gate?.settle(
-      target.hostname,
-      addresses,
-      classify(err) === 'timeout' ? 'silent' : 'other',
-    );
+    report(classify(err) === 'timeout' ? 'silent' : 'other');
     throw err;
   }
 }

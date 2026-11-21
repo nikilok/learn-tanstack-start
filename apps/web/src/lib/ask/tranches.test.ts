@@ -155,7 +155,7 @@ describe('walkedListing', () => {
   test('a slice to judge keeps the list open, one with the judge is loading, one that failed is a failed page', () => {
     expect(
       walkedListing(listing, { next: null, judging: false, failed: false }),
-    ).toEqual(listing);
+    ).toEqual({ ...listing, moreHeld: null });
     expect(
       walkedListing(listing, {
         next: RANKED_MAX,
@@ -177,5 +177,49 @@ describe('walkedListing', () => {
         { next: null, judging: false, failed: false },
       ).hasMore,
     ).toBe(true);
+  });
+
+  test('a cooldown holds the walk at the slice still to judge: it is not asked for, and the listing says until when', () => {
+    const until = 1_800_000_000_000;
+    const held = walkedListing(listing, {
+      next: RANKED_MAX,
+      judging: false,
+      failed: false,
+      heldUntil: until,
+    });
+    expect(held.moreHeld).toBe(until);
+    // A page that failed is never asked for by scrolling: the hold reads as one.
+    expect(held.moreFailed).toBe(true);
+    expect(held.hasMore).toBe(true);
+  });
+
+  test('a cooldown holds nothing while judged rows are still to show, or once the shortlist ran out', () => {
+    const until = 1_800_000_000_000;
+    const paging = walkedListing(
+      { ...listing, hasMore: true },
+      { next: RANKED_MAX, judging: false, failed: false, heldUntil: until },
+    );
+    expect(paging.moreHeld).toBeNull();
+    expect(paging.moreFailed).toBe(false);
+    const done = walkedListing(listing, {
+      next: null,
+      judging: false,
+      failed: false,
+      heldUntil: until,
+    });
+    expect(done.moreHeld).toBeNull();
+    expect(done.moreFailed).toBe(false);
+    expect(done.hasMore).toBe(false);
+  });
+
+  test('no cooldown holds nothing', () => {
+    expect(
+      walkedListing(listing, {
+        next: RANKED_MAX,
+        judging: false,
+        failed: false,
+        heldUntil: null,
+      }).moreHeld,
+    ).toBeNull();
   });
 });

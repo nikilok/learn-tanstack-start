@@ -10,6 +10,7 @@ import {
   enforcing,
   fromBrowser,
   localVerdict,
+  loggedVerdict,
   ownerOrBrowser,
   pageAllowed,
 } from './browser-check.server';
@@ -162,6 +163,51 @@ describe('browserVerdict', () => {
       'automated',
     );
     expect(await browserVerdict('page', answering(false).check)).toBe('person');
+  });
+});
+
+describe('loggedVerdict', () => {
+  test('is the verdict itself, said under its tag, whatever is enforced', async () => {
+    process.env[ENFORCE_ENV] = '1';
+    expect(await loggedVerdict('ask', answering(false).check)).toBe('person');
+    delete process.env[ENFORCE_ENV];
+    expect(await loggedVerdict('ask', answering(true).check)).toBe('automated');
+    expect(await loggedVerdict('ask', answering(true, true).check)).toBe(
+      'verified crawler',
+    );
+    expect(said()).toEqual([
+      '[ask] browser check: person',
+      '[ask] browser check: automated',
+      '[ask] browser check: verified crawler',
+    ]);
+  });
+
+  test('a check that fails is unchecked: the caller decides what that means, and the failure is said once', async () => {
+    const errors = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const failing = (async () => {
+        throw new Error('service unreachable');
+      }) as BrowserCheck;
+      expect(await loggedVerdict('ask', failing)).toBe('unchecked');
+      expect(errors).toHaveBeenCalledTimes(1);
+      expect(String(errors.mock.calls[0]?.[0])).toBe(
+        '[ask] browser check failed:',
+      );
+      expect(said()).toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  test('a local verdict rides it as the development override', async () => {
+    const { check, asked } = answering(true);
+    await loggedVerdict('ask', check, 'BAD-BOT');
+    expect(asked).toEqual([
+      {
+        advancedOptions: { checkLevel: BROWSER_CHECK_LEVEL },
+        developmentOptions: { bypass: 'BAD-BOT' },
+      },
+    ]);
   });
 });
 

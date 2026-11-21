@@ -265,6 +265,66 @@ describe('deriveAskHint', () => {
       keyboard: false,
     });
   });
+
+  const until = 1_800_000_000_000;
+
+  test('a device waiting out a cooldown is offered nothing, and told when it ends where the offer would have stood', () => {
+    expect(deriveAskHint({ ...base, cooldown: until })).toEqual({
+      eligible: false,
+      hint: { status: 'cooldown', until, keyboard: true },
+    });
+  });
+
+  test('a waiting device is told nothing where no offer would have stood, unless it just tried to ask', () => {
+    expect(
+      deriveAskHint({ ...base, couldAsk: false, cooldown: until }),
+    ).toEqual({ eligible: false, hint: null });
+    // A text with rows by name, asked from the hero's examples: the ask was not made, and says why.
+    expect(
+      deriveAskHint({
+        ...base,
+        couldAsk: false,
+        progress: { status: 'cooldown' },
+        cooldown: until,
+      }),
+    ).toEqual({
+      eligible: false,
+      hint: { status: 'cooldown', until, keyboard: true },
+    });
+  });
+
+  test('a cooldown outranks an earlier answer, and says nothing under an applied plan or closed access', () => {
+    expect(
+      deriveAskHint({
+        ...base,
+        progress: { status: 'unavailable' },
+        cooldown: until,
+      }).hint,
+    ).toEqual({ status: 'cooldown', until, keyboard: true });
+    expect(
+      deriveAskHint({ ...base, applied: true, cooldown: until }).hint,
+    ).toBeNull();
+    expect(
+      deriveAskHint({ ...base, access: 'off', cooldown: until }).hint,
+    ).toBeNull();
+  });
+
+  test('an ask not made for a cooldown that has since passed says nothing: the text is offered again', () => {
+    expect(
+      deriveAskHint({ ...base, progress: { status: 'cooldown' } }),
+    ).toEqual({
+      eligible: true,
+      hint: { status: 'eligible', keyboard: true },
+    });
+    expect(
+      deriveAskHint({
+        ...base,
+        couldAsk: false,
+        progress: { status: 'cooldown' },
+        cooldown: null,
+      }),
+    ).toEqual({ eligible: false, hint: null });
+  });
 });
 
 describe('nextEmptyPrefix', () => {

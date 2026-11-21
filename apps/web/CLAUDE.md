@@ -436,7 +436,8 @@ asking is open, so an owner's offer never waits on a mint and nobody else mints 
 The home document's `beforeLoad` sets it the same way (lib/ask/access-hint.server), and a
 request that may not ask has it expired there and by the ask's mint, so a rotated secret
 closes the offer on the next document. A forged or stale hint shows an offer the mint then
-refuses; the server decides every request.
+refuses; the server decides every request. While asking is public a visitor's document is
+given no hint at all (see "Ask: who may ask, and how often").
 
 - **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
   (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie
@@ -472,6 +473,126 @@ refuses; the server decides every request.
   its assets and edge-cache that for up to 30 days (the purge has already run).
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
+
+## Ask: who may ask, and how often — cross-file invariants
+
+Asking is the owner's alone until `VITE_ASK_PUBLIC=1` opens it to every visitor,
+each device under a budget of the tokens its asks may have the judge use
+(`ASK_DAILY_TOKENS`) and a day's cooldown once they are used up.
+`lib/ask/access.server.ts` says who a request asks as (`askStanding`: owner,
+local, public, nobody) and `lib/ask/admission.server.ts` is the one admission
+the mint, the plan and each further slice pass.
+
+- **Public is a constant of the build** (`lib/ask/public.ts`), not a runtime
+  read: the home route's first render offers the hero's ask row from it, and
+  the server's render must offer the same or the page mismatches on hydration.
+  A visitor's document is given no hint cookie while it is on. The /download
+  preview and a known cooldown are learnt in the route's layout effect for the
+  same reason, never in the first render (`lib/ask/at-mount.ts` decides what
+  it learns). The offer to ask a typed text waits
+  for that effect too (`mounted` in `couldAsk`), open access or not: it rests
+  on the name search having found nothing, and a search streamed with the
+  document can settle between the server's render and hydration.
+- **A visitor is never answered unmetered.** Without `ASK_DAILY_TOKENS`,
+  `ASK_DAILY_TOKENS_NETWORK` and `ASK_DAILY_TOKENS_SITE`, or with no network
+  to count it under, a public request is refused, and an ask whose hold cannot
+  be written is `unavailable`. Do not let either fall through to the judge.
+  The owner asks without a budget and without the browser check.
+- **An ask is counted against three totals**, held in this order
+  (`countedFor` in `lib/ask/admission.server.ts`): its device's, its
+  network's, the site's. Each is a row of `ask_usage` with its own budget,
+  window and cooldown, written by the same statements. A hold refused at one
+  gives back the holds already taken (a settle of 0 in each one's own window)
+  and tells that total's time; an admitted ask is charged the same amount on
+  every total. More
+  than one total can be waiting at once, so the browser keeps the later of
+  the times it is told (`laterCooldown`), never the one told last.
+- **A network's and the site's rows are keyed apart from any device's**
+  (`lib/ask/subjects.server.ts`): `net:` and a keyed hash of the address's
+  scope (`lib/session/address`), never the address, and `all:`. Neither is a
+  device key in form, so `deviceKey` (rpc-input) never yields one. Both carry
+  the deployment (`VERCEL_ENV`, else `local`): previews and local runs share
+  the table with production, and a deployment's asks count only against its
+  own network and site rows. A device's row is shared by all of them.
+- **The site's total stops asking for every visitor when it is reached**, for
+  a full cooldown, as a device's stops that device. Deleting its row reopens
+  asking at once.
+- **An ask is admitted on a hold and charged afterwards**
+  (`lib/ask/allowance.server.ts`): what it uses is known only once the judge
+  has answered, so `holdStatement` sets `HOLD_TOKENS` aside in `held` while it
+  runs, and `settleStatement` gives that up and adds what the ask used to
+  `tokens`. A handler that admits an ask owes it exactly one `charge`, however
+  the ask ends (the `finally` in `planSearch` and `rankMore`): one left out
+  leaves the hold set aside until the window ends, which takes room from the
+  budget, and one called twice would give up a hold that was never set. The
+  hold must stay about the most one call can use, or asks sent together run
+  past the budget before any is charged: an ask sets aside the larger of
+  `HOLD_TOKENS` and the least it will be charged (`reserveFor`), the same on
+  every total, and its settle gives up that same amount.
+- **Only tokens used start a cooldown.** A total has room while `tokens` and
+  `held` together are under its budget. Room taken up by holds alone is
+  `busy`: the ask is `unavailable`, no time is told, and there is room again
+  as those asks settle. The cooldown starts in the settle that brings
+  `tokens` to the budget, or in a hold that finds them there.
+- **A settle writes only the window its hold was set in.** The hold returns
+  the window's start as the database says it (`opened`, text, so nothing is
+  rounded on the way), and `settleStatement` matches on it: an ask that
+  settles after the device's window has begun again writes nothing, where it
+  would have taken a later ask's hold off the new total.
+- **Every ask is charged at least `minimumCharge`**, whatever it used. One the
+  browser check turns away is charged it on its device's and its network's
+  totals only: the site's hold is given back whole, as the site's total counts
+  admitted asks alone. A check that could not run gives every hold back whole.
+- **A visitor's mint is charged to its network** (`chargeMint` in
+  `lib/ask/admission.server.ts`): a share of the least an ask costs
+  (`mintCharge`), before the browser check is asked, so the tokens issued to
+  one network are bounded by its budget as its asks are. The device's and the
+  site's totals are only read at a mint, and read first: a mint either tells
+  to wait is charged nothing.
+- **A further slice is an ask** (`rankMore`): it reaches the judge as a
+  question does, so it is admitted and charged exactly as `planSearch` is.
+  `searchRanked` is not: it reads the rows of an answer already given, and a
+  listing must keep paging through a cooldown.
+- **The hold decides and writes in one statement** (`holdStatement`): a row
+  waiting out a cooldown is left unwritten, and so is one with no room, and
+  `admitted` says whether the ask found room. Split into a read and a write,
+  asks sent together each pass. The unit tests render the statements; they do
+  not run them. After changing one, run it on a real Postgres (the admission's
+  order and the statements' window, hold, busy, settle, late settle, cooldown
+  and prune cases are the checks worth repeating).
+- **The browser check decides the ask whatever `BROWSER_CHECK_ENFORCE` says**:
+  the mint refuses a client it names automated, and a plan or a slice goes on
+  only for one it names a person. That switch is the extras' and the
+  sessions' rollout, not the ask's.
+- **Both device-key lists refuse the ask** (`isListed`): the extras' and the
+  sessions'. A key refused anything is refused the ask too.
+- **One length for the window, the cooldown and what the browser is told**:
+  `COOLDOWN_SECONDS` (`lib/ask/cooldown.ts`). The statements splice it and the
+  stored time's sanity bound is measured in it.
+- **The time kept in the browser (`ss-ask-cooldown`) is a convenience**: it
+  spares a refused call and tells a returning visitor at once. The server
+  decides every request, and a time further ahead than two cooldowns is
+  discarded, so a clock put back cannot close asking for good. A document
+  carrying the owner hint does not read it at mount: the owner asks without
+  a budget. A wait told is kept at once (`keepCooldown`), mounted or not, and
+  never over a later one. Open tabs hear the store change (`onCooldownKept`)
+  and settle on the latest wait (`heardCooldown`): no lock is taken across
+  tabs, as nothing relies on the store.
+- **A wait just told is never over** (`toldCooldown`, applied by the loader
+  as it receives one): the server's clock is the one that counts, so a time
+  this device's clock says has passed is held a minute from now. Taken as
+  told, it would end at once and the page would mint again, over and over,
+  for as long as the clocks disagree.
+- **The loader holds every call to the latest wait it knows**
+  (`createAskLoader`), whichever answer named it, and the route holds it to
+  the wait it shows (`holdAsksUntil`), so one kept for the device or told
+  another tab counts too: until it ends nothing is minted or sent from that
+  document, and the token goes with every wait, so the first call after one
+  mints afresh. One check (`gate`) stands before everything the document
+  would send or say, read in the same turn as what it guards: a check parted
+  from its use by an `await` lets through a wait told in between.
+- **/privacy names the usage total and the stored time.** Change what is
+  kept, or for how long (`pruneStatement`), and change the page with it.
 
 ## Company documents set their own Cache-Control
 

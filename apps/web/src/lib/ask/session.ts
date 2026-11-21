@@ -13,20 +13,22 @@ import type { AskRanking } from './ask-loader';
 import type { EmptyReason } from './ask-loader';
 import { describeFilters, paramsKey } from './overlay';
 
-/** Whether this document may ask: known at mount from the owner hint the server sets (lib/ask/access-hint). */
+/** Whether this document may ask: known at mount, from the build while asking is public (lib/ask/public), else from the owner hint the server sets (lib/ask/access-hint). */
 export type AskAccess = 'open' | 'off';
 
-/** How the ask is going, as the box and the no-results message show it; an empty answer carries why. */
+/** How the ask is going, as the box and the no-results message show it; an empty answer carries why, and `cooldown` is an ask not made because the device is waiting one out. */
 export type AskProgress =
   | { status: 'idle' }
   | { status: 'pending' }
   | { status: 'unavailable' }
+  | { status: 'cooldown' }
   | { status: 'empty'; reason: EmptyReason };
 
-/** What the no-results message says about asking the text as a question: the offer, the wait, or why nothing came. `keyboard` says the offer can name Enter; a touch device taps the arrow. */
+/** What the listing says about asking the text as a question: the offer, the wait, why nothing came, or when a device waiting out a cooldown may ask again (lib/ask/cooldown). `keyboard` says the offer can name Enter; a touch device taps the arrow. */
 export type AskHint =
   | { status: 'eligible' | 'pending' | 'unavailable'; keyboard: boolean }
-  | { status: 'empty'; reason: EmptyReason; keyboard: boolean };
+  | { status: 'empty'; reason: EmptyReason; keyboard: boolean }
+  | { status: 'cooldown'; until: number; keyboard: boolean };
 
 /** What the box shows of the ask: a running question, an applied plan, or nothing. */
 export type AskBoxMode = 'off' | 'pending' | 'on';
@@ -129,7 +131,10 @@ export function reconcileApplied({
  * Whether the box offers to ask, and what the no-results message says. An
  * applied plan or closed access say nothing. A running ask outranks the
  * offer, and the ask's own empty or failed answer outranks it too, so the
- * message explains the answer before the box offers the text again.
+ * message explains the answer before the box offers the text again. A
+ * device waiting out a cooldown (`cooldown`, the time it ends) is offered
+ * nothing, and told when it may ask again wherever the offer would have
+ * stood or an ask was just tried.
  */
 export function deriveAskHint({
   applied,
@@ -137,16 +142,27 @@ export function deriveAskHint({
   progress,
   couldAsk,
   keyboard,
+  cooldown = null,
 }: {
   applied: boolean;
   access: AskAccess;
   progress: AskProgress;
   couldAsk: boolean;
   keyboard: boolean;
+  cooldown?: number | null;
 }): { eligible: boolean; hint: AskHint | null } {
   if (applied || access !== 'open') return { eligible: false, hint: null };
+  if (cooldown !== null)
+    return {
+      eligible: false,
+      hint:
+        couldAsk || progress.status === 'cooldown'
+          ? { status: 'cooldown', until: cooldown, keyboard }
+          : null,
+    };
   const eligible = progress.status !== 'pending' && couldAsk;
-  if (progress.status !== 'idle')
+  // An ask not made for a cooldown that has since passed says nothing.
+  if (progress.status !== 'idle' && progress.status !== 'cooldown')
     return { eligible, hint: { ...progress, keyboard } };
   return { eligible, hint: eligible ? { status: 'eligible', keyboard } : null };
 }

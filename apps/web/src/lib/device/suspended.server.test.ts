@@ -1,12 +1,49 @@
 import { describe, expect, spyOn, test } from 'bun:test';
 
-import { isSuspended } from './suspended.server';
+import { isListed, isSuspended } from './suspended.server';
 
 const KEY = '93f2ab04c1d88e5f67a90b12c3d4e5f6';
 const OTHER_KEY = 'f'.repeat(32);
 
 /** A read answering with a fixed value, as the store would. */
 const answering = (value: unknown) => async () => value;
+
+/** The sessions' list as its reader hands it over. */
+const sessions =
+  (...keys: string[]) =>
+  async () =>
+    new Set(keys) as ReadonlySet<string>;
+
+describe('isListed', () => {
+  test('a key on the extras’ list is listed', async () => {
+    expect(await isListed(KEY, answering([KEY]), sessions())).toBe(true);
+  });
+
+  test('a key on the sessions’ list alone is listed too', async () => {
+    expect(await isListed(KEY, answering([]), sessions(KEY))).toBe(true);
+    expect(await isListed(KEY, answering(undefined), sessions(KEY))).toBe(true);
+  });
+
+  test('a key on neither list is not, whatever other keys they hold', async () => {
+    expect(
+      await isListed(KEY, answering([OTHER_KEY]), sessions(OTHER_KEY)),
+    ).toBe(false);
+    expect(await isListed(KEY, answering([]), sessions())).toBe(false);
+  });
+
+  test('an extras’ list that cannot be read lists nobody, and the sessions’ list still counts', async () => {
+    const logged = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const failing = async () => {
+        throw new Error('network down');
+      };
+      expect(await isListed(KEY, failing, sessions())).toBe(false);
+      expect(await isListed(KEY, failing, sessions(KEY))).toBe(true);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
 
 describe('isSuspended', () => {
   test('a listed key is suspended, and only that key', async () => {

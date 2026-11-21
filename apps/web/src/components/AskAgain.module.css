@@ -1,0 +1,37 @@
+/*
+ * The hero's line for a device waiting out a cooldown: one quiet line under
+ * the filters row, entering on the hero's curve. Its ring is the examples'
+ * (AskExamples.module.css), dimmed and never turning.
+ */
+.again {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  max-width: 30rem;
+  margin: 0.9rem auto 0;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--sea-ink-soft);
+  text-align: center;
+  animation: again-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes again-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+}
+
+.rest {
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .again {
+    animation: none;
+  }
+}

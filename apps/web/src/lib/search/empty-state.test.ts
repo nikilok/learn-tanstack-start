@@ -127,4 +127,15 @@ describe('quietListing', () => {
     expect(quietListing({ status: 'unavailable' }, settled)).toBe(false);
     expect(quietListing(null, settled)).toBe(false);
   });
+
+  test('a device waiting out a cooldown is offered nothing: the scene, or the rows, say so', () => {
+    expect(quietListing({ status: 'cooldown' }, settled)).toBe(false);
+    expect(quietListing({ status: 'cooldown' }, rows)).toBe(false);
+    expect(
+      quietListing(
+        { status: 'cooldown' },
+        { confirmedEmpty: false, loading: true },
+      ),
+    ).toBe(false);
+  });
 });

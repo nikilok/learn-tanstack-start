@@ -8,12 +8,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["VITE_ASK_PUBLIC"],
       "outputs": [".output/**", ".vercel/output/**", "dist/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true,
       "passThroughEnv": [
+        "VITE_ASK_PUBLIC",
         "DESKTOP_APP_URL",
         "DESKTOP_SIMULATE_UPDATE",
         "DESKTOP_SIMULATE_RATE_LIMIT",

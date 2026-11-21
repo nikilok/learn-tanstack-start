@@ -21,7 +21,7 @@ function PrivacyPolicy() {
   return (
     <main className="page-wrap mx-auto max-w-2xl px-4 py-12 text-(--sea-ink) [&_a]:text-(--link-blue) [&_h1]:text-3xl [&_h1]:font-bold [&_h2]:mt-8 [&_h2]:text-xl [&_h2]:font-semibold [&_li]:mt-2 [&_li]:leading-relaxed [&_p]:mt-3 [&_p]:leading-relaxed [&_ul]:mt-3 [&_ul]:list-disc [&_ul]:pl-6">
       <h1>Privacy Policy</h1>
-      <p className="text-(--sea-ink-soft)">Last updated: 21 October 2026</p>
+      <p className="text-(--sea-ink-soft)">Last updated: 21 November 2026</p>
 
       <h2>Who we are</h2>
       <p>
@@ -39,6 +39,17 @@ function PrivacyPolicy() {
           <strong>Search queries.</strong> When you search for a company, the
           search term is logged on our server for operational and debugging
           purposes. These logs are not linked to your identity.
+        </li>
+        <li>
+          <strong>Questions.</strong> When you ask the search box a question in
+          plain words, its text is sent to an AI service we use to turn it into
+          a search, and is logged like any other search query, not linked to
+          your identity. So that asking stays available to everyone, we keep a
+          running total of how much processing the questions asked from your
+          browser&apos;s technical identifier (see Site protection below) have
+          used, with no record of what was asked, and remove it soon after its
+          limit resets. If the limit is reached, the time you can ask again is
+          kept in your browser&apos;s local storage.
         </li>
         <li>
           <strong>Basic request data.</strong> Our hosting provider (Vercel)
@@ -90,22 +101,28 @@ function PrivacyPolicy() {
           We do not require user accounts or collect account or profile
           information
         </li>
-        <li>We do not sell or share data with third parties</li>
+        <li>
+          We do not sell data, or share it with third parties beyond the service
+          providers described below
+        </li>
       </ul>
 
       <h2>Third-party services</h2>
       <p>
-        We use third-party services to host this website and to fetch publicly
-        available company data from UK government sources. These services may
-        process basic request data (such as IP addresses) in accordance with
-        their own privacy policies.
+        We use third-party services to host this website, to fetch publicly
+        available company data from UK government sources, and to interpret the
+        questions you ask the search box. These services may process basic
+        request data (such as IP addresses), and the text of a question you ask,
+        in accordance with their own privacy policies.
       </p>
 
       <h2>Data retention</h2>
       <p>
         Server logs including search queries are automatically deleted after a
         short retention period (up to 30 days). We do not store search queries
-        in our own database.
+        or questions in our own database; the usage total kept against a
+        browser&apos;s identifier holds no text, and is removed soon after its
+        limit resets.
       </p>
 
       <h2>Your rights</h2>

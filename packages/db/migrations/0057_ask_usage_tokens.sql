@@ -1,0 +1,1 @@
+ALTER TABLE "ask_usage" RENAME COLUMN "asks" TO "tokens";

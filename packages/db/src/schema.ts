@@ -679,3 +679,17 @@ export const profileWorkClaims = pgTable('profile_work_claims', {
   claimedBy: varchar('claimed_by', { length: 64 }).notNull(),
   claimedAt: timestamp('claimed_at').defaultNow().notNull(),
 });
+
+/**
+ * The tokens a device key's asks have used over one window, and the cooldown
+ * a used-up budget starts (web's lib/ask/allowance.server.ts is the only
+ * writer). A row is deleted once its window and its cooldown have both passed.
+ */
+export const askUsage = pgTable('ask_usage', {
+  deviceKey: text('device_key').primaryKey(),
+  windowStartedAt: timestamp('window_started_at', {
+    withTimezone: true,
+  }).notNull(),
+  tokens: integer('tokens').notNull(),
+  cooldownUntil: timestamp('cooldown_until', { withTimezone: true }),
+});

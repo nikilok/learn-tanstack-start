@@ -15,7 +15,13 @@ export type AskRanking = {
   next: number | null;
 };
 
-/** planSearch's answer: the plan (with pathway B's ranking when the text said what the organisations do), or a refusal of what was presented, or a failure to answer. */
+/** A device whose asks have used up its token budget, and when it may ask again (epoch milliseconds; lib/ask/cooldown). */
+export type AskCooldown = { status: 'cooldown'; until: number };
+
+/** The mint's answer: a token, or none, with the time a device waiting out a cooldown may ask again. */
+export type AskMintResponse = { token: string | null; cooldown?: number };
+
+/** planSearch's answer: the plan (with pathway B's ranking when the text said what the organisations do), or a refusal of what was presented, or a device told to wait, or a failure to answer. */
 export type AskPlanResponse =
   | {
       status: 'ok';
@@ -24,27 +30,34 @@ export type AskPlanResponse =
       ranking: AskRanking | null;
     }
   | { status: 'denied' }
+  | AskCooldown
   | { status: 'unavailable' };
 
-/** rankMore's answer: one more judged slice of the span's shortlist and where the walk goes next, or a refusal of what was presented, or a failure to answer. */
+/** rankMore's answer: one more judged slice of the span's shortlist and where the walk goes next, or a refusal of what was presented, or a device told to wait, or a failure to answer. */
 export type AskMoreResponse =
   | { status: 'ok'; ranked: string[]; next: number | null }
   | { status: 'denied' }
+  | AskCooldown
   | { status: 'unavailable' };
 
-/** What one ask came to: a plan; `off` when this document may not ask at all; `unavailable` when nothing could answer right now. */
+/** Whether this document may ask: `open`, `off` when it may not at all, or waiting out a cooldown. */
+export type AskOffer = { status: 'open' } | { status: 'off' } | AskCooldown;
+
+/** What one ask came to: a plan; `off` when this document may not ask at all; a cooldown to wait out; `unavailable` when nothing could answer right now. */
 export type AskOutcome =
   | Extract<AskPlanResponse, { status: 'ok' }>
   | { status: 'off' }
+  | AskCooldown
   | { status: 'unavailable' };
 
-/** What one further slice came to: the slice; `off` when this document may not ask at all; `unavailable` when nothing could judge it right now. */
+/** What one further slice came to: the slice; `off` when this document may not ask at all; a cooldown to wait out; `unavailable` when nothing could judge it right now. */
 export type AskMoreOutcome =
   | Extract<AskMoreResponse, { status: 'ok' }>
   | { status: 'off' }
+  | AskCooldown
   | { status: 'unavailable' };
 
-type Mint = (key: string) => Promise<string | null>;
+type Mint = (key: string) => Promise<AskMintResponse>;
 
 type Plan = (
   text: string,
@@ -65,6 +78,8 @@ type Rank = (
 type Refusable = { status: string };
 type Admitted<T extends Refusable> = Exclude<T, { status: 'denied' }>;
 
+const OFF = { status: 'off' } as const;
+
 /**
  * One token per document. `prepare` mints it and says whether this document
  * may ask at all, so the offer is only shown where it can be taken; `ask`
@@ -74,9 +89,18 @@ type Admitted<T extends Refusable> = Exclude<T, { status: 'denied' }>;
  * once; a mint that throws is dropped so the next call tries again, and a
  * call that throws rejects with the token kept, since the token was not
  * what failed.
+ *
+ * A device told to wait out a cooldown, by the mint or by a call, is not
+ * asked about again until the wait is over: every call in between answers
+ * with the cooldown, and the first one after it mints afresh.
  */
-export function createAskLoader(mint: Mint, plan: Plan, rank: Rank) {
-  let current: Promise<string | null> | null = null;
+export function createAskLoader(
+  mint: Mint,
+  plan: Plan,
+  rank: Rank,
+  now: () => number = Date.now,
+) {
+  let current: Promise<AskMintResponse> | null = null;
 
   const mintToken = (key: string) => {
     const minted = mint(key);
@@ -87,27 +111,57 @@ export function createAskLoader(mint: Mint, plan: Plan, rank: Rank) {
     return minted;
   };
 
-  const prepare = async (key: string): Promise<boolean> =>
-    (await (current ?? mintToken(key))) !== null;
+  /** The mint this document holds, minted when there is none or when the wait a held one named is over. */
+  const held = async (key: string) => {
+    const used = current ?? mintToken(key);
+    const answer = await used;
+    if (
+      answer.token !== null ||
+      answer.cooldown === undefined ||
+      now() < answer.cooldown
+    )
+      return { used, answer };
+    if (current === used) current = null;
+    const fresh = current ?? mintToken(key);
+    return { used: fresh, answer: await fresh };
+  };
+
+  /** What a mint that issued nothing means: a cooldown to wait out, or off. */
+  const refusal = (answer: AskMintResponse): { status: 'off' } | AskCooldown =>
+    answer.cooldown === undefined
+      ? OFF
+      : { status: 'cooldown', until: answer.cooldown };
+
+  /** Remembers a cooldown a call named, so nothing is sent until it is over. The token goes with it: the next call mints. */
+  const wait = <T extends Refusable>(answer: T): T => {
+    if (answer.status === 'cooldown')
+      current = Promise.resolve({
+        token: null,
+        cooldown: (answer as unknown as AskCooldown).until,
+      });
+    return answer;
+  };
+
+  const prepare = async (key: string): Promise<AskOffer> => {
+    const { answer } = await held(key);
+    return answer.token === null ? refusal(answer) : { status: 'open' };
+  };
 
   /** Runs `call` with the document's token, replacing a refused one once; off when nothing is issued or the replacement is refused too. */
   const withToken = async <T extends Refusable>(
     key: string,
     call: (token: string) => Promise<T>,
-  ): Promise<Admitted<T> | { status: 'off' }> => {
-    const used = current ?? mintToken(key);
-    const first = await used;
-    if (first === null) return { status: 'off' };
-    const answer = await call(first);
-    if (answer.status !== 'denied') return answer as Admitted<T>;
+  ): Promise<Admitted<T> | { status: 'off' } | AskCooldown> => {
+    const { used, answer: first } = await held(key);
+    if (first.token === null) return refusal(first);
+    const answer = await call(first.token);
+    if (answer.status !== 'denied') return wait(answer) as Admitted<T>;
     // Another call may already have replaced the refused token.
     if (current === used) current = null;
     const fresh = await (current ?? mintToken(key));
-    if (fresh === null) return { status: 'off' };
-    const retried = await call(fresh);
-    return retried.status === 'denied'
-      ? { status: 'off' }
-      : (retried as Admitted<T>);
+    if (fresh.token === null) return refusal(fresh);
+    const retried = await call(fresh.token);
+    return retried.status === 'denied' ? OFF : (wait(retried) as Admitted<T>);
   };
 
   const ask = (

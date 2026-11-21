@@ -436,7 +436,8 @@ asking is open, so an owner's offer never waits on a mint and nobody else mints 
 The home document's `beforeLoad` sets it the same way (lib/ask/access-hint.server), and a
 request that may not ask has it expired there and by the ask's mint, so a rotated secret
 closes the offer on the next document. A forged or stale hint shows an offer the mint then
-refuses; the server decides every request.
+refuses; the server decides every request. While asking is public a visitor's document is
+given no hint at all (see "Ask: who may ask, and how often").
 
 - **A no-op `owner-bootstrap` anchor flag must stay in the `flags` registry**
   (`flags.server.ts`): the toolbar only mints the `vercel-flag-overrides` cookie
@@ -472,6 +473,73 @@ refuses; the server decides every request.
   its assets and edge-cache that for up to 30 days (the purge has already run).
 - The release workflow never sets visibility — new releases are born private via the
   column default; only the owner-only Publish/Unpublish buttons on /download flip it.
+
+## Ask: who may ask, and how often — cross-file invariants
+
+Asking is the owner's alone until `VITE_ASK_PUBLIC=1` opens it to every visitor,
+each device under a budget of the tokens its asks may have the judge use
+(`ASK_DAILY_TOKENS`) and a day's cooldown once they are used up.
+`lib/ask/access.server.ts` says who a request asks as (`askStanding`: owner,
+local, public, nobody) and `lib/ask/admission.server.ts` is the one admission
+the mint, the plan and each further slice pass.
+
+- **Public is a constant of the build** (`lib/ask/public.ts`), not a runtime
+  read: the home route's first render offers the hero's ask row from it, and
+  the server's render must offer the same or the page mismatches on hydration.
+  A visitor's document is given no hint cookie while it is on. The /download
+  preview and a known cooldown are learnt in the route's layout effect for the
+  same reason, never in the first render. The offer to ask a typed text waits
+  for that effect too (`mounted` in `couldAsk`), open access or not: it rests
+  on the name search having found nothing, and a search streamed with the
+  document can settle between the server's render and hydration.
+- **A visitor is never answered unmetered.** Without `ASK_DAILY_TOKENS` a
+  public request is refused, and an ask whose hold cannot be written is
+  `unavailable`. Do not let either fall through to the judge. The owner asks
+  without a budget and without the browser check.
+- **An ask is admitted on a hold and charged afterwards**
+  (`lib/ask/allowance.server.ts`): what it uses is known only once the judge
+  has answered, so `holdStatement` sets `HOLD_TOKENS` against the device's
+  total while it runs and `settleStatement` replaces that with what it used.
+  A handler that admits an ask owes it exactly one `charge`, however the ask
+  ends (the `finally` in `planSearch` and `rankMore`): one left out leaves the
+  hold standing, which over-charges the device, and one called twice would
+  take a hold off that was never set. The hold must stay about the most one
+  call can use, or asks sent together run past the budget before any is
+  charged.
+- **Every ask is charged at least `minimumCharge`**, whatever it used, and so
+  is one the browser check turns away. Only a check that could not run gives
+  its hold back whole.
+- **A further slice is an ask** (`rankMore`): it reaches the judge as a
+  question does, so it is admitted and charged exactly as `planSearch` is.
+  `searchRanked` is not: it reads the rows of an answer already given, and a
+  listing must keep paging through a cooldown.
+- **The hold decides and writes in one statement** (`holdStatement`): a
+  waiting device's row is left unwritten, and `admitted` says whether the ask
+  found room. Split into a read and a write, asks sent together each pass. A
+  total found at the budget starts the cooldown there, so a hold that was
+  never settled cannot leave a device refused with no end in sight. The unit
+  tests render the statements; they do not run them. After changing one, run
+  it on a real Postgres (the admission's order and the statements' window,
+  hold, settle, cooldown and prune cases are the checks worth repeating).
+- **The browser check decides the ask whatever `BROWSER_CHECK_ENFORCE` says**:
+  the mint refuses a client it names automated, and a plan or a slice goes on
+  only for one it names a person. That switch is the extras' and the
+  sessions' rollout, not the ask's.
+- **Both device-key lists refuse the ask** (`isListed`): the extras' and the
+  sessions'. A key refused anything is refused the ask too.
+- **One length for the window, the cooldown and what the browser is told**:
+  `COOLDOWN_SECONDS` (`lib/ask/cooldown.ts`). The statements splice it and the
+  stored time's sanity bound is measured in it.
+- **The time kept in the browser (`ss-ask-cooldown`) is a convenience**: it
+  spares a refused call and tells a returning visitor at once. The server
+  decides every request, and a time further ahead than two cooldowns is
+  discarded, so a clock put back cannot close asking for good. A document
+  carrying the owner hint does not read it at mount: the owner asks without
+  a budget.
+- **The loader remembers a cooldown a call named** (`createAskLoader`): until
+  it ends nothing is minted or sent from that document.
+- **/privacy names the usage total and the stored time.** Change what is
+  kept, or for how long (`pruneStatement`), and change the page with it.
 
 ## Company documents set their own Cache-Control
 

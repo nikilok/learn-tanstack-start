@@ -2,6 +2,7 @@ import { FILTER_DIMENSION_COUNT } from '@ss/search-filters';
 import { Link } from '@tanstack/react-router';
 
 import { FILTER_SECTIONS } from '../lib/search/sections';
+import AskAgain from './AskAgain';
 import AskExamples from './AskExamples';
 import Odometer from './Odometer';
 
@@ -12,7 +13,9 @@ import styles from './HeroText.module.css';
  * live sponsor count abbreviated as "<n>K+" in high-contrast type over a muted
  * supporting label, plus a chip row broadcasting the filter capability that
  * links to /filters, or, while asking is open (`onAsk`), the rotating example
- * questions in its place (AskExamples). The number is the petrol-pump
+ * questions in its place (AskExamples). A device waiting out a cooldown
+ * (`askAgain`, the time it ends) keeps the filters row, with a line under it
+ * saying when it may ask again (AskAgain). The number is the petrol-pump
  * <Odometer>, rolling up to the live count. Rendered only while the search
  * input is empty, so its entrance animation runs on mount and unmounts the
  * moment the user types.
@@ -30,9 +33,11 @@ const FACETS = FILTER_SECTIONS.filter((s) => s.schemaLabel !== null).map(
 export default function HeroText({
   count,
   onAsk,
+  askAgain = null,
 }: {
   count?: number;
   onAsk?: (text: string) => void;
+  askAgain?: number | null;
 }) {
   // Whole thousands, floored, so "<n>K+" is always a truthful lower bound of the
   // live count (e.g. 114,145 → "114K+").
@@ -76,6 +81,7 @@ export default function HeroText({
           </span>
         </Link>
       )}
+      {askAgain !== null && <AskAgain until={askAgain} />}
     </>
   );
 }

@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { DIAL_STAGGER_MS } from './address-binding.ts';
 import type { AddressGate, Outcome } from './address-gate.ts';
 import { currentTurns } from './address-ledger.ts';
 import {
@@ -114,8 +115,8 @@ function network(
       events.push(`${refused ? 'refused' : 'turn'} ${addresses.join(',')}`);
       return !refused;
     },
-    settle: (host, addresses, outcome: Outcome) => {
-      events.push(`${outcome} ${host} ${addresses.join(',')}`);
+    settle: (host, addresses, port, outcome: Outcome) => {
+      events.push(`${outcome} ${host}:${port} at ${addresses.join(',')}`);
     },
     heldRequests: () => 0,
     paused: () => 0,
@@ -160,6 +161,8 @@ function network(
 }
 
 const ONE = '192.0.2.10,192.0.2.11';
+/** Where a request to one.example goes: the first of its addresses, which accepts. */
+const ASKED = 'one.example:443 at 192.0.2.10';
 
 describe('fetchPage at the address gate', () => {
   test("robots.txt, then the page, each wait their turn at the host's addresses", async () => {
@@ -173,10 +176,10 @@ describe('fetchPage at the address gate', () => {
     expect(events).toEqual([
       `turn ${ONE}`,
       'fetch https://one.example/robots.txt',
-      `answered one.example ${ONE}`,
+      `answered ${ASKED}`,
       `turn ${ONE}`,
       'fetch https://one.example/',
-      `answered one.example ${ONE}`,
+      `answered ${ASKED}`,
     ]);
     // Sent as ever: under our name, with a time limit, and redirects left for the fetcher to follow by hand.
     expect(sent.map((init) => init.headers)).toEqual([
@@ -246,7 +249,7 @@ describe('fetchPage at the address gate', () => {
     });
     expect(
       answered.filter((event) => /^[a-z]+ one\.example/.test(event)),
-    ).toEqual([`answered one.example ${ONE}`, `answered one.example ${ONE}`]);
+    ).toEqual([`answered ${ASKED}`, `answered ${ASKED}`]);
     clearRobotsCache();
 
     const silent = network({
@@ -259,7 +262,7 @@ describe('fetchPage at the address gate', () => {
     });
     expect(
       silent.filter((event) => /^[a-z]+ one\.example/.test(event)),
-    ).toEqual([`silent one.example ${ONE}`, `silent one.example ${ONE}`]);
+    ).toEqual([`silent ${ASKED}`, `silent ${ASKED}`]);
     clearRobotsCache();
 
     const neither = network({
@@ -272,7 +275,7 @@ describe('fetchPage at the address gate', () => {
     });
     expect(
       neither.filter((event) => /^[a-z]+ one\.example/.test(event)),
-    ).toEqual([`other one.example ${ONE}`, `other one.example ${ONE}`]);
+    ).toEqual([`other ${ASKED}`, `other ${ASKED}`]);
   });
 
   test('a host we may not ask takes no turn', async () => {
@@ -462,7 +465,7 @@ describe('a host on several addresses', () => {
     expect(sentTo).toEqual(['https://192.0.2.11/about']);
   });
 
-  test('when none of them accepts a connection, nothing is sent, and it fails as a refused connection does', async () => {
+  test('when none of them accepts a connection, nothing is sent or reported, and it fails as a refused connection does', async () => {
     const events = network(
       { 'https://one.example/': page('<p>Hello</p>') },
       { refusing: ['192.0.2.10', '192.0.2.11'] },
@@ -471,15 +474,49 @@ describe('a host on several addresses', () => {
       ok: false,
       reason: 'dns_or_refused',
     });
+    expect(events).toEqual([`turn ${ONE}`, `turn ${ONE}`]);
+  });
+
+  test('when none of them accepts within the time limit, it is the silence a timeout is at each one dialled and left unanswered: not at one that refused, nor at one never dialled', async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const wide = '192.0.2.10,192.0.2.11,192.0.2.12,192.0.2.13';
+    const events = network(
+      {},
+      {
+        hosts: { 'wide.example': wide.split(',') },
+        refusing: ['192.0.2.10'],
+        unanswering: ['192.0.2.11', '192.0.2.12', '192.0.2.13'],
+      },
+    );
+    // Time to dial the second and, a stagger later, the third; never the fourth.
+    const limit = spyOn(AbortSignal, 'timeout').mockImplementation(() =>
+      real(DIAL_STAGGER_MS + 100),
+    );
+    try {
+      expect(await fetchPage('https://wide.example/')).toEqual({
+        ok: false,
+        reason: 'timeout',
+      });
+    } finally {
+      limit.mockRestore();
+    }
+    expect(dialled).toEqual([
+      '192.0.2.10:443',
+      '192.0.2.11:443',
+      '192.0.2.12:443',
+      '192.0.2.10:443',
+      '192.0.2.11:443',
+      '192.0.2.12:443',
+    ]);
     expect(events).toEqual([
-      `turn ${ONE}`,
-      `other one.example ${ONE}`,
-      `turn ${ONE}`,
-      `other one.example ${ONE}`,
+      `turn ${wide}`,
+      'silent wide.example:443 at 192.0.2.11,192.0.2.12',
+      `turn ${wide}`,
+      'silent wide.example:443 at 192.0.2.11,192.0.2.12',
     ]);
   });
 
-  test('when none of them accepts within the time limit, nothing is sent, and it is the silence a timeout is', async () => {
+  test('when the first of them does not accept within the time limit, nothing is sent, and it is the silence a timeout is', async () => {
     const real = AbortSignal.timeout.bind(AbortSignal);
     const events = network(
       { 'https://one.example/': page('<p>Hello</p>') },
@@ -498,9 +535,9 @@ describe('a host on several addresses', () => {
     }
     expect(events).toEqual([
       `turn ${ONE}`,
-      `silent one.example ${ONE}`,
+      `silent ${ASKED}`,
       `turn ${ONE}`,
-      `silent one.example ${ONE}`,
+      `silent ${ASKED}`,
     ]);
   });
 
@@ -572,7 +609,7 @@ describe('a paused address', () => {
     expect(events.slice(1)).toEqual([
       `turn ${ONE}`,
       'fetch https://one.example/robots.txt',
-      `answered one.example ${ONE}`,
+      `answered ${ASKED}`,
     ]);
   });
 });
@@ -711,5 +748,84 @@ describe('paceByAddress', () => {
     expect(events).toHaveLength(sent);
     expect((await fetchPage('https://two.example/')).ok).toBe(false);
     expect(events.length).toBeGreaterThan(sent);
+  });
+
+  // An address of their own, and one that another site is at.
+  const OWN = '192.0.2.60';
+  const SHARED = '192.0.2.70';
+  const silence = new Error('The operation timed out.');
+  /** Robots.txt and the home page of each site, on `origin`'s scheme and port, going unanswered. */
+  const unanswered = (sites: string[], origin: (site: string) => string) =>
+    Object.fromEntries(
+      sites.flatMap((site) => [
+        [`${origin(site)}/robots.txt`, silence],
+        [`${origin(site)}/`, silence],
+      ]),
+    );
+
+  test('what a request came to counts at the address it was sent to, never at another its host resolves to', async () => {
+    const hosts = {
+      'shared.example': [SHARED],
+      'alpha.example': [OWN, SHARED],
+      'beta.example': [OWN, SHARED],
+      'gamma.example': [OWN, SHARED],
+      'delta.example': [OWN, SHARED],
+    };
+    network(
+      {
+        'https://shared.example/': page('<p>Hello</p>'),
+        'https://shared.example/about': page('<p>About</p>'),
+        'https://alpha.example/': page('<p>Hello</p>'),
+        ...unanswered(
+          ['beta', 'gamma', 'delta'],
+          (site) => `https://${site}.example`,
+        ),
+      },
+      { gated: false, hosts },
+    );
+    const gate = paceByAddress(0, () => {}, dir);
+    expect((await fetchPage('https://shared.example/')).ok).toBe(true);
+    expect((await fetchPage('https://alpha.example/')).ok).toBe(true);
+    expect(sentTo.at(-1)).toBe(`https://${OWN}/`);
+    for (const site of ['beta', 'gamma', 'delta']) {
+      expect((await fetchPage(`https://${site}.example/`)).ok).toBe(false);
+    }
+    // The address that went unanswered is paused, and it alone.
+    expect(gate.paused()).toBe(1);
+    expect(await fetchPage('https://alpha.example/')).toEqual({
+      ok: false,
+      reason: 'address_paused',
+    });
+    expect((await fetchPage('https://shared.example/about')).ok).toBe(true);
+  });
+
+  test('a timeout on a port an address was never heard on does not count against it', async () => {
+    const hosts = {
+      'shared.example': [SHARED],
+      'alpha.example': [SHARED],
+      'beta.example': [SHARED],
+      'gamma.example': [SHARED],
+    };
+    network(
+      {
+        'https://shared.example/': page('<p>Hello</p>'),
+        'https://shared.example/about': page('<p>About</p>'),
+        ...unanswered(
+          ['alpha', 'beta', 'gamma'],
+          (site) => `http://${site}.example:81`,
+        ),
+      },
+      { gated: false, hosts },
+    );
+    const gate = paceByAddress(0, () => {}, dir);
+    expect((await fetchPage('https://shared.example/')).ok).toBe(true);
+    for (const site of ['alpha', 'beta', 'gamma']) {
+      expect(await fetchPage(`http://${site}.example:81/`)).toEqual({
+        ok: false,
+        reason: 'timeout',
+      });
+    }
+    expect(gate.paused()).toBe(0);
+    expect((await fetchPage('https://shared.example/about')).ok).toBe(true);
   });
 });

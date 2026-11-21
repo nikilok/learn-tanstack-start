@@ -360,3 +360,6 @@ export const askSearch = loader.ask;
 
 /** Judges the next slice of an asked question's shortlist with the same token (lib/ask/tranches). */
 export const askMore = loader.more;
+
+/** Holds this document's asks to a wait the page learnt elsewhere: one kept for the device, or told another tab (lib/ask/cooldown). */
+export const holdAsksUntil = loader.holdUntil;

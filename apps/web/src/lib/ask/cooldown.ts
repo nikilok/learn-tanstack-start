@@ -28,6 +28,19 @@ export function laterCooldown(known: number | null, told: number): number {
   return known === null ? told : Math.max(known, told);
 }
 
+/** How long a wait the server names is held at the least. */
+const TOLD_WAIT_MIN_MS = 60 * 1000;
+
+/**
+ * A wait the server named, as this device holds it: the time told, or a
+ * short while from now where this device's clock says that time has passed.
+ * The server's clock is the one that counts, so a wait just told is never
+ * over, and asking is not tried again at once.
+ */
+export function toldCooldown(told: number, now: number): number {
+  return told > now ? told : now + TOLD_WAIT_MIN_MS;
+}
+
 /** The wait to show when a call names one: the latest of the one shown, the one kept for the device and the one told. */
 export function latestCooldown(
   shown: number | null,

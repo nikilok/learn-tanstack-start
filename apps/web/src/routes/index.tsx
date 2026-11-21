@@ -25,7 +25,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
-import { askMore, askSearch, prepareAsk } from '../api/ask';
+import { askMore, askSearch, holdAsksUntil, prepareAsk } from '../api/ask';
 import { searchFiltered } from '../api/filterSearch';
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
@@ -54,6 +54,7 @@ import {
   latestCooldown,
   loadCooldown,
   onCooldownKept,
+  toldCooldown,
   waitAfter,
 } from '../lib/ask/cooldown';
 import {
@@ -322,13 +323,17 @@ function Home() {
   }, []);
   /** Notes a cooldown the server named: kept for the device at once, whether or not the route is still here to show it, and the latest of it, the one shown and the one kept is shown until it ends. */
   const noteCooldown = useCallback((told: number) => {
-    keepCooldown(told);
+    // Never over as it is told, whatever this device's clock says.
+    const until = toldCooldown(told, Date.now());
+    keepCooldown(until);
     const stored = loadCooldown();
-    setCooldown((shown) => latestCooldown(shown, stored, told));
+    setCooldown((shown) => latestCooldown(shown, stored, until));
   }, []);
-  // The wait shown is kept for the device, whichever way it was learnt.
+  // The wait shown is kept for the device, whichever way it was learnt, and the document's asks are held to it.
   useEffect(() => {
-    if (cooldown !== null) keepCooldown(cooldown);
+    if (cooldown === null) return;
+    keepCooldown(cooldown);
+    holdAsksUntil(cooldown);
   }, [cooldown]);
   // A wait another tab is told is this device's too: shown here as it is kept there, and a later one shown here is put back.
   useEffect(() => {
@@ -734,12 +739,14 @@ function Home() {
     );
   };
   // An ask made before the device key exists waits for it, as pending, and
-  // learns with it when none will come.
+  // learns with it when none will come. A wait learnt meanwhile holds it, as
+  // it would have at the box: nothing is sent.
   useEffect(() => {
     const text = queuedAskRef.current;
     if (readiness.status === 'waiting' || text === null) return;
     queuedAskRef.current = null;
-    if (readiness.status === 'ready') runAsk(text, readiness.key);
+    if (cooldown !== null) setAskProgress(ASK_COOLDOWN);
+    else if (readiness.status === 'ready') runAsk(text, readiness.key);
     else setAskProgress(ASK_UNAVAILABLE);
     // runAsk reads render-time values the ask was made against.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

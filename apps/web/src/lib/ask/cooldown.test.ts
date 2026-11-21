@@ -14,6 +14,7 @@ import {
   onCooldownKept,
   saveCooldown,
   storedCooldown,
+  toldCooldown,
   waitAfter,
 } from './cooldown';
 
@@ -69,6 +70,26 @@ describe('laterCooldown', () => {
 
   test('a wait told twice is kept as it is', () => {
     expect(laterCooldown(NOW + HOUR, NOW + HOUR)).toBe(NOW + HOUR);
+  });
+});
+
+describe('toldCooldown', () => {
+  test('a wait told that is still ahead is held as told', () => {
+    expect(toldCooldown(NOW + HOUR, NOW)).toBe(NOW + HOUR);
+    expect(toldCooldown(NOW + 1, NOW)).toBe(NOW + 1);
+  });
+
+  test('a wait told that this device’s clock says has passed is held a minute from now: it is never over as it is told', () => {
+    expect(toldCooldown(NOW, NOW)).toBe(NOW + 60_000);
+    expect(toldCooldown(NOW - 1, NOW)).toBe(NOW + 60_000);
+    expect(toldCooldown(NOW - COOLDOWN, NOW)).toBe(NOW + 60_000);
+  });
+
+  test('what is held is a time the device’s record keeps and reads back', () => {
+    for (const told of [NOW - HOUR, NOW, NOW + HOUR])
+      expect(storedCooldown(String(toldCooldown(told, NOW)), NOW)).toBe(
+        toldCooldown(told, NOW),
+      );
   });
 });
 

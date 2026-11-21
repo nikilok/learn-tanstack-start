@@ -578,12 +578,17 @@ the mint, the plan and each further slice pass.
   never over a later one. Open tabs hear the store change (`onCooldownKept`)
   and settle on the latest wait (`heardCooldown`): no lock is taken across
   tabs, as nothing relies on the store.
+- **A wait just told is never over** (`toldCooldown`): the server's clock is
+  the one that counts, so a time this device's clock says has passed is held
+  a minute from now. Shown as told, it would end at once and the page would
+  mint again, over and over, for as long as the clocks disagree.
 - **The loader holds every call to the latest wait it knows**
-  (`createAskLoader`), whichever answer named it: until it ends nothing is
-  minted or sent from that document. A mint's answer is read through
-  `settled` in the same turn it is used, and `minting` starts no mint while a
-  wait is ahead; a check parted from its use by an `await` lets through a
-  wait told in between.
+  (`createAskLoader`), whichever answer named it, and the route holds it to
+  the wait it shows (`holdAsksUntil`), so one kept for the device or told
+  another tab counts too: until it ends nothing is minted or sent from that
+  document. A mint's answer is read through `settled` in the same turn it is
+  used, and `minting` starts or joins no mint while a wait is ahead; a check
+  parted from its use by an `await` lets through a wait told in between.
 - **/privacy names the usage total and the stored time.** Change what is
   kept, or for how long (`pruneStatement`), and change the page with it.
 

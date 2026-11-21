@@ -86,6 +86,21 @@ export async function browserVerdict(
 }
 
 /**
+ * The check's verdict on the current request, logged under `tag`: for a call that acts on the
+ * verdict itself, whatever `BROWSER_CHECK_ENFORCE` says. A check that failed has said so already
+ * (`browserVerdict`). Never throws.
+ */
+export async function loggedVerdict(
+  tag: string,
+  check: BrowserCheck = checkBotId,
+  verdict: LocalVerdict | undefined = localVerdict(),
+): Promise<BrowserVerdict | 'unchecked'> {
+  const said = await browserVerdict(tag, check, verdict);
+  if (said !== 'unchecked') console.info(`[${tag}] browser check: ${said}`);
+  return said;
+}
+
+/**
  * Whether the current request may have what it asks for (the extras, or a company page's data
  * under `tag`): it came from a browser a person is using, by Vercel's check of the challenge its
  * script attached to the request. Any client the check names as automated is refused while
@@ -116,7 +131,7 @@ export async function fromBrowser(
  * only while `enforce` holds (`BROWSER_CHECK_ENFORCE` unless a caller narrows it).
  */
 export async function ownerOrBrowser(
-  tag: 'extras' | 'page' | 'ask',
+  tag: 'extras' | 'page',
   deps: {
     owner?: () => Promise<boolean>;
     check?: BrowserCheck;

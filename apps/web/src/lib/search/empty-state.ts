@@ -2,6 +2,7 @@
 // ask's quiet offer, or the frame a load fills. Pure, so the rule that keeps
 // the WebGPU scene mounted across a refine is tested rather than read.
 
+import { cooldownHold, cooldownNotice } from '../ask/cooldown';
 import type { AskHint } from '../ask/session';
 
 /** Whether the last settled empty view was the scene: a settled empty state records it; rows, or a query dropped below the floor, clear it; a load leaves it. */
@@ -49,4 +50,23 @@ export function quietListing(
   if (ask === null) return false;
   if (ask.status === 'pending') return true;
   return ask.status === 'eligible' && (s.confirmedEmpty || s.loading);
+}
+
+/** The scene's second line: the ask's own word on the text where it has one, else when the rest of a question's answer can load while a wait holds it; null when there is nothing to add. */
+export function sceneNote(
+  ask: AskHint | null,
+  moreHeld: number | null,
+): string | null {
+  if (ask?.status === 'cooldown') return cooldownNotice(ask.until);
+  if (ask?.status === 'unavailable') return 'Ask isn’t available right now.';
+  if (ask?.status === 'empty')
+    return ask.reason === 'name'
+      ? 'That reads as one organisation’s name, and it isn’t on the register.'
+      : ask.reason === 'beyond'
+        ? 'That asks for something the register doesn’t hold.'
+        : ask.reason === 'unmatched'
+          ? 'Nothing we’ve read on a sponsor’s website describes that.'
+          : 'Couldn’t turn that into filters.';
+  if (moreHeld !== null) return cooldownHold(moreHeld);
+  return null;
 }

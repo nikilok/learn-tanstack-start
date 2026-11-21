@@ -1,0 +1,1 @@
+ALTER TABLE "ask_usage" ADD COLUMN "held" integer DEFAULT 0 NOT NULL;

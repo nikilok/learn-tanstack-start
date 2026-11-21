@@ -16,6 +16,7 @@ import { createIsomorphicFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/start-server-core';
 import {
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -24,7 +25,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
-import { askMore, askSearch, prepareAsk } from '../api/ask';
+import { askMore, askSearch, holdAsksUntil, prepareAsk } from '../api/ask';
 import { searchFiltered } from '../api/filterSearch';
 import { searchHmrc, sponsorCountQueryOptions } from '../api/hmrc';
 import HeroText from '../components/HeroText';
@@ -44,6 +45,17 @@ import {
   loadApplied,
   saveApplied,
 } from '../lib/ask/applied-store';
+import { askAtMount } from '../lib/ask/at-mount';
+import {
+  clearCooldown,
+  heardCooldown,
+  keepCooldown,
+  laterCooldown,
+  latestCooldown,
+  loadCooldown,
+  onCooldownKept,
+  waitAfter,
+} from '../lib/ask/cooldown';
 import {
   askEligible,
   askWordCount,
@@ -58,6 +70,7 @@ import {
   describeSector,
   paramsKey,
 } from '../lib/ask/overlay';
+import { ASK_PUBLIC } from '../lib/ask/public';
 import {
   type AskAccess,
   askBoxMode,
@@ -123,6 +136,7 @@ const serverSnapshot = () => WAITING;
 const ASK_IDLE: AskProgress = { status: 'idle' };
 const ASK_PENDING: AskProgress = { status: 'pending' };
 const ASK_UNAVAILABLE: AskProgress = { status: 'unavailable' };
+const ASK_COOLDOWN: AskProgress = { status: 'cooldown' };
 
 /** The home route's search as the registry validates it: the name term plus the filter params alone (`filterParamsOf`: a param that filters nothing never puts the page into filter mode). */
 function validateHomeSearch(search: Record<string, unknown>) {
@@ -272,21 +286,84 @@ function Home() {
     serverSnapshot,
   );
   const [askProgress, setAskProgress] = useState<AskProgress>(ASK_IDLE);
-  // Known at mount from the owner hint the document's own response left
+  // Open to every visitor while asking is public (lib/ask/public): a constant
+  // of the build, so the server's render and the first one here agree. Else
+  // known at mount from the owner hint the document's own response left
   // (lib/ask/access-hint.server), so an owner's offer never waits on a mint
-  // and nobody else mints at all. Off on every first render, so a hydration
-  // render matches the server: the route hydrates in its own Suspense
+  // and nobody else mints at all: off on every first render, so a hydration
+  // render matches the server (the route hydrates in its own Suspense
   // boundary after the root's effects, so `hydrationDone()` is already true
-  // there. The layout effect opens it before the first paint, and costs a
-  // document without the hint nothing.
-  const [askAccess, setAskAccess] = useState<AskAccess>('off');
+  // there), and opened by the layout effect before the first paint, which
+  // costs a document without the hint nothing. A /download preview never
+  // asks, and learns it there too: its first render must match the server's.
+  const [askAccess, setAskAccess] = useState<AskAccess>(
+    ASK_PUBLIC ? 'open' : 'off',
+  );
+  // When this device may ask again while it waits out a cooldown
+  // (lib/ask/cooldown): the latest time the server has named, kept for the
+  // device and read at mount, so a returning visitor is told at once and
+  // nothing is sent meanwhile. Null on every first render, as the server
+  // knows none.
+  const [cooldown, setCooldown] = useState<number | null>(null);
   // False on the first render only, for the same reason: what the entry
   // carries (its ranking) is read from the second on.
   const [mounted, setMounted] = useState(false);
   useLayoutEffect(() => {
     setMounted(true);
-    if (hasOwnerHint()) setAskAccess('open');
+    // The server still decides: a hint that is not a credential is told so.
+    const learnt = askAtMount({
+      preview: isDesktopPreview(),
+      owner: hasOwnerHint(),
+      open: ASK_PUBLIC,
+      stored: loadCooldown(),
+    });
+    setAskAccess(learnt.access);
+    setCooldown(learnt.cooldown);
   }, []);
+  /** Notes a cooldown the server named: kept for the device at once, whether or not the route is still here to show it, and the latest of it, the one shown and the one kept is shown until it ends. */
+  const noteCooldown = useCallback((told: number) => {
+    keepCooldown(told);
+    const stored = loadCooldown();
+    setCooldown((shown) => latestCooldown(shown, stored, told));
+  }, []);
+  // The wait shown is kept for the device, whichever way it was learnt, and the document's asks are held to it.
+  useEffect(() => {
+    if (cooldown === null) return;
+    keepCooldown(cooldown);
+    holdAsksUntil(cooldown);
+  }, [cooldown]);
+  // A wait another tab is told is this device's too: shown here as it is kept there, and a later one shown here is put back.
+  useEffect(() => {
+    if (askAccess !== 'open') return;
+    return onCooldownKept(() => {
+      const { show, keep } = heardCooldown({
+        owner: hasOwnerHint(),
+        shown: cooldown,
+        stored: loadCooldown(),
+        now: Date.now(),
+      });
+      if (keep !== null) keepCooldown(keep);
+      if (show !== null) setCooldown((shown) => laterCooldown(shown, show));
+    });
+  }, [askAccess, cooldown]);
+  // The wait over, asking is offered again, unless another tab has kept a later one since.
+  useEffect(() => {
+    if (cooldown === null) return;
+    const timer = setTimeout(
+      () => {
+        const later = waitAfter(cooldown, loadCooldown());
+        if (later !== null) {
+          setCooldown(later);
+          return;
+        }
+        clearCooldown();
+        setCooldown(null);
+      },
+      // Within what a timer can count: past it, one fires at once.
+      Math.min(Math.max(0, cooldown - Date.now()), 2 ** 31 - 1),
+    );
+    return () => clearTimeout(timer);
+  }, [cooldown]);
   // This history entry's state: an entry the ask produced carries its plan
   // (lib/ask/session). One object per entry, so it is a stable dependency.
   const [applied, setApplied] = useState<AppliedAsk | null>(null);
@@ -349,7 +426,8 @@ function Home() {
   // shows as rows on their way, one that could not be judged as a next page
   // that failed, and the slice still to judge keeps the list open. The list
   // asks for more as it does for any page; past the slices shown, that
-  // judges the next.
+  // judges the next, unless the device is waiting out a cooldown, which
+  // holds the walk there until it ends.
   const [judging, setJudging] = useState(false);
   const [walkFailed, setWalkFailed] = useState(false);
   const emptyRunRef = useRef(0);
@@ -360,6 +438,7 @@ function Home() {
       next: ranking?.next ?? null,
       judging,
       failed: walkFailed,
+      heldUntil: cooldown,
     }),
     fetchMore: () =>
       rankedListing.hasMore ? rankedListing.fetchMore() : judgeNextTranche(),
@@ -449,30 +528,36 @@ function Home() {
   // Open access is enough to offer: the device key the ask needs can arrive
   // seconds after the search settles, and the offer must not wait on it, or
   // the scene would claim "not found" first. A document that can never have
-  // one is not offered.
+  // one is not offered. Never on the first render, though access may be open
+  // there while asking is public: whether the text found nothing is the
+  // search's to say, and a search streamed with the document can settle
+  // between the server's render and this one's hydration.
   const couldAsk = askEligible({
     confirmedEmpty: confirmedEmpty || holding,
     text: search,
-    ready: askAccess === 'open' && readiness.status !== 'off',
+    ready: mounted && askAccess === 'open' && readiness.status !== 'off',
     preview,
   });
   // The token is minted the first time the offer would show, so Enter has it
   // ready. The loader shares one mint per document, so re-runs cost nothing;
   // a mint that fails leaves access as it was and is tried again on the next
   // text, and a refused one closes the document: the hint is no credential.
+  // A device told to wait is told when it may ask again instead, and nothing
+  // is minted while it waits.
   useEffect(() => {
-    if (!couldAsk || readiness.status !== 'ready') return;
+    if (!couldAsk || readiness.status !== 'ready' || cooldown !== null) return;
     let stale = false;
     prepareAsk(readiness.key).then(
-      (open) => {
-        if (!stale) setAskAccess(open ? 'open' : 'off');
+      (offer) => {
+        if (offer.status === 'cooldown') noteCooldown(offer.until);
+        else if (!stale) setAskAccess(offer.status);
       },
       () => {},
     );
     return () => {
       stale = true;
     };
-  }, [couldAsk, readiness, search]);
+  }, [couldAsk, readiness, search, cooldown, noteCooldown]);
   // A keyboard presses Enter, which the listing only takes for a highlighted
   // row; a touch device taps the arrow.
   const askKeyboard = !platformInfo.isMobile;
@@ -484,6 +569,7 @@ function Home() {
     progress: askProgress,
     couldAsk,
     keyboard: askKeyboard,
+    cooldown,
   });
   // The ring the box wears (lib/ask/session): turning while a question
   // runs or a further slice of its answer is judged, steady while its plan
@@ -508,7 +594,13 @@ function Home() {
     const run = ++askRunRef.current;
     askSearch(text, key, base).then(
       (outcome) => {
+        // The device's to know, whatever became of the run that learnt it.
+        if (outcome.status === 'cooldown') noteCooldown(outcome.until);
         if (run !== askRunRef.current) return;
+        if (outcome.status === 'cooldown') {
+          setAskProgress(ASK_COOLDOWN);
+          return;
+        }
         if (outcome.status === 'off') {
           setAskAccess('off');
           setAskProgress(ASK_IDLE);
@@ -564,9 +656,11 @@ function Home() {
     const live = appliedRef.current;
     const walk = live?.ranking;
     // Not while the route is leaving: a slice landing then would navigate
-    // under the company page loading.
+    // under the company page loading. Nor while the device waits out a
+    // cooldown: the listing says so where the slice would have joined.
     if (
       leaving ||
+      cooldown !== null ||
       !live ||
       !walk ||
       walk.next === null ||
@@ -594,6 +688,12 @@ function Home() {
       (outcome) => {
         walkingRef.current = null;
         setJudging(false);
+        // The device's to know, whatever became of the plan: the walk holds
+        // at this slice until the wait is over.
+        if (outcome.status === 'cooldown') {
+          noteCooldown(outcome.until);
+          return;
+        }
         // The plan ended, or moved on, while the slice was judged.
         const current = appliedRef.current;
         if (
@@ -636,12 +736,14 @@ function Home() {
     );
   };
   // An ask made before the device key exists waits for it, as pending, and
-  // learns with it when none will come.
+  // learns with it when none will come. A wait learnt meanwhile holds it, as
+  // it would have at the box: nothing is sent.
   useEffect(() => {
     const text = queuedAskRef.current;
     if (readiness.status === 'waiting' || text === null) return;
     queuedAskRef.current = null;
-    if (readiness.status === 'ready') runAsk(text, readiness.key);
+    if (cooldown !== null) setAskProgress(ASK_COOLDOWN);
+    else if (readiness.status === 'ready') runAsk(text, readiness.key);
     else setAskProgress(ASK_UNAVAILABLE);
     // runAsk reads render-time values the ask was made against.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -673,6 +775,11 @@ function Home() {
       });
     }
     askedRef.current = { text, urlKey: urlParamsKey };
+    // A device waiting out a cooldown is told so: nothing is sent.
+    if (cooldown !== null) {
+      setAskProgress(ASK_COOLDOWN);
+      return;
+    }
     setAskProgress(ASK_PENDING);
     if (readiness.status === 'ready') runAsk(text, readiness.key);
     else if (readiness.status === 'off') setAskProgress(ASK_UNAVAILABLE);
@@ -959,7 +1066,10 @@ function Home() {
         {heroVisible && (
           <HeroText
             count={sponsorCount}
-            onAsk={askAccess === 'open' && !preview ? askExample : undefined}
+            onAsk={
+              askAccess === 'open' && cooldown === null ? askExample : undefined
+            }
+            askAgain={askAccess === 'open' ? cooldown : null}
           />
         )}
 

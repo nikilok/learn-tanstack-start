@@ -14,10 +14,12 @@ import type { HmrcRow } from '../api/hmrc';
 import { restoresScroll, wantsMore } from '../hooks/listing-state';
 import { useResultsKeyboardNav } from '../hooks/useResultsKeyboardNav';
 import { clearApplied } from '../lib/ask/applied-store';
+import { cooldownHold, cooldownNotice } from '../lib/ask/cooldown';
 import type { AskHint } from '../lib/ask/session';
 import {
   nextSceneLast,
   quietListing,
+  sceneNote,
   sceneShown,
 } from '../lib/search/empty-state';
 import { rehydratePending, storeFilters } from '../lib/search/persist';
@@ -49,6 +51,8 @@ export type SponsorResultsData = {
   failed: boolean;
   /** The next page could not be loaded: it is not asked for again until the visitor says so. */
   moreFailed: boolean;
+  /** The next page waits on the ask's cooldown until this time (lib/ask/tranches): said in place of the offer to try again. */
+  moreHeld?: number | null;
   /** Asks for the first page again, after it `failed`. */
   retry: () => void;
   hasMore: boolean;
@@ -86,6 +90,7 @@ export default function HmrcResults({
     isLoading,
     failed,
     moreFailed,
+    moreHeld = null,
     retry,
     hasMore,
     loadingMore,
@@ -405,6 +410,7 @@ export default function HmrcResults({
   // zoom plays once, no remount. The message is gated on `confirmedEmpty` (NOT the loading
   // hold) so we never assert "not found" for a refined term that may still return matches.
   if (showScene) {
+    const note = sceneNote(ask, moreHeld);
     return (
       <>
         <BlackHole fullscreen className="z-0" />
@@ -426,28 +432,19 @@ export default function HmrcResults({
                   ? `No organisations found matching “${search}” with your filters`
                   : 'No organisations match these filters'}
             </p>
-            {/* The ask itself had nothing to offer for this text (lib/ask). */}
-            {ask &&
-              (ask.status === 'empty' || ask.status === 'unavailable') && (
-                <p
-                  className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink-soft) shadow-md backdrop-blur-md"
-                  style={{
-                    backgroundColor:
-                      'color-mix(in srgb, var(--surface) 85%, transparent)',
-                  }}
-                  aria-live="polite"
-                >
-                  {ask.status !== 'empty'
-                    ? 'Ask isn’t available right now.'
-                    : ask.reason === 'name'
-                      ? 'That reads as one organisation’s name, and it isn’t on the register.'
-                      : ask.reason === 'beyond'
-                        ? 'That asks for something the register doesn’t hold.'
-                        : ask.reason === 'unmatched'
-                          ? 'Nothing we’ve read on a sponsor’s website describes that.'
-                          : 'Couldn’t turn that into filters.'}
-                </p>
-              )}
+            {/* What the ask had to say of this text, or when the rest of a question's answer can load (lib/search/empty-state). */}
+            {note !== null && (
+              <p
+                className="max-w-sm rounded-2xl px-4 py-2 text-center text-sm text-(--sea-ink-soft) shadow-md backdrop-blur-md"
+                style={{
+                  backgroundColor:
+                    'color-mix(in srgb, var(--surface) 85%, transparent)',
+                }}
+                aria-live="polite"
+              >
+                {note}
+              </p>
+            )}
             {/* Users forget filters are on — offer the exit right where the dead end happens. */}
             {filtersActive && <ResetFilters search={search} />}
           </div>
@@ -503,98 +500,114 @@ export default function HmrcResults({
   }
 
   return (
-    <div ref={listRef} className={`mt-6 ${LIST_GUTTER} py-2`}>
-      <div
-        style={{
-          height: virtualizer.getTotalSize(),
-          // Floor the height so the rail runs down to near the page bottom even
-          // when only a few rows match; tall result sets exceed it and win.
-          minHeight: 'calc(100dvh - 16rem)',
-          width: '100%',
-          position: 'relative',
-        }}
-      >
-        {/* Continuous thin rail down the left gutter — the straight line the
+    <>
+      {/* An ask of a text that has rows by name was not made: the device waits out a cooldown (lib/ask). */}
+      {ask?.status === 'cooldown' && (
+        <p className="mt-4 text-sm text-(--sea-ink-soft)" aria-live="polite">
+          {cooldownNotice(ask.until)}
+        </p>
+      )}
+      <div ref={listRef} className={`mt-6 ${LIST_GUTTER} py-2`}>
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            // Floor the height so the rail runs down to near the page bottom even
+            // when only a few rows match; tall result sets exceed it and win.
+            minHeight: 'calc(100dvh - 16rem)',
+            width: '100%',
+            position: 'relative',
+          }}
+        >
+          {/* Continuous thin rail down the left gutter — the straight line the
             Union Jack marker rides; spans the full (floored) list height. The
             `guide-rail` class paints it with the hero "streaks" spectrum gradient
             (see styles.css) so it reads as part of the empty-state colourful grid. */}
-        <span
-          aria-hidden
-          className="guide-rail pointer-events-none absolute top-0 bottom-0 w-px rounded-full"
-          style={{ left: RAIL_X, transform: 'translateX(-50%)' }}
-        />
-        {/* The marker sits ON the rail at the highlighted row. Its `top` updates
+          <span
+            aria-hidden
+            className="guide-rail pointer-events-none absolute top-0 bottom-0 w-px rounded-full"
+            style={{ left: RAIL_X, transform: 'translateX(-50%)' }}
+          />
+          {/* The marker sits ON the rail at the highlighted row. Its `top` updates
             with no transition so it tracks the highlight instantly — a slide here
             visibly lags and jitters under fast key-repeat (held arrow scrolling).
             Hidden when that row is scrolled out of the rendered window. */}
-        {markerY != null && (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute z-10 block h-5 w-5"
-            style={{
-              left: RAIL_X,
-              top: markerY,
-              transform: 'translate(-50%, -50%)',
-            }}
-          >
-            <UnionJackLens
-              key={highlightedIndex}
-              className="h-full w-full"
-              fromDeg={lensRotation.from}
-              toDeg={lensRotation.to}
-              durationMs={prefersReducedMotion() ? 0 : 720}
-            />
-          </span>
-        )}
-        {virtualItems.map((virtualRow) => (
-          <div
-            key={virtualRow.index}
-            data-index={virtualRow.index}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
-            }}
-          >
-            <HmrcCard
-              row={results[virtualRow.index]}
-              search={search}
-              listingKey={listingKey}
-              isActive={activeId === results[virtualRow.index].slugId}
-              isHighlighted={highlightedIndex === virtualRow.index}
-              onActivate={() => {
-                stampPageFlip('forward');
-                // flushSync forces React to commit the state update before
-                // TanStack Router's click handler triggers
-                // startViewTransition — otherwise the OLD snapshot would be
-                // captured before the active card has its name applied.
-                flushSync(() => {
-                  setActiveId(results[virtualRow.index].slugId);
-                });
+          {markerY != null && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute z-10 block h-5 w-5"
+              style={{
+                left: RAIL_X,
+                top: markerY,
+                transform: 'translate(-50%, -50%)',
               }}
-            />
-          </div>
-        ))}
-      </div>
-      {loadingMore ? (
-        <SkeletonCards count={3} bare />
-      ) : (
-        moreFailed && (
-          <p className="mt-2 text-sm text-(--sea-ink-soft)">
-            More results couldn’t load.{' '}
-            <button
-              type="button"
-              onClick={() => fetchMore()}
-              className="cursor-pointer text-(--link-blue) hover:underline"
             >
-              Try again
-            </button>
-          </p>
-        )
-      )}
-    </div>
+              <UnionJackLens
+                key={highlightedIndex}
+                className="h-full w-full"
+                fromDeg={lensRotation.from}
+                toDeg={lensRotation.to}
+                durationMs={prefersReducedMotion() ? 0 : 720}
+              />
+            </span>
+          )}
+          {virtualItems.map((virtualRow) => (
+            <div
+              key={virtualRow.index}
+              data-index={virtualRow.index}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+              }}
+            >
+              <HmrcCard
+                row={results[virtualRow.index]}
+                search={search}
+                listingKey={listingKey}
+                isActive={activeId === results[virtualRow.index].slugId}
+                isHighlighted={highlightedIndex === virtualRow.index}
+                onActivate={() => {
+                  stampPageFlip('forward');
+                  // flushSync forces React to commit the state update before
+                  // TanStack Router's click handler triggers
+                  // startViewTransition — otherwise the OLD snapshot would be
+                  // captured before the active card has its name applied.
+                  flushSync(() => {
+                    setActiveId(results[virtualRow.index].slugId);
+                  });
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        {loadingMore ? (
+          <SkeletonCards count={3} bare />
+        ) : (
+          moreFailed &&
+          (moreHeld !== null ? (
+            <p
+              className="mt-2 text-sm text-(--sea-ink-soft)"
+              aria-live="polite"
+            >
+              {cooldownHold(moreHeld)}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-(--sea-ink-soft)">
+              More results couldn’t load.{' '}
+              <button
+                type="button"
+                onClick={() => fetchMore()}
+                className="cursor-pointer text-(--link-blue) hover:underline"
+              >
+                Try again
+              </button>
+            </p>
+          ))
+        )}
+      </div>
+    </>
   );
 }
 

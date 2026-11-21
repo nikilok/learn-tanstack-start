@@ -92,17 +92,32 @@ export function nextRankedPage(
     : undefined;
 }
 
-/** The listing the results list reads while a ranking's walk goes on: a slice with the judge is rows on their way, one that could not be judged is a next page that failed, and a slice still to judge keeps the list open. */
+/**
+ * The listing the results list reads while a ranking's walk goes on: a slice
+ * with the judge is rows on their way, one that could not be judged is a next
+ * page that failed, and a slice still to judge keeps the list open. A device
+ * waiting out a cooldown (`heldUntil`, the time it ends) has its walk held
+ * once the rows judged so far are all shown: the next slice is not asked for,
+ * and `moreHeld` says until when.
+ */
 export function walkedListing<
   T extends { hasMore: boolean; loadingMore: boolean; moreFailed: boolean },
 >(
   listing: T,
-  walk: { next: number | null; judging: boolean; failed: boolean },
-): T {
+  walk: {
+    next: number | null;
+    judging: boolean;
+    failed: boolean;
+    heldUntil?: number | null;
+  },
+): T & { moreHeld: number | null } {
+  const held =
+    walk.next !== null && !listing.hasMore ? (walk.heldUntil ?? null) : null;
   return {
     ...listing,
     hasMore: listing.hasMore || walk.next !== null,
     loadingMore: listing.loadingMore || walk.judging,
-    moreFailed: listing.moreFailed || walk.failed,
+    moreFailed: listing.moreFailed || walk.failed || held !== null,
+    moreHeld: held,
   };
 }

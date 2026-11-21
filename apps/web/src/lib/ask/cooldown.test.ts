@@ -163,13 +163,13 @@ describe('askAgainWhen', () => {
 describe('what a waiting visitor is told', () => {
   test('where an ask would have gone: the limit, and when asking opens again', () => {
     expect(cooldownNotice(NOW + COOLDOWN, LONDON)).toBe(
-      'You’ve reached the limit for questions for now. You can ask again after 14:05 on Sunday.',
+      'That’s the limit for questions for now. You can ask again after 14:05 on Sunday.',
     );
   });
 
   test('at the end of a question’s listing: when the rest can load', () => {
     expect(cooldownHold(NOW + COOLDOWN, LONDON)).toBe(
-      'You’ve reached the limit for questions for now. More matches can load after 14:05 on Sunday.',
+      'That’s the limit for questions for now. More matches can load after 14:05 on Sunday.',
     );
   });
 

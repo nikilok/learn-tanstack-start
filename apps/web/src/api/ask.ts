@@ -14,6 +14,7 @@ import {
   parseSearchFilters,
 } from '@ss/search-filters';
 import { createServerFn } from '@tanstack/react-start';
+import { getRequest } from '@tanstack/react-start/server';
 import { waitUntil } from '@vercel/functions';
 import { sql } from 'drizzle-orm';
 
@@ -30,7 +31,7 @@ import {
   pruneUsage,
   type Run,
   settleAsk,
-  tokenBudget,
+  tokenBudgets,
 } from '../lib/ask/allowance.server';
 import {
   type AskMintResponse,
@@ -42,6 +43,7 @@ import { MAX_QUESTION_CHARS } from '../lib/ask/eligibility';
 import { askOutcome } from '../lib/ask/outcome';
 import { applyPlan } from '../lib/ask/overlay';
 import { isSector, placeSector } from '../lib/ask/sector';
+import { networkKey, siteKey } from '../lib/ask/subjects.server';
 import { isTrancheOffset, nextTrancheOffset } from '../lib/ask/tranches';
 import { loggedVerdict } from '../lib/device/browser-check.server';
 import { deviceKey, TOKEN_MAX_LENGTH } from '../lib/device/rpc-input';
@@ -83,7 +85,9 @@ const ADMISSION: AdmissionDeps = {
   standing: () => askStanding(),
   tokenMatches: (token, key) => tokenMatches(token, key),
   listed: (key) => isListed(key),
-  budget: () => tokenBudget(),
+  budgets: () => tokenBudgets(),
+  network: () => networkKey(getRequest().headers),
+  site: () => siteKey(),
   cooling: async (key) => {
     const until = await coolingUntil(key, run);
     tidy();

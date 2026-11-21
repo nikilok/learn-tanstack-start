@@ -75,10 +75,10 @@ export function askAgainWhen(
 
 /** What a visitor is told where an ask would have gone, while their device waits out a cooldown. */
 export function cooldownNotice(until: number, when: When = {}): string {
-  return `You’ve reached the limit for questions for now. You can ask again after ${askAgainWhen(until, when)}.`;
+  return `That’s the limit for questions for now. You can ask again after ${askAgainWhen(until, when)}.`;
 }
 
 /** What the end of a question's listing says while the rest of its answer waits on a cooldown. */
 export function cooldownHold(until: number, when: When = {}): string {
-  return `You’ve reached the limit for questions for now. More matches can load after ${askAgainWhen(until, when)}.`;
+  return `That’s the limit for questions for now. More matches can load after ${askAgainWhen(until, when)}.`;
 }

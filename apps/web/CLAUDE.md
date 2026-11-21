@@ -493,10 +493,27 @@ the mint, the plan and each further slice pass.
   for that effect too (`mounted` in `couldAsk`), open access or not: it rests
   on the name search having found nothing, and a search streamed with the
   document can settle between the server's render and hydration.
-- **A visitor is never answered unmetered.** Without `ASK_DAILY_TOKENS` a
-  public request is refused, and an ask whose hold cannot be written is
-  `unavailable`. Do not let either fall through to the judge. The owner asks
-  without a budget and without the browser check.
+- **A visitor is never answered unmetered.** Without `ASK_DAILY_TOKENS`,
+  `ASK_DAILY_TOKENS_NETWORK` and `ASK_DAILY_TOKENS_SITE`, or with no network
+  to count it under, a public request is refused, and an ask whose hold cannot
+  be written is `unavailable`. Do not let either fall through to the judge.
+  The owner asks without a budget and without the browser check.
+- **An ask is counted against three totals**, held in this order
+  (`countedFor` in `lib/ask/admission.server.ts`): its device's, its
+  network's, the site's. Each is a row of `ask_usage` with its own budget,
+  window and cooldown, written by the same statements. A hold refused at one
+  gives back the holds already taken (a settle of 0 in each one's own window)
+  and tells that total's time; every total is charged the same amount.
+- **A network's and the site's rows are keyed apart from any device's**
+  (`lib/ask/subjects.server.ts`): `net:` and a keyed hash of the address's
+  scope (`lib/session/address`), never the address, and `all:`. Neither is a
+  device key in form, so `deviceKey` (rpc-input) never yields one. Both carry
+  the deployment (`VERCEL_ENV`, else `local`): previews and local runs share
+  the table with production, and a deployment's asks count only against its
+  own network and site rows. A device's row is shared by all of them.
+- **The site's total stops asking for every visitor when it is reached**, for
+  a full cooldown, as a device's stops that device. Deleting its row reopens
+  asking at once.
 - **An ask is admitted on a hold and charged afterwards**
   (`lib/ask/allowance.server.ts`): what it uses is known only once the judge
   has answered, so `holdStatement` sets `HOLD_TOKENS` against the device's

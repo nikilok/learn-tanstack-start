@@ -684,6 +684,8 @@ export const profileWorkClaims = pgTable('profile_work_claims', {
  * The tokens a device key's asks have used over one window, and the cooldown
  * a used-up budget starts (web's lib/ask/allowance.server.ts is the only
  * writer). A row is deleted once its window and its cooldown have both passed.
+ * The same is kept for a network and for the whole site, each in a row whose
+ * key is not a device key in form (web's lib/ask/subjects.server.ts).
  */
 export const askUsage = pgTable('ask_usage', {
   deviceKey: text('device_key').primaryKey(),

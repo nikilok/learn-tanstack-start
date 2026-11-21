@@ -17,6 +17,7 @@ import {
   settleStatement,
   statementFailure,
   tokenBudget,
+  tokenBudgets,
 } from './allowance.server';
 import { COOLDOWN_SECONDS } from './cooldown';
 
@@ -61,17 +62,8 @@ describe('tokenBudget', () => {
     expect(tokenBudget('999999999')).toBe(999_999_999);
   });
 
-  test('unset is none, whatever the machine running the tests has set', () => {
-    const found = process.env.ASK_DAILY_TOKENS;
-    try {
-      delete process.env.ASK_DAILY_TOKENS;
-      expect(tokenBudget()).toBeNull();
-      process.env.ASK_DAILY_TOKENS = '750000';
-      expect(tokenBudget()).toBe(750_000);
-    } finally {
-      if (found === undefined) delete process.env.ASK_DAILY_TOKENS;
-      else process.env.ASK_DAILY_TOKENS = found;
-    }
+  test('unset is none', () => {
+    expect(tokenBudget(undefined)).toBeNull();
   });
 
   test('empty or anything else is none: asking is never opened on a value nobody meant', () => {
@@ -94,6 +86,84 @@ describe('tokenBudget', () => {
 
   test('the largest budget and a hold together still fit the column', () => {
     expect(999_999_999 + HOLD_TOKENS).toBeLessThan(2 ** 31 - 1);
+  });
+});
+
+describe('tokenBudgets', () => {
+  const NAMES = [
+    'ASK_DAILY_TOKENS',
+    'ASK_DAILY_TOKENS_NETWORK',
+    'ASK_DAILY_TOKENS_SITE',
+  ] as const;
+
+  test('each budget is read from its own variable', () => {
+    expect(
+      tokenBudgets({
+        ASK_DAILY_TOKENS: '1000000',
+        ASK_DAILY_TOKENS_NETWORK: '2000000',
+        ASK_DAILY_TOKENS_SITE: '5000000',
+      }),
+    ).toEqual({ device: 1_000_000, network: 2_000_000, site: 5_000_000 });
+    expect(tokenBudgets({ ASK_DAILY_TOKENS_NETWORK: '2000000' })).toEqual({
+      device: null,
+      network: 2_000_000,
+      site: null,
+    });
+    expect(tokenBudgets({ ASK_DAILY_TOKENS_SITE: '5000000' })).toEqual({
+      device: null,
+      network: null,
+      site: 5_000_000,
+    });
+  });
+
+  test('an unset network or site budget is none even with the device’s set: neither is ever taken from another variable', () => {
+    expect(tokenBudgets({ ASK_DAILY_TOKENS: '1000000' })).toEqual({
+      device: 1_000_000,
+      network: null,
+      site: null,
+    });
+    expect(
+      tokenBudgets({
+        ASK_DAILY_TOKENS: '1000000',
+        ASK_DAILY_TOKENS_NETWORK: '2000000',
+      }).site,
+    ).toBeNull();
+  });
+
+  test('each is read as tokenBudget reads one', () => {
+    expect(
+      tokenBudgets({
+        ASK_DAILY_TOKENS: '0',
+        ASK_DAILY_TOKENS_NETWORK: '1.5M',
+        ASK_DAILY_TOKENS_SITE: '',
+      }),
+    ).toEqual({ device: null, network: null, site: null });
+  });
+
+  test('with no argument, the budgets are read from the process environment', () => {
+    const found = NAMES.map((name) => process.env[name]);
+    try {
+      process.env.ASK_DAILY_TOKENS = '1000000';
+      process.env.ASK_DAILY_TOKENS_NETWORK = '2000000';
+      process.env.ASK_DAILY_TOKENS_SITE = '5000000';
+      expect(tokenBudgets()).toEqual({
+        device: 1_000_000,
+        network: 2_000_000,
+        site: 5_000_000,
+      });
+      for (const name of NAMES) delete process.env[name];
+      expect(tokenBudgets()).toEqual({
+        device: null,
+        network: null,
+        site: null,
+      });
+    } finally {
+      NAMES.forEach((name, i) => {
+        const value = found[i];
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      });
+    }
   });
 });
 

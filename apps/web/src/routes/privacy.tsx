@@ -44,13 +44,15 @@ function PrivacyPolicy() {
           <strong>Questions.</strong> When you ask the search box a question in
           plain words, its text is sent to an AI service we use to turn it into
           a search, and is logged like any other search query, not linked to
-          your identity. So that asking stays available to everyone, we keep a
-          running total of how much processing the questions asked from your
-          browser&apos;s technical identifier (see Site protection below) have
-          used, with no record of what was asked. After its limit resets, it is
-          deleted as questions are next asked on the site. If the limit is
-          reached, the time you can ask again is kept in your browser&apos;s
-          local storage.
+          your identity. So that asking stays available to everyone, we keep
+          running totals of how much processing questions have used: one for
+          your browser&apos;s technical identifier (see Site protection below),
+          one for the network address the questions came from, which is stored
+          as a one-way code derived from the address and not as the address
+          itself, and one for the site as a whole. None holds any record of what
+          was asked. After its limit resets, a total is deleted as questions are
+          next asked on the site. If a limit is reached, the time you can ask
+          again is kept in your browser&apos;s local storage.
         </li>
         <li>
           <strong>Basic request data.</strong> Our hosting provider (Vercel)
@@ -121,9 +123,9 @@ function PrivacyPolicy() {
       <p>
         Server logs including search queries are automatically deleted after a
         short retention period (up to 30 days). We do not store search queries
-        or questions in our own database; the usage total kept against a
-        browser&apos;s identifier holds no text, and after its limit resets it
-        is deleted as questions are next asked on the site.
+        or questions in our own database; the usage totals described above hold
+        no text, and after its limit resets each is deleted as questions are
+        next asked on the site.
       </p>
 
       <h2>Your rights</h2>

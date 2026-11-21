@@ -14,13 +14,29 @@ import { COOLDOWN_SECONDS } from './cooldown';
 /** Runs one statement, as the Drizzle client does. */
 export type Run = (statement: SQL) => Promise<{ rows: unknown[] }>;
 
-/** The tokens a device's asks may use in a window before its cooldown, from `ASK_DAILY_TOKENS`: a whole number from one up; null when unset or anything else. */
-export function tokenBudget(
-  value = process.env.ASK_DAILY_TOKENS,
-): number | null {
+/** A budget as set: a whole number of tokens from one up; null when unset or anything else. */
+export function tokenBudget(value: string | undefined): number | null {
   return value !== undefined && /^[1-9]\d{0,8}$/.test(value)
     ? Number(value)
     : null;
+}
+
+/** The tokens the asks of one device, of one network and of the whole site may each use in a window before a cooldown; null where none is set. */
+export type Budgets = {
+  device: number | null;
+  network: number | null;
+  site: number | null;
+};
+
+/** The three budgets as set (`ASK_DAILY_TOKENS`, `ASK_DAILY_TOKENS_NETWORK`, `ASK_DAILY_TOKENS_SITE`), each read as `tokenBudget` reads one. */
+export function tokenBudgets(
+  env: Record<string, string | undefined> = process.env,
+): Budgets {
+  return {
+    device: tokenBudget(env.ASK_DAILY_TOKENS),
+    network: tokenBudget(env.ASK_DAILY_TOKENS_NETWORK),
+    site: tokenBudget(env.ASK_DAILY_TOKENS_SITE),
+  };
 }
 
 /**

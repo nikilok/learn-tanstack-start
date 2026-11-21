@@ -515,6 +515,189 @@ describe('createAskLoader, a device told to wait out a cooldown', () => {
     expect(plans).toHaveLength(2);
   });
 
+  test('a replacement mint that names a later wait than a call has told is the one held: nothing is minted or sent until it is over', async () => {
+    const replacement = laterMint();
+    const other = later();
+    const { ask, prepare, mints, plans, clock } = harness(
+      ['t1', replacement.answer, 't3'],
+      [DENIED, other.answer, OK],
+    );
+    const refused = ask('care homes in leeds', KEY);
+    const told = ask('plcs in york', KEY);
+    await until(() => mints.length === 2);
+    other.give({ status: 'cooldown', until: 5_000 });
+    expect(await told).toEqual({ status: 'cooldown', until: 5_000 });
+    replacement.give({ token: null, cooldown: 9_000 });
+    expect(await refused).toEqual({ status: 'cooldown', until: 9_000 });
+    for (const at of [5_000, 8_999]) {
+      clock.now = at;
+      expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+      expect(await ask('nurseries in hull', KEY)).toEqual({
+        status: 'cooldown',
+        until: 9_000,
+      });
+    }
+    expect(mints).toHaveLength(2);
+    expect(plans).toHaveLength(2);
+    clock.now = 9_000;
+    expect(await ask('nurseries in hull', KEY)).toEqual(OK);
+    expect(mints).toHaveLength(3);
+    expect(plans.map((p) => p[2])).toEqual(['t1', 't1', 't3']);
+  });
+
+  test('a replacement mint that names an earlier wait than a call has told does not shorten it: the call that waited on the mint is told the later one', async () => {
+    const replacement = laterMint();
+    const other = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', replacement.answer, 't3'],
+      [DENIED, other.answer],
+    );
+    const refused = ask('care homes in leeds', KEY);
+    const told = ask('plcs in york', KEY);
+    await until(() => mints.length === 2);
+    other.give({ status: 'cooldown', until: 9_000 });
+    await told;
+    replacement.give({ token: null, cooldown: 5_000 });
+    expect(await refused).toEqual({ status: 'cooldown', until: 9_000 });
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toHaveLength(2);
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toHaveLength(3);
+  });
+
+  test('a replacement mint that issues nothing and names no wait is off for the call that waited on it, and the wait told meanwhile still holds the rest', async () => {
+    const replacement = laterMint();
+    const other = later();
+    const { ask, prepare, mints } = harness(
+      ['t1', replacement.answer],
+      [DENIED, other.answer],
+    );
+    const refused = ask('care homes in leeds', KEY);
+    const told = ask('plcs in york', KEY);
+    await until(() => mints.length === 2);
+    other.give({ status: 'cooldown', until: 9_000 });
+    await told;
+    replacement.give({ token: null });
+    expect(await refused).toEqual(OFF);
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toHaveLength(2);
+  });
+
+  test('a fresh mint after a wait was over that names a later wait than one told meanwhile is the one held', async () => {
+    const fresh = laterMint();
+    const first = later();
+    const { ask, prepare, mints, clock } = harness(
+      ['t1', fresh.answer, 't3'],
+      [first.answer, { status: 'cooldown', until: 3_000 }],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    await ask('plcs in york', KEY);
+    clock.now = 3_000;
+    const after = ask('nurseries in hull', KEY);
+    await until(() => mints.length === 2);
+    first.give({ status: 'cooldown', until: 5_000 });
+    await inFlight;
+    fresh.give({ token: null, cooldown: 9_000 });
+    expect(await after).toEqual({ status: 'cooldown', until: 9_000 });
+    for (const at of [5_000, 8_999]) {
+      clock.now = at;
+      expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    }
+    expect(mints).toHaveLength(2);
+    clock.now = 9_000;
+    expect(await prepare(KEY)).toEqual(OPEN);
+    expect(mints).toHaveLength(3);
+  });
+
+  test('a fresh mint after a wait was over that names an earlier wait than one told meanwhile answers the later', async () => {
+    const fresh = laterMint();
+    const first = later();
+    const { ask, prepare, mints, plans, clock } = harness(
+      ['t1', fresh.answer],
+      [first.answer, { status: 'cooldown', until: 3_000 }],
+    );
+    const inFlight = ask('care homes in leeds', KEY);
+    await ask('plcs in york', KEY);
+    clock.now = 3_000;
+    const after = ask('nurseries in hull', KEY);
+    await until(() => mints.length === 2);
+    first.give({ status: 'cooldown', until: 9_000 });
+    await inFlight;
+    fresh.give({ token: null, cooldown: 5_000 });
+    expect(await after).toEqual({ status: 'cooldown', until: 9_000 });
+    clock.now = 5_000;
+    expect(await prepare(KEY)).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toHaveLength(2);
+    expect(plans).toHaveLength(2);
+  });
+
+  test('a wait told after a call read its token, but before that call resumed, holds it: the call is not sent', async () => {
+    const other = later();
+    const { ask, mints, plans } = harness(['t1'], [other.answer, OK]);
+    const told = ask('care homes in leeds', KEY);
+    await until(() => plans.length === 1);
+    // Given first, with the next call started in the same turn: that call reads its token before the wait is noted, and resumes after.
+    other.give({ status: 'cooldown', until: 9_000 });
+    const second = ask('plcs in york', KEY);
+    expect(await told).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(await second).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(plans).toHaveLength(1);
+    expect(mints).toEqual([KEY]);
+  });
+
+  test('a wait told after prepare read the token, but before it resumed, is the offer: not open', async () => {
+    const other = later();
+    const { ask, prepare, plans } = harness(['t1'], [other.answer]);
+    const told = ask('care homes in leeds', KEY);
+    await until(() => plans.length === 1);
+    other.give({ status: 'cooldown', until: 9_000 });
+    const offer = prepare(KEY);
+    await told;
+    expect(await offer).toEqual({ status: 'cooldown', until: 9_000 });
+  });
+
+  test('a wait told after a further slice read its token, but before it resumed, holds it: the slice is not judged', async () => {
+    const other = later();
+    const { ask, more, plans, mores } = harness(['t1'], [other.answer]);
+    const told = ask('care homes in leeds', KEY);
+    await until(() => plans.length === 1);
+    other.give({ status: 'cooldown', until: 9_000 });
+    const slice = more('care homes', KEY, {}, 400, null);
+    await told;
+    expect(await slice).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mores).toEqual([]);
+  });
+
+  test('a refused token is not replaced while a wait is ahead: no mint is started, and the call is told the wait', async () => {
+    const stale = laterMint();
+    const first = later();
+    const third = later();
+    const { ask, mints, plans, clock } = harness(
+      ['t1', stale.answer, 't3', 't4'],
+      [first.answer, DENIED, third.answer, OK],
+    );
+    // One call in flight on t1, and a second whose refusal starts a replacement mint that stays out.
+    const inFlight = ask('care homes in leeds', KEY);
+    const refused = ask('plcs in york', KEY);
+    await until(() => mints.length === 2);
+    first.give({ status: 'cooldown', until: 3_000 });
+    await inFlight;
+    // That wait over, a third call mints afresh and is sent.
+    clock.now = 3_000;
+    const later3 = ask('nurseries in hull', KEY);
+    await until(() => plans.length === 3);
+    expect(mints).toHaveLength(3);
+    // The mint that stayed out names a wait still ahead, and then the third call's token is refused.
+    stale.give({ token: null, cooldown: 9_000 });
+    expect(await refused).toEqual({ status: 'cooldown', until: 9_000 });
+    third.give(DENIED);
+    expect(await later3).toEqual({ status: 'cooldown', until: 9_000 });
+    expect(mints).toHaveLength(3);
+    expect(plans).toHaveLength(3);
+  });
+
   test('a mint that issued a token is never taken for a wait, whatever time it carries', async () => {
     const { ask, prepare, mints, clock } = harness(
       [{ token: 't1', cooldown: 9_000 }, 't2'],

@@ -65,6 +65,41 @@ export function keepCooldown(until: number, now = Date.now()): void {
   saveCooldown(laterCooldown(loadCooldown(now), until));
 }
 
+/**
+ * What a document does when the wait kept for the device changes under it,
+ * as another tab keeps or forgets one: the wait to show, and one to put back
+ * where this document shows a later one still ahead (null where there is
+ * none). The owner's document waits out no time, so nothing changes for it.
+ */
+export function heardCooldown({
+  owner,
+  shown,
+  stored,
+  now,
+}: {
+  owner: boolean;
+  shown: number | null;
+  stored: number | null;
+  now: number;
+}): { show: number | null; keep: number | null } {
+  if (owner) return { show: shown, keep: null };
+  const ahead = shown !== null && shown > now ? shown : null;
+  if (stored !== null && (ahead === null || stored >= ahead))
+    return { show: stored, keep: null };
+  return { show: shown, keep: ahead };
+}
+
+/** Calls `heard` each time another tab keeps or forgets the device's wait, and returns how to stop. With no window there is nothing to hear. */
+export function onCooldownKept(heard: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const listener = (event: StorageEvent) => {
+    // A null key is the whole store cleared.
+    if (event.key === null || event.key === STORE_KEY) heard();
+  };
+  window.addEventListener('storage', listener);
+  return () => window.removeEventListener('storage', listener);
+}
+
 /** Forgets the cooldown, once it has passed. Never throws. */
 export function clearCooldown(): void {
   try {

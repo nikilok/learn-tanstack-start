@@ -103,7 +103,7 @@ export function createAskLoader(
   now: () => number = Date.now,
 ) {
   let current: Promise<AskMintResponse> | null = null;
-  // The latest wait a mint or a call has named, while it is still held.
+  // The latest wait a mint or a call has named, until it is over: the one every call is held to.
   let waiting: number | null = null;
 
   const mintToken = (key: string) => {
@@ -115,41 +115,53 @@ export function createAskLoader(
     return minted;
   };
 
-  /** Keeps a wait a mint named while it is still ahead, the later of it and one already held. */
-  const noteMinted = (answer: AskMintResponse) => {
-    if (
-      answer.token === null &&
-      answer.cooldown !== undefined &&
-      now() < answer.cooldown
-    )
-      waiting = laterCooldown(waiting, answer.cooldown);
-  };
-
-  /** A mint's answer as it may be used: a token that arrives while a known wait is still ahead is held back, as that wait. */
-  const usable = (answer: AskMintResponse): AskMintResponse =>
-    answer.token !== null && waiting !== null && now() < waiting
+  /**
+   * A mint's answer as a call may act on it. A wait it names that is still
+   * ahead is held, the later of it and one held already; and while a wait
+   * held is still ahead, that wait is the answer, whatever token or earlier
+   * wait this one carries. A mint that issued nothing and named no wait is
+   * passed on as it is.
+   */
+  const settled = (answer: AskMintResponse): AskMintResponse => {
+    if (answer.token === null) {
+      if (answer.cooldown === undefined) return answer;
+      if (now() < answer.cooldown)
+        waiting = laterCooldown(waiting, answer.cooldown);
+    }
+    return waiting !== null && now() < waiting
       ? { token: null, cooldown: waiting }
       : answer;
+  };
 
-  /** The mint this document holds, minted when there is none or when the wait a held one named is over. */
+  /** The mint to read: the one this document holds, or a new one. None is started while a wait held is still ahead: that wait is then what is read. */
+  const minting = (key: string): Promise<AskMintResponse> => {
+    if (current !== null) return current;
+    return waiting !== null && now() < waiting
+      ? Promise.resolve({ token: null, cooldown: waiting })
+      : mintToken(key);
+  };
+
+  /**
+   * The mint this document holds and what it answered, minted when there is
+   * none and afresh when every wait held is over. The answer is as it came:
+   * its caller reads it through `settled` as it resumes, so a wait told in
+   * between counts.
+   */
   const held = async (key: string) => {
-    const used = current ?? mintToken(key);
-    const answer = usable(await used);
-    noteMinted(answer);
+    const used = minting(key);
+    const answer = await used;
+    const read = settled(answer);
     if (
-      answer.token !== null ||
-      answer.cooldown === undefined ||
-      now() < answer.cooldown
+      read.token !== null ||
+      read.cooldown === undefined ||
+      now() < read.cooldown
     )
       return { used, answer };
-    if (current === used) {
-      current = null;
-      waiting = null;
-    }
-    const fresh = current ?? mintToken(key);
-    const renewed = usable(await fresh);
-    noteMinted(renewed);
-    return { used: fresh, answer: renewed };
+    // No wait is ahead any more: the one held is forgotten, and the next mint starts afresh.
+    if (current === used) current = null;
+    waiting = null;
+    const fresh = minting(key);
+    return { used: fresh, answer: await fresh };
   };
 
   /** What a mint that issued nothing means: a cooldown to wait out, or off. */
@@ -171,7 +183,7 @@ export function createAskLoader(
   };
 
   const prepare = async (key: string): Promise<AskOffer> => {
-    const { answer } = await held(key);
+    const answer = settled((await held(key)).answer);
     return answer.token === null ? refusal(answer) : { status: 'open' };
   };
 
@@ -180,14 +192,15 @@ export function createAskLoader(
     key: string,
     call: (token: string) => Promise<T>,
   ): Promise<Admitted<T> | { status: 'off' } | AskCooldown> => {
-    const { used, answer: first } = await held(key);
+    const { used, answer: minted } = await held(key);
+    // Read here, with nothing awaited before the call is sent.
+    const first = settled(minted);
     if (first.token === null) return refusal(first);
     const answer = await call(first.token);
     if (answer.status !== 'denied') return wait(answer) as Admitted<T>;
     // Another call may already have replaced the refused token.
     if (current === used) current = null;
-    const fresh = usable(await (current ?? mintToken(key)));
-    noteMinted(fresh);
+    const fresh = settled(await minting(key));
     if (fresh.token === null) return refusal(fresh);
     const retried = await call(fresh.token);
     return retried.status === 'denied' ? OFF : (wait(retried) as Admitted<T>);

@@ -48,9 +48,12 @@ import {
 import { askAtMount } from '../lib/ask/at-mount';
 import {
   clearCooldown,
+  heardCooldown,
   keepCooldown,
+  laterCooldown,
   latestCooldown,
   loadCooldown,
+  onCooldownKept,
   waitAfter,
 } from '../lib/ask/cooldown';
 import {
@@ -317,8 +320,9 @@ function Home() {
     setAskAccess(learnt.access);
     setCooldown(learnt.cooldown);
   }, []);
-  /** Notes a cooldown the server named: the latest of it, the one shown and the one kept for the device is shown until it ends. */
+  /** Notes a cooldown the server named: kept for the device at once, whether or not the route is still here to show it, and the latest of it, the one shown and the one kept is shown until it ends. */
   const noteCooldown = useCallback((told: number) => {
+    keepCooldown(told);
     const stored = loadCooldown();
     setCooldown((shown) => latestCooldown(shown, stored, told));
   }, []);
@@ -326,6 +330,20 @@ function Home() {
   useEffect(() => {
     if (cooldown !== null) keepCooldown(cooldown);
   }, [cooldown]);
+  // A wait another tab is told is this device's too: shown here as it is kept there, and a later one shown here is put back.
+  useEffect(() => {
+    if (askAccess !== 'open') return;
+    return onCooldownKept(() => {
+      const { show, keep } = heardCooldown({
+        owner: hasOwnerHint(),
+        shown: cooldown,
+        stored: loadCooldown(),
+        now: Date.now(),
+      });
+      if (keep !== null) keepCooldown(keep);
+      if (show !== null) setCooldown((shown) => laterCooldown(shown, show));
+    });
+  }, [askAccess, cooldown]);
   // The wait over, asking is offered again, unless another tab has kept a later one since.
   useEffect(() => {
     if (cooldown === null) return;

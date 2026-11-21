@@ -6,10 +6,12 @@ import {
   COOLDOWN_SECONDS,
   cooldownHold,
   cooldownNotice,
+  heardCooldown,
   keepCooldown,
   laterCooldown,
   latestCooldown,
   loadCooldown,
+  onCooldownKept,
   saveCooldown,
   storedCooldown,
   waitAfter,
@@ -114,6 +116,125 @@ describe('waitAfter', () => {
 
   test('a later stored wait is the one still to keep', () => {
     expect(waitAfter(ENDED, ENDED + HOUR)).toBe(ENDED + HOUR);
+  });
+});
+
+describe('heardCooldown', () => {
+  const heard = (shown: number | null, stored: number | null, owner = false) =>
+    heardCooldown({ owner, shown, stored, now: NOW });
+
+  test('a wait another tab kept is shown where none was, and where an earlier one was', () => {
+    expect(heard(null, NOW + HOUR)).toEqual({ show: NOW + HOUR, keep: null });
+    expect(heard(NOW + HOUR, NOW + 2 * HOUR)).toEqual({
+      show: NOW + 2 * HOUR,
+      keep: null,
+    });
+  });
+
+  test('an earlier wait written over a later one this document shows is put back, and the later one stays shown', () => {
+    expect(heard(NOW + 2 * HOUR, NOW + HOUR)).toEqual({
+      show: NOW + 2 * HOUR,
+      keep: NOW + 2 * HOUR,
+    });
+  });
+
+  test('a wait forgotten elsewhere while this document shows one still ahead is put back', () => {
+    expect(heard(NOW + HOUR, null)).toEqual({
+      show: NOW + HOUR,
+      keep: NOW + HOUR,
+    });
+  });
+
+  test('a wait shown that is over is not put back: the one kept, if any, is shown', () => {
+    expect(heard(NOW, null)).toEqual({ show: NOW, keep: null });
+    expect(heard(NOW - 1, null)).toEqual({ show: NOW - 1, keep: null });
+    expect(heard(NOW, NOW + HOUR)).toEqual({ show: NOW + HOUR, keep: null });
+  });
+
+  test('the same wait kept as shown changes nothing, and neither does none at all', () => {
+    expect(heard(NOW + HOUR, NOW + HOUR)).toEqual({
+      show: NOW + HOUR,
+      keep: null,
+    });
+    expect(heard(null, null)).toEqual({ show: null, keep: null });
+  });
+
+  test('the owner’s document shows and puts back nothing, whatever is kept', () => {
+    expect(heard(null, NOW + HOUR, true)).toEqual({ show: null, keep: null });
+    expect(heard(null, null, true)).toEqual({ show: null, keep: null });
+  });
+});
+
+describe('onCooldownKept', () => {
+  type Listener = (event: { key: string | null }) => void;
+  // One global for every test file: put back exactly as it was found.
+  const found = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let listeners: Listener[];
+
+  beforeEach(() => {
+    listeners = [];
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      writable: true,
+      value: {
+        addEventListener: (type: string, listener: Listener) => {
+          if (type === 'storage') listeners.push(listener);
+        },
+        removeEventListener: (type: string, listener: Listener) => {
+          if (type === 'storage')
+            listeners = listeners.filter((kept) => kept !== listener);
+        },
+      },
+    });
+  });
+  afterEach(() => {
+    if (found) Object.defineProperty(globalThis, 'window', found);
+    else delete (globalThis as { window?: unknown }).window;
+  });
+
+  /** Tells every listener the store changed under a key. */
+  const change = (key: string | null) => {
+    for (const listener of listeners) listener({ key });
+  };
+
+  test('a change to the device’s wait is heard, and so is the whole store cleared', () => {
+    let heard = 0;
+    onCooldownKept(() => {
+      heard += 1;
+    });
+    change('ss-ask-cooldown');
+    change(null);
+    expect(heard).toBe(2);
+  });
+
+  test('a change to anything else kept in the browser is not', () => {
+    let heard = 0;
+    onCooldownKept(() => {
+      heard += 1;
+    });
+    change('hmrc-highlight');
+    change('ss-ask-cooldown-other');
+    expect(heard).toBe(0);
+  });
+
+  test('once stopped, nothing more is heard and no listener is left behind', () => {
+    let heard = 0;
+    const stop = onCooldownKept(() => {
+      heard += 1;
+    });
+    expect(listeners).toHaveLength(1);
+    stop();
+    expect(listeners).toHaveLength(0);
+    change('ss-ask-cooldown');
+    expect(heard).toBe(0);
+  });
+
+  test('with no window there is nothing to hear, and stopping is harmless', () => {
+    delete (globalThis as { window?: unknown }).window;
+    const stop = onCooldownKept(() => {
+      throw new Error('heard without a window');
+    });
+    expect(() => stop()).not.toThrow();
   });
 });
 

@@ -574,9 +574,16 @@ the mint, the plan and each further slice pass.
   decides every request, and a time further ahead than two cooldowns is
   discarded, so a clock put back cannot close asking for good. A document
   carrying the owner hint does not read it at mount: the owner asks without
-  a budget.
-- **The loader remembers a cooldown a call named** (`createAskLoader`): until
-  it ends nothing is minted or sent from that document.
+  a budget. A wait told is kept at once (`keepCooldown`), mounted or not, and
+  never over a later one. Open tabs hear the store change (`onCooldownKept`)
+  and settle on the latest wait (`heardCooldown`): no lock is taken across
+  tabs, as nothing relies on the store.
+- **The loader holds every call to the latest wait it knows**
+  (`createAskLoader`), whichever answer named it: until it ends nothing is
+  minted or sent from that document. A mint's answer is read through
+  `settled` in the same turn it is used, and `minting` starts no mint while a
+  wait is ahead; a check parted from its use by an `await` lets through a
+  wait told in between.
 - **/privacy names the usage total and the stored time.** Change what is
   kept, or for how long (`pruneStatement`), and change the page with it.
 

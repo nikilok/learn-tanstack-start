@@ -45,6 +45,7 @@ import {
   loadApplied,
   saveApplied,
 } from '../lib/ask/applied-store';
+import { askAtMount } from '../lib/ask/at-mount';
 import { clearCooldown, loadCooldown, saveCooldown } from '../lib/ask/cooldown';
 import {
   askEligible,
@@ -299,13 +300,15 @@ function Home() {
   const [mounted, setMounted] = useState(false);
   useLayoutEffect(() => {
     setMounted(true);
-    const owner = hasOwnerHint();
-    if (isDesktopPreview()) setAskAccess('off');
-    else if (owner) setAskAccess('open');
-    // The owner asks without a token budget: a time kept from a visit made
-    // without the cookie is not theirs to wait out. The server still says so
-    // to anyone whose hint is not a credential.
-    if (!owner) setCooldown(loadCooldown());
+    // The server still decides: a hint that is not a credential is told so.
+    const learnt = askAtMount({
+      preview: isDesktopPreview(),
+      owner: hasOwnerHint(),
+      open: ASK_PUBLIC,
+      stored: loadCooldown(),
+    });
+    setAskAccess(learnt.access);
+    setCooldown(learnt.cooldown);
   }, []);
   /** Notes a cooldown the server named: kept for the device, and shown until it ends. */
   const noteCooldown = useCallback((until: number) => {

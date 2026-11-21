@@ -488,7 +488,8 @@ the mint, the plan and each further slice pass.
   the server's render must offer the same or the page mismatches on hydration.
   A visitor's document is given no hint cookie while it is on. The /download
   preview and a known cooldown are learnt in the route's layout effect for the
-  same reason, never in the first render. The offer to ask a typed text waits
+  same reason, never in the first render (`lib/ask/at-mount.ts` decides what
+  it learns). The offer to ask a typed text waits
   for that effect too (`mounted` in `couldAsk`), open access or not: it rests
   on the name search having found nothing, and a search streamed with the
   document can settle between the server's render and hydration.

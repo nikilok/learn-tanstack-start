@@ -39,3 +39,17 @@ export function offerStands(
 ): boolean {
   return eligible && typed.trim() === search.trim();
 }
+
+/** Whether the listing opens its highlighted row on Enter: only where a keyboard drives the list. A touch keyboard's Enter is the box's alone, to submit. */
+export function enterOpensRow(highlighted: number, keyboard: boolean): boolean {
+  return keyboard && highlighted >= 0;
+}
+
+/** A submit of the box (Enter, or a phone keyboard's search key): kept from loading a page, and handed on as the press. */
+export function submitPress(
+  event: { preventDefault: () => void },
+  onEnter?: () => void,
+): void {
+  event.preventDefault();
+  onEnter?.();
+}

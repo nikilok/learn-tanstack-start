@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { memo, useEffect, useRef } from 'react';
 
+import { submitPress } from '../lib/ask/enter';
 import type { AskBoxMode } from '../lib/ask/session';
 import SearchIcon from './SearchIcon';
 
@@ -11,9 +12,10 @@ import styles from './SearchInput.module.css';
  * plus imperative DOM sync so parent-driven re-renders don't disrupt in-flight
  * typing; `defaultValue` only re-syncs when the input isn't focused so external
  * search-param updates apply without clobbering the user. `autoFocus` fires
- * once, while `focus` re-focuses on every truthy transition. Enter hands the
- * press to `onEnter` (the parent asks while it offers to, or remembers the
- * press until it does); while `askEnabled`, an arrow beside the clear button
+ * once, while `focus` re-focuses on every truthy transition. Submitting the
+ * box (Enter, or a phone keyboard's search key) hands the press to `onEnter`
+ * (the parent asks while it offers to, or remembers the press until it
+ * does); while `askEnabled`, an arrow beside the clear button
  * hands the text to `onAsk`. `askMode` wears the spectrum ring: turning while
  * a question runs, steady while its plan is applied.
  */
@@ -93,10 +95,18 @@ export default memo(function SearchInput({
   }, [defaultValue]);
 
   return (
-    <div className={`relative ${styles.inputWrapper}`}>
+    <form
+      // With no dialog around it, a submit before the script loads does nothing.
+      method="dialog"
+      noValidate
+      onSubmit={(e) => submitPress(e, onEnter)}
+      className={`relative ${styles.inputWrapper}`}
+    >
       <input
         ref={inputRef}
         type="text"
+        // A phone's keyboard offers a search key in place of return.
+        enterKeyHint="search"
         // Company names aren't dictionary words — stop the mobile keyboard from
         // autocorrecting/suggesting/capitalising them mid-search.
         autoComplete="off"
@@ -110,11 +120,8 @@ export default memo(function SearchInput({
           onChange(inputRef.current?.value ?? '');
         }}
         onKeyDown={(e) => {
+          // Enter is the form's to submit: an IME's confirming Enter submits nothing.
           if (e.key === 'Escape') inputRef.current?.blur();
-          // The listing's own handler opens a highlighted row on the same
-          // key; the parent asks only while nothing is listed. Not during
-          // IME composition, where Enter commits the candidate.
-          else if (e.key === 'Enter' && !e.nativeEvent.isComposing) onEnter?.();
         }}
         onBlur={onBlur}
         placeholder={placeholder}
@@ -181,6 +188,6 @@ export default memo(function SearchInput({
       >
         <SearchIcon className="h-3.5 w-3.5" />
       </button>
-    </div>
+    </form>
   );
 });

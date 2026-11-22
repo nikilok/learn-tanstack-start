@@ -558,8 +558,9 @@ function Home() {
       stale = true;
     };
   }, [couldAsk, readiness, search, cooldown, noteCooldown]);
-  // A keyboard presses Enter, which the listing only takes for a highlighted
-  // row; a touch device taps the arrow.
+  // A keyboard presses Enter, which the listing takes first for a highlighted
+  // row; a touch device taps the arrow or its keyboard's search key, which the
+  // listing leaves to the box.
   const askKeyboard = !platformInfo.isMobile;
   // Without access this is today's flow exactly: the no-results scene shows as
   // it always has, and nothing here says otherwise.
@@ -1080,6 +1081,7 @@ function Home() {
               filtersActive={listingMode}
               data={resultsData}
               ask={askHint}
+              enterOpens={askKeyboard}
               listingKey={
                 ranking
                   ? `${urlParamsKey}|${ranking.span}|${ranking.tranches[0]?.[0] ?? ''}`

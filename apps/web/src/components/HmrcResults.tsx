@@ -76,10 +76,13 @@ export default function HmrcResults({
   data,
   ask = null,
   listingKey = '',
+  enterOpens = true,
 }: {
   search: string;
   filtersActive?: boolean;
   data: SponsorResultsData;
+  /** Whether Enter opens the highlighted row: off where a touch keyboard's Enter is the search box's to submit. */
+  enterOpens?: boolean;
   /** What the no-results message says about asking the text (lib/ask/session), when the parent has something to say. */
   ask?: AskHint | null;
   /** What tells one listing from another under the same search text (a question's answer), so a new one resets the highlight. */
@@ -178,6 +181,7 @@ export default function HmrcResults({
   } = useResultsKeyboardNav({
     count: results.length,
     virtualizer,
+    enterOpens,
     onActivate: (index) => {
       const link = listRef.current?.querySelector<HTMLAnchorElement>(
         `[data-index="${index}"] a`,

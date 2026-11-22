@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { enterIntent, offerStands, settleEnterIntent } from './enter';
+import {
+  enterIntent,
+  enterOpensRow,
+  offerStands,
+  settleEnterIntent,
+  submitPress,
+} from './enter';
 
 const TEXT = 'care homes in leeds';
 
@@ -74,5 +80,35 @@ describe('offerStands', () => {
       false,
     );
     expect(offerStands(TEXT, { search: TEXT, eligible: false })).toBe(false);
+  });
+});
+
+describe('enterOpensRow', () => {
+  test("a keyboard's Enter opens the highlighted row; a phone keyboard's search key opens none, though a name search lists its top row highlighted", () => {
+    expect(enterOpensRow(0, true)).toBe(true);
+    expect(enterOpensRow(3, true)).toBe(true);
+    expect(enterOpensRow(0, false)).toBe(false);
+    expect(enterOpensRow(3, false)).toBe(false);
+  });
+
+  test('with no row highlighted Enter opens nothing, keyboard or not', () => {
+    expect(enterOpensRow(-1, true)).toBe(false);
+    expect(enterOpensRow(-1, false)).toBe(false);
+  });
+});
+
+describe('submitPress', () => {
+  test("a submit of the box is the press, once, and never loads a page: a phone keyboard's search key submits as Enter does", () => {
+    let prevented = 0;
+    let pressed = 0;
+    submitPress({ preventDefault: () => prevented++ }, () => pressed++);
+    expect(prevented).toBe(1);
+    expect(pressed).toBe(1);
+  });
+
+  test('a box with nobody to hand the press to still keeps the page', () => {
+    let prevented = 0;
+    submitPress({ preventDefault: () => prevented++ });
+    expect(prevented).toBe(1);
   });
 });

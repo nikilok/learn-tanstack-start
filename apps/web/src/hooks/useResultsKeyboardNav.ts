@@ -2,6 +2,8 @@ import type { Virtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
+import { enterOpensRow } from '../lib/ask/enter';
+
 /**
  * Scroll the page up so the highlighted row sits below the sticky search
  * pill. The virtualizer's scrollToIndex puts the row at viewport top, but the
@@ -22,7 +24,8 @@ function nudgeBelowStickyHeader(index: number) {
  * Keyboard navigation for the search results list. ArrowDown/ArrowUp move a
  * highlight through the rows (clamped at the ends), Enter activates the
  * highlighted row so TanStack Router's viewTransition click handler runs
- * unchanged. Works whether or not the search input is focused — arrows are
+ * unchanged, unless `enterOpens` is off: a touch keyboard's Enter is left to
+ * the search box. Works whether or not the search input is focused — arrows are
  * consumed globally as long as there are results. Real pointer movement also
  * sets the highlight to whichever row the cursor is over, so keyboard and
  * mouse can interleave: highlight follows the input device. Highlight resets
@@ -32,10 +35,12 @@ export function useResultsKeyboardNav({
   count,
   virtualizer,
   onActivate,
+  enterOpens = true,
 }: {
   count: number;
   virtualizer: Virtualizer<Window, Element>;
   onActivate: (index: number) => void;
+  enterOpens?: boolean;
 }) {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   // Accumulated lens rotation: each step adds (or subtracts) the per-step
@@ -44,8 +49,20 @@ export function useResultsKeyboardNav({
   // start at; `to` is where it should land.
   const [rotation, setRotation] = useState({ from: 0, to: 0 });
 
-  const stateRef = useRef({ count, highlightedIndex, virtualizer, onActivate });
-  stateRef.current = { count, highlightedIndex, virtualizer, onActivate };
+  const stateRef = useRef({
+    count,
+    highlightedIndex,
+    virtualizer,
+    onActivate,
+    enterOpens,
+  });
+  stateRef.current = {
+    count,
+    highlightedIndex,
+    virtualizer,
+    onActivate,
+    enterOpens,
+  };
 
   const moveHighlight = useCallback((next: number) => {
     const prev = stateRef.current.highlightedIndex;
@@ -87,7 +104,10 @@ export function useResultsKeyboardNav({
           s.virtualizer.scrollToIndex(next);
           nudgeBelowStickyHeader(next);
         }
-      } else if (e.key === 'Enter' && s.highlightedIndex >= 0) {
+      } else if (
+        e.key === 'Enter' &&
+        enterOpensRow(s.highlightedIndex, s.enterOpens)
+      ) {
         e.preventDefault();
         s.onActivate(s.highlightedIndex);
       }

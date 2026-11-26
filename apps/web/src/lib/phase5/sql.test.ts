@@ -210,3 +210,69 @@ describe('makeResolveSponsor — Companies House gaps', () => {
     });
   });
 });
+
+describe('makeResolveSponsor — an overseas company and its establishment', () => {
+  // JPMorgan Chase Bank: the proposal is the establishment, and carries the overseas company it came by.
+  test('the establishment is proposed with the name match, and says where it came from', async () => {
+    const name = 'JPMORGAN CHASE BANK, NATIONAL ASSOCIATION';
+    const establishment = {
+      company_number: 'BR000746',
+      company_name: name,
+      company_status: 'open',
+      type: 'uk-establishment',
+      branch_company_details: { parent_company_number: 'FC004891' },
+    };
+    const answers: [string, unknown][] = [
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: 'FC004891',
+              title: name,
+              company_status: 'active',
+            },
+          ],
+        },
+      ],
+      [
+        '/company/FC004891/uk-establishments',
+        { items: [{ company_number: 'BR000746', company_status: 'open' }] },
+      ],
+      [
+        '/company/FC004891',
+        {
+          company_number: 'FC004891',
+          company_name: name,
+          company_status: 'active',
+          type: 'oversea-company',
+        },
+      ],
+      ['/company/BR000746', establishment],
+    ];
+    const resolve = makeResolveSponsor(async (path): Promise<ChResponse> => {
+      const found = answers.find(([prefix]) => path.startsWith(prefix));
+      return found ? { ok: true, data: found[1] } : { ok: false, status: 404 };
+    });
+
+    expect(
+      await resolve('JPMorgan Chase Bank, National Association', {
+        townCity: 'London',
+        county: null,
+        route: 'Skilled Worker',
+      }),
+    ).toEqual({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+      matchMethod: 'exact',
+      matchScore: 1,
+      queryUsed: 'JPMorgan Chase Bank National Association',
+      profile: establishment,
+      overseas: {
+        companyNumber: 'FC004891',
+        link: 'followed',
+        establishments: ['BR000746'],
+      },
+    });
+  });
+});

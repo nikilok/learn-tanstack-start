@@ -6,6 +6,10 @@
  * full name, to be read by eye first, or when its website is shown on a proof
  * read against the overseas record, which would not follow it.
  *
+ * With `--keep-methods` every join keeps the method, score and check time it
+ * had, so the sweeps go on checking it, and a join made on less than the full
+ * name moves with the rest.
+ *
  * Each company is one write. It asks the register again that the listed
  * establishment is still the company's one open establishment, stores that
  * establishment's own profile, then locks the rows it moves and writes only
@@ -17,6 +21,7 @@
  *   bun apps/web/scripts/move-to-uk-establishments.ts --find --list=moves.json
  *   bun apps/web/scripts/move-to-uk-establishments.ts --list=moves.json
  *   bun apps/web/scripts/move-to-uk-establishments.ts --list=moves.json --backup=backup.json --apply
+ *   bun apps/web/scripts/move-to-uk-establishments.ts --list=moves.json --keep-methods
  *
  * `--find` writes the list and nothing else: each overseas company a sponsor
  * is joined to that has exactly one open UK establishment at Companies House.
@@ -42,7 +47,6 @@ import {
 import {
   applyMoves,
   findMoves,
-  type ListedEstablishment,
   parseEstablishmentMoves,
   planMoves,
 } from '../src/lib/hmrc-ch/establishment-move.ts';
@@ -50,6 +54,7 @@ import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import { dbFingerprint } from '../src/lib/phase5/db-host.ts';
 import type { CHFullProfile } from '../src/lib/phase5/decide.ts';
 import { makeBackup } from '../src/lib/websites/rejected-site-run.ts';
+import { makeEstablishmentReads } from './lib/ch-establishments.ts';
 import {
   type EstablishmentMoveArgs,
   parseEstablishmentMoveArgs,
@@ -96,25 +101,7 @@ const askCh: ChFetch = withChRetries(
   { retries: CH_RETRIES, pauseMs: CH_RETRY_PAUSE_MS },
 );
 
-/** A Companies House call that failed without saying anything about the company, named by its status. */
-class ChStatus extends Error {
-  constructor(status: number) {
-    super(`HTTP ${status}`);
-    this.name = `HTTP ${status}`;
-  }
-}
-
-/** The establishments Companies House lists under a company; none for a 404, and a throw when it cannot say. */
-async function fetchEstablishments(
-  companyNumber: string,
-): Promise<ListedEstablishment[]> {
-  const res = await askCh(`/company/${companyNumber}/uk-establishments`);
-  if (res.ok) {
-    return (res.data as { items?: ListedEstablishment[] }).items ?? [];
-  }
-  if (res.status === 404) return [];
-  throw new ChStatus(res.status);
-}
+const { fetchEstablishments, fetchProfile } = makeEstablishmentReads(askCh);
 
 if (args.find) {
   if (!chKey) stop('COMPANIES_HOUSE_SEED_API_KEY not set');
@@ -133,7 +120,14 @@ if (args.find) {
 const entries = parseEstablishmentMoves(await Bun.file(args.list).json());
 if (typeof entries === 'string') stop(entries);
 
-const plan = await planMoves(entries, makeReadMoveStates(sql));
+const plan = await planMoves(
+  entries,
+  makeReadMoveStates(sql),
+  args.keepMethods ? 'kept' : 'manual',
+);
+console.log(
+  `  joins are stored ${args.keepMethods ? 'with the method each had' : 'as manual'}`,
+);
 console.log(`  listed: ${entries.length}`, plan.planned);
 console.log('  the planned moves carry:', plan.carried);
 if (!args.apply) process.exit(0);
@@ -143,16 +137,6 @@ if (plan.planned.move > 0 && !chKey) {
 }
 
 const db = drizzle({ client: sql });
-
-/** A company's profile from Companies House; null when it has none (a 404), and a throw when it cannot say. */
-async function fetchProfile(
-  companyNumber: string,
-): Promise<CHFullProfile | null> {
-  const res = await askCh(`/company/${companyNumber}`);
-  if (res.ok) return res.data as CHFullProfile;
-  if (res.status === 404) return null;
-  throw new ChStatus(res.status);
-}
 
 /** Store a company's profile, over any copy already held. */
 async function storeProfile(profile: CHFullProfile): Promise<void> {

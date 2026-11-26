@@ -5,16 +5,15 @@ import {
   applyMoves,
   type CommitMoveInput,
   type CommitMoveResult,
-  chooseEstablishment,
   type EstablishmentMove,
   findMoves,
-  isOpenEstablishmentOf,
-  type ListedEstablishment,
   type MoveState,
+  moveForSweep,
   moveKind,
   parseEstablishmentMoves,
   planMoves,
 } from './establishment-move';
+import type { ListedEstablishment } from './uk-establishment';
 
 // JPMorgan Chase Bank's overseas record and its one UK establishment.
 const JPM: EstablishmentMove = {
@@ -115,59 +114,6 @@ describe('parseEstablishmentMoves', () => {
   });
 });
 
-describe('chooseEstablishment', () => {
-  test('JPMorgan Chase Bank has one open establishment', () => {
-    expect(
-      chooseEstablishment([
-        { company_number: 'BR000746', company_status: 'open' },
-      ]),
-    ).toEqual({ kind: 'one', establishmentNumber: 'BR000746' });
-  });
-
-  test('a closed establishment beside the open one does not count', () => {
-    expect(
-      chooseEstablishment([
-        { company_number: 'BR000001', company_status: 'closed' },
-        { company_number: 'BR000746', company_status: 'open' },
-      ]),
-    ).toEqual({ kind: 'one', establishmentNumber: 'BR000746' });
-  });
-
-  test('Caixa Geral de Depositos has two open, so neither is chosen', () => {
-    expect(
-      chooseEstablishment([
-        { company_number: 'BR006261', company_status: 'open' },
-        { company_number: 'BR028851', company_status: 'open' },
-      ]),
-    ).toEqual({ kind: 'several' });
-  });
-
-  test.each([
-    [[]],
-    [[{ company_number: 'BR000001', company_status: 'closed' }]],
-    [[{ company_number: 'BR000746/x', company_status: 'open' }]],
-    [[{ company_status: 'open' }]],
-  ])('none open, or none with a number, is none: %j', (items) => {
-    expect(chooseEstablishment(items)).toEqual({ kind: 'none' });
-  });
-});
-
-describe('isOpenEstablishmentOf', () => {
-  test('the open establishment the register links to the company', () => {
-    expect(isOpenEstablishmentOf(profile(), 'FC004891')).toBe(true);
-  });
-
-  test.each([
-    ['another company', profile(), 'FC000002'],
-    ['closed', profile({ company_status: 'closed' }), 'FC004891'],
-    ['not an establishment', profile({ type: 'oversea-company' }), 'FC004891'],
-    ['no link', profile({ branch_company_details: undefined }), 'FC004891'],
-    ['a null link', profile({ branch_company_details: null }), 'FC004891'],
-  ])('not for %s', (_label, given, companyNumber) => {
-    expect(isOpenEstablishmentOf(given, companyNumber)).toBe(false);
-  });
-});
-
 describe('moveKind', () => {
   test('joins on the overseas company move', () => {
     expect(moveKind(state())).toBe('move');
@@ -265,6 +211,31 @@ describe('moveKind', () => {
     );
   });
 
+  // A join that keeps its method stays under the sweeps, so nothing is settled by moving it.
+  test.each([['previous_name'], ['token_sim'], ['fuzzy_edit'], [null]])(
+    'a join made by %s moves with the rest when joins keep their methods',
+    (method) => {
+      expect(
+        moveKind(state({ joins: [join('A'), join('B', method)] }), 'kept'),
+      ).toBe('move');
+    },
+  );
+
+  test("keeping methods moves no owner's join, no shown website and nothing onto rows of the establishment's own", () => {
+    expect(moveKind(state({ joins: [join('A', 'manual')] }), 'kept')).toBe(
+      'manual',
+    );
+    expect(
+      moveKind(state({ site: siteAt('verified', 'name_and_place') }), 'kept'),
+    ).toBe('site_bound');
+    expect(
+      moveKind(state({ site: SITE, establishmentHasSite: true }), 'kept'),
+    ).toBe('site_conflict');
+    expect(
+      moveKind(state({ answers: ANSWERS, establishmentAnswers: 1 }), 'kept'),
+    ).toBe('answers_conflict');
+  });
+
   test('a website row on both is left', () => {
     expect(moveKind(state({ site: SITE, establishmentHasSite: true }))).toBe(
       'site_conflict',
@@ -339,6 +310,21 @@ describe('planMoves', () => {
     });
     expect(plan.carried).toEqual({ joins: 2, sites: 1, answered: 1 });
     expect(plan.kinds.get('FC000003')).toBe('missing');
+    expect(plan.storage).toBe('manual');
+  });
+
+  test('a plan that keeps methods carries a join made on less than the full name', async () => {
+    const stored = {
+      FC004891: state({ joins: [join('A'), join('B', 'previous_name')] }),
+    };
+    expect((await planMoves([JPM], read(stored))).planned).toMatchObject({
+      move: 0,
+      weak_join: 1,
+    });
+    const kept = await planMoves([JPM], read(stored), 'kept');
+    expect(kept.planned).toMatchObject({ move: 1, weak_join: 0 });
+    expect(kept.carried.joins).toBe(2);
+    expect(kept.storage).toBe('kept');
   });
 });
 
@@ -440,6 +426,7 @@ describe('applyMoves', () => {
           { id: 12, rowHash: 'hash of answer 12' },
         ],
         changedBy: 'uk_establishment_move',
+        storage: 'manual',
       },
     ]);
     expect(result).toEqual({
@@ -455,6 +442,19 @@ describe('applyMoves', () => {
       written: { joins: 2, sites: 1, answers: 2 },
       failure: null,
     });
+  });
+
+  test('each move is written as its plan stores joins, never as the default', async () => {
+    const stored = state({ joins: [join('A'), join('B', 'token_sim')] });
+    const plan = await planMoves([JPM], read({ FC004891: stored }), 'kept');
+    const run = writes({});
+    const result = await applyMoves([JPM], plan, run.deps);
+    expect(run.commits.map((c) => c.storage)).toEqual(['kept']);
+    expect(run.commits[0].joins.map((j) => j.organisationName)).toEqual([
+      'A',
+      'B',
+    ]);
+    expect(result.applied).toMatchObject({ moved: 1, left: 0 });
   });
 
   test('a failed backup writes nothing', async () => {
@@ -590,5 +590,166 @@ describe('applyMoves', () => {
     expect(result.failure).toBe(
       '7 planned moves were not written (first error: companies_house: HTTP 503); plan again and apply with a new --backup',
     );
+  });
+});
+
+describe('moveForSweep', () => {
+  const SPONSOR = 'JPMorgan Chase Bank, National Association';
+  const BY = 'phase5_sweep_exact_establishment';
+
+  /** One sweep's move of JPMorgan's company, over the rows given. */
+  async function sweepMove(
+    stored: MoveState | undefined,
+    over: Parameters<typeof writes>[0] = {},
+    dryRun = false,
+  ) {
+    const run = writes(over);
+    const result = await moveForSweep(JPM, SPONSOR, BY, {
+      ...run.deps,
+      read: read(stored ? { FC004891: stored } : {}),
+      dryRun,
+    });
+    return { run, result };
+  }
+
+  test('JPMorgan Chase Bank: the register is asked again, then every join moves with the method it had', async () => {
+    const stored = state({
+      joins: [join(SPONSOR), join('J.P. Morgan Chase Bank NA', 'exact_squash')],
+      site: SITE,
+      answers: ANSWERS,
+    });
+    const { run, result } = await sweepMove(stored);
+    expect(run.log).toEqual([
+      'list FC004891',
+      'fetch BR000746',
+      'store BR000746',
+      'commit FC004891',
+    ]);
+    expect(run.commits).toEqual([
+      {
+        ...JPM,
+        joins: stored.joins.map(({ organisationName, rowHash }) => ({
+          organisationName,
+          rowHash,
+        })),
+        siteHash: 'hash of the site row',
+        answers: [
+          { id: 11, rowHash: 'hash of answer 11' },
+          { id: 12, rowHash: 'hash of answer 12' },
+        ],
+        changedBy: BY,
+        storage: 'kept',
+      },
+    ]);
+    expect(result).toEqual({
+      kind: 'moved',
+      written: { joins: 2, sites: 1, answers: 2 },
+    });
+    // A sweep's move changes nothing but the company number, so it keeps no backup.
+    expect(run.backups).toEqual([]);
+  });
+
+  // Forestry Commission sits on Ghana Forestry Commission (FC025909) by a previous name: as wrong on either record, and still under the non-exact sweep after it moves.
+  test('a join made on less than the full name moves with its company', async () => {
+    const { run, result } = await sweepMove(
+      state({ joins: [join(SPONSOR, 'previous_name')] }),
+    );
+    expect(result.kind).toBe('moved');
+    expect(run.commits[0].storage).toBe('kept');
+  });
+
+  test.each([
+    [
+      'a website shown on a proof of the overseas record',
+      state({ site: siteAt('verified', 'name_and_place') }),
+      'site_bound',
+    ],
+    [
+      "an owner's join beside the swept one",
+      state({ joins: [join(SPONSOR), join('B', 'manual')] }),
+      'manual',
+    ],
+    [
+      "a website row of the establishment's own",
+      state({ site: SITE, establishmentHasSite: true }),
+      'site_conflict',
+    ],
+    [
+      "answers of the establishment's own",
+      state({ answers: ANSWERS, establishmentAnswers: 1 }),
+      'answers_conflict',
+    ],
+  ] as const)(
+    '%s holds the whole company, and nothing is asked or written',
+    async (_label, stored, reason) => {
+      const { run, result } = await sweepMove(stored);
+      expect(result).toEqual({ kind: 'held', reason });
+      expect(run.log).toEqual([]);
+    },
+  );
+
+  test.each([
+    [
+      'is on the company no longer',
+      state({ joins: [join('Another Sponsor')] }),
+    ],
+    ['has already moved', state({ joins: [], movedJoins: 1 })],
+    ['has nothing stored', undefined],
+  ])(
+    'a swept join that %s writes nothing: its row has changed',
+    async (_label, stored) => {
+      const { run, result } = await sweepMove(stored);
+      expect(result).toEqual({ kind: 'changed' });
+      expect(run.log).toEqual([]);
+    },
+  );
+
+  test('a dry run reads and decides, and neither asks the register nor writes', async () => {
+    const { run, result } = await sweepMove(
+      state({ site: SITE, answers: ANSWERS }),
+      {},
+      true,
+    );
+    expect(result).toEqual({ kind: 'moved', written: null });
+    expect(run.log).toEqual([]);
+  });
+
+  // Caixa Geral de Depositos has two open establishments: a second one opening is the same case arriving later.
+  test('a second establishment open by the time of the write holds the company', async () => {
+    const { run, result } = await sweepMove(state(), {
+      listed: [
+        { company_number: 'BR000746', company_status: 'open' },
+        { company_number: 'BR028851', company_status: 'open' },
+      ],
+    });
+    expect(result).toEqual({ kind: 'held', reason: 'not_establishment' });
+    expect(run.log).toEqual(['list FC004891']);
+  });
+
+  test('a profile for another number holds the company', async () => {
+    const { result } = await sweepMove(state(), {
+      profile: profile({ company_number: 'BR000002' }),
+    });
+    expect(result).toEqual({ kind: 'held', reason: 'no_profile' });
+  });
+
+  test('rows changed between the read and the write are left as changed', async () => {
+    const { run, result } = await sweepMove(state(), { commit: null });
+    expect(result).toEqual({ kind: 'changed' });
+    expect(run.log.at(-1)).toBe('commit FC004891');
+  });
+
+  test('a register that cannot say stops the row, named by stage and kind only', async () => {
+    const failed = new Error('the company is JPMorgan');
+    failed.name = 'HTTP 502';
+    const run = writes({ listed: failed });
+    await expect(
+      moveForSweep(JPM, SPONSOR, BY, {
+        ...run.deps,
+        read: read({ FC004891: state() }),
+        dryRun: false,
+      }),
+    ).rejects.toThrow('companies_house: HTTP 502');
+    expect(run.log).toEqual(['list FC004891']);
   });
 });

@@ -26,6 +26,11 @@ import { companiesHouseProfiles } from '@ss/db/schema';
 import dotenv from 'dotenv';
 import { drizzle } from 'drizzle-orm/neon-http';
 
+import {
+  makeCommitMove,
+  makeReadMoveStates,
+} from '../src/lib/hmrc-ch/establishment-move-sql.ts';
+import { moveForSweep } from '../src/lib/hmrc-ch/establishment-move.ts';
 import { profileToDbRow } from '../src/lib/hmrc-ch/profile-row.ts';
 import type {
   ApplyPromotionDeps,
@@ -51,6 +56,7 @@ import type {
 } from '../src/lib/phase5/sweep.ts';
 import { sweep } from '../src/lib/phase5/sweep.ts';
 import { fetchCh } from './lib/ch-client.ts';
+import { makeEstablishmentReads } from './lib/ch-establishments.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Env loading — POSTGRES_URL at monorepo root, CH API key at apps/web level
@@ -164,6 +170,15 @@ const applyDeps: ApplyPromotionDeps = {
 
 const dryRunOk = async (): Promise<ApplyResult> => ({ ok: true });
 
+// A dry run reads what a move would carry and writes nothing.
+const moveDeps = {
+  read: makeReadMoveStates(sql),
+  commit: makeCommitMove(sql),
+  storeProfile: upsertProfile,
+  ...makeEstablishmentReads(fetchCh),
+  dryRun: DRY_RUN,
+};
+
 const sweepDeps: SweepDeps = {
   selectRows: makeSelectRows(sql),
   lookupSponsor: makeLookupSponsor(sql),
@@ -174,6 +189,8 @@ const sweepDeps: SweepDeps = {
     : (existing, proposed, changedBy) =>
         applyPromotion(existing, proposed, changedBy, applyDeps),
   bumpVerifiedAt: DRY_RUN ? dryRunOk : makeBumpVerifiedAt(sql),
+  moveToEstablishment: (move, organisationName, changedBy) =>
+    moveForSweep(move, organisationName, changedBy, moveDeps),
   sleep: makeSleep(),
 };
 
@@ -204,6 +221,11 @@ console.log(`  inline_inconclusive : ${summary.inlineInconclusive}`);
 console.log(`  warned              : ${summary.warned}`);
 console.log(`  lock_missed         : ${summary.lockMissed}`);
 console.log(`  errored             : ${summary.errored}`);
+console.log(`  establishment_moved : ${summary.establishmentMoved}`);
+console.log(
+  `  establishment_held  : ${summary.establishmentHeld}${summary.establishmentHeld > 0 ? ` ${JSON.stringify(summary.establishmentHeldBy)}` : ''}`,
+);
+console.log(`  several_establishments : ${summary.severalEstablishments}`);
 console.log(`  duration            : ${durationSec}s`);
 
 // Fail the workflow run loudly when the error rate is too high — likely a

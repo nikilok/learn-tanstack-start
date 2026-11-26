@@ -23,6 +23,7 @@ const input: CommitMoveInput = {
     { id: 12, rowHash: 'hash of answer 12' },
   ],
   changedBy: 'uk_establishment_move',
+  storage: 'manual',
 };
 
 describe('makeReadOverseasCompanies', () => {
@@ -151,6 +152,8 @@ describe('makeCommitMove', () => {
       site,
       BR,
       BR,
+      // Whether joins keep their methods: bound once, read wherever the two ways differ.
+      false,
       BR,
       BR,
       'uk_establishment_move',
@@ -196,10 +199,10 @@ describe('makeCommitMove', () => {
     );
     expect(text).toContain('FROM joins j JOIN moved USING (organisation_name)');
     expect(text).toContain(
-      'UPDATE company_websites w SET company_number = $15 WHERE w.company_number = $16 AND (SELECT ok FROM intact)',
+      'UPDATE company_websites w SET company_number = $16 WHERE w.company_number = $17 AND (SELECT ok FROM intact)',
     );
     expect(text).toContain(
-      'UPDATE company_answers a SET company_number = $17 WHERE a.company_number = $18 AND (SELECT ok FROM intact)',
+      'UPDATE company_answers a SET company_number = $18 WHERE a.company_number = $19 AND (SELECT ok FROM intact)',
     );
     // Four writes in all, so none is left outside the check.
     expect(
@@ -207,16 +210,29 @@ describe('makeCommitMove', () => {
     ).toHaveLength(4);
   });
 
-  test('a moved join is stored as manual, with an audit row naming where it came from', async () => {
+  test('a join is stored as manual or with the method it had, by one bound flag, with an audit row naming where it came from', async () => {
     const { sql, calls } = makeFakeSql(written);
     await makeCommitMove(sql)(input);
     const text = flat(calls[0].text);
+    expect(text).toContain('mode AS ( SELECT $12::boolean AS keep )');
+    // Kept: the method, score and check time stay as stored. Otherwise manual, no score, stamped now.
     expect(text).toContain(
-      "SET company_number = $12, match_method = 'manual', match_score = NULL, verified_at = now()",
+      "SET company_number = $13, match_method = CASE WHEN (SELECT keep FROM mode) THEN m.match_method ELSE 'manual' END, match_score = CASE WHEN (SELECT keep FROM mode) THEN m.match_score END, verified_at = CASE WHEN (SELECT keep FROM mode) THEN m.verified_at ELSE now() END",
     );
     expect(text).toContain(
-      "SELECT j.organisation_name, j.company_number, $13, j.match_method, 'manual', $14",
+      "SELECT j.organisation_name, j.company_number, $14, j.match_method, CASE WHEN (SELECT keep FROM mode) THEN j.match_method ELSE 'manual' END, $15",
     );
+    // The flag is bound in one place only, so the four readings cannot disagree.
+    expect(text.match(/::boolean/g)).toHaveLength(1);
+  });
+
+  test.each([
+    ['manual', false],
+    ['kept', true],
+  ] as const)('joins stored as %s bind the flag %s', async (storage, flag) => {
+    const { sql, calls } = makeFakeSql(written);
+    await makeCommitMove(sql)({ ...input, storage });
+    expect(calls[0].params[11]).toBe(flag);
   });
 
   test('a company with no answers binds none', async () => {

@@ -17,6 +17,7 @@
 export const TIER_C_THRESHOLD = 0.85;
 const MIN_TOKENS_FOR_TIER_C = 2;
 
+export const TIER_A_SCORE = 1;
 export const TIER_A2_SCORE = 0.98;
 export const MIN_SQUASH_LENGTH = 3;
 
@@ -251,7 +252,7 @@ function jaccard(a: string[], b: string[]): number {
 export function matchTierA(candidate: string, ch: CHCandidate): number | null {
   return normaliseForComparison(candidate) ===
     normaliseForComparison(ch.company_name)
-    ? 1.0
+    ? TIER_A_SCORE
     : null;
 }
 

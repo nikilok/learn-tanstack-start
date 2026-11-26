@@ -1,18 +1,25 @@
 /**
  * Moving sponsors joined to an overseas company onto its UK establishment.
- * Every join on the overseas record moves, stored as `manual`, and the
- * record's website row and answers go with it, as both records are the one
- * company. A company is left where it is when one of its joins was made on
- * less than the sponsor's full name, or its website is shown on a proof read
- * against the overseas record. The database and Companies House are passed in.
+ * Every join on the overseas record moves, and the record's website row and
+ * answers go with it, as both records are the one company. A list's joins are
+ * stored as `manual` unless told to keep their methods; a sweep's always keep
+ * them. A company is left where it is when its website is shown on a proof
+ * read against the overseas record, or, where joins become `manual`, when one
+ * was made on less than the sponsor's full name. The database and Companies
+ * House are passed in.
  */
 
-import { COMPANY_NUMBER_RE } from '../company/ids';
 import type { CHFullProfile } from '../phase5/decide';
 import type { WebsiteEvidence } from '../websites/decide';
 import { ANSWER_RETENTION_STATUSES } from '../websites/publishable';
 import { TERMINAL_EVIDENCE } from '../websites/revalidate';
 import { MAX_ERRORS_IN_A_ROW, StageError, staged } from './mapping-correction';
+import {
+  chooseEstablishment,
+  isCompanyNumber,
+  isOpenEstablishmentOf,
+  type ListedEstablishment,
+} from './uk-establishment';
 
 /** One listed move: an overseas company, and the establishment its joins move to. */
 export type EstablishmentMove = {
@@ -20,17 +27,8 @@ export type EstablishmentMove = {
   establishmentNumber: string;
 };
 
-/** An establishment as Companies House lists it under an overseas company. */
-export type ListedEstablishment = {
-  company_number?: unknown;
-  company_status?: unknown;
-};
-
-/** What Companies House lists under an overseas company comes to: its one open establishment, none open, or several. */
-export type EstablishmentChoice =
-  | { kind: 'one'; establishmentNumber: string }
-  | { kind: 'none' }
-  | { kind: 'several' };
+/** How a move stores the joins it carries: as `manual`, an owner's correction no sweep revisits, or each with the method it had. */
+export type JoinStorage = 'manual' | 'kept';
 
 /** A stored row: exactly as stored, for the backup, with the hash its write is guarded on. */
 export type StoredRow = { stored: Record<string, unknown>; rowHash: string };
@@ -80,12 +78,13 @@ export type MoveKind =
 /** How many listed moves came to each outcome. */
 export type MoveCounts = Record<string, number>;
 
-/** The listed moves as read, what each comes to, and what the planned ones carry. */
+/** The listed moves as read, what each comes to, what the planned ones carry, and how their joins are to be stored. */
 export type MovePlan = {
   states: Map<string, MoveState>;
   kinds: Map<string, MoveKind>;
   planned: MoveCounts;
   carried: { joins: number; sites: number; answered: number };
+  storage: JoinStorage;
 };
 
 /** The guarded write of one move, with what it was planned on. */
@@ -96,6 +95,7 @@ export type CommitMoveInput = {
   siteHash: string | null;
   answers: { id: number; rowHash: string }[];
   changedBy: string;
+  storage: JoinStorage;
 };
 
 /** The rows one move wrote. */
@@ -121,6 +121,26 @@ export type MoveWrites = {
 /** What writing one move did. */
 type MoveOutcome = 'moved' | 'changed' | 'no_profile' | 'not_establishment';
 
+/** Why a sweep left a company on its overseas record: what its rows came to, or what the write found. */
+export type SweepHold =
+  | Exclude<MoveKind, 'move'>
+  | Exclude<MoveOutcome, 'moved' | 'changed'>;
+
+/** What moving one company during a sweep came to: moved (nothing written on a dry run), held where it is, or changed since the sweep read its row. */
+export type SweepMove =
+  | { kind: 'moved'; written: CommitMoveResult | null }
+  | { kind: 'held'; reason: SweepHold }
+  | { kind: 'changed' };
+
+/** What a sweep's move needs from outside. */
+export type SweepMoveDeps = MoveWrites & {
+  read: (
+    entries: readonly EstablishmentMove[],
+  ) => Promise<Map<string, MoveState>>;
+  /** Read and decide only. */
+  dryRun: boolean;
+};
+
 /** A company with nothing stored for it. */
 const NOTHING_STORED: MoveState = {
   joins: [],
@@ -130,11 +150,6 @@ const NOTHING_STORED: MoveState = {
   answers: [],
   establishmentAnswers: 0,
 };
-
-/** Whether a value has the shape of a company number. */
-function isCompanyNumber(value: unknown): value is string {
-  return typeof value === 'string' && COMPANY_NUMBER_RE.test(value);
-}
 
 /** Read a list of moves; a string says what is wrong with it, by position only. */
 export function parseEstablishmentMoves(
@@ -169,34 +184,6 @@ export function parseEstablishmentMoves(
   return entries;
 }
 
-/** What the establishments listed under an overseas company come to. */
-export function chooseEstablishment(
-  items: readonly ListedEstablishment[],
-): EstablishmentChoice {
-  const open = items.filter((item) => item.company_status === 'open');
-  if (open.length > 1) return { kind: 'several' };
-  const establishmentNumber = open[0]?.company_number;
-  return isCompanyNumber(establishmentNumber)
-    ? { kind: 'one', establishmentNumber }
-    : { kind: 'none' };
-}
-
-/** Whether a profile is the open UK establishment of the given overseas company, by the register's own link. */
-export function isOpenEstablishmentOf(
-  profile: CHFullProfile,
-  companyNumber: string,
-): boolean {
-  const branch = profile.branch_company_details as
-    | { parent_company_number?: unknown }
-    | null
-    | undefined;
-  return (
-    profile.type === 'uk-establishment' &&
-    profile.company_status === 'open' &&
-    branch?.parent_company_number === companyNumber
-  );
-}
-
 /** Joins made on the sponsor's name in full; one made on less is read by eye before a move stores it as `manual`. */
 const FULL_NAME_METHODS: ReadonlySet<string | null> = new Set([
   'exact',
@@ -217,8 +204,11 @@ function isShownOnOwnRecord(site: StoredRow | null): boolean {
   );
 }
 
-/** What a listed move comes to for the rows as stored now. */
-export function moveKind(state: MoveState): MoveKind {
+/** What a listed move comes to for the rows as stored now, given how it would store the joins. */
+export function moveKind(
+  state: MoveState,
+  storage: JoinStorage = 'manual',
+): MoveKind {
   if (state.joins.length === 0) {
     return state.movedJoins > 0 ? 'already' : 'missing';
   }
@@ -226,7 +216,11 @@ export function moveKind(state: MoveState): MoveKind {
   if (state.joins.some((join) => join.matchMethod === 'manual')) {
     return 'manual';
   }
-  if (state.joins.some((join) => !FULL_NAME_METHODS.has(join.matchMethod))) {
+  // A join that keeps its method stays under the sweeps, so only one about to become `manual` waits.
+  if (
+    storage === 'manual' &&
+    state.joins.some((join) => !FULL_NAME_METHODS.has(join.matchMethod))
+  ) {
     return 'weak_join';
   }
   if (isShownOnOwnRecord(state.site)) return 'site_bound';
@@ -265,12 +259,13 @@ export async function findMoves(
   return { moves, found };
 }
 
-/** Read the listed companies and say what each move comes to. */
+/** Read the listed companies and say what each move comes to, given how it would store the joins. */
 export async function planMoves(
   entries: readonly EstablishmentMove[],
   read: (
     entries: readonly EstablishmentMove[],
   ) => Promise<Map<string, MoveState>>,
+  storage: JoinStorage = 'manual',
 ): Promise<MovePlan> {
   const states = await read(entries);
   const kinds = new Map<string, MoveKind>();
@@ -287,7 +282,7 @@ export async function planMoves(
   const carried = { joins: 0, sites: 0, answered: 0 };
   for (const entry of entries) {
     const state = states.get(entry.companyNumber) ?? NOTHING_STORED;
-    const kind = moveKind(state);
+    const kind = moveKind(state, storage);
     kinds.set(entry.companyNumber, kind);
     planned[kind] += 1;
     if (kind !== 'move') continue;
@@ -295,7 +290,7 @@ export async function planMoves(
     carried.sites += state.site ? 1 : 0;
     carried.answered += state.answers.length > 0 ? 1 : 0;
   }
-  return { states, kinds, planned, carried };
+  return { states, kinds, planned, carried, storage };
 }
 
 /** Write one move. The register is asked again and the establishment's own profile checked and stored first, so a failed write leaves every row as it was. */
@@ -303,6 +298,7 @@ async function writeMove(
   entry: EstablishmentMove,
   state: MoveState,
   changedBy: string,
+  storage: JoinStorage,
   writes: MoveWrites,
 ): Promise<[MoveOutcome, CommitMoveResult | null]> {
   const listed = await staged('companies_house', () =>
@@ -338,9 +334,39 @@ async function writeMove(
       siteHash: state.site?.rowHash ?? null,
       answers: state.answers.map(({ id, rowHash }) => ({ id, rowHash })),
       changedBy,
+      storage,
     }),
   );
   return done ? ['moved', done] : ['changed', null];
+}
+
+/** Move the company a swept join is on to its establishment, every join keeping its method; nothing moves unless the whole company can. */
+export async function moveForSweep(
+  entry: EstablishmentMove,
+  organisationName: string,
+  changedBy: string,
+  deps: SweepMoveDeps,
+): Promise<SweepMove> {
+  const states = await deps.read([entry]);
+  const state = states.get(entry.companyNumber) ?? NOTHING_STORED;
+  // The join the sweep read is no longer on the company.
+  if (!state.joins.some((join) => join.organisationName === organisationName)) {
+    return { kind: 'changed' };
+  }
+  const kind = moveKind(state, 'kept');
+  if (kind !== 'move') return { kind: 'held', reason: kind };
+  if (deps.dryRun) return { kind: 'moved', written: null };
+  const [outcome, written] = await writeMove(
+    entry,
+    state,
+    changedBy,
+    'kept',
+    deps,
+  );
+  if (outcome === 'moved') return { kind: 'moved', written };
+  return outcome === 'changed'
+    ? { kind: 'changed' }
+    : { kind: 'held', reason: outcome };
 }
 
 /** Back the planned moves' rows up, then write each; a failed backup writes nothing, and a planned move not written fails the run. */
@@ -402,6 +428,7 @@ export async function applyMoves(
         entry,
         state,
         deps.changedBy,
+        plan.storage,
         deps,
       );
       applied[outcome] += 1;

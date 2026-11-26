@@ -7,7 +7,9 @@ import {
   type CommitMoveResult,
   chooseEstablishment,
   type EstablishmentMove,
+  findMoves,
   isOpenEstablishmentOf,
+  type ListedEstablishment,
   type MoveState,
   moveKind,
   parseEstablishmentMoves,
@@ -50,6 +52,13 @@ const SITE = {
   rowHash: 'hash of the site row',
 };
 
+/** Two answers held for the overseas company, as stored. */
+const ANSWERS = [11, 12].map((id) => ({
+  stored: { id, company_number: 'FC004891', answer: `answer ${id}` },
+  rowHash: `hash of answer ${id}`,
+  id,
+}));
+
 /** The overseas company's website row at a given status and proof. */
 const siteAt = (status: string, evidence: string) => ({
   stored: { ...SITE.stored, status, evidence },
@@ -62,7 +71,7 @@ const state = (over: Partial<MoveState> = {}): MoveState => ({
   movedJoins: 0,
   site: null,
   establishmentHasSite: false,
-  answers: 0,
+  answers: [],
   establishmentAnswers: 0,
   ...over,
 });
@@ -175,7 +184,7 @@ describe('moveKind', () => {
     'a website shown on a proof of the overseas record keeps the company where it is: %s, %s',
     (status, evidence) => {
       expect(
-        moveKind(state({ site: siteAt(status, evidence), answers: 2 })),
+        moveKind(state({ site: siteAt(status, evidence), answers: ANSWERS })),
       ).toBe('site_bound');
     },
   );
@@ -206,7 +215,7 @@ describe('moveKind', () => {
   });
 
   test('a website row and answers go with them when the establishment has none', () => {
-    expect(moveKind(state({ site: SITE, answers: 2 }))).toBe('move');
+    expect(moveKind(state({ site: SITE, answers: ANSWERS }))).toBe('move');
   });
 
   test("the establishment's own rows do not matter when there is nothing to carry", () => {
@@ -263,9 +272,41 @@ describe('moveKind', () => {
   });
 
   test('answers on both are left', () => {
-    expect(moveKind(state({ answers: 2, establishmentAnswers: 1 }))).toBe(
+    expect(moveKind(state({ answers: ANSWERS, establishmentAnswers: 1 }))).toBe(
       'answers_conflict',
     );
+  });
+});
+
+describe('findMoves', () => {
+  /** What the register lists under each test company; one it cannot answer for throws. */
+  const register: Record<string, ListedEstablishment[] | null> = {
+    FC004891: [{ company_number: 'BR000746', company_status: 'open' }],
+    FC023485: [
+      { company_number: 'BR006261', company_status: 'open' },
+      { company_number: 'BR028851', company_status: 'open' },
+    ],
+    FC021303: [],
+    FC000009: null,
+  };
+  const ask = async (companyNumber: string) => {
+    const listed = register[companyNumber];
+    if (!listed) throw new Error('HTTP 401');
+    return listed;
+  };
+
+  test('lists each company with one open establishment, and counts the rest', async () => {
+    expect(await findMoves(['FC004891', 'FC023485', 'FC021303'], ask)).toEqual({
+      moves: [JPM],
+      found: { one: 1, none: 1, several: 1, failed: 0 },
+    });
+  });
+
+  test('a company that could not be asked is counted as failed, never as having none', async () => {
+    expect(await findMoves(['FC000009', 'FC004891'], ask)).toEqual({
+      moves: [JPM],
+      found: { one: 1, none: 0, several: 0, failed: 1 },
+    });
   });
 });
 
@@ -281,7 +322,7 @@ describe('planMoves', () => {
         FC004891: state({
           joins: [join('A'), join('B')],
           site: SITE,
-          answers: 2,
+          answers: ANSWERS,
         }),
         FC000002: state({ joins: [join('C', 'manual')], site: SITE }),
       }),
@@ -301,8 +342,20 @@ describe('planMoves', () => {
   });
 });
 
+/** The one open establishment the register lists under a test company. */
+const soleEstablishment = (companyNumber: string): ListedEstablishment[] => [
+  {
+    company_number:
+      companyNumber === JPM.companyNumber
+        ? JPM.establishmentNumber
+        : companyNumber.replace('FC', 'BR'),
+    company_status: 'open',
+  },
+];
+
 /** The writes of a run, each recorded in order, with what they answer. */
 function writes(over: {
+  listed?: ListedEstablishment[] | Error;
   profile?: CHFullProfile | null | Error;
   commit?: CommitMoveResult | null;
   backup?: Error;
@@ -320,6 +373,11 @@ function writes(over: {
         log.push('backup');
         if (over.backup) throw over.backup;
         backups.push(stored);
+      },
+      fetchEstablishments: async (companyNumber: string) => {
+        log.push(`list ${companyNumber}`);
+        if (over.listed instanceof Error) throw over.listed;
+        return over.listed ?? soleEstablishment(companyNumber);
       },
       fetchProfile: async (companyNumber: string) => {
         log.push(`fetch ${companyNumber}`);
@@ -342,28 +400,30 @@ function writes(over: {
 }
 
 describe('applyMoves', () => {
-  test('backs the rows up, then checks and stores the profile, then writes the move on what it was planned on', async () => {
+  test('backs the rows up, asks the register again, checks and stores the profile, then writes the move on what it was planned on', async () => {
     const stored = state({
       joins: [join('A'), join('B')],
       site: SITE,
-      answers: 2,
+      answers: ANSWERS,
     });
     const plan = await planMoves([JPM], read({ FC004891: stored }));
     const run = writes({});
     const result = await applyMoves([JPM], plan, run.deps);
     expect(run.log).toEqual([
       'backup',
+      'list FC004891',
       'fetch BR000746',
       'store BR000746',
       'commit FC004891',
     ]);
+    // Every row the move writes is kept as stored: its joins, its website row and its answers.
     expect(run.backups).toEqual([
       [
         {
           ...JPM,
           joins: stored.joins.map((j) => j.stored),
           site: SITE.stored,
-          answers: 2,
+          answers: ANSWERS.map((a) => a.stored),
         },
       ],
     ]);
@@ -375,7 +435,10 @@ describe('applyMoves', () => {
           { organisationName: 'B', rowHash: 'hash of B' },
         ],
         siteHash: 'hash of the site row',
-        answers: 2,
+        answers: [
+          { id: 11, rowHash: 'hash of answer 11' },
+          { id: 12, rowHash: 'hash of answer 12' },
+        ],
         changedBy: 'uk_establishment_move',
       },
     ]);
@@ -435,11 +498,53 @@ describe('applyMoves', () => {
       const plan = await planMoves([JPM], read({ FC004891: state() }));
       const run = writes({ profile: given });
       const result = await applyMoves([JPM], plan, run.deps);
-      expect(run.log).toEqual(['backup', 'fetch BR000746']);
+      expect(run.log).toEqual(['backup', 'list FC004891', 'fetch BR000746']);
       expect(result.applied).toMatchObject({ moved: 0, not_establishment: 1 });
       expect(result.failure).toStartWith('1 planned moves were not written');
     },
   );
+
+  // The list can be older than the register: Caixa Geral de Depositos has two open establishments, and a company with one may gain another.
+  test.each([
+    [
+      'a second establishment has opened',
+      [
+        { company_number: 'BR000746', company_status: 'open' },
+        { company_number: 'BR028851', company_status: 'open' },
+      ],
+    ],
+    [
+      'another establishment is now the open one',
+      [
+        { company_number: 'BR000746', company_status: 'closed' },
+        { company_number: 'BR028851', company_status: 'open' },
+      ],
+    ],
+    ['none is listed any more', []],
+  ])(
+    'when %s since the list was made, nothing is fetched or written, and the run fails',
+    async (_label, listed) => {
+      const plan = await planMoves([JPM], read({ FC004891: state() }));
+      const run = writes({ listed });
+      const result = await applyMoves([JPM], plan, run.deps);
+      expect(run.log).toEqual(['backup', 'list FC004891']);
+      expect(result.applied).toMatchObject({ moved: 0, not_establishment: 1 });
+      expect(result.failure).toStartWith('1 planned moves were not written');
+    },
+  );
+
+  test('a register that cannot say is an error, and nothing is written', async () => {
+    const plan = await planMoves([JPM], read({ FC004891: state() }));
+    const failed = new Error('the company is JPMorgan');
+    failed.name = 'HTTP 502';
+    const run = writes({ listed: failed });
+    const result = await applyMoves([JPM], plan, run.deps);
+    expect(run.log).toEqual(['backup', 'list FC004891']);
+    expect(result.applied).toMatchObject({ moved: 0, errored: 1 });
+    expect(result.failure).toBe(
+      '1 planned moves were not written (first error: companies_house: HTTP 502); plan again and apply with a new --backup',
+    );
+  });
 
   test.each([
     ['no profile', null],
@@ -448,7 +553,7 @@ describe('applyMoves', () => {
     const plan = await planMoves([JPM], read({ FC004891: state() }));
     const run = writes({ profile: given });
     const result = await applyMoves([JPM], plan, run.deps);
-    expect(run.log).toEqual(['backup', 'fetch BR000746']);
+    expect(run.log).toEqual(['backup', 'list FC004891', 'fetch BR000746']);
     expect(result.applied).toMatchObject({ moved: 0, no_profile: 1 });
     expect(result.failure).toStartWith('1 planned moves were not written');
   });

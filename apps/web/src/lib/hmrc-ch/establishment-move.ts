@@ -41,6 +41,9 @@ export type StoredJoin = StoredRow & {
   matchMethod: string | null;
 };
 
+/** An answer held for the overseas company, as stored. */
+export type StoredAnswer = StoredRow & { id: number };
+
 /** What the database holds for one listed move. */
 export type MoveState = {
   /** Every join on the overseas company. */
@@ -50,9 +53,17 @@ export type MoveState = {
   /** The overseas company's website row. */
   site: StoredRow | null;
   establishmentHasSite: boolean;
-  /** Answers held for the overseas company. */
-  answers: number;
+  /** Every answer held for the overseas company. */
+  answers: StoredAnswer[];
   establishmentAnswers: number;
+};
+
+/** How many overseas companies came to each outcome when their establishments were asked for. */
+export type FindCounts = {
+  one: number;
+  none: number;
+  several: number;
+  failed: number;
 };
 
 /** What a listed move comes to for the rows as stored. */
@@ -83,7 +94,7 @@ export type CommitMoveInput = {
   establishmentNumber: string;
   joins: { organisationName: string; rowHash: string }[];
   siteHash: string | null;
-  answers: number;
+  answers: { id: number; rowHash: string }[];
   changedBy: string;
 };
 
@@ -96,6 +107,10 @@ export type CommitMoveResult = {
 
 /** What the writes of a move need from outside. */
 export type MoveWrites = {
+  /** The establishments Companies House lists under an overseas company now; a throw when it cannot say. */
+  fetchEstablishments: (
+    companyNumber: string,
+  ) => Promise<readonly ListedEstablishment[]>;
   /** The establishment's profile from Companies House; null when it has none to give. */
   fetchProfile: (companyNumber: string) => Promise<CHFullProfile | null>;
   storeProfile: (profile: CHFullProfile) => Promise<void>;
@@ -112,7 +127,7 @@ const NOTHING_STORED: MoveState = {
   movedJoins: 0,
   site: null,
   establishmentHasSite: false,
-  answers: 0,
+  answers: [],
   establishmentAnswers: 0,
 };
 
@@ -217,10 +232,37 @@ export function moveKind(state: MoveState): MoveKind {
   if (isShownOnOwnRecord(state.site)) return 'site_bound';
   // A row of the establishment's own is never written over.
   if (state.site && state.establishmentHasSite) return 'site_conflict';
-  if (state.answers > 0 && state.establishmentAnswers > 0) {
+  if (state.answers.length > 0 && state.establishmentAnswers > 0) {
     return 'answers_conflict';
   }
   return 'move';
+}
+
+/** The moves for the given overseas companies: each one with exactly one open establishment. A company that could not be asked is counted as failed and left out. */
+export async function findMoves(
+  companies: readonly string[],
+  fetchEstablishments: MoveWrites['fetchEstablishments'],
+): Promise<{ moves: EstablishmentMove[]; found: FindCounts }> {
+  const moves: EstablishmentMove[] = [];
+  const found: FindCounts = { one: 0, none: 0, several: 0, failed: 0 };
+  for (const companyNumber of companies) {
+    let listed: readonly ListedEstablishment[];
+    try {
+      listed = await fetchEstablishments(companyNumber);
+    } catch {
+      found.failed += 1;
+      continue;
+    }
+    const choice = chooseEstablishment(listed);
+    found[choice.kind] += 1;
+    if (choice.kind === 'one') {
+      moves.push({
+        companyNumber,
+        establishmentNumber: choice.establishmentNumber,
+      });
+    }
+  }
+  return { moves, found };
 }
 
 /** Read the listed companies and say what each move comes to. */
@@ -251,18 +293,29 @@ export async function planMoves(
     if (kind !== 'move') continue;
     carried.joins += state.joins.length;
     carried.sites += state.site ? 1 : 0;
-    carried.answered += state.answers > 0 ? 1 : 0;
+    carried.answered += state.answers.length > 0 ? 1 : 0;
   }
   return { states, kinds, planned, carried };
 }
 
-/** Write one move. The establishment's own profile is checked and stored first, so a failed write leaves every row as it was. */
+/** Write one move. The register is asked again and the establishment's own profile checked and stored first, so a failed write leaves every row as it was. */
 async function writeMove(
   entry: EstablishmentMove,
   state: MoveState,
   changedBy: string,
   writes: MoveWrites,
 ): Promise<[MoveOutcome, CommitMoveResult | null]> {
+  const listed = await staged('companies_house', () =>
+    writes.fetchEstablishments(entry.companyNumber),
+  );
+  const choice = chooseEstablishment(listed);
+  // The list may be older than the register: another establishment may have opened since.
+  if (
+    choice.kind !== 'one' ||
+    choice.establishmentNumber !== entry.establishmentNumber
+  ) {
+    return ['not_establishment', null];
+  }
   const profile = await staged('companies_house', () =>
     writes.fetchProfile(entry.establishmentNumber),
   );
@@ -283,7 +336,7 @@ async function writeMove(
         rowHash,
       })),
       siteHash: state.site?.rowHash ?? null,
-      answers: state.answers,
+      answers: state.answers.map(({ id, rowHash }) => ({ id, rowHash })),
       changedBy,
     }),
   );
@@ -317,7 +370,7 @@ export async function applyMoves(
         ...entry,
         joins: state.joins.map((join) => join.stored),
         site: state.site?.stored ?? null,
-        answers: state.answers,
+        answers: state.answers.map((answer) => answer.stored),
       })),
     );
   } catch (error) {

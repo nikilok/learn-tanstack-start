@@ -17,7 +17,7 @@ type Sql = NeonQueryFunction<false, false>;
 
 type RawStored = { stored: Record<string, unknown>; row_hash: string };
 
-/** Stored rows grouped by the company number each holds. */
+/** Stored rows grouped by the company number each holds, in the order read. */
 function byCompany(rows: RawStored[]): Map<string, StoredRow[]> {
   const grouped = new Map<string, StoredRow[]>();
   for (const { stored, row_hash } of rows) {
@@ -67,14 +67,13 @@ export function makeReadMoveStates(sql: Sql) {
         WHERE w.company_number = ANY(${numbers}::text[])
       `) as RawStored[],
     );
-    const answered = await sql`
-      SELECT a.company_number, count(*)::int AS answers
-      FROM company_answers a
-      WHERE a.company_number = ANY(${numbers}::text[])
-      GROUP BY a.company_number
-    `;
-    const answers = new Map(
-      answered.map((r) => [r.company_number as string, Number(r.answers)]),
+    const answers = byCompany(
+      (await sql`
+        SELECT to_jsonb(a) AS stored, md5(a::text) AS row_hash
+        FROM company_answers a
+        WHERE a.company_number = ANY(${numbers}::text[])
+        ORDER BY a.id
+      `) as RawStored[],
     );
     return new Map(
       entries.map(({ companyNumber, establishmentNumber }) => [
@@ -88,53 +87,74 @@ export function makeReadMoveStates(sql: Sql) {
           movedJoins: joins.get(establishmentNumber)?.length ?? 0,
           site: sites.get(companyNumber)?.[0] ?? null,
           establishmentHasSite: sites.has(establishmentNumber),
-          answers: answers.get(companyNumber) ?? 0,
-          establishmentAnswers: answers.get(establishmentNumber) ?? 0,
+          answers: (answers.get(companyNumber) ?? []).map((row) => ({
+            ...row,
+            id: Number(row.stored.id),
+          })),
+          establishmentAnswers: answers.get(establishmentNumber)?.length ?? 0,
         },
       ]),
     );
   };
 }
 
-/** Write one move as a single statement: the joins with their audit rows, the website row and the answers, only while everything it was planned on is as it was read. */
+/** Write one move as a single statement: the joins with their audit rows, the website row and the answers. It locks every row it moves, reads them again, and writes only when each is as the move was planned on. */
 export function makeCommitMove(sql: Sql) {
   return async (input: CommitMoveInput): Promise<CommitMoveResult | null> => {
     const names = input.joins.map((join) => join.organisationName);
     const hashes = input.joins.map((join) => join.rowHash);
+    const answerIds = input.answers.map((answer) => answer.id);
+    const answerHashes = input.answers.map((answer) => answer.rowHash);
     const rows = await sql`
       WITH expected AS (
         SELECT * FROM unnest(${names}::text[], ${hashes}::text[])
           AS e(organisation_name, row_hash)
       ),
+      expected_answers AS (
+        SELECT * FROM unnest(${answerIds}::int[], ${answerHashes}::text[])
+          AS x(id, row_hash)
+      ),
+      joins AS MATERIALIZED (
+        SELECT m.organisation_name, m.company_number, m.match_method,
+               md5(m::text) AS row_hash
+        FROM hmrc_company_mapping m
+        WHERE m.company_number = ${input.companyNumber}
+        FOR UPDATE
+      ),
+      site_row AS MATERIALIZED (
+        SELECT md5(w::text) AS row_hash
+        FROM company_websites w
+        WHERE w.company_number = ${input.companyNumber}
+        FOR UPDATE
+      ),
+      answer_rows AS MATERIALIZED (
+        SELECT a.id, md5(a::text) AS row_hash
+        FROM company_answers a
+        WHERE a.company_number = ${input.companyNumber}
+        FOR UPDATE
+      ),
       intact AS (
         SELECT (
-          (SELECT count(*) FROM hmrc_company_mapping m
-             JOIN expected e ON e.organisation_name = m.organisation_name
-                            AND e.row_hash = md5(m::text)
-            WHERE m.company_number = ${input.companyNumber})
+          (SELECT count(*) FROM joins j
+             JOIN expected e ON e.organisation_name = j.organisation_name
+                            AND e.row_hash = j.row_hash)
             = (SELECT count(*) FROM expected)
-          AND (SELECT count(*) FROM hmrc_company_mapping m
-                WHERE m.company_number = ${input.companyNumber})
-            = (SELECT count(*) FROM expected)
-          AND (SELECT md5(w::text) FROM company_websites w
-                WHERE w.company_number = ${input.companyNumber})
+          AND (SELECT count(*) FROM joins) = (SELECT count(*) FROM expected)
+          AND (SELECT s.row_hash FROM site_row s)
             IS NOT DISTINCT FROM ${input.siteHash}::text
           AND (${input.siteHash}::text IS NULL OR NOT EXISTS (
                 SELECT 1 FROM company_websites w
                 WHERE w.company_number = ${input.establishmentNumber}))
-          AND (SELECT count(*) FROM company_answers a
-                WHERE a.company_number = ${input.companyNumber})
-            = ${input.answers}::int
-          AND (${input.answers}::int = 0 OR NOT EXISTS (
+          AND (SELECT count(*) FROM answer_rows r
+                 JOIN expected_answers x ON x.id = r.id
+                                        AND x.row_hash = r.row_hash)
+            = (SELECT count(*) FROM expected_answers)
+          AND (SELECT count(*) FROM answer_rows)
+            = (SELECT count(*) FROM expected_answers)
+          AND (NOT EXISTS (SELECT 1 FROM expected_answers) OR NOT EXISTS (
                 SELECT 1 FROM company_answers a
                 WHERE a.company_number = ${input.establishmentNumber}))
         ) AS ok
-      ),
-      old AS (
-        SELECT m.organisation_name, m.company_number, m.match_method
-        FROM hmrc_company_mapping m
-        WHERE m.company_number = ${input.companyNumber}
-          AND (SELECT ok FROM intact)
       ),
       moved AS (
         UPDATE hmrc_company_mapping m
@@ -142,8 +162,9 @@ export function makeCommitMove(sql: Sql) {
             match_method   = 'manual',
             match_score    = NULL,
             verified_at    = now()
-        FROM old
-        WHERE m.organisation_name = old.organisation_name
+        FROM joins j
+        WHERE m.organisation_name = j.organisation_name
+          AND (SELECT ok FROM intact)
         RETURNING m.organisation_name
       ),
       audited AS (
@@ -156,13 +177,13 @@ export function makeCommitMove(sql: Sql) {
           changed_by
         )
         SELECT
-          old.organisation_name,
-          old.company_number,
+          j.organisation_name,
+          j.company_number,
           ${input.establishmentNumber},
-          old.match_method,
+          j.match_method,
           'manual',
           ${input.changedBy}
-        FROM old
+        FROM joins j
         JOIN moved USING (organisation_name)
         RETURNING 1
       ),

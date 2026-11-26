@@ -46,7 +46,23 @@ describe('parseEstablishmentMoveArgs', () => {
     [['--list='], '--list needs a file'],
     [['--find'], '--list needs a file'],
     [['--list=moves.json', '--apply'], '--apply needs --backup'],
-    [['--list=moves.json', '--backup=', '--apply'], '--apply needs --backup'],
+    // A flag with no value is malformed in every mode, not read as left out.
+    [['--list=moves.json', '--backup=', '--apply'], '--backup needs a file'],
+    [['--list=moves.json', '--backup='], '--backup needs a file'],
+    [['--find', '--list=moves.json', '--backup='], '--backup needs a file'],
+    // The first of two files must never be taken silently for the reviewed one.
+    [
+      ['--list=old.json', '--list=reviewed.json', '--backup=b.json', '--apply'],
+      '--list is given more than once',
+    ],
+    [
+      ['--list=moves.json', '--backup=a.json', '--backup=b.json', '--apply'],
+      '--backup is given more than once',
+    ],
+    [
+      ['--find', '--list=a.json', '--list=a.json'],
+      '--list is given more than once',
+    ],
     [
       ['--find', '--list=moves.json', '--apply', '--backup=b.json'],
       '--find writes the list and nothing else',

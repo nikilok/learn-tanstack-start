@@ -1,7 +1,7 @@
 /**
  * The establishment move script's command line, read strictly: an argument it
- * does not know, or a flag missing its value, stops the run rather than
- * starting a different one from the one asked for.
+ * does not know, a flag missing its value, or a file given twice stops the
+ * run rather than starting a different one from the one asked for.
  */
 
 /** Every argument the script reads. */
@@ -19,16 +19,18 @@ export type EstablishmentMoveArgs = {
   apply: boolean;
 };
 
-/** The value of a `--name=value` argument, or undefined when it was not passed or is empty. */
+/** The value of a `--name=value` argument, or undefined when it was not passed; throws when it is passed twice, or with no value. */
 function valueOf(args: readonly string[], name: string): string | undefined {
   const prefix = `--${name}=`;
-  const value = args
-    .find((arg) => arg.startsWith(prefix))
-    ?.slice(prefix.length);
-  return value === '' ? undefined : value;
+  const given = args.filter((arg) => arg.startsWith(prefix));
+  if (given.length > 1) throw new Error(`--${name} is given more than once`);
+  if (given.length === 0) return undefined;
+  const value = given[0].slice(prefix.length);
+  if (value === '') throw new Error(`--${name} needs a file`);
+  return value;
 }
 
-/** Read the script's arguments; throws on one it does not know, no list, a find that would also write rows, or an apply with nowhere to back up to. */
+/** Read the script's arguments; throws on one it does not know, no list, a file flag given twice or empty, a find that would also write rows, or an apply with nowhere to back up to. */
 export function parseEstablishmentMoveArgs(
   args: readonly string[],
 ): EstablishmentMoveArgs {

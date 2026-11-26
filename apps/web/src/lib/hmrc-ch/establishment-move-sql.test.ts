@@ -18,7 +18,10 @@ const input: CommitMoveInput = {
     { organisationName: 'B', rowHash: 'hash of B' },
   ],
   siteHash: 'hash of the site row',
-  answers: 2,
+  answers: [
+    { id: 11, rowHash: 'hash of answer 11' },
+    { id: 12, rowHash: 'hash of answer 12' },
+  ],
   changedBy: 'uk_establishment_move',
 };
 
@@ -54,6 +57,11 @@ describe('makeReadMoveStates', () => {
       company_number: 'FC004891',
       url: 'https://www.quillmere.example',
     };
+    const answer = (id: number, companyNumber: string) => ({
+      id,
+      company_number: companyNumber,
+      answer: `answer ${id}`,
+    });
     const { sql, calls } = makeFakeSql(
       [
         { stored: joinA, row_hash: 'hash of A' },
@@ -64,8 +72,9 @@ describe('makeReadMoveStates', () => {
         { stored: { company_number: 'BR000002' }, row_hash: 'another' },
       ],
       [
-        { company_number: 'FC004891', answers: 2 },
-        { company_number: 'BR000002', answers: 1 },
+        { stored: answer(11, 'FC004891'), row_hash: 'hash of answer 11' },
+        { stored: answer(12, 'FC004891'), row_hash: 'hash of answer 12' },
+        { stored: answer(21, 'BR000002'), row_hash: 'hash of answer 21' },
       ],
     );
     const states = await makeReadMoveStates(sql)([
@@ -90,7 +99,19 @@ describe('makeReadMoveStates', () => {
       movedJoins: 0,
       site: { stored: site, rowHash: 'hash of the site row' },
       establishmentHasSite: false,
-      answers: 2,
+      // Each answer as stored, for the backup, with the hash its move is guarded on.
+      answers: [
+        {
+          stored: answer(11, 'FC004891'),
+          rowHash: 'hash of answer 11',
+          id: 11,
+        },
+        {
+          stored: answer(12, 'FC004891'),
+          rowHash: 'hash of answer 12',
+          id: 12,
+        },
+      ],
       establishmentAnswers: 0,
     });
     expect(states.get('FC000002')).toEqual({
@@ -98,17 +119,17 @@ describe('makeReadMoveStates', () => {
       movedJoins: 1,
       site: null,
       establishmentHasSite: true,
-      answers: 0,
+      answers: [],
       establishmentAnswers: 1,
     });
   });
 });
 
 describe('makeCommitMove', () => {
+  const written = [{ ok: true, joins: 2, sites: 1, answers: 2 }];
+
   test('one statement, bound to the rows the move was planned on', async () => {
-    const { sql, calls } = makeFakeSql([
-      { ok: true, joins: 2, sites: 1, answers: 2 },
-    ]);
+    const { sql, calls } = makeFakeSql(written);
     expect(await makeCommitMove(sql)(input)).toEqual({
       joins: 2,
       sites: 1,
@@ -121,17 +142,15 @@ describe('makeCommitMove', () => {
     expect(calls[0].params).toEqual([
       ['A', 'B'],
       ['hash of A', 'hash of B'],
+      [11, 12],
+      ['hash of answer 11', 'hash of answer 12'],
       FC,
       FC,
       FC,
       site,
       site,
       BR,
-      FC,
-      2,
-      2,
       BR,
-      FC,
       BR,
       BR,
       'uk_establishment_move',
@@ -142,44 +161,69 @@ describe('makeCommitMove', () => {
     ]);
   });
 
-  test('every write holds only while the rows are as they were read', async () => {
-    const { sql, calls } = makeFakeSql([
-      { ok: true, joins: 2, sites: 1, answers: 2 },
-    ]);
+  test('it locks every row it moves, and checks the rows as locked', async () => {
+    const { sql, calls } = makeFakeSql(written);
     await makeCommitMove(sql)(input);
     const text = flat(calls[0].text);
-    // The joins are read under the check, and both their writes follow that read.
     expect(text).toContain(
-      'old AS ( SELECT m.organisation_name, m.company_number, m.match_method FROM hmrc_company_mapping m WHERE m.company_number = $13 AND (SELECT ok FROM intact) )',
+      'joins AS MATERIALIZED ( SELECT m.organisation_name, m.company_number, m.match_method, md5(m::text) AS row_hash FROM hmrc_company_mapping m WHERE m.company_number = $5 FOR UPDATE )',
     );
     expect(text).toContain(
-      'FROM old WHERE m.organisation_name = old.organisation_name',
-    );
-    expect(text).toContain('FROM old JOIN moved USING (organisation_name)');
-    expect(text).toContain(
-      'UPDATE company_websites w SET company_number = $17 WHERE w.company_number = $18 AND (SELECT ok FROM intact)',
+      'site_row AS MATERIALIZED ( SELECT md5(w::text) AS row_hash FROM company_websites w WHERE w.company_number = $6 FOR UPDATE )',
     );
     expect(text).toContain(
-      'UPDATE company_answers a SET company_number = $19 WHERE a.company_number = $20 AND (SELECT ok FROM intact)',
+      'answer_rows AS MATERIALIZED ( SELECT a.id, md5(a::text) AS row_hash FROM company_answers a WHERE a.company_number = $7 FOR UPDATE )',
     );
-    // Four writes in all, so none is left outside the check.
-    expect(text.match(/\b(?:UPDATE|INSERT INTO|DELETE FROM)\b/g)).toHaveLength(
-      4,
+    // Every join, the website row and every answer: each as planned, and none besides.
+    expect(text).toContain(
+      'FROM joins j JOIN expected e ON e.organisation_name = j.organisation_name AND e.row_hash = j.row_hash) = (SELECT count(*) FROM expected) AND (SELECT count(*) FROM joins) = (SELECT count(*) FROM expected)',
+    );
+    expect(text).toContain(
+      '(SELECT s.row_hash FROM site_row s) IS NOT DISTINCT FROM $8::text',
+    );
+    expect(text).toContain(
+      'FROM answer_rows r JOIN expected_answers x ON x.id = r.id AND x.row_hash = r.row_hash) = (SELECT count(*) FROM expected_answers) AND (SELECT count(*) FROM answer_rows) = (SELECT count(*) FROM expected_answers)',
     );
   });
 
+  test('every write holds only while the check passes', async () => {
+    const { sql, calls } = makeFakeSql(written);
+    await makeCommitMove(sql)(input);
+    const text = flat(calls[0].text);
+    // The joins are written from the locked rows, and their audit rows from what was written.
+    expect(text).toContain(
+      'FROM joins j WHERE m.organisation_name = j.organisation_name AND (SELECT ok FROM intact)',
+    );
+    expect(text).toContain('FROM joins j JOIN moved USING (organisation_name)');
+    expect(text).toContain(
+      'UPDATE company_websites w SET company_number = $15 WHERE w.company_number = $16 AND (SELECT ok FROM intact)',
+    );
+    expect(text).toContain(
+      'UPDATE company_answers a SET company_number = $17 WHERE a.company_number = $18 AND (SELECT ok FROM intact)',
+    );
+    // Four writes in all, so none is left outside the check.
+    expect(
+      text.match(/\b(?:UPDATE \w+ \w+ SET|INSERT INTO|DELETE FROM)\b/g),
+    ).toHaveLength(4);
+  });
+
   test('a moved join is stored as manual, with an audit row naming where it came from', async () => {
-    const { sql, calls } = makeFakeSql([
-      { ok: true, joins: 2, sites: 0, answers: 0 },
-    ]);
+    const { sql, calls } = makeFakeSql(written);
     await makeCommitMove(sql)(input);
     const text = flat(calls[0].text);
     expect(text).toContain(
-      "SET company_number = $14, match_method = 'manual', match_score = NULL, verified_at = now()",
+      "SET company_number = $12, match_method = 'manual', match_score = NULL, verified_at = now()",
     );
     expect(text).toContain(
-      "SELECT old.organisation_name, old.company_number, $15, old.match_method, 'manual', $16",
+      "SELECT j.organisation_name, j.company_number, $13, j.match_method, 'manual', $14",
     );
+  });
+
+  test('a company with no answers binds none', async () => {
+    const { sql, calls } = makeFakeSql(written);
+    await makeCommitMove(sql)({ ...input, siteHash: null, answers: [] });
+    expect(calls[0].params.slice(2, 4)).toEqual([[], []]);
+    expect(calls[0].params.slice(7, 9)).toEqual([null, null]);
   });
 
   test('rows changed since they were read write nothing', async () => {

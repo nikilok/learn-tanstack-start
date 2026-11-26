@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ChResponse } from '../../src/lib/hmrc-ch/ch-lookup.ts';
-import { ChStatus, makeEstablishmentReads } from './ch-establishments.ts';
+import {
+  ChStatus,
+  ChUnreadable,
+  makeEstablishmentReads,
+} from './ch-establishments.ts';
 
 /** The reads over one canned response, recording the paths asked. */
 function readsWith(res: ChResponse) {
@@ -28,7 +32,6 @@ describe('makeEstablishmentReads', () => {
   test.each([
     ['an empty list', { ok: true, data: { items: [] } }],
     ['no list at all', { ok: true, data: {} }],
-    ['a list that is no array', { ok: true, data: { items: 'none' } }],
     ['a 404', { ok: false, status: 404 }],
   ] as [string, ChResponse][])(
     '%s is no establishment listed',
@@ -36,6 +39,18 @@ describe('makeEstablishmentReads', () => {
       expect(
         await readsWith(res).reads.fetchEstablishments('FC021303'),
       ).toEqual([]);
+    },
+  );
+
+  test.each([[{ items: 'none' }], [{ items: {} }]])(
+    'an answer whose list is no list is a throw, never none listed: %j',
+    async (data) => {
+      const { reads } = readsWith({ ok: true, data });
+      const failure = reads.fetchEstablishments('FC004891');
+      await expect(failure).rejects.toBeInstanceOf(ChUnreadable);
+      await expect(failure).rejects.toMatchObject({
+        name: 'unreadable answer',
+      });
     },
   );
 

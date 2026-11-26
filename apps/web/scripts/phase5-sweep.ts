@@ -189,17 +189,8 @@ const sweepDeps: SweepDeps = {
     : (existing, proposed, changedBy) =>
         applyPromotion(existing, proposed, changedBy, applyDeps),
   bumpVerifiedAt: DRY_RUN ? dryRunOk : makeBumpVerifiedAt(sql),
-  // Reached only for a row on a company whose own establishment was proposed, so both numbers are set.
-  moveToEstablishment: (existing, proposed, changedBy) =>
-    moveForSweep(
-      {
-        companyNumber: existing.companyNumber as string,
-        establishmentNumber: proposed.companyNumber as string,
-      },
-      existing.organisationName,
-      changedBy,
-      moveDeps,
-    ),
+  moveToEstablishment: (move, organisationName, changedBy) =>
+    moveForSweep(move, organisationName, changedBy, moveDeps),
   sleep: makeSleep(),
 };
 

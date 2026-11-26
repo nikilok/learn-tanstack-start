@@ -87,7 +87,7 @@ runs:
           echo "| 🔒 Lock missed | ${LOCK_MISSED:-—} |"
           echo "| ❌ Errored | ${ERRORED:-—} |"
           echo "| 🏢 Moved to UK establishment | ${MOVED:-—} |"
-          echo "| ✋ Left on overseas record | ${HELD:-—} |"
+          echo "| ✋ Held on their record | ${HELD:-—} |"
           echo "| 🔀 Several establishments | ${SEVERAL:-—} |"
           echo "| ⏱️ Duration | ${DURATION:-—} |"
         } >> "$GITHUB_STEP_SUMMARY"

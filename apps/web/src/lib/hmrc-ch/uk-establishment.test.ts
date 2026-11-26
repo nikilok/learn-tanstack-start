@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   chooseEstablishment,
+  establishmentNumbers,
   isCompanyNumber,
   isOpenEstablishmentOf,
   isOverseasCompany,
+  listedEstablishments,
 } from './uk-establishment';
 
 /** JPMorgan Chase Bank's one UK establishment, as Companies House gives its profile. */
@@ -90,5 +92,46 @@ describe('isCompanyNumber', () => {
     [null, false],
   ])('%j: %s', (value, expected) => {
     expect(isCompanyNumber(value)).toBe(expected);
+  });
+});
+
+describe('listedEstablishments', () => {
+  const items = [{ company_number: 'BR000746', company_status: 'open' }];
+
+  test("the list in Companies House's answer", () => {
+    expect(listedEstablishments({ kind: 'related-companies', items })).toEqual(
+      items,
+    );
+  });
+
+  // Dennison Trailers (FC021303) answers with an empty list; a 404 reaches here as no answer.
+  test.each([
+    [{ items: [] }],
+    [{ kind: 'related-companies' }],
+    [{ items: null }],
+    [null],
+    [undefined],
+  ])('no establishment listed: %j', (answer) => {
+    expect(listedEstablishments(answer)).toEqual([]);
+  });
+
+  test.each([[{ items: 'none' }], [{ items: {} }], [{ items: 3 }]])(
+    'a list that is no list says nothing: %j',
+    (answer) => {
+      expect(listedEstablishments(answer)).toBeNull();
+    },
+  );
+});
+
+describe('establishmentNumbers', () => {
+  test('every establishment listed, open or not, and none without a number', () => {
+    expect(
+      establishmentNumbers([
+        { company_number: 'BR000001', company_status: 'closed' },
+        { company_number: 'BR000746', company_status: 'open' },
+        { company_number: 'BR000746/x', company_status: 'open' },
+        { company_status: 'open' },
+      ]),
+    ).toEqual(['BR000001', 'BR000746']);
   });
 });

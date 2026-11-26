@@ -7,7 +7,7 @@
 
 import type { StoredRow } from './establishment-move';
 import { MAX_ERRORS_IN_A_ROW, StageError, staged } from './mapping-correction';
-import { TIER_A2_SCORE } from './pipeline';
+import { TIER_A2_SCORE, TIER_A_SCORE } from './pipeline';
 
 /** The audit label of the move whose joins are restored. */
 export const MOVED_BY = 'uk_establishment_move';
@@ -66,7 +66,7 @@ export type CommitRestoreInput = {
 
 /** The score each method fixes: the only methods a join can be given back without its stored score. */
 const SCORE_OF: ReadonlyMap<string | null, number> = new Map([
-  ['exact', 1],
+  ['exact', TIER_A_SCORE],
   ['exact_squash', TIER_A2_SCORE],
 ]);
 

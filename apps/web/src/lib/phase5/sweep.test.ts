@@ -477,10 +477,18 @@ describe('sweep — a join on an overseas company whose own establishment is pro
       companyNumber: 'BR000746',
       queryUsed: 'JPMorgan Chase Bank National Association',
       profile: establishment(),
-      overseas: { companyNumber: 'FC004891', link: 'followed' },
+      overseas: {
+        companyNumber: 'FC004891',
+        link: 'followed',
+        establishments: ['BR000746'],
+      },
       ...over,
     });
   const moved = { kind: 'moved' as const, written: null };
+  const JPM_MOVE = {
+    companyNumber: 'FC004891',
+    establishmentNumber: 'BR000746',
+  };
 
   test('JPMorgan Chase Bank: the whole company moves, and the row is then a join on its establishment', async () => {
     const r = onOverseas();
@@ -500,8 +508,8 @@ describe('sweep — a join on an overseas company whose own establishment is pro
 
     expect(deps.moveToEstablishment).toHaveBeenCalledTimes(1);
     expect(deps.moveToEstablishment).toHaveBeenCalledWith(
-      r,
-      proposed,
+      JPM_MOVE,
+      SPONSOR,
       'phase5_sweep_exact_establishment',
     );
     // Never the join alone, and never the tie-break: its website and answers would be left behind.
@@ -555,8 +563,8 @@ describe('sweep — a join on an overseas company whose own establishment is pro
     const summary = await sweep({ tier: 'non_exact', maxRows: 10 }, deps);
 
     expect(deps.moveToEstablishment).toHaveBeenCalledWith(
-      r,
-      proposed,
+      JPM_MOVE,
+      SPONSOR,
       'phase5_sweep_non_exact_establishment',
     );
     expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
@@ -709,7 +717,14 @@ describe('sweep — a join on an overseas company whose own establishment is pro
       const deps = makeDeps({
         selectRows: mock(async () => [onOverseas()]),
         resolveSponsor: mock(async () =>
-          proposedEstablishment({ profile: establishment('FC000002') }),
+          proposedEstablishment({
+            profile: establishment('FC000002'),
+            overseas: {
+              companyNumber: 'FC000002',
+              link: 'followed',
+              establishments: ['BR000746'],
+            },
+          }),
         ),
         getProfile: mock(async () => fcProfile({ company_number: 'FC004891' })),
       });
@@ -770,7 +785,11 @@ describe('sweep — a join on an overseas company whose own establishment is pro
         verifiedExact({
           companyNumber: 'FC023485',
           profile: fcProfile({ company_number: 'FC023485' }),
-          overseas: { companyNumber: 'FC023485', link: 'several' },
+          overseas: {
+            companyNumber: 'FC023485',
+            link: 'several',
+            establishments: ['BR006261', 'BR028851'],
+          },
         }),
       ),
     });
@@ -780,5 +799,190 @@ describe('sweep — a join on an overseas company whose own establishment is pro
     expect(deps.moveToEstablishment).not.toHaveBeenCalled();
     expect(deps.bumpVerifiedAt).toHaveBeenCalledWith(r);
     expect(summary).toMatchObject({ bumped: 1, severalEstablishments: 1 });
+  });
+
+  // A join on an establishment since closed, where the company's one open establishment is in the sponsor's town: the tie-break would promote, and take the join from its website row.
+  test('a join on another establishment of the same company is held, never promoted or sent to the tie-break', async () => {
+    const r = onOverseas({ companyNumber: 'BR000001' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      lookupSponsor: mock(async () => ({
+        townCity: 'London',
+        county: null,
+        route: 'Skilled Worker',
+      })),
+      resolveSponsor: mock(async () =>
+        proposedEstablishment({
+          overseas: {
+            companyNumber: 'FC004891',
+            link: 'followed',
+            establishments: ['BR000001', 'BR000746'],
+          },
+        }),
+      ),
+      getProfile: mock(async () =>
+        ukProfile({
+          company_number: 'BR000001',
+          company_status: 'closed',
+          registered_office_address: { locality: 'Leeds' },
+        }),
+      ),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.moveToEstablishment).not.toHaveBeenCalled();
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(deps.getProfile).not.toHaveBeenCalled();
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledWith(r);
+    expect(summary).toMatchObject({
+      establishmentHeld: 1,
+      establishmentHeldBy: { other_record: 1 },
+      inlineResolved: 0,
+      updated: 0,
+    });
+  });
+
+  test('a stronger name match does not take a join from one establishment to another alone either', async () => {
+    const r = onOverseas({
+      companyNumber: 'BR000001',
+      matchMethod: 'token_sim',
+      matchScore: '0.857',
+    });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      resolveSponsor: mock(async () =>
+        proposedEstablishment({
+          overseas: {
+            companyNumber: 'FC004891',
+            link: 'followed',
+            establishments: ['BR000001', 'BR000746'],
+          },
+        }),
+      ),
+    });
+
+    const summary = await sweep({ tier: 'non_exact', maxRows: 10 }, deps);
+
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({
+      establishmentHeld: 1,
+      establishmentHeldBy: { other_record: 1 },
+      updated: 0,
+    });
+  });
+
+  // Caixa Geral de Depositos: a join on its London office, where the name matches the overseas record and two are open.
+  test('a join on an establishment is not taken back to its overseas company alone', async () => {
+    const r = row({
+      organisationName: 'Caixa Geral de Depositos, S.A.',
+      companyNumber: 'BR006261',
+      matchMethod: 'exact',
+    });
+    const deps = makeDeps({
+      selectRows: mock(async () => [r]),
+      resolveSponsor: mock(async () =>
+        verifiedExact({
+          companyNumber: 'FC023485',
+          profile: fcProfile({ company_number: 'FC023485' }),
+          overseas: {
+            companyNumber: 'FC023485',
+            link: 'several',
+            establishments: ['BR006261', 'BR028851'],
+          },
+        }),
+      ),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(deps.getProfile).not.toHaveBeenCalled();
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledWith(r);
+    expect(summary).toMatchObject({
+      establishmentHeld: 1,
+      establishmentHeldBy: { other_record: 1 },
+      severalEstablishments: 1,
+    });
+  });
+
+  test("an owner's join on another record of the company is not held as one: it warns as any manual conflict", async () => {
+    const originalWarn = console.warn;
+    console.warn = mock(() => undefined);
+    try {
+      const r = onOverseas({
+        companyNumber: 'BR000001',
+        matchMethod: 'manual',
+        matchScore: null,
+      });
+      const deps = makeDeps({
+        selectRows: mock(async () => [r]),
+        resolveSponsor: mock(async () =>
+          proposedEstablishment({
+            overseas: {
+              companyNumber: 'FC004891',
+              link: 'followed',
+              establishments: ['BR000001', 'BR000746'],
+            },
+          }),
+        ),
+      });
+
+      const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+      expect(summary).toMatchObject({ warned: 1, establishmentHeld: 0 });
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  // GCH Hotels Windsor's overseas record held two sponsors' joins: one move carries both.
+  test('a second join of a company moved earlier in the run is not moved again: it is bumped as a join on the establishment', async () => {
+    const first = onOverseas();
+    const second = onOverseas({ organisationName: 'JPMorgan Chase Bank NA' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [first, second]),
+      resolveSponsor: mock(async () => proposedEstablishment()),
+      moveToEstablishment: mock(async () => moved),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.moveToEstablishment).toHaveBeenCalledTimes(1);
+    expect(deps.bumpVerifiedAt).toHaveBeenCalledTimes(2);
+    expect(deps.bumpVerifiedAt).toHaveBeenLastCalledWith({
+      ...second,
+      companyNumber: 'BR000746',
+    });
+    // One company moved, however many of its joins the run reads: a dry run counts the same.
+    expect(summary).toMatchObject({
+      establishmentMoved: 1,
+      bumped: 2,
+      lockMissed: 0,
+    });
+  });
+
+  test('a company held is asked again for its next join, and each row is counted', async () => {
+    const first = onOverseas();
+    const second = onOverseas({
+      organisationName: 'J.P. Morgan Chase Bank NA',
+    });
+    const deps = makeDeps({
+      selectRows: mock(async () => [first, second]),
+      resolveSponsor: mock(async () => proposedEstablishment()),
+      moveToEstablishment: mock(async () => ({
+        kind: 'held' as const,
+        reason: 'site_bound' as const,
+      })),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.moveToEstablishment).toHaveBeenCalledTimes(2);
+    expect(summary).toMatchObject({
+      establishmentMoved: 0,
+      establishmentHeld: 2,
+      establishmentHeldBy: { site_bound: 2 },
+    });
   });
 });

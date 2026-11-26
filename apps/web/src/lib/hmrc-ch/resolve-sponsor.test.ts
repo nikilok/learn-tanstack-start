@@ -627,7 +627,11 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
       matchScore: 1,
       queryUsed: 'JPMorgan Chase Bank National Association',
       profile: jpmEstablishment,
-      overseas: { companyNumber: 'FC004891', link: 'followed' },
+      overseas: {
+        companyNumber: 'FC004891',
+        link: 'followed',
+        establishments: ['BR000746'],
+      },
     });
     expect(calls.slice(1)).toEqual([
       '/company/FC004891',
@@ -734,6 +738,7 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
       expect(result.overseas).toEqual({
         companyNumber: 'SF000123',
         link: 'followed',
+        establishments: ['BR000123'],
       });
     },
   );
@@ -810,7 +815,11 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
       companyNumber: 'FC023485',
       matchMethod: 'exact',
       profile: overseas,
-      overseas: { companyNumber: 'FC023485', link: 'several' },
+      overseas: {
+        companyNumber: 'FC023485',
+        link: 'several',
+        establishments: ['BR006261', 'BR028851'],
+      },
     });
     // No town picks between them: neither establishment's profile is asked for.
     expect(calls.slice(1)).toEqual([
@@ -826,7 +835,7 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
       { kind: 'related-companies', items: [] },
     ],
     ['a 404', new Failed(404)],
-    ['a list that is no array', { items: 'none' }],
+    ['an answer with no list in it', { kind: 'related-companies' }],
   ])(
     'Dennison Trailers (FC021303, no establishment) stays on FC021303: %s',
     async (_label, listed) => {
@@ -876,7 +885,11 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
         companyNumber: 'FC021303',
         matchMethod: 'exact',
         profile: overseas,
-        overseas: { companyNumber: 'FC021303', link: 'none' },
+        overseas: {
+          companyNumber: 'FC021303',
+          link: 'none',
+          establishments: [],
+        },
       });
     },
   );
@@ -896,6 +909,44 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
       expect(result).toEqual({ verdict: 'unavailable' });
     },
   );
+
+  test.each([[{ items: 'none' }], [{ items: {} }], [{ items: 3 }]])(
+    'an answer whose list is no list says nothing of the company, and leaves no verdict to store: %j',
+    async (answer) => {
+      const { fetchApi } = makeFetch(jpmRoutes([[LIST, answer]]));
+      const result = await resolveOneSponsor(
+        'JPMorgan Chase Bank, National Association',
+        london,
+        fetchApi,
+      );
+      expect(result).toEqual({ verdict: 'unavailable' });
+    },
+  );
+
+  test('every establishment the register lists under the company is named, open or not', async () => {
+    const listed = {
+      items: [
+        { company_number: 'BR000001', company_status: 'closed' },
+        { company_number: 'BR000746', company_status: 'open' },
+        { company_number: 'not a number', company_status: 'closed' },
+      ],
+    };
+    const { fetchApi } = makeFetch(jpmRoutes([[LIST, listed]]));
+    const result = await resolveOneSponsor(
+      'JPMorgan Chase Bank, National Association',
+      london,
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+      overseas: {
+        companyNumber: 'FC004891',
+        link: 'followed',
+        establishments: ['BR000001', 'BR000746'],
+      },
+    });
+  });
 
   test.each([
     ['closed', { ...jpmEstablishment, company_status: 'closed' }],
@@ -926,7 +977,11 @@ describe('resolveOneSponsor — an overseas company lands on its UK establishmen
         companyNumber: 'FC004891',
         matchMethod: 'exact',
         profile: jpmOverseas,
-        overseas: { companyNumber: 'FC004891', link: 'unconfirmed' },
+        overseas: {
+          companyNumber: 'FC004891',
+          link: 'unconfirmed',
+          establishments: ['BR000746'],
+        },
       });
     },
   );

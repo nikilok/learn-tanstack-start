@@ -86,12 +86,18 @@ process(row, changed_by):
   # parent): the whole company moves or nothing does. See "An overseas
   # company and its own UK establishment" below.
   if row is not manual and proposed is row.company_number's own establishment:
-    move = moveToEstablishment(row, proposed, changed_by + "_establishment")
+    # one move a company a run: a later row of a company already moved is
+    # taken as on the establishment, and a dry run counts the same
+    move = moveToEstablishment(pair, row.organisation_name, changed_by + "_establishment")
     match move:
       changed → count lock_missed; next row
       held    → bumpVerifiedAt(row); count establishment_held; next row
       moved   → count establishment_moved
                 row = row with company_number = proposed.company_number
+  else if row is not manual and row.company_number is another record of the
+          overseas company the proposal's name matched (that company, or an
+          establishment listed under it):
+    bumpVerifiedAt(row); count establishment_held (other_record); next row
 
   action = decide(existing = row, proposed)
 
@@ -145,7 +151,17 @@ type check. The move:
 The swept row then carries on as a join on the establishment: a stronger name
 match is an ordinary promotion on the same number, anything else a bump. A
 held row is bumped so it does not lead every later run. A dry run reads and
-decides, and writes nothing.
+decides, and writes nothing. A company is moved once a run: a later row of a
+company the run has already moved is taken as a join on the establishment.
+
+The same holds for every other pair of one overseas company's records. The
+resolver returns each establishment the register lists under the company it
+matched, open or not, so the sweep knows a row on a closed establishment
+whose company has since opened another, or a row on one of several
+establishments when the name matches the overseas record. Such a row is held
+and counted (`other_record`), never sent to the tie-break or promoted: either
+would take the join and leave the website row and answers where they were.
+Moving a company from one establishment to another is not built.
 
 ## The decision (upgrade-only, never demote)
 
@@ -685,7 +701,7 @@ Phase 5 sweep — tier=<name>
   lock_missed      : N
   errored          : N
   establishment_moved : N # companies moved from an overseas record to its UK establishment
-  establishment_held  : N # rows left on the overseas record, with the kinds that held them
+  establishment_held  : N # rows left where they are though another record of their company was proposed, with what held them
   several_establishments : N # rows whose overseas company has several open establishments
   api_calls        : N
   duration         : Xs

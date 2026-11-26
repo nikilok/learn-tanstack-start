@@ -121,9 +121,9 @@ export type MoveWrites = {
 /** What writing one move did. */
 type MoveOutcome = 'moved' | 'changed' | 'no_profile' | 'not_establishment';
 
-/** Why a sweep left a company on its overseas record. */
+/** Why a sweep left a company on its overseas record: what its rows came to, or what the write found. */
 export type SweepHold =
-  | Exclude<MoveKind, 'move' | 'already' | 'missing'>
+  | Exclude<MoveKind, 'move'>
   | Exclude<MoveOutcome, 'moved' | 'changed'>;
 
 /** What moving one company during a sweep came to: moved (nothing written on a dry run), held where it is, or changed since the sweep read its row. */
@@ -354,7 +354,6 @@ export async function moveForSweep(
     return { kind: 'changed' };
   }
   const kind = moveKind(state, 'kept');
-  if (kind === 'already' || kind === 'missing') return { kind: 'changed' };
   if (kind !== 'move') return { kind: 'held', reason: kind };
   if (deps.dryRun) return { kind: 'moved', written: null };
   const [outcome, written] = await writeMove(

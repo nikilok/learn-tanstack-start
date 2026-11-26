@@ -1674,9 +1674,11 @@ open establishment whose own profile names that company as its parent, and
 the match lands there with the method and score of the name match. None
 open, or several, leaves the overseas record: Dennison Trailers (`FC021303`)
 lists none, and Caixa Geral de Depositos (`FC023485`) has open establishments
-in London and Manchester. A list that cannot be read stops the resolver, as
-any other gap does. The record's type decides, never its number's prefix:
-some overseas companies carry `SF` or `NF` numbers.
+in London and Manchester. A list that cannot be read, or an answer that holds
+no list, stops the resolver, as any other gap does. The record's type decides,
+never its number's prefix: some overseas companies carry `SF` or `NF` numbers.
+The result names every establishment listed under the company, open or not,
+so a sweep can tell a row that sits on another record of the same company.
 
 Treating `open` as live was not the fix. It helps only when the establishment
 is among the search results and its locality reads as the sponsor's town, and

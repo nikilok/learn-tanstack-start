@@ -27,12 +27,32 @@ export type LinkedProfile = {
 /** What following the link from a matched overseas company came to: its one open establishment taken, none open, several open, or one listed that its own profile does not bear out. */
 export type EstablishmentLink = 'followed' | 'none' | 'several' | 'unconfirmed';
 
-/** The overseas company a sponsor's name matched, and what following its link came to. */
-export type OverseasMatch = { companyNumber: string; link: EstablishmentLink };
+/** The overseas company a sponsor's name matched, what following its link came to, and every establishment the register lists under it, open or not. */
+export type OverseasMatch = {
+  companyNumber: string;
+  link: EstablishmentLink;
+  establishments: readonly string[];
+};
 
 /** Whether a value has the shape of a company number. */
 export function isCompanyNumber(value: unknown): value is string {
   return typeof value === 'string' && COMPANY_NUMBER_RE.test(value);
+}
+
+/** The establishments in Companies House's answer for an overseas company; none for no answer or no `items`, and null when `items` is something other than a list. */
+export function listedEstablishments(
+  answer: unknown,
+): ListedEstablishment[] | null {
+  const items = (answer as { items?: unknown } | null | undefined)?.items;
+  if (items === undefined || items === null) return [];
+  return Array.isArray(items) ? (items as ListedEstablishment[]) : null;
+}
+
+/** The company numbers of the establishments listed, open or not. */
+export function establishmentNumbers(
+  items: readonly ListedEstablishment[],
+): string[] {
+  return items.map((item) => item.company_number).filter(isCompanyNumber);
 }
 
 /** Whether the register types a profile as an overseas company; its number's prefix does not say. */

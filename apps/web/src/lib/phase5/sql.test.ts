@@ -268,7 +268,11 @@ describe('makeResolveSponsor — an overseas company and its establishment', () 
       matchScore: 1,
       queryUsed: 'JPMorgan Chase Bank National Association',
       profile: establishment,
-      overseas: { companyNumber: 'FC004891', link: 'followed' },
+      overseas: {
+        companyNumber: 'FC004891',
+        link: 'followed',
+        establishments: ['BR000746'],
+      },
     });
   });
 });

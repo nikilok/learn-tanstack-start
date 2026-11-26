@@ -54,9 +54,10 @@ import {
 } from './pipeline';
 import {
   chooseEstablishment,
+  establishmentNumbers,
   isOpenEstablishmentOf,
   isOverseasCompany,
-  type ListedEstablishment,
+  listedEstablishments,
   type OverseasMatch,
 } from './uk-establishment';
 
@@ -246,14 +247,20 @@ async function landOnEstablishment(
   if (!isOverseasCompany(matched)) return { profile: matched };
   const companyNumber = matched.company_number;
   // A 404 is a company with no establishment listed.
-  const listed = (await read(
-    `/company/${encodeURIComponent(companyNumber)}/uk-establishments`,
-  )) as { items?: ListedEstablishment[] } | null;
-  const choice = chooseEstablishment(
-    Array.isArray(listed?.items) ? listed.items : [],
+  const listed = listedEstablishments(
+    await read(
+      `/company/${encodeURIComponent(companyNumber)}/uk-establishments`,
+    ),
   );
+  // An answer that is no list says nothing about the company.
+  if (listed === null) throw new ChUnavailable();
+  const establishments = establishmentNumbers(listed);
+  const choice = chooseEstablishment(listed);
   if (choice.kind !== 'one') {
-    return { profile: matched, overseas: { companyNumber, link: choice.kind } };
+    return {
+      profile: matched,
+      overseas: { companyNumber, link: choice.kind, establishments },
+    };
   }
   const establishment =
     inHand.get(choice.establishmentNumber) ??
@@ -267,12 +274,12 @@ async function landOnEstablishment(
   ) {
     return {
       profile: matched,
-      overseas: { companyNumber, link: 'unconfirmed' },
+      overseas: { companyNumber, link: 'unconfirmed', establishments },
     };
   }
   return {
     profile: establishment,
-    overseas: { companyNumber, link: 'followed' },
+    overseas: { companyNumber, link: 'followed', establishments },
   };
 }
 

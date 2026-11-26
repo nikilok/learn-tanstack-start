@@ -144,7 +144,10 @@ const CONFIRMABLE = new Set<WebsiteEvidence>([
  *  site; a phrase match on a short page is not evidence against either. An
  *  ordinary one-page care home announcing "our new wing is coming soon" clears
  *  looksParked's bar, and without this it silently removed the link. */
-const TERMINAL_EVIDENCE = new Set<WebsiteEvidence>(['manual', 'crn_on_page']);
+export const TERMINAL_EVIDENCE: ReadonlySet<WebsiteEvidence> = new Set([
+  'manual',
+  'crn_on_page',
+]);
 
 /**
  * Failures where the host answered but the stored URL was never actually read.

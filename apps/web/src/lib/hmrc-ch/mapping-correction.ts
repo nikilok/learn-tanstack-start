@@ -145,14 +145,17 @@ export type CorrectionWrites = {
 };
 
 /** A write that failed, named by its stage and the kind of error only: the cause itself may quote the row. */
-class StageError extends Error {
+export class StageError extends Error {
   constructor(stage: string, cause: unknown) {
     super(`${stage}: ${cause instanceof Error ? cause.name : 'error'}`);
   }
 }
 
 /** Run one stage of a write, naming the stage in whatever it throws. */
-async function staged<T>(stage: string, run: () => Promise<T>): Promise<T> {
+export async function staged<T>(
+  stage: string,
+  run: () => Promise<T>,
+): Promise<T> {
   try {
     return await run();
   } catch (error) {
@@ -206,7 +209,7 @@ export async function planCorrections(
 }
 
 /** Errors in a row after which the run stops trying. */
-const MAX_ERRORS_IN_A_ROW = 5;
+export const MAX_ERRORS_IN_A_ROW = 5;
 
 /** Back the listed rows up, then write each planned correction; a failed backup writes nothing, and a planned row not written fails the run. */
 export async function applyCorrections(

@@ -43,6 +43,7 @@ clobbered). First visits resolve immediately; the sweep covers the rest.
 - `hmrc_company_mapping_audit` — INSERT one row per UPDATE
 - `companies_house_profiles` — UPSERT when a `no_match` flips to `verified`; read existing profile for the inline scorer
 - `hmrc_skilled_workers` — read for locality + route tiebreak, and as the live-register gate in every tier SELECT
+- `company_websites`, `company_answers` — re-keyed with the joins when a company moves from its overseas record to its UK establishment (see "An overseas company and its own UK establishment" below); never read or written otherwise
 
 Earlier versions of this design used an `hmrc_company_mapping_review_queue` table for `same_rank_different_number` cases. The live sweep no longer enqueues — the inline scorer (see "Same-rank inline resolution" below) decides these cases at sweep time. The other reason classes the queue theoretically held (`manual_conflict`, `public_body_conflict`) never fired in production and are replaced with log-and-bump.
 
@@ -80,6 +81,18 @@ process(row, changed_by):
   # verdict the gap would have produced (a skipped probe can verify the wrong
   # company). The same rule as the on-demand lookup.
 
+  # The proposal is the open UK establishment of the very company the row is
+  # joined to (the establishment's own profile names that company as its
+  # parent): the whole company moves or nothing does. See "An overseas
+  # company and its own UK establishment" below.
+  if row is not manual and proposed is row.company_number's own establishment:
+    move = moveToEstablishment(row, proposed, changed_by + "_establishment")
+    match move:
+      changed → count lock_missed; next row
+      held    → bumpVerifiedAt(row); count establishment_held; next row
+      moved   → count establishment_moved
+                row = row with company_number = proposed.company_number
+
   action = decide(existing = row, proposed)
 
   match action:
@@ -94,6 +107,45 @@ process(row, changed_by):
                     # cases. Sweep summary's `warned` counter goes non-zero;
                     # operator decides whether to act manually.
 ```
+
+## An overseas company and its own UK establishment
+
+Companies House holds a foreign company that trades here twice: the overseas
+record (`oversea-company`, status `active`, usually an `FC` number) and its UK
+establishment (`uk-establishment`, status `open`, a `BR` number). A sponsor
+belongs on the establishment: it carries the UK address. The resolver follows
+the register's own link: a verified match on an overseas company asks
+`/company/<number>/uk-establishments`, and exactly one open establishment,
+whose own profile names that company as its parent, becomes the answer with
+the name match's method and score. None open, or several, leaves the overseas
+record (several is counted as `several_establishments`). The link is read by
+number, never by name: a third of establishments are not named as their
+parent is.
+
+A company's website row and its answers are keyed by company number, so **a
+join never moves alone between an overseas company and its own
+establishment**. When the proposal is the establishment of the company the row
+is on, the sweep calls `moveToEstablishment` (`moveForSweep` in
+`lib/hmrc-ch/establishment-move.ts`) and never the tie-break below, which
+could not decide these pairs anyway: the same-company bonus does not clear the
+margin without a town match, and both record types fail the charity routes'
+type check. The move:
+
+1. reads every join on the overseas record, its website row and its answers;
+2. holds the company where it is when a join on it is `manual`, when its
+   website is shown on a proof read against the overseas record
+   (`site_bound`), or when the establishment already has a website row or
+   answers of its own (`site_conflict`, `answers_conflict`);
+3. otherwise asks the register again, stores the establishment's profile, and
+   writes one locked statement: every join, the website row and the answers
+   change company number and nothing else. Each join keeps its method, score
+   and `verified_at`, with one audit row
+   (`changed_by = phase5_sweep_<tier>_establishment`).
+
+The swept row then carries on as a join on the establishment: a stronger name
+match is an ordinary promotion on the same number, anything else a bump. A
+held row is bumped so it does not lead every later run. A dry run reads and
+decides, and writes nothing.
 
 ## The decision (upgrade-only, never demote)
 
@@ -632,6 +684,9 @@ Phase 5 sweep — tier=<name>
   warned           : N    # manual_conflict / public_body_conflict log lines
   lock_missed      : N
   errored          : N
+  establishment_moved : N # companies moved from an overseas record to its UK establishment
+  establishment_held  : N # rows left on the overseas record, with the kinds that held them
+  several_establishments : N # rows whose overseas company has several open establishments
   api_calls        : N
   duration         : Xs
 ```

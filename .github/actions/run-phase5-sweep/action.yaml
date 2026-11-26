@@ -67,6 +67,9 @@ runs:
         QUEUED=$(extract queued)
         LOCK_MISSED=$(extract lock_missed)
         ERRORED=$(extract errored)
+        MOVED=$(extract establishment_moved)
+        HELD=$(extract establishment_held)
+        SEVERAL=$(extract several_establishments)
         DURATION=$(extract duration)
         DRY_NOTE=""
         if [ "$DRY_RUN" = "true" ]; then
@@ -83,5 +86,8 @@ runs:
           echo "| 📋 Queued | ${QUEUED:-—} |"
           echo "| 🔒 Lock missed | ${LOCK_MISSED:-—} |"
           echo "| ❌ Errored | ${ERRORED:-—} |"
+          echo "| 🏢 Moved to UK establishment | ${MOVED:-—} |"
+          echo "| ✋ Left on overseas record | ${HELD:-—} |"
+          echo "| 🔀 Several establishments | ${SEVERAL:-—} |"
           echo "| ⏱️ Duration | ${DURATION:-—} |"
         } >> "$GITHUB_STEP_SUMMARY"

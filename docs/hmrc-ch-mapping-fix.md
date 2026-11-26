@@ -1657,6 +1657,38 @@ resolved to the correct entity (7 exact_squash, 7 exact via parser fixes,
 3 fuzzy_edit — all active, locality-confirmed); 2 unincorporated controls
 correctly stayed no_match.
 
+## 2026-11 UK establishments (a match on an overseas company lands on its establishment)
+
+JPMorgan Chase Bank was joined to its overseas record, registered in Ohio
+(`FC004891`), where its UK establishment at Canary Wharf (`BR000746`) was the
+record to show. The cause was general: the resolver treats only status
+`active` as live, an establishment's status is `open`, and so the overseas
+record was the only live candidate whenever a name matched both. A census on
+2026-11-26 found 472 of 476 live joins on an overseas record had exactly one
+open establishment.
+
+The resolver now follows the register's own link after a match on an overseas
+company is verified (`landOnEstablishment` in `resolve-sponsor.ts`, rule in
+`uk-establishment.ts`): `/company/<number>/uk-establishments`, exactly one
+open establishment whose own profile names that company as its parent, and
+the match lands there with the method and score of the name match. None
+open, or several, leaves the overseas record: Dennison Trailers (`FC021303`)
+lists none, and Caixa Geral de Depositos (`FC023485`) has open establishments
+in London and Manchester. A list that cannot be read stops the resolver, as
+any other gap does. The record's type decides, never its number's prefix:
+some overseas companies carry `SF` or `NF` numbers.
+
+Treating `open` as live was not the fix. It helps only when the establishment
+is among the search results and its locality reads as the sponsor's town, and
+otherwise turns a match into a tie that maps nothing.
+
+Joins already on an overseas record move through the sweeps, a whole company
+at a time (docs/phase5-sweep-algorithm.md, "An overseas company and its own
+UK establishment"), or through `scripts/move-to-uk-establishments.ts`. The 373
+joins that script moved on 2026-11-26 were stored as `manual`;
+`scripts/restore-establishment-methods.ts` gives each its method back from
+the move's audit rows, so the sweeps check them again.
+
 ---
 
 ## Decisions locked in

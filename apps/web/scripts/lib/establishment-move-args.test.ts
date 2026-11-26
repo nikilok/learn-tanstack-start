@@ -9,6 +9,7 @@ describe('parseEstablishmentMoveArgs', () => {
       find: false,
       backup: undefined,
       apply: false,
+      keepMethods: false,
     });
   });
 
@@ -19,6 +20,7 @@ describe('parseEstablishmentMoveArgs', () => {
         find: true,
         backup: undefined,
         apply: false,
+        keepMethods: false,
       },
     );
   });
@@ -35,7 +37,22 @@ describe('parseEstablishmentMoveArgs', () => {
       find: false,
       backup: 'out/backup=1.json',
       apply: true,
+      keepMethods: false,
     });
+  });
+
+  test('keeping methods is asked for by name, to plan or to apply', () => {
+    expect(
+      parseEstablishmentMoveArgs(['--list=moves.json', '--keep-methods']),
+    ).toMatchObject({ apply: false, keepMethods: true });
+    expect(
+      parseEstablishmentMoveArgs([
+        '--keep-methods',
+        '--list=moves.json',
+        '--backup=b.json',
+        '--apply',
+      ]),
+    ).toMatchObject({ apply: true, backup: 'b.json', keepMethods: true });
   });
 
   test.each([
@@ -70,6 +87,14 @@ describe('parseEstablishmentMoveArgs', () => {
     [
       ['--find', '--list=moves.json', '--backup=b.json'],
       '--find writes the list and nothing else',
+    ],
+    [
+      ['--find', '--list=moves.json', '--keep-methods'],
+      '--find writes the list and nothing else',
+    ],
+    [
+      ['--list=moves.json', '--keep-method'],
+      'Unknown arguments: --keep-method',
     ],
   ])('refuses %j', (args, why) => {
     expect(() => parseEstablishmentMoveArgs(args)).toThrow(why);

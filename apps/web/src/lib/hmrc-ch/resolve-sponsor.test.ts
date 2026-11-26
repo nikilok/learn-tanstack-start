@@ -531,3 +531,489 @@ describe('resolveOneSponsor — name-only matches need the place', () => {
     expect(result.queryUsed).not.toContain('00000077');
   });
 });
+
+// The JPMorgan, Caixa and Dennison answers are Companies House's own, recorded 2026-11-26.
+describe('resolveOneSponsor — an overseas company lands on its UK establishment', () => {
+  const JPM = 'JPMORGAN CHASE BANK, NATIONAL ASSOCIATION';
+  const london = { townCity: 'London', county: null };
+  // Three records carry the name: only the overseas company is `active`.
+  const jpmSearch: SearchItem[] = [
+    {
+      company_number: 'OE032355',
+      title: JPM,
+      company_status: 'registered',
+      address: { locality: 'Delaware' },
+    },
+    {
+      company_number: 'FC004891',
+      title: JPM,
+      company_status: 'active',
+      address: { locality: 'Ohio 43240', region: 'United States' },
+    },
+    {
+      company_number: 'BR000746',
+      title: JPM,
+      company_status: 'open',
+      address: { locality: 'London', region: 'Canary Wharf' },
+    },
+  ];
+  const jpmOverseas = {
+    company_number: 'FC004891',
+    company_name: JPM,
+    company_status: 'active',
+    type: 'oversea-company',
+    registered_office_address: {
+      address_line_1: '1111 Polaris Parkway',
+      address_line_2: 'Columbus',
+      locality: 'Ohio 43240',
+      region: 'United States',
+      country: 'United States',
+    },
+  };
+  const jpmEstablishment = {
+    company_number: 'BR000746',
+    company_name: JPM,
+    company_status: 'open',
+    type: 'uk-establishment',
+    registered_office_address: {
+      address_line_1: '25 Bank Street',
+      locality: 'London',
+      region: 'Canary Wharf',
+      postal_code: 'E14 5JP',
+    },
+    branch_company_details: {
+      business_activity: 'Banking',
+      parent_company_name: JPM,
+      parent_company_number: 'FC004891',
+    },
+  };
+  const jpmListed = {
+    kind: 'related-companies',
+    items: [
+      {
+        company_name: JPM,
+        company_number: 'BR000746',
+        company_status: 'open',
+        locality: 'London',
+        links: { company: '/company/BR000746' },
+      },
+    ],
+  };
+  const LIST = '/company/FC004891/uk-establishments';
+
+  /** JPMorgan's records as routes: `over` first, and the list ahead of the profile whose path it extends. */
+  const jpmRoutes = (
+    over: [string, unknown][] = [],
+    items: SearchItem[] = jpmSearch,
+  ): [string, unknown][] => [
+    ...over,
+    ['/search/companies', { items }],
+    [LIST, jpmListed],
+    ['/company/FC004891', jpmOverseas],
+    ['/company/BR000746', jpmEstablishment],
+  ];
+
+  test('JPMorgan Chase Bank (FC004891 active, BR000746 open, sponsor in London) lands on BR000746', async () => {
+    const { fetchApi, calls } = makeFetch(jpmRoutes());
+    const result = await resolveOneSponsor(
+      'JPMorgan Chase Bank, National Association',
+      london,
+      fetchApi,
+    );
+    expect(result).toEqual({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+      matchMethod: 'exact',
+      matchScore: 1,
+      queryUsed: 'JPMorgan Chase Bank National Association',
+      profile: jpmEstablishment,
+      overseas: { companyNumber: 'FC004891', link: 'followed' },
+    });
+    expect(calls.slice(1)).toEqual([
+      '/company/FC004891',
+      LIST,
+      '/company/BR000746',
+    ]);
+  });
+
+  test('it lands there whether or not the search lists the establishment, and whatever the town', async () => {
+    const { fetchApi } = makeFetch(jpmRoutes([], jpmSearch.slice(0, 2)));
+    const result = await resolveOneSponsor(
+      'JPMorgan Chase Bank, National Association',
+      { townCity: 'Bournemouth', county: 'Dorset' },
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+      matchMethod: 'exact',
+    });
+  });
+
+  test('the method and score stay those of the name match: a squashed name', async () => {
+    const { fetchApi } = makeFetch(jpmRoutes());
+    const result = await resolveOneSponsor(
+      'JPMorgan Chase Bank National Association',
+      london,
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+      matchMethod: 'exact_squash',
+      matchScore: 0.98,
+    });
+  });
+
+  // An invented overseas company, numbered SF as three of the real ones are: its type says what it is, not its prefix.
+  const quillmere = (name: string, previous: string[] = []) => ({
+    company_number: 'SF000123',
+    company_name: name,
+    company_status: 'active',
+    type: 'oversea-company',
+    registered_office_address: { locality: 'Wilmington' },
+    previous_company_names: previous.map((p) => ({ name: p })),
+  });
+  const quillmereRoutes = (
+    overseas: ReturnType<typeof quillmere>,
+  ): [string, unknown][] => [
+    [
+      '/search/companies',
+      {
+        items: [
+          {
+            company_number: 'SF000123',
+            title: overseas.company_name,
+            company_status: 'active',
+          },
+        ],
+      },
+    ],
+    [
+      '/company/SF000123/uk-establishments',
+      { items: [{ company_number: 'BR000123', company_status: 'open' }] },
+    ],
+    ['/company/SF000123', overseas],
+    [
+      '/company/BR000123',
+      {
+        company_number: 'BR000123',
+        company_name: 'QUILLMERE UK BRANCH',
+        company_status: 'open',
+        type: 'uk-establishment',
+        branch_company_details: { parent_company_number: 'SF000123' },
+      },
+    ],
+  ];
+
+  test.each([
+    [
+      'a previous name',
+      'Quillmere Trust Company',
+      quillmere('QUILLMERE BANK INC', ['QUILLMERE TRUST COMPANY']),
+      'previous_name',
+      0.95,
+    ],
+    [
+      'most of its words',
+      'Quillmere Global Bank Trust Services Group Inc',
+      quillmere('QUILLMERE GLOBAL BANK TRUST SERVICES INC'),
+      'token_sim',
+      6 / 7,
+    ],
+  ] as const)(
+    'the method and score stay those of the name match: %s',
+    async (_label, sponsor, overseas, method, score) => {
+      const { fetchApi } = makeFetch(quillmereRoutes(overseas));
+      const result = await resolveOneSponsor(sponsor, noLocation, fetchApi);
+      expect(result.verdict).toBe('verified');
+      if (result.verdict !== 'verified') return;
+      expect(result.companyNumber).toBe('BR000123');
+      expect(result.matchMethod).toBe(method);
+      expect(result.matchScore).toBeCloseTo(score, 10);
+      expect(result.overseas).toEqual({
+        companyNumber: 'SF000123',
+        link: 'followed',
+      });
+    },
+  );
+
+  test('Caixa Geral de Depositos (FC023485, open in London and Manchester, sponsor in London) stays on FC023485', async () => {
+    const overseas = {
+      company_number: 'FC023485',
+      company_name: 'CAIXA GERAL DE DEPOSITOS, S.A.',
+      company_status: 'active',
+      type: 'oversea-company',
+      registered_office_address: {
+        address_line_1: 'Caixa Geral De Depositos, Sa',
+        address_line_2: 'Avenida Dom Joao Ii, No 1',
+        locality: 'Lisboa',
+        region: 'Lisboa 1998-038',
+        country: 'Portugal',
+      },
+    };
+    const { fetchApi, calls } = makeFetch([
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: 'FC023485',
+              title: 'CAIXA GERAL DE DEPOSITOS, S.A.',
+              company_status: 'active',
+              address: { locality: 'Lisboa', region: 'Lisboa 1998-038' },
+            },
+            {
+              company_number: 'BR006261',
+              title: 'CAIXA GERAL DE DEPOSITOS, S.A., LONDON OFFICE',
+              company_status: 'open',
+              address: { locality: 'London' },
+            },
+            {
+              company_number: 'BR028851',
+              title: 'CAIXA GERAL DE DEPOSITOS, S.A.,MANCHESTER OFFICE',
+              company_status: 'open',
+              address: { locality: 'Manchester', region: 'Oxford Street' },
+            },
+          ],
+        },
+      ],
+      [
+        '/company/FC023485/uk-establishments',
+        {
+          kind: 'related-companies',
+          items: [
+            {
+              company_name: 'CAIXA GERAL DE DEPOSITOS, S.A., LONDON OFFICE',
+              company_number: 'BR006261',
+              company_status: 'open',
+              locality: 'London',
+            },
+            {
+              company_name: 'CAIXA GERAL DE DEPOSITOS, S.A.,MANCHESTER OFFICE',
+              company_number: 'BR028851',
+              company_status: 'open',
+              locality: 'Manchester',
+            },
+          ],
+        },
+      ],
+      ['/company/FC023485', overseas],
+    ]);
+    const result = await resolveOneSponsor(
+      'Caixa Geral de Depositos, S.A.',
+      london,
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'FC023485',
+      matchMethod: 'exact',
+      profile: overseas,
+      overseas: { companyNumber: 'FC023485', link: 'several' },
+    });
+    // No town picks between them: neither establishment's profile is asked for.
+    expect(calls.slice(1)).toEqual([
+      '/company/FC023485',
+      '/company/FC023485/uk-establishments',
+    ]);
+  });
+
+  // Its Belfast namesake NI017855 matches the name too; the town is taken as Lancaster, where FC021303's office is.
+  test.each([
+    [
+      'an empty list, as Companies House answers',
+      { kind: 'related-companies', items: [] },
+    ],
+    ['a 404', new Failed(404)],
+    ['a list that is no array', { items: 'none' }],
+  ])(
+    'Dennison Trailers (FC021303, no establishment) stays on FC021303: %s',
+    async (_label, listed) => {
+      const overseas = {
+        company_number: 'FC021303',
+        company_name: 'DENNISON TRAILERS LIMITED',
+        company_status: 'active',
+        type: 'oversea-company',
+        registered_office_address: {
+          address_line_2: 'Dennison Trailers Ltd',
+          locality: 'Caton Road',
+          region: 'Lancaster',
+          postal_code: 'LA1 3PE',
+          country: 'Northern Ireland',
+        },
+      };
+      const { fetchApi } = makeFetch([
+        [
+          '/search/companies',
+          {
+            items: [
+              {
+                company_number: 'FC021303',
+                title: 'DENNISON TRAILERS LIMITED',
+                company_status: 'active',
+                address: { locality: 'Caton Road', region: 'Lancaster' },
+              },
+              {
+                company_number: 'NI017855',
+                title: 'DENNISON TRAILERS LIMITED',
+                company_status: 'active',
+                address: { locality: '21 Old Channel Road', region: 'Belfast' },
+              },
+            ],
+          },
+        ],
+        ['/company/FC021303/uk-establishments', listed],
+        ['/company/FC021303', overseas],
+      ]);
+      const result = await resolveOneSponsor(
+        'Dennison Trailers Limited',
+        { townCity: 'Lancaster', county: 'Lancashire' },
+        fetchApi,
+      );
+      expect(result).toMatchObject({
+        verdict: 'verified',
+        companyNumber: 'FC021303',
+        matchMethod: 'exact',
+        profile: overseas,
+        overseas: { companyNumber: 'FC021303', link: 'none' },
+      });
+    },
+  );
+
+  test.each([
+    ['the establishments list', LIST],
+    ["the establishment's profile", '/company/BR000746'],
+  ])(
+    '%s failing to answer leaves no verdict to store',
+    async (_label, path) => {
+      const { fetchApi } = makeFetch(jpmRoutes([[path, new Failed(502)]]));
+      const result = await resolveOneSponsor(
+        'JPMorgan Chase Bank, National Association',
+        london,
+        fetchApi,
+      );
+      expect(result).toEqual({ verdict: 'unavailable' });
+    },
+  );
+
+  test.each([
+    ['closed', { ...jpmEstablishment, company_status: 'closed' }],
+    [
+      "another company's",
+      {
+        ...jpmEstablishment,
+        branch_company_details: { parent_company_number: 'FC000002' },
+      },
+    ],
+    [
+      'without a parent',
+      { ...jpmEstablishment, branch_company_details: undefined },
+    ],
+    ['for another number', { ...jpmEstablishment, company_number: 'BR000002' }],
+    ['missing', new Failed(404)],
+  ])(
+    'an establishment whose own profile is %s moves nothing: the overseas record stays',
+    async (_label, given) => {
+      const { fetchApi } = makeFetch(jpmRoutes([['/company/BR000746', given]]));
+      const result = await resolveOneSponsor(
+        'JPMorgan Chase Bank, National Association',
+        london,
+        fetchApi,
+      );
+      expect(result).toMatchObject({
+        verdict: 'verified',
+        companyNumber: 'FC004891',
+        matchMethod: 'exact',
+        profile: jpmOverseas,
+        overseas: { companyNumber: 'FC004891', link: 'unconfirmed' },
+      });
+    },
+  );
+
+  test("a profile already in hand is not asked for again: the establishment's number in the register name", async () => {
+    const { fetchApi, calls } = makeFetch(jpmRoutes());
+    const result = await resolveOneSponsor(
+      'JPMorgan Chase Bank, National Association (Co Reg: BR000746)',
+      london,
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'BR000746',
+    });
+    expect(calls.filter((path) => path === '/company/BR000746')).toHaveLength(
+      1,
+    );
+  });
+
+  test('a match held for want of the place asks for no establishments', async () => {
+    const { fetchApi, calls } = makeFetch([
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: 'FC000456',
+              title: 'QUILLMERE LIMITED',
+              company_status: 'active',
+            },
+          ],
+        },
+      ],
+      [
+        '/company/FC000456',
+        {
+          company_number: 'FC000456',
+          company_name: 'QUILLMERE LIMITED',
+          company_status: 'active',
+          type: 'oversea-company',
+          registered_office_address: { locality: 'Dublin' },
+        },
+      ],
+    ]);
+    const result = await resolveOneSponsor('Quillmere', london, fetchApi);
+    expect(result.verdict).toBe('human_review');
+    expect(calls.some((path) => path.includes('uk-establishments'))).toBe(
+      false,
+    );
+  });
+
+  test('a company the register does not type as overseas asks for none, whatever its number', async () => {
+    const { fetchApi, calls } = makeFetch([
+      [
+        '/search/companies',
+        {
+          items: [
+            {
+              company_number: 'FC000789',
+              title: 'QUILLMERE HOLDINGS LIMITED',
+              company_status: 'active',
+            },
+          ],
+        },
+      ],
+      [
+        '/company/FC000789',
+        {
+          company_number: 'FC000789',
+          company_name: 'QUILLMERE HOLDINGS LIMITED',
+          company_status: 'active',
+          type: 'ltd',
+        },
+      ],
+    ]);
+    const result = await resolveOneSponsor(
+      'Quillmere Holdings Limited',
+      noLocation,
+      fetchApi,
+    );
+    expect(result).toMatchObject({
+      verdict: 'verified',
+      companyNumber: 'FC000789',
+    });
+    if (result.verdict !== 'verified') return;
+    expect(result.overseas).toBeUndefined();
+    expect(calls).toEqual([calls[0], '/company/FC000789']);
+  });
+});

@@ -28,7 +28,9 @@
  *   9. Locality tiebreak when multiple candidates pass at the same tier
  *  10. A name-only winner with nothing of the sponsor's place behind it goes
  *      to human_review (see name-only-guard.ts)
- *  11. Fail closed if no verified match
+ *  11. A winner the register types as an overseas company lands on its one
+ *      open UK establishment, by the register's own link (uk-establishment.ts)
+ *  12. Fail closed if no verified match
  */
 
 import {
@@ -50,6 +52,13 @@ import {
   pickByLocality,
   type ScoredCandidate,
 } from './pipeline';
+import {
+  chooseEstablishment,
+  isOpenEstablishmentOf,
+  isOverseasCompany,
+  type ListedEstablishment,
+  type OverseasMatch,
+} from './uk-establishment';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -92,6 +101,11 @@ type CHFullProfile = {
   has_charges?: boolean;
   previous_company_names?: { name: string }[];
   confirmation_statement?: { last_made_up_to?: string };
+  /** On a UK establishment: the overseas company it belongs to. */
+  branch_company_details?: {
+    parent_company_number?: string;
+    parent_company_name?: string;
+  };
 };
 
 /** A Companies House read inside the pipeline: the payload, or null for a 404. Gaps never reach it. */
@@ -115,6 +129,8 @@ export type ResolveResult =
       matchScore: number;
       queryUsed: string;
       profile: CHFullProfile;
+      /** Set when the name matched an overseas company: that company, and whether the match landed on its UK establishment. */
+      overseas?: OverseasMatch;
     }
   | { verdict: 'public_body'; reason: 'matched_public_body_regex' }
   | {
@@ -189,7 +205,9 @@ class ChUnavailable extends Error {}
  *
  * The function may fetch up to 1 embedded-number profile + 1 search + 3
  * profile lookups during scoring, then 1 additional profile fetch only if
- * the verified candidate's profile isn't already in hand.
+ * the verified candidate's profile isn't already in hand. A verified
+ * overseas company adds its establishments list and, when one is open, that
+ * establishment's profile.
  */
 export async function resolveOneSponsor(
   orgName: string,
@@ -213,6 +231,49 @@ export async function resolveOneSponsor(
     if (error instanceof ChUnavailable) return { verdict: 'unavailable' };
     throw error;
   }
+}
+
+/**
+ * The record a verified match lands on: the one open UK establishment the
+ * register lists under an overseas company, else the company matched. The
+ * establishment's own profile must name that company as its parent.
+ */
+async function landOnEstablishment(
+  matched: CHFullProfile,
+  read: Read,
+  inHand: ReadonlyMap<string, CHFullProfile>,
+): Promise<{ profile: CHFullProfile; overseas?: OverseasMatch }> {
+  if (!isOverseasCompany(matched)) return { profile: matched };
+  const companyNumber = matched.company_number;
+  // A 404 is a company with no establishment listed.
+  const listed = (await read(
+    `/company/${encodeURIComponent(companyNumber)}/uk-establishments`,
+  )) as { items?: ListedEstablishment[] } | null;
+  const choice = chooseEstablishment(
+    Array.isArray(listed?.items) ? listed.items : [],
+  );
+  if (choice.kind !== 'one') {
+    return { profile: matched, overseas: { companyNumber, link: choice.kind } };
+  }
+  const establishment =
+    inHand.get(choice.establishmentNumber) ??
+    ((await read(
+      `/company/${encodeURIComponent(choice.establishmentNumber)}`,
+    )) as CHFullProfile | null);
+  // A profile for any other number, or one that does not bear the list out, moves nothing.
+  if (
+    establishment?.company_number !== choice.establishmentNumber ||
+    !isOpenEstablishmentOf(establishment, companyNumber)
+  ) {
+    return {
+      profile: matched,
+      overseas: { companyNumber, link: 'unconfirmed' },
+    };
+  }
+  return {
+    profile: establishment,
+    overseas: { companyNumber, link: 'followed' },
+  };
 }
 
 /** The pipeline itself, over reads that only ever answer with data or a 404. */
@@ -441,12 +502,22 @@ async function resolveFrom(
     };
   }
 
+  // The name matched this record; the method and score stay the name match's.
+  const landed = await landOnEstablishment(
+    verifiedProfile,
+    read,
+    profilesByNumber,
+  );
   return {
     verdict: 'verified',
-    companyNumber: verifiedNumber,
+    companyNumber:
+      landed.overseas?.link === 'followed'
+        ? landed.profile.company_number
+        : verifiedNumber,
     matchMethod,
     matchScore: picked.score,
     queryUsed: searchQuery,
-    profile: verifiedProfile,
+    profile: landed.profile,
+    ...(landed.overseas ? { overseas: landed.overseas } : {}),
   };
 }

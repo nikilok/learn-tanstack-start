@@ -98,7 +98,7 @@ export function makeReadMoveStates(sql: Sql) {
   };
 }
 
-/** Write one move as a single statement: the joins with their audit rows, the website row and the answers. It locks every row it moves, reads them again, and writes only when each is as the move was planned on. */
+/** Write one move as a single statement: the joins with their audit rows, the website row and the answers. It locks every row it moves, reads them again, and writes only when each is as the move was planned on. A join stored as `manual` loses its score and is stamped; one that keeps its method changes in its company number alone. */
 export function makeCommitMove(sql: Sql) {
   return async (input: CommitMoveInput): Promise<CommitMoveResult | null> => {
     const names = input.joins.map((join) => join.organisationName);
@@ -156,12 +156,18 @@ export function makeCommitMove(sql: Sql) {
                 WHERE a.company_number = ${input.establishmentNumber}))
         ) AS ok
       ),
+      mode AS (
+        SELECT ${input.storage === 'kept'}::boolean AS keep
+      ),
       moved AS (
         UPDATE hmrc_company_mapping m
         SET company_number = ${input.establishmentNumber},
-            match_method   = 'manual',
-            match_score    = NULL,
-            verified_at    = now()
+            match_method   = CASE WHEN (SELECT keep FROM mode)
+                                  THEN m.match_method ELSE 'manual' END,
+            match_score    = CASE WHEN (SELECT keep FROM mode)
+                                  THEN m.match_score END,
+            verified_at    = CASE WHEN (SELECT keep FROM mode)
+                                  THEN m.verified_at ELSE now() END
         FROM joins j
         WHERE m.organisation_name = j.organisation_name
           AND (SELECT ok FROM intact)
@@ -181,7 +187,7 @@ export function makeCommitMove(sql: Sql) {
           j.company_number,
           ${input.establishmentNumber},
           j.match_method,
-          'manual',
+          CASE WHEN (SELECT keep FROM mode) THEN j.match_method ELSE 'manual' END,
           ${input.changedBy}
         FROM joins j
         JOIN moved USING (organisation_name)

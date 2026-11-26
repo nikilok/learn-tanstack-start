@@ -4,8 +4,10 @@
  * run rather than starting a different one from the one asked for.
  */
 
+import { fileFlag } from './file-flag.ts';
+
 /** Every argument the script reads. */
-const KNOWN_ARG = /^--(?:apply|find|(?:list|backup)=.*)$/;
+const KNOWN_ARG = /^--(?:apply|find|keep-methods|(?:list|backup)=.*)$/;
 
 /** What a run of the script was asked for. */
 export type EstablishmentMoveArgs = {
@@ -17,18 +19,9 @@ export type EstablishmentMoveArgs = {
   backup?: string;
   /** Write; without it the run only plans. */
   apply: boolean;
+  /** Every join keeps the method it had, instead of becoming `manual`. */
+  keepMethods: boolean;
 };
-
-/** The value of a `--name=value` argument, or undefined when it was not passed; throws when it is passed twice, or with no value. */
-function valueOf(args: readonly string[], name: string): string | undefined {
-  const prefix = `--${name}=`;
-  const given = args.filter((arg) => arg.startsWith(prefix));
-  if (given.length > 1) throw new Error(`--${name} is given more than once`);
-  if (given.length === 0) return undefined;
-  const value = given[0].slice(prefix.length);
-  if (value === '') throw new Error(`--${name} needs a file`);
-  return value;
-}
 
 /** Read the script's arguments; throws on one it does not know, no list, a file flag given twice or empty, a find that would also write rows, or an apply with nowhere to back up to. */
 export function parseEstablishmentMoveArgs(
@@ -38,16 +31,17 @@ export function parseEstablishmentMoveArgs(
   if (unknown.length > 0) {
     throw new Error(`Unknown arguments: ${unknown.join(' ')}`);
   }
-  const list = valueOf(args, 'list');
+  const list = fileFlag(args, 'list');
   if (list === undefined) throw new Error('--list needs a file');
-  const backup = valueOf(args, 'backup');
+  const backup = fileFlag(args, 'backup');
   const apply = args.includes('--apply');
   const find = args.includes('--find');
-  if (find && (apply || backup !== undefined)) {
+  const keepMethods = args.includes('--keep-methods');
+  if (find && (apply || backup !== undefined || keepMethods)) {
     throw new Error('--find writes the list and nothing else');
   }
   if (apply && backup === undefined) {
     throw new Error('--apply needs --backup, a file that does not exist yet');
   }
-  return { list, find, backup, apply };
+  return { list, find, backup, apply, keepMethods };
 }

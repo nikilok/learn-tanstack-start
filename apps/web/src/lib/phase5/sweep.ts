@@ -8,11 +8,18 @@
  * CH profiles and dispatches to applyPromotion / bumpVerifiedAt / warn-and-
  * bump. No queue, no follow-up job — the decision lands in the same sweep run.
  *
+ * A join never moves alone between an overseas company and its own UK
+ * establishment: when the proposal is the open establishment of the company
+ * the row is joined to, the whole company moves (every join, its website row
+ * and its answers) through `moveToEstablishment`, or the row stays where it is.
+ *
  * All side-effecting dependencies are injected so the orchestration is unit
  * testable. The thin CLI in `apps/web/scripts/phase5-sweep.ts` wires the
  * real db / Companies House fetch / upsertProfile into these slots.
  */
 
+import type { SweepMove } from '../hmrc-ch/establishment-move.ts';
+import { isOpenEstablishmentOf } from '../hmrc-ch/uk-establishment.ts';
 import type { CompareCandidate } from './compare-candidates.ts';
 import { compareForInlineResolution } from './compare-candidates.ts';
 import type {
@@ -63,6 +70,14 @@ export type SweepDeps = {
    *  lock_missed when the lock matched zero rows so the sweep counts the
    *  skipped write instead of assuming success. */
   bumpVerifiedAt: (existing: ExistingMapping) => Promise<ApplyResult>;
+  /** Move the overseas company a row is joined to onto the establishment
+   *  proposed for it: every join with its method, its website row and its
+   *  answers, or nothing. */
+  moveToEstablishment: (
+    existing: ExistingMapping,
+    proposed: ProposedResolution,
+    changedBy: string,
+  ) => Promise<SweepMove>;
   sleep: (ms: number) => Promise<void>;
 };
 
@@ -80,6 +95,16 @@ export type SweepSummary = {
    *  misses are concurrency noise; a high rate means the lock is broken. */
   lockMissed: number;
   errored: number;
+  /** Companies moved from an overseas record onto its UK establishment. Each
+   *  such row is also counted by what became of it afterwards. */
+  establishmentMoved: number;
+  /** Rows left on an overseas record whose establishment was proposed; row
+   *  bumped. `establishmentHeldBy` counts them by what held the company. */
+  establishmentHeld: number;
+  establishmentHeldBy: Record<string, number>;
+  /** Rows whose overseas company lists several open establishments, so the
+   *  match stayed on the overseas record. Also counted by their outcome. */
+  severalEstablishments: number;
 };
 
 const CHANGED_BY: Record<Tier, string> = {
@@ -120,6 +145,21 @@ function toScorerSponsor(sponsor: SweepSponsor): ScorerSponsor {
   return { route: sponsor.route, townCity: sponsor.townCity };
 }
 
+/** Whether a proposal is the open UK establishment of the very company the row is joined to, by the register's own link. An owner's join is never moved. */
+function isOwnEstablishment(
+  row: ExistingMapping,
+  proposed: ProposedResolution,
+): boolean {
+  return (
+    row.matchMethod !== 'manual' &&
+    row.companyNumber !== null &&
+    proposed.verdict === 'verified' &&
+    proposed.profile !== undefined &&
+    proposed.companyNumber !== row.companyNumber &&
+    isOpenEstablishmentOf(proposed.profile, row.companyNumber)
+  );
+}
+
 /** Run a single tier sweep against the injected dependencies. */
 export async function sweep(
   config: SweepConfig,
@@ -135,6 +175,10 @@ export async function sweep(
     warned: 0,
     lockMissed: 0,
     errored: 0,
+    establishmentMoved: 0,
+    establishmentHeld: 0,
+    establishmentHeldBy: {},
+    severalEstablishments: 0,
   };
 
   const changedBy = CHANGED_BY[config.tier];
@@ -149,10 +193,41 @@ export async function sweep(
 
   for (let i = 0; i < rows.length; i += 1) {
     if (i > 0) await deps.sleep(delayMs);
-    const row = rows[i];
+    const selected = rows[i];
     try {
-      const sponsor = await deps.lookupSponsor(row.organisationName);
-      const proposed = await deps.resolveSponsor(row.organisationName, sponsor);
+      const sponsor = await deps.lookupSponsor(selected.organisationName);
+      const proposed = await deps.resolveSponsor(
+        selected.organisationName,
+        sponsor,
+      );
+      if (proposed.overseas?.link === 'several') {
+        summary.severalEstablishments += 1;
+      }
+
+      let row = selected;
+      if (isOwnEstablishment(selected, proposed)) {
+        const move = await deps.moveToEstablishment(
+          selected,
+          proposed,
+          `${changedBy}_establishment`,
+        );
+        if (move.kind === 'changed') {
+          summary.lockMissed += 1;
+          continue;
+        }
+        if (move.kind === 'held') {
+          // Bumped, so a company that cannot move does not lead every later run.
+          if (await bumpAndCount(selected)) {
+            summary.establishmentHeld += 1;
+            summary.establishmentHeldBy[move.reason] =
+              (summary.establishmentHeldBy[move.reason] ?? 0) + 1;
+          }
+          continue;
+        }
+        summary.establishmentMoved += 1;
+        // The join now sits on the establishment; the rest is decided from there.
+        row = { ...selected, companyNumber: proposed.companyNumber };
+      }
       const decision = decide(row, proposed);
 
       if (decision.action === 'update') {
@@ -206,7 +281,7 @@ export async function sweep(
     } catch (err) {
       summary.errored += 1;
       console.error(
-        `[phase5-sweep] row "${row.organisationName}" errored:`,
+        `[phase5-sweep] row "${selected.organisationName}" errored:`,
         err,
       );
     }

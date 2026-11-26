@@ -11,6 +11,8 @@
  * See docs/phase5-sweep-algorithm.md for the rule table.
  */
 
+import type { OverseasMatch } from '../hmrc-ch/uk-establishment.ts';
+
 export type MatchMethod =
   | 'exact'
   | 'exact_squash'
@@ -52,6 +54,8 @@ export type ProposedResolution = {
   profile?: CHFullProfile;
   /** Top CH search results captured for the review queue's audit jsonb. */
   topResults?: unknown[];
+  /** Set when the name matched an overseas company: that company, and whether the match landed on its UK establishment. */
+  overseas?: OverseasMatch;
 };
 
 export type LogAndBumpReason = 'manual_conflict' | 'public_body_conflict';

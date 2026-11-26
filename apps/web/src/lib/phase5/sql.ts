@@ -267,6 +267,7 @@ function toProposedResolution(result: ResolveResult): ProposedResolution {
       matchScore: result.matchScore,
       queryUsed: result.queryUsed,
       profile: result.profile as CHFullProfile,
+      ...(result.overseas ? { overseas: result.overseas } : {}),
     };
   }
   if (result.verdict === 'public_body') {

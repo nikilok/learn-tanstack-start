@@ -985,4 +985,94 @@ describe('sweep — a join on an overseas company whose own establishment is pro
       establishmentHeldBy: { site_bound: 2 },
     });
   });
+
+  /** A second sponsor on JPMorgan's overseas record whose own name resolves to another company. */
+  const laterJoin = (over: Partial<ExistingMapping> = {}) =>
+    onOverseas({ organisationName: 'JPMorgan Chase Bank NA', ...over });
+  const anotherCompany = verifiedExact({
+    companyNumber: '01234567',
+    profile: {
+      company_number: '01234567',
+      company_name: 'JPMORGAN CHASE BANK NA LIMITED',
+      company_status: 'active',
+      type: 'ltd',
+      registered_office_address: { locality: 'Leeds' },
+    },
+  });
+  /** The first sponsor's name resolves to the establishment, the second's to another company. */
+  const resolveEachTheirOwn = mock(async (name: string) =>
+    name === SPONSOR ? proposedEstablishment() : anotherCompany,
+  );
+
+  test('a later join of a company moved in the run is read where it now is: the tie-break scores the establishment', async () => {
+    const second = laterJoin();
+    const deps = makeDeps({
+      selectRows: mock(async () => [onOverseas(), second]),
+      lookupSponsor: mock(async () => ({
+        townCity: 'London',
+        county: null,
+        route: 'Skilled Worker',
+      })),
+      resolveSponsor: resolveEachTheirOwn,
+      moveToEstablishment: mock(async () => moved),
+      getProfile: mock(async (number: string) =>
+        number === 'BR000746'
+          ? establishment()
+          : fcProfile({ company_number: number }),
+      ),
+    });
+
+    const summary = await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    // Read off the overseas record, in Wilmington, the same pair is left undecided; on the establishment in the sponsor's town the join is kept.
+    expect(deps.getProfile).toHaveBeenCalledTimes(1);
+    expect(deps.getProfile).toHaveBeenCalledWith('BR000746');
+    expect(deps.applyPromotion).not.toHaveBeenCalled();
+    expect(deps.bumpVerifiedAt).toHaveBeenLastCalledWith({
+      ...second,
+      companyNumber: 'BR000746',
+    });
+    expect(summary).toMatchObject({
+      establishmentMoved: 1,
+      inlineResolved: 1,
+      inlineInconclusive: 0,
+    });
+  });
+
+  test('a later join promoted to another company is recorded as leaving the establishment', async () => {
+    const second = laterJoin({ matchMethod: 'token_sim', matchScore: '0.857' });
+    const deps = makeDeps({
+      selectRows: mock(async () => [onOverseas(), second]),
+      resolveSponsor: resolveEachTheirOwn,
+      moveToEstablishment: mock(async () => moved),
+    });
+
+    await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.applyPromotion).toHaveBeenCalledTimes(1);
+    expect(deps.applyPromotion).toHaveBeenCalledWith(
+      { ...second, companyNumber: 'BR000746' },
+      anotherCompany,
+      'phase5_sweep_exact',
+    );
+  });
+
+  test('a later join of a company that was held, not moved, is read where it was', async () => {
+    const second = laterJoin();
+    const deps = makeDeps({
+      selectRows: mock(async () => [onOverseas(), second]),
+      resolveSponsor: resolveEachTheirOwn,
+      moveToEstablishment: mock(async () => ({
+        kind: 'held' as const,
+        reason: 'site_bound' as const,
+      })),
+      getProfile: mock(async (number: string) =>
+        fcProfile({ company_number: number }),
+      ),
+    });
+
+    await sweep({ tier: 'exact', maxRows: 10 }, deps);
+
+    expect(deps.getProfile).toHaveBeenCalledWith('FC004891');
+  });
 });

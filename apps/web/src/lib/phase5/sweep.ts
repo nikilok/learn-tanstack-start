@@ -238,16 +238,18 @@ export async function sweep(
         summary.severalEstablishments += 1;
       }
 
-      let row = selected;
-      const move = ownEstablishmentMove(selected, proposed);
+      // An earlier row of this run moved this row's company, this join with it: everything below reads the join where it now is.
+      const movedOn =
+        selected.companyNumber === null
+          ? undefined
+          : movedTo.get(selected.companyNumber);
+      let row =
+        movedOn === undefined
+          ? selected
+          : { ...selected, companyNumber: movedOn };
+      const move = ownEstablishmentMove(row, proposed);
       let held: string | null = null;
-      if (
-        move &&
-        movedTo.get(move.companyNumber) === move.establishmentNumber
-      ) {
-        // An earlier row of this run moved the company, this join with it.
-        row = { ...selected, companyNumber: move.establishmentNumber };
-      } else if (move) {
+      if (move) {
         const done = await deps.moveToEstablishment(
           move,
           selected.organisationName,
@@ -265,13 +267,13 @@ export async function sweep(
           // The join now sits on the establishment; the rest is decided from there.
           row = { ...selected, companyNumber: move.establishmentNumber };
         }
-      } else if (isOtherRecordOfCompany(selected, proposed)) {
+      } else if (isOtherRecordOfCompany(row, proposed)) {
         // Neither the tie-break nor a promotion may take the join and leave its website row behind.
         held = OTHER_RECORD;
       }
       if (held !== null) {
         // Bumped, so a company that cannot move does not lead every later run.
-        if (await bumpAndCount(selected)) {
+        if (await bumpAndCount(row)) {
           summary.establishmentHeld += 1;
           summary.establishmentHeldBy[held] =
             (summary.establishmentHeldBy[held] ?? 0) + 1;
